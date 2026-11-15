@@ -1,7 +1,7 @@
 # Foreman
 
 The Foreman is a Claude Code session in a project's main checkout. It watches that project's Conveyor and brings you
-what needs you: blocked cards, changes that wait for your yes, stuck cards, push errors and a failed CI run in a release. There is one Foreman per
+what needs you: blocked cards, changes that wait for your yes, stuck cards and push errors. There is one Foreman per
 project.
 
 ## Start it

@@ -11,4 +11,4 @@ Closes #
 ## Sign-off
 
 - [ ] Each commit is signed off (`git commit -s`), as the [Developer Certificate of Origin](https://github.com/pushprove-max/conveyor-belt/blob/main/DCO) asks
-  (CONTRIBUTING.md, Sign-off). The DCO check fails a pull request with a commit that is not.
+  (CONTRIBUTING.md, Sign-off).

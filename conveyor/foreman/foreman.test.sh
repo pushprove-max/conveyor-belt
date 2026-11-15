@@ -377,42 +377,6 @@ board 80; bash "$SRC/watch-alerts.sh" --once && fail "a limit alert still active
 rm -f "$FD"/pending/*.wake "$T/h0" "$T/beta/.claude/metrics/decisions.jsonl"; board 20
 }
 
-# Bug (#651): CI ran on every push and pull request, on Ubuntu and macOS, and used up the owner's Actions minutes; it
-# now runs only inside the Release workflow, before the tag. A failed Release run whose CI jobs failed wakes the
-# Foreman once per run, naming its commit, the failed CI steps and the run; a failed run of another workflow, a
-# Release run that failed past its CI, a cancelled one and a green one put none, a run whose jobs do not read wakes
-# at a later poll, and a record whose runs do not read forgets nothing.
-# The gh fixture: `run list --workflow release.yml` prints $T/runs (alpha's) or [] (beta's); `run view <id>` prints
-# $T/jobs-<id>, and fails when there is none.
-t_ciwake() {
-CASE=ciwake
-ready
-export CONVEYOR_FOREMAN_GH="[ -e $T/gh-down ] && exit 1; case \$1\$2 in runlist) [ \"\$3 \$4\" = '--workflow release.yml' ] || exit 1
-  [ \"\$(basename \"\$PWD\")\" = alpha ] && cat $T/runs || echo '[]' ;; runview) cat $T/jobs-\$3 ;; esac"
-run() { # <second, under 60> <sha letters> <conclusion> [<workflow>]: one run, its id the number of letters
-  jq -cn --arg t "$(printf %02d "$1")" --arg s "$2" --arg c "$3" --arg w "${4:-Release}" '{databaseId: ($s | length), workflowName: $w, headSha: ($s * 8), status: "completed",
-    conclusion: $c, url: "https://github.com/example/alpha/actions/runs/\($s | length)", createdAt: "2026-11-15T00:00:\($t)Z"}'; }
-jq -n '{jobs: [{name: "CI / test (ubuntu-24.04)", conclusion: "failure", steps: [{name: "Set up", conclusion: "success"}, {name: "Every test", conclusion: "failure"}]},
-  {name: "CI / test (macos-15)", conclusion: "failure", steps: []}, {name: "release", conclusion: "skipped", steps: []}]}' > "$T/jobs-2"
-jq -n '{jobs: [{name: "CI / test (ubuntu-24.04)", conclusion: "success", steps: []}, {name: "CI / test (macos-15)", conclusion: "success", steps: []},
-  {name: "release", conclusion: "failure", steps: [{name: "Run bash .github/release/release.sh", conclusion: "failure"}]}]}' > "$T/jobs-3"
-cp "$T/jobs-2" "$T/jobs-4"
-{ run 1 a success; run 2 bb failure; run 3 ccc failure; run 4 dddd failure CI; run 5 eeeee failure; run 6 ffffff cancelled; } | jq -s . > "$T/runs"
-rm -f "$FD"/pending/*.wake
-bash "$SRC/watch-ci.sh" --once || fail "a Release run whose CI failed did not wake"
-[ "$(cat "$FD"/pending/*.wake)" = $'CI red in a release\nalpha: CI failed in the Release run at commit bbbbbbb: failed steps: CI / test (ubuntu-24.04): Every test; CI / test (macos-15); run: https://github.com/example/alpha/actions/runs/2' ] \
-  || fail "the wake is not run 2's alone (not the release step's failure, another workflow's run or an unread run): $(cat "$FD"/pending/*.wake)"
-rm -f "$FD"/pending/*.wake
-bash "$SRC/watch-ci.sh" --once && fail "a Release run whose CI failed woke again: $(cat "$FD"/pending/*.wake)"
-touch "$T/gh-down"; bash "$SRC/watch-ci.sh" --once; rm "$T/gh-down"
-bash "$SRC/watch-ci.sh" --once && fail "a Release run woke again after a poll whose runs did not read: $(cat "$FD"/pending/*.wake)"
-# Run 5's jobs read now: it wakes, as an unread run was not kept as seen.
-cp "$T/jobs-2" "$T/jobs-5"
-bash "$SRC/watch-ci.sh" --once || fail "a Release run whose jobs did not read at first never woke"
-[ "$(grep -c 'run: ' "$FD"/pending/*.wake)" = 1 ] && grep -qF 'at commit eeeeeee: failed steps: CI / test (ubuntu-24.04): Every test' "$FD"/pending/*.wake \
-  || fail "the wake for run 5: $(cat "$FD"/pending/*.wake)"
-}
-
 t_state_stop() {
 CASE=state-stop
 ready
@@ -1071,7 +1035,7 @@ bash "$SRC/../privacy/check.sh" --terms "$TERMS" "$SRC"/* "$SRC/../../commands/"
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(setup wake pushwake needs alerts ciwake state_stop reply_stop filing ask_pin session reopen projects projects_filing projects_groups remote words auto privacy)
+cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin session reopen projects projects_filing projects_groups remote words auto privacy)
 # (A case's own variables, as its loops' c, are its own: the case's name is in one none of them uses.)
 for one_case in "${cases[@]}"; do
   (CASE=${one_case//_/-}; fixture "$one_case"; "t_$one_case"; : > "$B/$one_case.passed") > "$B/$one_case.out" 2>&1 &

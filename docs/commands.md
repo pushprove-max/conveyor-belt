@@ -116,3 +116,6 @@ GitHub and releases:
 
 - `gh-write <gh arguments>` runs a `gh` write through the privacy check.
 - `release-prep <version>` prepares a release ([Releases](releases.md)).
+- `release <version>` makes the release: the tag, the pinned marketplace entry and the GitHub release
+  ([Releases](releases.md)). Only the owner decides a release: the Foreman runs it only after the owner says yes in
+  chat.

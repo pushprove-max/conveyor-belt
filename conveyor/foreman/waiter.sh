@@ -5,14 +5,14 @@
 # and exits, the waiter stops the rest and exits 2 with every pending wake, whole, on stderr, which wakes the
 # session. The next stop starts it again. It never blocks a turn, and only one runs per Foreman (waiter.lock): a
 # stop while one is alive passes.
-# The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-ci.sh, watch-idle.sh. One that exits with nothing put
+# The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. One that exits with nothing put
 # died: it is started again after 5 s, up to 3 times an hour each; past that one WATCHER DOWN wake names it.
 # The hook is ended at its 86400 s timeout, and nothing would start it again in a day with no wake: after 23 hours
 # with nothing it wakes the session with one renew line.
 # The text relayed is never cut: every wake names every item (watch-conveyor.sh). It is kept as last-wake.txt, so the
 # reply check (stop.sh) knows a turn a wake started. A relayed wake leaves pending only once it is on stderr: a kill
 # before that relays it again, never loses it.
-# For tests: CONVEYOR_FOREMAN_WATCHERS (the watchers, one command line each, in place of the five),
+# For tests: CONVEYOR_FOREMAN_WATCHERS (the watchers, one command line each, in place of the four),
 # CONVEYOR_FOREMAN_RENEW (seconds, 82800).
 set -u
 SID=$(jq -r '.session_id // empty | strings' 2>/dev/null)
@@ -50,7 +50,7 @@ deliver && { rm -f "$ACK"; exit 2; }
 if [ -n "${CONVEYOR_FOREMAN_WATCHERS:-}" ]; then
   while IFS= read -r c; do [ -z "$c" ] || CMD[$c]=$c; done <<<"$CONVEYOR_FOREMAN_WATCHERS"
 else
-  for w in watch-conveyor.sh watch-limit.sh watch-alerts.sh watch-ci.sh watch-idle.sh; do CMD[$w]="bash $(printf %q "$FHERE/$w")"; done
+  for w in watch-conveyor.sh watch-limit.sh watch-alerts.sh watch-idle.sh; do CMD[$w]="bash $(printf %q "$FHERE/$w")"; done
 fi
 start() { # <name>: in its own process group, so stopping it stops its sleep too; without the lock
   set -m; bash -c "${CMD[$1]}" > /dev/null 2>&1 7>&- & PID[$1]=$!; set +m

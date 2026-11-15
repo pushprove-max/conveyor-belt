@@ -4,9 +4,10 @@
 # Usage: rulesets.sh apply   (run in a checkout of the repository; GH_REPO names it when its remote does not)
 # - main.json: main takes no force push and is not deleted; plain pushes stay allowed (the engine lands cards on main).
 # - tags-fixed.json: a v* tag is never moved or deleted, by anyone.
-# - tags-create.json: a v* tag is made only by GitHub Actions (the release workflow, .github/workflows/release.yml),
-#   the GitHub Actions app (id 15368) being its one bypass actor. The tag rules are two rulesets because a bypass actor
-#   passes every rule of its ruleset: in one ruleset, Actions could move and delete tags too.
+# - tags-create.json: a v* tag is made only by a repository admin (the owner's `conveyor.sh release` on the build
+#   machine pushes it), the admin role (id 5) being its one bypass actor. The tag rules are two rulesets because a
+#   bypass actor passes every rule of its ruleset: in one ruleset, an admin could move and delete tags too. Its name
+#   stays the one GitHub has, so apply updates that ruleset in place rather than making a second one beside it.
 # For each file, the ruleset of the same name is updated (PUT) when the repository has one, else made (POST); a second
 # run changes nothing more. Prints one "<made|updated> <name> (id <id>)" line a ruleset.
 # Exit 0 when all are applied, 2 on a usage or API error (the ones before it stay applied).

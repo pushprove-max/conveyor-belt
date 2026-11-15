@@ -1052,7 +1052,7 @@ There is one Foreman per project, never one for the machine. A Foreman holds one
 state and decisions; one that watched several projects would mix them in one context and one memory, and would
 manage both worse with every project added. So each project gets its own Foreman: run the same setup and
 `/conveyor-belt:foreman` in that project's own checkout. A Foreman is woken only by its own project's Conveyor
-(blocked cards, waits on your yes, stuck cards, push errors, idle, awaited issues, a failed CI run in a release), and keeps its session mark,
+(blocked cards, waits on your yes, stuck cards, push errors, idle, awaited issues), and keeps its session mark,
 pending wakes, saved state, decision log (`rulings.jsonl`, the owner's picker answers and typed messages) and watcher positions in `foreman/` in that project's state folder (`conveyor.sh
 state-dir`). The decision log is written on the machine the owner's session runs on, in the state folder of the
 checkout that session is in, never in the plugin install: on the host that is the host file's `stateDir`

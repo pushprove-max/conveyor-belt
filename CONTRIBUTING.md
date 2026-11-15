@@ -9,9 +9,6 @@ what should change. The [engine reference](conveyor/README.md) says how the engi
 accepted issue becomes a card, built, reviewed, tested and landed by the belt (README.md). A pull request is welcome
 too; it is reviewed against the same rules.
 
-A Dependabot pull request is not merged: a card applies its update, and the pull request is closed with the commit
-that landed it.
-
 The owner approves every change to how the engine builds, reviews, fixes, tests, lands or pushes (the pack's
 `pipelineFiles`), whoever proposes it. The same rule is in the card rules every card is given
 (`conveyor/rules/card-core.md`).
@@ -22,9 +19,6 @@ Every commit in a pull request is signed off under the Developer Certificate of 
 sign-off says that you wrote the change, or have the right to submit it, under the project's license. Sign a commit
 off with `git commit -s`: git adds a last line `Signed-off-by: Your Name <your email>` with your name and email
 as the commit's author. To sign off commits you made already, run `git rebase --signoff <base>` and push again.
-
-The DCO check (`.github/workflows/dco.yml`) runs on each pull request. It fails the pull request, naming the commit,
-when a commit has no `Signed-off-by:` line that matches its author.
 
 ## Rules
 
@@ -54,8 +48,8 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   files whose naming changed: each case file an area lists that it did not list at `HEAD`, and every case file of an
   area whose `files` list changed (the whole engine test if that area's tests are `"all"`, or if the map cannot be
   read at `HEAD` or in the worktree). A map edit that wrongly drops a case file from an area is not caught by the
-  card; the map check and CI are the net. A change in one engine file that breaks a case mapped only to another is
-  found by CI at the next release, not by the card.
+  card; the map check and the whole suite are the net. A change in one engine file that breaks a case mapped only to
+  another is found by the whole suite at the next release (`conveyor.sh release`), not by the card.
 - The coverage map, `.conveyor/coverage.jsonl`, lists for each function of the engine's shell files, of
   `.claude/scripts/dashboard.sh` and of the hooks the test cases that ran it (engine cases, parts of
   `dashboard.test.sh` and of the hooks' tests that `CONVEYOR_SHELL_TEST_CASE` selects in (each check of
@@ -76,8 +70,9 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   through `claude plugin test`, with one `-- ok` or `-- FAIL` line a file.
 - To run one card in the foreground, with no service, run `CONVEYOR_MAIN="$PWD" conveyor.sh run 1` in the project's
   checkout. `CONVEYOR_MAIN` names the project, as the engine's own checkout is the default.
-- CI runs every test, and the privacy check, on Ubuntu and macOS at each release, before the tag
-  (`.github/workflows/ci.yml`, called by `.github/workflows/release.yml`). No push or pull request starts it.
+- This project runs no GitHub Actions. At each release, every test and the privacy check run on the build machine,
+  before the tag (`conveyor.sh release-prep` and `conveyor.sh release`, [Releases](docs/releases.md)). No push or
+  pull request starts a test run.
 
 Windows under WSL is not named as supported: no test runs on it.
 

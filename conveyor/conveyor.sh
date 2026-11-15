@@ -82,6 +82,7 @@ cmd lane lane.sh 'lane research create | lane fast create | review | land | rese
 cmd flaky flaky.sh 'flaky add <case> <source> <note> | flaky off <case> <source> <note>'
 cmd full-test full-test.sh 'full-test [push | anyway <run id> [--by <who>]]'
 cmd release-prep release-prep.sh 'release-prep <version>'
+cmd release release-prep.sh 'release <version>'
 cmd testaction testaction.sh 'testaction <judge | explain | run> <test file> | testaction stop <id>'
 cmd testissue testaction.sh 'testissue <test file> <title> <body>'
 cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'

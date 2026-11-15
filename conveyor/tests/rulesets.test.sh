@@ -10,8 +10,9 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Bugs caught: once public, anyone with push access can move or delete a release tag, make a v* tag by hand, or
-# force-push or delete main; or the rulesets block the engine's plain pushes to main, or let the Actions app (the
-# release workflow's bypass) move or delete a tag; or a re-run makes a second copy of a ruleset the repository has.
+# force-push or delete main; or the rulesets block the engine's plain pushes to main, or block the admin's tag push
+# from `conveyor.sh release` (no GitHub Actions runs to make one), or let that bypass move or delete a tag; or a
+# re-run makes a second copy of a ruleset the repository has.
 # A gh stub answers the rulesets list with one ruleset of main.json's name (id 7) and records each call with its body.
 t_rulesets() {
   local d=$T/$CASE out rc b name main='' fixed='' create=''
@@ -44,7 +45,7 @@ EOF
     and ([.rules[].type] | sort) == ["deletion", "non_fast_forward"] and .bypass_actors == []' "$main" > /dev/null \
     || fail "the main ruleset does not block exactly force push and deletion on main for everyone: $(cat "$main")"
 
-  # v* tags: made new (POST); update and deletion blocked for everyone, creation for all but the Actions app.
+  # v* tags: made new (POST); update and deletion blocked for everyone, creation for all but the admin role.
   grep -qx "api --method POST repos/{owner}/{repo}/rulesets --input .*/tags-fixed.json" "$d/call.${fixed##*.}" \
     && grep -qx "api --method POST repos/{owner}/{repo}/rulesets --input .*/tags-create.json" "$d/call.${create##*.}" \
     || fail "the tag rulesets the repository lacks are not made: $(cat "$d"/call.*)"
@@ -53,8 +54,8 @@ EOF
     || fail "the tag ruleset does not block update and deletion of v* tags for everyone: $(cat "$fixed")"
   jq -e '.target == "tag" and .enforcement == "active" and .conditions.ref_name.include == ["refs/tags/v*"]
     and [.rules[].type] == ["creation"]
-    and .bypass_actors == [{actor_id: 15368, actor_type: "Integration", bypass_mode: "always"}]' "$create" > /dev/null \
-    || fail "v* tag creation is not blocked for all but the GitHub Actions app: $(cat "$create")"
+    and .bypass_actors == [{actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always"}]' "$create" > /dev/null \
+    || fail "v* tag creation is not blocked for all but the repository admin role: $(cat "$create")"
   grep -qx "updated $name (id 40)" <<<"$out" && [ "$(grep -c '^made ' <<<"$out")" = 2 ] \
     || fail "the report does not name each ruleset and what was done: $out"
 }
