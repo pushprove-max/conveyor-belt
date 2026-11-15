@@ -45,12 +45,13 @@
       | (if $c.result != "" then null elif $last.step == "start" then $last.of
          else {build: "build", review: "review", fix: "fix", tests: "test", landing: "land"}[$c.x.at] // null end) as $kind
       | ($c.x.after // null) as $after
-      | (if $after then (if $after | IN("issue", "issuefail") then 15 else 14 end) elif $c.result != "" then null elif $kind then ($t | place($kind))
+      # wait: landed, not pushed, with push off: no step runs until the owner presses Push landed.
+      | (if $after == "wait" then null elif $after then (if $after | IN("issue", "issuefail") then 15 else 14 end) elif $c.result != "" then null elif $kind then ($t | place($kind))
          elif $last.step == "picked" then 2 elif $last.step == "worktree" then 3 else 4 end) as $at
       | ($t.nrev + 1) as $r
       # The fix in progress is the next one of the card, counted like the reviews: over every fix, a fix after failed tests too.
       | ([$log[] | select(.step == "fix")] | length + 1) as $f
-      | (if $at == null then "" elif $after then {push: "pushing", pushfail: "push failed; it is tried again", pushheld: "push failed its check; tried again once main moves",issue: "waiting for GitHub to close the issue", issuefail: "GitHub did not close the issue"}[$after]
+      | (if $after == "wait" then "Landed, waiting for Push landed" elif $at == null then "" elif $after then {push: "pushing", pushfail: "push failed; it is tried again", pushheld: "push failed its check; tried again once main moves",issue: "waiting for GitHub to close the issue", issuefail: "GitHub did not close the issue"}[$after]
          elif $kind == null then ["making the worktree", "linking dependencies", "writing the brief"][$at - 2]
          elif $kind == "file" then "filing follow-ups" elif $kind == "rebase" then "rebuilding after a conflict" elif $kind == "land" then "landing" elif $kind == "build" then "building"
          elif $kind == "fix" and $t.phase != "main" then "fix after failed tests"
@@ -100,7 +101,7 @@
           elif $l.step == "blocked" then ({worktree: 0, deps: 0, brief: 0}[$l.stop // ""] // .cur // 0) as $i
             | if $l.stop == "yes" then . else .s[$i].sec = (.s[$i].sec // 0) + ($l.took // 0) | .s[$i].state = "failed" end
           else . end | .prev = $l)) as $u
-      | (if $after then 5 elif $c.result != "" then null elif $kind == null then 0 elif $kind == "fix" and $u.rc then $u.cur
+      | (if $after == "wait" then null elif $after then 5 elif $c.result != "" then null elif $kind == null then 0 elif $kind == "fix" and $u.rc then $u.cur
          else {build: 0, review: 1, fix: 2, test: 3}[$kind] // 4 end) as $six
       # Push is done once main is pushed and the issue is closed: by GitHub (an issue line that is ok), or found closed
       # (x.shut) after GitHub did not close it, closed by hand; it stays failed only while the issue is open.
@@ -159,7 +160,7 @@
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
                     reason: (if $l.step == "fix" then $l.reason else null end)}
                    | with_entries(select(.value != null and .value != "")))]
-           + (if $label == "" then [] else [{name: $label, sec: null} + (if $after | IN("pushfail", "pushheld", "issuefail")
+           + (if $label == "" or $after == "wait" then [] else [{name: $label, sec: null} + (if $after | IN("pushfail", "pushheld", "issuefail")
                # A failed push or close of the issue: when it was last seen (the last line's time) and why, as the push step says.
                then {state: "failed", at: $last.time, why: $why} | with_entries(select(.value != null and .value != "")) else {state: "now"} end)] end))};
 

@@ -82,6 +82,18 @@ test('a card shows one line a finished review: none, one, three, and one recorde
   assert.ok(!panel(w, 'landed').querySelectorAll('li')[1].textContent.includes('Review 1'), 'a landed card with no review listed shows none');
 });
 
+// The owner read a landed card shown "pushing", with push off and nothing pushed, as Conveyor pushing against the rule.
+// With push off the snapshot gives it no running step (at null) and the label of what it waits for.
+test('with push off a landed, unpushed card says it waits for Push landed, with no running Push step', () => {
+  const w = boot();
+  const data = full();
+  Object.assign(data.panels.landed.data.cards[0], { pushed: false, track: trackOf('+++++.', 'Landed, waiting for Push landed') });
+  next(w, data);
+  const li = panel(w, 'landed').querySelector('li');
+  assert.ok(li.textContent.includes('Landed, waiting for Push landed'), li.textContent);
+  assert.doesNotMatch(li.textContent, /Pushing|not pushed yet/, 'its Push step is not shown running');
+});
+
 test('a card with no token read yet says no reading yet, never $0; one with a reading shows its dollars so far', () => {
   const w = boot();
   const cost = (over) => {

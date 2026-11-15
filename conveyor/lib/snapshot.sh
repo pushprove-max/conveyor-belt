@@ -30,7 +30,8 @@
 #   and track, as below: a blocked card is off the belt, and its track is where the step it stopped in is failed,
 #   with the seconds that step ran.
 # belt: every open card, then every card that has landed and is not yet pushed with its issue closed (landed true;
-#   its step is push or issue, and it takes no builder slot): step (brief, build, review, fix, tests, landing: the one in progress; waiting while it waits
+#   its step is push or issue, and it takes no builder slot; with the rule "Push when a card lands" off, a card whose
+#   commit is not pushed is not among them: landed lists it, its track labelled "Landed, waiting for Push landed"): step (brief, build, review, fix, tests, landing: the one in progress; waiting while it waits
 #   on a same-file card, never the landing it waits to begin), waitsOn (that card's {card, issue, state}, else null), gaveWay (the issue
 #   of the card it gave up its land turn to while it is fitted, reviewed, fixed or tested again: giveway(); else null),
 #   gaveWayFixing (it gave that turn up for the fix of its failed tests), review (the number of
@@ -55,7 +56,7 @@
 #   the issue (followups: how many were filed). at is the place of the step in progress (null on a card that has
 #   ended), label what it is doing ("review 2 of 3", "fix after review 1", "filing follow-ups", "rebuilding after a
 #   conflict", and after the landing "pushing", "push failed; it is tried again", "waiting for GitHub to close the
-#   issue"), since when that began, reason why Push failed (the push's error, or the issue left open), files a test
+#   issue"; "Landed, waiting for Push landed", at null, while push is off and its commit is not pushed), since when that began, reason why Push failed (the push's error, or the issue left open), files a test
 #   run's {run, of}, tests its cases {done, of, failed} (null when its command said no count: a line
 #   `TESTRUN cases=N`; done and failed are the cases its runner named as ended, session.sh watch()). No time is estimated from past cards. detail is every recorded step, the 17 of before (queued,
 #   picked, worktree ready, dependencies linked, brief written, building, review 1, fix 1, review 2, fix 2, review 3,
@@ -475,12 +476,15 @@ snapshot() (
     # on the belt (x.after: push, pushfail when a push that carried it failed, pushheld when it failed its check and
     # waits for main to move, issue, or issuefail when GitHub kept the
     # issue open), so a slow or failed push is
-    # a step in progress or failed there. x.shut: the issue is known closed (the open issues were listed and it is not
+    # a step in progress or failed there. With the rule "Push when a card lands" off (rules.push false), nothing pushes
+    # it until the owner presses Push landed: x.after is wait, and it is off the belt, listed only as landed and not
+    # pushed, a failed Push landed too (needs-you and the Control tab say that the push failed). x.shut: the issue is known closed (the open issues were listed and it is not
     # among them), however it was closed: by GitHub, or by hand after GitHub did not.
+    | (($control // {}) | .rules.push? == false) as $pushOff
     | ($all[0] | map(select(.x.retried | not)) | map(.x.shut = (.issue != 0 and $iss[0] != null and (.issue as $n | $iss[0] | any(.number == $n) | not)))
       | map(.x.after = (
         if .step != "landed" then null
-        elif .sha | IN($un[]) then (if $h.pushError != null and $h.pushError.time >= .x.endAt then (if $h.pushError.kind == "check" then "pushheld" else "pushfail" end) else "push" end)
+        elif .sha | IN($un[]) then (if $pushOff then "wait" elif $h.pushError != null and $h.pushError.time >= .x.endAt then (if $h.pushError.kind == "check" then "pushheld" else "pushfail" end) else "push" end)
         else (.x.log | map(select(.step == "pushed")) | last) as $p | (.x.log | map(select(.step == "issue")) | last) as $il
           | if .issue == 0 or $p == null or .x.shut then null
             # No issue line yet: GitHub is waited for $wait; an issue line that never comes (the loop died) then
@@ -620,7 +624,7 @@ snapshot() (
        release: $rl,
        flaky: $fl,
        slowOff: $so,
-       belt: [($c[] | select(.result == "")), ($c[] | select(.x.after != null)) | sofar as $s | (.x.after != null) as $landed
+       belt: [($c[] | select(.result == "")), ($c[] | select(.x.after != null and .x.after != "wait")) | sofar as $s | (.x.after != null) as $landed
          | (if $landed then (if .x.after | IN("issue", "issuefail") then "issue" else "push" end) elif .live.waits.on then "waiting" else .x.at end) as $step
          # A card waiting on a same-file card: that card, its issue, and where it is (its step on the belt, blocked,
          # landed, closed, queued: `retry` gave its issue back, or gone: in no record).

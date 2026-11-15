@@ -45,7 +45,8 @@
 #           false and usd null before any token is read), its finished reviews, its track (the six steps Build, Review,
 #           Fix, Test, Land, Push, with every recorded step as its detail) and its times: start (the first pick-up
 #           of its work), pickedAt, priorSec and totalSec, as the snapshot gives them. No time is estimated.
-#           A card that has landed stays here (landed true) until it is pushed and its issue is closed. cap: the
+#           A card that has landed stays here (landed true) until it is pushed and its issue is closed (with the rule
+#           "Push when a card lands" off, the snapshot leaves an unpushed one out: Landed today shows it). cap: the
 #           slots in force (every project's own cap together, no more than the machine cap; null when neither is known).
 #   belt3d  the Belt 3D panel, cut from the parts above and nothing else: repos, belt (each belt card's repo, card,
 #           issue, title, url, step, stepAt, landed, waitsOn, usd, turns (its live record's), its reviews (round,

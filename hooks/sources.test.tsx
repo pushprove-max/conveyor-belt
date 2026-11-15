@@ -457,6 +457,15 @@ test('LANDED TODAY gives the time, the last verdict and its round, the cost or p
   expect(section(tableText(board({ landed: LANDED, cost: { today: null } }), 62), 'LANDED TODAY').split('\n')[0]).toBe('LANDED TODAY  3 · cost partial')
 })
 
+// The owner read "pushing" on a landed card, with push off and nothing pushed, as a push against the rule. With push
+// off the snapshot gives it no running step (at null) and the label of what it waits for: /units says that.
+test('LANDED TODAY with push off: a landed, unpushed card says it waits for Push landed, never pushing', () => {
+  const landed = [{ ...LANDED[1], track: track('++-++.', 'Landed, waiting for Push landed', { at: null }) }]
+  const part = section(tableText(board({ landed }), 80), 'LANDED TODAY')
+  expect(part).toMatch(/#3860 Health record .*Landed, waiting for Push landed$/m)
+  expect(part).not.toMatch(/pushing|not pushed/)
+})
+
 test('LANDED TODAY with no landing says so', () => {
   expect(section(tableText(board(), 80), 'LANDED TODAY')).toBe('LANDED TODAY\n  nothing landed today')
 })

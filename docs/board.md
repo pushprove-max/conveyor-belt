@@ -101,6 +101,11 @@ issue that is not open, a cycle, or an issue whose card already runs.
 The Rules tab's **Push when a card lands** rule is Off by default. Conveyor lands each card on main and pushes when you
 press **Push landed**. Turn the rule On, and Conveyor pushes each card on its own after it lands.
 
+With the rule Off, a card that landed leaves the belt. It is not in On the belt, Belt 3D or `/units` ON THE BELT. Landed
+today shows it as "Landed, waiting for Push landed", and the Control tab counts it in "N landed, not pushed". Its Push
+step stays to come until you press Push landed. With the rule On, a landed card stays on the belt as "pushing" until
+Conveyor pushes it.
+
 **Push landed** and **Run full test suite** are on the Control tab, which shows "N landed, not pushed". Push landed runs
 the project's full test suite, the `test.full` of the pack (the project's settings, `.conveyor/project.json`), on
 main. Setup sets `test.full` to your test command in a new pack. Green, it pushes the landed commits that the run tested.

@@ -51,9 +51,11 @@ window.DASH_APP.panel({
     const row = (c) => {
       const li = h('li', 'row');
       const head = h('div', 'row-main');
-      // The push and the close of the issue are the card's last step: "pushing" while it runs.
+      // The push and the close of the issue are the card's last step: "pushing" while it runs. With push off no step
+      // runs (track.at null) and the track's label says what it waits for: "Landed, waiting for Push landed".
       const push = c.track && Array.isArray(c.track.steps) && c.track.steps[5] ? c.track.steps[5] : null;
-      let state = ctx.chip(push && push.state === 'now' ? 'Pushing' : 'Landed, not pushed yet', 'warn');
+      const waits = c.track && c.track.at == null && typeof c.track.label === 'string' && c.track.label ? c.track.label : null;
+      let state = ctx.chip(push && push.state === 'now' ? 'Pushing' : waits || 'Landed, not pushed yet', 'warn');
       if (c.step === 'closed') state = ctx.chip('Already fixed', 'quiet');
       else if (push && push.state === 'failed') state = ctx.chip(String(c.track.reason || '').startsWith('GitHub did not close the issue') ? 'Issue still open' : 'Push failed', 'bad');
       else if (c.pushed) state = ctx.chip('Landed and pushed', 'ok');

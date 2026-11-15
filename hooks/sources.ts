@@ -72,7 +72,9 @@ export type Waiting = Ref & { waitsFor: number[] }
 // An open issue labelled awaiting-deploy: built and merged, waiting for your PROD deploy. since: when it got the label.
 export type Deploy = Ref & { since: number | null }
 // push: the state of its Push step (now while the push runs, failed when it failed or GitHub left the issue open).
-export type Landed = Card & Times & { closed: boolean; at: number | null; usd: number | null; reviews: number; rounds: Review[]; followups: number[]; pushed: boolean | null; issueOpen: boolean; parent: number | null; push: Step['state'] | null; metrics: Metrics | null }
+// waits: what it waits for while no step of it runs (its track's label with at null: with push off, "Landed, waiting
+// for Push landed"), else null.
+export type Landed = Card & Times & { closed: boolean; at: number | null; usd: number | null; reviews: number; rounds: Review[]; followups: number[]; pushed: boolean | null; issueOpen: boolean; parent: number | null; push: Step['state'] | null; waits: string | null; metrics: Metrics | null }
 // queue is null when no record's queue was read (gh did not list the issues); queueMore: a record gave its full ten,
 // so more may wait behind them. todayUsd is the dollars of today's priced steps, and todayLeftOut how many
 // steps of today it leaves out for having no price; todayUsd is null when a record was not read or its price table
@@ -190,7 +192,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       const t = trackOf(x.track)
       return {
         ...card(x), ...timesOf(x), closed: x.step === 'closed', at: time(x.time), usd: num(x.usd), reviews: num(x.reviews) ?? 0, rounds: reviewsOf(x.rounds),
-        issueOpen: t?.steps[5].state === 'failed' && (t.reason ?? '').startsWith('GitHub did not close the issue'), push: t ? t.steps[5].state : null, parent: parentOf(x),
+        issueOpen: t?.steps[5].state === 'failed' && (t.reason ?? '').startsWith('GitHub did not close the issue'), push: t ? t.steps[5].state : null, waits: t && t.at === null && t.label ? t.label : null, parent: parentOf(x),
         followups: Array.isArray(x.followups) ? x.followups.filter((n: unknown): n is number => num(n) !== null) : [], pushed: typeof x.pushed === 'boolean' ? x.pushed : null,
         metrics: metricsOf(x.metrics),
       }
@@ -673,7 +675,7 @@ export const deployModel = (s: State, snap: Snap, w: number): Line[] => [
 
 // LANDED TODAY: the count and the day's cost in the heading; per card the time it landed, a check
 // mark, the issue and short title, the last verdict and its round, and the cost ("pushing" in place of it while the
-// push runs); beneath, when it was picked up and its overall time to the landing, and the follow-ups it filed.
+// push runs, what it waits for while no step runs: "Landed, waiting for Push landed" with push off); beneath, when it was picked up and its overall time to the landing, and the follow-ups it filed.
 export const landedModel = (s: State, snap: Snap, w: number, short: boolean): Line[] => {
   const shown = short ? snap.landed.slice(0, NEXT) : snap.landed
   // The day's cost is today's priced steps (the head's figure), not the lifetime cost of the cards that landed today.
@@ -687,7 +689,7 @@ export const landedModel = (s: State, snap: Snap, w: number, short: boolean): Li
       const verdict: Seg[] = l.closed ? [{ t: 'already fixed', d: true }]
         : last ? [{ t: last.verdict || 'no verdict', c: last.verdict === 'GO' ? C.ok : C.you }, { t: ` r${last.round}`, d: true }]
           : [{ t: count(l.reviews, 'review'), d: true }]
-      const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you }
+      const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : l.waits ? { t: l.waits, c: C.you }
         : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : cost(l.usd)
       const lead: Seg[] = [{ t: ` ${l.at ? clockOf(l.at) : 'time?'} `, d: true }, { t: '✓ ', c: C.ok }]
       const all = overallOf(l, s.now)

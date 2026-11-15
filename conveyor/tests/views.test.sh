@@ -228,6 +228,19 @@ t_snapshotpush() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop retry 8
     && [ "$(q '.landed[] | select(.card == "c5") | .track.records | map(select(.name | IN("pushed", "issue not closed")) | [.name, .state])')" = '[["pushed","done"],["issue not closed","failed"]]' ] \
     || fail "a card whose issue was closed by hand is still on the belt, or its Push is not done: $(after) $(q '.landed[] | select(.card == "c5") | .track')"
 }
+# With push off nothing pushes a landed card until the owner presses Push landed: it is off the belt, never "pushing"
+# (the owner read that as a push against the rule), and listed as landed and not pushed, waiting. With push on, pushing.
+t_snapshotpushoff() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop control rules push=off >/dev/null || fail "push=off failed"
+  out=$(loop snapshot 2>/dev/null) || fail "snapshot with push off exited non-zero"
+  [ "$(q '[(.belt | map(select(.landed)) | length), (.health.unpushed | map(.card)), (.landed[] | select(.card == "c5") | [.step, .pushed, .track.label, .track.at, .track.steps[5].state, (.track.records | map(.state) | index("now"))])]')" \
+    = '[0,["c10","c5"],["landed",false,"Landed, waiting for Push landed",null,"todo",null]]' ] || fail "a landed card with push off is on the belt or pushing: $out"
+  loop control rules push=on >/dev/null; out=$(loop snapshot 2>/dev/null) || fail "snapshot with push on exited non-zero"
+  [ "$(after)" = '[["c10","push",14,"pushing","nt","n",null],["c5","push",14,"pushing","nt","n",null]]' ] || fail "with push on a landed card is not pushing: $(after)"
+  # A Push landed that failed does not put them back on the belt with push off: the failure is the Control tab's.
+  mark 5 push "${d}T00:40:00Z" fail "$ahead"; loop control rules push=off >/dev/null; out=$(loop snapshot 2>/dev/null) || fail "snapshot after a failed push exited non-zero"
+  [ "$(q '[(.belt | map(select(.landed)) | length), (.health.pushError != null), (.landed[] | select(.card == "c5") | .track.label)]')" \
+    = '[0,true,"Landed, waiting for Push landed"]' ] || fail "with push off a failed push puts a landed card back on the belt: $out"
+}
 
 # Bugs: a card that is building shows no dollars until its session ends, or $0 before the session has said
 # anything; an answer of the model that comes as several events is counted once for each; a long session that is

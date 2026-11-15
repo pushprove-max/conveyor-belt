@@ -43,7 +43,8 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
      (`Test 16m · Land 16m`), so no measured time or count is lost.
   3. The round (`round 1 of 3`), each finished round's verdict with its counts by level, and, right-aligned, the
      measured time in the step it is in (`fixing 2m`, `pushing 51s`, `push failed 3m`).
-  A card that has landed stays on the belt, Push in progress, until main is pushed and its issue closed. A Push
+  A card that has landed stays on the belt, Push in progress, until main is pushed and its issue closed. With the
+  rule "Push when a card lands" Off, a landed card that is not pushed is not on the belt: LANDED TODAY shows it. A Push
   that failed adds a fourth line, `✗` and the reason (the push's error, or that GitHub kept the issue open), cut to
   the width. From the live feed, while a step runs, a dim line follows: what it is doing now, its turns and the
   seconds since its last output (`now Bash: npm test · 3 turns · last output 6s ago`). The Test step runs no model,
@@ -54,7 +55,7 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
 - **BUILT, WAITING FOR YOUR PROD DEPLOY**: the open issues labelled `awaiting-deploy`, which the loop never picks,
   with how long each has carried the label. Shown only when there is one.
 - **LANDED TODAY**: the count and the day's cost in the heading; per card the time it landed, `✓`, the issue and short
-  title, the last verdict and its round (`NO-GO r3`), and its cost (`pushing` while the push runs, `not pushed`,
+  title, the last verdict and its round (`NO-GO r3`), and its cost (`pushing` while the push runs, `Landed, waiting for Push landed` with that rule Off, `not pushed`,
   `issue open` when GitHub did not close it); beneath, when it was picked up, its overall time to the landing and the
   follow-ups it filed (`↳ 3 follow-ups: #13 #14 #15`).
 - **The measurements of a card**, in `/units` under each card that needs you, the same fields as the Board's per-card
