@@ -26,6 +26,11 @@ Add the plugin in Claude Code with `/plugin marketplace add pushprove-max/convey
 release, run `/plugin marketplace update conveyor-belt`, or turn on auto-update for this marketplace in `/plugin`
 (Marketplaces).
 
+The plugin does nothing in a project until `/conveyor-belt:setup` runs there. A project with no
+`.conveyor/project.json` keeps its Bash, Edit, Write and AskUserQuestion calls as they were. In a project whose
+commit is not installed on this machine, the guards are off, and each session shows one line that says so until
+setup installs the commit.
+
 Setup installs the newest release of the engine, and the loop runs from it. You do not clone the repository for
 the loop. The shell commands in these pages are that release's `conveyor/conveyor.sh`, in
 `~/.local/share/conveyor/versions/<commit>` (under `$XDG_DATA_HOME` when that is set), run in your project's checkout.

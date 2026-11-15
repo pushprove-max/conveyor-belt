@@ -14,6 +14,8 @@ trap 'kill $LSN $RAW_LSN $FULL_LSN $FORGE_LSN 2>/dev/null; rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/repo/.conveyor" "$T/bare" "$T/config/conveyor" "$T/data/conveyor/versions/$PIN/.claude/hooks"
 cp "$SRC/.claude/hooks/board-open.sh" "$T/data/conveyor/versions/$PIN/.claude/hooks/"
 jq -n --arg c "$PIN" '{plugin: {commit: $c}}' > "$T/repo/.conveyor/project.json"
+# A Conveyor project is a git checkout: outside one the plugin's hooks do nothing (plugin-hooks.test.sh).
+git init -q "$T/repo"
 echo '{}' > "$T/config/conveyor/host.json"
 for o in open xdg-open; do printf '#!/usr/bin/env bash\necho "$1" >> %q\n' "$T/opened" > "$T/bin/$o"; chmod +x "$T/bin/$o"; done
 free_port() { python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }

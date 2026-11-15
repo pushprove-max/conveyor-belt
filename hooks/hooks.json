@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh start"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh start"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ ! -f \"${CLAUDE_PROJECT_DIR:-.}/.conveyor/project.json\" ] || \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/board-open.sh",
+            "command": "[ ! -f \"${CLAUDE_PROJECT_DIR:-.}/.conveyor/project.json\" ] || CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/board-open.sh",
             "timeout": 30
           }
         ]
@@ -27,31 +27,31 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/git-safety.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/git-safety.sh",
             "timeout": 30,
             "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/bash-guardrails.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/bash-guardrails.sh",
             "timeout": 30,
             "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/adversarial-review-gate.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/adversarial-review-gate.sh",
             "timeout": 120,
             "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/dependency-addition-guard.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/dependency-addition-guard.sh",
             "timeout": 60,
             "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filing"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filing"
           }
         ]
       },
@@ -60,13 +60,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/dependency-addition-guard.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/dependency-addition-guard.sh",
             "timeout": 60,
             "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ruling-cite-gate.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ruling-cite-gate.sh",
             "timeout": 30,
             "onFailure": "block"
           }
@@ -77,13 +77,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/worker-ask-guard.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/worker-ask-guard.sh",
             "timeout": 30,
             "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ask-records-decision.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ask-records-decision.sh",
             "timeout": 60
           }
         ]
@@ -94,12 +94,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ruling-log.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ruling-log.sh",
             "timeout": 60
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh words",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh words",
             "timeout": 120
           }
         ]
@@ -111,7 +111,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ruling-log.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh .claude/hooks/ruling-log.sh",
             "timeout": 60
           }
         ]
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filed"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filed"
           }
         ]
       }
@@ -132,7 +132,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filed"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filed"
           }
         ]
       }
@@ -142,15 +142,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/stop.sh state"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/stop.sh state"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/stop.sh reply"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/stop.sh reply"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/waiter.sh",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/waiter.sh",
             "asyncRewake": true,
             "timeout": 86400
           }
