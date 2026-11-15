@@ -100,9 +100,9 @@ t_relboard() {
   [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && grep -q '^release create v1.1.0 ' "$STUB/gh-calls" || fail "no tag v1.1.0 was pushed, or no GitHub release made: $(cat "$STUB/gh-calls")"
   [ "$(wc -l < "$STUB/runs")" = 1 ] || fail "the suite ran $(wc -l < "$STUB/runs") times, not once"
 }
-# reusesetup <suite>: runsetup, with the record of a release-prep of 1.1.0 that passed on main's head ($O), main not
+# relreusesetup <suite>: runsetup, with the record of a release-prep of 1.1.0 that passed on main's head ($O), main not
 # moved, and its passing status kept by gh, as release-prep leaves them.
-reusesetup() {
+relreusesetup() {
   runsetup "$1"
   mkdir -p "$T/$CASE/cards/release" && printf '[{"context":"conveyor/release-suite","state":"success"}]\n' > "$STUB/statuses" \
     && jq -cn --arg o "$O" '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-11-15T08:00:00Z", ended: "2026-11-15T08:25:00Z",
@@ -112,7 +112,7 @@ reusesetup() {
 # release-prep had just recorded. The suite here fails if called.
 t_relreuse() {
   local O RUN out
-  reusesetup 'exit 1'
+  relreusesetup 'exit 1'
   out=$(loop release-run 1.1.0 2>&1) && grep -q 'with the suite that passed on' <<<"$out" || fail "release-run did not start release alone on the pass: $out"
   relwait "the run did not end" '.step == "release" and .ended != null'
   [ ! -e "$STUB/runs" ] || fail "the suite ran again on the commit it passed on: $(cat "$T/$CASE/cards/release/run.log")"
@@ -123,7 +123,7 @@ t_relreuse() {
 # after the pass: release-run runs release-prep first, on the new head.
 t_relreusemoved() {
   local O RUN out new
-  reusesetup true
+  relreusesetup true
   git -C "$R" commit -q --allow-empty -m 'fix: landed after the pass' && git -C "$R" push -q origin main || fail "the fixture could not be made"
   new=$(git -C "$R" rev-parse HEAD)
   out=$(loop release-run 1.1.0 2>&1) && grep -q 'release-prep 1.1.0 is running' <<<"$out" || fail "release-run did not start release-prep: $out"

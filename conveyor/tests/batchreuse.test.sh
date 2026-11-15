@@ -57,7 +57,7 @@ echo "${PWD##*-}$ran" >> "$STUB/runs"
 echo "TESTRUN cases=$k" >> "$L"; [ "$RR" = /dev/null ] || echo "TESTRUN kept=$kept" >> "$L"
 EOF
 }
-cardof() { st "select(.issue == $1 and .step == \"picked\") | .card"; } # <issue>: its card id
+# cardof is batch.test.sh's: the runner loads every case file into one shell, so a second definition replaces the first.
 runs() { tr '\n' ',' < "$STUB/runs"; } # every run, in order, as `<card> <cases>,`
 landedtogether() { [ "$(st 'select(.step == "landed") | .batch | join(" ")' | sort -u)" = "$1" ]; } # <the batch's cards, in order>
 

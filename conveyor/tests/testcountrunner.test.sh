@@ -47,3 +47,17 @@ t_testcountinner() {
   [ "$(cd "$d/log/cases" && find . -type f | sort | tr '\n' ' ')" = './ok/testcount_outer ' ] \
     || fail "a case run inside a case is named in the run's records: $(cd "$d/log/cases" && find . | sort | tr '\n' ' ')"
 }
+
+# Bug (#35): releaserun.test.sh defined reusesetup(), the name of batchreuse.test.sh's fixture. The runner loads every
+# case file into one shell, so the later definition replaced the batch one, and four batchreuse cases failed on main.
+# tools/fnclash.sh fails on a fixture of two case files that both define helperx(), and names both files and helperx;
+# a definition inside a heredoc (a script a case writes) is not one. The files the runner loads pass it.
+t_casefnclash() {
+  local d=$T/$CASE/fx out
+  mkdir -p "$d" || fail "the fixture could not be made"
+  printf '%s\n' 'helperx() { :; }' 't_one() { helperx; }' "cat > x <<'EOF'" 'only() { :; }' 'EOF' > "$d/one.test.sh"
+  printf '%s\n' 'helperx() { echo two; }' 'only2() { :; }' 'cat > y <<-EOF' 'only() { :; }' '	EOF' 'only2x() { :; }' > "$d/two.test.sh"
+  out=$(bash "$SRC/tools/fnclash.sh" "$d/one.test.sh" "$d/two.test.sh" 2>&1); [ $? = 1 ] && [ "$out" = "helperx: one.test.sh two.test.sh" ] \
+    || fail "two case files that both define helperx() were not named as a clash: $out"
+  out=$(bash "$SRC/tools/fnclash.sh" "$SRC/tests/lib.sh" "$SRC"/tests/*.test.sh 2>&1) || fail "two files the runner loads define one function: $out"
+}
