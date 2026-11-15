@@ -16,6 +16,30 @@ The session that takes the role says so in one line: `This session is now the Fo
 the Foreman a name in `foreman.name`, the line shows it in brackets: `This session is now the Foreman (Ada): …`.
 `/conveyor-belt:foreman off` ends the role.
 
+## Status and wakes
+
+`conveyor.sh foreman status` prints the state of the Foreman's projects as short plain text. Give a project's name to
+see only that project. It shows:
+
+- each card on the belt, one a line: its issue, step, time in that step and title
+- the cards that wait on other issues, and the held issues, by number
+- the release or full-test run in progress: its commit, how long it has run, the cases done of all its cases, and the
+  failed files. With no run in progress, it shows how the last run ended.
+- each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
+  error and a problem of the engine
+
+The Foreman uses this command for its status checks. Its rules also tell it to run short commands in the foreground,
+to put several checks into one command, and to read an image only when you ask or a check needs it.
+
+A watcher wakes the Foreman when something needs it. The wake holds the outcome, so the Foreman does not have to look
+it up:
+
+- A card that the Foreman waits for lands: the wake names its commit.
+- A blocked card: the wake names the reason.
+- A release or full-test run that ends: the wake names the result and the failed files.
+
+A card that moves from one step to the next, as from build to review, gives no wake.
+
 ## The Foreman on your own machine
 
 The Foreman can run on your own machine while the belt runs on a host. Give your machine's host file (its

@@ -115,6 +115,12 @@ export CONVEYOR_FOREMAN_ASK='case $CONVEYOR_CMD in health) jq -cn --argjson w "[
 out=$(cd "$M" && PATH=$T/bin:$PATH bash "$SRC/../conveyor.sh" foreman 2>&1) || fail "conveyor foreman failed: $out"
 grep -qF "cwd=$M foreman=1 ttl=1h" <<<"$out" || fail "claude did not start in the main checkout in Foreman mode with the 1-hour cache: $out"
 grep -qF '# Live summary' <<<"$out" || fail "the session got no live summary: $out"
+# Bug (#11): the Foreman checked status by hand in 4 to 6 shell calls, ran short commands in the background and read
+# images it was not asked to, each call re-reading the whole conversation. Its rules say how to keep calls few.
+grep -qF '# Check status with conveyor.sh foreman status, not your own snapshot reads.' <<<"$out" \
+  && grep -qF '# Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.' <<<"$out" \
+  && grep -qF '# Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.' <<<"$out" \
+  || fail "the Foreman's start context lacks the three lean-habit rules: $out"
 grep -qF "alpha waiting on the owner's yes: #12" <<<"$out" && grep -qF "beta waiting on the owner's yes: #19" <<<"$out" \
   || fail "the live summary does not cover both records: $out"
 grep -qF "alpha waiting on the owner's yes before its build: #21" <<<"$out" || fail "the live summary leaves out an issue waiting for its yes before its build: $out"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# watch-conveyor.sh [--once] -- the Foreman's Conveyor watcher, run by waiter.sh. Once a minute it asks the
+# watch-conveyor.sh [--once | --status [<project>]] -- the Foreman's Conveyor watcher, run by waiter.sh. Once a minute it asks the
 # Foreman's own record, or each record of its group (lib.sh mine), never another project's, for `conveyor.sh
 # snapshot` (lib.sh ask) and, on any NEW problem, puts one wake in pending and
 # exits. The problems, each a record's own:
@@ -13,8 +13,9 @@
 #   the record unreachable: no snapshot for 2 minutes (never one failed poll)
 #   an awaited issue landed: $FD/await-<repo>.txt lists issue numbers, one per line, of the record <repo>, so a
 #     group's Foreman claimed in another checkout awaits the same issues of the same projects; one whose card has
-#     pushed wakes once. The Foreman only appends to it: what was dropped is counted in await-done-<repo>.txt
+#     pushed wakes once, naming the commit it landed as. The Foreman only appends to it: what was dropped is counted in await-done-<repo>.txt
 #     ("<issue> <its lines in await-<repo>.txt then>"), so a line appended later awaits it again
+#   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit and failed files
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
@@ -32,20 +33,28 @@
 # A problem reported is not reported again until it clears and comes back: conveyor-reported.txt holds the keys,
 # "<repo>/<key>", of the reported problems still there, so a restart repeats nothing. While a record gives no
 # snapshot, its reported problems stay reported.
+# A card that only moves on the belt (build to review, review to tests) needs no one and wakes nothing.
+# --status prints the records' state for the Foreman to read, and reports nothing as seen (STATUS, below).
 # For tests: CONVEYOR_FOREMAN_ASK (lib.sh), CONVEYOR_FOREMAN_NOW (the clock, epoch seconds), --once (one poll: exit 0
 # with a wake put, 1 with nothing new).
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
 SEEN=$FD/conveyor-reported.txt
 POLL=60 DOWN_S=120 PUSH_S=600
-mkdir -p "$FD" && touch "$SEEN" || exit 1
 # The kinds of the Board's Needs you, the list the Board reads too: one that does not read stops the watcher here,
 # never as a record read as unreachable.
 KINDS=$FHERE/../../.claude/scripts/dashboard_needs.json
 jq -e 'arrays | all(.[]; (.kind | strings) and (.from | arrays))' "$KINDS" >/dev/null || { echo "watch-conveyor: $KINDS does not read as the list of Needs you kinds" >&2; exit 1; }
 RECS=$(mine) || exit 1
-while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt" || exit 1; done <<<"$RECS"
 
+# A whole-suite run of the snapshot's suites (a release's or the full test's) on one line: under way, its commit, how
+# long it has run, the cases done of the cases selected (the total when its runner gives it) and failed; ended, its result and commit; either way the failed files by name.
+SUITE='def took: if . < 3600 then "\(. / 60 | floor)m" else "\(. / 3600 | floor)h\(. % 3600 / 60 | floor)m" end;
+  def suiteline($now): (if .kind == "release" then "release \(.version // "")" else "full test" end) as $k
+    | (.sha // "" | if . == "" then "no commit yet" else .[0:12] end) as $c
+    | ([.cases | arrays | .[] | tostring] | if length > 20 then "\(.[:20] | join(", ")) and \(length - 20) more" else join(", ") end) as $f
+    | if .ended == null then "\($k) running on \($c) for \((.since | fromdate? | $now - .) // null | if . == null then "?" else took end): \(.done // 0)\(if .of == null then "" else " of \(.of)" end) cases done, \(.failed // 0) failed\(if $f == "" then "" else ": \($f)" end)"
+      else "\($k) \(.state // "ended") on \($c) at \(.ended)\(if $f == "" then "" else "; failed files: \($f)" end)" end;'
 # The issues of a snapshot, or of its history ($hist: `conveyor.sh history`, null when not read), whose card pushed:
 # landed and not in health's unpushed, or in pushedCards. The snapshot holds only the newest of both lists (#544:
 # with 110 pushed today an awaited issue among the oldest was in neither, and never woke the Foreman).
@@ -54,7 +63,9 @@ PUSHED='def pushed($hist): [.health.unpushed | arrays | .[] | objects | .card] a
      (.pushedCards | arrays | .[] | objects | .issue | numbers)];'
 # A snapshot's problems, one per line: <key> TAB <kind> TAB <issue numbers, "#n" by spaces> TAB <text>. Fails for
 # anything but a snapshot holding a health record. idle is a candidate here: record() reports it on its second poll.
-PROBLEMS=$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
+# An awaited issue that landed names its commit (the snapshot's or the history's landed line of it); a whole-suite run
+# that ended (snapshot suites) is one item, its line as the status command prints it, the failed files named.
+PROBLEMS=$SUITE$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   (type == "object" and .belt == [] and (.queue.next // null) == []) as $idle
   | pushed($hist[0]) as $pushed
   | . as $snap
@@ -73,7 +84,11 @@ PROBLEMS=$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | "#\(.issue)"] | join(", ")))"
       elif (.cases | type) == "array" then "its test step has had \(.cases | map(tostring) | join(", ") | one) running since \(.since)"
       else "no new step and no output since \(.since) (last step: \(.step))" end)] end),
-    ($await[] | select(.[0] | IN($pushed[])) | ["landed:\(.[0]):\(.[1])", "landed", "#\(.[0])", "#\(.[0]) landed: your step is due"]),
+    ($await[] | select(.[0] | IN($pushed[])) | .[0] as $i
+      | (first($snap, ($hist[0] | objects) | .landed | arrays | .[] | objects | select(.issue == $i) | .sha | strings | select(. != "")) // "") as $sha
+      | ["landed:\(.[0]):\(.[1])", "landed", "#\(.[0])", "#\(.[0]) landed\(if $sha == "" then "" else " as \($sha[0:12])" end): your step is due"]),
+    ($snap.suites | arrays | .[] | objects | select(.ended != null)
+      | ["suite:\(.kind | tostring | gsub("\\s"; "-")):\(.ended)", "suite ended", "", suiteline($now) | gsub("\\s+"; " ")]),
     (select(.loop | not) | ["noloop", "no loop", "", "no loop is running"]),
     (select(.pushFailingSince != null) | .pushError as $e
       | if ($e | type) == "object" and $e.kind == "check" then
@@ -106,6 +121,41 @@ PROBLEMS=$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (select($idle) | ["idle", "idle", "", "Conveyor is idle: nothing in flight and nothing to pick"])
   | join("\t")'
 
+# --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
+# snapshot, with no wake put and nothing marked reported: the belt (a card a line: issue, step, time in step, title cut to 60 characters), the
+# cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
+# that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
+# above), each "needs you: <text>". <project> names one record of mine; with none, every one of them.
+STATUS=$SUITE'def num: if type == "number" then "#\(.)" else tostring end;
+  "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt",
+  (.belt | arrays | .[] | objects | "  #\(.issue) \(.step)\((.waitsOn.issue | numbers | " on #\(.)") // "")"
+    + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
+  (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),
+  (.open.held | arrays | select(length > 0) | "held: " + (map(objects | .issue | num) | join(" "))),
+  ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
+    | if $run != [] then $run[] | suiteline($now)
+      else $s | map(select(.ended != null)) | max_by(.ended) | objects | "last " + suiteline($now) end)'
+if [ "${1:-}" = --status ]; then
+  now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} n=0
+  errf=$(mktemp) || exit 1; trap 'rm -f "$errf"' EXIT
+  while IFS=$'\t' read -r repo main; do
+    [ -z "${2:-}" ] || [ "$repo" = "$2" ] || continue
+    n=$((n + 1))
+    if ! rec=$(ask "$repo" "$main" snapshot 2>"$errf") || ! jq -e objects <<<"$rec" >/dev/null 2>&1; then
+      echo "$repo: no snapshot ($(tr -s '[:space:]' ' ' < "$errf" | tail -c 200))"; continue
+    fi
+    jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
+    jq -r --argjson push -1 --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null \
+      | awk -F'\t' '$2 != "suite ended" { print "needs you: " $4 }'
+    [ "${PIPESTATUS[0]}" = 0 ] || echo "needs you: unknown, the snapshot holds no health record"
+  done <<<"$RECS"
+  [ "$n" -gt 0 ] || { echo "foreman status: $2 is none of this Foreman's projects ($(cut -f1 <<<"$RECS" | paste -sd' ' -))" >&2; exit 2; }
+  exit 0
+fi
+
+mkdir -p "$FD" && touch "$SEEN" || exit 1
+while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt" || exit 1; done <<<"$RECS"
+
 # One record's problems now, each line prefixed with its repo: <repo> TAB <key> TAB <kind> TAB <issues> TAB <text>.
 record() { # <repo> <main> <now> <await>
   local repo=$1 now=$3 rec cur first last err held
@@ -117,7 +167,7 @@ record() { # <repo> <main> <now> <await>
   if rec=$(ask "$repo" "$2" snapshot 2>"$errf") \
     && { jq -e --argjson await "$4" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
       && ask "$repo" "$2" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; } \
-    && cur=$(jq -r --argjson push "$PUSH_S" --argjson await "$4" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf"); then
+    && cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$4" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf"); then
     rm -f "$down"
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi

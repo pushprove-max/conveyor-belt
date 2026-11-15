@@ -22,6 +22,13 @@ echo 'echo pass >> "$(dirname "$0")/../ran"' > "$R/lib/fx-pass.test.sh"
 printf 'import os, sys\nopen(os.path.join(os.path.dirname(__file__), "..", "ran"), "a").write("py\\n")\nsys.exit(1)\n' > "$R/lib/fx-fail.test.py"
 # A runner that names its own case as ended in the engine's test log folder, as the engine's runner does.
 echo '[ -z "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/own"; }' >"$R/lib/fx-own.test.sh"
+# Two engine case files that run the same two cases under the same names, as the engine's runner and each case file
+# do. Their names end in no tracked test file's path, so the test step does not take this test for a meta-runner.
+mkdir -p "$R/conveyor/tests"
+for f in conveyor/tests/fx-a.test.sh conveyor/tests/fx-b.test.sh; do
+  printf '%s\n' 't_one() { :; }' 't_two() { :; }' 'echo "TESTRUN cases=2"' \
+    '[ -z "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$CONVEYOR_TEST_LOG/cases/ok/two"; }' > "$R/$f"
+done
 echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 echo 'echo untracked >> "$(dirname "$0")/../ran"' > "$R/lib/fx-untracked.test.sh"
@@ -30,9 +37,14 @@ mkdir "$T/log"
 (cd "$R" && CONVEYOR_TEST_LOG=$T/log bash -c "$full") > "$T/out" 2>&1; rc=$?
 # Bug: a whole-suite run's progress (release-prep, release, the Board's full test) counts only the cases the engine's
 # runner names, so the Board's test files and their failures were left out of its cases done and failed.
+# Bug: a case file that ran cases the runner had named already was named again as a file, a name the total has not.
 got=$(cd "$T/log/cases" && find ok failed -type f | sort | tr '\n' ' ')
-[ "$got" = "failed/lib:fx-fail.test.py ok/lib:fx-pass.test.sh ok/own " ] \
+[ "$got" = "failed/lib:fx-fail.test.py ok/lib:fx-pass.test.sh ok/one ok/own ok/two " ] \
   || no "the full suite does not name each file that named no case of its own as ended, by its result: $got"
+# Bug: the progress's total (fulltest.sh suiteprog(), the sum of the run's `TESTRUN cases=` lines) left out each file
+# the suite names itself, and counted the engine's cases twice, so the Foreman's status showed a false total.
+of=$(awk -F= '/^TESTRUN cases=/ { n += $2 } END { print n + 0 }' "$T/out")
+[ "$of" = 5 ] || no "the full suite's case total is $of, not the 5 names it marks as ended: $(grep TESTRUN "$T/out")"
 [ $rc = 1 ] || no "a failing test file did not fail the full suite (exit $rc): $(cat "$T/out")"
 [ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "pass py " ] || no "the full suite did not run each tracked test file alone: $(cat "$R/ran" 2>&1)"
 grep -qx 'ok lib/fx-pass.test.sh' "$T/out" && grep -qx 'FAIL lib/fx-fail.test.py' "$T/out" \

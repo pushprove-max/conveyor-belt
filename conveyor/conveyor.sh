@@ -78,7 +78,7 @@ cmd setup setup.sh 'setup [--owner <name>] [--product <path>]... [--test <comman
 cmd doctor doctor.sh 'doctor'
 cmd wording wording.sh 'wording adversarial | review'
 cmd auto auto.sh 'auto on | narrow | off | status | band | rules | decide'
-cmd foreman foreman.sh 'foreman [<claude argument>...]'
+cmd foreman foreman.sh 'foreman [status [<project>] | <claude argument>...]'
 cmd lane lane.sh 'lane research create | lane fast create | review | land | reset [--drop <sha>]'
 cmd flaky flaky.sh 'flaky add <case> <source> <note> | flaky off <case> <source> <note>'
 cmd full-test full-test.sh 'full-test [push | anyway <run id> [--by <who>]]'

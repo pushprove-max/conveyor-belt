@@ -23,15 +23,17 @@ relsnap() {
 }
 # Bug: nothing shows a release's suite while it runs (the owner asks the Foreman whether it runs and how far it is), or
 # after it ends, with the commit it tested. The stub suite names each case as it ends, as the engine's runner does,
-# says so ($STUB/at1, at2), and waits for the case to read the snapshot.
+# says so ($STUB/at1, at2), and waits for the case to read the snapshot. Bug (#11): the snapshot gave the cases done
+# but not how many the run selected, so the Foreman's status could not say how far the suite is: the stub's log says
+# it selected 3 (`TESTRUN cases=3`), and the snapshot's of says so.
 t_relrecord() {
   local O pid
-  relsetup 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$STUB/at1"
+  relsetup 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && echo "TESTRUN cases=3" > "$CONVEYOR_TEST_LOG/run.log" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$STUB/at1"
 until [ -e "$STUB/go" ]; do sleep 0.1; done; : > "$CONVEYOR_TEST_LOG/cases/ok/two"; : > "$STUB/at2"
 until [ -e "$STUB/go2" ]; do sleep 0.1; done'
   loop release-prep 1.1.0 > "$T/$CASE.prep" 2>&1 & pid=$!
   wait_until '[ -e "$STUB/at1" ]' || fail "the suite did not start: $(cat "$T/$CASE.prep")"
-  relsnap "the snapshot does not show the run on $O, 1 case done" --arg o "$O" '.state == "running" and .sha == $o and .version == "1.1.0" and .done == 1 and .ended == null'
+  relsnap "the snapshot does not show the run on $O, 1 case done" --arg o "$O" '.state == "running" and .sha == $o and .version == "1.1.0" and .done == 1 and .of == 3 and .ended == null'
   : > "$STUB/go"; wait_until '[ -e "$STUB/at2" ]' || fail "the suite did not go on"
   relsnap "the snapshot's cases done do not rise as the suite runs" '.state == "running" and .done == 2'
   : > "$STUB/go2"; wait "$pid" || fail "release-prep failed: $(cat "$T/$CASE.prep")"

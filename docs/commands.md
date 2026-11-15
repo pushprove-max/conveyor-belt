@@ -88,6 +88,7 @@ Lanes and the Foreman:
 - `lane fast create | review | land | reset [--drop <sha>]` and `lane research create` ([Lanes](lanes.md)).
 - `foreman [--new] [<claude argument>...]` starts the Foreman's Claude Code session in the main checkout. It resumes the
   last one unless you give `--new`.
+- `foreman status [<project>]` prints the state of the Foreman's projects as short text ([Foreman](foreman.md)).
 - `auto on | narrow | off | status | band | rules` is the Foreman's auto mode ([Foreman](foreman.md)): `on` and
   `narrow` start it, `off` ends it, `status` prints one line about it, `band` prints its state for the plugin's band,
   and `rules` prints what the Foreman is told while it is on. `conveyor.sh auto decide` is its decide step.
