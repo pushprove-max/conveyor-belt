@@ -15,22 +15,24 @@ ftl() { jq -c "$1" "$ST/fulltest.jsonl" 2>/dev/null; }                          
 ftlines() { cat "$ST/fulltest.jsonl" 2>/dev/null | wc -l | tr -d ' '; }
 ftended() { wait_until "[ \"\$(ftlines)\" = $1 ] && [ ! -e \"\$ST/fulltest.jsonl.running\" ]" 'cat "$ST/fulltest.jsonl.log" "$ST/fulltest.jsonl" 2>&1'; } # <lines>: the run or push asked for has ended
 
-# Bug this guards: with land only, the loop still pushed every landing, so the owner could not hold main back from the
-# remote; and the rule's default must keep today's push of each landing.
+# Bugs this guards: a new install (a record that names no push rule) pushed every landing with nobody asked; with
+# land only, the loop still pushed, so the owner could not hold main back from the remote; Push landed then did not
+# take the landed commit to the remote.
 t_landonly() {
-  setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"; echo "$GO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  # The record as setup seeds it names no push rule: a landing is pushed, as before the rule.
-  loop run 1 > "$STUB/run.out" 2>&1 || fail "the first run failed: $(cat "$STUB/run.out")"
-  [ -n "$(st 'select(.issue == 7 and .step == "landed")')" ] && [ "$(ftorigin)" = "$(ftmain)" ] && [ -n "$(st 'select(.issue == 7 and .step == "pushed")')" ] \
-    || fail "with the rule on by default, the landing was not pushed: $(cat "$STUB/run.out")"
-  # Land only: the card lands on main, nothing is pushed, and the run does not end on an owed push.
-  loop control rules push=off > /dev/null || fail "control rules push=off was refused"
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  # The record names no push rule, as a new install's: the default is land only.
+  jq -c 'del(.rules.push)' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   loop run 1 > "$STUB/run.out" 2>&1 || fail "a run with land only ended in failure (a push it may not make counted as owed): $(cat "$STUB/run.out")"
-  [ -n "$(st 'select(.issue == 8 and .step == "landed")')" ] || fail "the second card did not land: $(cat "$STUB/run.out")"
-  [ "$(ftorigin)" != "$(ftmain)" ] && [ -z "$(st 'select(.issue == 8 and (.step == "pushed" or .step == "push"))')" ] \
-    || fail "with land only, the landing was pushed: $(st 'select(.issue == 8)')"
+  [ -n "$(st 'select(.issue == 7 and .step == "landed")')" ] || fail "the card did not land: $(cat "$STUB/run.out")"
+  [ "$(ftorigin)" != "$(ftmain)" ] && [ -z "$(st 'select(.issue == 7 and (.step == "pushed" or .step == "push"))')" ] \
+    || fail "with the push rule off by default, the landing was pushed: $(st 'select(.issue == 7)')"
   # The Board's count and cards of what landed and is not pushed come from the snapshot.
-  [ "$(loop snapshot | jq -c '[.health.unpushed[] | .issue]')" = '[8]' ] || fail "the snapshot does not name the unpushed card: $(loop snapshot | jq -c .health.unpushed)"
+  [ "$(loop snapshot | jq -c '[.health.unpushed[] | .issue]')" = '[7]' ] || fail "the snapshot does not name the unpushed card: $(loop snapshot | jq -c .health.unpushed)"
+  # Push landed (the Board's `full-test push`): its green run pushes the landed commit to the remote. The fixture's
+  # pack is not setup's, so it is given the test.full setup writes into a new pack (t_setup checks that it does).
+  tune '.test.full = "true"'; loop full-test push > /dev/null || fail "push landed did not start"; ftended 1
+  [ "$(ftorigin)" = "$(ftmain)" ] && [ -n "$(st 'select(.issue == 7 and .step == "pushed")')" ] \
+    || fail "Push landed did not take the landed commit to the remote: origin $(ftorigin), main $(ftmain), $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log" 2>&1)"
 }
 
 # Bugs this guards: Push landed pushed a commit its run did not test (main moved on during the run); a second press

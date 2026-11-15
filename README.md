@@ -10,8 +10,9 @@ Conveyor turns your GitHub issues into reviewed, tested commits on your default 
 
 Conveyor is a Claude Code plugin that turns GitHub issues into merged commits, one card per issue. Conveyor builds
 each card in a fresh git worktree. A second model reviews it, a fix session fixes what the review finds, and the
-card's tests run. Then Conveyor lands one commit on your default branch and pushes it. A card that needs a person waits
-for you, and the other cards go on.
+card's tests run. Then Conveyor lands one commit on your default branch. It pushes when you press "Push landed" on the
+Board, or on its own once you turn push on in the Rules tab. A card that needs a person waits for you, and the other
+cards go on.
 
 <p align="center"><img src="docs/belt-3d.gif" alt="The Board's Belt 3D view: cards move through Build, Review, Fix, Test, Land and Push, one card goes back to Fix after a review finding, a blocked card waits in red, cards land, and a click on a card opens its steps, review rounds and cost." width="100%"></p>
 

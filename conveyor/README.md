@@ -768,7 +768,8 @@ test. The helpers themselves depend on each project's stack, so the survey finds
 
 ## The full test suite
 
-A project's full test suite is its pack's `test.full`; a pack that names none has none, and the Board shows both of
+A project's full test suite is its pack's `test.full`, which `setup` sets to the test command in a new pack; a pack
+that names none has none, and the Board shows both of
 its buttons disabled with that reason. It runs only when asked, from the Board's Control tab (`conveyor.sh full-test`),
 on main as it is at that moment, in a worktree of that commit alone and on one of the machine's test slots. Cards keep
 landing while it runs. One run at a time per project: a second press while one runs is refused and says so.

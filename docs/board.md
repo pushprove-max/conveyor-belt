@@ -95,11 +95,12 @@ issue that is not open, a cycle, or an issue whose card already runs.
 
 ## Push landed and Run full test suite
 
-The Rules tab's **Push when a card lands** rule is On by default. Off, cards still land on main and nothing is pushed.
+The Rules tab's **Push when a card lands** rule is Off by default. Conveyor lands each card on main and pushes when you
+press **Push landed**. Turn the rule On, and Conveyor pushes each card on its own after it lands.
 
 **Push landed** and **Run full test suite** are on the Control tab, which shows "N landed, not pushed". Push landed runs
 the project's full test suite, the `test.full` of the pack (the project's settings, `.conveyor/project.json`), on
-main. Green, it pushes the landed commits that the run tested.
+main. Setup sets `test.full` to your test command in a new pack. Green, it pushes the landed commits that the run tested.
 Red, it pushes nothing: it runs each failed case alone and judges it. A case that passes alone goes on the flaky-test
 record. A case that fails in the code becomes a P1 fix card. A case that fails for the machine or the network is
 declined, with its reason. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full test

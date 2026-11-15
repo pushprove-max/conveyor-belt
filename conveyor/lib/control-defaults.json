@@ -10,7 +10,7 @@
     "P2": true,
     "P3": true,
     "followups": true,
-    "push": true,
+    "push": false,
     "visible": false,
     "never": []
   },

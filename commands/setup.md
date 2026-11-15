@@ -29,4 +29,5 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
    that the Foreman is started by typing `/conveyor-belt:foreman` in a Claude Code session in this checkout (it stays
    the Foreman when continued or resumed; `/conveyor-belt:foreman off` ends it), that it is this project's Foreman
    only (another project gets its own by this same setup in its own checkout), and that the launcher
-   `conveyor.sh foreman` (which sets `CONVEYOR_FOREMAN=1`) remains an advanced option.
+   `conveyor.sh foreman` (which sets `CONVEYOR_FOREMAN=1`) remains an advanced option. End the reply with one line:
+   landed cards wait for "Push landed" on the Board until push is turned on in the Rules tab.

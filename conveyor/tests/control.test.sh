@@ -30,10 +30,11 @@ controlsetup() { # <issues json>
 t_control() {
   controlsetup "$(jq -cs . <(issue 5 2026-01-01 P2) <(issue 6 2026-02-01 P1 area:billing) <(issue 8 2026-03-01 P2) <(issue 9 2026-04-01 P0))"
   # The actions. No file: the record the engine reads (ctlread) is the defaults, the plugin project's own settings
-  # (#593; bug: a new project started on one card at once, no guard, no judge and no seat set). Each seat names a
+  # (#593; bug: a new project started on one card at once, no guard, no judge and no seat set, or pushed every landing
+  # with nobody asked: push is off). Each seat names a
   # model this pack does not list, so it runs on the seed: the first model the pack allows it, at medium.
   rm "$C"; [ "$(ctl | jq -c '[.mode, .cap, .guard, .held, .order, .model, .reviewer, .judge, .judgeOn, .judgeAlways, .rules, .depGuard, .start]')" \
-    = '["run",6,98,[],[],{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},true,[],{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":true,"visible":false,"never":[]},true,"queue"]' ] \
+    = '["run",6,98,[],[],{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},true,[],{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":false,"visible":false,"never":[]},true,"queue"]' ] \
     && [ ! -e "$C" ] || fail "no record does not read as the plugin project's settings: $(ctl)"
   [ "$(loop health | jq -c '[.models, .efforts, .builderCap]')" = '[{"claude":"m","codex":"x"},{"claude":"medium","codex":"medium"},6]' ] || fail "no record does not have the seed's seats and the defaults' cap: $(loop health)"
   [ "$(loop health | jq -c '.homes | [.["control.cap"].value, (.["control.model"] | [.value.model, .home])]')" = '[6,["m","seed"]]' ] \
@@ -57,9 +58,9 @@ t_control() {
   [ "$(ctl cap 9 | jq .cap)" = 9 ] && [ "$(ctl cap 100 | jq .cap)" = 100 ] && [ "$(ctl | jq .cap)" = 100 ] \
     && [ "$(ctl cap 1 | jq .cap)" = 1 ] && [ "$(ctl guard 50 | jq .guard)" = 50 ] && [ "$(ctl hold 8 6 | jq -c .held)" = '[6,8]' ] && [ "$(ctl release 6 | jq -c .held)" = '[8]' ] \
     && [ "$(ctl order 9 5 9 | jq -c .order)" = '[9,5]' ] && [ "$(ctl order 9 5 8 | jq -c .order)" = '[9,5,8]' ] && [ "$(ctl unpin 5 6 | jq -c .order)" = '[9,8]' ] \
-    && [ "$(ctl order 9 5 | jq -c .order)" = '[9,5]' ] &&[ "$(ctl rules P1=off area:billing=off followups=off | jq -c .rules)" = '{"P0":true,"P1":false,"P2":true,"P3":true,"followups":false,"push":true,"visible":false,"never":["area:billing"]}' ] \
+    && [ "$(ctl order 9 5 | jq -c .order)" = '[9,5]' ] &&[ "$(ctl rules P1=off area:billing=off followups=off | jq -c .rules)" = '{"P0":true,"P1":false,"P2":true,"P3":true,"followups":false,"push":false,"visible":false,"never":["area:billing"]}' ] \
     && [ "$(ctl rules area:billing=on followups=on | jq -c '[.rules.never, .rules.followups]')" = '[[],true]' ] \
-    && [ "$(ctl rules push=off | jq -c '[.rules.push, .rules.never]')" = '[false,[]]' ] && [ "$(ctl | jq .rules.push)" = false ] && [ "$(ctl rules push=on | jq .rules.push)" = true ] \
+    && [ "$(ctl rules push=on | jq -c '[.rules.push, .rules.never]')" = '[true,[]]' ] && [ "$(ctl | jq .rules.push)" = true ] && [ "$(ctl rules push=off | jq .rules.push)" = false ] \
     && [ "$(ctl rules visible=off | jq -c '[.rules.visible, .rules.never]')" = '[false,[]]' ] && [ "$(ctl | jq .rules.visible)" = false ] && [ "$(ctl rules visible=on | jq .rules.visible)" = true ] \
     && [ "$(ctl model claude m2 high | jq -c .model)" = '{"cli":"claude","model":"m2","effort":"high"}' ] && [ "$(ctl reviewer codex x2 low | jq -c .reviewer)" = '{"cli":"codex","model":"x2","effort":"low"}' ] \
     && [ "$(ctl reviewer codex x2 medium | jq -c .reviewer)" = '{"cli":"codex","model":"x2","effort":"medium"}' ] && [ "$(ctl model claude m | jq -c .model)" = '{"cli":"claude","model":"m","effort":null}' ] \
@@ -261,7 +262,7 @@ t_controlnewkeywrite() {
 }
 # A project's own record keeps every value it sets; only the keys it leaves out take the defaults (#593). Bugs: the
 # new defaults' cap 6 or judge on win over a record's cap 2 and judge off, or a key the record leaves out is not the
-# defaults' (no guard, no seat, the judge's seat lost).
+# defaults' (no guard, no seat, the judge's seat lost); the push-off default overrides a record that turned push on.
 t_controlkept() {
   # shellcheck disable=SC2034 # CTL_K and HERE are read by ctlread, run by the eval
   local CTL0 CTL_K=() CTL_V CONTROL=$T/$CASE/control.json HERE=$SRC
@@ -270,6 +271,8 @@ t_controlkept() {
   mkdir -p "$T/$CASE" && echo '{"cap":2,"judgeOn":false}' > "$CONTROL"
   ctlread || fail "a record that sets cap and judgeOn alone did not read"
   [ "$(jq -c '[.cap, .judgeOn, .guard, .model, .reviewer, .judge, .rules.visible, .rules.push, .depGuard, .start]' <<<"$CTL_V")" \
-    = '[2,false,98,{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},false,true,true,"queue"]' ] \
+    = '[2,false,98,{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},false,false,true,"queue"]' ] \
     || fail "the record's cap 2 and judge off were not kept, or a key it leaves out is not the new defaults': $CTL_V"
+  echo '{"rules":{"push":true}}' > "$CONTROL"
+  ctlread && [ "$(jq .rules.push <<<"$CTL_V")" = true ] || fail "a record with push on did not keep it over the defaults: $CTL_V"
 }

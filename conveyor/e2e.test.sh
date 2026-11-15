@@ -31,7 +31,7 @@ scenario() { # <dir> <engine dir>
   # The host file names the state folder, so none is made inside the engine the main checkout links to.
   export XDG_CONFIG_HOME=$D/config; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$STUB" "$ST"
   jq -n --arg s "$ST" '{stateDir: $s}' > "$XDG_CONFIG_HOME/conveyor/host.json"
-  echo '{"mode":"run","cap":1,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"start":"queue","startHeld":[],"startSeen":[]}' > "$ST/control.json"
+  echo '{"mode":"run","cap":1,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"start":"queue","startHeld":[],"startSeen":[]}' > "$ST/control.json"
   # The sample repo: default branch master, its remote a bare repo beside it. Its conveyor/ links to the engine, as a
   # project's checkout holds the plugin, so the review gate finds the card records through it.
   git init -q -b master "$R" && echo one > "$R/a.txt" && ln -s "$E" "$R/conveyor" && printf 'conveyor\n.conveyor/\n' > "$R/.gitignore" \

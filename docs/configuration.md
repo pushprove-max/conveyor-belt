@@ -19,7 +19,7 @@ Some pack settings that this site names:
 - `pipelineFiles`: the files that change how cards are built, reviewed, fixed, tested, landed or pushed. A follow-up
   that changes one is filed held.
 - `auto.reserved`: what `/conveyor-belt:auto` never decides ([Foreman](foreman.md)).
-- `test.full`: the full test suite. `test.main`: the whole test on main. `test.survey`: the monthly test-speed survey.
+- `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.survey`: the monthly test-speed survey.
   `test.firstSurvey`: the answer to setup's survey question.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
 - `prices`: your model prices, by model name, each `{"input": 3, "output": 15, "cacheRead": 0.3}` in dollars per
@@ -47,6 +47,8 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - where new issues start.
 
 A new project starts on Conveyor's default values (`conveyor/README.md`, Control). A record keeps each value it sets.
+With the default push rule, Conveyor lands each card and pushes when you press "Push landed" on the Board, or on its
+own once you turn push on in the Rules tab.
 Only the keys it leaves out take those defaults. `default` sets a value back: for example `conveyor.sh control cap off`
 or `conveyor.sh control model default`. For a seat, the default is the pack's first model for it (`models.allowed`).
 

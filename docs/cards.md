@@ -69,13 +69,12 @@ Same-file cards).
 
 ## Push
 
-The loop pushes main after each landing, through the project's own pre-push hook. A push that fails is one of two
-kinds:
+By default, Conveyor lands each card and pushes when you press
+[Push landed](board.md#push-landed-and-run-full-test-suite). Turn on the Rules tab's **Push when a card lands** rule,
+and the loop pushes main on its own after each landing. Each push goes through the project's own pre-push hook. A push
+that fails is one of two kinds:
 
 - `check`: the pre-push hook failed (typecheck, tests, lint). A retry fails the same way, so the loop wakes the
   Foreman and shows the hook's last lines on Needs you. It does not run the checks again until main's commit changes.
 - `transport`: git, the network or the remote failed. The loop tries again every `tunables.pushRetry` seconds. Needs
   you shows it once a retry fails too.
-
-The Rules tab's **Push when a card lands** rule turns the push off. Cards then land and wait for
-[Push landed](board.md#push-landed-and-run-full-test-suite).

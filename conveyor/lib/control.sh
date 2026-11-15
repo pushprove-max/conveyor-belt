@@ -31,8 +31,8 @@ CTL_K=()
 # judge reads the reviews (judgeOn) and always accepts no kind. A cap, seat or effort the record sets null is the
 # seed's: six cards at once (CAP0), and for a seat the first model the pack's models.allowed lists for it (seed()) at
 # medium effort (an OpenCode builder at none: it is given no effort, seatnow). The dependency guard is on: no issue is
-# picked while an issue it depends on is open; nothing is forced past it. A card that lands is pushed (rules.push;
-# off: land only, owed()). A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
+# picked while an issue it depends on is open; nothing is forced past it. A card that lands is not pushed (rules.push
+# off: land only, owed()): it waits for the Board's Push landed, or for the owner to turn the rule on. A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
 # `Visible change approved:` line, yesrule()). No Tests seat is set: no test action starts (testaction()). Empty when
 # the file cannot be read, or there is no jq (doctor says so): then no record is read.
 CTL0=$(jq -c . "$HERE/lib/control-defaults.json" 2>/dev/null) || CTL0=

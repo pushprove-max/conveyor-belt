@@ -2,7 +2,9 @@
 # /conveyor-belt:setup (plan sections 7 and 9), run by the plugin copy in the project's checkout (MAIN), safe to run
 # again: it changes only what is not there yet.
 # The pack, when there is none: the owner, the product paths and the test command have no safe default and are passed
-# in (none passed: it says which it needs and writes nothing); test.slowIssues is false (it files nothing: the test
+# in (none passed: it says which it needs and writes nothing); test.full, the full test suite the Board's Push landed
+# runs, is the test command too (given no list, it runs whole), so a new install can push what it lands;
+# test.slowIssues is false (it files nothing: the test
 # rules, test.rules, replace it, and with no test.rules their switch is off and no rule is on); every other field is PACK0's, the default branch
 # origin's (never the checked-out branch, which may be a feature branch: when origin's cannot be read, nothing is
 # written). A pack already there is never rewritten: one that fails the check stops setup.
@@ -22,13 +24,16 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # one survey issue (firstsurvey(), lib/survey.sh) and no files none; then the answer is saved, so a filing that failed
 # leaves it unsaved and the question asked again.
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
+# Its last line says that landed cards wait for the Board's Push landed: the control record's push rule is off by
+# default (lib/control-defaults.json). A pack with no test.full (one setup did not write) has no Push landed: the line
+# says to add one.
 # Matt Pocock's skills, the plugin /conveyor-belt:plan reads (MPS, from the official marketplace), are a requirement:
 # setup installs them for the user when Claude Code's record of installed plugins (in CLAUDE_CONFIG_DIR, default
 # ~/.claude) has none, and doctor names them missing until it has.
 MPS=mattpocock-skills@claude-plugins-official
 mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length > 0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" >/dev/null 2>&1; }
 setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]
-  local owner='' test='' prods=() need=() b p f have l n fm='' pin='' sv='' first
+  local owner='' test='' prods=() need=() b p f have l n fm='' pin='' sv='' first full
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
     [ "$1" != --foreman ] || { fm=1; shift; continue; }
@@ -50,7 +55,7 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
       || b=$(timeout 60 git ls-remote --symref origin HEAD 2>/dev/null | awk '$1 == "ref:" && $3 == "HEAD" {sub("^refs/heads/", "", $2); print $2}')
     [ -n "$b" ] || { echo "conveyor: origin's default branch could not be read; add the remote origin (git remote add origin <url>), then run setup again" >&2; return 1; }
     mkdir -p "$(dirname "$PACK")" && jq -n --arg o "$owner" --arg t "$test" --arg b "$b" "$PACK0"' + {owner: {name: $o}, productPaths: $ARGS.positional,
-        test: {command: $t, slowIssues: false}, defaultBranch: $b}' --args "${prods[@]}" > "$PACK.new" \
+        test: {command: $t, full: $t, slowIssues: false}, defaultBranch: $b}' --args "${prods[@]}" > "$PACK.new" \
       && "$HERE/lib/pack.sh" check "$PACK.new" && mv "$PACK.new" "$PACK" || { rm -f "$PACK.new"; return 1; }
     echo "conveyor: wrote the pack $PACK"
   fi
@@ -85,7 +90,9 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
   fi
   timinghint || return 1
   hostadd || return 1
-  [ -z "$fm" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" setup
+  [ -z "$fm" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" setup || return 1
+  packget test.full full || return 1
+  echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
 }
 # A test command that runs a shell script of the project (a word of it ending in .sh that is a file, from the
 # checkout's root) with no `TESTRUN sec` and no testtime.sh in it: its cards record no test times. Setup says how to

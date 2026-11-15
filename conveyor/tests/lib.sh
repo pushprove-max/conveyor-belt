@@ -58,11 +58,12 @@ tuned() { # <jq filter> <command...>
   local rc; cp "$R/.conveyor/project.json" "$STUB/pack.was"; tune "$1"; shift; "$@"; rc=$?; mv "$STUB/pack.was" "$R/.conveyor/project.json"; return $rc
 }
 # The control record, the only home of the cap and the two seats' models: as setup seeds it (seed), or with one
-# seat's model changed and its effort kept (seatset). The judge off and visible changes waiting for the owner's yes
-# are set here, not left to control-defaults.json (judge on, visible off): a case turns them as it needs.
+# seat's model changed and its effort kept (seatset). The judge off, visible changes waiting for the owner's yes and
+# a push after each landing are set here, not left to control-defaults.json (judge on, visible off, push off): a case
+# turns them as it needs.
 seed() {
   mkdir -p "$ST"
-  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"visible":true,"never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
+  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
     > "$ST/control.json"
 }
 # The loop's turns, for a check that something did not happen: a case waits for turns the loop takes, not for seconds

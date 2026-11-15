@@ -91,11 +91,16 @@ t_setup() {
   out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no 2>&1) && fail "setup went on with origin's default branch unread: $out"
   grep -q "origin's default branch could not be read" <<<"$out" && [ ! -e "$S/.conveyor" ] && [ ! -e "$V" ] || fail "setup with origin unread: $out"
   git -C "$S" remote set-url origin "$T/$CASE/origin.git"
-  (cd "$S" && bash "$X" setup --owner Dana --product src/ --product 'web app/' --test 'npm test' --survey no >/dev/null) || fail "setup from nothing exited non-zero"
+  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --product 'web app/' --test 'npm test' --survey no 2>&1) || fail "setup from nothing exited non-zero: $out"
+  # Bug: a new install lands cards and pushes none (the push rule is off by default), and setup did not say so, so
+  # the owner waited for pushes that never came. Its last line names Push landed and the Rules tab.
+  [ "$(tail -n 1 <<<"$out")" = 'conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab' ] \
+    || fail "setup's last line does not say that landed cards wait for Push landed: $out"
   bash "$SRC/lib/pack.sh" check "$S/.conveyor/project.json" || fail "setup wrote a pack that fails the check"
   # Bug: a new project follows the plugin's main, where changes are tested before they are released. It follows the
-  # plugin's releases, and its newest release (v1.0.0, $B) is taken and installed.
-  jq -e '.owner.name == "Dana" and .productPaths == ["src/", "web app/"] and .test.command == "npm test" and .defaultBranch == "trunk"
+  # plugin's releases, and its newest release (v1.0.0, $B) is taken and installed. Bug: a new pack named no test.full,
+  # so the Push landed its last line sends the owner to was greyed and `full-test push` refused: the test command is it.
+  jq -e '.owner.name == "Dana" and .productPaths == ["src/", "web app/"] and .test.command == "npm test" and .test.full == "npm test" and .defaultBranch == "trunk"
       and .plugin == {follow: "releases"} and .privacy.mode == "public" and .remote == "origin"' "$S/.conveyor/project.json" >/dev/null \
     || fail "the pack is not the answers, the defaults and the plugin's releases followed: $(cat "$S/.conveyor/project.json")"
   # No to the first test-speed survey: none filed, and the answer saved, so the rerun below is not asked again.
@@ -119,9 +124,13 @@ setupdone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --o
 t_setuppin() {
   local X out; setupdone
   # With --pin, a pack naming no plugin pins the plugin copy's commit instead.
-  jq 'del(.plugin)' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
+  # Bug: on a pack already there with no test.full, setup's last line sent the owner to a Push landed that is greyed
+  # (fulltest() refuses with no test.full): it says the pack needs one.
+  jq 'del(.plugin, .test.full)' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
   out=$(cd "$S" && bash "$X" setup --pin 2>&1) || fail "setup --pin exited non-zero: $out"
   [ "$(jq -c .plugin "$S/.conveyor/project.json")" = "{\"commit\":\"$B\"}" ] && grep -q "pinned Conveyor commit $B" <<<"$out" || fail "setup --pin did not pin the plugin copy's commit: $out"
+  [ "$(tail -n 1 <<<"$out")" = "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab; Push landed needs the pack's test.full, the full test suite: add it" ] \
+    || fail "setup on a pack with no test.full did not say Push landed needs one: $out"
   # A pin already there is kept, and its commit installed.
   jq --arg a "$A" '.plugin = {commit: $a}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
   (cd "$S" && bash "$X" setup >/dev/null) || fail "setup with a pin already there exited non-zero"
