@@ -222,9 +222,11 @@ EOF
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
   grep -q "card $c7 tests a batch of 3: $c9 $c7 $c8" <<<"$out" || fail "the ordered #9 and #7 did not go before #8 in the batch, though #8 was ready first: $out"
   [ "$(st 'select(.step == "landed" and .issue != 7) | .batch | join(" ")' | sort -u)" = "$c9 $c8" ] || fail "#9 and #8 did not land as one batch, a run after #7's red one: $out"
-  [ "$(st 'select(.issue == 7 and .step == "test" and .result == "fail") | .failures | [.of, .files] | tojson')" = '[1,[{"file":"clash.test","cases":[{"name":"clash","line":"FAIL [clash]: seven and nine together"}]}]]' ] \
+  # #7 has two red test lines: its batch's run, then (main having moved: #9 and #8 landed) the same failure run again
+  # on main as it is now before its fix round (#582). Each names clash.test and its case, and its own run's times.
+  [ "$(st 'select(.issue == 7 and .step == "test" and .result == "fail") | .failures | [.of, .files] | tojson' | sort -u)" = '[1,[{"file":"clash.test","cases":[{"name":"clash","line":"FAIL [clash]: seven and nine together"}]}]]' ] \
     || fail "#7's test line does not name the failing file and case of the run that judged it: $(st 'select(.issue == 7 and .step == "test" and .result == "fail") | .failures | tojson')"
-  st 'select(.issue == 7 and .step == "test" and .result == "fail")' | jq -se 'length == 1 and (.[0].run | type) == "number" and .[0].run < 3' >/dev/null \
+  st 'select(.issue == 7 and .step == "test" and .result == "fail")' | jq -se 'length == 2 and all(.run | type == "number" and . < 3)' >/dev/null \
     || fail "#7's test line holds the times of a later run, not its own: $(st 'select(.issue == 7 and .step == "test") | [.result, .run]' | jq -sc .)"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "9 8 7 " ] || fail "#7 did not land after its fix: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
   [ "$(git -C "$R" log --reverse --format=%s HEAD~3..HEAD | tr '\n' ,)" = "feat(product): title 9 (#9),feat(product): title 8 (#8),feat(product): title 7 (#7)," ] \
@@ -398,6 +400,10 @@ EOF
   done
   [ "$(batchruns)" = 4 ] || fail "the batch was not run again on main as it moved and split (its run, then the two again, then each): $(batchruns) batch runs: $out"
   [ -z "$(st 'select(.step == "blocked") | .step')" ] || fail "a card was blocked, not sent to its fix: $(st 'select(.step == "blocked")')"
+  # #8, run again alone on main as it is now, fails the check there: a red run that goes to its fix round, where it was
+  # blocked as a check failing on its own pass (card()).
+  st 'select(.issue == 8 and .step == "test" and .result == "fail") | .tail' | grep -q "a product check failed on the change of $c8 on main as it is now" \
+    || fail "#8's check failing on main as it is now was not a red test line sent to its fix: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   st 'select(.issue == 8 and .step == "test" and .result == "fail") | .tail' | grep -q 'eight beside flag-x' || fail "#8's test line does not name the failing check: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   grep -q 'eight beside flag-x' "$STUB/fixbrief" || fail "#8's fix was not given the failing check"
   [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight-fixed " ] || fail "main does not hold #7's change and #8's fixed one: $(cat "$R/a.txt")"

@@ -391,8 +391,14 @@ card() { # <card> <issue> [<branch> <tip>]
             continue 2
           fi
         fi
-        # The product checks, on every pass that would land: a failure blocks the card, never a finding to fix.
-        out=$(checks "$wt") || { block "$c" "$n" "$wt" "a product check failed; nothing landed."$'\n'"$out"; return; }
+        # The product checks, on every pass that would land: a failure blocks the card, never a finding to fix. Not on
+        # the pass that runs again on main as it is now what failed in a red run (tmain): there a failing check is that
+        # red run failing again, as a check that fails on a batch's change is a red run (batch()), and goes to the one
+        # fix round; on the passes after the fix it blocks again.
+        if ! out=$(checks "$wt"); then
+          [ -n "$tmain" ] || { block "$c" "$n" "$wt" "a product check failed; nothing landed."$'\n'"$out"; return; }
+          norun "$wt" "a product check failed on the change of $c on main as it is now:"$'\n'"$out"; sec=0; trc=1; continue
+        fi
         # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
         began "$c" "$n" test
         [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)

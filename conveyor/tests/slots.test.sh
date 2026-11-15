@@ -276,13 +276,15 @@ t_slotcores() {
 # A test command may leave a process running that closed every descriptor it inherited (a program that starts another
 # so: Python's subprocess), the slot's among them: the slot then came back when the command ended, and the next card's
 # tests ran beside that process, on its core. With a pool of 1, a card's test command leaves such a process: the card
-# lands without waiting for it, the slot stays taken while it lives, and is free once it has ended.
+# lands without waiting for it, the slot stays taken while it lives, and is free once it has ended. That process
+# lives until the case kills it, and push is off: a push takes a slot (push.sh), so the loop's push waited for the
+# process, and the case found it ended (one of 60 s) or never ended (one that lives on).
 t_slotleft() {
   local i
-  slotpool 1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  slotpool 1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; loop control rules push=off > /dev/null
   cat > "$STUB/test-cmd" <<'EOF2'
 echo x >> "$STUB/tests"
-( for ((f = 3; f < 256; f++)); do eval "exec $f>&-"; done; echo "$BASHPID" > "$STUB/left"; exec sleep 60 ) > /dev/null 2>&1 & # sleep: a stand-in for a process the test command leaves
+( for ((f = 3; f < 256; f++)); do eval "exec $f>&-"; done; echo "$BASHPID" > "$STUB/left"; exec sleep 3600 ) > /dev/null 2>&1 & # sleep: a stand-in for a process the test command leaves, alive until the case kills it
 until [ -s "$STUB/left" ]; do sleep 0.05; done
 EOF2
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
