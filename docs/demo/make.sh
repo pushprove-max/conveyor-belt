@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # make.sh [--terms <file>] -- rebuilds the README's product demo, docs/demo.mp4 and docs/demo.gif, and its Belt 3D
 # GIF, docs/belt-3d.gif, from this folder alone: the terminal beat recorded in a neutral Docker container
-# (record-terminal.sh), the Board beats captured from the real Board page served from the mock timeline
+# (record-terminal.sh, its lines kept as captures/beat2.txt), the Board beats captured from the real Board page served from the mock timeline
 # (capture-board.js, timeline.js), beat 10 (/units) from captures/beat9.mp4 and beat 11 (the Foreman) from
 # captures/foreman.mp4, cut together by the HyperFrames composition (index.html). The two clips are recorded by
 # record-cli.sh from a signed-in Claude Code session in a neutral container and committed; make.sh fails, naming each
@@ -82,6 +82,7 @@ fi
 cp "$B/demo.mp4" "$ROOT/docs/demo.mp4"
 cp "$B/demo.gif" "$ROOT/docs/demo.gif"
 cp "$B/belt-3d.gif" "$ROOT/docs/belt-3d.gif"
+cp "$B/captures/beat2.txt" "$HERE/captures/beat2.txt"
 echo "make.sh: wrote docs/demo.mp4 ($(wc -c < "$ROOT/docs/demo.mp4") bytes) and docs/demo.gif ($size bytes, $frames frames)"
 echo "make.sh: wrote docs/belt-3d.gif ($(wc -c < "$ROOT/docs/belt-3d.gif") bytes)"
 echo "make.sh: privacy: $checked frames read by OCR (every 10th of $frames) and checked with the privacy check and the terms list: no hit"

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# record-terminal.sh <out dir> -- the demo's beat 2: Conveyor's setup and `conveyor doctor` run in a clean Docker
-# container whose user, host and home are neutral (dev@acme, /home/dev), on an invented project (acme-api) with a local
-# origin. gh and claude are stand-ins, as in README.test.sh: gh answers as a signed-in account with the release and
-# labels, claude records the plugin install. Writes <out dir>/beat2.txt (the session as typed and printed) and
-# <out dir>/beat2.js (the same text for the composition: window.BEAT2 = "...").
+# record-terminal.sh <out dir> -- the demo's beat 2: the install the README gives, as typed in Claude Code (the two
+# /plugin lines, then /conveyor-belt:setup with its questions answered), run in a clean Docker container whose user,
+# host and home are neutral (dev@acme, /home/dev), on an invented project (acme-api) with a local origin. Behind each
+# line runs what it runs: claude's plugin commands, then conveyor.sh setup with the answers and conveyor.sh doctor, the
+# output shown as printed. gh and claude are stand-ins, as in README.test.sh: gh answers as a signed-in account with
+# the release and labels, claude records the plugin install. Writes <out dir>/beat2.txt (the session as typed and
+# printed) and <out dir>/beat2.js (the same text for the composition: window.BEAT2 = "...").
 # Exit 1 when Docker does not run, the container fails, or doctor names anything missing.
 set -euo pipefail
 OUT=${1:?usage: record-terminal.sh <out dir>}
@@ -49,20 +51,31 @@ esac
 GH
 cat > ~/bin/claude <<'CL'
 #!/usr/bin/env bash
+[ "$1 $2 $3" = "plugin marketplace add" ] && { echo "Successfully added marketplace: ${4#*/}"; exit 0; }
 [ "$1 $2" = "plugin install" ] || exit 0
 f=~/.claude/plugins/installed_plugins.json; mkdir -p ~/.claude/plugins; [ -s "$f" ] || echo '{"version": 2, "plugins": {}}' > "$f"
 jq --arg p "$3" '.plugins[$p] = [{scope: "user"}]' "$f" > "$f.new" && mv "$f.new" "$f"
+echo "Successfully installed plugin: $3 (scope: user)"
 CL
 # conveyor.sh on PATH by its own name, so the screen's command lines are short.
 printf '#!/bin/sh\n' > ~/bin/codex; chmod +x ~/bin/*; export PATH=~/bin:~/conveyor-belt/conveyor:$PATH
-claude plugin install conveyor-belt@conveyor-belt && claude plugin install mattpocock-skills@claude-plugins-official
+claude plugin install mattpocock-skills@claude-plugins-official >/dev/null
 printf '%s\n' 'Example Client Ltd' > ~/.config/conveyor/terms
 printf '{"terms": "~/.config/conveyor/terms", "host": "acme", "ssh": "localhost", "main": "%s/conveyor-belt", "records": [{"repo": "acme-api", "main": "%s/acme-api"}]}\n' "$HOME" "$HOME" > ~/.config/conveyor/host.json
 cd ~/acme-api
-shown() { printf 'dev@acme:~/acme-api$ %s\n' "$*"; sleep 0.2; eval "$*" 2>&1; }
+# typed <line>: a line typed at Claude Code's prompt. asked <question> <answer>: a question setup asks, answered.
+typed() { printf '> %s\n' "$1"; sleep 0.2; }
+asked() { printf '? %s  %s\n' "$1" "$2"; }
 {
-  shown 'conveyor.sh setup --owner "Dev" --product src/ --test "npm test" --survey no'
-  shown 'conveyor.sh doctor'
+  typed '/plugin marketplace add pushprove-max/conveyor-belt'; claude plugin marketplace add pushprove-max/conveyor-belt
+  typed '/plugin install conveyor-belt@conveyor-belt'; claude plugin install conveyor-belt@conveyor-belt
+  typed '/conveyor-belt:setup'
+  asked 'Who approves a change that users will see?' 'Dev'
+  asked 'Where is the product code?' 'src/'
+  asked 'The command that runs the tests?' 'npm test'
+  asked 'Run a first test-speed survey now?' 'no'
+  conveyor.sh setup --owner "Dev" --product src/ --test "npm test" --survey no
+  conveyor.sh doctor
 } > ~/session.txt 2>&1
 cat ~/session.txt
 EOS

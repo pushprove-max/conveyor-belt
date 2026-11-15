@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The README's committed demo, docs/demo.gif: its /units and Foreman beats are the Claude Code clips record-cli.sh
-# recorded, not a card in their place. Frames from the middle of each beat (index.html: /units from 62 s to 71 s, the
-# Foreman from 71 s to 85 s) are read by tesseract OCR.
+# recorded, not a card in their place, and its end card shows the README's two install lines. Frames from the middle
+# of each beat (index.html: /units from 62 s to 71 s, the Foreman from 71 s to 85 s, the end card from 85 s) are read
+# by tesseract OCR.
 set -u
 command -v ffmpeg >/dev/null && command -v tesseract >/dev/null || { echo "demo-gif.test.sh: ffmpeg and tesseract are needed"; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd -P)
@@ -24,6 +25,12 @@ beat() {
 }
 beat units 64 67 70
 beat foreman 76 80 84
+beat end 87 88 89
+
+# Bug caught: the end card shows only /plugin install, which fails until the marketplace is added.
+for cmd in '/plugin marketplace add pushprove-max/conveyor-belt' '/plugin install conveyor-belt@conveyor-belt'; do
+  grep -qF "$cmd" "$T/end.txt" || fail "the end card shows no \"$cmd\": $(head -c 400 "$T/end.txt")"
+done
 
 # Bug caught (#652): the demo built with a placeholder card ("This clip is recorded ...") in place of the Claude Code
 # clips, or the clips missing from the beats: /units shows the CONVEYOR pane, the Foreman asks to retry #44.

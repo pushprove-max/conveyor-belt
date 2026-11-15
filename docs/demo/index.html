@@ -42,17 +42,19 @@
   .tag { font-size: 34px; color: #4ade80; font-weight: 650; animation: rise 0.6s ease-out 1.9s both; }
   @keyframes rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 
-  /* Beat 2: the terminal, with the session record-terminal.sh recorded, line by line. */
+  /* Beat 2: the terminal, with the session record-terminal.sh recorded, line by line. A line takes no room until it
+     is shown, and the body keeps its last line in sight, so a session longer than the window scrolls as a terminal does. */
   .term { position: absolute; left: 20px; top: 12px; width: 1240px; height: 632px; border-radius: 12px; background: #11141b;
-    border: 1px solid #2a2f3d; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
-  .term-bar { height: 34px; background: #1b1f2a; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-size: 15px; color: #9aa1b2; }
+    border: 1px solid #2a2f3d; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; }
+  .term-bar { flex: none; height: 34px; background: #1b1f2a; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-size: 15px; color: #9aa1b2; }
   .term-bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a4050; display: inline-block; }
   .term-bar span { margin-left: 12px; }
-  .term pre { padding: 12px 18px; font: 15.5px/20px "DejaVu Sans Mono", Menlo, Consolas, monospace; white-space: pre; color: #c9cfdc; }
+  .term-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  .term pre { flex: 1 0 auto; padding: 12px 18px; font: 15.5px/20px "DejaVu Sans Mono", Menlo, Consolas, monospace; white-space: pre; color: #c9cfdc; }
   .term pre div { animation: line-in 0.01s linear both; }
   .term .prompt { color: #8b8cf8; font-weight: 700; }
   .term .ok { color: #4ade80; }
-  @keyframes line-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes line-in { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 20px; } }
 
   /* Beat 3: three issues filed on GitHub drop onto the belt. */
   .gh { position: absolute; left: 190px; top: 50px; width: 900px; border: 1px solid #30363d; border-radius: 10px; background: #0d1117; overflow: hidden; }
@@ -101,10 +103,10 @@
     <div class="tag">Issues in. Merged commits out.</div>
   </section>
 
-  <!-- 2. Terminal: setup's checks, then conveyor doctor -->
+  <!-- 2. Claude Code: the plugin's install, /conveyor-belt:setup answered, then conveyor doctor -->
   <section class="clip" data-start="3.5" data-duration="6">
-    <div class="term"><div class="term-bar"><i></i><i></i><i></i><span>dev@acme: ~/acme-api</span></div><pre id="term"></pre></div>
-    <div class="cap"><b>2</b>/conveyor-belt:setup, then conveyor doctor: all green</div>
+    <div class="term"><div class="term-bar"><i></i><i></i><i></i><span>claude: ~/acme-api</span></div><div class="term-body"><pre id="term"></pre></div></div>
+    <div class="cap"><b>2</b>/plugin install, /conveyor-belt:setup, conveyor doctor: all green</div>
   </section>
 
   <!-- 3. GitHub: three issues are filed; they drop onto the belt -->
@@ -185,28 +187,29 @@
       <path class="arc" d="M42.5 20.5A16 16 0 1 0 42.5 43.5" fill="none" stroke="url(#cv-end)" stroke-width="7.5" stroke-linecap="round"/>
       <rect class="parcel" x="35" y="26.5" width="16" height="11" rx="3" fill="#4ade80"/>
     </svg>
+    <div class="cmd">/plugin marketplace add pushprove-max/conveyor-belt</div>
     <div class="cmd">/plugin install conveyor-belt@conveyor-belt</div>
     <div class="link">github.com/pushprove-max/conveyor-belt</div>
   </section>
 </div>
 <script src="captures/beat2.js"></script>
 <script>
-  // Beat 2's lines: the prompt lines typed with a pause before them, the rest printed one after another; an ok line green.
+  // Beat 2's lines: the lines typed at the prompt ("> ") with a pause before them, the rest (setup's questions, "? ",
+  // answered) printed one after another; an ok line green.
   (function () {
     const pre = document.getElementById('term');
     const lines = String(window.BEAT2 || '').replace(/\n$/, '').split('\n');
     let at = 0.4;
     lines.forEach((text) => {
       const div = document.createElement('div');
-      const prompt = /^dev@acme:/.test(text);
-      at += prompt ? 0.6 : 0.11;
+      const prompt = /^[>?] /.test(text);
+      at += text.startsWith('> ') ? 0.45 : 0.1;
       if (prompt) {
-        const i = text.indexOf('$ ') + 2;
-        const p = document.createElement('span'); p.className = 'prompt'; p.textContent = text.slice(0, i);
-        div.append(p, text.slice(i));
+        const p = document.createElement('span'); p.className = 'prompt'; p.textContent = text.slice(0, 2);
+        div.append(p, text.slice(2));
       } else {
         div.textContent = text;
-        if (/^ok:|^conveyor: (wrote|created|took|saved|the project)/.test(text)) div.className = 'ok';
+        if (/^ok:|^Successfully|^conveyor: (wrote|created|took|saved|the project)/.test(text)) div.className = 'ok';
       }
       div.style.animationDelay = `${at.toFixed(2)}s`;
       pre.append(div);

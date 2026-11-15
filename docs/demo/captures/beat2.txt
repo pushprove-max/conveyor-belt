@@ -1,0 +1,36 @@
+> /plugin marketplace add pushprove-max/conveyor-belt
+Successfully added marketplace: conveyor-belt
+> /plugin install conveyor-belt@conveyor-belt
+Successfully installed plugin: conveyor-belt@conveyor-belt (scope: user)
+> /conveyor-belt:setup
+? Who approves a change that users will see?  Dev
+? Where is the product code?  src/
+? The command that runs the tests?  npm test
+? Run a first test-speed survey now?  no
+conveyor: wrote the pack ~/acme-api/.conveyor/project.json
+conveyor: the project follows the plugin's releases
+conveyor: took Conveyor commit 774fff20f2d43f18942ee4d325a037d461d2feea of the plugin's release v1.0.0: the loop restarts on it at its next pick
+conveyor: created the label P0
+conveyor: created the label P1
+conveyor: created the label P2
+conveyor: created the label awaiting-deploy
+conveyor: created the label bug
+conveyor: created the label conveyor-followup
+conveyor: saved the answer to the first test-speed survey (no) as the pack's test.firstSurvey
+ok: bash 5.2.21(1)-release
+ok: jq
+ok: git
+ok: gh, signed in
+ok: the plugin mattpocock-skills@claude-plugins-official, for /conveyor-belt:plan
+ok: the host file ~/.config/conveyor/host.json
+ok: pyotp, in the Board's virtualenv ~/.local/share/conveyor/board-venv
+ok: segno, in the Board's virtualenv ~/.local/share/conveyor/board-venv
+ok: cryptography, in the Board's virtualenv ~/.local/share/conveyor/board-venv
+ok: the pack ~/acme-api/.conveyor/project.json
+ok: claude, for the default models the pack names for it
+ok: codex, for the default models the pack names for it
+builder: claude-opus-5-5 (claude) direct
+reviewer: gpt-6.1-sol (codex) direct
+ok: the project follows the plugin's releases: it runs Conveyor commit 774fff20f2d43f18942ee4d325a037d461d2feea, release v1.0.0, the newest release
+ok: the pinned commit 774fff20f2d43f18942ee4d325a037d461d2feea, installed
+ok: the terms file ~/.config/conveyor/terms

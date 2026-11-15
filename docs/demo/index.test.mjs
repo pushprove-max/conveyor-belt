@@ -42,6 +42,29 @@ test('beats 10 and 11 are the Claude Code clips, each its section long', () => {
   }
 });
 
+// Bug caught: the end card shows only `/plugin install`, which fails until the marketplace is added, or its install
+// lines drift from the README's Install section, so a viewer types lines that do not install the plugin.
+test("the end card's install lines are the README's Install section's, in its order", () => {
+  const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+  const install = readme.match(/^## Install\n([\s\S]*?)^## /m)[1];
+  const readmeLines = [...install.matchAll(/`(\/plugin (?:marketplace add|install) [^`]+)`/g)].map((m) => m[1]);
+  assert.equal(readmeLines.length, 2, 'the README gives the marketplace add and the plugin install');
+  const { document } = new JSDOM(beats.at(-1).body).window;
+  assert.deepEqual([...document.querySelectorAll('.cmd')].map((e) => e.textContent), readmeLines);
+});
+
+// Bug caught: beat 2 shows `conveyor.sh setup ...` typed in a shell, a line no user types, with the plugin installed off
+// screen, in place of the install the README gives in Claude Code.
+test("beat 2's recorded lines are the README's install: the two /plugin lines, then /conveyor-belt:setup", () => {
+  const shown = readFileSync(new URL('./captures/beat2.txt', import.meta.url), 'utf8');
+  const typed = shown.split('\n').filter((l) => l.startsWith('> '));
+  assert.deepEqual(typed, ['> /plugin marketplace add pushprove-max/conveyor-belt', '> /plugin install conveyor-belt@conveyor-belt', '> /conveyor-belt:setup']);
+  assert.doesNotMatch(shown, /conveyor\.sh setup/);
+  assert.match(shown, /^ok: /m, 'conveyor doctor ran');
+  assert.doesNotMatch(shown, /^missing/m);
+  assert.match(beats[1].caption, /\/plugin install, \/conveyor-belt:setup, conveyor doctor/);
+});
+
 // The owner's order: a product demo shows the product, never how the video was made. Bug caught: a caption, card or
 // title says a clip is recorded elsewhere, is not recorded yet, or names the mock, the container or make.sh.
 test('no visible text of the composition says how the demo is made', () => {
