@@ -161,7 +161,9 @@ declined() { # <card> <issue> <code | judge | owner> <why> <finding>
 # closed one gets no such line.
 declinedbuild() { # <id>
   ( flock 9 || exit 1
-    l=$(stdb ask lines declined 2>/dev/null | jq -c --arg id "$1" 'select(.id == $id)' 2>/dev/null | head -n 1)
+    l=$(stdb ask lines declined 2>/dev/null | jq -c --arg id "$1" 'objects | select(.id == $id)' 2>/dev/null) \
+      || { echo "conveyor: the declined list could not be read; nothing filed" >&2; exit 1; }
+    l=$(head -n 1 <<<"$l")
     [ -n "$l" ] || { echo "conveyor: the declined list has no line $1; nothing filed" >&2; exit 2; }
     num=$(jq -r '.built // empty' <<<"$l"); [ -z "$num" ] || { echo "conveyor: this finding is already filed as #$num; nothing filed"; exit 0; }
     src=$(jq -r '.issue' <<<"$l")
@@ -184,7 +186,8 @@ declineddismiss() { # [--by <who>] <id>...
   [ $# -ge 1 ] && [[ $by == *[![:space:]]* && $by != *$'\n'* ]] \
     || { echo "usage: conveyor.sh declined dismiss [--by <who>] <id>..." >&2; return 2; }
   ( flock 9 || exit 1
-    miss=$(stdb ask lines declined 2>/dev/null | jq -rn '[inputs | objects | .id] as $have | $ARGS.positional - $have | join(" ")' --args "$@" 2>/dev/null) || miss="$*"
+    miss=$(stdb ask lines declined 2>/dev/null | jq -rn '[inputs | objects | .id] as $have | $ARGS.positional - $have | join(" ")' --args "$@" 2>/dev/null) \
+      || { echo "conveyor: the declined list could not be read; nothing dismissed" >&2; exit 1; }
     [ -z "$miss" ] || { echo "conveyor: the declined list has no line $miss; nothing dismissed" >&2; exit 2; }
     stdb ask lines declined | jq -c --arg t "$(clock)" --arg by "$by" 'if type == "object" and (.id | IN($ARGS.positional[])) and .dismissed == null then .dismissed = {time: $t, by: $by} else . end' \
       --args "$@" > "$DECLINED.new" && stdb rewrite declined < "$DECLINED.new" && rm -f "$DECLINED.new" \

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Conveyor: one issue = one card. Pick, build in a fresh worktree, review, land, record.
-# cards.jsonl in the state folder (`conveyor.sh state-dir`) is the only state; report.sh is the only readout.
+# The state is in the state folder (`conveyor.sh state-dir`), its files and its database as state.py's header says;
+# `conveyor.sh snapshot` reads it out for the Board.
 # Usage: the command table below; `conveyor.sh` with no command, or with one the table does not hold, prints it.
 # The rules are in README.md beside this script: the review rule, a landing conflict, an issue already fixed, the
 # changed tests, a visible change, the push, land-branch, a blocked card's kept work, the marks, the live record, the

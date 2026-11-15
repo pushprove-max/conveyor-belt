@@ -330,7 +330,13 @@ def ask(folder, argv):
     db.commit()
     for out, text in texts:
         if out is None:
-            sys.stdout.write(text)
+            # A reader that stopped reading (`| head -1`) is no error: the rest is dropped, with no traceback, and
+            # stdout is pointed at /dev/null so Python's flush at exit does not raise it again.
+            try:
+                sys.stdout.write(text)
+                sys.stdout.flush()
+            except BrokenPipeError:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         else:
             with open(out, "w", encoding="utf-8") as f:
                 f.write(text)

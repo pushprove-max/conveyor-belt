@@ -255,6 +255,7 @@
 {"area": "followups", "test": "judge.test.sh"}
 {"area": "followups", "test": "deps.test.sh"}
 {"area": "followups", "test": "mainred.test.sh"}
+{"area": "followups", "test": "declined.test.sh"}
 {"area": "followups", "file": "conveyor/lib/followups.sh"}
 {"area": "card", "test": "review.test.sh"}
 {"area": "card", "test": "fail.test.sh"}

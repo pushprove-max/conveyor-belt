@@ -48,6 +48,8 @@ t_get() {
   [ "$(pk get tunables.poll "$p")" = 30 ] || fail "the default of tunables.poll: $(pk get tunables.poll "$p")"
   [ "$(pk get checks "$p")" = '[]' ] || fail "the default of checks: $(pk get checks "$p")"
   [ "$(pk get tunables.closeWait "$(edited '.tunables.closeWait = 0')")" = 0 ] || fail "a set 0 was read as unset"
+  # Bug: a default of false (`false // empty` in jq) printed nothing, as if the schema had no default.
+  [ "$(pk get test.slowIssues "$(edited 'del(.test.slowIssues)')")" = false ] || fail "the default false of test.slowIssues: $(pk get test.slowIssues "$T/pack.json")"
   [ -z "$(pk get foreman "$PACK")" ] || fail "an unset field with no default printed something"
   pk get tunables.nope "$PACK" >/dev/null 2>&1; [ $? = 2 ] || fail "a field the schema does not name was not refused with exit 2"
   # The pack is found from the current directory's checkout when no path is given.

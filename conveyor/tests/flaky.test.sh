@@ -30,6 +30,23 @@ t_flakyrerun() {
   [ "$(flakyfiled)" = 0 ] || fail "one card's entries filed an issue: $(cat "$STUB/filed")"
 }
 
+# A main-red fix card and a land-branch card have no issue, and their ids end in -0. Bug: flakyrun() read the 0 as
+# the card's issue, so the entry held issue 0 and the filed issue listed it as "issue #0".
+t_flakyrunzero() {
+  setup '[]'
+  local c=c20260101T000000-repo-0 b
+  local w=$T/$CASE/cards/$c
+  mkdir -p "${w%/*}"
+  jq -cn '{exit: 1, failures: {files: [{file: "b.test", cases: [{name: "flaky"}]}]}}' > "$w.first"
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/flaky.sh (FLAKY=${STATE%/*}/flaky.json)
+  ( STATE=$ST/cards.jsonl; . "$SRC/lib/flaky.sh"; eval "$(sed -n '/^clock() {/p' "$SRC/lib/control.sh"; sed -n "/^NOTPASSED=/,/unique;'\$/p" "$SRC/lib/testrun.sh")"
+    flakyrun "$w" ) || fail "flakyrun failed"
+  [ "$(fl '.entries[] | [.card, .issue] | tojson')" = "[\"$c\",null]" ] || fail "the entry of a -0 card does not hold issue null: $(cat "$ST/flaky.json")"
+  loop flaky add "b.test: flaky" two "second" > /dev/null && loop flaky add "b.test: flaky" three "third" > /dev/null || fail "flaky add failed"
+  b=$(jq -r .body "$STUB/filed") && grep -q "^- .* $c$" <<<"$b" || fail "the filed body does not list the -0 card's entry: $b"
+  ! grep -q 'issue #' <<<"$b" || fail "the filed body names an issue for a card that has none: $b"
+}
+
 # The cases kept off card runs (flakyoff(), called alone): a case whose last flaky issue is open, or that has none yet;
 # never a case whose issue closed with no entry since, nor a whole file, nor a case the card's list already names.
 # A case whose entries aged out of the record (older than FLAKY_KEEP, dropped at the next write) stays off while its

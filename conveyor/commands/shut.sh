@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh shut <issue>`: the Board's Close, once it has closed the issue: its blocked card is shut now (shut(),
-# lib/issues.sh), not at the loop's next turn, which a stopped loop never takes, so it leaves Needs you at once.
+# `conveyor.sh shut <issue | card id>`: the Board's Close, once it has closed the issue: its blocked card is shut now
+# (shut(), lib/issues.sh), not at the loop's next turn, which a stopped loop never takes, so it leaves Needs you at once.
 # Sourced by conveyor.sh.
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/views.sh" || exit 1

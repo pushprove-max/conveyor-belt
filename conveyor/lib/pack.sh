@@ -9,7 +9,7 @@
 # <pack> defaults to .conveyor/project.json at the top of the git checkout holding the current directory.
 # The schema is checked with jq, not a JSON Schema library (the engine is bash + jq, plan section 4), so the schema
 # may use only the keywords in KNOWN below: a schema using another fails every check rather than going unchecked.
-# Sourced (conveyor.sh), it only defines SCHEMA, CHECK, GET and packcheck, for a check of the pack's text as read.
+# Sourced (by lib/prompts.sh), it only defines SCHEMA, CHECK, GET and packcheck, for a check of the pack's text as read.
 set -uo pipefail
 # This file's folder by bash's own text handling, not a dirname program (a path with no slash is in the current folder).
 PACKLIB=.; [[ ${BASH_SOURCE[0]} != */* ]] || PACKLIB=${BASH_SOURCE[0]%/*}
@@ -57,7 +57,7 @@ def plugin: objects | .plugin | objects | select(has("commit") == has("follow"))
 GET='($f | split(".")) as $p
 | (reduce $p[] as $k ($s; if . == null then null else .properties[$k] // (.additionalProperties | if type == "object" then . else null end) end)) as $fs
 | if $fs == null then "conveyor pack: \($f): not a field of the schema\n" | halt_error(2) end
-| $v | getpath($p) | if . == null then $fs.default // empty end | if type == "string" then . else tojson end'
+| $v | getpath($p) | if . == null then (if $fs | has("default") then $fs.default else empty end) end | if type == "string" then . else tojson end'
 
 # The check of the pack file, or, given them, of its text and the schema's text (the file is named in each message).
 packcheck() { # <pack> [<its text> <the schema's text>]

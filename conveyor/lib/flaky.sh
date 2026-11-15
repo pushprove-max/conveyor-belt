@@ -58,13 +58,13 @@ flakyfile() { # <case> <now>, under flaky()'s lock
   flakyput "$(jq -c --arg c "$1" --argjson n "$n" '.filed = [.filed[] | select(.case != $c)] + [{case: $c, issue: $n}]' <<<"$rec")"
 }
 # A card's test run that passed on re-run (<worktree>.first), recorded by tests() as it ends: one entry for each case
-# that had not passed, the card its source (the worktree's name; its issue the number that ends it: lib/pick.sh). A
-# run again that failed, given its failures (testfails()), adds only the cases that passed in it (PASSEDAGAIN): their
+# that had not passed, the card its source (the worktree's name; its issue the number that ends it, none for 0:
+# lib/pick.sh). A run again that failed, given its failures (testfails()), adds only the cases that passed in it (PASSEDAGAIN): their
 # file passed, or the case printed ok; a case it did not run, or that failed again, is no entry. A batch's run in the
 # card's worktree is the card's. A failure here is said and leaves the card as it is.
 flakyrun() { # <worktree> [testfails() of the run again, when it failed]
   local e c=${1##*/} n
-  n=${c##*-}; [[ $n =~ ^[0-9]+$ ]] || n=null
+  n=${c##*-}; [[ $n =~ ^[1-9][0-9]*$ ]] || n=null # a main-red fix card or a land-branch card ends in -0: no issue
   if [ $# -ge 2 ]; then
     e=$(jq -ce --arg c "$c" --argjson n "$n" --argjson l "${2:-null}" "$NOTPASSED$PASSEDAGAIN"'[passedagain($l)[] | {case: ., card: $c, issue: $n}] | select(length > 0)' "$1.first" 2>/dev/null) || return 0
   else

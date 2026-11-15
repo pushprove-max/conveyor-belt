@@ -176,3 +176,13 @@ t_statedbpipe() {
   [ "$(cat <&3 | wc -l)" = 2999 ] || fail "the first call's answer was cut"
   exec 3<&-
 }
+
+# Bug: a reader that stops early (`| head -1`) made `ask` end in a BrokenPipeError traceback on stderr, about one
+# every 6 s in the service log. 20,000 lines are well over the pipe's 64 kB, so the write meets the closed pipe.
+t_statedbheadpipe() {
+  local s=$T/$CASE/st x
+  mkdir -p "$s"
+  awk 'BEGIN { for (i = 1; i <= 20000; i++) printf "{\"card\":\"c%05d\",\"issue\":%d,\"step\":\"picked\",\"time\":\"2026-03-01T00:00:00Z\"}\n", i, i }' > "$s/cards.jsonl"
+  x=$(statedb "$s" ask lines cards 2>"$s/err" | head -n 1) && [[ $x == *c00001* ]] || fail "the first line was not read: $x"
+  [ ! -s "$s/err" ] || fail "a reader that stopped early left this on stderr: $(head -c 600 "$s/err")"
+}
