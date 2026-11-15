@@ -107,7 +107,9 @@ test("a card's steps show a NO-GO review's findings and the blocked step's sente
   assert.equal(items.length, 2);
   const [review, stopped] = items;
   assert.equal(review.querySelector('details.output').open, false, 'the findings are closed until asked for');
-  assert.equal(review.querySelector('pre.output-text').textContent, '[P1] a.sh:1 wrong\n[P2] b.sh:2 slow');
+  // A review's findings are rows (dashboard-view.output-review), on a card's steps too.
+  assert.deepEqual(Array.from(review.querySelectorAll('.output-finding'), (x) => [x.querySelector('.chip').textContent, x.querySelector('.finding-text').textContent,
+    x.querySelector('.finding-at').textContent]), [['P1', 'wrong', 'a.sh:1'], ['P2', 'slow', 'b.sh:2']]);
   assert.ok(review.querySelector('button.output-copy'));
   assert.equal(stopped.querySelector('.detail-why').textContent, 'the changed tests failed; nothing landed.');
   assert.equal(stopped.querySelector('pre.output-text').textContent, "cp: cannot stat './hooks.json' ×2\nFAIL x.test\nERROR:./hooks.json\nPATH=/usr/bin:./bin ran",

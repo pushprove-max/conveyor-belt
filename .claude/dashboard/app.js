@@ -142,7 +142,8 @@
   }
   // The end of the output a blocked card failed on (its line's tail), shown under its sentence: closed under "Show
   // output", in monospace with its line breaks; the card's worktree prefix is ./, identical lines in a row are one line
-  // with ×N, and its FAIL and error lines are counted and listed first. Copy puts the output as shown on the
+  // with ×N, and its FAIL and error lines are counted and listed first. A review's output (a line of it starts [P0] to
+  // [P3]) is its findings instead: one row each (findingRows), with no failures list. Copy puts the output as shown on the
   // clipboard, as plain text. null when there is no output. label: the words of its toggle, when not "Show output".
   // was: the toggle this one replaces in a redraw, if any: open, for the same card, it stays open with the new output.
   // The reader's place in it stays too: with the same output the toggle is that one, and its scroll and a text
@@ -150,6 +151,35 @@
   // the old one was. A box built new each
   // second sent a reader who scrolled up in a running card's output back to the top, and stalled a scroll over it.
   const FAILLINE = /\bFAIL(?:ED)?\b|\b(?:error|Error|ERROR)\b|: (?:cannot|can't) |No such file or directory|Permission denied|command not found/;
+  // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional.
+  const FINDING = /^\[(P[0-3])\]\s*(.*)$/;
+  // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
+  // on one line, the place (path:line) under it, and the part after "Proof:" folded under a closed "Proof" toggle. A
+  // line that is not a finding is a row of its whole text.
+  function findingRows(folded) {
+    const list = h('ol', 'output-findings');
+    folded.forEach((x) => {
+      if (!x.text.trim()) return;
+      const row = h('li', 'output-finding'), m = FINDING.exec(x.text), times = x.n > 1 ? ` ×${x.n}` : '';
+      if (!m) { row.append(h('p', 'finding-text', x.text + times)); list.append(row); return; }
+      let rest = m[2];
+      const at = /^(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S)/.exec(rest);
+      if (at) rest = rest.slice(at[0].length);
+      const cut = rest.search(/(?:^|\s)Proof:/);
+      const sentence = (cut < 0 ? rest : rest.slice(0, cut)).trim(), proof = cut < 0 ? '' : rest.slice(cut).replace(/^\s*Proof:\s*/, '');
+      const head = h('div', 'finding-head');
+      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), h('p', 'finding-text', sentence + times));
+      row.append(head);
+      if (at) row.append(h('p', 'finding-at', at[1]));
+      if (proof) {
+        const fold = h('details', 'finding-proof');
+        fold.append(h('summary', null, 'Proof'), h('p', 'finding-proof-text', proof));
+        row.append(fold);
+      }
+      list.append(row);
+    });
+    return list;
+  }
   function output(tail, card, label, was) {
     if (typeof tail !== 'string' || !tail.trim()) return null;
     const same = JSON.stringify([tail, typeof card === 'string' ? card : '', label || '']);
@@ -186,7 +216,8 @@
       else folded.push({ text, n: 1 });
     }
     const shown = (x) => (x.n > 1 ? `${x.text} ×${x.n}` : x.text);
-    const det = h('details', 'output'), fails = folded.filter((x) => FAILLINE.test(x.text));
+    const review = folded.some((x) => FINDING.test(x.text));
+    const det = h('details', 'output'), fails = review ? [] : folded.filter((x) => FAILLINE.test(x.text));
     det.append(h('summary', null, label || 'Show output'));
     det.dataset.card = typeof card === 'string' ? card : '';
     det.open = Boolean(was && was.open && was.dataset.card === det.dataset.card);
@@ -196,8 +227,8 @@
       top.append(h('p', 'output-count', `${fails.length} ${fails.length === 1 ? 'failure' : 'failures'}`), list);
       det.append(top);
     }
-    const pre = h('pre', 'output-text');
-    folded.forEach((x, i) => {
+    const pre = review ? findingRows(folded) : h('pre', 'output-text');
+    if (!review) folded.forEach((x, i) => {
       const line = h('span', FAILLINE.test(x.text) ? 'output-line is-fail' : 'output-line', x.text);
       if (x.n > 1) line.append(h('span', 'output-times', ` ×${x.n}`));
       pre.append(line);

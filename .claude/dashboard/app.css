@@ -360,6 +360,16 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
   background: var(--surface-2); font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .output-line.is-fail { color: var(--bad); font-weight: 700; }
 .output-times { color: var(--muted); font-weight: 700; }
+/* A review's output: one row per finding, the chip and sentence on a line, its place and folded proof under it. */
+.output-findings { margin: var(--sp-1) 0 0; padding: 0; list-style: none; color: var(--text); }
+.output-finding { padding: var(--sp-2) 0; border-top: 1px solid var(--border); min-width: 0; }
+.output-finding:first-child { border-top: 0; }
+.finding-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.finding-text { margin: 0; flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.finding-at { margin: 2px 0 0; color: var(--muted); font-family: var(--mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.finding-proof { margin-top: 2px; font-size: var(--fs-xs); }
+.finding-proof > summary { cursor: pointer; color: var(--muted); }
+.finding-proof-text { margin: var(--sp-1) 0 0; font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .output-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
 .output-note { color: var(--muted); }
 

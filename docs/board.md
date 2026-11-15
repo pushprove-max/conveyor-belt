@@ -146,6 +146,10 @@ does not start again by itself.
 
 - A finished review reads "Review 2: passed" or "Review 2: changes asked". A review the judge read says "judge: N
   accepted, M declined".
+- **Show output** on a review lists its findings, one row each, in the order the reviewer gave them. A row shows the
+  priority (P0 to P3), the finding, and under it the file and line. Click **Proof** to read the reviewer's proof. Each
+  other step's output shows as plain text, with its failures first. **Copy output** copies the output as plain text, for a
+  review too. This is the same in On the belt, Landed today and Needs you.
 - A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it** or
   **Fix 4: tests failed**. Hover over the label for the full reason.
 - A reply-check fix after the build shows on the Build step, "Build · reply check fix" and then "Build · reply check
