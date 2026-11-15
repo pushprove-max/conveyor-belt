@@ -7,8 +7,9 @@
 // says) with one button whose label follows the state, and the changes since the tag, closed until opened. Each button
 // acts on a second click. Draft notes, Run suite and Run again on the new main send `conveyor.sh release-run prep
 // <version>`: release-prep alone, which writes a notes draft and stops when main has no notes, else runs the whole
-// suite, and releases nothing. Release <version> sends `release-run <version>`: release-prep, then, when it is green,
-// release makes the tag and the GitHub release. Stop (`release-run stop`, a second click too) shows only while a run is
+// suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite of that
+// version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
+// ("Runs the suite first"); then release makes the tag and the GitHub release. Stop (`release-run stop`, a second click too) shows only while a run is
 // under way. Each reason a refused or failed run printed shows under the step it belongs to. The panel is wide or full,
 // never small: in the narrow column every line wraps.
 (() => {
@@ -69,7 +70,10 @@
     else if (!passed) chip = ['Suite not run', 'quiet'];
     else if (cur.state === 'released') chip = ['Released', 'ok'];
     else chip = ['Ready to release', 'ok'];
-    return { cur, going, passed: passed && !moved, failed, moved, released, chip };
+    // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
+    // suite first.
+    const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
+    return { cur, going, passed: passed && !moved, failed, moved, released, reuse, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -204,10 +208,21 @@
     const relFailed = !relDone && run && run.ended !== null && run.step === 'release' && run.version === v && why[2].length > 0;
     const s3 = step(h, 'Release', relDone ? 'done' : relFailed ? 'failed' : 'todo',
       relDone ? `${m.tag || `v${run.version}`} is tagged and on GitHub` : `The tag v${v} and the GitHub release`, reasonsList(h, why[2]));
+    // What Release does with the suite: uses the pass, or runs it first (about as long as the last run took).
+    let suiteSaid = '';
+    if (notes && s.passed) {
+      const c = s.cur, took = Date.parse(c.ended) - Date.parse(c.since);
+      suiteSaid = s.reuse ? `Uses the suite that passed at ${ctx.clock(c.ended)} on ${short(c.sha)}`
+        : `Runs the suite first${took >= 60000 ? ` (about ${ctx.dur(took / 1000)})` : ''}`;
+      const p = h('p', 'row-meta', suiteSaid);
+      p.dataset.figure = 'suite-use';
+      s2.append(p);
+    }
     const steps = h('ol', 'rows numbered compact release-steps');
     steps.append(s1, s2, s3);
-    // The version and the one button: its label follows the state. Release sends release-run <version> (the suite once
-    // more, then the tag and the GitHub release); the others send release-run prep <version>, which releases nothing.
+    // The version and the one button: its label follows the state. Release sends release-run <version> (the suite's
+    // pass, or the suite first, then the tag and the GitHub release); the others send release-run prep <version>, which
+    // releases nothing.
     const go = h('div', 'release-go'), input = h('input', 'release-version');
     input.type = 'text'; input.setAttribute('aria-label', 'Version to release'); input.dataset.field = 'version';
     input.value = typed.has(rec.repo) ? typed.get(rec.repo) : String(m.next || '');
@@ -215,7 +230,7 @@
       `Run the whole suite on main's head. It releases nothing: Release ${v} shows when it has no failures.`, 'The suite runs again on the new main.', true]
       : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md for you to read and commit. It runs nothing else.`, 'The notes draft is being written.', true]
       : !s.passed ? ['Run suite', 'Click again to run the suite', `Run the whole suite on main's head. It releases nothing: Release ${v} shows when it has no failures.`, 'The suite is running.', true]
-      : [`Release ${v}`, `Click again to release ${v}`, `Run the whole suite on main's head once more, then make the tag v${v} and the GitHub release.`, `Release ${v} started.`, false];
+      : [`Release ${v}`, `Click again to release ${v}. ${suiteSaid}.`, `${suiteSaid}, then make the tag v${v} and the GitHub release.`, `Release ${v} started.`, false];
     const btn = h('button', 'btn', label);
     btn.type = 'button'; btn.dataset.act = 'release'; btn.title = title;
     btn.hidden = s.going;

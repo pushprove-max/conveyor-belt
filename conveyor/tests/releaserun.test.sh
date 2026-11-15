@@ -100,6 +100,37 @@ t_relboard() {
   [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && grep -q '^release create v1.1.0 ' "$STUB/gh-calls" || fail "no tag v1.1.0 was pushed, or no GitHub release made: $(cat "$STUB/gh-calls")"
   [ "$(wc -l < "$STUB/runs")" = 1 ] || fail "the suite ran $(wc -l < "$STUB/runs") times, not once"
 }
+# reusesetup <suite>: runsetup, with the record of a release-prep of 1.1.0 that passed on main's head ($O), main not
+# moved, and its passing status kept by gh, as release-prep leaves them.
+reusesetup() {
+  runsetup "$1"
+  mkdir -p "$T/$CASE/cards/release" && printf '[{"context":"conveyor/release-suite","state":"success"}]\n' > "$STUB/statuses" \
+    && jq -cn --arg o "$O" '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-11-15T08:00:00Z", ended: "2026-11-15T08:25:00Z",
+      state: "passed", sha: $o, done: 3, failed: 0, cases: [], moved: false, main: $o, reasons: [], pid: 1}' > "$RUN" || fail "the fixture could not be made"
+}
+# Bug (#35): the Board's Release ran the whole suite again (release-prep, about 25 min) on the commit whose pass
+# release-prep had just recorded. The suite here fails if called.
+t_relreuse() {
+  local O RUN out
+  reusesetup 'exit 1'
+  out=$(loop release-run 1.1.0 2>&1) && grep -q 'with the suite that passed on' <<<"$out" || fail "release-run did not start release alone on the pass: $out"
+  relwait "the run did not end" '.step == "release" and .ended != null'
+  [ ! -e "$STUB/runs" ] || fail "the suite ran again on the commit it passed on: $(cat "$T/$CASE/cards/release/run.log")"
+  jq -e --arg o "$O" '.state == "released" and .sha == $o and .done == 3' "$RUN" > /dev/null || fail "release did not release the passed commit $O: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "no tag v1.1.0 was pushed"
+}
+# Bug (#35): a pass on a main that moved since is reused, so a commit no suite tested is released. Here a card lands
+# after the pass: release-run runs release-prep first, on the new head.
+t_relreusemoved() {
+  local O RUN out new
+  reusesetup true
+  git -C "$R" commit -q --allow-empty -m 'fix: landed after the pass' && git -C "$R" push -q origin main || fail "the fixture could not be made"
+  new=$(git -C "$R" rev-parse HEAD)
+  out=$(loop release-run 1.1.0 2>&1) && grep -q 'release-prep 1.1.0 is running' <<<"$out" || fail "release-run did not start release-prep: $out"
+  relwait "the run did not end" '.step == "release" and .ended != null'
+  [ "$(wc -l < "$STUB/runs" 2>/dev/null)" = 1 ] && [ "$(cat "$STUB/full-at")" = "$new" ] || fail "the suite did not run once on the new head $new: $(cat "$STUB/full-at" 2>&1)"
+  jq -e --arg n "$new" '.state == "released" and .sha == $n' "$RUN" > /dev/null || fail "release did not release the tested head: $(cat "$RUN")"
+}
 # Bug (#27): the Board's Run suite (`release-run prep <version>`) also makes the tag and the GitHub release when the
 # suite passes, with no Release press by the owner.
 t_relprep() {

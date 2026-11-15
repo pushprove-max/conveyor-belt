@@ -46,7 +46,8 @@ The Release panel on the Board's Overview tab does steps 4 to 6 ([The Board](boa
 click the card's button two times. Its label follows the state: **Draft notes**, **Run suite**, **Release** with the
 version, or **Run again on the new main**. Draft notes, Run suite and Run again run `conveyor.sh release-run prep
 <version>`: `release-prep` alone, which releases nothing. For **Release**, the second click is the owner's yes. Conveyor
-runs `conveyor.sh release-run <version>`: `release-prep`, then `release` when the suite passes. The output of the two
+runs `conveyor.sh release-run <version>`: `release` alone when the suite of that version passed on the head of `main`
+and `main` did not move after it, else `release-prep`, then `release` when the suite passes. The output of the two
 is in `release/run.log` in the cards folder. When a step stops, the panel shows each reason, and nothing more runs. `/units` shows the run while it is in
 progress ([/units](units.md)). `conveyor.sh release-run stop` is the panel's **Stop**.
 

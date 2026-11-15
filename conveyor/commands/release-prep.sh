@@ -40,7 +40,9 @@
 # starts release-prep, then, when it passes and prep is not given, release, in the background, and returns (with prep,
 # release-prep alone: the Board's Draft notes and Run suite, which release nothing); their output is in
 # $CARDS/release/run.log. That release is told the commit the suite passed on: a main that moved since is refused and
-# its record says moved, so it is never tested and released again without the owner's yes. `conveyor.sh release-run
+# its record says moved, so it is never tested and released again without the owner's yes. Without prep, when the
+# record is a passed release-prep of that version on main's head, main not moved since, it starts release alone, told
+# that commit: the suite that passed is used, not run again. `conveyor.sh release-run
 # stop` ends the run under way: the processes of that run alone (the tree of the record's pid), never a process group,
 # and its record says stopped. Exit 2: refused (a run is already under way; none to stop).
 # Sourced by conveyor.sh.
@@ -258,15 +260,22 @@ release() { # <version>
     || { echo "conveyor: release: v$v is pushed, but its GitHub release could not be made: make it from the tag with $notes as its body" >&2; return 1; }
   echo "conveyor: release: v$v is released at ${t:0:12}"
 }
-# The Board's Release: release-prep, then on its pass release, in the background (above).
+# The Board's Release: release-prep, then on its pass release, in the background (above). Without prep, when the
+# record (the newest run) is a passed release-prep of <version> on main's head, main not moved since: release alone,
+# told that commit.
 releasego() { # <version> [prep: release-prep alone]
+  local ok=''
   ( flock -n 9 ) 9>>"$CARDS/release/lock" || { echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
+  [ "${2:-}" = prep ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false) | .sha | strings' "$RELRUN" 2>/dev/null) \
+    && [ "$ok" = "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" ] || ok=''; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     export CONVEYOR_RELEASE_PID=$BASHPID
     # release is told the commit release-prep's suite passed on, so a main that moved meanwhile is refused, never run
     # and released again without the owner's second press.
-    bash "$HERE/conveyor.sh" release-prep "$1" && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1" ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
+    if [ -n "$ok" ]; then CONVEYOR_RELEASE_SHA=$ok bash "$HERE/conveyor.sh" release "$1"
+    else bash "$HERE/conveyor.sh" release-prep "$1" && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
   if [ "${2:-}" = prep ]; then echo "conveyor: release-run: release-prep $1 is running, and nothing is released; its output is in $CARDS/release/run.log"
+  elif [ -n "$ok" ]; then echo "conveyor: release-run: release $1 is running, with the suite that passed on ${ok:0:12}; its output is in $CARDS/release/run.log"
   else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
 # The run under way ended: its record's pid and every process under it, told to end, then killed 10 s later if they

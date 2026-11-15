@@ -128,6 +128,25 @@ test('D3: passed on main\'s head, Release 1.0.0; a card lands, Main moved and Ru
   assert.equal(stepOf(w, 'release').dataset.state, 'done');
 });
 
+// Bug this guards (#35): Release gave no sign whether it reuses the suite that passed on main's head or runs it again
+// first (release-run reuses a passed release-prep of that version on main's head).
+test('#35: a passed release-prep on main\'s head: step 2 and Release\'s confirm say "Uses the suite that passed"', async () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', done: 140, of: 140, failed: 0, cases: [] }));
+  assert.match(stepOf(w, 'full-suite').querySelector('[data-figure="suite-use"]').textContent, /^Uses the suite that passed at .+ on bbbbbbbbbbbb$/);
+  act(card(w), 'release').click();
+  assert.match(act(card(w), 'release').textContent, /^Click again to release 1\.0\.0\. Uses the suite that passed at .+ on bbbbbbbbbbbb\.$/);
+});
+// Bug this guards (#35): a release refused after the pass is no release-prep pass, so release-run runs the suite first;
+// the panel must not say it reuses one.
+test('#35: a refused release on main\'s head: step 2 and Release\'s confirm say "Runs the suite first (about 25 min)"', async () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, step: 'release', ended: '2026-11-14T08:25:00Z', state: 'refused', failed: 0, cases: [], reasons: ['the checkout has uncommitted changes'] }));
+  assert.equal(stepOf(w, 'full-suite').querySelector('[data-figure="suite-use"]').textContent, 'Runs the suite first (about 25 min)');
+  act(card(w), 'release').click();
+  assert.equal(act(card(w), 'release').textContent, 'Click again to release 1.0.0. Runs the suite first (about 25 min).');
+});
+
 // Bug this guards: every change since the tag was listed open, as a raw subject with its hash, a finding's file:line
 // and its "Proof:" text.
 test('D4: the changes are closed under "Show 26 changes"; open, each is its issue\'s title, linked, no hash or Proof:, 10 at a time', () => {

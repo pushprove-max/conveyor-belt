@@ -146,7 +146,8 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
 1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
-   that failed. A full test run in progress shows here too.
+   that failed. A full test run in progress shows here too. When the button is **Release**, the step also says what
+   the button does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
 3. **Release**: the tag and the GitHub release.
 
 When a run stops, each reason that it gave shows under its step: a notes reason under step 1, a suite reason under
@@ -163,8 +164,10 @@ example **Release 1.0.0**) or **Run again on the new main**. Click it, then clic
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
   of them and stops. Else it runs the whole suite on the head of `main`. These buttons do not release.
 - **Release** with the version runs `conveyor.sh release-run <version>`. The second click is your yes to the release.
-  Conveyor runs `conveyor.sh release-prep <version>`, which runs the whole suite again. When the suite passes, Conveyor
-  runs `conveyor.sh release <version>` ([Releases](releases.md)). Nothing else starts a release.
+  When the suite of that version passed on the head of `main`, and `main` did not move after it, Conveyor uses that
+  pass and runs `conveyor.sh release <version>` ([Releases](releases.md)). Else Conveyor runs
+  `conveyor.sh release-prep <version>`, which runs the whole suite first, and runs `conveyor.sh release <version>` when
+  the suite passes. The second click's text says which of the two occurs. Nothing else starts a release.
 
 **Stop** shows only while a run is in progress. After a second click, it stops the processes of that run. Conveyor
 itself continues.
