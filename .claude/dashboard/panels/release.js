@@ -81,7 +81,11 @@
     m.setAttribute('aria-hidden', 'true');
     box.append(m, h('span', 'step-name', name));
     mark.append(box);
-    head.append(mark, h('span', 'release-line', line));
+    // The line is a text, or a span that holds a time as well (the suite's): a span goes in as it is, as h() writes
+    // only text.
+    const text = typeof line === 'string' ? h('span', null, line) : line;
+    text.classList.add('release-line');
+    head.append(mark, text);
     li.append(head, ...more.filter(Boolean));
     return li;
   }

@@ -88,6 +88,10 @@ test('D2: a run under way shows a progress bar of files done of all, the failed 
   assert.match(stepOf(w, 'full-suite').querySelector('[data-figure="progress"]').textContent, /12 of 140 files done · 1 failed/);
   assert.deepEqual(Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="failed"] li'), (x) => x.textContent), ['code.test']);
   assert.equal(chip(w), 'Suite running');
+  // #31: the line, a span with a time in it, showed as "[object HTMLSpanElement]".
+  const going = stepOf(w, 'full-suite').querySelector('.release-line');
+  assert.match(going.textContent, /^Running on bbbbbbbbbbbb · .+ so far$/);
+  assert.ok(going.querySelector('time.since'), 'the time is a live time element');
   assert.equal(act(card(w), 'release').hidden, true, 'no second run beside the one under way');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
@@ -101,12 +105,15 @@ test('D3: passed on main\'s head, Release 1.0.0; a card lands, Main moved and Ru
   deliver(w, data(passed));
   assert.equal(chip(w), 'Ready to release');
   assert.equal(stepOf(w, 'full-suite').dataset.state, 'done');
+  // #31: the result, commit and time showed as "[object HTMLSpanElement]".
+  assert.match(stepOf(w, 'full-suite').querySelector('.release-line').textContent, /^Passed on bbbbbbbbbbbb · .+ ago$/);
   assert.equal(act(card(w), 'release').textContent, 'Release 1.0.0');
   // Release alone sends release-run <version>, the one that makes the tag and the GitHub release.
   act(card(w), 'release').click();
   assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [{ action: 'release-run', args: ['1.0.0'], repo: 'plugin' }]);
   next(w, data(passed, { head: NEW, count: 27 }));
   assert.equal(chip(w), 'Main moved since the suite');
+  assert.match(stepOf(w, 'full-suite').querySelector('.release-line').textContent, /^Passed on bbbbbbbbbbbb · .+ ago · main has moved since$/);
   assert.equal(act(card(w), 'release').textContent, 'Run again on the new main');
   assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), []);
   assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
