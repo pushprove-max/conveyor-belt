@@ -231,9 +231,31 @@ overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL 
     OVL=$(jq -c --argjson n "$n" --arg l "Depends on: #$d" 'map(if .number == $n then .body = ((.body // "") + "\n" + $l) else . end)' <<<"$OVL") || return 0
   done
 }
+# One answer from a model with no tools: the builder's CLI on the last model the pack's models.allowed lists for that
+# CLI (none listed, the builder's own), at <effort>, <seconds> at most, run in <folder> (a scratch folder the caller
+# removes), the answer left in <folder>/answer. Returns the CLI's exit (124: the timeout); when no CLI could be
+# started, 1 with why on stdout (nothing else is printed there).
+askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
+  local d=$1 p=$5 s a agent model acct rc
+  s=$(seat builder "$4") && jqget "$s" agent agent model model && packget models.allowed a 2>/dev/null \
+    || { echo "no builder model"; return 1; }
+  model=$(jq -r --arg g "$agent" --arg m "$model" "$OKMODELS"'okmodels("builder")[$g] // [] | last // $m' <<<"$a") || model=''
+  case $agent in
+    claude) acct=$(acctenv "$(ctlacct "$4")") || { echo "$acct"; return 1; }
+      (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \
+        --setting-sources "" --strict-mcp-config --no-session-persistence --output-format text <<<"$p" > "$d/answer" 2>/dev/null 8>&- 9>&-); rc=$? ;;
+    codex) model=$(codexmodel "$model") || { echo "$model"; return 1; }
+      (cd "$d" && exec timeout --kill-after=10 "$2" codex exec --skip-git-repo-check -s read-only -m "$model" -c "model_reasoning_effort=\"$3\"" \
+        -o "$d/answer" - <<<"$p" > /dev/null 2>&1 8>&- 9>&-); rc=$? ;;
+    opencode) (REVIEW_TIMEOUT=$2 ocrun "$d" "$model" "$3" <<<"$p" > "$d/events" 2>/dev/null 8>&- 9>&-); rc=$?
+      [ $rc != 0 ] || jq -Rrn "$OPENCODEANSWER" "$d/events" > "$d/answer" 2>/dev/null || rc=1 ;;
+    *) rc=1 ;;
+  esac
+  return $rc
+}
 # One same-file judgement (overlap()): prints "<card's issue>\t<file>" or NONE, else why not and fails.
 overlapcall() { # <issue> <the belt's issues, a JSON array> <open issues json> <the control record>
-  local p d rc s a agent model acct
+  local p d rc s a
   p=$OVERLAP$'\n\n'$(jq -r --argjson n "$1" --argjson b "$2" 'def show: "#\(.number) \(.title // "")\n\((.body // "")[0:4000])\n";
     "# The queued issue\n" + (map(select(.number == $n)) | map(show) | join("")) + "\n# The cards on the belt\n" + (map(select(.number | IN($b[]))) | map(show) | join("\n"))' <<<"$3") \
     || { echo "the issues could not be read"; return 1; }
@@ -241,20 +263,8 @@ overlapcall() { # <issue> <the belt's issues, a JSON array> <open issues json> <
   if [ -n "${CONVEYOR_OVERLAP_CMD:-}" ]; then
     (cd "$d" && exec timeout --kill-after=10 "$OVERLAP_TIMEOUT" bash -c "$CONVEYOR_OVERLAP_CMD" <<<"$p" > "$d/answer" 2>/dev/null 8>&- 9>&-); rc=$?
   else
-    s=$(seat builder "$4") && jqget "$s" agent agent model model && packget models.allowed a 2>/dev/null \
-      || { rm -rf "$d"; echo "no builder model"; return 1; }
-    model=$(jq -r --arg g "$agent" --arg m "$model" "$OKMODELS"'okmodels("builder")[$g] // [] | last // $m' <<<"$a") || model=''
-    case $agent in
-      claude) acct=$(acctenv "$(ctlacct "$4")") || { rm -rf "$d"; echo "$acct"; return 1; }
-        (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$OVERLAP_TIMEOUT" claude -p --model "$model" --effort low --tools "" \
-          --setting-sources "" --strict-mcp-config --no-session-persistence --output-format text <<<"$p" > "$d/answer" 2>/dev/null 8>&- 9>&-); rc=$? ;;
-      codex) model=$(codexmodel "$model") || { rm -rf "$d"; echo "$model"; return 1; }
-        (cd "$d" && exec timeout --kill-after=10 "$OVERLAP_TIMEOUT" codex exec --skip-git-repo-check -s read-only -m "$model" -c 'model_reasoning_effort="low"' \
-          -o "$d/answer" - <<<"$p" > /dev/null 2>&1 8>&- 9>&-); rc=$? ;;
-      opencode) (REVIEW_TIMEOUT=$OVERLAP_TIMEOUT ocrun "$d" "$model" low <<<"$p" > "$d/events" 2>/dev/null 8>&- 9>&-); rc=$?
-        [ $rc != 0 ] || jq -Rrn "$OPENCODEANSWER" "$d/events" > "$d/answer" 2>/dev/null || rc=1 ;;
-      *) rc=1 ;;
-    esac
+    s=$(askmodel "$d" "$OVERLAP_TIMEOUT" low "$4" "$p"); rc=$?
+    [ -z "$s" ] || { rm -rf "$d"; echo "$s"; return 1; }
   fi
   # Exactly one line (backticks and spaces around it dropped): NONE, or DEPENDS on a card of the belt and one file.
   a=$(jq -Rrsn --argjson b "$2" 'input | split("\n") | map(gsub("^[[:space:]`*]+|[[:space:]`*]+$"; "") | select(. != ""))

@@ -5,17 +5,18 @@
 # release-prep runs the pack's whole suite (test.full) on the remote's head of the default branch, in a worktree of
 # that commit alone ($CARDS/release/wt), and posts the result on that commit as the commit status
 # conveyor/release-suite: success when the suite passed, failure when it did not. `release` takes that status's newest
-# state, success, as the suite's pass on the commit it releases. Before the run release-prep writes a draft of the
-# release notes, the commits since the newest vX.Y.Z tag as bullets, to <state>/release/<version>.md, for the Foreman
-# to edit and commit as docs/releases/<version>.md. The suite runs only when that head holds docs/releases/<version>.md:
-# `release` releases the commit with the notes, so the first run writes the draft and stops, and the run after the
-# notes are pushed runs the suite. It tags and releases nothing.
+# state, success, as the suite's pass on the commit it releases. The suite runs only when that head holds
+# docs/releases/<version>.md in the release notes style (tools/notes-check.sh): `release` releases the commit with the
+# notes. When the head has no notes, release-prep has a model write a draft of them in that style (relnotes()), from
+# the issues landed and the commits since the newest vX.Y.Z tag, to <state>/release/<version>.md, prints its path and
+# stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
+# pushed runs the suite. It tags and releases nothing.
 # Exit 0: passed and posted; 1: the suite failed (failure posted), the head has no notes yet (draft written, nothing
-# run) or a step could not be done; 2: refused at the ask.
+# run), its notes break the style, or a step could not be done; 2: refused at the ask.
 # release, in the main checkout, refuses (exit 1), changing nothing and naming each reason, unless all of:
 # - the version is higher than the newest vX.Y.Z tag of the remote, and its tag does not exist;
 # - the checkout is on the default branch, at the remote's head of it, with no uncommitted change to a tracked file;
-# - docs/releases/<version>.md is on that commit and is not empty;
+# - docs/releases/<version>.md is on that commit, is not empty, and passes the notes style check (tools/notes-check.sh);
 # - the privacy check (privacy/check.sh, with the host file's terms file, as gh_write() runs it) finds nothing in the
 #   tracked files, nor in the changes since the newest tag: each commit's message and added lines, so a hit a later
 #   commit removed is still one;
@@ -42,16 +43,40 @@
 . "$HERE/lib/install.sh" || exit 1
 names || exit 1
 RELHELP="Only the owner decides a release: the Foreman runs conveyor.sh release only after the owner says yes in chat."
-# The notes draft (<file>): a heading, then the subjects of the commits since <last tag> up to <commit>, merges left
-# out, each a bullet in New (feat), Fixes (fix) or Other changes, with its conventional-commit prefix and its
-# trailing (#N) taken off: the notes name no issue or commit.
+RELNOTES_TIMEOUT=600
+# The style of the release notes, docs/releases.md (Release notes); tools/notes-check.sh checks its mechanical rules.
+RELNOTES='Write the release notes of a new release of this project, from the issues that landed since the last release and
+the subjects of its commits, given below. They are for the people who use the project, not for its developers.
+- Begin with the line "# VERSION", then one sentence that says what this release is about.
+- Then "## " sections named for what a user does or sees (for example: Cards, The Board, In Claude Code, Setup). No
+  "###" headings.
+- Plain-English bullets about the effect for the user, one change per bullet.
+- No file, script or function names, no paths, no issue or pull request numbers, no commit hashes, no "Closes", no
+  internal unit names. Names a person types or sees (a slash command, a setup question, a setting, a button) are
+  allowed.
+- Leave out changes that only touch tests, refactors or tooling, or put them in one plain line if they change nothing
+  a user sees.
+Answer with the notes alone, in Markdown, and nothing else.'
+# The notes draft (<file>), written by a model (askmodel) from the issues the commits since <last tag> up to <commit>
+# name ("(#N)" at a subject's end, or a "Closes #N" line: their titles and bodies, as gh reads them) and those commits'
+# subjects, merges left out, each with its trailing (#N) taken off. An issue gh cannot read is left out, with a
+# warning; its commit's subject is still given. Fails, with why on stdout, when the model gives no notes.
 relnotes() { # <version> <last tag, or empty> <commit> <file>
-  git log --no-merges --format=%s "${2:+$2..}$3" | jq -Rrs --arg v "$1" '
-    [split("\n")[] | select(. != "") | (capture("^(?<k>[A-Za-z]+)(\\([^)]*\\))?!?: (?<s>.*)$") // {k: "", s: .})
-      | .s |= sub(" \\(#[0-9]+\\)$"; "")] as $l
-    | "# \($v)\n" + ([[["New", "feat"], ["Fixes", "fix"], ["Other changes", null]][] as [$h, $k]
-      | [$l[] | select(if $k == null then .k != "feat" and .k != "fix" else .k == $k end) | "- \(.s)"]
-      | select(length > 0) | "\n## \($h)\n\n" + join("\n") + "\n"] | join("")) ' > "$4"
+  local subj ns n j iss='[]' p d rc s c
+  subj=$(git log --no-merges --format=%s "${2:+$2..}$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "${2:+$2..}$3") || { echo "the commits could not be read"; return 1; }
+  for n in $(grep -oE '(\(#[0-9]+\)$|^Closes #[0-9]+)' <<<"$ns" | grep -oE '[0-9]+' | sort -un); do
+    j=$(timeout 60 gh issue view "$n" --json number,title,body < /dev/null 2>/dev/null) && iss=$(jq -c --argjson i "$j" '. + [$i]' <<<"$iss" 2>/dev/null) \
+      || echo "conveyor: release-prep: issue #$n could not be read; the notes are written without it" >&2
+  done
+  p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
+    + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
+  c=$(ctl 2>/dev/null) || c=''
+  d=$(mktemp -d) || { echo "no scratch folder"; return 1; }
+  s=$(askmodel "$d" "$RELNOTES_TIMEOUT" medium "$c" "$p"); rc=$?
+  [ -z "$s" ] || { rm -rf "$d"; echo "$s"; return 1; }
+  [ "$rc" = 0 ] && [ -n "$(tr -d '[:space:]' < "$d/answer" 2>/dev/null)" ] && cp "$d/answer" "$4" \
+    || { rm -rf "$d"; echo "the model gave no notes (exit $rc; 124 is the ${RELNOTES_TIMEOUT}s timeout)"; return 1; }
+  rm -rf "$d"
 }
 # The release lock, held until the command ends. 1: it could not be made; 2: another run holds it.
 rellock() { # <command name>
@@ -80,7 +105,7 @@ relsuite() { # <command name> <commit>
   else echo "conveyor: $n: the whole suite failed on ${sha:0:12} (exit $rc; its output is in $wt.test); a failing status is posted" >&2; return 1; fi
 }
 releaseprep() { # <version>
-  local v=$1 cmd sha last d
+  local v=$1 cmd sha last d out
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
@@ -88,15 +113,19 @@ releaseprep() { # <version>
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}") || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
   last=$(lasttag)
-  d=${STATE%/*}/release/$v.md
-  mkdir -p "${d%/*}" && relnotes "$v" "$last" "$sha" "$d" || { echo "conveyor: release-prep: the notes draft could not be written; nothing run" >&2; return 1; }
   # `release` releases the remote's head and reads the status of that commit, so the suite runs only on a head that
-  # holds the notes: a status posted before the notes are committed is on a commit the release does not use.
-  [ -n "$(git show "$sha:docs/releases/$v.md" 2>/dev/null | tr -d '[:space:]')" ] || {
-    echo "conveyor: release-prep: the notes draft, from the commits since ${last:-the first commit}, is $d. ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: edit the draft, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
-    return 1; }
-  echo "conveyor: release-prep: the notes draft, from the commits since ${last:-the first commit}, is $d; ${sha:0:12} holds docs/releases/$v.md"
-  relsuite release-prep "$sha"
+  # holds the notes, in the notes style: a status posted on another commit is on one the release does not use.
+  if [ -n "$(git show "$sha:docs/releases/$v.md" 2>/dev/null | tr -d '[:space:]')" ]; then
+    out=$(git show "$sha:docs/releases/$v.md" | "$HERE/tools/notes-check.sh" - "docs/releases/$v.md") \
+      || { echo "conveyor: release-prep: docs/releases/$v.md on ${sha:0:12} breaks the release notes style, so the suite is not run and no status is posted: $(head -n 10 <<<"$out" | paste -sd ';' -)" >&2; return 1; }
+    echo "conveyor: release-prep: ${sha:0:12} holds docs/releases/$v.md"
+    relsuite release-prep "$sha"; return
+  fi
+  d=${STATE%/*}/release/$v.md
+  mkdir -p "${d%/*}" && rm -f "$d" && out=$(relnotes "$v" "$last" "$sha" "$d") || { echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
+  out=$("$HERE/tools/notes-check.sh" "$d") || out=" The draft breaks the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)."
+  echo "conveyor: release-prep: the notes draft, from the issues and commits since ${last:-the first commit}, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
+  return 1
 }
 release() { # <version>
   local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=()
@@ -112,7 +141,10 @@ release() { # <version>
   if git rev-parse -q --verify "refs/tags/v$v" > /dev/null; then why+=("the tag v$v already exists")
   elif [ -n "$last" ] && [ "$(printf '%s\n' "${last#v}" "$v" | sort -V | tail -n 1)" != "$v" ]; then why+=("the version $v is not higher than the newest release, $last")
   fi
-  [ -n "$(git show "$sha:$notes" 2>/dev/null | tr -d '[:space:]')" ] || why+=("there are no release notes: $notes is missing or empty on ${sha:0:12}")
+  if [ -z "$(git show "$sha:$notes" 2>/dev/null | tr -d '[:space:]')" ]; then why+=("there are no release notes: $notes is missing or empty on ${sha:0:12}")
+  elif ! out=$(git show "$sha:$notes" | "$HERE/tools/notes-check.sh" - "$notes"); then
+    why+=("the release notes break the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)")
+  fi
   terms=$(termsfile)
   if [ -z "$terms" ] && termsnamed; then why+=("the host file's terms file cannot be read, so the privacy check cannot be made")
   else

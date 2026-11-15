@@ -8,26 +8,29 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# relsetup <full-cmd> [nonotes]: main's pack names a whole suite (test.full: $STUB/full-cmd, which notes the commit it
-# ran on); origin has the release v1.0.0 and two commits after it, the last adding docs/releases/1.1.0.md (not with
-# nonotes); main has one more commit origin lacks. gh records each call.
-# O is origin's head, the commit release-prep must test and post on.
+# relsetup <full-cmd> [nonotes|<notes text>]: main's pack names a whole suite (test.full: $STUB/full-cmd, which notes
+# the commit it ran on); origin has the release v1.0.0 (its commit names issue #1) and two commits after it, the first
+# naming issue #5 in its subject, the second issue #7 in a Closes line and adding docs/releases/1.1.0.md (not with
+# nonotes; with <notes text>, that text); main has one more commit origin lacks. gh records each call, and `gh issue
+# view <n>` prints issue n of the fixture issues (#1, #5, #7). A case that drafts notes writes the model, the stub
+# claude. O is origin's head, the commit release-prep must test and post on.
 relsetup() {
-  setup '[]'; tune '.test.full = ". \"$STUB/full-cmd\""'
+  setup '[{"number":1,"title":"Old","body":"BEFORE-BODY"},{"number":5,"title":"Hold a card","body":"HOLD-BODY"},{"number":7,"title":"Faster board","body":"FAST-BODY"}]'
+  tune '.test.full = ". \"$STUB/full-cmd\""'
   printf 'git rev-parse HEAD > "$STUB/full-at"\n%s\n' "$1" > "$STUB/full-cmd"
-  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$STUB/gh-calls"\n' > "$STUB/gh"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$STUB/gh-calls"' \
+    '[ "$1 $2" != "issue view" ] || jq -c --argjson n "$3" ".[] | select(.number == \$n)" "$STUB/issues.json"' > "$STUB/gh"
   git -C "$R" commit -q --allow-empty -m 'fix: before the release (#1)' && git -C "$R" tag v1.0.0
   git -C "$R" commit -q --allow-empty -m 'feat(engine): A new thing (#5)' || fail "the fixture could not be made"
-  [ "${2:-}" = nonotes ] || { mkdir -p "$R/docs/releases" && echo '- A fix' > "$R/docs/releases/1.1.0.md" && git -C "$R" add docs; } || fail "the fixture could not be made"
-  git -C "$R" commit -q --allow-empty -m 'fix: A fix'
+  [ "${2:-}" = nonotes ] || { mkdir -p "$R/docs/releases" && printf '%s\n' "${2:-- A fix}" > "$R/docs/releases/1.1.0.md" && git -C "$R" add docs; } || fail "the fixture could not be made"
+  git -C "$R" commit -q --allow-empty -m 'fix: A fix' -m 'Closes #7'
   git -C "$R" push -q origin main && git -C "$R" push -q origin v1.0.0 && git -C "$R" tag -d v1.0.0 > /dev/null || fail "the fixture could not be made"
   git -C "$R" commit -q --allow-empty -m 'feat: Not pushed yet'
   O=$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)
 }
 
 # Bugs: a passing status is posted on a commit whose suite was not run or did not pass, or on main's local head rather
-# than the remote's (the commit `release` releases); the notes draft misses commits since the last release, holds
-# ones before it, or names issue numbers.
+# than the remote's (the commit `release` releases); a model is paid to draft notes the head already holds.
 t_relpass() {
   local O out
   relsetup true
@@ -35,22 +38,75 @@ t_relpass() {
   [ "$(cat "$STUB/full-at" 2>/dev/null)" = "$O" ] || fail "the suite did not run on origin's head $O: $(cat "$STUB/full-at" 2>&1)"
   [ "$(grep -c statuses "$STUB/gh-calls")" = 1 ] && grep -q "statuses/$O -f state=success -f context=conveyor/release-suite " "$STUB/gh-calls" \
     || fail "no passing conveyor/release-suite status was posted on $O: $(cat "$STUB/gh-calls" 2>&1)"
-  [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\n## New\n\n- A new thing\n\n## Fixes\n\n- A fix' ] \
-    || fail "the notes draft does not list the commits since v1.0.0 alone: $(cat "$ST/release/1.1.0.md" 2>&1)"
+  [ ! -e "$STUB/sessions" ] && [ ! -e "$ST/release/1.1.0.md" ] || fail "a notes draft was written for a head that holds the notes"
 }
 
-# Bug: the suite ran and its status was posted on a head without the notes; committing the notes then makes a new head,
-# and `release`, which checks the status of the head it releases, runs the suite again. The draft is still written.
+# relmodel <answer>: the model (the stub claude) keeps its prompt in $STUB/notes-prompt and answers <answer>.
+relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\nprintf "%%s\\n" %q\n' "$1" > "$STUB/claude"; }
+
+# Bugs: the suite ran and its status was posted on a head without the notes (committing the notes then makes a new
+# head, and `release`, which checks the status of the head it releases, runs the suite again); the notes draft is not
+# the model's, or the model is not given the issues landed since the last release (named by "(#N)" or by a Closes
+# line), their bodies, the commit subjects and the style, or is given an issue from before it.
 t_relnonotes() {
   local O out
-  relsetup true nonotes
+  relsetup true nonotes; relmodel $'# 1.1.0\n\nCards can wait.\n\n## Cards\n\n- You can hold a card.'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
   [ ! -e "$STUB/full-at" ] || fail "the suite ran on a head with no notes"
   ! grep -q statuses "$STUB/gh-calls" 2>/dev/null || fail "a status was posted on a head with no notes: $(cat "$STUB/gh-calls")"
-  grep -q 'has no docs/releases/1.1.0.md' <<<"$out" && grep -q 'run release-prep 1.1.0 again' <<<"$out" \
-    || fail "release-prep does not say to commit the notes and run again: $out"
-  [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\n## New\n\n- A new thing\n\n## Fixes\n\n- A fix' ] \
-    || fail "the notes draft was not written: $(cat "$ST/release/1.1.0.md" 2>&1)"
+  grep -qF "the notes draft, from the issues and commits since v1.0.0, is $ST/release/1.1.0.md. " <<<"$out" && grep -q 'run release-prep 1.1.0 again' <<<"$out" \
+    || fail "release-prep does not print the draft's path and say to commit the notes and run again: $out"
+  [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\nCards can wait.\n\n## Cards\n\n- You can hold a card.' ] \
+    || fail "the notes draft is not the model's: $(cat "$ST/release/1.1.0.md" 2>&1)"
+  grep -q HOLD-BODY "$STUB/notes-prompt" && grep -q FAST-BODY "$STUB/notes-prompt" && grep -qx 'fix: A fix' "$STUB/notes-prompt" \
+    && grep -qx 'feat(engine): A new thing' "$STUB/notes-prompt" \
+    && grep -q '^- Begin with the line "# 1.1.0"' "$STUB/notes-prompt" && ! grep -q BEFORE-BODY "$STUB/notes-prompt" \
+    || fail "the model was not given the issues and subjects since v1.0.0 alone, and the style: $(cat "$STUB/notes-prompt" 2>&1)"
+}
+# Bug: a draft that breaks the style is shown as if it were ready to commit.
+t_reldraftstyle() {
+  local O out
+  relsetup true nonotes; relmodel $'# 1.1.0\n\n- Cards can wait. Closes #5'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  grep -qF 'The draft breaks the release notes style: ' <<<"$out" && grep -qF '1.1.0.md:3: a Closes line' <<<"$out" \
+    || fail "release-prep does not say the draft breaks the style, naming the rule: $out"
+}
+# Bug: a model that gives no notes leaves an empty draft, or an earlier run's, to be taken for this run's.
+t_relnomodel() {
+  local O out
+  relsetup true nonotes; printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB/claude"
+  mkdir -p "$ST/release" && echo '# an earlier draft' > "$ST/release/1.1.0.md" || fail "the fixture could not be made"
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -q 'the notes draft could not be written: the model gave no notes (exit 1' <<<"$out" \
+    || fail "release-prep does not say the model gave no notes: $out"
+  [ ! -e "$ST/release/1.1.0.md" ] || fail "a draft was written when the model gave none"
+}
+# Bug: the suite runs, and its pass is posted, on a head whose notes `release` refuses, so the run is wasted.
+t_relnotestyle() {
+  local O out
+  relsetup true $'# 1.1.0\n\n### Fixes'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -qF 'docs/releases/1.1.0.md:3: a ### heading' <<<"$out" \
+    || fail "release-prep did not refuse notes that break the style, naming the rule: $out"
+  [ ! -e "$STUB/full-at" ] && ! grep -q statuses "$STUB/gh-calls" 2>/dev/null || fail "the suite ran or a status was posted on notes that break the style"
+}
+
+# Bug: the style check passes notes that name a file, an issue or a commit, so users read an engineering log; or it
+# refuses the shipped 1.0.0 notes. Each finding names its rule, so the owner knows what to change.
+t_notescheck() {
+  local f=$T/$CASE.md rule line out
+  out=$("$SRC/tools/notes-check.sh" "$SRC/../docs/releases/1.0.0.md") || fail "the 1.0.0 notes break the style: $out"
+  while IFS='|' read -r rule line; do
+    printf '# 9.9.9\n\nThe release.\n\n%s\n' "$line" > "$f"
+    out=$("$SRC/tools/notes-check.sh" "$f" n.md); [ $? = 1 ] && grep -qF "n.md:5: $rule: $line" <<<"$out" \
+      || fail "the check did not refuse \"$line\" as $rule: $out"
+  done <<'EOF'
+a ### heading|### Cards
+an issue or pull request number|- Cards can wait (#12).
+a commit hash|- Landed at 3f9a2c1d.
+a path or file name|- The fix is in conveyor/lib/x.sh.
+a path or file name|- The belt is drawn by belt3d.js.
+a path or file name|- A new logo.svg and icon.png.
+a Closes line|Closes #3
+EOF
 }
 
 # Bug: a failing suite still posts a passing status, so `release` would release a red commit without running the suite.
@@ -104,6 +160,14 @@ t_cutlower() {
   [ ! -e "$STUB/full-at" ] || fail "the suite ran for a release refused before it"
 }
 t_cutnotes() { local O; cutsetup true; cutrefused 1.2.0 'no release notes: docs/releases/1.2.0.md is missing'; }
+# Bug: notes that read as an engineering log (an issue number here) are released as the GitHub release's text.
+t_cutstyle() {
+  local O; cutsetup true
+  printf '# 1.1.0\n\n- A fix (#12)\n' > "$R/docs/releases/1.1.0.md" && git -C "$R" commit -qam 'the notes' && git -C "$R" push -q origin main \
+    && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
+  cutrefused 1.1.0 'the release notes break the release notes style: docs/releases/1.1.0.md:3: an issue or pull request number'
+  [ ! -e "$STUB/full-at" ] || fail "the suite ran for a release refused before it"
+}
 # The uncommitted change stays as it was.
 t_cutdirty() {
   local O; cutsetup true; echo changed >> "$R/a.txt"
