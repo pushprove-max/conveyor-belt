@@ -86,7 +86,7 @@ test('Health: a test file kept off card test steps is listed with why and its is
   const row = dd(w, 'Kept off card tests');
   assert.match(row.textContent, /^1 file1 test file over the CPU budget in two card test runs in a row/);
   assert.equal(row.querySelector(':scope > details.output .slow-off-list').textContent,
-    "conveyor/tests/s.test.sh: 10.2 CPU s in c2-9's test run and 9 in c2-8's, over the 8 CPU s budget; runs only in the full test suite until #17 lands");
+    "conveyor/tests/s.test.sh2 runs over budget#1710.2 CPU s in c2-9's test run and 9 in c2-8's, over the 8 CPU s budget; runs only in the full test suite until its issue lands");
   assert.equal(row.querySelector(':scope > details.output a.issue').href, 'https://github.com/example/sample/issues/17');
 });
 

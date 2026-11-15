@@ -9,8 +9,9 @@
 // restart, restartFailed?} | null} | null (the main checkout brought forward to origin/main)}.
 // A row whose chip is a fault or a warning is failing: the failing rows come first, faults before warnings, each with
 // one line of what to do next ("Next: …"); the rows that are fine fold into one "N checks fine" that opens to them.
-// A row is one plain line: a long or many-line text (a push's output, an error) shows its first line, cut, and the
-// whole under "Show output"; a wait given in seconds ("retry after 1022 s") reads "try again in 17 min".
+// A row is one plain line: a long or many-line text (a push's output) shows its first line, cut, and the whole under
+// "Show output"; a one-line error shows a plain sentence of what failed, the raw line under "Raw error"; a wait given in
+// seconds ("retry after 1022 s") reads "try again in 17 min".
 const HEALTH_LINE = 100; // the most characters a row's text shows before the rest goes under "Show output"
 const OLD_READING_MS = 15 * 60 * 1000; // a usage or account reading older than this shows its age and is a warning
 const ACCOUNTS_DOC = 'https://github.com/pushprove-max/conveyor-belt/blob/main/conveyor/README.md#accounts'; // how an account is added to the host file
@@ -33,7 +34,7 @@ window.DASH_APP.panel({
     const olds = new Map(Array.from(el.querySelectorAll('dd > details.output'), (o) => [o.parentElement.previousElementSibling?.dataset.check, o]));
     const check = (label, chip, ...detail) => {
       const dd = h('dd');
-      const shown = detail.flat().map((x) => (x && Object.prototype.hasOwnProperty.call(x, 'tail') ? ctx.output(x.tail, null, null, olds.get(label)) : x));
+      const shown = detail.flat().map((x) => (x && Object.prototype.hasOwnProperty.call(x, 'tail') ? ctx.output(x.tail, null, x.label || null, olds.get(label)) : x));
       dd.append(chip, ...shown.filter(Boolean).map((x) => (typeof x === 'string' ? h('span', 'detail', x) : x)));
       const dt = h('dt', null, label);
       dt.dataset.check = label;
@@ -49,10 +50,27 @@ window.DASH_APP.panel({
       const first = t.split('\n')[0];
       return [h('span', 'detail', first.length > HEALTH_LINE ? `${first.slice(0, HEALTH_LINE - 1)}…` : first), { tail: t }];
     };
+    // An error from the host or git: one line is a plain sentence with the raw line under "Raw error" (healthError);
+    // several lines are a log, drawn as plain() draws it.
+    const error = (text) => {
+      if (typeof text !== 'string' || text.trim().includes('\n')) return plain(text);
+      const e = healthError(text, ctx);
+      return e ? [e.line, e.raw ? { tail: e.raw, label: 'Raw error' } : null] : [];
+    };
+    // One row of a Health list (a test case or file), in a review finding's row styles: its name, a chip of its count
+    // and the issue filed for it (f) as a link when there is one on a line; what more it says (why) under it.
+    const item = (name, count, f, why) => {
+      const row = h('li', 'output-finding'), head = h('div', 'finding-head');
+      head.append(h('p', 'finding-text', name), ctx.chip(count, 'quiet'));
+      if (typeof f.issue === 'number' && f.issue > 0) head.append(ctx.issueLink(f));
+      row.append(head);
+      if (why) row.append(h('p', 'detail', why));
+      return row;
+    };
     const name = d.host.name || 'Build machine';
-    if (d.host.reachable === true) check(name, ctx.chip('Reachable', 'ok'), plain(d.host.error));
-    else if (d.host.reachable === false) check(name, ctx.chip('Unreachable', 'bad'), plain(d.host.error)).next = 'Check the build machine is on and this computer reaches it over SSH.';
-    else check(name, ctx.chip('Not checked', 'warn'), plain(d.host.error)).next = 'The Board checks it again in about a minute. Before that check, this project must name its build machine.';
+    if (d.host.reachable === true) check(name, ctx.chip('Reachable', 'ok'), error(d.host.error));
+    else if (d.host.reachable === false) check(name, ctx.chip('Unreachable', 'bad'), error(d.host.error)).next = 'Check the build machine is on and this computer reaches it over SSH.';
+    else check(name, ctx.chip('Not checked', 'warn'), error(d.host.error)).next = 'The Board checks it again in about a minute. Before that check, this project must name its build machine.';
     // How old what the page shows is: dataRow below (it draws its own next step).
     const s = d.stream;
     if (s && typeof s === 'object') dataRow(check('Data', h('span')).dd, s, ctx);
@@ -93,17 +111,13 @@ window.DASH_APP.panel({
       if (Array.isArray(r.cycles) && r.cycles.length) check(`Dependency cycles${of}`, ctx.chip(`${r.cycles.length} cycle${r.cycles.length === 1 ? '' : 's'}`, 'bad'),
         plain(r.cycles.map((c) => c.map((n) => `#${n}`).join(' ↔ ')).join('; '))).next = "Break each cycle: take one issue off another's Depends on: line on GitHub.";
       // The cases that failed and then passed when run again in the last 7 days (conveyor/lib/flaky.sh): how many on
-      // the row's line, and under "Show output" each with how many times and the issue filed for it when there is
-      // one. A record from before the snapshot gave them has none.
+      // the row's line, and under "Show output" one row each (item): its name, a chip of how many re-runs, and the
+      // issue filed for it when there is one. A record from before the snapshot gave them has none.
       if (Array.isArray(r.flaky)) {
         const cases = r.flaky.filter((f) => f && typeof f.case === 'string' && typeof f.count === 'number');
         if (cases.length) {
-          const det = h('details', 'output'), list = h('p', 'detail flaky-list');
-          cases.forEach((f, i) => {
-            if (i) list.append(h('span', null, ', '));
-            list.append(h('span', null, `${f.case} ×${f.count}`));
-            if (typeof f.issue === 'number' && f.issue > 0) list.append(h('span', null, ' '), ctx.issueLink(f));
-          });
+          const det = h('details', 'output'), list = h('ul', 'output-findings flaky-list');
+          list.append(...cases.map((f) => item(f.case, `${f.count} ${f.count === 1 ? 're-run' : 're-runs'}`, f)));
           det.append(h('summary', null, 'Show output'), list);
           check(`Flaky tests${of}`, ctx.chip(`${cases.length} case${cases.length === 1 ? '' : 's'}`, 'warn'),
             `${cases.length === 1 ? '1 case' : `${cases.length} cases`} passed only on re-run in the last 7 days`, det).next =
@@ -111,17 +125,15 @@ window.DASH_APP.panel({
         } else check(`Flaky tests${of}`, ctx.chip('None', 'ok'), 'no case passed only on re-run in the last 7 days');
       }
       // The test files kept off card test steps for their CPU seconds (conveyor/lib/testrun.sh slowoffs()), each with
-      // why: over the budget in two card test runs in a row, by how much, and the issue whose card brings it back.
+      // why: over the budget in two card test runs in a row, by how much, and the issue whose card brings it back. One
+      // row each (item), the figures under its name.
       if (Array.isArray(r.slowOff)) {
         const files = r.slowOff.filter((f) => f && typeof f.file === 'string');
         if (files.length) {
           const n = (x) => (typeof x === 'number' ? `${Math.round(x * 10) / 10}` : '?');
-          const det = h('details', 'output'), list = h('p', 'detail slow-off-list');
-          files.forEach((f, i) => {
-            if (i) list.append(h('br'));
-            list.append(h('span', null, `${f.file}: ${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s, over the ${n(f.budget)} CPU s budget; runs only in the full test suite until`),
-              h('span', null, ' '), typeof f.issue === 'number' && f.issue > 0 ? ctx.issueLink(f) : h('span', null, 'its issue'), h('span', null, ' lands'));
-          });
+          const det = h('details', 'output'), list = h('ul', 'output-findings slow-off-list');
+          list.append(...files.map((f) => item(f.file, '2 runs over budget', f,
+            `${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s, over the ${n(f.budget)} CPU s budget; runs only in the full test suite until its issue lands`)));
           det.append(h('summary', null, 'Show output'), list);
           check(`Kept off card tests${of}`, ctx.chip(`${files.length} file${files.length === 1 ? '' : 's'}`, 'warn'),
             `${files.length === 1 ? '1 test file' : `${files.length} test files`} over the CPU budget in two card test runs in a row`, det).next =
@@ -217,11 +229,12 @@ window.DASH_APP.panel({
     (acc && Array.isArray(acc.list) ? acc.list : []).forEach((a) => {
       const used = typeof a.usedPct === 'number', age = used ? old(a.readAt) : null, idle = a.cards === false;
       const where = a.machine || 'this machine';
-      const error = typeof a.error === 'string' && /^HTTP 401\b/.test(a.error) ? `this login has expired: sign in again on ${where}` : a.error;
+      // An expired login is the Board's own sentence, whole; any other error is the host's (error()).
+      const why = typeof a.error === 'string' && /^HTTP 401\b/.test(a.error) ? `this login has expired: sign in again on ${where}` : error(a.error);
       const row = check(`Account ${a.name}${a.machine ? ` on ${a.machine}` : ' on this machine'}`,
         used ? ctx.chip(`${Math.round(a.usedPct)}% used`, idle ? 'quiet' : a.usedPct >= 90 ? 'bad' : age ? 'warn' : 'quiet') : ctx.chip('Not read', idle ? 'quiet' : 'warn'),
         a.email || 'no email recorded', age, typeof a.fiveHourPct === 'number' ? `5-hour window ${Math.round(a.fiveHourPct)}%` : null,
-        Array.isArray(a.usedFor) ? a.usedFor.join('; ') : 'the Board does not know its use: it did not read the records', used && !age ? null : plain(error));
+        Array.isArray(a.usedFor) ? a.usedFor.join('; ') : 'the Board does not know its use: it did not read the records', used && !age ? null : why);
       if (idle) return;
       const reset = typeof a.resetsAt === 'string' && a.resetsAt ? ` at ${ctx.when(a.resetsAt)}` : '';
       const doc = h('a', null, 'Accounts');
@@ -231,12 +244,12 @@ window.DASH_APP.panel({
         : a.others === true ? `Move this account's work to another on the Rules tab, or wait for its reset${reset}.`
         : [`Wait for its reset${reset}. To move its work to another account, add one to `, h('code', null, 'accounts'), " in the build machine's host file (", doc, ').'];
     });
-    if (acc && acc.error) check('Host accounts', ctx.chip('Not read', 'warn'), plain(acc.error)).next = 'The Board reads them again in about a minute.';
+    if (acc && acc.error) check('Host accounts', ctx.chip('Not read', 'warn'), error(acc.error)).next = 'The Board reads them again in about a minute.';
     // A checkout that could not be brought forward says why; the last move says whether the dashboard restarted on it.
     const u = d.update;
     if (u && typeof u === 'object') {
       const m = u.moved && typeof u.moved === 'object' ? u.moved : null;
-      check('Dashboard code', u.error ? ctx.chip('Not updated', 'warn') : ctx.chip('Up to date', 'ok'), u.error ? plain(u.error) : (u.head ? `main at ${u.head}` : null),
+      check('Dashboard code', u.error ? ctx.chip('Not updated', 'warn') : ctx.chip('Up to date', 'ok'), u.error ? error(u.error) : (u.head ? `main at ${u.head}` : null),
         m ? `${m.restartFailed ? 'brought forward, restart failed' : m.restart ? 'restarted on new code' : 'brought forward'} ${m.from}..${m.to}` : null, m ? ctx.since(m.at, ' ago') : null).next =
         m && m.restartFailed ? 'Restart the Board on this machine to run the new code.' : 'Make the main checkout the same as origin/main by hand. The reason is beside it.';
     }
@@ -301,6 +314,18 @@ function healthWaits(text, ctx) {
     .replace(/\brate limited \(429\)/g, 'the usage server asked for a pause')
     .replace(/^origin\/main could not be fetched: /, 'the Board could not get main from GitHub: ');
 }
+// An error from the host as {line, raw}: line is a short plain sentence that says what failed, the words before the
+// first ": " of its first line when they are more than one and fit HEALTH_LINE ("the Board could not get main from
+// GitHub: fatal: …" is "The Board could not get main from GitHub."), else that line in the Board's words (healthWaits),
+// cut to HEALTH_LINE. raw is the text as the host gave it, for a closed "Raw error" under the sentence; null when the
+// sentence already says all of it. null for no text.
+function healthError(text, ctx) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  const raw = text.trim(), t = healthWaits(raw, ctx), first = t.split('\n')[0], cut = first.indexOf(': '), head = cut > 0 ? first.slice(0, cut).trim() : '';
+  const line = /\s/.test(head) && head.length < HEALTH_LINE ? `${head[0].toUpperCase()}${head.slice(1)}.`
+    : first.length > HEALTH_LINE ? `${first.slice(0, HEALTH_LINE - 1)}…` : first;
+  return { line, raw: line === t ? null : raw };
+}
 // The live feed rewrites the stream (writtenAt) every 10 s while it runs, and builds data.js again with each change, or
 // after 45 s with none (dashboard_stream.py KEEP), so data.js and this page's feed carry a write at most about 60 s old:
 // a stream not written to for STREAM_EXPIRE_MS is one whose feed has stopped, whatever its last word said.
@@ -326,10 +351,13 @@ function dataRow(dd, s, ctx) {
   const from = live ? (typeof f.updatedAt === 'number' ? new Date(f.updatedAt).toISOString() : null) : s.heardAt;
   const c = ctx.chip(healthAge(from, ctx), 'warn');
   if (typeof from === 'string') c.lastChild.dataset.ageFrom = from;
+  // The stream's own error is one line from the host: its sentence, and the raw line under "Raw error" (healthError).
+  const e = live || s.live ? null : healthError(s.error, ctx);
   const why = live ? 'this page asks the build machine for news every 15 s'
-    : s.live ? 'the live feed stopped' : (s.error || 'the live stream is down');
+    : s.live ? 'the live feed stopped' : e ? e.line : 'the live stream is down';
   const next = live ? 'Reload the page to open its live feed again.' : 'Reload the page. If the data stays old, make sure that the build machine is on. Then press Restart the Board\'s feed.';
-  dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`));
+  const raw = e && e.raw ? ctx.output(e.raw, null, 'Raw error', dd.querySelector(':scope > details.output')) : null;
+  dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`), ...(raw ? [raw] : []));
 }
 // "N s old" (minutes and hours past two minutes); "Age unknown" with no time to count from.
 function healthAge(iso, ctx) {

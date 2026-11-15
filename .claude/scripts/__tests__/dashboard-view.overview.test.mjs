@@ -470,7 +470,7 @@ test('health draws a Flaky tests line: each case with its count and its issue nu
   const dt = panel(w, 'health').querySelector('dt[data-check="Flaky tests"]');
   assert.ok(dt, 'a Flaky tests line');
   const dd = dt.nextElementSibling;
-  assert.match(dd.textContent, /2 cases.*b\.test: flaky ×3 #16, c\.test: other ×1$/s);
+  assert.match(dd.textContent, /2 cases.*b\.test: flaky3 re-runs#16c\.test: other1 re-run$/s);
   const a = dd.querySelector('a.issue');
   assert.equal(a && a.getAttribute('href'), `${P}/16`, 'the issue filed links to it');
   assert.equal(dd.querySelectorAll('.issue').length, 1, 'a case with no issue filed shows none');

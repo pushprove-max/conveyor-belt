@@ -56,6 +56,16 @@ you. **Restart the Board's feed** is in the Health panel.
 - **Queue and Close.** Each entry under "Pipeline changes held for you" has a **Queue** button, which releases
   the issue (`conveyor.sh control release`), and a **Close** button.
 
+## Health and Lanes
+
+- **Flaky tests** and **Kept off card tests** in Health list each test case or file on its own row under **Show
+  output**. A row shows the name, a count ("3 re-runs", "2 runs over budget") and the issue filed for it, as a link,
+  when there is one.
+- A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
+  main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
+- A blocked landing in the Fast lane shows its reason on one line. Its log is under **Show output**, as plain text,
+  with **Copy output**.
+
 ## Rules
 
 The Rules tab holds the settings:

@@ -6,13 +6,23 @@
 // A project with neither lane named says "No lanes set up" and the command that makes one.
 // A card that landed on an earlier day has no since: the lane says "on an earlier day", not a time.
 (function () {
+  const REASON_LINE = 100; // the most characters a blocked landing's reason line shows
+  // The landing's line, and for a blocked one its reason's line too: a node, or a list of them.
   function landing(l, ctx, cardsError) {
     const x = l.landing, h = ctx.h, p = h('p', 'row-meta');
     // The reader's reason (it names files and internal parts) on tap only.
     if (!x) p.append(ctx.chip('Landing not read', 'warn'), ctx.tip(h('span', null, `The Board could not read the cards. ${ctx.retry}`), ctx.details(cardsError)));
     else if (x.state === 'belt') p.append(ctx.chip('Landing: on the belt', 'info'), h('span', null, x.step === 'review' ? `review ${x.review} of ${x.of}` : x.step), ctx.since(x.since, ' in this step'));
     else if (x.state === 'waiting') p.append(ctx.chip('Landing: waiting for your yes', 'warn'), h('span', null, x.reason));
-    else if (x.state === 'blocked') p.append(ctx.chip('Landing: blocked', 'bad'), h('span', null, x.reason));
+    else if (x.state === 'blocked') {
+      // Its reason as one plain line of its own, under the chip and before the log ("Show output"): the reason's first
+      // line, cut; the whole on hover.
+      const said = typeof x.reason === 'string' ? x.reason.trim() : '', first = said.split('\n')[0];
+      const why = h('p', 'reason landing-reason', !first ? 'no reason recorded' : first.length > REASON_LINE ? `${first.slice(0, REASON_LINE - 1)}…` : first);
+      if (said !== why.textContent) why.title = said;
+      p.append(ctx.chip('Landing: blocked', 'bad'));
+      return [p, why];
+    }
     else if (x.state === 'landed') p.append(ctx.chip('Landed', 'ok'), h('span', null, `${x.since ? `at ${ctx.clock(x.since)}` : 'on an earlier day'}; reset the lane to main before the next change`));
     else p.append(ctx.chip('Not landing', 'quiet'), h('span', null, 'conveyor.sh lane land starts it'));
     return p;
@@ -71,7 +81,7 @@
         if (r.fast) ul.append(lane('Fast lane', of, repo, r.fast, ctx, (li, head) => {
           status(r.fast, head, li, ctx);
           const l = r.fast, open = typeof l.ahead === 'number' && l.ahead > 0;
-          if (open) li.append(landing(l, ctx, d.cardsError));
+          if (open) li.append(...[].concat(landing(l, ctx, d.cardsError)));
           // The rows are drawn anew: the lane's output drawn before stays open for the same card.
           const was = Array.from(el.querySelectorAll('li[data-lane="Fast lane"] > details.output')).find((x) => x.parentElement.dataset.repo === repo);
           const out = open && l.landing && l.landing.state === 'blocked' ? ctx.output(l.landing.tail, l.landing.card, null, was) : null;

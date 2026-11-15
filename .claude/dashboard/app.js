@@ -142,7 +142,8 @@
   }
   // The end of the output a blocked card failed on (its line's tail), shown under its sentence: closed under "Show
   // output", in monospace with its line breaks; the card's worktree prefix is ./, identical lines in a row are one line
-  // with ×N, and its FAIL and error lines are counted and listed first. A review's output (a line of it starts [P0] to
+  // with ×N, and its FAIL and error lines are counted and listed first (an output of one line has no such list: it would
+  // only say that line again, above it). A review's output (a line of it starts [P0] to
   // [P3]) is its findings instead: one row each (findingRows), with no failures list. Copy puts the output as shown on the
   // clipboard, as plain text. null when there is no output. label: the words of its toggle, when not "Show output".
   // was: the toggle this one replaces in a redraw, if any: open, for the same card, it stays open with the new output.
@@ -217,7 +218,7 @@
     }
     const shown = (x) => (x.n > 1 ? `${x.text} ×${x.n}` : x.text);
     const review = folded.some((x) => FINDING.test(x.text));
-    const det = h('details', 'output'), fails = review ? [] : folded.filter((x) => FAILLINE.test(x.text));
+    const det = h('details', 'output'), fails = review || folded.length < 2 ? [] : folded.filter((x) => FAILLINE.test(x.text));
     det.append(h('summary', null, label || 'Show output'));
     det.dataset.card = typeof card === 'string' ? card : '';
     det.open = Boolean(was && was.open && was.dataset.card === det.dataset.card);

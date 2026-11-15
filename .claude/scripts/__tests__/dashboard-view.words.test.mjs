@@ -78,9 +78,12 @@ test('Health: a refused usage read and a failed fetch of main are said in plain 
   hd.update = { checkedAt: hd.update ? hd.update.checkedAt : null, head: 'abc1234', error: "origin/main could not be fetched: fatal: 'origin' does not appear to be a git repository", moved: null };
   const w = boot();
   deliver(w, d);
-  const text = panel(w, 'health').textContent;
+  // The page's words, less the closed "Raw error" folds that hold an error as the host gave it.
+  const page = panel(w, 'health').cloneNode(true);
+  page.querySelectorAll('details.output').forEach((d) => d.remove());
+  const text = page.textContent;
   assert.ok(text.includes('the usage server asked for a pause; try again in 58 min'), text);
-  assert.ok(text.includes("the Board could not get main from GitHub: fatal: 'origin' does not appear to be a git repository"), text);
+  assert.ok(text.includes('The Board could not get main from GitHub.'), text);
   assert.doesNotMatch(text, /rate limited|retry after|origin\/main could not/);
 });
 
