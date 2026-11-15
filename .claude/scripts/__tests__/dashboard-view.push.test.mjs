@@ -77,6 +77,30 @@ test('Control: the landed cards not pushed are counted and named, and Push lande
   assert.equal(ruled(r).querySelector('[data-rule="landed"], [data-rule="full-test"]'), null);
 });
 
+// Bugs this guards (issue 25): with the push rule off, the only way to push what landed was Push landed, behind a whole
+// suite run; Push now, beside it, pushes with no run, on a second click, and is off with its reason when it cannot work.
+test('Control: Push now sits beside Push landed, sends push-now on a second click, and needs no full test suite', async () => {
+  const w = boot({ tab: 'control' });
+  deliver(w, data({ push: false }));
+  const btns = Array.from(part(w, 'landed').querySelectorAll('button'), (b) => b.dataset.act);
+  assert.equal(btns.indexOf('push-now'), btns.indexOf('push-landed') + 1, `Push now is next to Push landed: ${btns}`);
+  assert.equal(act(pushP(w), 'push-now').disabled, false);
+  assert.equal(act(pushP(w), 'push-now').dataset.guard, 'final', 'a push cannot be undone');
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'push-now').click()), [], 'the first click only asks');
+  assert.equal(act(pushP(w), 'push-now').textContent, 'Click again to push now, with no full suite run');
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'push-now').click()), [{ action: 'push-now', args: [], repo: 'sample' }]);
+  // No test.full: Push landed is off, Push now still works (it runs no suite).
+  next(w, data({ fullTest: { command: false, why: 'the pack names no full test suite (test.full)', running: null, last: null } }));
+  assert.ok(act(pushP(w), 'push-landed').disabled && !act(pushP(w), 'push-now').disabled, 'Push now needs no full test suite');
+  // A full run under way, or nothing to push: off, with the reason (the host refuses both too).
+  next(w, data({ fullTest: { command: true, why: null, running: { since: '2026-11-14T08:00:00Z', sha: A, how: 'push' }, last: null } }));
+  assert.equal(act(pushP(w), 'push-now').disabled, true);
+  assert.match(part(w, 'landed').querySelector('.board-push-why').textContent, /a full test run is under way/);
+  next(w, data({ unpushed: [] }));
+  assert.equal(act(pushP(w), 'push-now').disabled, true);
+  assert.equal(part(w, 'landed').querySelector('.board-push-why').textContent, 'Cannot work now: nothing that landed waits for a push.');
+});
+
 // Bugs this guards: a project with no full test suite was offered both buttons, and a second press during a run started
 // another (the host refuses it too; its refusal is shown); (UX38) the reason sat under both buttons while neither
 // looked off: each button is disabled, and says why beside it in a sentence.

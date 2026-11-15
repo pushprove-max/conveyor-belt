@@ -181,7 +181,7 @@ atorigin() { # <sha>
 }
 # The push that is owed, as "<card> <issue> <sha>" of the last landing: its commit is in main and not at origin.
 # None while the control record's rule "Push when a card lands" is off (rules.push: land only): the landed commits
-# wait for the Board's Push landed (fulltest()). A record that does not read keeps the push on.
+# wait for the Board's Push landed (fulltest()) or Push now (pushnow()). A record that does not read keeps the push on.
 owed() {
   local o
   [ "$(ctl 2>/dev/null | jq -r '.rules.push')" != false ] || return 1

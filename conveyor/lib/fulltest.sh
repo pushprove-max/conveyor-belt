@@ -86,6 +86,27 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
     anyway) echo "conveyor: ${sha:0:12} is being pushed over its red suite, by $by" ;;
   esac
 }
+# `conveyor.sh push-now` (the Board's "Push now"): what landed and is not pushed, pushed as the loop pushes it while the
+# rule "Push when a card lands" is on, with no full test run: push() of main through the project's pre-push hook, under
+# the card of the newest landing origin lacks, a failure recorded as that card's push line (kind check or transport).
+# Refused (exit 2), with the reason and nothing changed, when main holds no landed commit origin lacks, or while a full
+# test run holds its lock (Run full test suite, Push landed or Push anyway). The ask returns once the push has started:
+# it goes on in the background (its output in $PUSHNOW_LOG), so the Board is not kept waiting for the pre-push hook.
+PUSHNOW_LOG=${STATE%/*}/pushnow.log
+pushnow() {
+  local lk sha o c n
+  [ $# = 0 ] || { echo "usage: conveyor.sh push-now" >&2; return 2; }
+  mkdir -p "$CARDS/fulltest" && { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || { echo "conveyor: the full test's lock could not be made; nothing pushed" >&2; return 1; }
+  flock -n "$lk" || { exec {lk}>&-; echo "conveyor: a full test run is under way$(jq -r '" (\(.how), since \(.since), on \(.sha[0:12]))"' "$FULLTEST.running" 2>/dev/null); nothing pushed" >&2; return 2; }
+  exec {lk}>&-
+  sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main could not be read; nothing pushed" >&2; return 1; }
+  o=$(fullowed "$sha") || { echo "conveyor: no landed commit of main (${sha:0:12}) is unpushed; nothing pushed" >&2; return 2; }
+  read -r c n <<<"$o"
+  # The push file names this job while it pushes (pushing()); it is cleared at the end only while it still does.
+  ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
+    push "$c" "$n"; [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$BASHPID" ] || rm -f "$PUSHING" ) > "$PUSHNOW_LOG" 2>&1 < /dev/null 8>&- &
+  echo "conveyor: main (${sha:0:12}) is being pushed through the pre-push hook, with no full test run"
+}
 # "<card> <issue>" of the newest landing in <commit> that origin lacks; fails when there is none.
 fullowed() { # <commit>
   local c n s

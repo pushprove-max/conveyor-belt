@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the rule "Push when a card lands" (the control record's rules.push) and the Board's full test suite
-# (the pack's test.full): Run full test suite, Push landed behind it, Push anyway, and how a red run is judged.
+# (the pack's test.full): Run full test suite, Push landed behind it, Push anyway, and how a red run is judged; and Push
+# now, which pushes what landed with no run.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -186,4 +187,53 @@ t_fullpushdiverged() {
   [ "$(ftorigin)" = "$hand" ] && [ "$(ftmain)" = "$A" ] && [ "$(ftl '[.state, .sha, .pushed.ok]')" = "[\"passed\",\"$A\",false]" ] \
     && ftl '.pushed.reason' | grep -q 'the full test run did not test' \
     || fail "a diverged remote got a merge the run did not test, or the push does not say why it failed: origin $(ftorigin), main $(ftmain), $(cat "$ST/fulltest.jsonl")"
+}
+
+# Push now (`conveyor.sh push-now`, issue 25), on a card that landed with the push rule off. A pre-push hook that
+# fails when $STUB/push-fail exists, with a check's FAILED line as the project's would print; a test.full that would
+# fail and leaves a mark if it is ever run.
+ftnow() {
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  printf '%s\n' '#!/usr/bin/env bash' 'read -r ref sha rest; echo "$sha" >> "$STUB/hookruns"' \
+    '[ ! -e "$STUB/push-fail" ] || { echo "push-checks: FAILED fast-checks" >&2; exit 1; }' > "$R/.git/hooks/pre-push"
+  chmod +x "$R/.git/hooks/pre-push"
+  echo 'touch "$STUB/full-ran"; exit 1' > "$STUB/full-cmd"; tune '.test.full = ". \"$STUB/full-cmd\""'
+  loop control rules push=off > /dev/null; loop run 1 > "$STUB/run.out" 2>&1 || fail "the run failed: $(cat "$STUB/run.out")"
+  [ "$(ftorigin)" != "$(ftmain)" ] || fail "the landing was pushed with land only"
+}
+ftpushes() { st 'select(.step == "push" or .step == "pushed") | [.step, .result, .kind] | join(" ")' | wc -l | tr -d ' '; }
+
+# Bugs this guards: with the push rule off, landed work could reach the remote only behind a whole suite run (Push
+# landed); Push now must push it as the loop's own push does: through the pre-push hook, a failed hook recorded as a
+# check push error under the landed card (Needs you reads it), and never run test.full.
+t_pushnow() {
+  ftnow; local A O0 out
+  A=$(ftmain); O0=$(ftorigin)
+  # The hook fails: nothing reaches the remote, and the card has a push line of kind check naming the check.
+  : > "$STUB/push-fail"
+  loop push-now > /dev/null || fail "push-now did not start"
+  wait_until '[ "$(ftpushes)" = 1 ] && [ ! -e "$ST/pushing" ]' 'cat "$ST/pushnow.log" "$ST/cards.jsonl"'
+  [ "$(ftorigin)" = "$O0" ] && [ "$(st 'select(.step == "push") | [.issue, .result, .kind, .check, .sha] | join(" ")')" = "7 fail check fast-checks $A" ] \
+    || fail "a push whose pre-push hook failed reached the remote, or is not recorded as a check push error: origin $(ftorigin), $(st 'select(.step == "push")')"
+  # The hook passes: main reaches the remote through it, the card is marked pushed.
+  rm "$STUB/push-fail"
+  loop push-now > /dev/null || fail "push-now did not start after the check failed"
+  wait_until '[ -n "$(st "select(.issue == 7 and .step == \"pushed\")")" ] && [ ! -e "$ST/pushing" ]' 'cat "$ST/pushnow.log" "$ST/cards.jsonl"'
+  [ "$(ftorigin)" = "$A" ] && [ "$(tail -n 1 "$STUB/hookruns")" = "$A" ] || fail "push-now did not push main through the pre-push hook: origin $(ftorigin), main $A, hook $(cat "$STUB/hookruns")"
+  [ ! -e "$STUB/full-ran" ] && [ ! -s "$ST/fulltest.jsonl" ] || fail "push-now ran the full test suite"
+  # Nothing is unpushed now: refused with the reason, and nothing is pushed or recorded.
+  out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'no landed commit' <<<"$out" || fail "push-now with nothing unpushed was not refused: $out"
+  [ "$(ftpushes)" = 2 ] && [ "$(wc -l < "$STUB/hookruns")" = 2 ] || fail "push-now with nothing unpushed changed something: $(cat "$STUB/hookruns")"
+}
+
+# Bug this guards: Push now pushed while a full test run was under way (its push would race the run's own).
+t_pushnowbusy() {
+  ftnow; local O0 out
+  O0=$(ftorigin)
+  echo 'git rev-parse HEAD >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
+  loop full-test > /dev/null || fail "full-test did not start"
+  wait_until '[ -s "$STUB/full-at" ]' 'cat "$ST/fulltest.jsonl.log"'
+  out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'a full test run is under way' <<<"$out" || fail "push-now during a full test run was not refused: $out"
+  : > "$STUB/go"; ftended 1
+  [ "$(ftorigin)" = "$O0" ] && [ "$(ftpushes)" = 0 ] && [ ! -e "$STUB/hookruns" ] || fail "push-now during a full test run pushed: origin $(ftorigin), $(cat "$STUB/hookruns" 2>&1)"
 }

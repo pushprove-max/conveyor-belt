@@ -24,7 +24,7 @@
 # a card: it is not counted against the builder cap, and its end only turns the loop. A `run` waits for a push under
 # way before it ends (a failed pick does not end it under one either), then exits 1 if a push is still owed. With the
 # control record's push rule off (land only, owed()), no push is owed: cards land on main one after another and the
-# loop pushes none of them; the Board's Push landed does (fulltest()).
+# loop pushes none of them; the Board's Push landed (fulltest()) or Push now (pushnow()) does.
 # stop, under the lock: which of the loop's cards in progress end, given as "<pid> <card>" lines. A card that
 # has begun filing its follow-ups or landing is left to finish: stopped there, it could leave filed issues with no
 # landing. Under the lock, none of them can begin either while this asks. Each card that ends has its processes

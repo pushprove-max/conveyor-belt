@@ -835,7 +835,13 @@ for a in now anyway 'anyway 0123456789AB' 'anyway 0123456789a' 'anyway 012345678
   [ "$(ctl "$(act full-test $a)")" = 400 ] || fail "full_test_takes_no_other_argument: '$a' answered '$(cat "$M/ctl.out")'"
 done
 [ -z "$(calls)" ] || fail "full_test_takes_no_other_argument: ran '$(calls)'"
-pass=$((pass + 4))
+# The Control tab's Push now reaches `conveyor.sh push-now` on the record, with no argument. Bug: the button reaches no
+# command, or an argument reaches the host.
+fresh_control
+[ "$(ctl "$(act push-now)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM push-now" ] || fail "push_now_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control
+[ "$(ctl "$(act push-now push)")" = 400 ] && [ -z "$(calls)" ] || fail "push_now_takes_no_argument: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
+pass=$((pass + 6))
 # The Release panel's Release (the version typed) and Stop reach `conveyor.sh release-run` on the record. Bug: a press
 # reaches no command, or a version the engine does not take (or a word the shell reads) reaches the host.
 for a in 1.2.0 stop; do

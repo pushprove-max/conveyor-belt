@@ -164,6 +164,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or dismiss of declined findings (its "Dismiss" and "Dismiss all shown": the ids of their lines),
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
 # or full-test (the Rules tab's Run full test suite, Push landed and Push anyway: `conveyor.sh full-test [push | anyway <run id>]`),
+# or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
 # or release-run (the Release panel's Release and Stop: `conveyor.sh release-run <version> | release-run stop`),
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
 # or prices (the Rules tab's Model prices: one model's price override set or cleared: `conveyor.sh prices`),
@@ -361,6 +362,8 @@ def control_ok(body):
         return 3 <= n <= 2 + DEPENDS_MAX and ISSUE.fullmatch(v[0]) is not None and v[1] in ('add', 'remove') and all(ISSUE.fullmatch(x) for x in v[2:])
     if a == 'full-test':  # Run full test suite (none), Push landed (push), Push anyway over the red run shown (anyway, its id)
         return v in ([], ['push']) or (n == 2 and v[0] == 'anyway' and RUN_ID.fullmatch(v[1]) is not None)
+    if a == 'push-now':  # Push now: what landed, pushed through the pre-push hook only, with no full test run
+        return n == 0
     if a == 'release-run':  # the Release panel's Release (the version typed) and Stop (stop)
         return n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)
     if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's budget or mark
@@ -523,6 +526,9 @@ def control_script(action, args, main, today, record=None, user=None):
         # The run goes on on the host after the answer (conveyor.sh full-test starts it and returns); a push over a red
         # suite names the red run the confirm showed and is logged under the Board user who confirmed it.
         return '%s full-test%s%s' % (conv, ''.join(' ' + q(x) for x in args), ' --by %s' % q('Board user %s' % user) if args[:1] == ['anyway'] else '')
+    if action == 'push-now':
+        # The push goes on on the host after the answer (conveyor.sh push-now starts it and returns).
+        return '%s push-now' % conv
     if action == 'release-run':
         # Release: the owner's yes to release-prep, then release, which run on the host after the answer; or Stop.
         return '%s release-run %s' % (conv, q(args[0]))

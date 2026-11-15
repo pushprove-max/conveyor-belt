@@ -99,12 +99,12 @@ issue that is not open, a cycle, or an issue whose card already runs.
 ## Push landed and Run full test suite
 
 The Rules tab's **Push when a card lands** rule is Off by default. Conveyor lands each card on main and pushes when you
-press **Push landed**. Turn the rule On, and Conveyor pushes each card on its own after it lands.
+press **Push landed** or **Push now**. Turn the rule On, and Conveyor pushes each card on its own after it lands.
 
 With the rule Off, a card that landed leaves the belt. It is not in On the belt, Belt 3D or `/units` ON THE BELT. Landed
 today shows it as "Landed, waiting for Push landed", and the Control tab counts it in "N landed, not pushed". Its Push
-step stays to come until you press Push landed. With the rule On, a landed card stays on the belt as "pushing" until
-Conveyor pushes it.
+step stays to come until you press Push landed or Push now. With the rule On, a landed card stays on the belt as
+"pushing" until Conveyor pushes it.
 
 **Push landed** and **Run full test suite** are on the Control tab, which shows "N landed, not pushed". Push landed runs
 the project's full test suite, the `test.full` of the pack (the project's settings, `.conveyor/project.json`), on
@@ -114,6 +114,12 @@ record. A case that fails in the code becomes a P1 fix card. A case that fails f
 declined, with its reason. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full test
 suite** runs the suite and pushes nothing. A project with no `test.full` shows both buttons greyed
 (`conveyor/README.md`, The full test suite).
+
+**Push now**, beside Push landed, pushes the landed commits at once, with no full test run. Click it, then click again.
+It pushes main as Conveyor does after each card when the rule is On: through the project's pre-push hook only. If the
+hook fails, nothing is pushed and the card shows in Needs you with the failed check. It is greyed while a full test
+run is under way, or when nothing waits for a push. Use Push now for a small change that the card's own tests and the
+pre-push hook cover. Use Push landed when you want the whole suite green before the push.
 
 ## Release
 

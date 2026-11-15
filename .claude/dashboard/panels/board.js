@@ -3,7 +3,7 @@
 // control bar (the loop's state, and when paused who paused it and how to resume; "Pause <project> after current" or
 // "Resume <project>"; "Stop now and requeue N cards" with a second click; the weekly limit meter
 // with the guard's mark, and today's landed count and cost; cards at once, the guard, the models and the judge are
-// set on the Rules tab), then Push landed and Run full test suite with what they act on (pushTest), over six
+// set on the Rules tab), then Push landed, Push now and Run full test suite with what they act on (pushTest), over six
 // columns: Held, Queue, Building, Review, Needs you, Landed today (on a phone, one under another: Needs you, Building,
 // Review, Queue, Held, Landed today, the last two closed to their heading and count until tapped). A card is dragged between Held and Queue, or onto a
 // queued card to go before it; at phone width the columns are one list and each card has Hold, Queue, Move up and
@@ -51,7 +51,7 @@
 (function () {
   'use strict';
   const MOTION_MS = 260;
-  const ARM_MS = 5000;  // Stop now, Remove the label, Push landed, Run full test suite and Push anyway wait this long for their second click
+  const ARM_MS = 5000;  // Stop now, Remove the label, Push landed, Push now, Run full test suite and Push anyway wait this long for their second click
   const LONG = 8;       // a Held group longer than this starts closed
   const PAGE = 100;     // a column shows this many cards, then more on a click (the owner's figure for the Board)
   const STATES = {
@@ -389,8 +389,8 @@
     return tile;
   }
   // ---- what landed and is not pushed, and the full test suite (the part's unpushed and fullTest) ----
-  // Two actions, not rules: Push landed (the full test suite on main, then, green, the push of the commit it tested)
-  // and Run full test suite (the suite on main by itself, pushing nothing), with the run under way and the last
+  // Actions, not rules: Push landed (the full test suite on main, then, green, the push of the commit it tested), Push
+  // now (the push alone, below) and Run full test suite (the suite on main by itself, pushing nothing), with the run under way and the last
   // result: each failed case and what was done with it, and beside a red run Push anyway, on a second click whose words
   // name the failed cases, sent with that run's id so a later red run is not what it pushes over. A full run costs time
   // and a push cannot be undone: each acts on a second click (guarded). A button that cannot work is greyed, and says
@@ -466,8 +466,14 @@
     const push = guarded('push-landed', 'spend', 'Push landed', 'Click again to run the full suite, then push', 'push-landed','Run the full test suite on main. When it is green, Conveyor pushes what landed', () => send('full-test', ['push']));
     const nothing = un === null ? 'the Board does not know which landed cards wait for a push' : !un.length ? 'nothing that landed waits for a push' : null;
     push.disabled = !!(off || nothing);
+    // Push now: what landed, pushed as Conveyor pushes a card when the push rule is on (the project's pre-push hook
+    // only), with no full test run. It needs no suite in the pack, so only a run under way or nothing to push stops it.
+    const nowOff = f && f.command !== true ? null : off;
+    const pushNow = guarded('push-now', 'final', 'Push now', 'Click again to push now, with no full suite run', 'push-now', 'Push what landed now, through the project\'s pre-push checks only, with no full test run', () => send('push-now', []));
+    pushNow.disabled = !!(nowOff || nothing);
+    const whyNot = [...new Set([off, nothing, nowOff].filter(Boolean))];
     landed.append(h('span', 'board-label', 'Landed, not pushed'), h('span', 'board-value', un === null ? 'not known' : `${un.length} landed, not pushed`),
-      ...(un && un.length ? [cards] : []), push, ...(off || nothing ? [why(off || nothing)] : []));
+      ...(un && un.length ? [cards] : []), push, pushNow, ...whyNot.map(why));
     const full = h('div', 'board-ctl');
     full.dataset.push = 'full-test';
     const runBtn = guarded('full-test', 'spend', 'Run full test suite', 'Click again to run the full suite', 'full-test','Run the full test suite on main; it pushes nothing', () => send('full-test', []));
