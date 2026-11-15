@@ -39,16 +39,23 @@ FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
 # How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
 # runner named as ended (cases/ok and cases/failed of its log folder, session.sh testdone()): {done, failed, cases: the
-# names of the failed ones, of: the cases it selected, the sum of its `TESTRUN cases=N` lines, null with none}. The
+# names of the failed ones, of: the cases it selected, the sum of its `TESTRUN cases=N` lines, null with none; files:
+# {done, of, failed}: the files its runner named as ended (`-- ok <file>`, `-- FAIL <file>`), the sum of its
+# `TESTRUN files=N` lines (null with none) and the names of those that failed}. The
 # lines are read from the logs it wrote (session.sh testlogs()), or from its output when it wrote none, so a runner
 # that also prints its log's lines is counted once.
 suiteprog() { # <worktree>
-  local d=$1.testlog/cases of logs=()
+  local d=$1.testlog/cases ls logs=()
   mapfile -t logs < <(find "$1.testlog" -maxdepth 1 -type f 2>/dev/null)
   [ ${#logs[@]} -gt 0 ] || logs=("$1.test")
-  of=$(cat "${logs[@]}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '/^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); n += $1; seen = 1 } END { print seen ? n + 0 : "null" }')
+  ls=$(cat "${logs[@]}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '/^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); n += $1; seen = 1 }
+    /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); fn += $1; fseen = 1 }
+    /^-- ok / { print "ok\t" substr($0, 7) } /^-- FAIL / { print "failed\t" substr($0, 9) }
+    END { print "of\t" (seen ? n + 0 : "null"); print "fof\t" (fseen ? fn + 0 : "null") }')
   { find "$d/ok" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|ok\t|'; find "$d/failed" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|failed\t|'; } \
-    | jq -Rsc --argjson of "$of" '[split("\n")[] | select(. != "") | split("\t")] | {done: length, of: $of, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort}'
+    | jq -Rsc --arg ls "$ls" '($ls | [split("\n")[] | select(. != "") | split("\t")]) as $l | ($l | map(select(.[0] == "of" or .[0] == "fof") | {(.[0]): (.[1] | fromjson)}) | add) as $n
+      | [split("\n")[] | select(. != "") | split("\t")] | {done: length, of: $n.of, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort,
+        files: ($l | map(select(.[0] == "ok" or .[0] == "failed")) | {done: (map(.[1]) | unique | length), of: $n.fof, failed: [.[] | select(.[0] == "failed") | .[1]] | unique})}'
 }
 FULL_OUTSIDE='ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|Could not resolve host|Network is unreachable|Temporary failure in name resolution|Connection (refused|reset|timed out)|No space left on device|Disk quota exceeded|Cannot allocate memory|out of memory'
 fulltest() { # [push | anyway <run id> [--by <who>]]

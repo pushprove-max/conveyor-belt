@@ -47,8 +47,16 @@ of=$(awk -F= '/^TESTRUN cases=/ { n += $2 } END { print n + 0 }' "$T/out")
 [ "$of" = 5 ] || no "the full suite's case total is $of, not the 5 names it marks as ended: $(grep TESTRUN "$T/out")"
 [ $rc = 1 ] || no "a failing test file did not fail the full suite (exit $rc): $(cat "$T/out")"
 [ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "pass py " ] || no "the full suite did not run each tracked test file alone: $(cat "$R/ran" 2>&1)"
-grep -qx 'ok lib/fx-pass.test.sh' "$T/out" && grep -qx 'FAIL lib/fx-fail.test.py' "$T/out" \
+grep -qx -- '-- ok lib/fx-pass.test.sh' "$T/out" && grep -qx -- '-- FAIL lib/fx-fail.test.py' "$T/out" \
   || no "the full suite does not name each file's result: $(cat "$T/out")"
+# Bug: the suite printed `ok <file>` and no file total, so the Release panel's progress (fulltest.sh suiteprog(), which
+# reads `TESTRUN files=` and `-- ok|FAIL <file>`) had no files done of total and no failed file names.
+cp "$T/out" "$T/wt.test"
+# shellcheck source=/dev/null
+source <(sed -n '/^suiteprog() {/,/^}/p' "$HERE/../conveyor/lib/fulltest.sh")
+got=$(suiteprog "$T/wt" | jq -c .files)
+[ "$got" = '{"done":5,"of":5,"failed":["lib/fx-fail.test.py"]}' ] \
+  || no "the suite's progress does not count its files and failed file names: $got"
 
 # With the failing file gone, the suite passes.
 git -C "$R" rm -q lib/fx-fail.test.py && rm -f "$R/lib/fx-untracked.test.sh"

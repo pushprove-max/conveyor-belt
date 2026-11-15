@@ -193,7 +193,7 @@ export const saved = (w) => JSON.parse(w.localStorage.getItem(STORE));
 // The layout kept for one tab (each tab keeps its own).
 export const kept = (w, tab = 'overview') => saved(w).tabs[tab];
 // Cost is one column wide, so on a wide screen it fills the right column under Lanes (UX36).
-export const SIZES0 = { needs: 'wide', belt: 'wide', queue: 'small', landed: 'wide', release: 'small', declined: 'wide', health: 'small', lanes: 'small', cost: 'small', metrics: 'wide' };
+export const SIZES0 = { needs: 'wide', belt: 'wide', queue: 'small', landed: 'wide', release: 'wide', declined: 'wide', health: 'small', lanes: 'small', cost: 'small', metrics: 'wide' };
 // A panel's width and whether it shows are set in Customize only (its head has no width or hide button).
 export function setSize(w, id, size) { const s = w.document.getElementById(`size-${id}`); s.value = size; s.dispatchEvent(new w.Event('change')); }
 export const hidePanel = (w, id) => w.document.getElementById(`show-${id}`).click();
@@ -414,9 +414,10 @@ export function full(now = T0) {
         { repo: 'sample', card: 'c5-7', issue: 7, title: 'Landed one', url: `${P}/7`, step: 'landed', time: iso(now - 3600000), start: iso(now - 5400000), tookSec: 1800, usd: 2.5, reviews: 2, followups: [31], sha: 'abc', pushed: true },
         { repo: 'sample', card: 'c6-8', issue: 8, title: 'Fixed before', url: `${P}/8`, step: 'closed', time: iso(now - 7200000), start: iso(now - 7800000), tookSec: 600, usd: 0.5, reviews: 1, followups: [], sha: '', pushed: null },
       ] } },
-      // Release: main two commits past v1.2.0, the next version's notes not on main, and no run yet.
-      release: { error: null, data: { records: [{ repo: 'sample', suites: [], release: { tag: 'v1.2.0', count: 2, next: '1.3.0', notes: false, head: 'b'.repeat(40),
-        commits: [{ sha: 'b'.repeat(40), subject: 'feat: Board panel' }, { sha: 'a'.repeat(40), subject: 'fix: A fix' }] } }] } },
+      // Release: a project that releases with Conveyor, main two commits past v1.2.0, the next version's notes not on
+      // main, and no run yet.
+      release: { error: null, data: { records: [{ repo: 'sample', url: 'https://github.com/example/sample-project', suites: [], release: { tag: 'v1.2.0', count: 2, next: '1.3.0', notes: false,
+        head: 'b'.repeat(40), releases: true, commits: [{ sha: 'b'.repeat(40), subject: 'feat: Board panel (#12)' }, { sha: 'a'.repeat(40), subject: 'fix: A fix' }] } }] } },
       // Declined: the collector gives them newest first; the older one was filed as #90 by "File as issue", so it is in
       // the rest the panel shows under "Show every line".
       declined: { error: null, data: { lines: [
@@ -506,8 +507,8 @@ export const SAYS = {
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
   queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2):', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
   landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
-  release: { title: 'Release', count: '', data: ['Newest release v1.2.0: 2 commits on main since it', 'bbbbbbb feat: Board panel', 'docs/releases/1.3.0.md is not on main yet', 'Release'],
-    empty: 'No project to release', failed: 'The Board could not read the release state' },
+  release: { title: 'Release', count: '', data: ['sample', 'Newest release v1.2.0', '2 changes since', 'Notes missing', 'docs/releases/1.3.0.md on main: missing: Draft notes writes them',
+    'Draft notes', 'Show 2 changes'], empty: 'No project releases with Conveyor.', failed: 'The Board could not read the release state' },
   declined: { title: 'Declined', count: '1', data: ['#63', '[P1] b.txt:2 no mark here', 'declined by the judge', '30 min ago', 'Why: its proof needs a stub built to misbehave', 'File as issue',
     'Dismiss', 'Dismiss all shown (1)', 'Show every line'], empty: 'No declined finding', failed: 'The Board could not read the declined findings' },
   health: { title: 'Health', count: '', data: ['buildhost', 'Reachable', 'Conveyor', 'Running', 'Last push', 'All pushed', 'Usage limit', '44% of the 7-day limit used', 'account default, noreply-a@example.com: build and fix and reviews', '6 checks fine'], empty: 'No health reading yet', failed: 'The Board could not read Health' },

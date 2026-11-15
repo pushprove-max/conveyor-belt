@@ -800,6 +800,7 @@
   const partOf = (id) => modules.get(id).part || id;
   // A panel that states alwaysShown (Needs you) has no hide control and no hide box, and a kept layout cannot hide it.
   const hideable = (id) => modules.get(id).alwaysShown !== true;
+  const widthsOf = (id) => modules.get(id).widths || SIZES;  // the widths a panel can take (panel(); every size for a missing one)
   const idsOf = (t) => Array.from(modules.keys()).filter((id) => tabOf(id) === t);
   // On a phone (one column, columns()) the page is one long column: the report panels that say phoneFolded start as
   // their headings, so what needs the owner is not sixteen screens long (issue 413). A layout the owner kept is theirs.
@@ -818,7 +819,8 @@
     const lens = s.lengths && typeof s.lengths === 'object' ? s.lengths : {};
     return {
       order: order.concat(d.order.filter((id) => !order.includes(id))),  // a panel added since the last visit goes last
-      sizes: Object.fromEntries(d.order.map((id) => [id, s.sizes && SIZES.includes(s.sizes[id]) ? s.sizes[id] : d.sizes[id]])),
+      // A width the panel cannot take (Release kept small before it was wide only) is its default.
+      sizes: Object.fromEntries(d.order.map((id) => [id, s.sizes && widthsOf(id).includes(s.sizes[id]) ? s.sizes[id] : d.sizes[id]])),
       lengths: Object.fromEntries(d.order.filter((id) => lengthOk(lens[id])).map((id) => [id, lens[id]])),
       // A layout that lists no collapsed panels (nothing kept yet) has the default's: the phone's folded reports.
       collapsed: Array.isArray(s.collapsed) ? known(s.collapsed) : d.collapsed, hidden: known(s.hidden).filter(hideable),
@@ -1571,7 +1573,7 @@
       label.append(input, h('span', null, hideable(id) ? mod.title : `${mod.title} (always shown)`));
       const width = h('select', 'field custom-size');
       width.id = `size-${id}`; width.setAttribute('aria-label', `Width of ${mod.title}`);
-      SIZES.forEach((s) => { const o = h('option', null, s[0].toUpperCase() + s.slice(1)); o.value = s; o.selected = s === l.sizes[id]; width.append(o); });
+      widthsOf(id).forEach((s) => { const o = h('option', null, s[0].toUpperCase() + s.slice(1)); o.value = s; o.selected = s === l.sizes[id]; width.append(o); });
       width.addEventListener('change', () => { const to = width.value; change(() => { lay().sizes[id] = to; }, `${mod.title} is now ${to}`); });
       row.append(label, width);
       set.append(row);
@@ -1907,7 +1909,8 @@
   // (true: a report panel that starts collapsed to its heading on a phone, until the owner opens it: defaults()), and
   // older(live, history) (its live part with the older entries of the history laid in: withOlder())}, and part (the id
   // of the panel on the list whose part it is drawn from: one file's part shown as more than one panel, such as the
-  // Rules tab's; default its own id).
+  // Rules tab's; default its own id), and widths (the sizes it can take, its size among them; default every size:
+  // Customize offers only these, and a kept layout's other width is read as its default: tidy()).
   function panel(mod) {
     const need = ['render', 'empty', 'error', 'isEmpty'];
     if (!mod || typeof mod.id !== 'string' || typeof mod.title !== 'string' || !need.every((k) => typeof mod[k] === 'function')) throw new Error('a panel needs id, title, render, empty, error and isEmpty');
@@ -1917,6 +1920,7 @@
       tab: TABS.some((x) => x[0] === mod.tab) ? mod.tab : 'overview',
       rows: lengthOk(mod.rows) ? mod.rows : ROWS,
       statedRows: lengthOk(mod.rows),
+      widths: Array.isArray(mod.widths) && SIZES.includes(mod.size) && mod.widths.includes(mod.size) ? SIZES.filter((s) => mod.widths.includes(s)) : SIZES,
     }));
   }
   // A list entry whose file did not load, or did not register, still gets its place and says what is wrong.

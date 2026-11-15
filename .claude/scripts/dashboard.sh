@@ -73,8 +73,9 @@
 #   landed  cards: the cards that landed today, each with its review count, time, its start and tookSec (from the first
 #           pick-up of its work to the landing, the snapshot's totalSec), usd, its reviews in order (rounds, each with judge:
 #           what the judge made of it, as the snapshot gives it), its fixes (fix rounds) and its track.
-#   release records: each record's repo, release (main's newest tag, the commits since it, the next version, whether
-#           main holds its notes, main's head) and suites (its whole-suite runs), as the snapshot gives them.
+#   release records: each record's repo, url (its repository's https address, else null), release (main's newest tag,
+#           the commits since it, the next version, whether main holds its notes, main's head, whether it releases
+#           with Conveyor) and suites (its whole-suite runs), as the snapshot gives them.
 #   declined lines: the review findings the Declined panel shows (not dismissed, not built, at most 7 days old), of every
 #           record, newest first: each with repo, id, time, card, issue, url, finding, by (who declined it: code, judge
 #           or owner), why, built (the issue "File as issue" filed for it, else null), dismissed ({time, by}, else null),
@@ -728,8 +729,8 @@ PANELS_JQ='
               byRepo: ($R | map({key: .repo, value: {held: (.snap | heldN)}}) | from_entries)} end)} end),
    landed: (if $R == null then {error: $cerr, data: null} else {error: null, data: {day: $R[0].snap.day, cards: $landed}} end),
    # Release: the main of each record as its Release panel shows it, and its whole-suite runs (release and suites of
-   # the snapshot; null from a snapshot from before them).
-   release: (if $R == null then {error: $cerr, data: null} else {error: null, data: {records: ($R | map({repo, release: (.snap.release // null), suites: (.snap.suites // null)}))}} end),
+   # the snapshot; null from a snapshot from before them), with the address of its repository for the issue links.
+   release: (if $R == null then {error: $cerr, data: null} else {error: null, data: {records: ($R | map({repo, url: .repoUrl, release: (.snap.release // null), suites: (.snap.suites // null)}))}} end),
    # Declined: the declined list of every record (lines: the declined of its snapshot; rest: its declinedRest; none from
    # a snapshot from before it carried them), newest first.
    declined: (if $R == null then {error: $cerr, data: null} else {error: null, data: ({lines: "declined", rest: "declinedRest"} | map_values(. as $k

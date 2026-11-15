@@ -133,24 +133,48 @@ pre-push hook cover. Use Push landed when you want the whole suite green before 
 
 ## Release
 
-The Release panel on Overview shows, for each project:
+The Release panel on Overview is as wide as Landed today. Customize sets it to wide or full only. It shows one card for each project that releases with
+Conveyor: a project whose `main` has a `docs/releases/` folder. Other projects do not show. When no project releases
+with Conveyor, the panel says "No project releases with Conveyor."
 
-- the newest release tag, and the commits on `main` since that tag;
-- if `main` has the notes of the next version, `docs/releases/<version>.md`;
-- the release run in progress: its step, its commit, how long it has run, the cases done, the cases that failed and
-  their names. A full test run in progress shows here too.
-- else the result of the last release run, on the commit that it tested, and if that commit is still the head of `main`.
-  When a step stops the run, the panel shows each reason that the step gave: no notes file, a change that is not
-  committed, `main` moved while the suite ran, a privacy hit, or a failed suite.
+The top row of a card shows the project, its newest release tag (or "No release yet"), the number of changes since that
+tag, and one status. The status is the first of these that applies: Suite running, Suite failed, Main moved since the
+suite, Released, Notes missing, Suite not run, Ready to release.
 
-**Release** has a version field, with the next minor version in it. Click Release, then click again. This second click
-is your yes to the release. Conveyor runs `conveyor.sh release-prep <version>`. When the whole suite passes on the head
-of `main`, Conveyor runs `conveyor.sh release <version>` ([Releases](releases.md)). Nothing else starts a release.
+Under the top row are three numbered steps. Each step has a mark: done, failed, in progress or to do.
 
-**Stop**, on a run in progress, stops the processes of that run, after a second click. Conveyor itself continues.
+1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
+2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
+   "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
+   that failed. A full test run in progress shows here too.
+3. **Release**: the tag and the GitHub release.
 
-When a card lands while the suite runs, the panel says that `main` moved, and shows **Run again on the new main**. The run
-does not start again by itself.
+When a run stops, each reason that it gave shows under its step: a notes reason under step 1, a suite reason under
+step 2, other reasons under step 3.
+
+The version field has the version to release. This is the newest `docs/releases/<version>.md` on `main` that is higher
+than the newest tag. If there is none, it is the version in `.claude-plugin/plugin.json` when that is higher. Else it
+is the next minor version. When you type another version, the card shows the steps and the button for that version.
+
+The card has one button. Its label follows the state: **Draft notes**, **Run suite**, **Release** with the version (for
+example **Release 1.0.0**) or **Run again on the new main**. Click it, then click again.
+
+- **Draft notes**, **Run suite** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
+  runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
+  of them and stops. Else it runs the whole suite on the head of `main`. These buttons do not release.
+- **Release** with the version runs `conveyor.sh release-run <version>`. The second click is your yes to the release.
+  Conveyor runs `conveyor.sh release-prep <version>`, which runs the whole suite again. When the suite passes, Conveyor
+  runs `conveyor.sh release <version>` ([Releases](releases.md)). Nothing else starts a release.
+
+**Stop** shows only while a run is in progress. After a second click, it stops the processes of that run. Conveyor
+itself continues.
+
+When a card lands while the suite runs, the status stays Suite running, and the suite step says that `main` moved. The
+button stays hidden until the suite ends. Then the status is Main moved since the suite, and the button is **Run again
+on the new main**. The run does not start again by itself.
+
+**Show N changes** opens the changes on `main` since the tag, newest first, 10 at a time. Each change is one line: the
+issue number, as a link, and the issue title.
 
 ## Card steps
 

@@ -843,13 +843,15 @@ fresh_control
 [ "$(ctl "$(act push-now push)")" = 400 ] && [ -z "$(calls)" ] || fail "push_now_takes_no_argument: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
 pass=$((pass + 6))
 # The Release panel's Release (the version typed) and Stop reach `conveyor.sh release-run` on the record. Bug: a press
-# reaches no command, or a version the engine does not take (or a word the shell reads) reaches the host.
-for a in 1.2.0 stop; do
+# reaches no command, or a version the engine does not take (or a word the shell reads) reaches the host. Run suite's
+# `prep <version>` (release-prep alone) reaches it as two words.
+for a in 1.2.0 stop 'prep 1.2.0'; do
   fresh_control
-  [ "$(ctl "$(act release-run $a)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run $a" ] || fail "release_run_${a}_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+  # shellcheck disable=SC2086 # each word an argument
+  [ "$(ctl "$(act release-run $a)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run $a" ] || fail "release_run_${a// /_}_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
 done
 fresh_control
-for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id'; do
+for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id' prep 'prep stop' 'prep 1.2' '1.2.0 prep'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 400 ] || fail "release_run_takes_a_version_or_stop: '$a' answered '$(cat "$M/ctl.out")'"
 done

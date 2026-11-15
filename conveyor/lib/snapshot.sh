@@ -22,10 +22,11 @@
 #   (the reason both buttons are off, else null), running ({since, sha, how} while a run or push holds its lock, else
 #   null) and last (the last line of its record, else null). suites is each whole-suite run, the release's and the
 #   full test's, in one shape (suites()): {kind ("release" or "full test"), version (a release's), step, sha, since,
-#   ended (null while under way), state, done, failed, cases (the failed cases' names), moved, reasons}: the release
+#   ended (null while under way), state, done, failed, cases (the failed cases' names), files ({done, of, failed}),
+#   moved, reasons}: the release
 #   record of commands/release-prep.sh, its cases counted as the suite runs; the full test's run under way, else its
-#   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, head},
-#   null when main cannot be read. The
+#   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, written,
+#   head, releases}, null when main cannot be read. The
 #   first two carry reviews
 #   and track, as below: a blocked card is off the belt, and its track is where the step it stopped in is failed,
 #   with the seconds that step ran.
@@ -259,16 +260,27 @@ suites() {
   printf '%s\n' "$r" "$fr" | jq -cs 'map(objects | del(.main))'
 }
 # What the Release panel shows of main (docs/board.md): the newest vX.Y.Z tag, the commits since it (count; the newest
-# 20, {sha, subject}), the next minor version, whether main holds its notes (docs/releases/<next>.md), and main's head.
+# 100, {sha, subject}), the version to release next, whether main holds its notes (docs/releases/<next>.md), written
+# (every X.Y.Z of a docs/releases/<X.Y.Z>.md on main, for a version the owner types instead), main's head, and
+# releases: whether the project releases with Conveyor (main holds docs/releases/, where release-prep's notes go).
+# The next version is the first of: the newest docs/releases/<X.Y.Z>.md higher than the tag, plugin.json's version
+# (.claude-plugin/plugin.json) when higher than the tag, else the tag's next minor.
+relhigher() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; } # <X.Y.Z> <X.Y.Z>
 releasemain() {
-  local h tag next
+  local h tag base next v w rel=false re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
   h=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || { echo null; return; }
   tag=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
-  next=$(awk -F. '{ print $1 "." $2 + 1 ".0" }' <<<"${tag:-v0.0.0}"); next=${next#v}
-  git log -n 20 --format='%H%x09%s' "${tag:+$tag..}$h" 2>/dev/null | jq -Rcs --arg h "$h" --arg t "$tag" --arg n "$next" \
+  base=${tag#v}; base=${base:-0.0.0}
+  [ "$(git cat-file -t "$h:docs/releases" 2>/dev/null)" != tree ] || rel=true
+  w=$(git ls-tree --name-only "$h" docs/releases/ 2>/dev/null | sed -n 's|^docs/releases/\(.*\)\.md$|\1|p' | grep -E "$re" | sort -V)
+  v=$(tail -n 1 <<<"$w")
+  if [ -n "$v" ] && relhigher "$v" "$base"; then next=$v
+  elif v=$(git show "$h:.claude-plugin/plugin.json" 2>/dev/null | jq -r '.version // empty' 2>/dev/null) && [[ $v =~ $re ]] && relhigher "$v" "$base"; then next=$v
+  else next=$(awk -F. '{ print $1 "." $2 + 1 ".0" }' <<<"$base"); fi
+  git log -n 100 --format='%H%x09%s' "${tag:+$tag..}$h" 2>/dev/null | jq -Rcs --arg h "$h" --arg t "$tag" --arg n "$next" --argjson rel "$rel" --arg w "$w" \
     --argjson c "$(git rev-list --count "${tag:+$tag..}$h" 2>/dev/null || echo null)" --argjson nt "$(git cat-file -e "$h:docs/releases/$next.md" 2>/dev/null && echo true || echo false)" \
     '{tag: (if $t == "" then null else $t end), count: $c, commits: [split("\n")[] | select(. != "") | split("\t") | {sha: .[0], subject: (.[1:] | join("\t"))}],
-      next: $n, notes: $nt, head: $h}'
+      next: $n, notes: $nt, written: [$w | split("\n")[] | select(. != "")], head: $h, releases: $rel}'
 }
 checkrun() { # <scratch folder>; prints {} when the pack names no progress command, else {checkRun: ...}
   local cmd f=${STATE%/*}/checkrun.json out rc v

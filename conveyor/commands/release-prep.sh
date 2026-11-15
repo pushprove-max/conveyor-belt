@@ -36,8 +36,9 @@
 # (each line the command printed to stderr, its "conveyor: <command>: " taken off) and pid (the process whose tree
 # `release-run stop` ends)}. A release after a passed release-prep of the same version keeps that run's
 # suite (sha, done, failed, cases, moved, since); one after a refused release of it keeps that one's (all but moved).
-# `conveyor.sh release-run <version>` is the Board's Release (docs/board.md): the owner's yes, given there. It starts
-# release-prep, then, when it passes, release, in the background, and returns; their output is in
+# `conveyor.sh release-run [prep] <version>` is the Board's Release (docs/board.md): the owner's yes, given there. It
+# starts release-prep, then, when it passes and prep is not given, release, in the background, and returns (with prep,
+# release-prep alone: the Board's Draft notes and Run suite, which release nothing); their output is in
 # $CARDS/release/run.log. That release is told the commit the suite passed on: a main that moved since is refused and
 # its record says moved, so it is never tested and released again without the owner's yes. `conveyor.sh release-run
 # stop` ends the run under way: the processes of that run alone (the tree of the record's pid), never a process group,
@@ -258,14 +259,15 @@ release() { # <version>
   echo "conveyor: release: v$v is released at ${t:0:12}"
 }
 # The Board's Release: release-prep, then on its pass release, in the background (above).
-releasego() { # <version>
+releasego() { # <version> [prep: release-prep alone]
   ( flock -n 9 ) 9>>"$CARDS/release/lock" || { echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     export CONVEYOR_RELEASE_PID=$BASHPID
     # release is told the commit release-prep's suite passed on, so a main that moved meanwhile is refused, never run
     # and released again without the owner's second press.
-    bash "$HERE/conveyor.sh" release-prep "$1" && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1" ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
-  echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"
+    bash "$HERE/conveyor.sh" release-prep "$1" && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1" ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
+  if [ "${2:-}" = prep ]; then echo "conveyor: release-run: release-prep $1 is running, and nothing is released; its output is in $CARDS/release/run.log"
+  else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
 # The run under way ended: its record's pid and every process under it, told to end, then killed 10 s later if they
 # have not. Only a pid that runs conveyor.sh is taken, so a record left by a run that died names no other process.
@@ -291,8 +293,9 @@ if [ "$CMD_ARG" = release ]; then
 elif [ "$CMD_ARG" = release-run ]; then
   if [ "$*" = stop ]; then releasestop
   else
-    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run <version: X.Y.Z> | release-run stop" >&2; exit 2; }
-    mkdir -p "$CARDS/release" && releasego "$1"
+    prep=; [ $# = 2 ] && [ "$1" = prep ] && { prep=prep; shift; }
+    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> | release-run stop" >&2; exit 2; }
+    mkdir -p "$CARDS/release" && releasego "$1" $prep
   fi
 else
   [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-prep <version: X.Y.Z>" >&2; exit 2; }

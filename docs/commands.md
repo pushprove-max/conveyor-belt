@@ -126,4 +126,5 @@ GitHub and releases:
   ([Releases](releases.md)). Only the owner decides a release: the Foreman runs it only after the owner says yes in
   chat.
 - `release-run <version>` is the Board's **Release**: `release-prep`, then `release` when the suite passes.
+  `release-run prep <version>` is its **Draft notes** and **Run suite**: `release-prep` alone, which releases nothing.
   `release-run stop` stops that run ([Releases](releases.md#a-release-from-the-board)).

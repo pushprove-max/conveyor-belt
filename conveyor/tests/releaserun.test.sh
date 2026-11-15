@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: the record of a release's suite run, as the snapshot shows it (suites, release), and the Board's
-# Release (`conveyor.sh release-run <version> | release-run stop`). Their fixtures are release.test.sh's (relsetup,
+# Release (`conveyor.sh release-run [prep] <version> | release-run stop`). Their fixtures are release.test.sh's (relsetup,
 # cutsetup).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -28,21 +28,45 @@ relsnap() {
 # it selected 3 (`TESTRUN cases=3`), and the snapshot's of says so.
 t_relrecord() {
   local O pid
-  relsetup 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && echo "TESTRUN cases=3" > "$CONVEYOR_TEST_LOG/run.log" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$STUB/at1"
+  relsetup 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && printf "%s\n" "TESTRUN cases=3" "TESTRUN files=2" "-- FAIL a.test" > "$CONVEYOR_TEST_LOG/run.log" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$STUB/at1"
 until [ -e "$STUB/go" ]; do sleep 0.1; done; : > "$CONVEYOR_TEST_LOG/cases/ok/two"; : > "$STUB/at2"
 until [ -e "$STUB/go2" ]; do sleep 0.1; done'
   loop release-prep 1.1.0 > "$T/$CASE.prep" 2>&1 & pid=$!
   wait_until '[ -e "$STUB/at1" ]' || fail "the suite did not start: $(cat "$T/$CASE.prep")"
   relsnap "the snapshot does not show the run on $O, 1 case done" --arg o "$O" '.state == "running" and .sha == $o and .version == "1.1.0" and .done == 1 and .of == 3 and .ended == null'
+  # Bug (#27): the Release panel shows the suite's cases, not its files done of all and the failed files' names.
+  relsnap "the snapshot does not count the suite's files" '.files == {done: 1, of: 2, failed: ["a.test"]}'
   : > "$STUB/go"; wait_until '[ -e "$STUB/at2" ]' || fail "the suite did not go on"
   relsnap "the snapshot's cases done do not rise as the suite runs" '.state == "running" and .done == 2'
   : > "$STUB/go2"; wait "$pid" || fail "release-prep failed: $(cat "$T/$CASE.prep")"
   relsnap "the snapshot does not show the passed run on $O once it ended" --arg o "$O" '.state == "passed" and .sha == $o and .done == 2 and .failed == 0 and .ended != null'
   # Bug: the Release panel cannot say what a release would hold: main's newest tag (the one release-prep fetched), the
-  # commits since it, the next minor version and whether main holds its notes.
+  # commits since it, the next version and whether main holds its notes.
   loop snapshot | jq -e --arg h "$(git -C "$R" rev-parse HEAD)" '.release | .tag == "v1.0.0" and .count == 3 and .next == "1.1.0" and .notes == true and .head == $h
     and (.commits | map(.subject)) == ["feat: Not pushed yet", "fix: A fix", "feat(engine): A new thing (#5)"]' > /dev/null \
     || fail "the snapshot's release does not show main since v1.0.0: $(loop snapshot | jq -c .release)"
+}
+# Bugs (#27): the Release panel shows a project that does not release with Conveyor (no docs/releases/ on main), and
+# fills in the tag's next minor (0.1.0 with no tag) where main already holds the notes of the release being prepared
+# (docs/releases/1.0.0.md), or plugin.json names a higher version. The engine's own releasemain() (lib/snapshot.sh),
+# called on one main as it moves.
+t_relnext() {
+  setup '[]'
+  relmain() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/snapshot.sh")" && names || exit 1
+    cd "$R" && releasemain | jq -c "${1:-[.tag, .next, .notes, .releases]}" ); }
+  relput() { mkdir -p "$R/${1%/*}" && printf '%s\n' "$2" > "$R/$1" && git -C "$R" add "$1" && git -C "$R" commit -q -m "add $1" || fail "the fixture could not be made"; }
+  [ "$(relmain)" = '[null,"0.1.0",false,false]' ] || fail "a main with no docs/releases/ and no tag: $(relmain)"
+  relput docs/releases/1.0.0.md '# 1.0.0'
+  [ "$(relmain)" = '[null,"1.0.0",true,true]' ] || fail "no tag and docs/releases/1.0.0.md: not 1.0.0, or not a project that releases with Conveyor: $(relmain)"
+  git -C "$R" tag v1.0.0 && relput .claude-plugin/plugin.json '{"version": "1.1.5"}'
+  [ "$(relmain)" = '["v1.0.0","1.1.5",false,true]' ] || fail "plugin.json's 1.1.5 over v1.0.0 is not the next version: $(relmain)"
+  relput docs/releases/1.3.0.md '# 1.3.0'; relput docs/releases/1.10.0-rc.md 'not a version'
+  [ "$(relmain)" = '["v1.0.0","1.3.0",true,true]' ] || fail "the notes of 1.3.0 do not come before plugin.json's version: $(relmain)"
+  # Bug: the panel marks the notes written for a version the owner types in place of next: written names each version
+  # with notes on main, so the panel checks the one typed.
+  [ "$(relmain .written)" = '["1.0.0","1.3.0"]' ] || fail "written does not name the versions with notes on main: $(relmain .written)"
+  git -C "$R" tag v1.3.0
+  [ "$(relmain)" = '["v1.3.0","1.4.0",false,true]' ] || fail "with notes and plugin.json no higher than v1.3.0, not its next minor: $(relmain)"
 }
 # Bug: the Release panel says main moved only once the suite ends, so the owner waits for a whole suite whose result
 # no release can use. A card lands (main moves) while the stub suite waits; the snapshot must say moved before it ends.
@@ -75,6 +99,17 @@ t_relboard() {
   jq -e --arg o "$O" '.state == "released" and .sha == $o' "$RUN" > /dev/null || fail "the release was not made from the suite's pass on $O: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
   [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && grep -q '^release create v1.1.0 ' "$STUB/gh-calls" || fail "no tag v1.1.0 was pushed, or no GitHub release made: $(cat "$STUB/gh-calls")"
   [ "$(wc -l < "$STUB/runs")" = 1 ] || fail "the suite ran $(wc -l < "$STUB/runs") times, not once"
+}
+# Bug (#27): the Board's Run suite (`release-run prep <version>`) also makes the tag and the GitHub release when the
+# suite passes, with no Release press by the owner.
+t_relprep() {
+  local O RUN out
+  runsetup true
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  relwait "the run did not end" '.ended != null'
+  sleep 1 # sleep: no record is the outcome under test, so no condition can end the wait; a release started after the pass would write its record within this
+  jq -e --arg o "$O" '.state == "passed" and .step == "release-prep" and .sha == $o' "$RUN" > /dev/null || fail "release-prep did not pass alone on $O: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" || fail "Run suite released v1.1.0: $(cat "$STUB/gh-calls")"
 }
 # Bug: a red suite is released, or its record does not name its failed cases. This suite's runner names none, so they
 # come from its output.
