@@ -192,6 +192,10 @@ issue number, as a link, and the issue title.
   command gives the count when it prints `TESTRUN cases=N`, and names each case as it ends with an empty file in
   `cases/ok` or `cases/failed` of its test log folder (`conveyor/README.md`, The test step). With no case count, the
   card shows its test files, "3 of 6 test files".
+- A passing Test step with test files over their CPU budget shows one chip, "3 slow files" or "1 slow file". It is a
+  note, not a warning: the card still lands. Click the chip to open the list under the step. Each row shows the file
+  name, its folder under it and its CPU seconds, "63.3 CPU s". The slowest file is first. When all the files went over one
+  budget, a line above the rows gives it (`test.fileBudget` in the pack, or the file's own budget).
 
 ## Tests page
 
