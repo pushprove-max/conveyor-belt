@@ -57,8 +57,7 @@ test('each panel states its tab and its default length: about 5 to 8 rows for a 
   }
   assert.deepEqual(stated, {
     machine: ['control', 'all'], 'board-loop': ['control', 'all'], 'board-push': ['control', 'all'], board: ['control', 'all'],
-    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], queue: ['overview', 8], landed: ['overview', 6], declined: ['overview', 6],
-    machine: ['control', 'all'], board: ['control', 'all'], rules: ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], queue: ['overview', 8], landed: ['overview', 6], release: ['overview', 'all'], declined: ['overview', 6],
+    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], queue: ['overview', 8], landed: ['overview', 6], release: ['overview', 'all'], declined: ['overview', 6],
     health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 8], metrics: ['overview', 8],
   });
   for (const [id, [, rows]] of Object.entries(stated)) if (rows !== 'all') assert.ok(rows >= 5 && rows <= 8, `${id} shows ${rows} rows by default`);
