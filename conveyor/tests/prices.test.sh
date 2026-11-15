@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the pack's model price overrides (prices), saved by `conveyor.sh prices` and used to price card steps.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this

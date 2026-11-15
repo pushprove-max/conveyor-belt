@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # timeout: 60
 # The release steps, docs/releases.md (Making a release), hold the step that keeps the Board's built-in model prices
 # current: the Claude and OpenAI pricing pages read again, and the table in dashboard_limit.py updated with the date

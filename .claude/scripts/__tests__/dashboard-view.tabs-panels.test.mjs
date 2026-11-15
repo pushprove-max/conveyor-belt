@@ -9,11 +9,18 @@ import { VIEW, clone, iso, T0, boot, deliver, full, panel, state, order, act, ca
 const test = cases(import.meta.url);
 
 // The panels docs/board.md names for a tab, in its order: "- **Rules**: the panels **A**, **B** and **C**."
+const DOCS = path.join(VIEW, '..', '..', 'docs');
 function documented(tab) {
-  const doc = fs.readFileSync(path.join(VIEW, '..', '..', 'docs', 'board.md'), 'utf8').replace(/\n {2}/g, ' ');
+  const doc = fs.readFileSync(path.join(DOCS, 'board.md'), 'utf8').replace(/\n {2}/g, ' ');
   const m = doc.match(new RegExp(`^- \\*\\*${tab}\\*\\*: the panels (.+?)\\.(?: |$)`, 'm'));
   assert.ok(m, `docs/board.md names the panels of ${tab}`);
   return Array.from(m[1].matchAll(/\*\*(.+?)\*\*/g), (x) => x[1]);
+}
+// The tab's panel titles match the docs where the docs are: an install (closure.test.sh) ships no docs/ folder, so
+// there only the panels themselves are checked. A checkout with docs/ but no board.md still fails.
+function matchesDocs(titles, tab) {
+  if (!fs.existsSync(DOCS)) return;
+  assert.deepEqual(titles, documented(tab));
 }
 // Each panel the tab shows: its heading, and whether it has the frame's collapse control and its own body.
 const framed = (w) => order(w).map((id) => {
@@ -29,7 +36,7 @@ test('Rules: the tab is five panels in the order the docs give, Model prices its
   const d = full();
   d.panels.rules.data.prices = { builtIn: [{ model: 'claude-opus-5-5', input: 4, output: 20, cacheRead: 0.2 }], overrides: {} };
   deliver(w, d);
-  assert.deepEqual(framed(w), documented('Rules'));
+  matchesDocs(framed(w), 'Rules');
   assert.deepEqual(order(w), ['rules', 'rules-produce', 'rules-prices', 'rules-held', 'rules-issues']);
   for (const id of order(w)) assert.equal(state(w, id), 'ready', `${id} is drawn from the Rules part`);
   // Each section is in its panel and in no other.
@@ -83,7 +90,7 @@ test('Control: Pause\'s answer and Undo show in Loop, even when Board is used wh
 test('Control: the tab is the machine, Loop, Push landed and full test suite, and Board, in the order the docs give', () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());
-  assert.deepEqual(framed(w), documented('Control'));
+  matchesDocs(framed(w), 'Control');
   assert.deepEqual(order(w), ['machine', 'board-loop', 'board-push', 'board']);
   // Projects and Foremen has a Pause of its own for each project: where each of the Board part's controls is.
   const where = (a) => order(w).filter((x) => x !== 'machine' && act(panel(w, x), a));

@@ -93,7 +93,13 @@ t_relnotestyle() {
 # refuses the shipped 1.0.0 notes. Each finding names its rule, so the owner knows what to change.
 t_notescheck() {
   local f=$T/$CASE.md rule line out
-  out=$("$SRC/tools/notes-check.sh" "$SRC/../docs/releases/1.0.0.md") || fail "the 1.0.0 notes break the style: $out"
+  # The 1.0.0 notes are checked where the docs are: an install (closure.test.sh) ships no docs/ folder. The fixtures
+  # below run in both. A checkout with docs/ but no 1.0.0 notes still fails.
+  if [ -d "$SRC/../docs" ]; then
+    out=$("$SRC/tools/notes-check.sh" "$SRC/../docs/releases/1.0.0.md") || fail "the 1.0.0 notes break the style: $out"
+  else
+    echo "skip [$CASE]: the 1.0.0 notes are not checked here: this install has no docs/ folder" >&2
+  fi
   while IFS='|' read -r rule line; do
     printf '# 9.9.9\n\nThe release.\n\n%s\n' "$line" > "$f"
     out=$("$SRC/tools/notes-check.sh" "$f" n.md); [ $? = 1 ] && grep -qF "n.md:5: $rule: $line" <<<"$out" \

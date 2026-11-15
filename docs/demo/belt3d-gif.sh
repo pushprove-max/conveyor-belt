@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # belt3d-gif.sh <belt3d.mp4> <belt3d.json> <out.gif> <terms file> -- makes the README's Belt 3D GIF, docs/belt-3d.gif,
 # from the clip capture-board.js records (make.sh runs it): every frame of the clip, none dropped, played 25 a second
 # (a delay of 4/100 s each, which every browser keeps; a clip of 30 frames a second plays 6/5 as long), at most 800 px

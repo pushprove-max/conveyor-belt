@@ -226,7 +226,7 @@
       typed.set(rec.repo, input.value);
       const fresh = record(rec, ctx, suitesAll), field = fresh.querySelector('[data-field="version"]');
       card.replaceWith(fresh);
-      field.focus();
+      field.focus({ preventScroll: true });
       if (at !== null) field.setSelectionRange(at, at);
     });
     ctx.twice(btn, 'spend', ask, () => {

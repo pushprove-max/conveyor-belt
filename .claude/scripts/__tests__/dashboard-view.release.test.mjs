@@ -50,7 +50,13 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   // Bug: a version typed in place of 1.0.0 kept 1.0.0's notes step and button, then sent the typed one, whose missing
   // notes made release-prep draft them in place of the suite the button named.
   const field = card(w).querySelector('[data-field="version"]');
+  // Bug (#33): the redraw put the focus back without preventScroll, so a reader scrolled away was pulled back to the
+  // field. jsdom lays nothing out, so the focus call's options are recorded.
+  const focused = [], focus = w.HTMLElement.prototype.focus;
+  w.HTMLElement.prototype.focus = function (opt) { focused.push(Boolean(opt && opt.preventScroll)); return focus.call(this, opt); };
   field.value = '1.1.0'; field.dispatchEvent(new w.Event('input'));
+  w.HTMLElement.prototype.focus = focus;
+  assert.deepEqual(focused, [true], 'the redraw focuses the field without scrolling the page');
   assert.equal(stepOf(w, 'release-notes').dataset.state, 'todo');
   assert.match(stepOf(w, 'release-notes').textContent, /docs\/releases\/1\.1\.0\.md on main: missing/);
   assert.equal(chip(w), 'Notes missing');

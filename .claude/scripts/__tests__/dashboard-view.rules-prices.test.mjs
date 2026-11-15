@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // The Rules tab's Model prices: the built-in prices and the pack's overrides, each override saved or removed through
 // `conveyor.sh prices` (POST control). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';

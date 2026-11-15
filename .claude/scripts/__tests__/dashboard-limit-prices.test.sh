@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # The pack's model price overrides (prices) on the Board's request costs (dashboard_limit.py build, the top strip's cost
 # today and the limit card): an override wins over a model's built-in row, its fast mode and its long-prompt rate.

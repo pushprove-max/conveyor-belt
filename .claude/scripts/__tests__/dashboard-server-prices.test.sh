@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # The Rules tab's Model prices save through POST /control (action prices), which runs `conveyor.sh prices` on the
 # record's main: here the host is this machine and its main a fixture checkout with a pack of its own, so the case
 # reads the override back from the pack the engine wrote. A bad value (negative, a word) is refused with the engine's

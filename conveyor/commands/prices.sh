@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh prices set <model> <input> <output> <cache read> | prices clear <model>`: one model price override of
 # the pack (prices) saved, from the Board's Rules tab (Model prices). The prices are $ per million tokens, each a
 # number of 0 or more; an override wins over the Board's built-in price of the model (dashboard_limit.py use_prices).

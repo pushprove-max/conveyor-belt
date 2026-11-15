@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # belt3d-gif.sh, the step of make.sh that makes the README's Belt 3D GIF from the clip capture-board.js records, run on
 # a clip drawn here by ffmpeg in its place (no browser runs in a test): 30 frames a second, as capture-board.js films,
