@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en" data-motion="on" data-density="comfortable">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The server serves this page at /login; only sibling files load, and it posts to /login of its own host. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="light dark">
+<title>Conveyor Board</title>
+<link rel="stylesheet" href="app.css">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+</head>
+<body>
+<main class="login">
+  <section class="panel login-card" aria-labelledby="login-title">
+    <header class="panel-head login-head">
+      <svg class="brand-mark" aria-hidden="true" viewBox="0 0 64 64">
+        <defs><linearGradient id="cv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b8cf8"/><stop offset="1" stop-color="#4ade80"/></linearGradient></defs>
+        <rect x="1.5" y="1.5" width="61" height="61" rx="17" fill="#151821" stroke="url(#cv)" stroke-width="3"/>
+        <path d="M42.5 20.5A16 16 0 1 0 42.5 43.5" fill="none" stroke="url(#cv)" stroke-width="7.5" stroke-linecap="round"/>
+        <rect x="35" y="26.5" width="16" height="11" rx="3" fill="#4ade80"/>
+      </svg>
+      <div>
+        <h1 id="login-title">Conveyor Board</h1>
+        <!-- The machine this Board runs on, from the address it was opened at (login.js). -->
+        <p id="login-machine" class="login-machine"></p>
+      </div>
+    </header>
+    <div class="panel-body">
+      <!-- The server's answer to a refused step, read out as it appears. -->
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+      <form id="login-password" class="login-form" novalidate>
+        <label class="login-label" for="login-user">User</label>
+        <input class="field" id="login-user" name="user" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+        <label class="login-label" for="login-secret">Password</label>
+        <div class="login-secret">
+          <input class="field" id="login-secret" name="password" type="password" autocomplete="current-password" required>
+          <button class="btn btn-quiet login-show" type="button" id="login-show" aria-controls="login-secret" aria-label="Show password">Show</button>
+        </div>
+        <label class="choice-item"><input type="checkbox" id="login-trust" name="trust" aria-describedby="login-trust-hint"> Trust this device</label>
+        <p id="login-trust-hint" class="foot">Stay logged in on this device for a year, with no password or code.</p>
+        <!-- Shown only once Trust this device is ticked; left blank, the device is named from its browser and system. -->
+        <div id="login-label-row" class="login-form" hidden>
+          <label class="login-label" for="login-label">Device name <span class="login-optional">(optional)</span></label>
+          <input class="field" id="login-label" name="label" maxlength="40">
+        </div>
+        <button class="btn btn-primary login-go" type="submit">Log in</button>
+      </form>
+      <form id="login-code" class="login-form" novalidate hidden>
+        <p class="login-say" id="login-code-hint">Enter the 6-digit code your authenticator app shows for Conveyor.</p>
+        <label class="login-label" for="login-code-input" id="login-code-label">Authenticator code</label>
+        <input class="field login-code-input" id="login-code-input" name="code" inputmode="numeric" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" maxlength="40" required aria-describedby="login-code-hint">
+        <button class="btn btn-primary login-go" type="submit">Log in</button>
+        <button class="btn btn-quiet login-link" type="button" id="login-recovery" aria-controls="login-code-input">Use a recovery code</button>
+        <button class="btn btn-quiet" type="button" id="login-back">Back</button>
+      </form>
+    </div>
+  </section>
+</main>
+<script src="login.js"></script>
+</body>
+</html>

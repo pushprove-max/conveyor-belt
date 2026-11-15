@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+# A release (docs/releases.md, Making a release), by the repository owner alone, from the Actions tab's "Run workflow" button on main.
+# CI (ci.yml) runs first, at the commit being released; the release job runs only when both its jobs pass.
+# The checks and the release are .github/release/release.sh: it refuses, changing nothing, unless the run is the owner's,
+# the version is higher than the newest tag, the commit has the build machine's passing whole-suite status, the privacy
+# check finds nothing since the last release, and docs/releases/<version>.md exists.
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to release, X.Y.Z"
+        required: true
+        type: string
+permissions:
+  contents: write
+  statuses: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  # CI (ci.yml) at the commit being released, on Ubuntu and macOS; its failed step is named in this run. The release
+  # job needs it, so a red CI stops the release before the tag.
+  ci:
+    name: CI
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - run: git config user.name 'github-actions[bot]' && git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - run: bash .github/release/release.sh "$VERSION"
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_TRIGGER: ${{ github.triggering_actor }}
+          RELEASE_OWNER: ${{ github.repository_owner }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}

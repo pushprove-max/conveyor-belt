@@ -1,0 +1,39 @@
+{
+  "mode": "run",
+  "cap": 6,
+  "guard": 98,
+  "held": [],
+  "order": [],
+  "rules": {
+    "P0": true,
+    "P1": true,
+    "P2": true,
+    "P3": true,
+    "followups": true,
+    "push": true,
+    "visible": false,
+    "never": []
+  },
+  "model": {
+    "model": "claude-opus-5-5",
+    "effort": "medium"
+  },
+  "reviewer": {
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
+  },
+  "judge": {
+    "model": "claude-opus-5-5",
+    "effort": "medium"
+  },
+  "tests": null,
+  "judgeOn": true,
+  "judgeAlways": [],
+  "account": null,
+  "reviewAccount": null,
+  "start": "queue",
+  "startHeld": [],
+  "startSeen": [],
+  "depGuard": true,
+  "forced": []
+}

@@ -1,0 +1,13 @@
+Conveyor Belt
+Copyright 2026 pushprove-max
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes three.js 0.170.0 (https://threejs.org), in .claude/dashboard/vendor/three/,
+Copyright © 2010-2024 three.js authors, licensed under the MIT License
+(see .claude/dashboard/vendor/three/LICENSE).
+
+This product includes STE80 Humanizer (https://github.com/Dodaios/ste80-humanizer), its SKILL.md at commit
+0d6f7994a581205aba615e0663a4c509d8a35c7d, in conveyor/rules/ste80.md, Copyright (c) 2026 Dodaios,
+licensed under the MIT License. Its Pass 1 is adapted from humanizer (https://github.com/blader/humanizer),
+Copyright (c) 2025 Siqi Chen, licensed under the MIT License (both in conveyor/rules/ste80-LICENSE).

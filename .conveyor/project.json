@@ -1,0 +1,77 @@
+{
+  "owner": {
+    "name": "owner"
+  },
+  "labels": {
+    "built": "awaiting-deploy",
+    "followup": "conveyor-followup",
+    "type": "bug",
+    "priorities": [
+      "P0",
+      "P1",
+      "P2"
+    ],
+    "areaPrefix": "area:",
+    "nonProductAreas": [
+      "area:engine",
+      "area:board",
+      "area:hooks",
+      "area:plugin"
+    ]
+  },
+  "productPaths": [
+    "site/"
+  ],
+  "pipelineFiles": [
+    "conveyor/conveyor.sh",
+    "conveyor/lib/",
+    ".conveyor/test-changed.sh",
+    ".conveyor/engine-areas.json"
+  ],
+  "test": {
+    "command": "bash .conveyor/test-changed.sh",
+    "full": "bash .conveyor/test-full.sh",
+    "wholeCommands": [
+      "conveyor/conveyor.test.sh"
+    ],
+    "changed": ".conveyor/test-changed.sh",
+    "slowIssues": false,
+    "files": {
+      "conveyor/tools/closure.test.sh": { "cardMode": "CONVEYOR_CLOSURE_QUICK=1" },
+      "conveyor/conveyor.test.sh": { "wholeOnly": true }
+    }
+  },
+  "linkFromMain": [
+    "node_modules"
+  ],
+  "push": {
+    "env": {}
+  },
+  "remote": "origin",
+  "defaultBranch": "main",
+  "models": {
+    "allowed": {
+      "claude": [
+        "claude-opus-5-5",
+        "claude-fable-5-2",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5"
+      ],
+      "codex": [
+        "gpt-6.1-sol",
+        "gpt-6-astra"
+      ],
+      "claude-reviewer": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-fable-5-2"
+      ]
+    }
+  },
+  "review": {
+    "proof": "real"
+  },
+  "privacy": {
+    "mode": "public"
+  }
+}

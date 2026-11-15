@@ -1,0 +1,21 @@
+Always:
+- The smallest change that fully solves the issue. No feature, abstraction or option the issue does not ask for; do add the checks and error handling the changed code needs to be correct.
+- Before you finish, read your staged change once as the reviewer will: does each changed behaviour have a test that fails without it (a test that only finds text in a source file does not test behaviour, unless no behaviour can be run, such as a stylesheet rule in a test with no layout; such a test says why in a one-line comment), and does each new test say which bug it catches; can a check you added be skipped or fooled by an input it trusts; is any comment or doc left untrue. Fix what you find; that is part of the issue.
+- Before changing a file, know what imports it, what breaks if its interface changes and which tests cover it. Fix every in-scope copy of the same bug.
+- A guard or hook that refuses an action is never worked round in another shape. Do what it says, or stop that item and say so. A guard that blocks a write means the file is in the wrong place: move it.
+- The card's hooks refuse three shell commands; do the other thing first time. An `rg`, or a recursive `grep`, with no path, or over `.`, the checkout root, a parent of it or `~` (a whole command that is one such search, with one such path and no `~`, glob, pipe or redirect, runs over the checkout instead, its long output shortened as other commands' are, below): name the directories to search. A shell write into a code file (a redirect, heredoc, `sed -i`, `cp` or `mv`, or a script; Markdown and /tmp are allowed): use the Edit tool. `node --test` without `--max-old-space-size=4096`, or with a larger heap: pass that flag, or use the project's own test script where it has one.
+- No `git stash`, `git checkout` of tracked files, rebase or pull.
+- The owner approves every change to how the engine builds, reviews, fixes, tests, lands or pushes: make one only where the issue asks for it.
+- In your reply: plain English, the point first; tag only what you did not verify, [likely] or [uncertain].
+- When the issue has a `## Done when` section, your final reply (of the build and of every fix or rebase session) ends with a `## Done when` section: one line per bullet of the issue's, in order, `D<n> met: <evidence>` or `D<n> not met: <why>`. Evidence names something checkable: a test (file and case name), a file and line, or a command and its result. Name every TODO or [VERIFY] marker your change adds, on a line with its file. Conveyor checks these lines in code before the review.
+
+Keep tests fast:
+- A test file runs on its own in under the project's CPU budget (the pack's `test.fileBudget`, default 8 CPU s): every card's test step waits for its slowest file.
+- No wrapper that only runs other tests again, and no second case of one behaviour: the run already runs them, so the copy doubles their time and proves nothing.
+- One fixture, render or build per file where the cases allow it, as each one is paid for on every run; a case that runs several fixtures one after another is split into one case per fixture, as cases run side by side and a file takes about as long as its slowest case.
+- Use the project's shared fast test helpers rather than the slow real thing, unless the test is about that thing; call the function rather than run the whole program when only the function is under test: the slow path adds its time to every run and proves nothing more about the code under test.
+
+Keep the session's context small (each tool result is read again on every later turn):
+- Test commands run through the engine's `testbrief.sh -- <command>`, and the command guard adds it to one that does not: it prints the failures with their line numbers, the summary and the path of the whole log, so read the log by line range or search it, never whole.
+- Other commands with over 8,000 characters of output print their first 60 lines, their last 40 lines and the path of a file with the whole output. When the middle matters, read the saved file by line range or search it. Put `CONVEYOR_WHOLE=1` in a command only when it must print whole.
+- Search before you read, and read a file of over 400 lines by line range (the lines a search found), not whole: a whole big file stays in every later turn.

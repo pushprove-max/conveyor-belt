@@ -1,0 +1,6 @@
+conveyor/state/
+node_modules/
+__pycache__/
+*.pyc
+# The types Claude Code writes for the /units mod's editor when it loads the plugin (tsconfig.json extends them).
+.claude-plugin/types/

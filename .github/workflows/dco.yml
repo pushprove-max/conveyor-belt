@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+# The DCO check of a pull request (CONTRIBUTING.md, Sign-off): .github/dco/dco.sh fails it, naming the commit, when a
+# commit has no Signed-off-by: line with its author's name and email. Pushes to main are not pull requests and are
+# not checked.
+name: DCO
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  dco:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash .github/dco/dco.sh "$BASE" "$HEAD"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}

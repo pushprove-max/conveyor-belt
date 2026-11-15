@@ -1,0 +1,11 @@
+{
+  "name": "conveyor-belt-demo",
+  "description": "Builds docs/demo.gif and docs/demo.mp4 (make.sh)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "hyperframes": "0.9.52",
+    "puppeteer": "25.17.0"
+  },
+  "private": true
+}

@@ -1,0 +1,108 @@
+<svg viewBox="0 0 960 360" width="960" height="360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+  <title id="t">How Conveyor Belt works</title>
+  <desc id="d">Open issues drop onto a belt and travel through Pick, Build in a fresh worktree, Review by a second model, Test of the changed tests, Land as one commit on main, and Push. A review finding loops through Fix and back to Review. A block parks the card with its work kept, and Retry sends it back to Pick.</desc>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #e5e7eb; }
+    .name { font-size: 15px; font-weight: 600; text-anchor: middle; }
+    .sub { font-size: 11px; fill: #9ca3af; text-anchor: middle; }
+    .tag { font-size: 11px; fill: #9ca3af; }
+    .still { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .motion { display: none; }
+      .still { display: inline; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="cv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b8cf8"/><stop offset="1" stop-color="#4ade80"/></linearGradient>
+    <marker id="ai" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8b8cf8"/></marker>
+    <marker id="aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/></marker>
+    <g id="card">
+      <rect x="-15" y="-10" width="30" height="20" rx="4"/>
+      <path d="M-9,-4 H9 M-9,1 H5" stroke="#151821" stroke-width="2" stroke-linecap="round"/>
+    </g>
+  </defs>
+
+  <rect x="1.5" y="1.5" width="957" height="357" rx="20" fill="#151821" stroke="url(#cv)" stroke-width="3"/>
+
+  <!-- where the issues come from -->
+  <text class="tag" x="145" y="30">open issues</text>
+
+  <!-- the belt -->
+  <rect x="30" y="110" width="900" height="28" rx="14" fill="#1f2330" stroke="url(#cv)" stroke-width="2"/>
+  <circle cx="44" cy="124" r="8" fill="#151821" stroke="#8b8cf8" stroke-width="2"/>
+  <circle cx="916" cy="124" r="8" fill="#151821" stroke="#4ade80" stroke-width="2"/>
+  <g class="still"><path d="M60,124 H900" stroke="#3a3f52" stroke-width="2" stroke-dasharray="6 14"/></g>
+  <g class="motion">
+    <path d="M60,124 H900" stroke="#3a3f52" stroke-width="2" stroke-dasharray="6 14">
+      <animate attributeName="stroke-dashoffset" from="0" to="-20" dur="0.6s" repeatCount="indefinite"/>
+    </path>
+  </g>
+
+  <!-- each step hangs off the belt -->
+  <path d="M120,138 V160 M270,138 V160 M420,138 V160 M570,138 V160 M720,138 V160 M870,138 V160" stroke="#3a3f52" stroke-width="2"/>
+
+  <!-- side paths: a finding loops through Fix; a block parks the card, and Retry sends it back to Pick -->
+  <path d="M400,214 V258" fill="none" stroke="#8b8cf8" stroke-width="2" marker-end="url(#ai)"/>
+  <path d="M440,262 V218" fill="none" stroke="#8b8cf8" stroke-width="2" marker-end="url(#ai)"/>
+  <text class="tag" x="394" y="242" text-anchor="end">finding</text>
+  <text class="tag" x="446" y="242">fixed, reviewed again</text>
+  <path d="M590,214 V258" fill="none" stroke="#f59e0b" stroke-width="2" marker-end="url(#aa)"/>
+  <text class="tag" x="596" y="242">block</text>
+  <path d="M650,300 V340 H120 V218" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#aa)"/>
+  <text class="tag" x="380" y="333" style="fill:#f59e0b">Retry</text>
+
+  <!-- the moving cards: issues drop onto the belt and ride it to Push, and turn green once they land -->
+  <g class="motion">
+    <g fill="#8b8cf8" opacity="0">
+      <use href="#card"/>
+      <animateMotion path="M120,22 V99 H880" dur="9s" begin="0s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.03;0.95;1" dur="9s" begin="0s" repeatCount="indefinite"/>
+      <animate attributeName="fill" values="#8b8cf8;#8b8cf8;#4ade80;#4ade80" keyTimes="0;0.78;0.81;1" dur="9s" begin="0s" repeatCount="indefinite"/>
+    </g>
+    <g fill="#8b8cf8" opacity="0">
+      <use href="#card"/>
+      <animateMotion path="M120,22 V99 H880" dur="9s" begin="3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.03;0.95;1" dur="9s" begin="3s" repeatCount="indefinite"/>
+      <animate attributeName="fill" values="#8b8cf8;#8b8cf8;#4ade80;#4ade80" keyTimes="0;0.78;0.81;1" dur="9s" begin="3s" repeatCount="indefinite"/>
+    </g>
+    <g fill="#8b8cf8" opacity="0">
+      <use href="#card"/>
+      <animateMotion path="M120,22 V99 H880" dur="9s" begin="6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.03;0.95;1" dur="9s" begin="6s" repeatCount="indefinite"/>
+      <animate attributeName="fill" values="#8b8cf8;#8b8cf8;#4ade80;#4ade80" keyTimes="0;0.78;0.81;1" dur="9s" begin="6s" repeatCount="indefinite"/>
+    </g>
+    <circle r="4" fill="#8b8cf8">
+      <animateMotion path="M400,214 V281 H440 V214" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="4" fill="#f59e0b">
+      <animateMotion path="M590,214 V281 H650 V340 H120 V214" dur="7s" begin="1s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- the static frame, shown instead when the reader asks for reduced motion -->
+  <g class="still">
+    <use href="#card" x="120" y="60" fill="#8b8cf8"/>
+    <use href="#card" x="420" y="99" fill="#8b8cf8"/>
+    <use href="#card" x="720" y="99" fill="#4ade80"/>
+  </g>
+
+  <!-- the steps -->
+  <g stroke-width="2" fill="#1f2330">
+    <rect x="58" y="160" width="124" height="54" rx="10" stroke="#8b8cf8"/>
+    <rect x="208" y="160" width="124" height="54" rx="10" stroke="#8b8cf8"/>
+    <rect x="358" y="160" width="124" height="54" rx="10" stroke="#8b8cf8"/>
+    <rect x="508" y="160" width="124" height="54" rx="10" stroke="#4ade80"/>
+    <rect x="658" y="160" width="124" height="54" rx="10" stroke="#4ade80"/>
+    <rect x="808" y="160" width="124" height="54" rx="10" stroke="#4ade80"/>
+    <rect x="370" y="262" width="100" height="38" rx="10" stroke="#8b8cf8"/>
+    <rect x="570" y="262" width="160" height="38" rx="10" stroke="#f59e0b"/>
+  </g>
+  <text class="name" x="120" y="184">Pick</text><text class="sub" x="120" y="202">the next issue</text>
+  <text class="name" x="270" y="184">Build</text><text class="sub" x="270" y="202">fresh worktree</text>
+  <text class="name" x="420" y="184">Review</text><text class="sub" x="420" y="202">a second model</text>
+  <text class="name" x="570" y="184">Test</text><text class="sub" x="570" y="202">changed tests</text>
+  <text class="name" x="720" y="184">Land</text><text class="sub" x="720" y="202">one commit on main</text>
+  <text class="name" x="870" y="184">Push</text><text class="sub" x="870" y="202">to the remote</text>
+  <text class="name" x="420" y="286">Fix</text>
+  <text class="name" x="650" y="286">Parked: work kept</text>
+</svg>

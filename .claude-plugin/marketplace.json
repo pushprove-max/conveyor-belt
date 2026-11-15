@@ -1,0 +1,17 @@
+{
+  "name": "conveyor-belt",
+  "owner": {
+    "name": "pushprove-max"
+  },
+  "plugins": [
+    {
+      "name": "conveyor-belt",
+      "source": {
+        "source": "github",
+        "repo": "pushprove-max/conveyor-belt",
+        "ref": "v1.0.0"
+      },
+      "description": "Issue-to-merged-commit automation for Claude Code: one issue becomes one card, built in a fresh worktree, reviewed, tested, landed and pushed."
+    }
+  ]
+}

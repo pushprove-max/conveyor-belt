@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""dashboard_stream.py <dashboard folder> <main checkout> -- the dashboard's live Conveyor feed.
+
+dashboard.sh --loop runs it beside the page server. For every record conveyor/host.json names it keeps one ssh open to
+the host (at host.json's `ssh` target) running `conveyor.sh watch` (conveyor/watch.py says what each line
+holds), and after each line it writes <dashboard folder>/stream.json, the same object dashboard.sh's conveyor() gives
+({host, reachable, error, records}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
+the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
+is down), writtenAt (when this file was written: every TICK seconds at least)}. After a line that changed something it
+has `dashboard.sh --publish` build data.js again from that and the slower parts the last cycle read, so a card's step
+reaches the page without waiting for the 60 s cycle, and the slow reads (the usage limit, GitHub, cost history) never
+hold it up. A build starts at most every GAP seconds: the changes in that time go into the next one, none is lost. A
+line that changes nothing (a beat) builds nothing; with no change for KEEP seconds data.js is built once more, so its
+writtenAt stays within the page's window (health.js STREAM_EXPIRE_MS) and the page sees a feed that stopped. A
+record's live line is laid over its last snapshot's belt.
+
+A stream that ends, or says nothing for DEAD seconds (the host beats every 10 s), is closed and opened again after
+1 s, then 2, 4 ... up to 30 s between tries; each new stream begins with a whole snapshot. While a record's stream is
+down its last snapshot stays, marked stale (live false, with heardAt), and records is null only until every record
+has sent one. stream.json is written at least every TICK seconds while this runs, so its age says whether it does.
+/units reads stream.json too.
+Test seams: CONVEYOR_STREAM_DEAD, CONVEYOR_STREAM_TICK and CONVEYOR_STREAM_BACKOFF (the first wait, s).
+"""
+import copy
+import datetime
+import glob
+import json
+import os
+import re
+import select
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEAD = float(os.environ.get('CONVEYOR_STREAM_DEAD') or 30)
+TICK = float(os.environ.get('CONVEYOR_STREAM_TICK') or 10)
+BACKOFF = float(os.environ.get('CONVEYOR_STREAM_BACKOFF') or 1)
+BACKOFF_MAX = 30.0
+GAP = 2.0    # s from the start of one build of data.js to the start of the next, at least
+KEEP = 45.0  # s with no change after which data.js is built again for its writtenAt: under health.js STREAM_EXPIRE_MS
+NAME = re.compile(r'^[A-Za-z0-9._-]+$')
+PATH = re.compile(r'^/[A-Za-z0-9._/-]+$')
+SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
+OPEN = set()  # the ssh of every stream open now: each in a group of its own, so each is ended with this process
+
+
+def end(*_):
+    for p in list(OPEN):
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    os._exit(0)
+
+
+def iso(t):
+    return None if t is None else datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def config(main):
+    """(host, main on the host, [(repo, main)], ssh target), or (host or None, reason) when it cannot be read: the same
+    rules as dashboard.sh's conveyor(): this machine's host file when there is one, else main's conveyor/host.json."""
+    path = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'conveyor', 'host.json')
+    if not os.path.exists(path):
+        path = os.path.join(main, 'conveyor', 'host.json')
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except OSError:
+        return None, 'this checkout has no conveyor/host.json'
+    except ValueError:
+        return None, 'conveyor/host.json is not understood'
+    host, hmain = cfg.get('host') if isinstance(cfg, dict) else None, cfg.get('main') if isinstance(cfg, dict) else None
+    if not (isinstance(host, str) and NAME.match(host) and isinstance(hmain, str) and PATH.match(hmain)):
+        return None, 'conveyor/host.json is not understood'
+    recs = cfg.get('records', [{'repo': 'project', 'main': hmain}])
+    if not (isinstance(recs, list) and recs and all(isinstance(r, dict) and isinstance(r.get('repo'), str) and NAME.match(r['repo'])
+                                                     and isinstance(r.get('main'), str) and PATH.match(r['main']) for r in recs)):
+        return host, 'conveyor/host.json records are not understood'
+    # The ssh target: host.json's own `ssh` (the Board reads no host list of the project's own).
+    target = cfg.get('ssh')
+    if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
+        return host, 'conveyor/host.json names no ssh target for %s' % host
+    return (host, hmain, [(r['repo'], r['main']) for r in recs], target), None
+
+
+class Feed:
+    def __init__(self, out, dash, main, host, hmain, recs, target):
+        self.out, self.dash, self.main, self.host, self.hmain, self.target = out, dash, main, host, hmain, target
+        self.cfg = (host, hmain, recs, target)
+        self.lock = threading.Lock()
+        self.recs = [{'repo': repo, 'main': m, 'snap': None, 'overlay': None, 'repoUrl': None, 'lastPushAt': None, 'up': False,
+                      'heardAt': None, 'downAt': time.time(), 'error': 'the stream has not opened yet', 'unreachable': False,
+                      'snapAt': None, 'failed': None, 'failedAt': None}
+                     for repo, m in recs]
+        self.wlock = threading.Lock()
+        self.dirty = threading.Event()  # data.js is to be built again
+        self.built = time.monotonic() - GAP  # when the last build of data.js started (none yet: the first is not held)
+        self.shown = None               # what of the stream the last publish showed: (live, error)
+        self.gone = False               # the host file changed: stream.json is no longer this feed's
+
+    # ---- one record's stream ----
+    def follow(self, rec):
+        wait = BACKOFF
+        while True:
+            cmd = 'CONVEYOR_MAIN=%s exec bash %s/conveyor/conveyor.sh watch' % (rec['main'], self.hmain)
+            try:
+                # A group of its own: closing a stream ends everything it started, so nothing holds its pipes open.
+                p = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15',
+                                      '-o', 'ServerAliveCountMax=4', self.target, cmd],
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                                     start_new_session=True)
+            except OSError as e:
+                self.down(rec, 'ssh could not start: %s' % e, False)
+                time.sleep(wait)
+                wait = min(BACKOFF_MAX, wait * 2)
+                continue
+            OPEN.add(p)
+            tail = []
+            reader = threading.Thread(target=lambda: tail.extend(p.stderr.read().splitlines()[-5:]), daemon=True)
+            reader.start()
+            got, quiet = self.read(rec, p)
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            rc = p.wait()
+            OPEN.discard(p)
+            reader.join(2)
+            p.stdout.close()
+            err = [x.decode('utf-8', 'replace').strip() for x in tail if x.strip()]
+            why = 'no line in %g s' % DEAD if quiet else err[-1][:200] if err else 'the stream ended (exit %s)' % rc
+            self.down(rec, '%s: %s' % (self.host, why), rc == 255)
+            if got:
+                wait = BACKOFF  # it worked: the next try is soon
+            time.sleep(wait)
+            wait = BACKOFF if got else min(BACKOFF_MAX, wait * 2)
+
+    def read(self, rec, p):
+        """Reads lines until the stream ends or goes quiet for DEAD seconds: (a snapshot came, it went quiet)."""
+        got, buf, fd = False, b'', p.stdout.fileno()
+        last = time.monotonic()
+        while True:
+            ready, _, _ = select.select([fd], [], [], max(0.0, last + DEAD - time.monotonic()))
+            if not ready:
+                return got, True
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                return got, False
+            last = time.monotonic()
+            buf += chunk
+            while b'\n' in buf:
+                line, buf = buf.split(b'\n', 1)
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(ev, dict) and self.take(rec, ev):
+                    got = True
+
+    def take(self, rec, ev):
+        kind, now, changed = ev.get('type'), time.time(), False
+        with self.lock:
+            rec['heardAt'] = now
+            if kind == 'snapshot' and isinstance(ev.get('snap'), dict):
+                rec.update(snap=ev['snap'], overlay=None, repoUrl=ev.get('repoUrl'), lastPushAt=ev.get('lastPushAt'),
+                           up=True, downAt=None, error=None, unreachable=False, snapAt=now, failed=None, failedAt=None)
+                changed = True
+            elif kind == 'live' and isinstance(ev.get('cards'), dict) and rec['snap'] is not None:
+                rec['overlay'] = ev['cards']
+                changed = True
+            elif kind == 'error':
+                # The host's snapshot failed: the board is its last good one, so it is not live (its beats say only
+                # that the stream is open) until a snapshot works again.
+                if rec['failed'] is None:
+                    rec['failedAt'] = now
+                rec['failed'] = '%s: %s' % (self.host, str(ev.get('error') or 'the snapshot failed')[:200])
+                changed = True
+        # stream.json is replaced before the publisher is told, so a publish that starts at once reads this change.
+        self.write()
+        if changed:
+            self.dirty.set()
+        return kind == 'snapshot'
+
+    def down(self, rec, why, unreachable):
+        with self.lock:
+            if rec['up']:
+                rec['downAt'] = time.time()
+            rec.update(up=False, error=why, unreachable=unreachable)
+        self.write()
+        self.dirty.set()
+
+    # ---- stream.json ----
+    @staticmethod
+    def merged(rec):
+        snap = rec['snap']
+        if rec['overlay'] is None:
+            return snap
+        snap = copy.deepcopy(snap)
+        for b in snap.get('belt') or []:
+            if not isinstance(b, dict) or b.get('landed'):
+                continue
+            o = rec['overlay'].get(b.get('card'))
+            if o is None:
+                b['live'] = None  # its step ended after the snapshot; the next snapshot has the step's line
+                continue
+            b.update(tokens=o.get('tokens'), usd=o.get('usd'), reading=o.get('reading'), live=o.get('live'))
+            if isinstance(o.get('files'), dict) and isinstance(b.get('track'), dict):
+                b['track']['files'] = o['files']
+        return snap
+
+    def doc(self):
+        with self.lock:
+            recs = list(self.recs)
+            # A record whose stream is open but whose last snapshot failed is stale like one whose stream is down: its
+            # age is that of its last good snapshot, and its error is the failure.
+            stale = lambda r: not r['up'] or r['failed'] is not None  # noqa: E731
+            live = not any(stale(r) for r in recs)
+            heard = [r['snapAt'] if r['up'] and r['failed'] is not None else r['heardAt'] for r in recs]
+            down = [dict(r, error=r['failed'], downAt=r['failedAt']) if r['up'] else r for r in recs if stale(r)]
+            records = None if any(r['snap'] is None for r in recs) else [
+                {'repo': r['repo'], 'snap': self.merged(r), 'steered': r['main'] == self.hmain, 'repoUrl': r['repoUrl'], 'lastPushAt': r['lastPushAt']}
+                for r in recs]
+            error = None
+            if records is None:
+                error = down[0]['error'] if down else 'waiting for the first snapshot of every record'
+            return {'host': self.host, 'reachable': not any(r['unreachable'] for r in recs), 'error': error, 'records': records,
+                    'stream': {'live': live, 'heardAt': None if None in heard else iso(min(heard)),
+                               'since': None if live else iso(min(r['downAt'] or time.time() for r in down)),
+                               'error': None if live else '; '.join(sorted({r['error'] for r in down if r['error']})) or None,
+                               'writtenAt': iso(time.time())}}
+
+    def write(self):
+        # One write at a time: a document built earlier never replaces one built later; none once the host file changed.
+        with self.wlock:
+            if not self.gone:
+                self._write()
+
+    def changed(self, host):
+        """The host file changed: /control reads it per request, so the page stops showing this feed's cards
+        before the feed ends. stream.json becomes the new host's, with no card, data.js is built from it at once, and
+        the feed ends; dashboard.sh --loop starts it again on the new file."""
+        why = 'conveyor/host.json changed; the stream restarts on it'
+        sys.stderr.write('dashboard_stream: %s\n' % why)
+        t = iso(time.time())
+        with self.wlock:
+            self.gone = True
+            self._write({'host': host, 'reachable': None, 'error': why, 'records': [],
+                         'stream': {'live': False, 'heardAt': None, 'since': t, 'error': why, 'writtenAt': t}})
+        try:
+            run = subprocess.run(['bash', self.dash, '--publish'], capture_output=True, text=True, timeout=120)
+            if run.returncode != 0:
+                sys.stderr.write('dashboard_stream: publish failed: %s\n' % run.stderr.strip()[-300:])
+        except (OSError, subprocess.TimeoutExpired) as e:
+            sys.stderr.write('dashboard_stream: publish failed: %s\n' % e)
+        end()
+
+    def _write(self, d=None):
+        d = d or self.doc()
+        tmp = os.path.join(self.out, '.stream.json.%d' % threading.get_ident())
+        try:
+            with open(tmp, 'w') as f:
+                json.dump(d, f, separators=(',', ':'))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, os.path.join(self.out, 'stream.json'))
+        except OSError as e:
+            sys.stderr.write('dashboard_stream: could not write stream.json: %s\n' % e)
+            try:
+                os.remove(tmp)  # not left: each process names its own, so leftovers add up
+            except OSError:
+                pass
+
+    # ---- data.js, built again after a change: one build at a time, at most every GAP s, and the changes during the
+    # wait or a build give one more ----
+    def publisher(self):
+        while True:
+            self.publish_next()
+
+    def publish_next(self):
+        self.dirty.wait()
+        time.sleep(max(0.0, self.built + GAP - time.monotonic()))
+        # Cleared after the wait: a change in it is in stream.json already, so this build takes it.
+        self.dirty.clear()
+        self.built = time.monotonic()
+        try:
+            run = subprocess.run(['bash', self.dash, '--publish'], capture_output=True, text=True, timeout=120)
+            if run.returncode != 0:
+                sys.stderr.write('dashboard_stream: publish failed: %s\n' % run.stderr.strip()[-300:])
+        except (OSError, subprocess.TimeoutExpired) as e:
+            sys.stderr.write('dashboard_stream: publish failed: %s\n' % e)
+
+    def ticker(self):
+        while True:
+            time.sleep(TICK)
+            now = config(self.main)
+            if now != (self.cfg, None):
+                self.changed(now[0][0] if now[1] is None else now[0])
+            self.write()
+            # A tick builds nothing while lines change nothing, but data.js carries writtenAt too: built again after
+            # KEEP s, so the page sees this feed stop (its Live expires) without the 60 s cycle, and not before.
+            if time.monotonic() - self.built >= KEEP:
+                self.dirty.set()
+
+    def run(self):
+        os.makedirs(self.out, exist_ok=True)
+        self.write()
+        for target in [self.publisher, self.ticker] + [lambda r=r: self.follow(r) for r in self.recs]:
+            threading.Thread(target=target, daemon=True).start()
+        while True:
+            time.sleep(3600)
+
+
+def main(argv):
+    if len(argv) != 3:
+        sys.exit('usage: dashboard_stream.py <dashboard folder> <main checkout>')
+    out, main = argv[1], argv[2]
+    # The temp files of an earlier feed (it ended mid-write): nothing else removes them, and this one names its own.
+    for name in glob.glob(os.path.join(glob.escape(out), '.stream.json.*')):
+        try:
+            os.remove(name)
+        except OSError:
+            pass
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, end)
+    cfg, why = config(main)
+    if cfg is None or why:
+        # Nothing to follow: the cycle's own read says why on the page. Waiting here keeps the loop from restarting it.
+        sys.stderr.write('dashboard_stream: no stream: %s\n' % why)
+        while config(main) == (cfg, why):
+            time.sleep(TICK)
+        end()  # the host file changed: dashboard.sh --loop starts the stream again on it
+    Feed(out, os.path.join(HERE, 'dashboard.sh'), main, *cfg).run()
+
+
+if __name__ == '__main__':
+    main(sys.argv)

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/pushprove-max/conveyor-belt/discussions
+    about: Ask questions and share ideas in Discussions. Use an issue only for a bug or a feature request.
+  - name: Report a security vulnerability
+    url: https://github.com/pushprove-max/conveyor-belt/blob/main/SECURITY.md
+    about: Report it privately, as the security policy says. Do not open a public issue for it.

@@ -1,0 +1,1267 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The tests a card's change touches, until CI (C1) replaces this: each changed test file, and each test file named
+# after a changed source file (same stem, beside it or in __tests__ next to it; `_` in the stem read as `-`), and the
+# test files TESTS_OF lists for it (ones named after another file, or none). A test named <stem>-<rest> belongs to the
+# longest source name its name starts with: a change to <stem> does not select it when another source file beside it
+# or beside its __tests__ folder, or a name in NAMED, is named <stem>-<part>… and the test's name starts with that
+# (issue 463). And the test files .conveyor/test-links.json links to a changed file (issue 598: LINKS, below).
+# Exit 1 if any fails or none ran for a changed source file that has tests.
+# The engine: each engine source file is in one area of .conveyor/engine-areas.json, which names the case files
+# (conveyor/tests/) that cover it ("all": every one). In a build or fix session an engine change runs only the cases of
+# its areas' files, and of each changed case file, and so does the loop's test step (CONVEYOR_TEST_LOG set: conveyor.sh tests()). Every run first checks the map: an engine source file (a file under conveyor/ that is not
+# a test and not in its "outside" list) in no area, or in two, an area whose tests are not "all" or a non-empty list,
+# or a file or case file it names that does not exist, fails it. So does a file under conveyor/lib/ in an "all" area
+# with no `why` (each engine file names its own case files; "all" is for what every case runs through, and says why),
+# and a case file under conveyor/tests/ that no area names in a list (it would run on no engine file's change).
+# A deleted engine file runs the whole engine test: its area can no longer be read from the map.
+# A change to the texts, comments and blanks alone of an engine file under conveyor/lib/, of conveyor/conveyor.sh or of
+# a Board file under .claude/dashboard/ (issues 512, 513: textonly) runs neither its area nor the tests named after it:
+# only the tests that hold a text it changed, the tests of each source file that holds an old text, and its parse check.
+# Ahead of every rule here, a change to the comment and blank lines alone of a shell, Python, YAML, JS, TS, CSS or HTML
+# file (issue 640: commentonly) selects no test, not even itself when it is a test file (one that passed before stays
+# passed), only a shell file's parse check; the run prints `comment-only change: <file>, no tests selected` for each.
+# A changed case file whose shared part (its lines outside its t_<case> functions) is the same but for comments and
+# blanks runs only its changed and added cases (issue 513: casesof); else it runs whole.
+# A change to functions of conveyor/lib/paths.sh alone runs the case files of their callers' areas and the case files
+# that call them, unless one runs at start-up (issue 514: funcsof); a change to lines of conveyor.sh's command table
+# alone (a command added, removed or changed, with its usage text) runs the case files that run those commands (cmdsof;
+# issue 530). Else each runs the whole, as before. A change to keys of the control record's defaults
+# (conveyor/lib/control-defaults.json) runs the case files of the code that reads those keys and of the case files that
+# read the file (keysof); else the file's area.
+# Ahead of those two, a change to functions alone of a shell file the coverage map holds (.conveyor/coverage.jsonl,
+# written by a traced run of every case: .conveyor/coverage.sh; issue 527: covof) runs the cases the map lists for each
+# changed function: engine cases through the runner, parts of dashboard.test.sh and of the hooks' tests (partsof;
+# CONVEYOR_SHELL_TEST_CASE, comma-separated), other test
+# files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
+# trace did not run). A part runs only when nothing selects its test file whole. A change outside any function, to a
+# function the map does not hold or lists no case for, or to one changed since the map was traced (its sum differs),
+# runs by the rules above (its area). The map check says how old the coverage map is.
+# A change to the map itself runs the map check, the map's own test (.conveyor/test-changed.test.sh) and the case files
+# whose naming changed: each case file an area lists in the map now and did not list at HEAD, and every case file of an
+# area whose files list changed, so a file moved to other cases runs them. An "all" area among those, or a map that cannot be read at HEAD or in the worktree, runs the whole engine
+# test. A map edit that wrongly drops a case file from an area is not caught here: the map check (every case file is
+# named by some area) and the nightly whole test are the net. `test-changed.sh --check` runs the map check alone, and
+# lists the meta-runners (below) the runs saw and those the pack marks, each with its mark.
+# Meta-runners (issue 584): each test file it starts is marked (CONVEYOR_TEST_FILE names it), and every bash it starts
+# reads a hook (BASH_ENV) that sees a bash test file of this checkout (its path ends in one that git lists here, as a
+# copy of the checkout's does) start whole (no CONVEYOR_SHELL_TEST_CASE) under another's mark: that file is a
+# meta-runner, and the log says so (`TESTRUN nested<TAB><file><TAB><inner file>`). The runs' meta-runners are kept in
+# the repository's git folder (conveyor-meta-runners) for --check. A meta-runner needs one of two marks in the pack
+# (.conveyor/project.json): `test.files.<file>.cardMode`, a NAME=VALUE this script runs it with (its card mode: its own
+# checks, a stub in place of the files it starts), or `test.files.<file>.wholeOnly`: this script never runs it, and
+# says so (`TESTRUN whole-only<TAB><file>`); the whole test, which does not run through it, runs it whole. A file that
+# starts another test file with neither mark fails, its failure naming the file and the two marks. The engine runner
+# sources its case files, which the hook does not see: its run of every case file is a meta-runner's run, logged so,
+# and with neither mark it is not run, and fails; its run of chosen cases is not, and runs whatever its mark.
+# Every run also runs the test lint (.conveyor/test-lint.sh): a sleep-then-check in any test file fails the run.
+# And shellcheck on the changed .sh files: a warning on a line the change added or changed fails the run (below).
+# A run again of the same change (conveyor.sh tests(): CONVEYOR_TEST_RERUN names what passed and what failed) runs
+# no file that passed, and of the engine's runner only the cases that failed, when the run before named them, else
+# those of its selection that did not print `ok <case>` (a runner killed part-way). A file the list names failed cases
+# of runs even when no changed file selects it (the loop runs a card's failing cases on main, where nothing changed):
+# of the engine's runner, those cases, when the list names one of its cases; of a node test file, those cases alone; a
+# `fail` line naming no case (a file that failed naming none), the file whole; of an engine case file, each of its
+# cases, through the runner (the run of one file by hand: conveyor.sh testaction run).
+# A node test file it runs leaves out each case an `ok` line of the list names, as the runner does (the loop keeps a
+# flaky case off a card's run so: conveyor.sh flakyoff()); a Python or other shell test file has no case filter and
+# runs whole. A case an `off` line names (one the loop keeps off as flaky) is left out of the runner and of a node test
+# file even where a `changed` or `main` line below selects it; a file an `off` line names with no case (one the loop
+# keeps off for its CPU seconds) does not run at all, nor, of an engine case file, any of its cases. After a session changed the change
+# (the list's `changed` lines: the files whose content it changed), the tests those files select, picked as above (an
+# "all" area's file runs the whole engine test; a changed map runs what the map rule says), run too, whether or not
+# they passed before. After the change moved onto a newer main (the list's `main` lines: the files main changed since
+# the list was made), the tests those files select run too, only where the change's own selection holds them: a test
+# file it selects, of the engine's runner the cases both select. Each file such a run runs, and each file a first run
+# of the loop's test step runs (CONVEYOR_TEST_LOG set, no list), its log says why
+# (`TESTRUN why<TAB><file><TAB><reason>`: "the card changed <file>", "main changed <file>", "did not pass", and of the
+# runner, "the area <name> runs all engine tests" when an "all" area selected it). A run of every engine case file
+# says so in its log (`TESTRUN whole-suite`). A run again's log says how many cases of the selection passed before and are not run:
+# `TESTRUN kept=<n>`. A file the list names as passed and also names failed cases of (it passed, then failed them in
+# such a run) runs: of the runner, those cases alone. When it runs only some of the runner's cases, its log names
+# each (`TESTRUN case<TAB><file><TAB><case>`). Each Board or shell test file it runs, its log times as it ends
+# (`TESTRUN sec<TAB><file><TAB><seconds><TAB><CPU seconds>`: clock, and user plus system of all it started), and each
+# engine case file whose every case the runner ran, as the runner ends (the sums of its cases' times:
+# CONVEYOR_TEST_TIMES), for the loop's CPU budget of a test file (conveyor/README.md).
+set -u
+unset CONVEYOR_SHELL_TEST_CASE
+RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
+MAP=.conveyor/engine-areas.json
+# The map is one fact a line, so two changes that each add a line to it merge with no conflict (the repository's
+# .gitattributes merges it keeping both sides): {"outside": <path>}, or of an area {"area": <name>} with one more key,
+# "file": <engine file>, "test": <case file>, "tests": "all" or "why": <text>. AREAS reads its lines (jq -s) as
+# {outside: [paths], areas: {<name>: {files, tests: "all" or [case files], why}}}; any other line, or an area with both
+# "all" and case files, is an error: the map cannot be read. `test-changed.sh --map` prints it so.
+AREAS='reduce .[] as $l ({outside: [], areas: {}};
+  if ($l | type) == "object" and ($l | keys) == ["outside"] and ($l.outside | type) == "string" then .outside += [$l.outside]
+  elif ($l | type) == "object" and ($l.area | type) == "string" and ($l | length) == 2 then
+    .areas[$l.area] |= ((. // {files: []}) | if ($l.file | type) == "string" then .files += [$l.file]
+      elif ($l.test | type) == "string" and .tests != "all" then .tests = (.tests // []) + [$l.test]
+      elif $l.tests == "all" and .tests == null then .tests = "all"
+      elif ($l.why | type) == "string" then .why = $l.why
+      else error("not a line of the map: \($l)") end)
+  else error("not a line of the map: \($l)") end)'
+if [ "${1:-}" = --map ]; then jq -s "$AREAS" "$MAP"; exit; fi
+# The coverage map (covof, below; .conveyor/coverage.sh writes it).
+COV=.conveyor/coverage.jsonl
+# FUNCS, an awk program, reads a bash file as its functions and the rest (coverage: covof, coverage.sh), less strictly
+# than CASES: a function starts at a line at the left `<name>() {` or `<name>() (` (or `function <name>() ...`), and ends
+# on that line when it closes there, else at the next line that starts with the `}` or `)` that closes it, past the
+# heredocs it starts; a line in it may be at the left (a comment, a line of a string). A `K<TAB><name><TAB><body>` line
+# for each, its lines joined by \001; `S<TAB><line>` for each other line; and `U` when a name is defined twice, a
+# function does not end, or a line in one starts a function (a function it misread as not ended there).
+FUNCS='function heredoc(x) {
+  x = $0; gsub(/<<</, "", x)
+  if (match(x, /<<-?[ \t]*[\047"\\]?[A-Za-z_0-9.-]+/)) { x = substr(x, RSTART, RLENGTH); hdt = (x ~ /^<<-/); sub(/^<<-?[ \t]*[\047"\\]?/, "", x); hd = x }
+}
+function start() { return match($0, /^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)[ \t]*[{(]/) }
+c != "" {
+  b = b "\001" $0
+  if (hd != "") { x = $0; if (hdt) sub(/^\t+/, "", x); if (x == hd) hd = ""; next }
+  if (substr($0, 1, 1) == e) { print "K\t" c "\t" b; c = ""; next }
+  if (start()) { print "U"; u = 1; exit }
+  heredoc(); next
+}
+start() {
+  x = substr($0, 1, RLENGTH); e = substr(x, RLENGTH) == "{" ? "}" : ")"; r = substr($0, RLENGTH + 1)
+  n = x; sub(/^function[ \t]+/, "", n); sub(/[ \t]*\(.*/, "", n)
+  if (n in seen) { print "U"; u = 1; exit }
+  seen[n] = 1
+  if (r !~ /^[ \t]*(#.*)?$/ && r ~ (e == "}" ? "[;&] *}([ \t]*[0-9]*>+[ \t]*[^ \t;&|]+)*[ \t]*(#.*)?$" : "\\)([ \t]*[0-9]*>+[ \t]*[^ \t;&|]+)*[ \t]*(#.*)?$")) { print "K\t" n "\t" $0; next }
+  c = n; b = $0; heredoc(); next
+}
+{ print "S\t" $0 }
+END { if (!u && c != "") print "U" }'
+# sumsof: of FUNCS output on stdin, `<name><TAB><sum>` for each function, its sum the cksum of its body: the coverage
+# map's sum of a function as it was traced, and covof's of it as the change found it.
+sumsof() {
+  local k n b
+  while IFS=$'\t' read -r k n b; do [ "$k" != K ] || printf '%s\t%s\n' "$n" "$(cksum <<<"$b" | cut -d' ' -f1)"; done
+  return 0
+}
+# `test-changed.sh --funcs <file>`: the sums of its functions (coverage.sh), or exit 1 when FUNCS cannot read it.
+if [ "${1:-}" = --funcs ]; then s=$(awk "$FUNCS" "$2") && ! grep -qx U <<<"$s" || exit 1; sumsof <<<"$s"; exit; fi
+# partsof <test file>: the parts of a shell test file CONVEYOR_SHELL_TEST_CASE runs (comma-separated), one a line: the
+# names of its `) & started <part>` lines (dashboard.test.sh), else of its `CASES=" <case> ... "` line (the hooks'
+# case_on files). Exit 3 for a file that selects its checks by their text (it sources lib/case-filter.sh:
+# bash-guardrails.test.sh), whose parts are texts (coverage.sh); exit 1 for a file with no parts, run whole.
+# `test-changed.sh --parts <test file>` prints them so (coverage.sh).
+partsof() {
+  local p
+  grep -q CONVEYOR_SHELL_TEST_CASE "$1" 2>/dev/null || return 1
+  p=$(sed -n 's/^) & started \([a-z0-9]*\)$/\1/p' "$1")
+  [ -n "$p" ] || p=$(sed -n 's/^CASES=" \([a-z0-9 -]*\) "$/\1/p' "$1" | tr ' ' '\n' | grep .)
+  [ -z "$p" ] || { echo "$p"; return 0; }
+  grep -q '^[.] .*/lib/case-filter[.]sh"\?$' "$1" && return 3
+  return 1
+}
+# partok <test file> <part>: the file has that part now: one partsof names, or a text with no comma the file holds.
+partok() {
+  local p r
+  p=$(partsof "$1"); r=$?
+  if [ $r = 0 ]; then grep -qxF -- "$2" <<<"$p"; else [ $r = 3 ] && [[ $2 != *,* ]] && grep -qF -- "$2" "$1"; fi
+}
+if [ "${1:-}" = --parts ]; then partsof "$2"; exit; fi
+AMAP=$(jq -cs "$AREAS" "$MAP" 2>/dev/null) || AMAP=''
+mapcheck() {
+  local bad
+  [ -n "$AMAP" ] && bad=$(git ls-files -co --exclude-standard conveyor | while read -r f; do [ -e "$f" ] && echo "$f"; done \
+    | jq -Rrn --argjson m "$AMAP" --arg map "$MAP" '[inputs] as $all
+      | ([$m.areas[].files[]]) as $named
+      | ($all[] | select(endswith(".test.sh") | not) | . as $f
+          | select($m.outside | any(. as $o | $f == $o or (($o | endswith("/")) and ($f | startswith($o)))) | not)
+          | ([$named[] | select(. == $f)] | length) as $n
+          | if $n == 0 then "\($f): an engine source file in no area of \($map)"
+            elif $n > 1 then "\($f): in \($n) areas of \($map); a file is in one" else empty end),
+        ($named - $all | .[] | "\(.): named in \($map), but there is no such file"),
+        ($m.areas | to_entries[] | select(.value.tests != "all" and ((.value.tests | type) != "array" or .value.tests == []))
+          | "\(.key): an area of \($map) with no case files; its tests are \"all\" or a non-empty list"),
+        ([$m.areas[].tests | arrays | .[] | "conveyor/tests/" + .] | unique - $all | .[] | "\(.): named in \($map), but there is no such case file"),
+        ($m.areas | to_entries[] | select(.value.tests == "all" and ((.value.why // "") | length) == 0) | .key as $k
+          | .value.files[] | select(startswith("conveyor/lib/"))
+          | "\(.): in \($k), an area of \($map) whose tests are \"all\" with no why; name its case files"),
+        ([$all[] | select(test("^conveyor/tests/[^/]+[.]test[.]sh$"))]
+          - [$m.areas[].tests | arrays | .[] | "conveyor/tests/" + .] | .[]
+          | "\(.): a case file no area of \($map) names; an area of the engine files it covers lists it")') \
+    || bad="$MAP could not be read"
+  [ -z "$bad" ] || { echo "engine area map check failed:"; echo "$bad"; return 1; }
+}
+# covage: how old the coverage map is (issue 527), with the map check: when it was traced (its oldest `traced` line, as
+# two maps merged keep both) and how many days ago, or that there is none or it cannot be read. It fails nothing: with
+# no map, every change runs by its area.
+covage() {
+  local a
+  if [ ! -s "$COV" ]; then echo "coverage map: none ($COV); a change to a function runs its area's cases"
+  elif a=$(jq -rn '[inputs | .traced? // empty] | min | select(. != null)
+      | "\(.), \((now - fromdateiso8601) / 86400 | floor) days ago"' "$COV" 2>/dev/null) && [ -n "$a" ]; then
+    echo "coverage map $COV: traced $a"
+  else echo "coverage map $COV: cannot be read, or says not when it was traced; a change to a function runs its area's cases"; fi
+}
+# The pack's marks of meta-runners (issue 584): cmode, a test file's card mode (a NAME=VALUE for env; another value
+# is no mark, as env would run it as a command), and wonly, a file marked whole-only.
+declare -A cmode=() wonly=()
+while IFS=$'\t' read -r k f v; do
+  case $k in c) [[ $v =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && cmode[$f]=$v ;; w) wonly[$f]=1 ;; esac
+done < <(jq -r '.test.files // {} | to_entries[] | (select(.value.cardMode | type == "string") | "c\t\(.key)\t\(.value.cardMode)"),
+  (select(.value.wholeOnly == true) | "w\t\(.key)\t")' .conveyor/project.json 2>/dev/null)
+METAREC=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/conveyor-meta-runners
+# metarunners: each meta-runner the runs saw (METAREC) or the pack marks, with its mark and the files it was seen start.
+metarunners() {
+  local f
+  for f in $( { cut -f1 "$METAREC" 2>/dev/null; printf '%s\n' "${!cmode[@]}" "${!wonly[@]}"; } | grep . | LC_ALL=C sort -u); do
+    printf 'meta-runner %s: ' "$f"
+    if [ -n "${wonly[$f]:-}" ]; then printf 'wholeOnly'; elif [ -n "${cmode[$f]:-}" ]; then printf 'cardMode %s' "${cmode[$f]}"
+    else printf 'no mark: a card'"'"'s test step fails it'; fi
+    awk -F'\t' -v f="$f" '$1 == f { s[$2] = 1 } END { n = 0; for (i in s) n++; if (n) printf "; seen starting %d test file(s)", n }' "$METAREC" 2>/dev/null
+    echo
+  done
+}
+if [ "${1:-}" = --check ]; then mapcheck; r=$?; covage; metarunners; exit $r; fi
+rc=0
+mapcheck || rc=1
+covage
+# The test lint, on every run too: a test that sleeps a set time and then checks fails the run (test-lint.sh).
+bash .conveyor/test-lint.sh || rc=1
+# No browser tests (no-browser-tests.sh, the owner's order of 2026-11-14), on every run too.
+bash .conveyor/no-browser-tests.sh || rc=1
+mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
+# The shellcheck of each changed .sh file, on every run too (issue 525): a warning or error (-S warning) on a line the
+# change added or changed (every line of a new file) fails the run, printed with its file and line; one on a line it
+# did not touch does not (the engine's files hold old ones). A file with no #! line is read as bash, as the engine's
+# sourced files are. With no shellcheck, it says so once and the run goes on.
+scfiles=(); bang=(); nobang=()
+for f in "${changed[@]}"; do case $f in *.sh) [ ! -f "$f" ] || scfiles+=("$f") ;; esac; done
+if [ ${#scfiles[@]} -gt 0 ] && ! command -v shellcheck > /dev/null; then
+  echo "shellcheck is not installed: the changed shell lines are not checked"
+elif [ ${#scfiles[@]} -gt 0 ]; then
+  # The lines the change added or changed, <file>:<line> one a line: of each hunk of the diff, +<start>[,<count>]
+  # (count 1 when left out); of a file git does not track, <file>:all.
+  keep=$({ git diff -U0 --no-color --no-ext-diff --no-prefix HEAD -- "${scfiles[@]}" | awk '/^\+\+\+ / { f = substr($0, 5) }
+      /^@@ / { split($3, a, ","); n = (2 in a) ? a[2] : 1; for (i = 0; i < n; i++) print f ":" substr(a[1], 2) + i }'
+    git ls-files -o --exclude-standard -- "${scfiles[@]}" | sed 's/$/:all/'; })
+  for f in "${scfiles[@]}"; do if [ "$(head -c 2 "$f")" = '#!' ]; then bang+=("$f"); else nobang+=("$f"); fi; done
+  new=$({ [ ${#bang[@]} = 0 ] || shellcheck -S warning -f gcc -- "${bang[@]}"
+      [ ${#nobang[@]} = 0 ] || shellcheck -s bash -S warning -f gcc -- "${nobang[@]}"; } 2>&1 \
+    | awk -F: -v k="$keep" 'BEGIN { n = split(k, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
+      ($1 ":" $2) in keep || ($1 ":all") in keep')
+  [ -z "$new" ] || { echo "shellcheck: a new warning on a line this change added or changed:"; echo "$new"; rc=1; }
+fi
+declare -A run=() area=() ccase=() allby=()
+# The parts of a test file the coverage map selects (covof): npart, of the pick under way; tparts, of every pick; and
+# twhole, each file a pick also selected whole, which then runs whole.
+declare -A npart=() tparts=() twhole=()
+COVTESTS=
+all=
+# A source file's test files that are not named after it (pick), space-separated: Rules' Undo is tested in
+# dashboard-view.needs; dashboard.sh, the collector, is run by dashboard-limit (through the collector) and
+# dashboard-server (--restart, and the standalone Board), named after dashboard_limit.py and dashboard_server.py.
+# The engine's foreman command (conveyor/commands/foreman.sh, outside the map: it starts conveyor/foreman/foreman.sh)
+# is run by the Foreman's test. The /units mod's views (hooks/units.tsx) are drawn by sources.ts with elements.ts, so
+# units.test.tsx tests them too; its two-project fixture is the fetch's test's and the views' tests'.
+declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests__/dashboard-view.needs.test.mjs
+  [.claude/scripts/dashboard.sh]=".claude/scripts/__tests__/dashboard-limit.test.sh .claude/scripts/__tests__/dashboard-server.test.sh"
+  [conveyor/commands/foreman.sh]=conveyor/foreman/foreman.test.sh
+  [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
+  [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx")
+# The test links (issue 598): a test that broke main without the card running it is run by later cards that change
+# the files of the landing that broke it. .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, written
+# by the engine (conveyor/lib/testrun.sh brokeby(), testlinks()) and committed by the main-red fix card. LINKS holds
+# one `<changed file><TAB><test file>` a line; a link whose test file no longer exists is dropped as it is read, and a
+# file that cannot be read links nothing. Each test file a link adds to a pick (an engine case file to the engine's
+# runner, as a changed one; a meta-runner by its pack mark, below) the log names: linked, `<test file><TAB><changed file>`.
+LINKS=$(jq -r 'to_entries[] | .key as $k | .value | arrays[] | strings | "\($k)\t\(.)"' .conveyor/test-links.json 2>/dev/null \
+  | while IFS=$'\t' read -r f t; do [ ! -f "$t" ] || printf '%s\t%s\n' "$f" "$t"; done)
+declare -A linked=()
+# Test names that are no source file's beside them (<folder>/<name>): dashboard-view.* test the page in
+# .claude/dashboard, not dashboard.sh (owned).
+NAMED=(.claude/scripts/__tests__/dashboard-view)
+# owned <test file> <stem>: the test is another source file's, one named <stem>-<part>… (`_` read as `-`) that its name
+# starts with, beside it, beside its __tests__ folder or in NAMED; so a change to <stem> does not select it by name.
+owned() {
+  local d=${1%/*} b=${1##*/} s=${2//_/-} o n
+  local -a names=() near=("$d"/*)
+  [ "${d##*/}" != __tests__ ] || near+=("${d%/*}"/*)
+  for o in "${near[@]}"; do
+    case $o in *.test.*) continue ;; esac
+    [ ! -f "$o" ] || { n=${o##*/}; names+=("${n%.*}"); }
+  done
+  for o in "${NAMED[@]}"; do [ "${o%/*}" != "$d" ] || names+=("${o##*/}"); done
+  for n in "${names[@]}"; do
+    n=${n//_/-}
+    case $n in "$s"-?*) case $b in "$n".*|"$n"-*) return 0 ;; esac ;; esac
+  done
+  return 1
+}
+# A text-only change (issue 512). TEXT, an awk program run with lang=sh (bash), js (the Board's JavaScript) or css, reads
+# a file as its code and its texts: a `C<TAB><code>` line for each line of code, with its comments (but a `#!` line and a
+# `# shellcheck` line), its blank lines and its runs of blanks left out and each text left as a mark; a
+# `T<TAB><n><TAB><piece>` line for each piece of a text (split where an expansion or a line end is), n the text's place
+# among the file's texts (so two texts that swap places are changed texts, issue 529); and `U` when it cannot read the
+# file to its end. A text is a human message only. In bash: an echo or printf message (a printf format less its directives and
+# escapes), the body of a cat heredoc with a quoted word, an argument of block() or of gh --body or --title, and a
+# sentence of 3 words or more set to a name (a fixed reason, `SHUT='...'`; a list of names is code: sentence()). In the Board: a string of 2 words or more that
+# is no key, compared value, class, selector, attribute or pattern. CSS has comments only. Any other quoted text is
+# code: a jq, sed, awk or grep program, any other single-quoted string, a path, a redirect, a command substitution, and
+# what echo or printf write into a substitution, a pipe or a file.
+TEXT='function piece() { gsub(/^[ \t]+|[ \t]+$/, "", p); if (p != "") ps[++np] = p; p = "" }
+function sp() { if (s != "" && substr(s, length(s)) != " ") s = s " " }
+function prose(k, j, all, m, wa) {
+  all = ""; for (j = 1; j <= np; j++) all = all " " ps[j]
+  if (all ~ /[][|{}<>=\\^$]/) return 0
+  m = 0; for (j = split(all, wa, /[ \t]+/); j > 0; j--) if (wa[j] ~ /^[^-]/ && wa[j] ~ /[A-Za-z][A-Za-z]/) m++
+  return m >= k
+}
+# A sentence, not a list of names a command reads (a field list, or the protocols of LANEPROTO): it holds a word such as
+# the, of or was, and no camelCase name.
+function sentence(j, all) {
+  all = " "; for (j = 1; j <= np; j++) all = all ps[j] " "
+  if (all ~ /[a-z][A-Z]/) return 0
+  all = tolower(all); gsub(/[,.:;!?]/, " ", all)
+  return all ~ / (the|a|an|is|was|are|were|be|been|not|no|of|to|in|on|by|for|its|it|with|from|and|but|has|have|had|this|that|could|cannot|did|does|since|while|when|nothing|each|every) /
+}
+# Board words, not class names (all lowercase, one with a hyphen), a camelCase name or a .class or #id selector.
+function words(j, all, wa, m, kebab) {
+  all = ""; for (j = 1; j <= np; j++) all = all " " ps[j]
+  if (all ~ /[a-z][A-Z]|(^|[ ,])[.#][A-Za-z]/) return 0
+  m = split(all, wa, /[ ,]+/); kebab = 0
+  for (j = 1; j <= m; j++) { if (wa[j] != "" && wa[j] !~ /^[a-z0-9-]+$/) return 1; if (wa[j] ~ /[a-z0-9]-[a-z0-9]/) kebab = 1 }
+  return !kebab
+}
+function sclose(text, j) {
+  if (text) { s = s sq sskel sq; ntx++; for (j = 1; j <= np; j++) print "T\t" ntx "\t" ps[j] } else s = s sraw
+  np = 0; p = ""; sskel = ""; sraw = ""; q = 0
+}
+# A message holds no braces: a string of JSON or of a program that echo prints is code. Nor is it piped on or written
+# to a file (what follows the string in its command, or a loop or group it ends, on its line): that output is data.
+function msg(j, r) {
+  for (j = 1; j <= np; j++) if (ps[j] ~ /[{}]/) return 0
+  r = substr($0, i + 1); gsub(/[0-9]?>&[0-9]|[0-9]?>+ *\/dev\/null/, "", r)
+  if (r ~ /(done|[})])[^;&|]*>/) return 0
+  if (match(r, /;|&&|\|\||\)/)) r = substr(r, 1, RSTART - 1)
+  return r !~ /[|>]/
+}
+function wend(x) { x = substr($0, i + 1, 1); return x == "" || x == " " || x == "\t" || x == ";" || x == ")" }
+function out(x) { gsub(/\n/, "\nC\t", x); print "C\t" x }
+function newcmd() { cstart = 1; cmd = ""; argn = 0; fmt = 0; prev = "" }
+# A "(" or "$(" (lv: "p", "s"; "d" a double-quoted string a "$(" is in) keeps the command it is in, for after its ")".
+function push(k, l) { lv = lv k; l = length(lv); sc[l] = cmd; sa[l] = argn; sf[l] = fmt; ss[l] = cstart; sv[l] = prev }
+function pop(l, k) {
+  l = length(lv); k = substr(lv, l); lv = substr(lv, 1, l - 1)
+  if (k != "d") { cmd = sc[l]; argn = sa[l]; fmt = sf[l]; cstart = ss[l]; prev = sv[l] }
+  return k
+}
+BEGIN { newcmd() }
+lang == "sh" {
+  if (inhd) {
+    t = $0; if (hdtab) sub(/^\t+/, "", t)
+    if (t == hd) { inhd = 0; hd = ""; print "C\t" $0; next }
+    if (hdtext) { t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t); print "C\tH"; if (t != "") print "T\t" ++ntx "\t" t } else print "C\tH\t" $0
+    next
+  }
+  if (NR == 1 && /^#!/) { print "C\t" $0; next }
+  if (!q && !cont) newcmd()
+  # A line starts a word (issue 513: an echo at the left after `set -u` was read as an argument of set, so as code).
+  if (!q) inw = 0
+  cont = 0; n = length($0); i = 1
+  while (i <= n) {
+    c = substr($0, i, 1); d = substr($0, i + 1, 1)
+    # The directives and escapes of a printf format are code; the text between them is a message.
+    if (q && !codeq && ctx == "fmt" && (c == "%" || c == "\\") && d != "") {
+      match(substr($0, i), c == "%" ? /^%[-+ #0-9.]*[a-zA-Z%]/ : /^\\./); if (RLENGTH < 2) RLENGTH = 2
+      x = substr($0, i, RLENGTH); piece(); sskel = sskel "\001" x; sraw = sraw x; i += RLENGTH; continue
+    }
+    if (q == 1) {
+      if (c == "\047") { piece(); sraw = sraw c; sclose((ctx == "assign" && prose(3) && sentence() && wend()) || (ctx == "fmt" && msg())); i++; continue }
+      sraw = sraw c; p = p c; i++; continue
+    }
+    # A command substitution makes its double-quoted string code, read on as code to its ")", even over lines.
+    if (q == 2 && c == "$" && d == "(") {
+      if (!codeq) { s = s sraw; np = 0; p = ""; sskel = ""; sraw = ""; push("d") }
+      s = s "$("; push("s"); q = 0; codeq = 0; inw = 0; newcmd(); i += 2; continue
+    }
+    if (q == 2 && codeq) {
+      if (c == "\\") { s = s c d; i += 2; continue }
+      if (c == "\"") { s = s c; q = 0; codeq = 0; pop(); i++; continue }
+      s = s c; i++; continue
+    }
+    if (q == 2) {
+      if (c == "\\") { sraw = sraw c d; if (d == "") { i++; continue }; p = p (index("$`\"\\", d) ? d : c d); i += 2; continue }
+      if (c == "\"") {
+        piece(); sraw = sraw c
+        sclose(!sbad && (((ctx == "msg" || ctx == "fmt") && msg()) || (ctx == "assign" && prose(3) && sentence() && wend())))
+        i++; continue
+      }
+      if (c == "`" || (c == "$" && (d == "\047" || d == "\""))) sbad = 1
+      if (c == "$" && d == "{") {
+        e = index(substr($0, i), "}"); x = e ? substr($0, i, e) : ""
+        if (!e || substr(x, 3) ~ /[${"`\047]/) { sbad = 1; sraw = sraw c; p = p c; i++; continue }
+        piece(); sskel = sskel "\001" x; sraw = sraw x; i += e; continue
+      }
+      if (c == "$" && d ~ /[A-Za-z_]/) { match(substr($0, i + 1), /^[A-Za-z_0-9]+/); x = substr($0, i, RLENGTH + 1); piece(); sskel = sskel "\001" x; sraw = sraw x; i += RLENGTH + 1; continue }
+      if (c == "$" && d ~ /[0-9#?@*$!-]/) { piece(); sskel = sskel "\001" c d; sraw = sraw c d; i += 2; continue }
+      sraw = sraw c; p = p c; i++; continue
+    }
+    if (c == " " || c == "\t") { sp(); inw = 0; i++; continue }
+    if (c == "#" && (i == 1 || substr($0, i - 1, 1) ~ /[ \t;&|()]/)) { if (substr($0, i) ~ /^#[ \t]*shellcheck/) s = s substr($0, i); break }
+    if (c == "\\") { if (d == "") { cont = 1; s = s c; i++; continue }; s = s c d; i += 2; continue }
+    if (c == "<" && d == "<") {
+      if (substr($0, i + 2, 1) == "<") { s = s "<<<"; inw = 0; i += 3; continue }
+      r = substr($0, i)
+      if (hd != "" || !match(r, /^<<-?[ \t]*(\047[A-Za-z_0-9.-]+\047|"[A-Za-z_0-9.-]+"|\\?[A-Za-z_0-9.-]+)/)) { bad = 1; s = s c; i++; continue }
+      w = substr(r, 1, RLENGTH); s = s w; i += RLENGTH
+      hdtab = (w ~ /^<<-/); hdq = (w ~ /[\047"]/); sub(/^<<-?[ \t]*\\?/, "", w); gsub(/[\047"]/, "", w); hd = w
+      r = substr($0, i); gsub(/\|\||>&/, "", r)
+      hdtext = (cmd == "cat" && hdq && s !~ />/ && r !~ /[|>]/); continue
+    }
+    if (c == "$" && d == "\047") {
+      for (j = i + 2; j <= n && substr($0, j, 1) != "\047"; j++) if (substr($0, j, 1) == "\\") j++
+      if (j > n) bad = 1
+      if (!inw) { inw = 1; if (!cstart) argn++ }; s = s substr($0, i, j - i + 1); i = j + 1; continue
+    }
+    if (c == "$" && d == "{" && (e = index(substr($0, i), "}")) && substr($0, i + 2, e - 3) !~ /[$`"\047]/) { if (!inw) { inw = 1; if (!cstart) argn++ }; s = s substr($0, i, e); i += e; continue }
+    if (c == "$" && d == "(") { if (!inw) { inw = 1; if (!cstart) argn++ }; s = s "$("; push("s"); newcmd(); inw = 0; i += 2; continue }
+    if (c == "(") { s = s c; push("p"); newcmd(); inw = 0; i++; continue }
+    if (c == ")" && lv != "") {
+      s = s c; inw = 1
+      if (pop() == "s" && substr(lv, length(lv)) == "d") { q = 2; codeq = 1 }
+      i++; continue
+    }
+    if (index(";&|){}!", c)) { s = s c; inw = 0; if (c != "}") newcmd(); i++; continue }
+    if (c == ">" || c == "<") { s = s c; inw = 0; redir = 1; i++; continue }
+    if (c == "\047" || c == "\"") {
+      if (!inw) { inw = 1; if (!cstart) argn++; rw = redir; redir = 0 }
+      if (rw) ctx = "code"
+      else if (cstart && asg && substr($0, i - 1, 1) == "=") ctx = "assign"
+      # echo or printf output a substitution reads is data, not a message.
+      else if (!cstart && index(lv, "s") && (cmd == "echo" || cmd == "printf")) ctx = "code"
+      else if (!cstart && (cmd == "echo" || cmd == "block")) ctx = "msg"
+      else if (!cstart && cmd == "printf" && argn == (fmt ? fmt : 1)) ctx = "fmt"
+      else if (!cstart && cmd ~ /^gh(_[a-z]+)?$/ && (prev == "--body" || prev == "--title")) ctx = "msg"
+      else ctx = "code"
+      q = (c == "\047") ? 1 : 2; codeq = 0; sq = c; sraw = c; sskel = ""; np = 0; p = ""; sbad = 0; i++; continue
+    }
+    if (!inw) {
+      inw = 1; rw = redir; redir = 0; match(substr($0, i), /^[^ \t;&|()<>"\047\\$`]+/); w = substr($0, i, RLENGTH)
+      asg = (w ~ /^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=/)
+      if (cstart && !asg && w !~ /^(if|then|do|else|elif|while|until|time|!|local|export|declare|readonly)$/) { cstart = 0; cmd = w; argn = 0; fmt = 0; prev = "" }
+      else if (!cstart) { argn++; if (cmd == "printf" && argn == 1 && w == "-v") fmt = 3; prev = w }
+    }
+    s = s c; i++
+  }
+  if (q && !codeq) { piece(); sraw = sraw "\n"; sskel = sskel "\n" }
+  else { sub(/[ \t]+$/, "", s); sub(/^ /, "", s); if (s != "") out(s); s = "" }
+  if (hd != "") inhd = 1
+  next
+}
+lang != "sh" {
+  n = length($0); i = 1
+  while (i <= n) {
+    c = substr($0, i, 1); d = substr($0, i + 1, 1)
+    if (bc) { if (c == "*" && d == "/") { bc = 0; i += 2 } else i++; continue }
+    # A template with a ${ is code, read on as code to its } (lv: "t" the template, "e" the ${, "b" a brace in it).
+    if (q == 3 && c == "$" && d == "{") {
+      if (!codeq) { s = s sraw; np = 0; p = ""; sskel = ""; sraw = ""; lv = lv "t" }
+      s = s "${"; lv = lv "e"; q = 0; codeq = 0; i += 2; continue
+    }
+    if (q == 3 && codeq) {
+      if (c == "\\") { s = s c d; i += 2; continue }
+      if (c == "`") { s = s c; q = 0; codeq = 0; lv = substr(lv, 1, length(lv) - 1); i++; continue }
+      s = s c; i++; continue
+    }
+    if (q) {
+      if (c == "\\") { sraw = sraw c d; p = p c d; i += 2; continue }
+      if (c == sq) {
+        piece(); sraw = sraw c; r = substr($0, i + 1); t = s
+        sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", t)
+        # A Board label: words, not a directive, a key, a class (the second argument of h()), a compared value, a
+        # selector, an attribute or a pattern.
+        sclose(lang == "js" && prose(2) && words() && r !~ /^(:|[!=]=)/ && !(t ~ /(^|[;{}])$/ && r ~ /^(;|$)/) \
+          && t !~ /((^|[^A-Za-z0-9_$])h\((\047[^\047]*\047|"[^"]*"), ?|(^|[^A-Za-z0-9_$])(class|className|rel|target|type|role|autocomplete|inputmode) ?[:=] ?)$/ && t !~ /([!=]=|\[|(^|[^A-Za-z0-9_])case|\.(querySelector|querySelectorAll|closest|matches|getElementById|getAttribute|setAttribute|removeAttribute|hasAttribute|toggleAttribute|addEventListener|removeEventListener|includes|startsWith|endsWith|indexOf|lastIndexOf|split|replace|replaceAll|match|matchAll|search|test|get|has|set|delete|add|remove|toggle|contains)\()$/)
+        i++; continue
+      }
+      sraw = sraw c; p = p c; i++; continue
+    }
+    if (c == " " || c == "\t") { sp(); i++; continue }
+    if (c == "/" && d == "*") { bc = 1; i += 2; continue }
+    if (lang == "js" && c == "/" && d == "/") break
+    if (lv != "" && c == "{") { s = s c; lv = lv "b"; i++; continue }
+    if (lv != "" && c == "}") {
+      s = s c; t = substr(lv, length(lv)); lv = substr(lv, 1, length(lv) - 1)
+      if (t == "e") { q = 3; codeq = 1 }
+      i++; continue
+    }
+    if (c == "\047" || c == "\"" || (c == "`" && lang == "js")) { q = (c == "`") ? 3 : 1; codeq = 0; sq = c; sraw = c; sskel = ""; np = 0; p = ""; i++; continue }
+    if (lang == "js" && c == "/") {
+      t = s; sub(/ +$/, "", t); if (t == "") t = last
+      if (t == "" || t ~ /[(,=:[!&|?{};+*%~^<>-]$/ || t ~ /(^|[^A-Za-z0-9_$])(return|typeof|case|do|else|in|of|void|yield|await|delete|new)$/) {
+        j = i + 1; cl = 0
+        while (j <= n) { e = substr($0, j, 1); if (e == "\\") { j += 2; continue }; if (e == "[") cl = 1; else if (e == "]") cl = 0; else if (e == "/" && !cl) break; j++ }
+        if (j > n) { bad = 1; s = s c; i++; continue }
+        s = s substr($0, i, j - i + 1); i = j + 1; continue
+      }
+    }
+    s = s c; i++
+  }
+  if (q == 3 && !codeq) { piece(); sraw = sraw "\n"; sskel = sskel "\n"; next }
+  if (q == 3) next
+  if (q) { bad = 1; q = 0 }
+  sub(/[ \t]+$/, "", s); sub(/^ /, "", s)
+  if (s != "") { out(s); last = s }
+  s = ""
+}
+END { if (bad || q || inhd || lv != "") print "U" }'
+NOTEXT=; TXFROM=HEAD; TXTO=
+declare -A parse=()
+# needles <piece>...: what a test that checks one of these texts holds: a piece whole, or any 3 words of it in a row (a
+# test checks part of a message).
+needles() { printf '%s\n' "$@" | awk 'NF < 4 { print; next } { for (i = 1; i + 2 <= NF; i++) print $i " " $(i + 1) " " $(i + 2) }'; }
+# textof <lang>: the file on stdin as TEXT reads it (sh, js, css), or, for the base area's test fixtures (issue 513), a
+# JSON file (json) as one code line, jq's compact form, with no texts (its values are data the cases read), so only
+# its blanks can change alone; and a Markdown file (md, the test pack's card rules) as its non-blank lines, each a text
+# at its place among them.
+textof() {
+  local x
+  case $1 in
+    json) x=$(jq -c .) && printf 'C\t%s\n' "$x" ;;
+    md) awk '{ sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") } $0 != "" { print "T\t" ++n "\t" $0 }' ;;
+    *) awk -v lang="$1" "$TEXT" ;;
+  esac
+}
+# textonly <file>: when the change of <file> is to its texts, comments and blanks alone (its code, TEXT, the same both
+# sides), its tests in place of those pick gives any other change (its area's case files, the tests named after it).
+# Such a file is an engine file under conveyor/lib/ or the dispatcher conveyor/conveyor.sh (bash, or JSON or Markdown
+# as textof reads them; issue 513: so a text change to the dispatcher or to a base file, portable.sh, paths.sh or a
+# test pack fixture, runs no "all" area's whole engine test) or a
+# Board file under .claude/dashboard/ (JavaScript or CSS, not vendor/). The change is from TXFROM to TXTO (a commit, or
+# the worktree when empty): the card's whole change, HEAD to the worktree, or what main changed under it (the list's `main` lines), from the main of its last run to HEAD. Its
+# tests: its parse check (parse), into area each case file under conveyor/tests/ and into run each other test file
+# that holds an old or new text that changed (needles), and, as pick gives them, the tests of each engine or Board
+# source file that holds an old one whole: code there may match the text (app.js compares step names). A change to
+# comments or blanks alone selects its parse check alone. It fails, and pick goes on as for any change, when the file
+# is none of those or cannot be read either side, TEXT cannot read it or its code changed, a changed text is too short
+# to look for, or a shared file of the cases (a .sh under conveyor/tests/ that is no case file) holds one.
+textonly() {
+  local f=$1 lang a b
+  [ -n "$TXFROM" ] || return 1
+  case $f in
+    conveyor/lib/*.sh|conveyor/conveyor.sh) lang='sh' ;;
+    conveyor/lib/*.json) lang=json ;;
+    conveyor/lib/*.md) lang=md ;;
+    .claude/dashboard/vendor/*) return 1 ;;
+    .claude/dashboard/*.js) lang=js ;;
+    .claude/dashboard/*.css) lang=css ;;
+    *) return 1 ;;
+  esac
+  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(textof $lang <<<"$a") || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(textof $lang <<<"$b") || return 1
+  else b=$(textof $lang < "$f") || return 1; fi
+  ! grep -qx U <<<"$a"$'\n'"$b" && [ "$(grep -v '^T' <<<"$a")" = "$(grep -v '^T' <<<"$b")" ] || return 1
+  texttests "$a" "$b" || return 1
+  parse[$f]=1
+}
+# CODE, an awk program (lang: sh, py, yml, js, css or html): the lines of a file that are not comment or blank lines, as
+# they are (commentonly). A comment line: in shell, Python and YAML a line that starts with `#` (never the #! first
+# line, nor a shell file's `# shellcheck` directive, which changes what the shellcheck of the run checks); in JS and TS
+# a line that starts with `//` (not in CSS, where `//` is no comment and drops the next rule); in JS, TS and CSS a line
+# inside `/* */`, and in HTML inside `<!-- -->`, with nothing else on it. A line of a shell heredoc, of a Python triple-quoted string or of a JS template string
+# is data, and counted as code, though it starts with `#` or `//` or is blank. A block comment that opens after code on
+# a line is not followed: its next lines count as code.
+CODE='function heredoc(x) {
+  x = $0; gsub(/<<</, "", x)
+  if (match(x, /<<-?[ \t]*[\047"\\]?[A-Za-z_0-9.-]+/)) { x = substr(x, RSTART, RLENGTH); hdt = (x ~ /^<<-/); sub(/^<<-?[ \t]*[\047"\\]?/, "", x); hd = x }
+}
+function blk(o, c, s, i) {
+  s = $0
+  while (1) {
+    if (inb) { i = index(s, c); if (!i) return 1; s = substr(s, i + length(c)); inb = 0; continue }
+    sub(/^[ \t]+/, "", s)
+    if (s == "" || (lang == "js" && substr(s, 1, 2) == "//")) return 1
+    if (substr(s, 1, length(o)) != o) return 0
+    s = substr(s, length(o) + 1); inb = 1
+  }
+}
+lang == "sh" && hd != "" { print; x = $0; if (hdt) sub(/^\t+/, "", x); if (x == hd) hd = ""; next }
+q != "" { print; x = $0; gsub(/\\./, "", x); if (gsub(q, "", x) % 2) q = ""; next }
+NR == 1 && /^#!/ { print; next }
+lang == "sh" && /^[ \t]*#[ \t]*shellcheck[ \t]/ { print; next }
+lang ~ /^(sh|py|yml)$/ && /^[ \t]*(#|$)/ { next }
+lang ~ /^(js|css)$/ && blk("/*", "*/") { next }
+lang == "html" && blk("<!--", "-->") { next }
+{ print; x = $0; gsub(/\\./, "", x)
+  if (lang == "sh") heredoc()
+  else if (lang == "py") { if (gsub(/"""/, "", x) % 2) q = "\"\"\""; else if (gsub(/\047\047\047/, "", x) % 2) q = "\047\047\047" }
+  else if (lang == "js" && gsub(/`/, "", x) % 2) q = "`" }'
+# commentonly <file> (issue 640): when the change of <file> (TXFROM to TXTO, as textonly reads it) adds, removes or
+# edits its comment and blank lines alone (CODE the same both sides): it selects no test, only a shell file's parse
+# check (bash -n), and the run says so (conly). It fails, and pick goes on as for any change, for another file type
+# (Markdown, JSON and the rest), a file new or gone, or one whose content is the same (a change of its mode alone).
+declare -A conly=()
+commentonly() {
+  local f=$1 lang a b
+  [ -n "$TXFROM" ] || return 1
+  case $f in
+    *.sh|*.bash) lang='sh' ;;
+    *.py) lang=py ;;
+    *.yml|*.yaml) lang=yml ;;
+    *.js|*.mjs|*.ts|*.tsx) lang=js ;;
+    *.css) lang=css ;;
+    *.html) lang=html ;;
+    *) return 1 ;;
+  esac
+  # Each side ends in a `.` that is cut after, so that blank lines at the end, which $(...) drops, are compared too.
+  a=$(git show "$TXFROM:$f" 2>/dev/null && echo .) || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null && echo .) || return 1
+  else [ -f "$f" ] && b=$(cat -- "$f" && echo .) || return 1; fi
+  a=${a%.} b=${b%.}
+  [ "$a" != "$b" ] && [ "$(awk -v lang=$lang "$CODE" <<<"$a")" = "$(awk -v lang=$lang "$CODE" <<<"$b")" ] || return 1
+  conly[$f]=1; [ $lang != sh ] || parse[$f]=1
+}
+# texttests <old> <new>: the tests of a change to texts alone, from the file's two sides as TEXT reads them (the code
+# the same): as textonly says. It fails, having chosen none, when a changed text is too short to look for or a shared
+# file of the cases holds one.
+texttests() {
+  local a=$1 b=$2 t
+  local -a old new tests src hold
+  # The pieces of the texts that changed, old and new; one under 6 characters is too short to look for. Counted, not
+  # as sets, and each with its text's place (the code is the same both sides, so a place is the same text): a piece
+  # that one message loses and another keeps (`could not be read` after a name) is an old one too, and so are two
+  # texts that swap places.
+  mapfile -t old < <(LC_ALL=C comm -23 <(grep '^T' <<<"$a" | LC_ALL=C sort) <(grep '^T' <<<"$b" | LC_ALL=C sort) | cut -f3- | LC_ALL=C sort -u)
+  mapfile -t new < <(LC_ALL=C comm -13 <(grep '^T' <<<"$a" | LC_ALL=C sort) <(grep '^T' <<<"$b" | LC_ALL=C sort) | cut -f3- | LC_ALL=C sort -u)
+  for t in "${old[@]}" "${new[@]}"; do [ ${#t} -ge 6 ] || return 1; done
+  if [ $((${#old[@]} + ${#new[@]})) -gt 0 ]; then
+    mapfile -t tests < <(git ls-files -co --exclude-standard '*.test.sh' '*.test.mjs' '*.test.py' 'conveyor/tests/*.sh' | grep -vx conveyor/conveyor.test.sh)
+    mapfile -t hold < <(grep -lF -f <(needles "${old[@]}" "${new[@]}") -- "${tests[@]}" 2>/dev/null < /dev/null)
+    for t in "${hold[@]}"; do case $t in conveyor/tests/*.test.sh) ;; conveyor/tests/*) return 1 ;; esac; done
+    for t in "${hold[@]}"; do case $t in conveyor/tests/*) area[$t]=1 ;; *) run[$t]=1 ;; esac; done
+  fi
+  [ ${#old[@]} -gt 0 ] || return 0
+  # Code that matches a text holds it whole (app.js compares a step name), so an old piece whole is looked for here.
+  mapfile -t src < <(git ls-files -co --exclude-standard conveyor .claude/dashboard .claude/scripts \
+    | grep -vE '^conveyor/tests/|[.]test[.]|/__tests__/|^[.]claude/dashboard/vendor/|[.]md$')
+  mapfile -t hold < <(grep -lF -f <(printf '%s\n' "${old[@]}") -- "${src[@]}" 2>/dev/null < /dev/null)
+  [ ${#hold[@]} = 0 ] || NOTEXT=1 pick "${hold[@]}"
+}
+# CASES, an awk program, reads an engine case file as its cases and its shared part: a `K<TAB><case><TAB><body>` line
+# for each case, the function t_<case> as the runner names it (conveyor.test.sh), one line `t_<case>() { ...; }` or
+# from its `t_<case>() {` line to the first line that is `}`, its lines joined by \001; an `S<TAB><line>` line for each
+# other line (its setup, helpers and top-level lines); and `U`, and no more, when a case is of no such shape, is defined
+# twice or does not end. A line in a case is indented or blank, or a line of a heredoc it starts (to the heredoc's
+# word), so a line at the left (`helper() {`, a comment) after a case read wrongly as not ended is U, not taken into the
+# case: the file runs whole. With lib=1 it reads a library of functions (paths.sh: funcsof) so: a K line for each
+# function, `<name>() {` at the left, and S for its top-level lines. A one-line case or function may end in a redirect (`...; } 2>/dev/null`).
+CASES='function bad() { print "U"; u = 1; exit }
+function heredoc(x) {
+  x = $0; gsub(/<<</, "", x)
+  if (match(x, /<<-?[ \t]*[\047"\\]?[A-Za-z_0-9.-]+/)) { x = substr(x, RSTART, RLENGTH); hdt = (x ~ /^<<-/); sub(/^<<-?[ \t]*[\047"\\]?/, "", x); hd = x }
+}
+c != "" {
+  if (hd != "") { x = $0; if (hdt) sub(/^\t+/, "", x); if (x == hd) hd = ""; b = b "\001" $0; next }
+  if ($0 ~ /^}([ \t]*[0-9]*>+[ \t]*[^ \t;&|]+)*[ \t]*(#.*)?$/) { print "K\t" c "\t" b; c = ""; next }
+  if ($0 !~ /^([ \t]|$)/) bad()
+  b = b "\001" $0; heredoc(); next
+}
+BEGIN { if (lib) { at = "^[A-Za-z_][A-Za-z0-9_]*\\("; ok = "^[A-Za-z_][A-Za-z0-9_]*\\(\\) \\{"; pl = 0 }
+  else { at = "^t_[a-z0-9]*\\("; ok = "^t_[a-z0-9]+\\(\\) \\{"; pl = 2 } }
+$0 ~ at {
+  if ($0 !~ ok) bad()
+  n = substr($0, pl + 1, index($0, "(") - pl - 1); if (n in seen) bad(); seen[n] = 1
+  if ($0 ~ /[;&] *\}([ \t]*[0-9]*>+[ \t]*[^ \t;&|]+)*[ \t]*(#.*)?$/) print "K\t" n "\t" $0; else { c = n; b = $0; heredoc() }
+  next
+}
+{ print "S\t" $0 }
+END { if (!u && c != "") print "U" }'
+# casesof <case file>: when the change of <file> (TXFROM to TXTO, as textonly reads it) leaves its shared part (CASES)
+# the same but for comments and blanks (its code and texts, TEXT, the same both sides), its changed and added cases,
+# into ccase (a removed case runs nothing). It fails, and the file runs whole, when the file cannot be read either side,
+# CASES or TEXT cannot read it, or its shared part changed: a helper or setup line that the cases share.
+casesof() {
+  local f=$1 a b sa sb n
+  [ -n "$TXFROM" ] || return 1
+  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk "$CASES" <<<"$a") || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk "$CASES" <<<"$b") || return 1
+  else b=$(awk "$CASES" "$f") || return 1; fi
+  ! grep -qx U <<<"$a"$'\n'"$b" || return 1
+  sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
+  ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
+  while IFS= read -r n; do [ -z "$n" ] || ccase[$n]=1; done \
+    < <(LC_ALL=C comm -13 <(grep '^K' <<<"$a" | LC_ALL=C sort) <(grep '^K' <<<"$b" | LC_ALL=C sort) | cut -f2)
+}
+# areaof <engine file>: its area's case files into area, or all when its tests are "all" (and the area's name into
+# allby: why the runner runs).
+areaof() {
+  local a t
+  while IFS=$'\t' read -r a t; do if [ "$t" = all ]; then all=1; allby[$a]=1; else area[conveyor/tests/$t]=1; fi; done \
+    < <(jq -r --arg f "$1" '.areas | to_entries[] | select(.value.files | index($f)) | .key as $k | .value.tests
+      | if . == "all" then [$k, "all"] else .[] | [$k, .] end | @tsv' <<<"$AMAP")
+}
+# callers <ERE> <file> (issue 514): the engine test of each file of the map and case file under conveyor/tests/, but
+# <file>, with a line that matches <ERE> and is no comment line: a case file into area, any other file's area
+# (areaof: so conveyor/tests/lib.sh, which every case runs through, runs the whole engine test).
+callers() {
+  local t
+  local -a files
+  mapfile -t files < <({ jq -r '.areas[].files[]' <<<"$AMAP"; git ls-files -co --exclude-standard 'conveyor/tests/*.test.sh'; } \
+    | LC_ALL=C sort -u | while read -r t; do [ "$t" = "$2" ] || [ ! -f "$t" ] || echo "$t"; done)
+  [ ${#files[@]} -gt 0 ] || return 0
+  while read -r t; do case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) areaof "$t" ;; esac; done \
+    < <(awk -v p="$1" '!/^[ \t]*#/ && $0 ~ p { print FILENAME; nextfile }' "${files[@]}" < /dev/null)
+}
+# funcsof <file> (issue 514): when the change of conveyor/lib/paths.sh (TXFROM to TXTO, as textonly reads it) edits,
+# adds or removes its functions alone (CASES with lib=1; its top-level lines the same but for comments and blanks,
+# TEXT), the engine test of their callers (callers): of each of them, and of each other function of the file that
+# calls one. It fails, and the file's area ("all") runs, when the file cannot be read either side, CASES or TEXT
+# cannot read it, a top-level line changed, or one of them is called at start-up: by a top-level line of the file, or
+# in the code of conveyor/conveyor.sh or conveyor/lib/portable.sh (or either cannot be read).
+funcsof() {
+  local f=$1 a b sa sb st more
+  local -a fn
+  [ "$f" = conveyor/lib/paths.sh ] && [ -n "$TXFROM" ] || return 1
+  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk -v lib=1 "$CASES" <<<"$a") || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk -v lib=1 "$CASES" <<<"$b") || return 1
+  else b=$(awk -v lib=1 "$CASES" "$f") || return 1; fi
+  ! grep -qx U <<<"$a"$'\n'"$b" || return 1
+  sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
+  ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
+  # The functions changed, added or removed: a K line on one side alone.
+  mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
+  [ ${#fn[@]} -gt 0 ] || return 1
+  while more=$(grep '^K' <<<"$a"$'\n'"$b" | grep -wF -f <(printf '%s\n' "${fn[@]}") | cut -f2 \
+      | grep -vxF -f <(printf '%s\n' "${fn[@]}") | LC_ALL=C sort -u) && [ -n "$more" ]; do
+    mapfile -t -O "${#fn[@]}" fn <<<"$more"
+  done
+  st=$({ textof sh < conveyor/conveyor.sh && textof sh < conveyor/lib/portable.sh; } 2>/dev/null) && ! grep -qx U <<<"$st" || return 1
+  ! grep '^C' <<<"$sb"$'\n'"$st" | grep -qwF -f <(printf '%s\n' "${fn[@]}") || return 1
+  callers "(^|[^A-Za-z0-9_])($(IFS='|'; echo "${fn[*]}"))([^A-Za-z0-9_]|\$)" "$f"
+  parse[$f]=1
+}
+# TABLE, an awk program, reads conveyor/conveyor.sh as its command table and the rest: a `K<TAB><command><TAB><line>`
+# line for each line of the table (`cmd <command> <script> <usage>`, at the left: issue 530), and an `S<TAB><line>`
+# line for each other line; and `U` when it has no table line or names a command twice.
+TABLE='/^cmd / && $2 ~ /^[a-z][a-z-]*$/ { if ($2 in seen) { print "U"; u = 1; exit } seen[$2] = 1; n++; print "K\t" $2 "\t" $0; next }
+{ print "S\t" $0 }
+END { if (!u && !n) print "U" }'
+# usages: of K lines (TABLE) on stdin, a line `T<TAB>K<command><TAB><usage>` for each line's usage text (the quoted
+# text that ends it; none for `-`).
+usages() { awk -F'\t' 'index($3, "\047") { u = substr($3, index($3, "\047") + 1); sub(/\047[ \t]*$/, "", u); print "T\tK" $2 "\t" u }'; }
+# cmdsof <file> (issue 514): when the change of conveyor/conveyor.sh (TXFROM to TXTO) is to lines of its command table
+# alone (TABLE: a line added, removed or changed), the rest the same but for comments, blanks and texts (TEXT), the
+# engine test of the files that run those commands (callers): a line with `conveyor.sh <command>` or
+# `conveyor.sh" <command>`, or `"$X" <command>` where an engine file or a file under conveyor/tests/ sets X to a path
+# that ends in conveyor.sh, or with the command after a function that a file under conveyor/tests/ defines to run
+# conveyor.sh with its arguments (`loop <command>`, or `loop <main> <command>`); and the tests texttests gives for
+# the texts that changed: those of the rest, and the tests that hold a usage text of a changed line (usages), a part of
+# the usage message. A command conveyor/tests/lib.sh runs (setup's `loop state-dir`) runs the whole engine test. It
+# fails, and the file's area ("all") runs, when the file cannot be read either side, TABLE or TEXT cannot read it, a
+# code line outside the table changed, or texttests fails (a changed usage text under 6 characters).
+cmdsof() {
+  local f=$1 a b sa sb ka kb w v t p
+  local -a cs
+  [ "$f" = conveyor/conveyor.sh ] && [ -n "$TXFROM" ] || return 1
+  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk "$TABLE" <<<"$a") || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk "$TABLE" <<<"$b") || return 1
+  else b=$(awk "$TABLE" "$f") || return 1; fi
+  ! grep -qx U <<<"$a"$'\n'"$b" || return 1
+  sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
+  ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$(grep -v '^T' <<<"$sa")" = "$(grep -v '^T' <<<"$sb")" ] || return 1
+  mapfile -t cs < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
+  [ ${#cs[@]} -gt 0 ] || return 1
+  # The usage texts that changed, old and new (a command's line added, removed, or changed in its usage text), go to
+  # texttests as new texts, each in a place of its own: the tests that hold one run, and no source file is looked for
+  # that holds an old one (the command's own files run as its callers; an old text the new one extends, `retry <issue>`
+  # of `retry <issue> [--now]`, would find conveyor.sh itself, and the whole test).
+  ka=$(LC_ALL=C comm -23 <(grep '^K' <<<"$a" | LC_ALL=C sort) <(grep '^K' <<<"$b" | LC_ALL=C sort) | usages)
+  kb=$(LC_ALL=C comm -13 <(grep '^K' <<<"$a" | LC_ALL=C sort) <(grep '^K' <<<"$b" | LC_ALL=C sort) | usages)
+  ka=$(LC_ALL=C comm -3 <(grep . <<<"$ka" | LC_ALL=C sort) <(grep . <<<"$kb" | LC_ALL=C sort) | awk -F'\t' '{ print "T\tK" NR "\t" $NF }')
+  texttests "$sa" "$sb${ka:+$'\n'$ka}" || return 1
+  w=$(sed -nE 's/^[ \t]*([A-Za-z_][A-Za-z0-9_]*)\(\) *\{.*conveyor[.]sh"? +"\$(@|\{@:2\})".*/\1/p' conveyor/tests/*.sh 2>/dev/null \
+    | LC_ALL=C sort -u | paste -sd '|' -)
+  v=$({ jq -r '.areas[].files[]' <<<"$AMAP"; git ls-files -co --exclude-standard 'conveyor/tests/*.sh'; } 2>/dev/null \
+    | LC_ALL=C sort -u | while read -r t; do [ ! -f "$t" ] || echo "$t"; done \
+    | xargs -r sed -nE 's/.*(^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)="?[^ ;"]*conveyor[.]sh"?([ \t;)]|$).*/\2/p' 2>/dev/null \
+    | LC_ALL=C sort -u | paste -sd '|' -)
+  p='conveyor[.]sh"?'; [ -z "$v" ] || p="($p|\"?[\$][{]?($v)[}]?\"?)"
+  [ -z "$w" ] || p="($p|(^|[^A-Za-z0-9_-])($w)([ \t]+[^ \t]+)?)"
+  callers "${p}[ \t]+($(IFS='|'; echo "${cs[*]}"))([^A-Za-z0-9_-]|\$)" "$f"
+  parse[$f]=1
+}
+# keysof <file> (issue 530): when the change of conveyor/lib/control-defaults.json (TXFROM to TXTO), the control
+# record's default for each key, adds, removes or changes keys (at the top, or in rules), the engine test of the code
+# that reads one (callers: a line with `.<key>` or `"<key>"`) and each case file under conveyor/tests/ that reads the
+# file; not the whole area of control.sh, which reads the file whole for any key. It fails, and the file's area runs,
+# when either side cannot be read as a JSON object, no key changed, or a changed key is no plain name.
+keysof() {
+  local f=$1 a b k t
+  [ "$f" = conveyor/lib/control-defaults.json ] && [ -n "$TXFROM" ] || return 1
+  a=$(git show "$TXFROM:$f" 2>/dev/null | jq -ce 'objects') || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null | jq -ce 'objects') || return 1
+  else b=$(jq -ce 'objects' "$f" 2>/dev/null) || return 1; fi
+  k=$(jq -rn --argjson a "$a" --argjson b "$b" '($a + $b | keys[]) as $k
+    | if $k == "rules" and ($a.rules | type) == "object" and ($b.rules | type) == "object"
+      then ($a.rules + $b.rules | keys[]) as $r | select($a.rules[$r] != $b.rules[$r]) | $r
+      else select($a[$k] != $b[$k]) | $k end' | LC_ALL=C sort -u) && [ -n "$k" ] || return 1
+  ! grep -qvE '^[A-Za-z_][A-Za-z0-9_]*$' <<<"$k" || return 1
+  k=$(paste -sd '|' - <<<"$k")
+  callers "([.]($k)([^A-Za-z0-9_]|\$)|\"($k)\")" "$f"
+  for t in $(git ls-files -co --exclude-standard 'conveyor/tests/*.test.sh'); do
+    [ ! -f "$t" ] || ! grep -q 'control-defaults[.]json' "$t" || area[$t]=1
+  done
+  parse[$f]=1
+}
+# covof <file> (issue 527): when the change of a shell file (TXFROM to TXTO) edits or removes its functions alone (FUNCS;
+# its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them as it was
+# at TXFROM (one sum, the same as sumsof's there) with at least one case: the cases it lists for them. An engine case
+# into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It fails, and the
+# rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
+# its functions changed, a function is added, or the map lacks one, lists no case for one, holds an older sum of one,
+# or names a test file, an engine case or a part (partok) that is not there now.
+covof() {
+  local f=$1 a b sa sb s sel t c ac
+  local -a fn
+  [ -n "$TXFROM" ] && [ -s "$COV" ] || return 1
+  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk "$FUNCS" <<<"$a") || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk "$FUNCS" <<<"$b") || return 1
+  else b=$(awk "$FUNCS" "$f") || return 1; fi
+  ! grep -qx U <<<"$a"$'\n'"$b" || return 1
+  sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
+  ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
+  mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
+  [ ${#fn[@]} -gt 0 ] || return 1
+  # Each one's sum as TXFROM has it: one a function, or the change added one.
+  s=$(sumsof <<<"$a" | awk -F'\t' 'NR == FNR { w[$0]; next } $1 in w' <(printf '%s\n' "${fn[@]}") -)
+  [ -n "$s" ] && [ "$(grep -c . <<<"$s")" = ${#fn[@]} ] || return 1
+  sel=$(jq -rn --arg f "$f" --arg s "$s" '[inputs] as $m | [$s | split("\n")[] | select(. != "") | split("\t")] as $fs
+    | if all($fs[]; .[0] as $n | .[1] as $x | [$m[] | select(.file == $f and .fn == $n and has("sum")) | .sum]
+          | length > 0 and all(. == $x))
+        and all($fs[]; .[0] as $n | any($m[]; .file == $f and .fn == $n and has("test")))
+      then $m[] | select(.file == $f and has("test")) | select(.fn as $n | any($fs[]; .[0] == $n)) | [.test, .case // ""] | @tsv
+      else error("not held") end' "$COV" 2>/dev/null) && [ -n "$sel" ] || return 1
+  ac=$(allcases)
+  while IFS=$'\t' read -r t c; do
+    [ -f "$t" ] || return 1
+    if [ "$t" = conveyor/conveyor.test.sh ]; then [ -n "$c" ] && grep -qxF -- "$c" <<<"$ac" || return 1
+    elif [ -n "$c" ]; then partok "$t" "$c" || return 1; fi
+  done <<<"$sel"
+  while IFS=$'\t' read -r t c; do
+    if [ -z "$c" ]; then run[$t]=1; elif [ "$t" = conveyor/conveyor.test.sh ]; then ccase[$c]=1; else npart[$t]+=$'\n'$c; fi
+  done <<<"$sel"
+  [ -n "$COVTESTS" ] || COVTESTS=$(jq -rn '[inputs | .test? // empty] | unique[]' "$COV")
+  parse[$f]=1
+}
+# The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
+# test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].
+pick() {
+local f t s named stem dir cov
+[ -n "$NOTEXT" ] || npart=()
+for f; do
+  # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
+  [ -n "$NOTEXT" ] || ! commentonly "$f" || continue
+  # Its linked test files (LINKS), whatever else it selects; not in textonly's pick (NOTEXT): its files are not changed.
+  [ -z "$LINKS" ] || [ -n "$NOTEXT" ] || while IFS=$'\t' read -r s t; do
+    [ "$s" = "$f" ] || continue
+    case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) run[$t]=1 ;; esac
+    linked[$t$'\t'$f]=1
+  done <<<"$LINKS"
+  if [ "$f" = "$MAP" ]; then
+    # The map's own test, and the case files whose naming changed: each one an area lists now that it did not list at
+    # HEAD, and each one of an area whose files changed (in the map now, else at HEAD). "all", or a map either side
+    # that cannot be read (none at HEAD, or a line that is not one of its shapes: AREAS), runs the whole engine test.
+    [ ! -f .conveyor/test-changed.test.sh ] || run[.conveyor/test-changed.test.sh]=1
+    if [ -n "$AMAP" ] && named=$(git show "HEAD:$MAP" 2>/dev/null) && named=$(jq -cs "$AREAS" <<<"$named" 2>/dev/null) \
+      && named=$(jq -rn --argjson o "$named" --argjson n "$AMAP" '($o.areas + $n.areas) | keys[] as $k
+        | (($n.areas[$k].tests | arrays) - ($o.areas[$k].tests | arrays // []))[],
+          (select($o.areas[$k].files != $n.areas[$k].files)
+            | ($n.areas[$k] // $o.areas[$k]).tests | if . == "all" then "all\t\($k)" else .[] end)' 2>/dev/null); then
+      while read -r t; do [ -z "$t" ] || if [[ $t == all$'\t'* ]]; then all=1; allby[${t#all$'\t'}]=1; else area[conveyor/tests/$t]=1; fi; done <<<"$named"
+    else
+      all=1
+    fi
+    continue
+  fi
+  if [ ! -f "$f" ]; then
+    case $f in conveyor/*)
+      jq -e --arg f "$f" 'any(.outside[]; . as $o | $f == $o or (($o | endswith("/")) and ($f | startswith($o)))) | not' \
+        <<<"$AMAP" > /dev/null && all=1 ;;
+    esac
+    continue
+  fi
+  case $f in
+    # A case file: its changed and added cases alone when its shared part is the same (casesof), else all of them.
+    conveyor/tests/*.test.sh) casesof "$f" || area[$f]=1; continue ;;
+    *.test.sh|*.test.mjs|*.test.ts|*.test.tsx) run[$f]=1; continue ;;
+  esac
+  # A change to its texts and comments alone: the tests that hold the texts (textonly).
+  [ -n "$NOTEXT" ] || ! textonly "$f" || continue
+  # A change to functions alone that the coverage map holds: the cases it lists (issue 527), and of the tests below,
+  # those the map names nowhere (a test the trace did not run); not its area.
+  cov=; [ -n "$NOTEXT" ] || ! covof "$f" || cov=1
+  # A change to functions of paths.sh, or to commands of conveyor.sh, alone: their callers' tests (issue 514). A change
+  # to the control record's defaults: the tests of the code that reads the keys it changed (issue 530).
+  [ -n "$NOTEXT" ] || [ -n "$cov" ] || ! { funcsof "$f" || cmdsof "$f" || keysof "$f"; } || continue
+  stem=$(basename "${f%.*}"); dir=$(dirname "$f")
+  for s in "$stem" "${stem//_/-}"; do
+    for t in "$dir/$s".test.* "$dir/$s"-*.test.* "$dir/__tests__/$s".test.* "$dir/__tests__/$s"-*.test.* \
+             "$dir/__tests__/$s"*.refute.test.*; do
+      # A file at the root is named as git names it, not ./<file> (issue 595: the meta-runner hook took
+      # ./README.test.sh's own start for another file's, and the pack's marks are keyed by git's name).
+      t=${t#./}
+      [ -f "$t" ] && ! owned "$t" "$stem" && { [ -z "$cov" ] || ! grep -qxF -- "$t" <<<"$COVTESTS"; } && run[$t]=1
+    done
+  done
+  for t in ${TESTS_OF[$f]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
+  [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; esac
+done
+# A part the coverage map selected runs as a part, unless this pick, or another, selected its file whole (run, here).
+[ -n "$NOTEXT" ] || { for t in "${!run[@]}"; do twhole[$t]=1; done
+  for t in "${!npart[@]}"; do run[$t]=1; tparts[$t]+=${npart[$t]}; done; }
+# The engine's runner: whole when the runner changed, an area is "all" or the map could not be read; else the cases of
+# the areas' files and the changed cases of a case file (casesof), in a session and in the loop's test step alike
+# (owner, 2026-11-13: a card tests what it touched). Not in the pick textonly calls (NOTEXT): run[the runner] would read
+# as a change to the runner, and the pick it is in sets cases.
+[ -z "$NOTEXT" ] || return 0
+cases=
+if [ -n "$all" ] || [ -n "${run[conveyor/conveyor.test.sh]:-}" ]; then
+  run[conveyor/conveyor.test.sh]=1
+elif [ ${#area[@]} -gt 0 ] || [ ${#ccase[@]} -gt 0 ]; then
+  cases=$({ [ ${#area[@]} = 0 ] || sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "${!area[@]}"
+    [ ${#ccase[@]} = 0 ] || printf '%s\n' "${!ccase[@]}"; } | sort -u | tr '\n' ' ')
+  run[conveyor/conveyor.test.sh]=1
+fi
+}
+allcases() { sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u; }
+pick "${changed[@]}"
+for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
+# The whole selection, before what passed is taken out of it (the cases kept as passed: kept, below).
+declare -A full=()
+for t in "${!run[@]}"; do full[$t]=1; done; fullcases=$cases
+# The tests that run whatever passed before (fresh, fcases), each with why it runs (why: one reason a line): those of
+# the files a session changed in the card's change (the loop's `changed` lines), picked as the change's own are; and
+# those of the files main changed since the HEAD the list was made on (its `main` lines), only where the change's own
+# selection holds them too: a test file it selects, and of the engine's runner the cases both select.
+declare -A fresh=() why=() only=()
+fcases=
+freshen() { # <reason> <only within the change's selection: 1, or empty> <file>...
+  local w=$1 o=$2 f t c a
+  shift 2
+  # A file changed in its texts alone (textonly) is judged on the card's whole change, or on what main changed in it
+  # since the main of the last run (the list's `from` line; with none, as any change).
+  if [ -n "$o" ]; then TXFROM=$(awk -F'\t' '$1 == "from" {print $2; exit}' "$RERUN"); TXTO=HEAD; else TXFROM=HEAD; TXTO=; fi
+  for f; do
+    run=(); area=(); ccase=(); allby=(); all=
+    # The map as main changed it is the one at HEAD, so which case files it names anew cannot be told: every case of
+    # the runner the change selects runs, and the map's own test.
+    if [ -n "$o" ] && [ "$f" = "$MAP" ]; then
+      run[conveyor/conveyor.test.sh]=1; cases=; [ ! -f .conveyor/test-changed.test.sh ] || run[.conveyor/test-changed.test.sh]=1
+    else pick "$f"; fi
+    for t in "${!run[@]}"; do
+      c=$cases
+      if [ -n "$o" ]; then
+        [ -n "${full[$t]:-}" ] || continue
+        if [ "$t" = conveyor/conveyor.test.sh ] && [ -n "$fullcases" ]; then
+          if [ -z "$c" ]; then c=$fullcases
+          else c=$(comm -12 <(tr ' ' '\n' <<<"$c" | grep . | sort -u) <(tr ' ' '\n' <<<"$fullcases" | grep . | sort -u) | tr '\n' ' ')
+            [ -n "$c" ] || continue
+          fi
+        fi
+      fi
+      if [ "$t" = conveyor/conveyor.test.sh ]; then
+        if [ -z "${fresh[$t]:-}" ]; then fcases=$c
+        elif [ -n "$fcases" ] && [ -n "$c" ]; then fcases=$(tr ' ' '\n' <<<"$fcases $c" | grep . | sort -u | tr '\n' ' ')
+        else fcases=; fi
+      fi
+      fresh[$t]=1; why[$t]+="$w $f"$'\n'
+      # An area that runs every engine case file selected the runner, and it runs them all for this file: the area's
+      # name is a reason too.
+      [ "$t" != conveyor/conveyor.test.sh ] || [ -n "$c" ] || for a in "${!allby[@]}"; do why[$t]+="the area $a runs all engine tests"$'\n'; done
+    done
+  done
+}
+# A first run of the loop's test step (a log folder, no list) says why each file of its selection runs too: the
+# reasons of each changed file, picked one at a time (freshen); the selection is the one picked above. A first run's
+# list holds no line but what the loop keeps off (`ok`, `off` and `pass` lines: conveyor.sh flakyoff(), slowoff()); a
+# run again's has its `change` line, a run by hand's its `fail` line. Nothing of a first run's selection "did not pass".
+first=; ! grep -qvE $'^(ok|off|pass)\t' "$RERUN" 2>/dev/null && first=1
+if [ -n "$first" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ] && [ ${#full[@]} -gt 0 ]; then
+  freshen "the card changed" '' "${changed[@]}"
+  run=(); for t in "${!full[@]}"; do run[$t]=1; done; cases=$fullcases; fresh=(); fcases=
+fi
+if [ -s "$RERUN" ]; then
+  mapfile -t since < <(awk -F'\t' '$1 == "changed" {print $2}' "$RERUN")
+  mapfile -t moved < <(awk -F'\t' '$1 == "main" {print $2}' "$RERUN")
+  [ ${#since[@]} = 0 ] || freshen "the card changed" '' "${since[@]}"
+  [ ${#moved[@]} = 0 ] || freshen "main changed" 1 "${moved[@]}"
+  run=(); for t in "${!full[@]}"; do run[$t]=1; done; cases=$fullcases
+fi
+if [ -s "$RERUN" ]; then
+  # A file listed as passed is not run, unless the list also names cases of it that failed (it passed before a run
+  # after a fix failed them): then, of the engine's runner, those cases alone.
+  failed=$(awk -F'\t' '$1 == "fail" {print $2}' "$RERUN")
+  while IFS=$'\t' read -r k f _; do [ "$k" != pass ] || grep -qxF -- "$f" <<<"$failed" || unset "run[$f]"; done < "$RERUN"
+  rpass=$(awk -F'\t' '$1 == "pass" && $2 == "conveyor/conveyor.test.sh"' "$RERUN")
+  # A `fail` line naming an engine case file and no case (the run of that one file: conveyor.sh testaction run) runs
+  # its cases through the runner, which times the file as a card's run does.
+  again=$({ awk -F'\t' '$1 == "fail" && $2 == "conveyor/conveyor.test.sh" {print $3}' "$RERUN"
+      awk -F'\t' '$1 == "fail" && $3 == "" && $2 ~ /^conveyor\/tests\/[^\/]+[.]test[.]sh$/ {print $2}' "$RERUN" \
+        | while IFS= read -r f; do [ ! -f "$f" ] || sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f"; done; } \
+    | grep -Fxf <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh) | sort -u | tr '\n' ' ')
+  # A file the list names failed cases of runs though no change selects it: the loop runs a card's failing cases on
+  # main (conveyor.sh verdicts()), where nothing changed. Of the engine's runner, only when a case it names is one; of
+  # a node test file, those cases alone (only, below). A `fail` line naming no case (a file that failed naming none, or
+  # ran out of time) runs its file whole, the runner too.
+  whole=$(awk -F'\t' '$1 == "fail" && $3 == "" {print $2}' "$RERUN")
+  while IFS=$'\t' read -r k f _; do
+    [ "$k" = fail ] && [ -f "$f" ] && [ -z "${run[$f]:-}" ] || continue
+    case $f in conveyor/tests/*.test.sh) ! grep -qxF -- "$f" <<<"$whole" || { [ -z "$again" ] || { run[conveyor/conveyor.test.sh]=1; cases=$again; }; continue; } ;; esac
+    if grep -qxF -- "$f" <<<"$whole"; then run[$f]=1; [ "$f" != conveyor/conveyor.test.sh ] || again=
+    elif [ "$f" != conveyor/conveyor.test.sh ]; then run[$f]=1; only[$f]=1; elif [ -n "$again" ]; then run[$f]=1; cases=$again; fi
+  done < "$RERUN"
+  sel=$cases; [ -z "$again" ] || cases=$again
+  # Cases of the runner that passed in a run of it that did not (one killed part-way, after or before a case failed):
+  # the rest of its selection runs, not only the cases that failed.
+  oks=$(awk -F'\t' '$1 == "ok" && $2 == "conveyor/conveyor.test.sh" {print $3}' "$RERUN")
+  if [ -n "$oks" ] && [ -z "$rpass" ] && [ -n "${run[conveyor/conveyor.test.sh]:-}" ]; then
+    left=$(tr ' ' '\n' <<<"${sel:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh)}" | grep . | grep -vFxf <(echo "$oks") | sort -u | tr '\n' ' ')
+    if [ -n "$left" ]; then cases=$left; else unset "run[conveyor/conveyor.test.sh]"; fi
+  fi
+  [ -n "$first" ] || for t in "${!run[@]}"; do why[$t]+=$'did not pass\n'; done
+  # The tests of the files the session changed run beside what had not passed: a test file whole, and of the runner
+  # the cases of their areas (all of them for an "all" area), added to its cases that had not passed.
+  for t in "${!fresh[@]}"; do
+    if [ "$t" = conveyor/conveyor.test.sh ]; then
+      if [ -z "$fcases" ]; then cases=
+      elif [ -z "${run[$t]:-}" ]; then cases=$fcases
+      elif [ -n "$cases" ]; then cases=$(tr ' ' '\n' <<<"$cases $fcases" | grep . | sort -u | tr '\n' ' ')
+      fi
+    fi
+    run[$t]=1
+  done
+  # Of the runner, a case the loop keeps off as flaky (an `off` line: conveyor.sh flakyoff()) does not run, though a
+  # change selects it or its whole area: it is left out last, after every case above was added.
+  # A whole test file an `off` line names (one the loop keeps off for its CPU seconds: conveyor.sh slowoff()) does not
+  # run either: an engine case file's cases are left out of the runner so, and any other file is not run.
+  off=$(awk -F'\t' '$1 == "off" && $2 == "conveyor/conveyor.test.sh" && $3 != "" {print $3}' "$RERUN")
+  while IFS=$'\t' read -r k f c; do
+    [ "$k" = off ] && [ -z "$c" ] && [ -n "$f" ] || continue
+    case $f in
+      conveyor/tests/*.test.sh) off+=$'\n'$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f" 2>/dev/null) ;;
+      *) unset "run[$f]" ;;
+    esac
+  done < "$RERUN"
+  off=$(grep . <<<"$off")
+  if [ -n "$off" ] && [ -n "${run[conveyor/conveyor.test.sh]:-}" ]; then
+    left=$(tr ' ' '\n' <<<"${cases:-$(allcases)}" | grep . | grep -vFxf <(echo "$off") | sort -u | tr '\n' ' ')
+    if [ -n "$left" ]; then cases=$left; else unset "run[conveyor/conveyor.test.sh]"; fi
+  fi
+fi
+# The loop's test step reads which files ran and which failed from a log in the folder it names (conveyor.sh
+# testfails()), where no test's own output can pass for these lines.
+log=/dev/null; [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || log=$CONVEYOR_TEST_LOG/test-changed.log
+for t in "${!linked[@]}"; do printf 'TESTRUN linked\t%s\n' "$t" >> "$log"; done
+# enginewhole: 0 when the runner's run starts every case file of the engine: no cases chosen, or a case of each (issue
+# 546: a whole run with a flaky case kept off; a file kept off whole, slowoff(), is not run so). Such a run sources
+# them all, which the hook does not see: it is a meta-runner's run (issue 584).
+enginewhole() {
+  [ -n "$cases" ] || return 0
+  local f c
+  for f in conveyor/tests/*.test.sh; do
+    c=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f")
+    [ -z "$c" ] || grep -qxFf <(tr ' ' '\n' <<<"$cases" | grep .) <<<"$c" || return 1
+  done
+}
+# A file the pack marks whole-only (wonly, above) is not run here: the whole test runs it. The runner's run of chosen
+# cases is no meta-runner's, and runs.
+for t in "${!run[@]}"; do
+  [ -n "${wonly[$t]:-}" ] || continue
+  [ "$t" != conveyor/conveyor.test.sh ] || enginewhole || continue
+  unset "run[$t]"; printf 'TESTRUN whole-only\t%s\n' "$t" >> "$log"
+  echo "== $t: not run: whole-only (test.files.\"$t\".wholeOnly in .conveyor/project.json), the nightly whole test runs it"
+done
+# What it selected and out of how many (the step's record, conveyor.sh testrec()): the test files it can run (an
+# engine case file is run by the engine's runner, never itself), and the cases: the engine's, and each node test file's
+# test() and it() and each python one's def test_ (the Board's), and each Claude Code plugin test file's test() (the
+# /units mod's), and each other shell test file's t_ cases, check calls and ok calls, or 1 for a file that has none of
+# them (it runs as one case).
+nf=$(git ls-files -co --exclude-standard '*.test.sh' '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx' | grep -vc '^conveyor/tests/')
+nc=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u | wc -l)
+filecases() { cat "$@" 2>/dev/null | grep -cE '^[[:space:]]*((test|it)\(|def test_)'; } # <node, python or plugin test files>
+shellcases() { # <shell test files>
+  local f c s=0
+  for f; do
+    c=$(grep -cE '^t_[a-z0-9_]+\(\) *\{|^[[:space:]]*check[a-z_]* |(^|[;&|{][[:space:]]*)ok "' "$f" 2>/dev/null)
+    s=$((s + (${c:-0} > 0 ? c : 1)))
+  done
+  echo $s
+}
+mapfile -t board < <(git ls-files -co --exclude-standard '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx')
+[ ${#board[@]} = 0 ] || nc=$((nc + $(filecases "${board[@]}")))
+mapfile -t shell < <(git ls-files -co --exclude-standard '*.test.sh' | grep -v '^conveyor/tests/' | grep -vx conveyor/conveyor.test.sh)
+[ ${#shell[@]} = 0 ] || nc=$((nc + $(shellcases "${shell[@]}")))
+sc=0; [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || if [ -n "$cases" ]; then sc=$(wc -w <<<"$cases"); else sc=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u | wc -l); fi
+board=(); shell=()
+for t in "${!run[@]}"; do case $t in conveyor/conveyor.test.sh) ;; *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;; *) shell+=("$t") ;; esac; done
+[ ${#board[@]} = 0 ] || sc=$((sc + $(filecases "${board[@]}")))
+[ ${#shell[@]} = 0 ] || sc=$((sc + $(shellcases "${shell[@]}")))
+echo "TESTRUN files=${#run[@]} of=$nf" >> "$log"; echo "TESTRUN cases=$sc of=$nc" >> "$log"
+# A run again (the loop's list) also says how many cases of the whole selection passed before and are not run: kept.
+if [ -s "$RERUN" ]; then
+  kc=0; board=(); shell=()
+  for t in "${!full[@]}"; do
+    if [ "$t" = conveyor/conveyor.test.sh ]; then
+      # Its cases of the selection that do not run (all of them when it does not run; none when it runs whole).
+      [ -n "${run[$t]:-}" ] && [ -z "$cases" ] && continue
+      kc=$((kc + $(comm -23 <(tr ' ' '\n' <<<"${fullcases:-$(allcases)}" | grep . | sort -u) \
+        <([ -z "${run[$t]:-}" ] || tr ' ' '\n' <<<"$cases" | grep . | sort -u) | wc -l)))
+    elif [ -z "${run[$t]:-}" ]; then
+      case $t in *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;; *) shell+=("$t") ;; esac
+    fi
+  done
+  [ ${#board[@]} = 0 ] || kc=$((kc + $(filecases "${board[@]}")))
+  [ ${#shell[@]} = 0 ] || kc=$((kc + $(shellcases "${shell[@]}")))
+  echo "TESTRUN kept=$kc" >> "$log"
+fi
+# The loop's live record counts the cases selected above that have ended, from the records in cases/ok and
+# cases/failed of its log folder (session.sh testdone()). The engine's runner writes a record for each of its own cases.
+# This script writes the records for a Board or other shell test file when the file ends, one for each case counted
+# above. A file that passed gets them all in ok. A failed file gets as many in failed as its runner's summary says
+# (node's `fail N`, python's `FAILED (failures=N, errors=M)`), at least 1 and at most all of them, and the rest in ok.
+ended() { # <test file> <ok|FAIL> <its output>
+  [ -d "${CONVEYOR_TEST_LOG:-}" ] || return 0
+  local k f=0 i d=$CONVEYOR_TEST_LOG/cases
+  case $1 in *.mjs|*.py|*.ts|*.tsx) k=$(filecases "$1") ;; *) k=$(shellcases "$1") ;; esac
+  if [ "$2" = FAIL ]; then
+    f=$(sed 's/\x1b\[[0-9;]*m//g' "$3" | awk '/^(ℹ|#) fail [0-9]+$/ { n += $3 }
+      /^FAILED \(/ { while (match($0, /(failures|errors)=[0-9]+/)) { split(substr($0, RSTART, RLENGTH), a, "="); n += a[2]; $0 = substr($0, RSTART + RLENGTH) } }
+      END { print n + 0 }')
+    f=$((f < 1 ? 1 : f)); f=$((f > k ? k : f))
+  fi
+  mkdir -p "$d/ok" "$d/failed"
+  for ((i = 1; i <= k; i++)); do
+    if [ "$i" -le "$f" ]; then : > "$d/failed/${1//\//:}#$i"; else : > "$d/ok/${1//\//:}#$i"; fi
+  done
+}
+# Of a node test file, the cases the list says to leave out or to run alone, as node's options (nargs): each case named
+# whole (its own name, as testfails() reads it from node's `✖ <name>` line, matched exactly). Not run: each case of an
+# `ok` line (one the loop keeps off as flaky, conveyor.sh flakyoff(), or that passed in a run killed part-way) or of an
+# `off` line (one kept off as flaky). Run
+# alone: each case of a `fail` line, when only such lines select the file (the run of a card's failing cases on main).
+# A Python or other shell test file has no such option: it runs whole.
+nodecases() { # <node test file>
+  local k f c p; nargs=()
+  [ -s "$RERUN" ] || return 0
+  while IFS=$'\t' read -r k f c; do
+    [ "$f" = "$1" ] && [ -n "$c" ] || continue
+    p="^$(sed 's/[][\\.*+?^${}()|/]/\\&/g' <<<"$c")\$"
+    if [ "$k" = ok ] || [ "$k" = off ]; then nargs+=("--test-skip-pattern=$p"); elif [ "$k" = fail ] && [ -n "${only[$1]:-}" ]; then nargs+=("--test-name-pattern=$p"); fi
+  done < "$RERUN"
+}
+o=$(mktemp); trap 'rm -f "$o" "$o.times" "$o.cpu" "$o.hook" "$o.nested" "$o.plugin" "$o.part"' EXIT
+# A Claude Code plugin test file (*.test.ts, *.test.tsx: the /units mod's, in hooks/) runs under Claude Code's own
+# runner, `claude plugin test` on the plugin, which runs every such file of the plugin in one run. So it runs once, at
+# the first such file, in that file's box, and a file's result is its own part of that run's output: its `<file>:`
+# heading and the lines under it. A file with a `(fail)` line there, or with no `(pass)` line (it did not run), fails.
+plugintest() { # <test file>
+  [ -s "$o.plugin" ] || "${b[@]}" env "${mk[@]}" claude plugin test . > "$o.plugin" 2>&1
+  awk -v f="$1:" '$0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
+  cat "$o.part"
+  grep -q '^(pass)' "$o.part" && ! grep -q '^(fail)' "$o.part"
+}
+# The meta-runner hook (BASH_ENV, header above): a bash test file of this checkout, started whole under the mark of
+# another, writes `TESTRUN nested` to $o.nested. A test file's own start, and one of a scratch file no path here
+# ends, write nothing.
+{ printf '%s\n' 'case $0 in *.test.sh) if [ -n "${CONVEYOR_TEST_FILE:-}" ] && [ -z "${CONVEYOR_SHELL_TEST_CASE:-}" ]; then' \
+    '  case $0 in */*) __n=$(cd "${0%/*}" 2>/dev/null && pwd -P)/${0##*/} ;; *) __n=$PWD/$0 ;; esac' \
+    '  case $__n in */"$CONVEYOR_TEST_FILE") ;; *) for __f in \'
+  git ls-files -co --exclude-standard '*.test.sh' | while IFS= read -r f; do printf '    %q \\\n' "$f"; done
+  printf '%s\n' '    ; do case $__n in */"$__f") printf '"'TESTRUN nested\\t%s\\t%s\\n'"' "$CONVEYOR_TEST_FILE" "$__f" >> '"$(printf %q "$o.nested")"'; break ;; esac; done ;; esac' \
+    '  unset __n __f; fi ;; esac'
+} > "$o.hook"
+# metaran <test file>: after it ran (or, for the engine runner's whole run, in its place), its nested starts to the log
+# and to METAREC; 1, and says why, when it started a test file and the pack gives it neither mark.
+metaran() {
+  [ -s "$o.nested" ] || return 0
+  cat "$o.nested" >> "$log"; cut -f2- "$o.nested" >> "$METAREC" 2>/dev/null
+  local in; in=$(cut -f3 "$o.nested" | LC_ALL=C sort -u | paste -sd' ' -); : > "$o.nested"
+  [ -z "${cmode[$1]:-}${wonly[$1]:-}" ] || return 0
+  echo "$1 starts other test files ($in): it is a meta-runner, and a card's test step does not run a whole suite. Give it one of two marks in .conveyor/project.json: test.files.\"$1\".cardMode, the NAME=VALUE that makes it run its own checks with a stub in place of the files it starts; or test.files.\"$1\".wholeOnly: true, so that it runs only in the nightly whole test"
+  return 1
+}
+# Bug (issue 452): a test run wrote a fake Foreman claim into the real main checkout's state, and the project took a
+# Foreman to hold the role. The Foreman's mark there (conveyor/state/foreman: session, former, claim.lock) is read
+# before the tests and after each test file, and a file that changed it fails. The rest of the state folder is the
+# live loop's and the Foreman's, written while the tests run, so it is not compared.
+REAL=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && REAL=${REAL%/.git}/conveyor/state/foreman
+realmark() { local f; for f in session former claim.lock; do printf '%s ' "$f"; { cksum < "$REAL/$f"; } 2>/dev/null || echo none; done; }
+mark=$(realmark)
+marked() { # <test file>: 1, and says so, when the Foreman's mark changed since the last check
+  local now; now=$(realmark); [ "$now" = "$mark" ] && return 0; mark=$now
+  echo "$1 changed the Foreman's mark in the main checkout's state, $REAL (session, former or claim.lock): a test writes only under its own temporary folder"
+  return 1
+}
+# The parse check of each file changed in its texts or comments alone (textonly, commentonly), whose other tests need
+# not run: bash -n, or node --check for the Board's JavaScript.
+for t in "${!parse[@]}"; do
+  [ -f "$t" ] || continue
+  case $t in *.sh) out=$(bash -n "$t" 2>&1) ;; *.js) out=$(node --check "$t" 2>&1) ;; *) continue ;; esac \
+    || { echo "$t does not parse: $out"; rc=1; }
+done
+# Each Board or shell test file runs in a box of its test slot's share of the machine, one core and the slot's share
+# of the memory (the engine's slot_box, the library the loop names, else this checkout's): with none to be had, as it
+# is. The engine's runner boxes each of its cases so itself, and the closure test each of its units.
+box=(); ! . "${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}" 2>/dev/null || ! declare -F slot_box >/dev/null || ! slot_pool 2>/dev/null || { slot_box; box=("${SLOT_BOX[@]}"); }
+for t in "${!run[@]}"; do
+  r=ok; echo "== $t" >> "$log"
+  # Why it runs (the step's record, conveyor.sh testrec()): one line a reason.
+  printf '%s' "${why[$t]:-}" | awk -v t="$t" 'length { printf "TESTRUN why\t%s\t%s\n", t, $0 }' >> "$log"
+  # Its mark and the meta-runner hook (header above), and its card mode when the pack gives it one (issue 584).
+  mk=(CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" ${cmode[$t]:+"${cmode[$t]}"})
+  if [ "$t" = conveyor/conveyor.test.sh ]; then
+    # A run of every case file (enginewhole) starts each of them: the runner is then a meta-runner, its starts go to
+    # the log and METAREC (metaran), and with no card mode it is not run, and fails (a whole-only mark took it off above).
+    w=; ! enginewhole || { w=1; for f in conveyor/tests/*.test.sh; do printf 'TESTRUN nested\t%s\t%s\n' "$t" "$f"; done >> "$o.nested"; }
+    if [ -n "$w" ] && [ -z "${cmode[$t]:-}" ]; then
+      echo "== $t: not run: every case file of the engine"; metaran "$t" || r=FAIL
+    elif [ -n "$cases" ]; then
+      # The cases it runs of the runner, so a run that never ends keeps the passes of the cases it did not run (conveyor.sh rerunlist()).
+      for c in $cases; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
+      # Every case file of the engine still runs when the list holds a case of each (enginewhole): the step's record
+      # says so as below.
+      [ -z "$w" ] || echo "TESTRUN whole-suite" >> "$log"
+      echo "== $t (cases: $cases)"; env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" bash "$t" || r=FAIL
+    else
+      # Every case file of the engine runs: the step's record says so in one field (testrec(): wholeSuite).
+      echo "TESTRUN whole-suite" >> "$log"
+      echo "== $t"; env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" bash "$t" || r=FAIL
+    fi
+    # Each case file whose every case it ran, timed by the runner (the sums of its cases' clock and CPU seconds, as
+    # they run at once), for the loop's CPU budget of a test file (conveyor/README.md, The test step).
+    [ ! -s "$o.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "$o.times" >> "$log"
+    rm -f "$o.times"; marked "$t" || r=FAIL; metaran "$t" || r=FAIL
+  else
+    # Its CPU seconds are the shell's children's user and system times (`times`) after it, less those before: the
+    # file's process tree, each process counted as it is waited for.
+    # It runs in its test slot's box (box, above), but for the closure test, a runner that takes slots of its own and boxes each unit.
+    # The parts of it the coverage map selected (covof), when nothing selected it whole: CONVEYOR_SHELL_TEST_CASE.
+    p=; [ -n "${twhole[$t]:-}" ] || p=$(grep . <<<"${tparts[$t]:-}" | LC_ALL=C sort -u | paste -sd, -)
+    echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"
+    # The closure test runs in its card mode, quick (issue 583: the pack's test.files cardMode, mk above): its checks,
+    # but none of the ~700 units it runs from the copy of the release set; the nightly whole test runs them.
+    b=("${box[@]}"); [ "$t" != conveyor/tools/closure.test.sh ] || b=()
+    case $t in
+      *.mjs) nodecases "$t"; "${b[@]}" env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
+      *.py) "${b[@]}" env "${mk[@]}" python3 "$t" ;;
+      *.ts|*.tsx) plugintest "$t" ;;
+      *) "${b[@]}" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} bash "$t" ;;
+    esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
+    marked "$t" || r=FAIL; metaran "$t" || r=FAIL
+    times >> "$o.cpu"
+    # Its own time and CPU seconds, for the loop's CPU budget of a test file (conveyor/README.md, The test step); not
+    # of a run of some of its parts, which is not the file's time.
+    [ -n "$p" ] || printf 'TESTRUN sec\t%s\t%s\t%s\n' "$t" "$(awk -v a="$s" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }')" \
+      "$(awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
+        NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f", n[4] - n[2] }' "$o.cpu")" >> "$log"
+    ended "$t" $r "$o"
+  fi
+  echo "-- $r $t" >> "$log"; [ $r = ok ] || rc=1
+done
+[ ${#run[@]} -gt 0 ] || echo "no test touches this change"
+exit $rc

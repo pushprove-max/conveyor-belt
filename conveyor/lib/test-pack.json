@@ -1,0 +1,85 @@
+{
+  "owner": {
+    "name": "Robin"
+  },
+  "labels": {
+    "built": "awaiting-deploy",
+    "followup": "conveyor-followup",
+    "type": "bug",
+    "priorities": [
+      "P0",
+      "P1",
+      "P2"
+    ],
+    "areaPrefix": "area:",
+    "nonProductAreas": [
+      "area:tooling",
+      "area:e2e"
+    ]
+  },
+  "productPaths": [
+    "src/",
+    "shared/",
+    "lambdas/",
+    "infra/",
+    "web/",
+    "ml/"
+  ],
+  "test": {
+    "command": "rm -f \"$(git rev-parse --absolute-git-dir)/test-changed-repeat\"; SAMPLE_TEST_CHANGED_UNCOMMITTED=1 npm run test:changed"
+  },
+  "linkFromMain": [
+    "node_modules",
+    "infra/node_modules",
+    "packages/sample-node/node_modules",
+    "web/node_modules"
+  ],
+  "push": {
+    "env": {
+      "SAMPLE_ALLOW_WORKTREE_PUSH": "1"
+    }
+  },
+  "remote": "origin",
+  "defaultBranch": "main",
+  "models": {
+    "allowed": {
+      "claude": [
+        "claude-opus-5-5",
+        "claude-fable-5-2",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5"
+      ],
+      "codex": [
+        "gpt-6.1-sol",
+        "gpt-6-astra"
+      ],
+      "claude-reviewer": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-fable-5-2"
+      ]
+    }
+  },
+  "rulings": {
+    "log": "~/.claude/rulings/project.jsonl"
+  },
+  "privacy": {
+    "mode": "private"
+  },
+  "checks": [],
+  "tunables": {
+    "poll": 30,
+    "idle": 60,
+    "stuck": 1200,
+    "sample": 60,
+    "live": 1,
+    "closeWait": 60,
+    "pushRetry": 600,
+    "pushTimeout": 900,
+    "buildTimeout": 3600,
+    "reviewTimeout": 900,
+    "testTimeout": 3600,
+    "limitTtl": 300,
+    "limitOld": 1800
+  }
+}

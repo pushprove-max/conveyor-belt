@@ -1,0 +1,50 @@
+{
+  "name": "conveyor-belt",
+  "version": "1.0.0",
+  "description": "Issue-to-merged-commit automation for Claude Code: one issue becomes one card, built in a fresh worktree, reviewed, tested, landed and pushed.",
+  "author": {
+    "name": "pushprove-max"
+  },
+  "repository": "https://github.com/pushprove-max/conveyor-belt",
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "boardAutoOpen": {
+      "type": "boolean",
+      "title": "Open the Board at start",
+      "description": "Open the Conveyor Board in the browser when a session starts in a repo with a Conveyor pack.",
+      "default": true
+    },
+    "band": {
+      "type": "string",
+      "title": "Band",
+      "description": "The /units rows above the prompt. auto: on in main, where the Foreman runs, off in worker panes.",
+      "options": ["auto", "on", "off"],
+      "default": "auto"
+    },
+    "pane": {
+      "type": "string",
+      "title": "Side pane",
+      "description": "The Conveyor pane: every section of /units, one line an item. auto: on in main, where the Foreman runs, off in worker panes.",
+      "options": ["auto", "on", "off"],
+      "default": "auto"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status line and toasts",
+      "description": "The pinned status line and the toasts for a card that newly needs you or lands. auto: on in main, where the Foreman runs, off in worker panes.",
+      "options": ["auto", "on", "off"],
+      "default": "auto"
+    },
+    "motion": {
+      "type": "string",
+      "title": "Motion",
+      "description": "Turns the mark of each card on the belt once a second. off: the mark stands still.",
+      "options": ["off", "on"],
+      "default": "off"
+    }
+  },
+  "engines": {
+    "claude-code": ">=2.1.322"
+  }
+}

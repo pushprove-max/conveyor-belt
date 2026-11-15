@@ -1,0 +1,1079 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The Conveyor dashboard's one look: one type scale, one spacing scale and one colour set, all variables here.
+   Every text colour below is at least 4.5:1 on the surface it is used on, in both themes (the view test checks
+   the pairs). Motion animates transform and opacity only and is off under reduced motion. Every transition and
+   animation stays under 300 ms and none loops, except the name's belt in the head and Belt 3D's floor and deck
+   (each its own section below). */
+:root {
+  --fs-xs: 0.75rem; --fs-sm: 0.8125rem; --fs-md: 0.9375rem; --fs-lg: 1.125rem; --fs-xl: 1.5rem; --fs-2xl: 2rem;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --radius: 12px; --radius-sm: 6px;
+  --motion: 260ms; --ease: cubic-bezier(.2, .7, .2, 1);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --bg: #f4f5f8; --surface: #ffffff; --surface-2: #eceef3; --border: #c9ced8;
+  --text: #14171f; --muted: #4a5262; --accent: #2a4fcf; --on-accent: #ffffff; --focus: #2a4fcf;
+  --ok: #0e6537; --ok-bg: #e0f3e8; --warn: #804400; --warn-bg: #fcefd6; --bad: #a8201a; --bad-bg: #fde6e4;
+  --info: #2a4fcf; --info-bg: #e5ebfd; --quiet: #4a5262; --quiet-bg: #eceef3;
+  --shadow: 0 1px 2px rgba(20, 23, 31, .06), 0 6px 20px rgba(20, 23, 31, .06);
+  /* The charts' series, in this order, never cycled; each mark has a legend or a label beside it. */
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
+  /* Belt 3D's floor is in the Board's dark colours in both themes. */
+  --b3-bg: #0c0f15; --b3-border: #343d4f; --b3-text: #e9ecf2; --b3-muted: #aab2c2; --b3-accent: #93abff;
+  --b3-ok: #74dfa3; --b3-warn: #f3c46c; --b3-bad: #ff9d95; --b3-hair: rgba(160, 175, 210, .16); --b3-glass: rgba(18, 22, 31, .68);
+  --b3-queued: #6f7c96; --b3-dim: #6f7889; --b3-why: #f0b9b3; --b3-mk-done: #c9f5dc; --b3-mk-skipped: #7c869a; --b3-white: #ffffff;
+  --b3-glide: cubic-bezier(.25, .7, .3, 1); --b3-slide: cubic-bezier(.22, .8, .25, 1);
+  /* The deck behind the floor (issue 393), the owner's mockup's colours. */
+  --b3-deck-in: #141a3e; --b3-deck-mid: #090b1c; --b3-deck-out: #03040a; --b3-holo: #8b93ff; --b3-grid: rgba(127, 136, 255, .55); --b3-grid-glow: #7f88ff;
+  --b3-cyan-line: rgba(111, 240, 255, .8); --b3-ro: #9fe9ff; --b3-ro-free: #4fbf82; --b3-ro-track: #1d2350;
+}
+/* The dark set, twice: when the system asks for it and no theme is chosen, and when the owner chooses it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0c0f15; --surface: #151922; --surface-2: #1e2430; --border: #343d4f;
+    --text: #e9ecf2; --muted: #aab2c2; --accent: #93abff; --on-accent: #0c0f15; --focus: #93abff;
+    --ok: #74dfa3; --ok-bg: #12301f; --warn: #f3c46c; --warn-bg: #33270d; --bad: #ff9d95; --bad-bg: #3a1614;
+    --info: #93abff; --info-bg: #1a2547; --quiet: #aab2c2; --quiet-bg: #1e2430;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .35);
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c0f15; --surface: #151922; --surface-2: #1e2430; --border: #343d4f;
+  --text: #e9ecf2; --muted: #aab2c2; --accent: #93abff; --on-accent: #0c0f15; --focus: #93abff;
+  --ok: #74dfa3; --ok-bg: #12301f; --warn: #f3c46c; --warn-bg: #33270d; --bad: #ff9d95; --bad-bg: #3a1614;
+  --info: #93abff; --info-bg: #1a2547; --quiet: #aab2c2; --quiet-bg: #1e2430;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .35);
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-density="compact"] { --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 24px; --fs-md: 0.875rem; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-family: var(--font); font-size: 16px; line-height: 1.45; color: var(--text); background: var(--bg); }
+body { margin: 0; min-height: 100vh; font-size: var(--fs-md); }
+h1, h2, h3, p, ul, ol, dl, dd, fieldset { margin: 0; padding: 0; border: 0; }
+ul, ol { list-style: none; }
+a { color: var(--accent); text-underline-offset: 2px; }
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip { position: absolute; left: var(--sp-4); top: -100px; padding: var(--sp-2) var(--sp-3); background: var(--surface); border-radius: var(--radius-sm); z-index: 30; }
+.skip:focus { top: var(--sp-2); }
+.ico { width: 1em; height: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- the top bar ---- */
+/* The head line is one grid row that never wraps: the name, the tiles (the room left, never less than the min-width
+   app.js gives them for the two that always show), the Live mark. A narrower bar moves the buttons, then the times,
+   to lines below it; the tiles stay on the head line. */
+.top { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: var(--sp-3) var(--sp-5);
+  padding: var(--sp-3) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: var(--sp-3); }
+.brand-mark { display: block; flex: none; width: 28px; height: 28px; }
+/* The header mark's gradient follows the theme; icon.svg, the tab icon, keeps the literal colours (no page CSS reaches it). */
+.brand-mark stop:first-child { stop-color: var(--accent); }
+.brand-mark stop:last-child { stop-color: var(--ok); }
+h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+.brand-sub { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); margin-left: var(--sp-2); }
+/* ---- the name's belt ---- */
+/* The name sits on a thin moving belt with a roller at each end; every 9 s a parcel rides across and fades off the
+   far end. The only loops on the page. Every part is out of flow and animates transform or opacity only, so motion
+   changes no box; under reduced motion it all stands still, the belt shows and the parcel is not drawn.
+   The name and its belt are one piece as tall as the logo (the name's line plus the belt and rollers in its bottom
+   padding), centred on the logo's line; the head's height comes from the tiles, not from the name. */
+.brand .word { position: relative; display: inline-block; line-height: 1; padding-bottom: 10px; vertical-align: middle; }
+.brand .belt { position: absolute; left: 0; right: 0; bottom: 2px; height: 6px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 3px; background-color: var(--surface-2); }
+.brand .belt::before { content: ""; position: absolute; top: 0; bottom: 0; left: -5px; right: 0;
+  background-image: repeating-linear-gradient(90deg, var(--border) 0 1px, transparent 1px 5px); animation: brandtread 1s linear infinite; }
+@keyframes brandtread { from { transform: translateX(0); } to { transform: translateX(5px); } }
+.brand .roller { position: absolute; bottom: 0; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--surface-2); border: 1.5px solid var(--muted); animation: brandspin 1.6s linear infinite; }
+@keyframes brandspin { to { transform: rotate(360deg); } }
+.brand .roller::after { content: ""; position: absolute; left: 50%; top: 1px; bottom: 1px; width: 1.5px; margin-left: -.75px; background: var(--muted); }
+.brand .roller.l { left: -6px; }
+.brand .roller.r { right: -6px; }
+.brand .lane { position: absolute; left: 0; right: 0; bottom: 8px; height: 0; animation: brandride 9s linear infinite; pointer-events: none; }
+.brand .parcel { position: absolute; left: -2px; bottom: 0; width: 7px; height: 5px; border-radius: 1.5px; background: var(--ok); opacity: 0;
+  animation: brandfade 9s linear infinite; }
+@keyframes brandride { 0% { transform: translateX(0); } 40%, 100% { transform: translateX(100%); } }
+@keyframes brandfade { 0% { opacity: 0; } 3%, 36% { opacity: 1; } 40%, 100% { opacity: 0; } }
+.brand .w { position: relative; z-index: 1; }
+/* ---- end of the name's belt ---- */
+/* The head line's tiles: a figure over its label in capitals, a thin rule between tiles. The tiles take the room
+   the bar has left and never wrap: app.js drops tiles from the right end of their order until the rest fit, and the
+   two that always show set the least room (the column's minimum), so no figure is cut. */
+.stats { min-width: 0; display: flex; flex-wrap: nowrap; justify-content: center; align-items: stretch; overflow: hidden; white-space: nowrap; }
+.stat { flex: none; display: flex; flex-direction: column; justify-content: center; padding: 2px var(--sp-3); color: var(--text); text-decoration: none; line-height: 1.2; }
+.stat + .stat { border-left: 1px solid var(--border); }
+.stat:hover { background: var(--surface-2); }
+.stat:focus-visible { outline-offset: -2px; }
+.stat-fig { display: inline-flex; align-items: baseline; gap: var(--sp-1); font-size: var(--fs-md); font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-sub { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
+.stat-mark { align-self: center; display: inline-flex; color: var(--warn); }
+.stat-label { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+/* What a figure leaves out, or why it is a dash, in words under it once tapped. */
+.stat-gap { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+.stat[data-tone="ok"] .stat-value { color: var(--ok); }
+.stat[data-tone="bad"] .stat-value { color: var(--bad); }
+.stat[data-known="false"] .stat-value { color: var(--muted); }
+.top-meta { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-2) var(--sp-4); white-space: nowrap; }
+.top-actions { display: flex; gap: var(--sp-2); }
+/* Off a phone the buttons are the row itself and Menu is not shown; on a phone (the @media rule for phones) they are
+   Menu's list. */
+.top-menu-list { display: contents; }
+.top-actions .top-menu { display: none; }
+@media (max-width: 1100px) {
+  .top-actions { grid-row: 2; grid-column: 1 / -1; justify-content: flex-end; }
+}
+.meta { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The machine head, under the tabs on every tab: the machine's state, its slots in use, today's cost, its one control,
+   and the project filter and sort. */
+.machine { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-2) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.machine-name { font-weight: 700; }
+.machine-slots strong, .machine-cost strong { font-variant-numeric: tabular-nums; }
+.machine-filter, .machine-sort { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.machine .field { flex: none; min-height: 32px; font-size: var(--fs-sm); }
+.machine .btn { min-height: 32px; }
+.machine-note, .project-note { color: var(--muted); }
+/* The machine head folded to one line (its host, state, slots and today's cost): on a phone only, where a tap opens
+   the rest (the @media rule for phones). */
+.machine-fold { display: none; align-items: center; gap: var(--sp-2); width: 100%; min-height: 36px; padding: 0; background: none; border: 0;
+  text-align: left; font-weight: 600; cursor: pointer; }
+.machine-fold-act { margin-left: auto; color: var(--accent); }
+/* A row's project: its name beside a bar of the project's own colour (its place among the host's projects). */
+.project-tag { padding-left: var(--sp-2); border-left: 3px solid var(--border); font-weight: 600; }
+.project-tag[data-hue="0"] { border-left-color: var(--series-1); }
+.project-tag[data-hue="1"] { border-left-color: var(--series-2); }
+.project-tag[data-hue="2"] { border-left-color: var(--series-3); }
+.project-tag[data-hue="3"] { border-left-color: var(--series-4); }
+.project-tag[data-hue="4"] { border-left-color: var(--series-5); }
+/* Projects and Foremen: one section a project, side by side while there is room. */
+.projects { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.project { padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.project-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.project-name { font-size: var(--fs-md); color: var(--text); }
+.project-list, .project-rules, .project-models { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); margin-top: var(--sp-1); }
+.project-list-name { font-weight: 600; min-width: 12ch; }
+/* Held, closed under "Held (N) · Show"; open, one issue with its title a line. A pinned issue's title beside it. */
+.project-held > summary { cursor: pointer; list-style: none; }
+.project-held > summary::-webkit-details-marker { display: none; }
+.project-show { color: var(--accent); }
+.project-held-list { display: grid; gap: 2px; margin: var(--sp-1) 0 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+.project-held-list li, .project-item { display: flex; gap: var(--sp-2); min-width: 0; }
+.project-item-title { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.project-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); }
+.foreman-waiting { margin: var(--sp-1) 0 0 var(--sp-4); list-style: disc; font-size: var(--fs-sm); color: var(--muted); }
+.metrics-compare caption { text-align: left; }
+.note { padding: 0 var(--sp-5); font-size: var(--fs-sm); color: var(--muted); min-height: 0; }
+.note:empty { display: none; }
+.banner { margin: var(--sp-3) var(--sp-5) 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-sm); background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+.banner[data-tone="warn"] { background: var(--warn-bg); color: var(--warn); }
+
+.btn { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); font-weight: 600;
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer;
+  transition: transform var(--motion) var(--ease), opacity var(--motion) var(--ease); }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: scale(.97); }
+/* A button that cannot work now looks it: greyed, and it neither lifts nor presses. */
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn-quiet { background: transparent; }
+.btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+/* An action on a whole list ("Dismiss all shown"): a warning's colours, so it never looks like a harmless button. */
+.btn-warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+/* The guard a button has is seen before it is pressed: one that costs money or time (dashed amber) and one that cannot
+   be undone (red) both act on a second click; a plain button acts on the first and its line offers Undo. */
+.btn-cost { border: 1px dashed var(--warn); color: var(--warn); }
+.btn-final, .board-danger { color: var(--bad); border-color: var(--bad); background: var(--surface); }
+.btn-cost[aria-pressed="true"] { background: var(--warn-bg); border-style: solid; }
+.btn-final[aria-pressed="true"], .board-danger[aria-pressed="true"] { background: var(--bad-bg); }
+.btn, .btn-undo { max-width: 100%; white-space: normal; text-align: left; }
+.btn-undo { min-height: 28px; padding: 0 var(--sp-2); }
+.undo-line { overflow-wrap: anywhere; }
+/* An action the host took, waiting for the loop: greyed in place, its buttons gone, until it leaves or is refused. */
+.is-pending { opacity: .62; }
+.is-pending .answer-note, .is-pending .board-sent { opacity: 1; font-weight: 650; color: var(--text); }
+/* A blocked card leads with why it failed; the reason as recorded opens on a tap. */
+details.why > summary { cursor: pointer; font-weight: 650; }
+.why-full { color: var(--muted); white-space: pre-wrap; }
+
+.chip { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 2px var(--sp-2); border-radius: 999px; font-size: var(--fs-xs); font-weight: 650; white-space: nowrap; }
+.chip-ok { background: var(--ok-bg); color: var(--ok); }
+.chip-warn { background: var(--warn-bg); color: var(--warn); }
+.chip-bad { background: var(--bad-bg); color: var(--bad); }
+.chip-info { background: var(--info-bg); color: var(--info); }
+.chip-quiet { background: var(--quiet-bg); color: var(--quiet); }
+
+/* ---- Customize ---- */
+.sheet { position: fixed; top: 64px; right: var(--sp-4); z-index: 25; width: min(340px, calc(100vw - 2 * var(--sp-4))); max-height: calc(100vh - 80px); overflow: auto;
+  padding: var(--sp-4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+  animation: rise var(--motion) var(--ease); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-2); }
+.sheet h2 { font-size: var(--fs-lg); }
+.sheet-note { font-size: var(--fs-sm); color: var(--muted); margin-bottom: var(--sp-3); }
+.choice { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-4); }
+/* A panel's row in Customize: whether it shows, then its width. */
+.custom-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.choice legend { width: 100%; font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: var(--sp-1); }
+.choice-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 32px; font-size: var(--fs-sm); cursor: pointer; }
+.choice-item input { width: 16px; height: 16px; accent-color: var(--accent); }
+.choice-item input:disabled { cursor: default; }
+.sheet-restore { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.sheet-restore .sheet-note { margin-bottom: 0; }
+
+/* ---- words a phone can open (app.js, tip): a tap on an item with hover words opens them under it ---- */
+[data-tip] { cursor: help; }
+.tip-pop { position: absolute; z-index: 30; max-width: min(320px, calc(100vw - 16px)); padding: var(--sp-2) var(--sp-3);
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow);
+  font-size: var(--fs-sm); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+/* What a control does, printed under it at phone width only (the @media rule for phones shows it). */
+.phone-note { display: none; }
+
+/* ---- the tabs: Overview and Control, under the head ---- */
+.tabs { padding: var(--sp-2) var(--sp-5) 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+.tabs:empty { display: none; }
+.tabs-list { display: flex; gap: var(--sp-1); }
+.tab { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-4); font-size: var(--fs-sm); font-weight: 650; color: var(--muted);
+  background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; }
+.tab:hover { background: var(--surface-2); color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+a.tab { text-decoration: none; }  /* the account page's tabs: links back to the Board */
+.top-actions [aria-current="page"] { color: var(--text); border-color: var(--accent); }
+/* The count is part of the tab's words ("Overview · 4"). The Overview's is the Needs you count: red, as that tile's,
+   and the only red here, so red means "act". */
+.tab { gap: var(--sp-1); }
+.tab-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.tab[data-tab="overview"] .tab-count { color: var(--bad); }
+
+/* ---- the grid and a panel's frame ---- */
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); padding: var(--sp-5); align-items: start; grid-auto-flow: row dense; }
+/* Once app.js has placed the panels they sit on a fine row grid, each spanning the rows its height takes, so
+   no column has an empty block between panels; the columns follow the width (three, two, one). */
+.grid[data-cols] { row-gap: 0; grid-auto-rows: 8px; }
+.grid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+.panel { grid-column: span 1; align-self: start; display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+/* The entrance plays on a page just opened only: app.js drops `fresh` at the first move, so it never plays over one. */
+.grid.fresh .panel { animation: rise var(--motion) var(--ease); }
+.panel[data-size="wide"] { grid-column: span 2; }
+.panel[data-size="full"] { grid-column: 1 / -1; }
+.panel.dragging { opacity: .55; }
+.panel-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
+.panel[data-collapsed="true"] .panel-head { border-bottom-color: transparent; }
+.panel-title { font-size: var(--fs-md); font-weight: 700; }
+.panel-count { padding: 1px var(--sp-2); border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums; }
+.panel[data-panel="needs"][data-state="ready"] .panel-count { background: var(--warn-bg); color: var(--warn); }
+.panel-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+/* A panel's actions on its whole list sit after its count; on a narrow head they take a line of their own below. */
+.panel-head { flex-wrap: wrap; }
+.panel-acts { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+.panel-acts[hidden] { display: none; }
+.tool { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 var(--sp-2); font-size: var(--fs-xs); font-weight: 650;
+  background: transparent; color: var(--muted); border: 0; border-radius: var(--radius-sm); cursor: pointer; }
+.tool:hover { background: var(--surface-2); color: var(--text); }
+.tool:disabled { opacity: .35; cursor: default; }
+.tool .ico { width: 16px; height: 16px; }
+.drag { cursor: grab; }
+.move { display: none; }  /* at phone width these replace dragging; see the media rule at the end */
+.panel-body { padding: var(--sp-4); min-height: 96px; animation: rise var(--motion) var(--ease); }
+/* Past its length a body scrolls inside the panel; the head stays where it is. */
+.panel-body.scrolls { overflow-y: auto; overscroll-behavior: contain; }
+.panel-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) var(--sp-4); border-top: 1px solid var(--border);
+  font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+.panel-foot .btn { min-height: 28px; }
+/* The length handle on the lower edge: drag it, or focus it and use the arrow keys. */
+.panel-length { display: flex; align-items: center; justify-content: center; height: 14px; margin-top: auto; cursor: ns-resize; touch-action: none; border-radius: 0 0 var(--radius) var(--radius); }
+.panel-length::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--border); }
+.panel-length:hover::before, .panel-length:focus-visible::before { background: var(--accent); }
+/* A collapsing body fades and lifts before app.js takes it out; an opened one comes in with `rise` above. */
+.panel-body.folding { opacity: 0; transform: translateY(-6px); pointer-events: none; transition: transform 140ms var(--ease), opacity 140ms var(--ease); }
+
+.skeleton { display: grid; gap: var(--sp-3); }
+.skeleton .bar { display: block; height: 14px; border-radius: 7px; background: var(--surface-2); }
+.w60 { width: 60%; } .w75 { width: 75%; } .w90 { width: 90%; }
+.state { display: grid; justify-items: center; gap: var(--sp-1); padding: var(--sp-4) var(--sp-2); text-align: center; }
+.state .ico { width: 28px; height: 28px; color: var(--ok); }
+.state-error .ico { color: var(--bad); }
+.state-title { font-weight: 700; }
+.state-detail { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+
+/* ---- what the panels draw with ---- */
+.group + .group { margin-top: var(--sp-4); }
+.group-title { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: var(--sp-2); }
+.rows { display: grid; gap: var(--sp-2); }
+.row { position: relative; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.rows.compact .row { padding: var(--sp-2) var(--sp-3); }
+.rows.numbered { counter-reset: n; }
+.rows.numbered .row { counter-increment: n; padding-left: calc(var(--sp-5) + var(--sp-3)); }
+.rows.numbered .row::before { content: counter(n); position: absolute; left: var(--sp-3); top: var(--sp-3); color: var(--muted); font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; }
+.row.enter { animation: rise var(--motion) var(--ease); }
+.row-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-1); font-size: var(--fs-sm); color: var(--muted); }
+.issue { font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; }
+.title { flex: 1 1 12ch; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.reason { margin-top: var(--sp-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.seen { margin-top: var(--sp-1); font: inherit; font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hint, .foot { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.warn-note { margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn); font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
+.num { font-variant-numeric: tabular-nums; }
+/* A text the Board rewrites in place (each second, or as a figure counts to its new value) never wraps, and its digits
+   are all one width: a timer ticking from "9 min" to "10 min" moves no line under it (as .track-now does for "now:").
+   Where its row can still wrap, the text holds a width that a usual value fits (below), so a tick does not move the row's
+   other parts either. The per-second update writes to these, or to text inside them, only (the Belt view's labels are
+   inside .b3-lb and .b3-ro; dashboard-view.live-texts.test.mjs). */
+.since, .live-quiet, .live-cost, .board-took, .tl-total, .tl-dur, .tl-tip, .expires, [data-age-from], #clock, #updated, .b3-lb, .b3-ro, .b3-row-min { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The card's "N overall" in its head row, a Needs-you "… ago" in a meta row and a phone's Belt list time: room for
+   "10 h 05 min overall", "10 h 05 min ago" and "10 h 05 min". The cost, its dollars and its tokens together: room for
+   "$100.00 · 999k tokens so far", so neither a dollar nor a token count growing a digit widens it. */
+.card-times .since { display: inline-block; min-width: 19ch; }
+.row-meta > .since { min-width: 15ch; }
+.b3-row-min { min-width: 11ch; }
+.live-cost { display: inline-block; min-width: 28ch; }
+.row-main > .num { margin-left: auto; font-weight: 700; }
+
+/* A Declined line done with (dismissed, built or expired) is greyed. */
+.row.is-done { background: var(--quiet-bg); color: var(--muted); }
+
+/* A new "Needs you" item is ringed once. */
+.row.is-new { border-color: var(--warn); }
+.row.is-new::after { content: ""; position: absolute; inset: -3px; border: 2px solid var(--warn); border-radius: calc(var(--radius-sm) + 3px); opacity: 0; pointer-events: none;
+  animation: ring 280ms var(--ease) 1; }
+
+.answer { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.field { flex: 1 1 14ch; min-width: 0; min-height: 36px; padding: var(--sp-1) var(--sp-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.answer-note { margin-top: var(--sp-1); font-size: var(--fs-sm); color: var(--muted); }
+.answer-note:empty { display: none; }
+/* A visible change waiting for the owner's yes: the files it changed, the list on demand. */
+.yes-files { margin-top: var(--sp-2); font-size: var(--fs-sm); }
+.yes-paths summary { cursor: pointer; color: var(--muted); }
+.yes-paths .paths { margin-top: var(--sp-1); padding-left: var(--sp-4); font-family: var(--mono); overflow-wrap: anywhere; list-style: disc; }
+/* The output a blocked card failed on, under its sentence: closed until asked for, its failures first. */
+.output { margin-top: var(--sp-1); font-size: var(--fs-sm); }
+.output > summary { cursor: pointer; color: var(--muted); }
+.output-fails { margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--bad-bg); color: var(--bad); }
+.output-count { font-weight: 700; }
+.output-fails ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); font-family: var(--mono); overflow-wrap: anywhere; list-style: disc; }
+.output-text { margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3); max-height: 24em; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.output-line.is-fail { color: var(--bad); font-weight: 700; }
+.output-times { color: var(--muted); font-weight: 700; }
+.output-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
+.output-note { color: var(--muted); }
+
+/* A card's track: the six steps Build, Review, Fix, Test, Land, Push in a row, joined by bars that fill as
+   the card moves on, so the track reads as one bar of progress from left to right. Each state has a mark of its own
+   shape (never colour alone): done ✓ with its time, now ▶ lit with its running time, to come · muted, skipped – and
+   failed ✗. The step in progress beats now and then (belt.js); never under reduced motion. */
+.track6 { display: flex; flex-wrap: wrap; align-items: center; row-gap: var(--sp-1); margin-top: var(--sp-3); list-style: none; }
+.step6 { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
+.step6:first-child { flex: 0 0 auto; }
+.step6 .join { flex: 1 1 var(--sp-3); min-width: var(--sp-2); height: 3px; margin: 0 var(--sp-1); border-radius: 2px; background: var(--border); position: relative; overflow: hidden; }
+.step6 .join::after { content: ""; position: absolute; inset: 0; background: var(--ok); transform: scaleX(0); transform-origin: left center; transition: transform 280ms var(--ease); }
+.step6 .join[data-filled="true"]::after { transform: scaleX(1); }
+.step6[data-state="failed"] .join::after { background: var(--bad); }
+.step-chip { display: inline-flex; align-items: baseline; gap: var(--sp-1); padding: 2px var(--sp-2); border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font-size: var(--fs-xs); font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.step-time:empty { display: none; }
+.step-time { font-weight: 500; }
+.step6[data-state="done"] .step-chip { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.step6[data-state="now"] .step-chip { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.step6[data-state="now"] .step-chip.beat { animation: beat 260ms var(--ease) 1; }
+.step6[data-state="failed"] .step-chip { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.step6[data-state="skipped"] .step-name { text-decoration: line-through; }
+.step6[data-state="todo"] .step-chip { border-style: dashed; }
+/* The step line is one line high whatever it holds: the live "now:" text (and a push failure's reason) is cut to the
+   width left over, its full text on hover, so a new action never grows or shrinks the card and the page never jumps.
+   Its width is the card's (contain: inline-size): the unwrapped text would otherwise widen the card's grid column. */
+.track-now { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-2); overflow: hidden; white-space: nowrap; contain: inline-size; font-size: var(--fs-sm); color: var(--muted); }
+.track-now > * { flex: 0 0 auto; }
+.track-now > .live-action, .track-now > .failed { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.track-now .failed { color: var(--bad); font-weight: 650; }
+.track-detail { margin-top: var(--sp-2); font-size: var(--fs-sm); }
+.track-detail > summary { cursor: pointer; color: var(--muted); }
+/* Every step as a timeline: a row a step, its name, then its bar on the card's one time axis (left and width set from
+   its time), its time on the bar or beside it. Done green, in progress the accent (it pulses now and then, belt.js),
+   failed red; a step to come or skipped has no bar. Its state, clock times and a failure's reason show on hover or focus. */
+/* The total line is written again each second while a step runs: one line high, cut to the card's width (contain:
+   inline-size, as .track-now), its full text on hover and tap (app.js, said()). */
+.track-detail .tl-total { margin: var(--sp-1) 0 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; contain: inline-size; }
+.track-detail .timeline { margin: var(--sp-1) 0 0; padding: 0; display: grid; gap: 2px; list-style: none; font-variant-numeric: tabular-nums; }
+.tl-item { position: relative; display: grid; grid-template-columns: minmax(10ch, 16ch) 1fr; align-items: center; gap: 2px var(--sp-2); padding: 2px var(--sp-1); border-radius: var(--radius-sm); }
+.tl-item:hover, .tl-item:focus-visible { background: var(--surface-2); }
+.tl-item:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tl-label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px var(--sp-1); font-weight: 600; min-width: 0; }
+.judged { color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
+.judged-open { display: inline; min-height: 0; padding: 0 var(--sp-1); font: inherit; text-decoration: underline; }
+.finding-ref.is-missing { text-decoration: underline dotted; cursor: help; }
+.day-totals .foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.tl-findings { font-weight: 500; color: var(--muted); font-size: var(--fs-xs); }
+.tl-lane { position: relative; height: 18px; border-radius: 4px; background: var(--surface-2); }
+.tl-bar { position: absolute; top: 2px; bottom: 2px; min-width: 3px; border-radius: 3px; background: var(--ok); overflow: hidden; }
+.tl-item[data-state="now"] .tl-bar { background: var(--accent); }
+.tl-item[data-state="now"] .tl-bar.beat { animation: pulse 260ms var(--ease) 1; }
+.tl-item[data-state="failed"] .tl-bar { background: var(--bad); }
+.tl-item[data-state="failed"] .tl-label { color: var(--bad); }
+.tl-item[data-state="todo"], .tl-item[data-state="skipped"] { color: var(--muted); }
+.tl-item[data-state="todo"] .tl-bar, .tl-item[data-state="skipped"] .tl-bar { display: none; }
+.tl-dur { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 var(--sp-1); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; color: var(--muted); }
+.tl-bar > .tl-dur { position: static; height: 100%; color: var(--surface); }
+.tl-tip { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tl-item:hover > .tl-tip, .tl-item:focus-visible > .tl-tip { z-index: 2; left: var(--sp-1); top: 100%; width: auto; height: auto; clip-path: none; max-width: 90vw; overflow-wrap: anywhere; white-space: normal;
+  padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); box-shadow: 0 4px 12px rgb(0 0 0 / .15); }
+.tl-item[data-state="failed"] > .tl-tip { color: var(--bad); }
+.tl-item > .tl-parts, .tl-item > .detail-why, .tl-item > .test-fails, .tl-item > .output { grid-column: 1 / -1; }
+.tl-parts > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-xs); }
+.tl-parts ol { margin: 2px 0 0; padding-left: var(--sp-5); }
+.track-detail .detail-todo { color: var(--muted); }
+.track-detail .detail-failed { color: var(--bad); }
+.track-detail .detail-why { margin: 2px 0 0; color: var(--text); }
+.track-detail li > .output { color: var(--text); }
+.test-fails { margin-top: 2px; color: var(--text); }
+.test-sum { margin: 0; color: var(--bad); font-weight: 700; }
+.test-files, .test-cases { margin: 0; padding: 0; list-style: none; }
+.test-file { margin-top: var(--sp-1); }
+.test-file-name { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+.test-case { display: flex; flex-wrap: wrap; gap: 0 var(--sp-2); padding-left: var(--sp-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.test-case-name { font-family: var(--mono); color: var(--bad); }
+.reviews { display: grid; gap: var(--sp-1); margin-top: var(--sp-2); list-style: none; font-size: var(--fs-sm); }
+.review { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.parent { font-size: var(--fs-sm); color: var(--muted); }
+/* A blocked card, in Needs you: the step it failed at and how long that step ran. */
+.stopped { margin-top: var(--sp-1); font-size: var(--fs-sm); font-weight: 650; color: var(--bad); }
+/* A panel set to its small width shows the marks and names; the times are in each step's label. */
+.panel[data-size="small"] .step-time { display: none; }
+
+/* The label column is at most 16ch (a long label wraps), so a row's text keeps the width to read in one line. */
+.checks { display: grid; grid-template-columns: minmax(7ch, max-content) minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); align-items: baseline; }
+.checks dt { max-width: 16ch; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
+.checks dd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); min-width: 0; }
+/* A failing row's next step and its output each take a line of their own under the row's line. */
+.checks dd > .check-next, .checks dd > .output { flex: 1 1 100%; min-width: 0; }
+.check-next { color: var(--text); overflow-wrap: anywhere; }
+.checks-fine { margin-top: var(--sp-2); font-size: var(--fs-sm); }
+.checks-fine > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.checks-fine > .checks { margin-top: var(--sp-2); }
+.detail { color: var(--muted); overflow-wrap: anywhere; }
+.meter { flex: 1 1 100%; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.meter-fill { display: block; height: 100%; background: var(--accent); transform-origin: left center; transition: transform 280ms var(--ease); }
+
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(11ch, 1fr)); gap: var(--sp-3); }
+.figure { padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); }
+.figure .num { display: block; font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.02em; }
+.figure .num.unknown { font-size: var(--fs-lg); color: var(--muted); }
+/* Metrics: a tab a Conveyor; headline tiles with a sparkline and the change on the 7 days before; charts as inline SVG;
+   every figure in a table one click away (All numbers); a card's row opens to its step timeline. */
+.metrics-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-3); border-bottom: 1px solid var(--border); }
+.metrics-tab { min-height: 32px; padding: 0 var(--sp-3); font: inherit; font-size: var(--fs-sm); font-weight: 650; color: var(--muted); background: transparent;
+  border: 0; border-bottom: 3px solid transparent; cursor: pointer; }
+.metrics-tab:hover { color: var(--text); background: var(--surface-2); }
+.metrics-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.metric-tiles { grid-template-columns: repeat(auto-fit, minmax(16ch, 1fr)); margin-bottom: var(--sp-4); }
+.metric-tile { display: flex; flex-direction: column; gap: 2px; }
+.metric-tile .num { font-variant-numeric: tabular-nums; }
+.tile-sub { font-size: var(--fs-xs); color: var(--muted); }
+.spark { width: 100%; height: 28px; margin-top: var(--sp-1); }
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.spark-dot { fill: var(--accent); stroke: var(--surface-2); stroke-width: 1.5; }
+.delta { font-size: var(--fs-xs); font-weight: 650; color: var(--muted); }
+.delta.good { color: var(--ok); }
+.delta.bad { color: var(--bad); }
+.metric-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.chart { margin: 0; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-svg .axis { stroke: var(--border); stroke-width: 1; }
+.chart-svg .grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 3; }
+.chart-svg .tick { fill: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.chart-svg .value { fill: var(--text); }
+.chart-svg .hit { fill: transparent; }
+.chart-svg .bar:hover .hit { fill: var(--surface-2); }
+.chart-svg .area { fill: var(--series-1); opacity: .18; }
+.chart-svg .area-line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; }
+.fill-landed { fill: var(--ok); background: var(--ok); }
+.fill-blocked { fill: var(--warn); background: var(--warn); }
+.fill-s1 { fill: var(--series-1); background: var(--series-1); }
+.fill-s2 { fill: var(--series-2); background: var(--series-2); }
+.fill-s3 { fill: var(--series-3); background: var(--series-3); }
+.fill-s4 { fill: var(--series-4); background: var(--series-4); }
+.fill-s5 { fill: var(--series-5); background: var(--series-5); }
+.legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: var(--sp-2) 0 0; padding: 0; list-style: none; font-size: var(--fs-xs); color: var(--muted); }
+.legend li { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.swatch { width: 10px; height: 10px; border-radius: 3px; }
+.metric-none { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--fs-sm); }
+.none-value { font-size: var(--fs-lg); font-weight: 700; color: var(--muted); }
+.metrics-all { margin-bottom: var(--sp-4); }
+.metrics-all > summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 650; color: var(--accent); margin-bottom: var(--sp-2); }
+.metrics-table { width: 100%; border-collapse: collapse; margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
+.metrics-table th, .metrics-table td { padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-variant-numeric: tabular-nums; }
+.metrics-table thead th { color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; }
+.metrics-table tbody th { font-weight: 600; width: 30%; }
+.unknown { color: var(--muted); }
+.card-detail > summary { cursor: pointer; list-style-position: inside; }
+.card-detail .timeline { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-1); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.figure-label { font-size: var(--fs-xs); color: var(--muted); }
+
+/* The Board: the control bar, then six columns of cards. A card's place changes by transform only (board.js
+   glides it); at phone width the columns are one list and each card has its own move buttons. */
+.board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--border); }
+.board-state, .board-acts, .board-ctl, .board-moves, .board-tags, .board-push-list { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.board-label { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.board-value { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; }
+.board-from { font-size: var(--fs-sm); color: var(--muted); }
+.board-today { margin-left: auto; }
+.board-stepper { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.board-meter { position: relative; display: inline-block; width: 150px; }
+.board-meter .meter { display: block; }
+.board-meter.over .meter-fill { background: var(--warn); }
+.board-guard { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--bad); transform: translateX(-1px); }
+.board-select { flex: 0 1 auto; min-height: 32px; }
+.board-note { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.board-note:empty { display: none; }
+.board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
+.board-col { min-height: 220px; padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-2); outline: 2px dashed transparent; outline-offset: -2px; }
+.board-col.over { outline-color: var(--accent); }
+.board-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-2); font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+/* Held's and Landed today's Show and Hide: on a phone only (the @media rule for phones). */
+.board-fold { display: none; margin-left: auto; min-height: 36px; padding: 0 var(--sp-2); background: none; border: 0; color: var(--accent);
+  font: inherit; text-transform: none; letter-spacing: 0; cursor: pointer; }
+/* "What these mean" under the Held heading: closed, one small link; open, the four reasons and where each is changed. */
+.board-meanings { margin-bottom: var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
+.board-meanings > summary { cursor: pointer; }
+.board-meanings dl { margin: var(--sp-1) 0 0; }
+.board-meanings dt { font-weight: 700; color: var(--text); }
+.board-meanings dd { margin: 0 0 var(--sp-1); overflow-wrap: anywhere; }
+.board-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.bcard { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); padding: var(--sp-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+.bcard .chip { max-width: 100%; white-space: normal; }
+.bcard[draggable="true"] { cursor: grab; }
+.bcard.dragging { opacity: .4; }
+.bcard.enter { animation: rise var(--motion) var(--ease); }
+.bcard.is-waiting { border-color: var(--warn); }
+.bcard.is-blocked { border-color: var(--bad); }
+.board-title { font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
+.board-why { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.board-answer { display: inline-block; margin-top: var(--sp-1); font-size: var(--fs-sm); font-weight: 650; overflow-wrap: anywhere; }
+.board-moves { display: none; }
+.board-batch { display: grid; gap: var(--sp-1); padding: var(--sp-2); border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+.board-batch-head { font-size: var(--fs-xs); font-weight: 700; color: var(--muted); }
+.board-empty { padding: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+/* How the open issues split, and Held grouped by reason with its filter. */
+.board-split { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-3); font-size: var(--fs-sm); color: var(--muted); }
+.board-split .board-value { color: var(--text); }
+/* The check run tile, under the control bar while a run goes and for an hour after. */
+.board-checkrun { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.board-checkrun .board-split { margin-top: 0; }
+.board-check-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
+.board-check-failed, .board-check-running, .board-check-list { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.board-check-failed { color: var(--bad); }
+.board-check-lanes > summary { cursor: pointer; font-size: var(--fs-sm); }
+.board-groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.board-group > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) 0; cursor: pointer;
+  font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.board-group > .board-cards { margin-top: var(--sp-1); }
+.card-times { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The Rules tab: one row a rule on the left, what they produce on the right, the held issues
+   grouped underneath, full width. It reuses the Board's labels, steppers and heads. */
+.rules { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+.rules-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); font-weight: 600; }
+/* The last change made here, with its Undo: a line of its own that stands out, not grey small print. */
+.rules-last { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); flex: 1 1 100%; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--accent); border-left-width: 4px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-md); }
+.rules-last-what { min-width: 0; overflow-wrap: anywhere; }
+.rules-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); }
+/* What these rules produce stays in view, under the sticky head (--head-h, app.js), while the rules beside it scroll:
+   that is when it is read. One taller than the window scrolls inside. */
+.rules-side { min-width: 0; }
+.rules-produce { position: sticky; top: calc(var(--head-h, 64px) + var(--sp-3)); align-self: start;
+  max-height: calc(100vh - var(--head-h, 64px) - 2 * var(--sp-3)); overflow-y: auto; }
+.rules-row { display: grid; grid-template-columns: minmax(12ch, 16ch) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--surface-2); }
+.rules-key { display: grid; }
+.rules-what { font-size: var(--fs-xs); color: var(--muted); }
+.rules-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.rules-would { flex-basis: 100%; font-size: var(--fs-sm); color: var(--warn); }
+.rules-would:empty { display: none; }
+.rules-refused { flex-basis: 100%; font-size: var(--fs-sm); color: var(--bad); }
+.rules-list, .rules-item, .rules-add, .rules-model { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.rules-add { flex: 1 1 22ch; }
+.rules-field { flex: 1 1 12ch; min-height: 32px; }
+.rules-field.rules-load { flex: 0 1 10ch; }
+.rules-tog { min-height: 32px; border-radius: 999px; }
+.rules-tog[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+/* A Build choice armed for its second click (it would skip queued issues). */
+.rules-tog.board-danger { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.rules-link { font-size: var(--fs-sm); }
+.rules-flow { display: grid; gap: var(--sp-1); margin: var(--sp-1) 0 var(--sp-3); list-style: none; }
+.rules-next { display: flex; gap: var(--sp-2); align-items: center; min-width: 0; padding: var(--sp-1) 0; border-top: 1px solid var(--surface-2); }
+.rules-next:first-child { border-top: 0; }
+.rules-next .board-title, .rules-held-row .board-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rules-marks { display: flex; flex: none; gap: var(--sp-1); }
+.rules-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); margin: var(--sp-3) 0; }
+.rules-stat { display: grid; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.rules-big { font-size: var(--fs-xl); font-weight: 650; font-variant-numeric: tabular-nums; }
+.rules-forecast { font-size: var(--fs-sm); color: var(--muted); }
+.rules-warn { margin-top: var(--sp-2); }
+.rules-limits { font-size: var(--fs-sm); color: var(--muted); }
+/* The Tests page (panels/tests.js): the figures, the table of test files and Test limits. A grid that holds a table, a
+   <pre> or a block that scrolls sideways has one column of minmax(0, 1fr): a plain grid column takes the min-content
+   width of its widest item, so on a phone the page ran past the panel and .tests-scroll did not scroll (issue 556). */
+.tests { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+.tests-figs { grid-template-columns: repeat(auto-fit, minmax(16ch, 1fr)); margin: 0; }
+.tests-filters { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); margin-bottom: var(--sp-2); }
+.tests-scroll { overflow-x: auto; }
+.tests-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.tests-table th { text-align: left; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); padding: var(--sp-1) var(--sp-2); }
+.tests-table td { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--surface-2); vertical-align: middle; }
+.tests-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The least width of the File column: short of room, the table scrolls in .tests-scroll and a name breaks at its
+   slashes, not one letter a line. */
+.tests-name { min-width: 24ch; min-height: 32px; text-align: left; overflow-wrap: anywhere; }
+.tests-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; }
+.tests-bar { width: 6px; height: 100%; border-radius: 1px; background: var(--accent); transform-origin: bottom; }
+.tests-more { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); padding: var(--sp-2) 0; }
+.tests-runs, .tests-list { display: grid; gap: var(--sp-1); list-style: none; }
+.tests-fact { font-size: var(--fs-sm); }
+.tests-where { font-size: var(--fs-xs); color: var(--muted); }
+/* The actions (issue 521): the marked buttons, the box of an action, the results and Auto-file. */
+.tests-act-row, .tests-box-head, .tests-box-btns, .tests-result-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.tests-acts, .tests-preview, .tests-box, .tests-rule { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+.tests-preview, .tests-box, .tests-rule { border: 1px solid var(--surface-2); border-radius: var(--radius-sm); padding: var(--sp-2); }
+.tests-mark { margin-left: var(--sp-1); }
+.tests-legend, .tests-why { font-size: var(--fs-xs); color: var(--muted); }
+.tests-progress { width: 12ch; }
+.tests-out { max-height: 24em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-xs); margin: 0; }
+.tests-body { width: 100%; font-family: inherit; }
+.tests-results-list, .tests-auto-log { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); list-style: none; font-size: var(--fs-sm); }
+.rules-skipped { display: grid; gap: var(--sp-1); margin-top: var(--sp-1); list-style: none; }
+.rules-skip { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }
+.rules-stat-open { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.rules-stat-open:disabled { cursor: default; }
+.rules-waits { display: grid; gap: var(--sp-1); margin: 0 0 var(--sp-3); list-style: none; }
+.rules-wait { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }
+.rules-deps, .board-deps { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: baseline; }
+.board-deps { margin-top: var(--sp-1); }
+.rules-held { padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+.rules-held-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.rules-search { flex: 1 1 22ch; min-height: 32px; }
+.rules-by { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.rules-groups { display: grid; gap: var(--sp-2); }
+.rules-group { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.rules-group-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
+.rules-group-toggle { display: flex; flex: 1 1 auto; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 36px; padding: 0 var(--sp-1); background: none; border: 0; color: var(--text); text-align: left; cursor: pointer; }
+.rules-group-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rules-group-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rules-group-mark { font-size: var(--fs-sm); color: var(--warn); }
+.rules-caret { color: var(--muted); }
+.rules-held-list { display: grid; margin: 0 var(--sp-2) var(--sp-2) var(--sp-5); padding-left: var(--sp-3); border-left: 2px solid var(--border); list-style: none; }
+.show-more { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0; }
+/* A row whose chips do not fit beside its title (a phone, 600 px) wraps them under it, never past the panel's edge. */
+.rules-held-row, .rules-issue { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; padding: var(--sp-1) 0; border-top: 1px solid var(--border); }
+.rules-held-row:first-child, .rules-issue:first-child { border-top: 0; }
+.rules-issue .board-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* An issue's area, labels, age and state go to the next line when the row has no room (a phone), never past the panel. */
+.rules-issue { flex-wrap: wrap; }
+.rules-issue .board-title { flex-basis: 12ch; }
+.rules-issues { margin-top: var(--sp-4); }
+.rules-issue-list { list-style: none; margin: 0; padding: 0; }
+.rules-issue-acts { margin-bottom: var(--sp-2); }
+/* The Board's filters and sort for every column. */
+.board-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.board-viewbar .field { min-height: 32px; font-size: var(--fs-sm); }
+/* The text filter is wide enough for its hint, and shrinks to the row on a phone. */
+.board-viewbar .board-text { flex: 0 1 22ch; min-width: 0; width: 22ch; }
+/* A column the filter emptied: its words, then Clear, in one line of text. */
+.board-unmatched .btn { min-height: 28px; padding-block: 0; }
+/* What stops the loop, in one line: who paused it and how to resume. */
+.board-paused, .machine-paused, .project-paused { font-size: var(--fs-sm); color: var(--warn); overflow-wrap: anywhere; }
+.project-paused { margin-bottom: var(--sp-1); }
+/* "Depends on…": a dependency's title beside its ×, and each number typed with its title. */
+.board-dep { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
+.board-dep-title { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+.dep-picked { flex-basis: 100%; display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.dep-picked[hidden] { display: none; }
+.dep-picked-title { color: var(--muted); }
+.rules-prio { flex: none; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); }
+.rules-group .show-more { margin: 0 var(--sp-2) var(--sp-2) var(--sp-5); }
+.rules-ask { display: grid; gap: var(--sp-2); margin: 0 var(--sp-2) var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn); font-size: var(--fs-sm); }
+.rules-ask-acts, .rules-check { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+/* The login page (login.html): one panel in the middle of the page, its fields one under another, phone-wide on a phone.
+   The MFA setup on the account page shares its QR and code styles. */
+.login { min-height: 100vh; display: grid; place-items: center; padding: var(--sp-5) var(--sp-4); }
+.login-card { width: min(400px, 100%); }
+.login-head { gap: var(--sp-3); padding: var(--sp-4); }
+.login-head .brand-mark { display: block; }
+.login-head h1 { font-size: var(--fs-xl); white-space: normal; }
+.login-machine { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+.login-form { display: grid; gap: var(--sp-2); }
+.login-label { margin-top: var(--sp-1); font-size: var(--fs-sm); font-weight: 650; }
+.login-optional { font-weight: 400; color: var(--muted); }
+.login-form .field { min-height: 44px; font-size: var(--fs-md); }
+.login-form .foot { margin-top: 0; }
+.login-form .choice-item { margin-top: var(--sp-2); min-height: 44px; }
+.login-go { justify-content: center; min-height: 44px; margin-top: var(--sp-3); font-size: var(--fs-md); }
+.login-go:disabled { opacity: .6; cursor: progress; }
+.login-secret { display: flex; gap: var(--sp-2); }
+.login-show { min-height: 44px; min-width: 7ch; justify-content: center; }
+.login-link { justify-content: center; text-decoration: underline; }
+.login-say { font-size: var(--fs-sm); color: var(--muted); }
+.login-error { margin-bottom: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-sm); background: var(--bad-bg); color: var(--bad); font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
+.login-code-input, .mfa-key, .mfa-codes { font-family: var(--mono); letter-spacing: .08em; }
+/* The account page's fields, each with its name above it; a setup link in its own box under its user, kept to dismissed. */
+.field-label { display: grid; gap: 2px; flex: 1 1 14ch; min-width: 0; font-size: var(--fs-sm); font-weight: 650; color: var(--text); }
+.field-label .field { width: 100%; font-weight: 400; }
+form.row-meta { align-items: end; }
+.setup-link { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--info-bg); }
+.setup-link-say { flex: 1 1 100%; font-size: var(--fs-sm); font-weight: 600; }
+.setup-link-url { flex: 1 1 24ch; min-width: 0; font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; user-select: all; }
+.mfa-qr { display: block; width: 216px; height: 216px; margin-top: var(--sp-2); border-radius: var(--radius-sm); }  /* the QR brings its own white ground */
+.mfa-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(24ch, 1fr)); gap: var(--sp-1) var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); font-size: var(--fs-sm); white-space: nowrap; }
+@media (max-width: 420px) {
+  .login { padding: var(--sp-3) var(--sp-2); place-items: start center; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ring { from { opacity: .9; transform: scale(.98); } to { opacity: 0; transform: scale(1.03); } }
+@keyframes beat { from { transform: scale(1); } 50% { transform: scale(1.06); } to { transform: scale(1); } }
+@keyframes pulse { from { opacity: 1; } 50% { opacity: .45; } to { opacity: 1; } }
+
+/* Belt 3D (belt3d.js, belt3d-scene.js): the factory floor on a dark stage in the Board's dark colours, whatever the
+   theme. The labels on the floor are the panel's HTML, placed by three.js's CSS2DRenderer and sized by the floor
+   (--u: one of its lengths in pixels at the lanes, --ub at the bays; the scene sets them): the floor's own type scale,
+   --fs-b3*. Each label has a fixed size, so new text moves nothing. The stage is as tall as the floor is deep
+   (--b3-depth, from the number of lanes) at the panel's width, and the bands above and below it (--b3-top: the header
+   strip and the deck's top readouts; --b3-bottom: its bottom ones; belt3d-scene.js fits the floor between them), and
+   never shorter than the window's room below its top (--b3-room, panels/belt3d.js; issue 449: on an iPad, with few
+   lanes, the floor's height alone left the page empty below it). Its motion is below, in the floor's motion. */
+.b3 { container-type: inline-size; position: relative; overflow: hidden; }
+.b3-stage { --u: 20px; --ub: 21px; --b3-aside: 328px; --b3-top: 110px; --b3-bottom: 40px; position: relative; isolation: isolate;
+  height: max(var(--b3-room, 0px), calc(var(--b3-top) + var(--b3-bottom) + 6px + (100cqw - 40px) * var(--b3-depth, 12.4) * 0.0132)); overflow: hidden; border-radius: var(--radius-sm);
+  --fs-b3hd: calc(var(--u) * .54); --fs-b3nm: calc(var(--u) * .7); --fs-b3st: calc(var(--u) * .68); --fs-b3why: calc(var(--u) * .5); --fs-b3rd: calc(var(--u) * .5); --fs-b3mk: calc(var(--u) * .82);
+  --fs-b3bh: calc(var(--ub) * .52); --fs-b3bhn: calc(var(--ub) * .546); --fs-b3t: calc(var(--ub) * .64); --fs-b3s: calc(var(--ub) * .54);
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, var(--b3-deck-in) 0%, var(--b3-deck-mid) 60%, var(--b3-deck-out) 100%); color: var(--b3-text); font-size: var(--fs-sm); line-height: 1.45;
+  font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.b3-stage::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(120% 95% at 50% 46%, transparent 55%, rgba(6, 8, 12, .6) 100%); }
+.b3-canvas { display: block; }
+.b3-glass { background: var(--b3-glass); -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5); border: 1px solid var(--b3-hair);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); }
+.b3-note { position: absolute; left: 18px; right: 18px; top: 60px; z-index: 4; }
+
+/* The deck behind the floor (panels/belt3d.js; the owner's mockup "Holo control deck", issue 393), in its own dark
+   colours whatever the theme: a glowing indigo grid in perspective, a core glow and three dashed rings centred on the
+   floor, all under the canvas (z-index -1 in the stage's own stacking context, which
+   isolation makes), so none of it covers or dims the floor or a word on it. The HUD: cyan corner brackets and the
+   readouts in the bands above and below the floor (--b3-top, --b3-bottom), over the stage's edge shade. Neither
+   takes a click. Their motion is below, in the deck's motion. */
+.b3-deck, .b3-hud { position: absolute; inset: 0; pointer-events: none; }
+.b3-deck { z-index: -1; overflow: hidden; }
+.b3-hud { z-index: 1; }
+.b3-grid { position: absolute; left: -60%; right: -60%; bottom: -10%; height: 70%; overflow: hidden; transform: perspective(500px) rotateX(64deg); transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, black 10%, transparent 85%); mask-image: linear-gradient(to top, black 10%, transparent 85%); filter: drop-shadow(0 0 6px var(--b3-grid-glow)); }
+/* One square taller than the grid: it rolls by one square and starts over. */
+.b3-grid i { position: absolute; left: 0; right: 0; top: -70px; bottom: 0;
+  background-image: linear-gradient(var(--b3-grid) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--b3-grid) 1.5px, transparent 1.5px); background-size: 70px 70px; }
+.b3-rings { position: absolute; left: 0; top: var(--b3-top); width: 100%; height: calc(100% - var(--b3-top) - var(--b3-bottom)); }
+.b3-rings stop { stop-color: var(--b3-holo); }
+.b3-rings g { fill: none; stroke: var(--b3-holo); }
+.b3-ring { transform-box: fill-box; transform-origin: center; }
+.b3-cn { position: absolute; width: 28px; height: 28px; box-sizing: border-box; border: 0 solid var(--b3-cyan-line); }
+.b3-cn.tl { left: 14px; top: 56px; border-width: 2px 0 0 2px; } .b3-cn.tr { right: 14px; top: 56px; border-width: 2px 2px 0 0; }
+.b3-cn.bl { left: 14px; bottom: 10px; border-width: 0 0 2px 2px; } .b3-cn.br { right: 14px; bottom: 10px; border-width: 0 2px 2px 0; }
+.b3-ro { position: absolute; max-width: calc(50% - 40px); font-family: var(--mono); font-size: var(--fs-xs); line-height: 16px; letter-spacing: .04em; white-space: nowrap;
+  color: var(--b3-ro); opacity: .85; }
+.b3-ro div { overflow: hidden; text-overflow: ellipsis; }
+.b3-ro.tl { left: 30px; top: 62px; } .b3-ro.tr { right: 30px; top: 62px; text-align: right; }
+.b3-ro.bl { left: 30px; bottom: 14px; } .b3-ro.br { right: 30px; bottom: 14px; text-align: right; }
+.b3-ro .free, .b3-ro .on { color: var(--b3-ro-free); } .b3-ro .off { color: var(--b3-warn); }
+/* The slots figure is never cut short: on a phone's narrow corner it wraps ("SLOTS 13 OF 13" over "IN USE"). */
+.b3-ro .free { white-space: normal; }
+.b3-ro .bar { width: 140px; max-width: 100%; height: 4px; margin-top: 4px; background: var(--b3-ro-track); opacity: .7; }
+.b3-ro .bar i { display: block; height: 100%; background: var(--b3-holo); transform-origin: left; transform: scaleX(.7); }
+
+.b3-sum { position: absolute; inset: 0 0 auto 0; z-index: 4; height: 48px; box-sizing: border-box; padding: 0 18px; display: flex; align-items: center; gap: 16px; overflow: hidden; white-space: nowrap;
+  color: var(--b3-muted); border-width: 0 0 1px; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }
+/* The counts give way, cut at their right, before the full-screen button that joins them full screen (issue 421),
+   so the two never overlap or wrap under each other. */
+.b3-ks { display: flex; align-items: center; gap: 16px; min-width: 0; overflow: hidden; }
+.b3-sum .tool.full { flex: none; margin-left: auto; color: var(--b3-muted); }
+.b3-sum .tool.full:hover { color: var(--b3-text); }
+.b3-k { display: inline-flex; align-items: center; gap: 7px; }
+.b3-k i { width: 8px; height: 8px; border-radius: 50%; }
+.b3-k-run i, .b3-dot-run { background: var(--b3-accent); } .b3-k-blocked i, .b3-dot-blocked { background: var(--b3-bad); } .b3-k-waiting i, .b3-dot-waiting { background: var(--b3-warn); }
+.b3-k-held i, .b3-dot-held { background: var(--b3-muted); } .b3-k-queued i, .b3-dot-queued { background: var(--b3-queued); } .b3-k-landed i, .b3-dot-landed { background: var(--b3-ok); }
+.b3-sum b { display: inline-block; min-width: 1.3em; color: var(--b3-text); font-weight: 650; }
+.b3-steps { display: inline-flex; gap: 2px; margin-left: -6px; padding: 3px 4px; border-radius: 8px; background: rgba(30, 36, 48, .6); border: 1px solid var(--b3-hair); font-size: var(--fs-xs); }
+.b3-step { display: inline-flex; gap: 5px; padding: 1px 4px 1px 7px; }
+.b3-step.z { opacity: .42; }
+
+.b3-labels { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+/* Every word starts at the stage's top left: the floor places it by its transform alone (CSS2DRenderer), so a word
+   left in the flow would start below every word before it and be placed off the stage (issue 405). */
+.b3-lb { position: absolute; top: 0; left: 0; white-space: nowrap; color: var(--b3-text); box-sizing: border-box; }
+.b3-hd, .b3-bh { font-weight: 650; letter-spacing: .13em; text-transform: uppercase; color: var(--b3-muted); }
+.b3-hd { font-size: var(--fs-b3hd); }
+.b3-hd i { font-style: normal; color: var(--b3-accent); opacity: .75; margin-right: .5em; }
+.b3-nm { width: calc(var(--u) * 15.3); height: calc(var(--u) * 1.72); padding: 0 calc(var(--u) * .6); display: flex; align-items: center; gap: calc(var(--u) * .45); border-radius: calc(var(--u) * .44);
+  font-size: var(--fs-b3nm); font-weight: 550; background: rgba(30, 36, 48, .78); border: 1px solid var(--b3-hair); }
+.b3-nm b { color: var(--b3-accent); font-weight: 700; }
+.b3-nm span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.b3-nm.bad { background: rgba(255, 157, 149, .09); border-color: rgba(255, 157, 149, .3); }
+.b3-nm.bad b { color: var(--b3-bad); }
+.b3-nm.hot, .b3-bc.hot { border-color: var(--b3-accent); box-shadow: 0 0 0 1px rgba(147, 171, 255, .3), 0 0 22px rgba(147, 171, 255, .28); }
+.b3-st { width: calc(var(--u) * 14.2); height: calc(var(--u) * 2.3); display: flex; flex-direction: column; justify-content: center; font-size: var(--fs-b3st); line-height: 1.18; font-weight: 600; }
+.b3-l1 { display: flex; align-items: center; gap: calc(var(--u) * .4); }
+.b3-dot { flex: none; width: calc(var(--u) * .34); height: calc(var(--u) * .34); border-radius: 50%; background: var(--b3-accent); box-shadow: 0 0 10px var(--b3-accent); }
+.b3-st.bad .b3-dot { background: var(--b3-bad); box-shadow: 0 0 10px var(--b3-bad); }
+.b3-st.bad .b3-l1 { color: var(--b3-bad); }
+.b3-pbar { position: absolute; left: calc(var(--u) * 9.1); right: calc(var(--u) * .2); top: 50%; height: calc(var(--u) * .3); margin-top: calc(var(--u) * -.15); border-radius: 99px; background: rgba(170, 178, 194, .16);
+  overflow: hidden; opacity: 0; }
+.b3-st.tests .b3-pbar { opacity: 1; }
+.b3-pbar i, .b3-pb i { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left; background: var(--b3-accent); }
+.b3-st.fail .b3-pbar i { background: var(--b3-bad); }
+.b3-why { margin-top: calc(var(--u) * .08); font-size: var(--fs-b3why); font-weight: 450; line-height: 1.25; color: var(--b3-why); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.b3-why:empty { display: none; }
+/* A card that went back (issue 423), amber: its status's second line, "← back to <step>" over the belt, and its
+   crate's round badge. Each sized by the floor, so it keeps clear of the lane's words at any width. */
+.b3-ret { margin-top: calc(var(--u) * .08); font-size: var(--fs-b3why); font-weight: 550; line-height: 1.25; color: var(--b3-warn); overflow: hidden; text-overflow: ellipsis; }
+.b3-ret:empty { display: none; }
+.b3-st.tests .b3-ret { max-width: calc(var(--u) * 8.8); }
+.b3-bk { font-size: var(--fs-b3why); font-weight: 650; line-height: 1.2; color: var(--b3-warn); text-shadow: 0 1px 6px rgba(0, 0, 0, .7); }
+.b3-rd { width: calc(var(--u) * .78); height: calc(var(--u) * .78); display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  font-size: var(--fs-b3rd); font-weight: 800; line-height: 1; color: var(--b3-bg); background: var(--b3-warn); box-shadow: 0 0 8px rgba(243, 196, 108, .55); }
+.b3-bk.off, .b3-rd.off { display: none; }
+.b3-mk { font-size: var(--fs-b3mk); font-weight: 800; line-height: 1; opacity: 0; text-shadow: 0 1px 6px rgba(0, 0, 0, .55); }
+.b3-mk.done { opacity: 1; color: var(--b3-mk-done); } .b3-mk.skipped { opacity: 1; color: var(--b3-mk-skipped); } .b3-mk.failed { opacity: 1; color: var(--b3-white); }
+.b3-bh { font-size: var(--fs-b3bh); display: flex; align-items: center; gap: .8em; }
+.b3-bh-waiting { color: var(--b3-warn); } .b3-bh-landed { color: var(--b3-ok); }
+.b3-bh b { letter-spacing: 0; font-size: var(--fs-b3bhn); min-width: 1.7em; padding: .12em 0; text-align: center; border-radius: 99px; color: var(--b3-text); background: rgba(170, 178, 194, .14); }
+.b3-bh em { font-style: normal; letter-spacing: .04em; text-transform: none; font-weight: 500; opacity: .7; }
+.b3-bc { width: calc(var(--ub) * 12.6); height: calc(var(--ub) * 1.95); padding: 0 calc(var(--ub) * .55); display: flex; flex-direction: column; justify-content: center; border-radius: calc(var(--ub) * .42);
+  border: 1px solid transparent; }
+.b3-bc.hot { background: rgba(30, 36, 48, .8); }
+/* A card not in a bay's first three has a tag but no place on the floor: it takes no room. */
+.b3-bc.off { display: none; }
+.b3-t { display: flex; gap: calc(var(--ub) * .4); font-size: var(--fs-b3t); font-weight: 600; }
+.b3-t b { color: var(--b3-muted); font-weight: 700; }
+.b3-t span, .b3-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.b3-s { font-size: var(--fs-b3s); color: var(--b3-muted); }
+
+.b3-tip { position: absolute; left: 0; top: 0; z-index: 5; max-width: 300px; padding: 9px 12px; border-radius: 10px; pointer-events: none; font-size: var(--fs-sm); }
+.b3-tip b { color: var(--b3-accent); margin-right: 4px; }
+.b3-tip small { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--b3-muted); font-size: var(--fs-xs); }
+.b3-tip small i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+
+/* A card's details: a full-height side panel over the stage's right; the floor eases over as it opens, out of the
+   width the stage's --b3-aside gives it (belt3d-scene.js), so it never covers the card. */
+.b3-detail { position: absolute; top: 60px; right: 12px; bottom: 12px; z-index: 3; width: 320px; box-sizing: border-box; padding: 18px 20px; overflow: auto; border-radius: 14px;
+  color: var(--b3-text); font-size: var(--fs-sm); line-height: 1.45; font-variant-numeric: tabular-nums; transform: translateX(calc(100% + 16px)); opacity: 0; }
+.b3-detail.open { transform: none; opacity: 1; }
+/* A panel too narrow for the floor and the details side by side, as on a phone: they open below the floor, at the
+   panel's width, and the floor keeps the whole stage. */
+@container (max-width: 719px) {
+  .b3-stage { --b3-aside: 0px; }
+  .b3-detail { position: relative; top: auto; right: auto; bottom: auto; width: auto; margin-top: 12px; background: var(--b3-bg); transform: none; display: none; }
+  .b3-detail.open { display: block; }
+}
+/* On a phone, in the floor's place (the @media rule for phones): one line a lane, the card, the step it is in and its
+   minutes there; a stuck card's in red. */
+.b3-phone { display: none; }
+.b3-list-note { margin-bottom: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.b3-list { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.b3-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-2); padding: var(--sp-2) 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.b3-row-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b3-row-step { font-weight: 650; }
+.b3-row-min { color: var(--muted); font-variant-numeric: tabular-nums; }
+.b3-row.bad b, .b3-row.bad .b3-row-step { color: var(--bad); }
+.b3-row-none { color: var(--muted); font-size: var(--fs-sm); }
+/* Full screen (panels/belt3d.js): the panel fills the screen and the floor all of it, the length it was given set
+   aside; the details open beside the floor, or below it on a narrow screen, the floor giving them room. Moving,
+   sizing, folding or hiding a panel that fills the screen means nothing, so only the full-screen button stays, and a
+   collapsed panel's body is shown all the same: full screen is the floor, never an empty panel. While the floor's
+   header strip is shown, the button is at its right end and the header is set aside (issue 421, .b3-headless): the
+   strip is the top row. A panel showing its error or "empty" has no strip: its header, the button in it, stays. */
+.panel:fullscreen { border-radius: 0; border: 0; }
+.panel:fullscreen > .panel-body[hidden] { display: block !important; }
+.panel:fullscreen .panel-body { flex: 1 1 auto; min-height: 0; max-height: none !important; }
+.panel:fullscreen .panel-head .drag, .panel:fullscreen .panel-tools .tool:not(.full), .panel:fullscreen .panel-foot, .panel:fullscreen .panel-length { display: none; }
+.panel.b3-headless > .panel-head { display: none; }
+/* No entry rise either, of the panel (on a page just opened, .grid.fresh) or its body: the strip is at the very top
+   from the moment the header is set aside, not up to 6 px down and sliding up. */
+.panel.b3-headless > .panel-body { padding-top: 0; }
+.grid .panel.b3-headless, .panel.b3-headless > .panel-body { animation: none; }
+.panel:fullscreen .b3 { height: 100%; display: flex; flex-direction: column; }
+.panel:fullscreen .b3-stage { flex: 1 1 auto; height: auto; min-height: 0; }
+@container (max-width: 719px) {
+  .panel:fullscreen .b3-detail.open { flex: none; max-height: 50%; overflow: auto; }
+}
+/* Where the browser has no full screen (Safari on iPhone) or refuses it, the same button makes the panel fill the
+   browser window instead (panels/belt3d.js .b3-fill): over every other panel and the page's header, the page behind
+   it held still. Its own rules, not a selector list with :fullscreen, which a browser without it drops whole. It is
+   the window's height, no more and no less (issue 449): a panel's align-self: start applies to a fixed box too
+   (Safari, current Chromium), where inset alone left it as tall as the floor it had in the page, so as its lanes; and
+   the min-height app.js gives a panel, rounded up to whole rows, ran it past the window's bottom (the browser's own
+   full-screen style sets both aside). */
+html.b3-filling, html.b3-filling body { overflow: hidden; }
+.panel.b3-fill { position: fixed; inset: 0; z-index: 40; margin: 0; border-radius: 0; border: 0; animation: none; align-self: stretch; min-height: 0 !important; }
+.panel.b3-fill > .panel-body[hidden] { display: block !important; }
+.panel.b3-fill .panel-body { flex: 1 1 auto; min-height: 0; max-height: none !important; }
+.panel.b3-fill .panel-head .drag, .panel.b3-fill .panel-tools .tool:not(.full), .panel.b3-fill .panel-foot, .panel.b3-fill .panel-length { display: none; }
+.panel.b3-fill .b3 { height: 100%; display: flex; flex-direction: column; }
+.panel.b3-fill .b3-stage { flex: 1 1 auto; height: auto; min-height: 0; }
+@container (max-width: 719px) {
+  .panel.b3-fill .b3-detail.open { flex: none; max-height: 50%; overflow: auto; }
+}
+.b3-eyebrow, .b3-detail h3 { margin: 0; font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .11em; color: var(--b3-muted); }
+.b3-detail h2 { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.02em; }
+.b3-detail h2 a { color: inherit; }
+.b3-repo { font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0; color: var(--b3-muted); }
+.b3-detail h3 { margin: 18px 0 7px; padding-top: 14px; border-top: 1px solid var(--b3-hair); }
+.b3-detail p { margin: 3px 0; }
+.b3-ttl { font-size: var(--fs-md); }
+.b3-chip { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; padding: 3px 11px 3px 9px; border-radius: 99px; font-size: var(--fs-xs); font-weight: 600; color: var(--c);
+  background: color-mix(in srgb, var(--c) 13%, transparent); border: 1px solid color-mix(in srgb, var(--c) 38%, transparent); }
+.b3-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.b3-c-run { --c: var(--b3-accent); } .b3-c-blocked { --c: var(--b3-bad); } .b3-c-waiting { --c: var(--b3-warn); } .b3-c-held { --c: var(--b3-muted); } .b3-c-queued { --c: var(--b3-queued); } .b3-c-landed { --c: var(--b3-ok); }
+.b3-six { list-style: none; margin: 16px 0 0; padding: 0; }
+.b3-six li { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid transparent; }
+.b3-six li span { width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 50%; font-size: var(--fs-xs); font-weight: 700; background: rgba(170, 178, 194, .1); }
+.b3-six em { margin-left: auto; font-style: normal; font-size: var(--fs-xs); color: var(--b3-muted); }
+.b3-six .s-now { background: rgba(147, 171, 255, .12); border-color: rgba(147, 171, 255, .35); font-weight: 600; }
+.b3-six .s-now span { background: var(--b3-accent); color: var(--b3-bg); }
+.b3-six .s-done span { background: rgba(116, 223, 163, .16); color: var(--b3-ok); }
+.b3-six .s-failed { color: var(--b3-bad); } .b3-six .s-failed span { background: rgba(255, 157, 149, .18); }
+.b3-six .s-todo, .b3-six .s-skipped { color: var(--b3-dim); }
+.b3-pb { height: 6px; margin-bottom: 7px; background: rgba(170, 178, 194, .16); border-radius: 99px; overflow: hidden; }
+.b3-detail .go { color: var(--b3-ok); } .b3-detail .nogo, .b3-detail .why { color: var(--b3-bad); }
+.b3-detail .b3-meta { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--b3-hair); color: var(--b3-muted); font-size: var(--fs-xs); }
+.b3-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; background: rgba(30, 36, 48, .6); border: 1px solid var(--b3-hair); color: var(--b3-muted);
+  font-size: var(--fs-lg); line-height: 1; cursor: pointer; }
+.b3-close:hover { color: var(--b3-text); border-color: var(--b3-border); }
+
+/* ---- the floor's motion ---- */
+/* The owner approved the mockup's motion for Belt 3D (issue 345): fades longer than the page's, the test bar gliding to
+   its share, the details sliding in, and the live status dot's slow pulse, the floor's one loop. Reduced motion stops all
+   of it, as everywhere. */
+.b3-step, .b3-pbar { transition: opacity .4s; }
+.b3-mk { transition: opacity .5s; }
+.b3-pbar i { transition: transform 1.6s var(--b3-glide); }
+.b3-detail { transition: transform .5s var(--b3-slide), opacity .35s; }
+.b3-dot { animation: b3-live 1.8s ease-in-out infinite; }
+.b3-st.bad .b3-dot { animation: none; }
+@keyframes b3-live { 50% { opacity: .35; } }
+/* ---- end of the floor's motion ---- */
+
+/* ---- the deck's motion ---- */
+/* The deck's loops behind the floor, as the owner approved them (issue 393): the grid rolls one square toward the
+   viewer every 3 s, the rings turn opposite ways (40 s and 26 s a turn) and the
+   readout's bar ticks. Each moves a transform only, so the compositor draws it and the floor's frames do
+   no more work. Reduced motion stops all of it, as everywhere. */
+.b3-grid i { animation: b3-roll 3s linear infinite; }
+@keyframes b3-roll { to { transform: translateY(70px); } }
+.b3-ring.r1 { animation: b3-spin 40s linear infinite; }
+.b3-ring.r2 { animation: b3-spin 26s linear infinite reverse; }
+@keyframes b3-spin { to { transform: rotate(360deg); } }
+.b3-ro .bar i { animation: b3-bar 8s linear infinite; }
+@keyframes b3-bar { 0%, 100% { transform: scaleX(.286); } 25% { transform: scaleX(.857); } 50% { transform: scaleX(.7); } 75% { transform: scaleX(1); } }
+/* ---- end of the deck's motion ---- */
+
+/* Reduced motion: nothing moves. The page sets data-motion from the same setting, for the motion it drives itself. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+:root[data-motion="off"] *, :root[data-motion="off"] *::before, :root[data-motion="off"] *::after { animation: none !important; transition: none !important; }
+
+@media (max-width: 1080px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel[data-size="wide"], .panel[data-size="full"] { grid-column: 1 / -1; }
+}
+/* Phone: one column; dragging gives way to move up and move down, and a width has nothing to change. */
+@media (max-width: 700px) {
+  .grid { grid-template-columns: minmax(0, 1fr); padding: var(--sp-3); gap: var(--sp-3); }
+  .panel, .panel[data-size="wide"], .panel[data-size="full"] { grid-column: 1 / -1; }
+  .drag, .custom-size { display: none; }
+  .step-time { display: none; }
+  .phone-note { display: block; flex: 1 0 100%; font-size: var(--fs-sm); color: var(--muted); }
+  .move { display: inline-flex; }
+  .panel-acts { order: 1; flex-basis: 100%; }
+  .tabs { padding: var(--sp-2) var(--sp-3) 0; }
+  .tool { min-width: 40px; height: 40px; }
+  /* The head is two lines: the name, the tiles and the Live mark; then the times and Menu, which holds the buttons. */
+  .top { padding: var(--sp-3); grid-template-columns: auto 1fr auto auto; gap: var(--sp-2) var(--sp-3); }
+  .stats { grid-column: 2 / 4; }
+  .top-meta { display: contents; }
+  .status { grid-row: 1; grid-column: 4; }
+  .top-meta .meta { grid-row: 2; grid-column: 1 / 3; }
+  .top-meta .meta:last-child { grid-column: 3; justify-self: end; }
+  .top-actions { grid-row: 2; grid-column: 4; justify-self: end; position: relative; }
+  .top-actions .top-menu { display: inline-flex; }
+  .top-menu-list { display: none; position: absolute; right: 0; top: calc(100% + var(--sp-1)); z-index: 26; flex-direction: column; gap: var(--sp-1);
+    width: max-content; max-width: calc(100vw - 2 * var(--sp-3)); padding: var(--sp-2); background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); }
+  .top-actions.open .top-menu-list { display: flex; }
+  /* Needs you's count by project made its tile wider than a phone, and the page with it; its panel names each card's project. */
+  .stat[data-stat="needs"] .stat-sub { display: none; }
+  .stat { padding: 2px var(--sp-2); }
+  /* The machine head is its one line until tapped. */
+  .machine-fold { display: flex; }
+  .machine:not(.open) > :not(.machine-fold) { display: none; }
+  .brand-sub { display: none; }
+  .sheet { top: var(--sp-2); right: var(--sp-2); }
+  /* The Board is one list: the columns one under another, and buttons on each card in place of dragging. */
+  .board { grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
+  .board-col { min-height: 0; }
+  /* What needs you first, then what is moving; the backlog and today's landings last, closed to their heading and count. */
+  .board-col[data-col="needs"] { order: 1; }
+  .board-col[data-col="building"] { order: 2; }
+  .board-col[data-col="review"] { order: 3; }
+  .board-col[data-col="queue"] { order: 4; }
+  .board-col[data-col="held"] { order: 5; }
+  .board-col[data-col="landed"] { order: 6; }
+  .board-head { justify-content: flex-start; gap: var(--sp-2); }
+  .board-fold { display: inline-flex; align-items: center; }
+  .board-col[data-col="held"]:not(.open) > :not(.board-head), .board-col[data-col="landed"]:not(.open) > :not(.board-head) { display: none; }
+  .board-col[data-col="held"]:not(.open) > .board-head, .board-col[data-col="landed"]:not(.open) > .board-head { margin-bottom: 0; }
+  .board-moves { display: flex; }
+  /* Belt 3D: the lanes' list in place of the floor, and no full-screen button (panels/belt3d.js draws no floor here).
+     Filling the window, as it was when the window narrowed, the floor stays, with its button to leave. */
+  .panel[data-panel="belt3d"]:not(.b3-fill) .b3-stage, .panel[data-panel="belt3d"]:not(.b3-fill) .b3-detail,
+  .panel[data-panel="belt3d"]:not(.b3-fill) .tool.full { display: none; }
+  .panel[data-panel="belt3d"]:not(.b3-fill) .b3-phone { display: block; }
+  /* Full screen by the browser (a phone turned upright while full screen) is not .b3-fill, and keeps the floor and its
+     button to leave too. Rules of their own: a browser without :fullscreen drops them alone, and has no full screen. */
+  .panel[data-panel="belt3d"]:fullscreen .b3-stage, .panel[data-panel="belt3d"]:fullscreen .b3-detail.open { display: block; }
+  .panel[data-panel="belt3d"]:fullscreen .tool.full { display: inline-flex; }
+  .panel[data-panel="belt3d"]:fullscreen .b3-phone { display: none; }
+  .board-today { margin-left: 0; }
+  .rules-cols { grid-template-columns: minmax(0, 1fr); }
+  .rules-produce { position: static; max-height: none; overflow-y: visible; }
+  .rules-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+  /* Builder, Reviewer and Judge lay out alike: CLI, model and effort each a full-width line, so no model is cut. */
+  .rules-model { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 100%; }
+  .rules-model > .field { width: 100%; }
+  /* An issue's row on the Rules tab wraps: its chips, age and buttons go under its title, not past the panel. */
+  .rules-next, .rules-held-row, .rules-issue { flex-wrap: wrap; }
+  .rules-next .board-title, .rules-held-row .board-title, .rules-issue .board-title { flex-basis: 100%; }
+  .rules-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rules-held-list, .rules-group .show-more { margin-left: var(--sp-2); }
+  /* An issue's row wraps its chips and labels under its title rather than run past the panel. */
+  .rules-next, .rules-held-row, .rules-issue { flex-wrap: wrap; }
+}
+/* A small phone: the mark beside the name gives its room to the tiles, the bar's padding, gaps and the tiles' padding
+   are tighter, and the name is smaller. Today and Needs you always show: at 320px with Today at $1,234.50
+   the two fit beside the name and the Live mark; should they still not, the name's column gives way (it may shorten
+   with an ellipsis), never the tiles' minimum, so Needs you is never pushed off the screen. */
+@media (max-width: 420px) {
+  .brand-mark { display: none; }
+  .top { grid-template-columns: minmax(0, auto) 1fr auto auto; padding: var(--sp-3) var(--sp-2); column-gap: var(--sp-2); }
+  .brand { min-width: 0; }
+  h1 { min-width: 0; font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The name's belt and rollers stay inside the name's own box: the box holds them in its padding and the name
+     shortens inside it, so they are neither cut off by the head nor push the tiles. */
+  .brand .word { display: block; min-width: 0; padding: 0 6px 10px; overflow: hidden; text-overflow: ellipsis; }
+  .brand .belt, .brand .lane { left: 6px; right: 6px; }
+  .brand .roller.l { left: 0; }
+  .brand .roller.r { right: 0; }
+  .stat { padding: 2px var(--sp-1); }
+  .stat-label { letter-spacing: 0; }
+}

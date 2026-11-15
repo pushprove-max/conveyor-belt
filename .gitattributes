@@ -1,0 +1,5 @@
+# The engine area map is one fact a line (.conveyor/test-changed.sh): two changes that each add a line to it merge
+# keeping both sides, with no conflict.
+/.conveyor/engine-areas.json merge=union
+# So is the coverage map (.conveyor/coverage.sh writes it).
+/.conveyor/coverage.jsonl merge=union

@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en" data-motion="on" data-density="comfortable">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Only sibling files load: the page's own code and the data.js it re-reads. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="light dark">
+<title>Conveyor Board</title>
+<link rel="stylesheet" href="app.css">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+</head>
+<body>
+<a class="skip" href="#grid">Skip to the panels</a>
+<header class="top">
+  <div class="brand">
+    <svg class="brand-mark" aria-hidden="true" viewBox="0 0 64 64">
+      <defs><linearGradient id="cv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b8cf8"/><stop offset="1" stop-color="#4ade80"/></linearGradient></defs>
+      <rect x="1.5" y="1.5" width="61" height="61" rx="17" fill="#151821" stroke="url(#cv)" stroke-width="3"/>
+      <path d="M42.5 20.5A16 16 0 1 0 42.5 43.5" fill="none" stroke="url(#cv)" stroke-width="7.5" stroke-linecap="round"/>
+      <rect x="35" y="26.5" width="16" height="11" rx="3" fill="#4ade80"/>
+    </svg>
+    <h1><span class="word"><span class="belt" aria-hidden="true"></span><span class="roller l" aria-hidden="true"></span><span class="roller r" aria-hidden="true"></span><span class="lane" aria-hidden="true"><span class="parcel"></span></span><span class="w">Conveyor</span></span> <span class="brand-sub">Board</span></h1>
+  </div>
+  <!-- The head line's tiles: head.js states them, app.js draws them from the data the page has. -->
+  <nav id="stats" class="stats" aria-label="At a glance"></nav>
+  <div class="top-meta">
+    <span id="status" class="status" role="status"><span class="chip chip-quiet"><span>Loading</span></span></span>
+    <span class="meta">Updated <span id="updated">never</span></span>
+    <span class="meta"><time id="clock">--:--</time></span>
+  </div>
+  <!-- On a phone the buttons are one Menu button's list (app.css, app.js wireMenu); wider, Menu is not shown. -->
+  <div class="top-actions">
+    <button type="button" class="btn top-menu" aria-expanded="false" aria-controls="top-menu-list">Menu</button>
+    <div class="top-menu-list" id="top-menu-list">
+      <a class="btn btn-quiet" href="account.html">Account</a>
+      <!-- Only while the status mark says Stale, No data or Feed stopped (app.js); the Health panel has it always. -->
+      <button type="button" id="restart" class="btn btn-quiet" hidden>Restart the Board's feed</button>
+      <button type="button" id="customize-open" class="btn" aria-expanded="false" aria-controls="customize"><span class="label">Customize</span></button>
+    </div>
+  </div>
+</header>
+<!-- The tabs: Overview, what reports; Control, what changes the loop; Rules. app.js fills them. -->
+<nav id="tabs" class="tabs" aria-label="Dashboard views"></nav>
+<!-- The machine head, on every tab: the machine's one Conveyor over every project. head.js draws it. -->
+<section id="machine-head" class="machine" aria-label="Conveyor on the build machine" hidden></section>
+<p id="restart-note" class="note" role="status"></p>
+<p id="banner" class="banner" role="alert" hidden></p>
+<p id="announce" class="sr-only" aria-live="polite"></p>
+
+<aside id="customize" class="sheet" aria-label="Customize the dashboard" hidden>
+  <header class="sheet-head">
+    <h2>Customize</h2>
+    <button type="button" id="customize-close" class="btn btn-quiet">Close</button>
+  </header>
+  <p class="sheet-note">Show or hide each panel and set its width here. Drag a panel by its handle to move it, and its lower edge to set its length. Each tab keeps its own layout in this browser.</p>
+  <div id="customize-body"></div>
+</aside>
+
+<main id="grid" class="grid" aria-busy="true">
+  <!-- Shown until the page's code has run, so the page is never blank. -->
+  <section class="panel" data-size="wide" aria-hidden="true"><div class="panel-body"><div class="skeleton"><span class="bar w60"></span><span class="bar w90"></span><span class="bar w75"></span></div></div></section>
+  <section class="panel" data-size="small" aria-hidden="true"><div class="panel-body"><div class="skeleton"><span class="bar w60"></span><span class="bar w90"></span><span class="bar w75"></span></div></div></section>
+  <section class="panel" data-size="full" aria-hidden="true"><div class="panel-body"><div class="skeleton"><span class="bar w60"></span><span class="bar w90"></span><span class="bar w75"></span></div></div></section>
+</main>
+<noscript><p class="banner">This page needs JavaScript to show what Conveyor is doing.</p></noscript>
+
+<script src="app.js"></script>
+<script src="head.js"></script>
+<script src="panels/index.js"></script>
+<script src="boot.js"></script>
+</body>
+</html>

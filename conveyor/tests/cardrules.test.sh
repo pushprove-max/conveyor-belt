@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 300
+# Engine cases: what the core card rules tell every card session.
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+# The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# Bug: a card session was not told what its hooks refuse, so it spent calls on commands a hook then refused (an
+# unbounded search, a shell write into a code file, an uncapped node --test) and on fetching the same facts from notes.
+# The core rules name each refusal on one line, each with what to do instead.
+t_hookrefusals() {
+  local line
+  line=$(grep -F "hooks refuse" "$SRC/rules/card-core.md")
+  [ "$(grep -c . <<<"$line")" = 1 ] || fail "the core card rules have no single rule naming what the hooks refuse"
+  # The search hook skips a grep with no recursive flag, so the rule names only the recursive one.
+  grep -qF 'An `rg`, or a recursive `grep`, with no path, or over `.`, the checkout root' <<<"$line" \
+    && grep -qF 'name the directories to search' <<<"$line" \
+    || fail "the hooks rule does not name the unbounded search and its alternative: $line"
+  grep -qF 'A shell write into a code file' <<<"$line" && grep -qF 'use the Edit tool' <<<"$line" \
+    || fail "the hooks rule does not name the shell write and its alternative: $line"
+  grep -qF '`node --test` without `--max-old-space-size=4096`' <<<"$line" \
+    && grep -qF "pass that flag, or use the project's own test script" <<<"$line" \
+    || fail "the hooks rule does not name the uncapped node --test and its alternative: $line"
+}
+
+# Bug: the test-speed rules lived in one project's own rules, so another project's cards wrote slow tests and their
+# reviews let them through. The core rules, which every project's cards and reviews are given with no setup, hold a
+# "Keep tests fast" section of four rules, each with its reason; a card's rules hold it whether or not the project
+# adds rules of its own (cardrules(), as the build, fix and review prompts are given them).
+t_speedrules() {
+  local f=$SRC/rules/card-core.md s r p
+  s=$(sed -n '/^Keep tests fast:$/,/^$/p' "$f")
+  [ "$(grep -c '^- ' <<<"$s")" = 4 ] || fail "the core card rules have no Keep tests fast section of four rules: $s"
+  for r in 'A test file runs on its own in under the project'"'"'s CPU budget (the pack'"'"'s `test.fileBudget`, default 8 CPU s)' \
+    'No wrapper that only runs other tests again, and no second case of one behaviour' \
+    'One fixture, render or build per file where the cases allow it' 'is split into one case per fixture' \
+    'Use the project'"'"'s shared fast test helpers rather than the slow real thing, unless the test is about that thing' \
+    'call the function rather than run the whole program when only the function is under test'; do
+    grep -qF -- "$r" <<<"$s" || fail "the Keep tests fast section does not say: $r"
+  done
+  # Each rule gives its reason after the rule: a colon, or ", as", inside its one line.
+  ! grep '^- ' <<<"$s" | grep -vE ': [a-z]|, as ' || fail "a Keep tests fast rule gives no reason: $s"
+  setup "[]"
+  # A project with rules of its own (the test pack's card-rules.md), then one with none.
+  for p in own none; do
+    [ $p = own ] || rm "$R/.conveyor/card-rules.md"
+    r=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && cardrules '{"title": "t", "body": ""}' ) ) \
+      || fail "the card rules could not be made: $r"
+    [[ $r == *"$s"* ]] || fail "a card's rules, in a project with $p rules of its own, do not hold the Keep tests fast section: $r"
+  done
+}
+
+# Bug: a session's big tool results, test logs and whole-file reads, held half its tool output and were read again
+# on every later turn (issue #540). The core rules tell it to run tests through testbrief.sh and read its log by part,
+# and to search before reading and read a file of over 400 lines by line range.
+t_contextrules() {
+  local s
+  s=$(sed -n "/^Keep the session's context small/,/^\$/p" "$SRC/rules/card-core.md")
+  grep -qF '`testbrief.sh -- <command>`' <<<"$s" && grep -qF 'read the log by line range or search it' <<<"$s" \
+    || fail "the core card rules do not tell a session to run tests through testbrief.sh: $s"
+  grep -qF 'Search before you read, and read a file of over 400 lines by line range' <<<"$s" \
+    || fail "the core card rules do not tell a session to search first and read a big file by line range: $s"
+  # Issue #543: long output of other commands is shortened, and the rules say where its middle is.
+  grep -qF 'When the middle matters, read the saved file by line range or search it.' <<<"$s" \
+    || fail "the core card rules do not tell a session to read a long output's saved file by part: $s"
+}
+
+# Bug: the first rule forbade "error handling the issue does not ask for", so builders left out the handling the
+# reviewer then asked for, and the builder was never told the review's angles, so most first reviews were a no-go. The
+# core rules let the changed code have the handling it needs and ask one read of the staged change on the review's
+# three angles. The bar for how likely an input is belongs to the project's review.proof setting, which the reviewer
+# applies, so the core rules name none.
+t_beforefinish() {
+  local f=$SRC/rules/card-core.md line
+  line=$(grep -F "The smallest change that fully solves the issue." "$f")
+  [ "$(grep -c . <<<"$line")" = 1 ] || fail "the core card rules have no single smallest-change rule"
+  grep -qF 'No feature, abstraction or option the issue does not ask for' <<<"$line" \
+    || fail "the first rule no longer forbids unrequested features, abstractions and options: $line"
+  ! grep -qiE 'no [^.;]*error handling' <<<"$line" && grep -qF 'error handling the changed code needs to be correct' <<<"$line" \
+    || fail "the first rule still forbids the error handling the changed code needs: $line"
+  line=$(grep -F "Before you finish, read your staged change once as the reviewer will" "$f")
+  [ "$(grep -c . <<<"$line")" = 1 ] || fail "the core card rules have no single before-you-finish rule"
+  grep -qF 'does each changed behaviour have a test that fails without it' <<<"$line" \
+    && grep -qF 'does each new test say which bug it catches' <<<"$line" \
+    || fail "the before-you-finish rule does not ask for a failing test per behaviour that names its bug: $line"
+  # Bug: a test that only finds text in a source file passes when nothing uses that text, and the rule did not say so.
+  grep -qF 'a test that only finds text in a source file does not test behaviour, unless no behaviour can be run, such as a stylesheet rule in a test with no layout; such a test says why in a one-line comment' <<<"$line" \
+    || fail "the before-you-finish rule does not rule out source-text-only tests, with the stylesheet exception and its one-line reason: $line"
+  grep -qF 'can a check you added be skipped or fooled by an input it trusts' <<<"$line" \
+    || fail "the before-you-finish rule does not ask whether a check can be skipped or fooled: $line"
+  grep -qF 'is any comment or doc left untrue' <<<"$line" \
+    || fail "the before-you-finish rule does not ask for untrue comments or docs: $line"
+  grep -qF 'Fix what you find; that is part of the issue.' <<<"$line" \
+    || fail "the before-you-finish rule does not say to fix what it finds: $line"
+  # The reply's [likely] tag is about what the session verified, not about inputs, so it is left out of this search.
+  ! sed 's/\[likely\]//g' "$f" | grep -qiE 'likely|probab|plausib|realistic|\brare\b|review\.proof' \
+    || fail "the core card rules name a bar for how likely an input is: $(sed 's/\[likely\]//g' "$f" | grep -iE 'likely|probab|plausib|realistic|\brare\b|review\.proof')"
+}
+
+# Bug: a card session waited on one command for longer than its saved context lasts (five minutes of silence), so the
+# next turn paid for the whole context again; and a run still going was reported as passed. The header every session
+# starts with gives the four-minute rule, the background form with an output file and an exit-status file, a wait that
+# ends within four minutes and runs on Linux and macOS alike, and says a run that has not ended is never passed.
+t_longwait() {
+  local h w b c n s seg ok='sleep timeout date stat find sed grep flock'
+  setup "[$(issue 7 2026-01-01)]"
+  # The build changes nothing: the card ends after the session that read the header, with no review, tests or landing.
+  echo : > "$STUB/build"
+  loop run 1 >/dev/null || fail "run exited non-zero"
+  [ -s "$STUB/brief" ] || fail "the build session was not given a brief"
+  h=$(tr '\n' ' ' < "$STUB/brief")
+  grep -qF 'Never wait on one command for more than 4 minutes.' <<<"$h" || fail "the header has no four-minute rule: $h"
+  b='rm -f /tmp/<name>.rc; (timeout 600 <command> > /tmp/<name>.out 2>&1; echo $? > /tmp/<name>.rc) &'
+  grep -qF "\`$b\`" <<<"$h" \
+    || fail "the header does not show the background run with its output file and its exit-status file: $h"
+  grep -qF 'a run with no exit-status file has not ended and is reported as unfinished, never as passed' <<<"$h" \
+    || fail "the header does not say an unfinished run is never reported as passed: $h"
+  w=$(grep -o '`i=0; while [^`]*`' <<<"$h" | tr -d '`')
+  [ -n "$w" ] || fail "the header shows no wait: $h"
+  # Each command of the wait is a bash builtin or keyword, or a tool the engine has on both systems (portable.sh, p_tools).
+  while IFS= read -r seg; do
+    read -r c _ <<<"$seg"
+    case $c in ''|while|do|done) continue ;; esac
+    [[ $c == *=* ]] || [ "$(type -t "$c")" = builtin ] || [ "$(type -t "$c")" = keyword ] || [[ " $ok " == *" $c "* ]] \
+      || fail "the wait runs $c, which is not in the engine's portable command set: $w"
+  done < <(sed -E 's/(;|&&|\|\||\bdo\b)/\n/g' <<<"$w")
+  ! grep -q 'tail\|--pid' <<<"$w" || fail "the wait uses tail --pid, which macOS does not have: $w"
+  # It ends within four minutes when the run does not end, and at once when it has.
+  n=$(sed -n 's/.*-lt \([0-9]*\) \].*/\1/p' <<<"$w"); s=$(sed -n 's/.*sleep \([0-9]*\);.*/\1/p' <<<"$w")
+  [ -n "$n" ] && [ -n "$s" ] && [ $((n * s)) -le 240 ] || fail "the wait does not end within four minutes: $w"
+  echo 0 > "$T/$CASE.rc"
+  timeout 5 bash -c "${w//\/tmp\/<name>/$T/$CASE}" || fail "the wait does not end at once when the exit-status file is there: $w"
+  # A status file an earlier run left is not read as this run's: started as shown over an old 0, a run still going
+  # leaves no exit-status file, and the wait does not end before it does.
+  b=${b//<command>/sleep 6} # sleep: a stand-in run still going while the wait is checked; the test never waits for it
+  # Half a second is enough: the wait looks at once and then sleeps $s seconds, at least one, before it looks again.
+  [ "$s" -ge 1 ] || fail "the wait sleeps under a second between looks: $w"
+  timeout 0.5 bash -c "${b//\/tmp\/<name>/$T/$CASE} ${w//\/tmp\/<name>/$T/$CASE}" && fail "the wait read an earlier run's status: $b $w"
+  [ ! -e "$T/$CASE.rc" ] || fail "an earlier run's status file is still there while the run goes on: $b"
+}

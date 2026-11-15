@@ -1,0 +1,1082 @@
+# Conveyor
+
+## Control
+
+`conveyor.sh control [<action>]` changes the control record; with no action it prints the record. A new project starts
+on the values in `conveyor/lib/control-defaults.json`; a record keeps each value it sets.
+
+`conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]` and
+`conveyor.sh control judge <cli> <model> [effort]` set the review's judge (below, The judge): each project's record holds
+its own, and the Board's Rules tab sets them in its Judge row.
+
+`conveyor.sh control tests <cli> <model> [effort]` sets the Tests seat (below, Test actions), and
+`conveyor.sh control tests default` clears it.
+
+`conveyor.sh control rules <rule>=<on|off>...` sets what the loop builds:
+
+- `P0`, `P1`, `P2`, `P3`: issues of that priority. An issue with no priority counts as P3. `P3` also decides what
+  happens to an accepted P3 review finding (below, The judge).
+- `followups`: follow-up issues.
+- `<areaPrefix><name>`: an area label; off means issues with that label are never built.
+- `push`: whether a card that lands is pushed (Push when a card lands). On, the loop pushes each landing.
+  Off is land only: cards still land on main one after another, each building on the last, and the loop pushes none of
+  them (a `run` does not end in failure for it); what landed waits for the Board's Push landed (The full test suite,
+  below), and the Board shows how many landed cards are not pushed and which.
+- `visible`: whether a change customers or staff will see needs the owner's yes (Visible changes need your yes). On,
+  a card whose change touches product code and that its reviewer says is visible stops for a
+  `Visible change approved:` line, and an issue whose `## What customers or staff will see` section names a change is
+  not picked without one. Off, no card or issue waits for that line: the build brief and the review do not ask for it,
+  the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
+  A visible change landed while it is off was never approved; the Board says so beside the switch.
+
+Every rule is on by default. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+that skips it. A record saved before a rule existed reads that rule as on.
+
+`conveyor.sh control dep-guard on|off` sets the dependency guard (`depGuard` in the record; a record saved before it
+reads as on). On, an issue is never picked while an issue its `Depends on:` lines name is open, nor while a follow-up
+filed from one is: a release, the order list and a retry do not change that. Off, `conveyor.sh control force <issue>`
+adds the issue to `forced`, and it is picked despite its open dependencies; it leaves `forced` once a card of it has
+landed or its issue is closed. With the guard on, `control force` is refused (exit 2) and changes nothing; a forced
+issue waits again while the guard is on.
+
+`conveyor.sh control depends <issue> add|remove <issue>...` (the Board's "Depends on…", on the Control and Rules tabs)
+changes the issue's `Depends on:` line on GitHub, through `gh-write`; the control record is not touched. add puts the
+numbers on the body's last `Depends on:` line, or writes `Depends on: #N` at the end of the body; remove takes them off,
+and drops a line left with none; the rest of the body is kept byte for byte. It is refused (exit 2), with nothing
+written, for an issue depending on itself, an issue that is not open in the project, a dependency that would make a
+cycle, an add to an issue whose card is already running, and a remove of a number no `Depends on:` line names.
+
+## The judge
+
+The judge is set in each project's control record, by `conveyor.sh control judge ...` or in the Judge row of the
+Board's Rules tab, never in the pack: a pack (`.conveyor/project.json`) that still holds a `judge` object fails its
+check, with a line naming these commands. `conveyor.sh control judge on` switches it on and
+`conveyor.sh control judge off` off, from the next review; it is on in a new project (docs/configuration.md, The control record). On, a judge reads each review
+that holds findings before the card acts on it, and marks each finding accepted or declined with a one-line reason.
+It declines unless the finding earns its place: one about code the card neither changed nor broke, or whose proof
+cannot happen with what the project really runs, is declined. A P2 finding has a higher bar: it is accepted only
+when it is inside the diff, its proof uses what the project really runs, and it would cause a wrong result that users
+or the next card meet. A P2 whose proof needs an unusual input, timing or setup is declined as `rare case`, and a P2
+about wording, naming or form with no wrong result as `style`. A P3 finding (a real but minor defect, such as a
+misleading name or message, a small inconsistency or dead code the change left) is judged as a P2 is, but is not
+declined because it causes no wrong result. An accepted P3 is handled by the control record's rule `P3` (the Rules
+tab): on, it is a finding as a P2 is, so it makes a NO-GO, goes to the fix round and, still open after the last
+review, is filed as a follow-up of the pack's P3 priority (with no priority label when the pack has fewer than four:
+an issue with none counts as P3). Off, it becomes a
+`MINOR:` line of the review: listed and counted on the card's review line, with no fix round and no follow-up, and a
+review left with no other finding is a GO. This holds with the judge off too, where every finding is accepted. A
+line the reviewer itself starts with `MINOR:` is a finding. A declined finding causes no fix round and no
+follow-up, and a review with no accepted finding is a GO. Each declined finding goes to the declined list, one line
+in `declined.jsonl` of the state folder: its time, card, issue, the finding, who declined it (`judge`) and why. A line
+the reviewer itself starts with `DECLINED:` is a finding, as any other line is. The review's record line holds each finding, the judge's
+reason and, for an accepted one, its "Cost to every card". `conveyor.sh control judge always security data` names
+the finding kinds that are always accepted, whatever the judge says: the reviewer tags a finding of one with its
+kind, in square brackets right after its level. Each kind is one word; the command names them all, and with no kind
+it clears them.
+
+`conveyor.sh control judge <cli> <model> [effort]` names the judge (a CLI installed on the host, the reviewer's too,
+and any model, listed by that CLI or not: docs/configuration.md, Models); a judge set to the reviewer's CLI is used, of the same
+family as the reviewer. `conveyor.sh control judge default` leaves it to the first model of another CLI than the
+reviewer's that the pack's `models.allowed` lists for the review (Claude Code or OpenCode for a Codex reviewer, and
+so on), at medium effort. The Board's Judge row offers every installed CLI, says "same family as the reviewer" when
+the judge runs on the reviewer's CLI, and shows the model the judge runs on when it is left at default. When the judge cannot run, fails
+or gives an answer that cannot be read, every finding is accepted: no card is blocked by the judge.
+
+## Accounts
+
+A project's cards can run on another Claude account than the host's default login. Each account is a Claude config
+folder on the Conveyor host, signed in once by you: run `CLAUDE_CONFIG_DIR=<folder> claude` there and sign in in
+the browser. Then list it in the host file (`~/.config/conveyor/host.json`), by a name of your choosing:
+
+```json
+"accounts": [{"name": "second", "configDir": "~/.claude-second"}]
+```
+
+A folder that is not absolute is under your home folder. A project that names no account runs on the default login,
+`~/.claude`, even when the engine was started with `CLAUDE_CONFIG_DIR` set.
+
+`conveyor.sh control account <name>` sets the account a project's cards use, and
+`conveyor.sh control review-account <name>` the one its reviews use when the reviewer is Claude; either with no name
+sets none (the default login; for reviews, the cards' account). The Board's Rules tab sets both. A change reaches the
+cards started after it; a card in flight finishes on the account it started with, and one whose reviewer is changed to
+Claude while it runs reviews on the account it builds on. Each card session runs with `CLAUDE_CONFIG_DIR` set to the account's folder,
+the card's worktree line names the accounts by name (never by email), and the usage-limit guard reads every account the
+next card will use (its build account and, with a Claude reviewer, its review account; the default login is read at
+its own folder), so an account at its limit holds back only the projects that use it. The Board's Health panel lists
+every account it can read, on its own machine and on the host, each with its own usage and what it is used for.
+
+## OpenCode builder
+
+The builder seat (build, fix and rebase sessions) can run any model OpenCode exposes. Choose it with
+`conveyor.sh control model opencode <provider>/<model>` (the provider and model as `opencode models` names them; one
+it does not list is taken as typed, and fails in the card when OpenCode cannot run it) or in the Board's Builder row on the Rules tab; the pack's `models.allowed.opencode`,
+as `opencode:<provider>/<model>`, can name one as the seat's default. OpenCode 1.x
+must be on PATH (`npm install -g opencode-ai`) and signed in to the provider (`opencode auth login`). OpenCode is
+given no effort: name the model alone. A step it runs names its model `opencode:<provider>/<model>`.
+
+Each session runs `opencode run --model <provider>/<model> --format json --auto` in the card's worktree, under the
+build timeout, with the same prompt (the brief and the card rules) on stdin as a Claude session. `--auto` approves
+every permission nothing denies, as a Claude session's bypass mode does; OpenCode's run mode denies its question
+tool itself. The project's own OpenCode config is not read (`OPENCODE_DISABLE_PROJECT_CONFIG`), as a Claude session
+reads no project settings; the config file the engine writes for the card (`<worktree>.opencode.json`, named by
+`OPENCODE_CONFIG`) loads the guard plugin.
+
+OpenCode's events fill the same live record as Claude's: turns (each `step_finish`, one call of the model), the
+action (the tool that ran last and what it names, or writing, or thinking), the last output, and usage: input, cache
+writes and reads, output (reasoning counted in it) and cost, the dollars OpenCode reports. OpenCode reports no
+1-hour cache writes (0) and no effort; once a step reports no cost, cost is left out and the Board leaves the step
+unpriced. The Board prices an OpenCode step at the cost OpenCode reported, never at a list price. A stall is found
+as for Claude, from the output lines and the worktree.
+
+Claude accounts (`control account`) and the weekly limit apply to Claude sessions only: an OpenCode session runs on
+no Claude account, and while the builder is OpenCode the usage-limit guard does not read the builder's account (with
+a Codex reviewer it reads none, and Claude's limit holds no card back).
+
+### Guards in an OpenCode session
+
+Every command guard of a Claude card session applies to an OpenCode one. A Claude session runs the PreToolUse hooks of
+the card's settings file (`<worktree>.settings`: `card-settings.json` and the pack's `hooks.json`); an OpenCode
+session loads the guard plugin, `opencode/guard.mjs`, which before each tool call (OpenCode's `tool.execute.before`)
+gives the call, in the shape Claude Code gives a hook, to `opencode/guard.sh`, and that runs the same hooks of the
+same file and refuses the call as Claude Code does, with the hook's message:
+
+| Guard | Claude session | OpenCode session |
+| --- | --- | --- |
+| Bash hooks: `git-safety.sh`, `bash-guardrails.sh` (the 4 GB heap cap on test runs, no search over an unbounded path, no shell write into a code file and the rest), `adversarial-review-gate.sh`, `dependency-addition-guard.sh`, and the pack's Bash hooks (its privacy egress guard among them, when it has one) | PreToolUse hooks, matcher `Bash` | the plugin runs them on each `bash` call; a call a hook rewrites (an unbounded search run over the checkout instead) runs as rewritten |
+| Edit and write hooks: `dependency-addition-guard.sh`, `ruling-cite-gate.sh`, the pack's `Edit\|Write\|MultiEdit` hooks | PreToolUse hooks | the plugin runs them on each `edit`, `multiedit` and `write` call, given as Claude's Edit, MultiEdit and Write, and on each file of an `apply_patch` call (the file tool OpenCode gives GPT models in place of `edit` and `write`): an added file as a Write of its contents, each chunk of an updated one as an Edit, a moved or deleted one as a Write to its path; one file refused refuses the patch |
+| Denied reads (`permissions.deny`, `Read(**/package-lock.json)`) | permission rule | `guard.sh` refuses a call of that tool on a matching path |
+| `worker-ask-guard.sh`: a card session asks nobody | PreToolUse hook on AskUserQuestion | `opencode run` denies its question tool, and the plugin refuses it |
+| No subagent (`--disallowedTools Agent`) | flag | the plugin refuses `task` |
+| No MCP server (`--strict-mcp-config`) | flag | the plugin refuses every tool it does not map to a Claude tool, each MCP tool among them |
+
+An `apply_patch` call that does not read as a patch (no `*** Begin Patch` ... `*** End Patch`) or names no file is
+refused, as are `patch` and `batch`. A hook marked `onFailure: block` that
+crashes or runs past its timeout refuses the call, as for Claude; guards that cannot run at all (no settings file, a
+runner that fails) refuse every call. No guard of a Claude session goes unenforced in an OpenCode one, so the card's
+report names none. The seat refuses to start, and the card blocks saying why, when OpenCode is not 1.x (the plugin
+API the guard plugin is written for), the guard plugin or `guard.sh` is missing, or the card's settings file is.
+Plugins the host's user installed for OpenCode (`~/.config/opencode`) still load, after the guard plugin; one that
+rewrites a call after the guards' turn is not seen by them.
+
+## Codex builder
+
+The builder seat (build, fix and rebase sessions) can run on Codex, as the reviewer and the judge already can. Choose
+it with `conveyor.sh control model codex <model> [effort]` (a model `codex debug models` lists, or any name typed in, which fails in the card when Codex cannot run it; a family name, such
+as `sol`, runs the newest of it, as for a review) or in the Board's Builder row on the Rules tab; the pack's
+`models.allowed["codex-builder"]` can name one as the seat's default. It takes Codex's efforts. The Codex CLI must be on PATH and
+signed in, its `exec` must have `--dangerously-bypass-hook-trust` (Codex 0.167 has it), and `node` must be on PATH for
+the guard hook.
+
+Each session runs `codex exec --json` in the card's worktree (`-C`), under the build timeout, on the model and effort
+in force, with the same prompt (the brief and the card rules) on stdin as a Claude session. Its sandbox is
+`workspace-write`, so it can write in the worktree, `/tmp` and `$TMPDIR` (where the brief's background runs keep
+their output and status files, and a test run its scratch folder), and, given with `--add-dir`, the machine's test
+slots folder (the host file's `testSlotsDir`, else `/tmp/conveyor-test-slots`), in which a test run takes a slot; a
+command that writes anywhere else fails. Codex reads the user's own `~/.codex` config, as a Codex review does (its
+provider and sign-in are there). Codex's web search is turned off (`web_search="disabled"`): it is a tool Codex runs
+on its side, which no hook is given.
+
+Codex's events fill the same live record as Claude's: turns (each item it completed: a message, a command, a file
+change; not the notices Codex gives as error items), the action (the item it started last, a command with its text),
+the last output, and usage: the running total from the session file Codex keeps under its home while the turn runs,
+then the turn's own usage once it completes, as input, cache reads and output (reasoning counted in it). Codex reports
+no cache writes, so write and write1h are 0. The step's line holds its tokens under `codex` and the same split, and
+the Board prices it at the model's list price, as a Codex review. A session stopped or timed out before its turn
+completed is read from that session file's running total. Codex's session file is removed once read, as a review's is.
+
+Claude accounts (`control account`) and the weekly limit apply to Claude sessions only: a Codex session runs on no
+Claude account, and while the builder is Codex the usage-limit guard does not read the builder's account.
+
+### Guards in a Codex session
+
+Every command guard of a Claude card session applies to a Codex one. The session is given one PreToolUse hook on
+every tool (`-c hooks.PreToolUse=...`, hooks on with `--enable hooks`, run without Codex's trust prompt, which a
+headless session cannot answer, by `--dangerously-bypass-hook-trust`): `codex/guard.mjs`, which gives each call, in the
+shape Claude Code gives a hook, to `opencode/guard.sh`, and that runs the hooks of the card's settings file
+(`<worktree>.settings`: `card-settings.json` and the pack's `hooks.json`), the same file and the same scripts a Claude
+session runs. A refusal is exit 2 with the hook's message, which Codex gives the model; a rewrite is Codex's
+`updatedInput`.
+
+| Guard | Claude session | Codex session |
+| --- | --- | --- |
+| Bash hooks: `git-safety.sh`, `bash-guardrails.sh` (the 4 GB heap cap on test runs, no search over an unbounded path, no shell write into a code file and the rest), `adversarial-review-gate.sh`, `dependency-addition-guard.sh`, and the pack's Bash hooks | PreToolUse hooks, matcher `Bash` | the hook runs them on each command (Codex names its shell tool `Bash`); a command a hook rewrites runs as rewritten. Commands run without a terminal (`--disable unified_exec_tty`), so their input is closed: Codex's `write_stdin`, which types into a command already running and is given no PreToolUse hook, can then only wait for more output, and keys sent with it are refused by Codex ("stdin is closed for this session"), so no command typed into a running shell gets past the guards. A Codex that does not know the feature fails to start rather than run with it on |
+| Edit and write hooks: `dependency-addition-guard.sh`, `ruling-cite-gate.sh`, the pack's `Edit\|Write\|MultiEdit` hooks | PreToolUse hooks | the hook runs them on each file of an `apply_patch` call (Codex's file tool), read as for OpenCode (`opencode/screen.mjs`): an added file as a Write of its contents, each chunk of an updated one as an Edit, a moved or deleted one as a Write to its path; one file refused refuses the patch, and a patch that does not read as one is refused |
+| Denied reads (`permissions.deny`, `Read(**/package-lock.json)`) | permission rule | `guard.sh` refuses a call of that tool on a matching path; Codex has no Read tool (it reads with commands, which a Claude session's Bash may do too) |
+| `worker-ask-guard.sh`: a card session asks nobody | PreToolUse hook on AskUserQuestion | `codex exec` does not run `request_user_input`, and the hook refuses it |
+| No subagent (`--disallowedTools Agent`) | flag | the hook refuses `spawn_agent` and every other agent tool |
+| No MCP server (`--strict-mcp-config`) | flag | the hook refuses every tool it does not map to a Claude tool, each MCP tool among them |
+| No web search beyond what the hooks see | (Claude's WebSearch goes through the hooks) | Codex's web search is off: Codex runs it on its side and gives it no hook |
+
+The hook maps `Bash`, `apply_patch`, `update_plan` (as TodoWrite) and `view_image` (as Read); any other
+tool is refused. Guards that cannot run (no settings file, the runner failing) refuse every call. No guard of a
+Claude session goes unenforced in a Codex one, so the card's report names none. The seat refuses to start, and the
+card blocks saying why, when Codex is not on PATH, its `exec` has no `--dangerously-bypass-hook-trust` (an older Codex,
+whose hooks would wait on a trust prompt and never run), `node` is not on PATH, the guard hook, `opencode/screen.mjs`
+or `opencode/guard.sh` is missing, or the card's settings file is. Hooks the host's user set for Codex
+(`~/.codex/hooks.json`) still run beside the guard hook.
+
+## Research lane
+
+`conveyor.sh lane research create`, run in the project's checkout, makes the research lane: a worktree at the host
+file's `lanes.research.worktree` (default: `<main checkout>-research`), whose `.claude/settings.local.json` sets the
+model and effort of the pack's `lanes.research`, the 1-hour prompt cache, the lane's shell and the lane's hooks. Run
+again, it rewrites the settings and keeps the worktree. Start the lane with `claude` in that worktree.
+
+Each `lane ... create` (`lane fast create` too) writes the lane's folder into the host file, in the record of the
+project's checkout: `records[].lanes.research.worktree` or `records[].lanes.fast.worktree`. The Board reads each
+project's lanes from there, on the machine it runs on. The record is the one whose `main` is the checkout; with no
+such record nothing is written and the command says which entry to add by hand. A host file that cannot be written
+fails the command.
+
+The lane is read-only by its shell, `lanes/research-bash`, which Claude Code runs for every Bash call: an
+operating-system sandbox (bubblewrap on Linux, `sandbox-exec` on macOS) in which only `reports/`, the lane's folder and
+the temp folder can be written, whatever the command; it runs nothing while one of those folders holds the worktree
+(a TMPDIR above it) or git tracks a file in `reports/`. Where the sandbox cannot run, `create` makes nothing and says
+why. `create` also makes each file git tracks in the worktree, and each folder holding one, read-only on disk, so the
+edit tools cannot write them either (as root, which that does not stop, it makes nothing). Beside it, a commit, a push,
+another git command that changes tracked files and an interpreter's inline code are refused, and the edit tools write only
+where the shell can; the worktree is never the main checkout. Reports go to the untracked
+`reports/<date>/`, each with a line in `reports/INDEX.md`. The shell has no network (its own network namespace on
+Linux, no outbound connection on macOS), so curl and gh cannot reach GitHub from it; the lane files work with its
+filing command, `lanes/research-file <title> < <body>`, whose filer the shell runs outside the sandbox. An issue filed
+that way starts held, as the Foreman's do, and is built only once the owner releases it.
+
+## Test slots
+
+Every test run on the machine takes its workers from one pool of test slots, so test runs never share a core with
+each other, whatever number of cards and projects test at once: a card's test run holds a slot until its command and
+all the command started have ended, and a test runner holds one more for each worker it runs beside the first.
+The host file's `testSlots` is the size of the pool (the default, and the most, is the machine's cores); the pool is the folder
+`/tmp/conveyor-test-slots`, the same for every Conveyor on the machine (`testSlotsDir` names another, for a test of
+the slots themselves). A slot is a core: on Linux a test command is pinned to its slot's core, so the workers it
+starts without a slot of their own share that one core, and one that cannot be pinned does not start. A project's runner that wants more cores sources the file
+`CONVEYOR_TEST_SLOTS` names and, for each worker, calls `slot_pool` once, then `slot_take` before the worker,
+`slot_mine` in it and `slot_free` after starting it.
+
+A slot is also a hard limit. On Linux, each test file a test step runs, and each case of the engine's
+runner, starts in its slot's box: a scope of the user's systemd (`systemd-run --user --scope`) with `CPUQuota=100%`,
+one core, and `MemoryMax` the machine's memory over the pool's slots, so a test that starts more processes or widens
+its cores gets one core's time and no more. A runner gets the words that start a command so from `slot_box` (after
+`slot_pool`: `"${SLOT_BOX[@]}" <command>`). Where
+no such scope can be made (macOS, no user systemd, a systemd without `--expand-environment`), nothing is boxed; a box is never made inside another. A card with no slot waits before its tests start, and the Board
+says "waiting for a test slot (n of N in use)"; the wait does not count against its test timeout. Builds and reviews
+take no slot.
+
+Pushes go first. The push step (a landed card's push, and Push landed's) runs `git push`, and so the project's
+pre-push hook, holding a test slot, on the slot's core and in its box, as a test unit runs. A push still waits while every slot is held, but it takes the next free slot before any test unit that
+waits (`slot_first`): a unit that takes a slot while a push waits gives it back. The push's time limit starts when it
+has its slot.
+
+## The test step
+
+Each run of a card's changed tests writes one `test` line to the card records, `pass` or `fail`, holding:
+
+- `sec`: all the step took, and apart from it `wait`, the seconds it waited for a test slot, and `run`, the seconds
+  its command ran (null when not known: a batch run another card made).
+- `slotsFree`: the test slots of the pool free beside its own when its command started.
+- `selected`: `{files, filesOf, cases, casesOf, kept}`, how many test files and cases the runner selected, out of how
+  many, and how many cases that passed in the last run it kept as passed and did not run. A runner says so in its log
+  (`CONVEYOR_TEST_LOG`) with the lines `TESTRUN files=<n> of=<m>`, `TESTRUN cases=<n> of=<m>` and
+  `TESTRUN kept=<n>`; a count no line gives is null.
+- `ended`: `passed`, `failed` (a case failed), `killed` (by a signal), `timed out`, or `nothing selected` (it passed
+  having selected no test file).
+- `why`: why each file ran, `{"<file>": [reasons]}`, on a first run and a run again alike, when the runner says (below).
+- `wholeSuite`: `true` when the runner ran every engine case file (its log line `TESTRUN whole-suite`), so a reader
+  does not count files; absent otherwise.
+- `ranCases`: the cases the runner selected of each file it ran only part of, `{"<file>": [cases]}`, from its log
+  lines `TESTRUN case<TAB><file><TAB><case>`; absent when it gives none. The search for the landing that broke a case
+  on main counts a card that ran the case so.
+- `refused`: `refused full run: <the reason seen>`, when the step refused to run the whole selection (below, When a
+  full test run is allowed).
+- `tests`: the counts a host's runner prints; a failed run also has `failures`, `reason` and `tail`.
+- `timed`: each test file the card's change adds or modifies that its own run timed, `{file, sec, cpu}`: its clock
+  seconds and its CPU seconds (null when its runner gave none).
+- `times`: the CPU seconds of every test file the card's own run timed, `{"<file>": <CPU seconds>}`: the next card
+  run's check of two slow runs in a row, and once the card has landed, a later card's "before" of those files (below).
+- `slow`: each test file the card's own run found over the CPU budget (below), `{file, sec, cpu, budget, changed}`,
+  and of a file the card's change only modifies, `before` (main's recorded CPU seconds of it, null when none is
+  recorded) and `from` (where that time came from, when there is one). A note, never a finding.
+
+A card whose tests already passed on what it holds, while it waited to land, is not run again: its `test` line is a
+`pass` with `reused: true` and no run. No passing output is kept. The Board's card shows the Test step's time as
+its wait and its run.
+
+A card's test step runs the pack's `test.command` in its worktree. A run that ends with cases that did not pass (they
+failed, or never finished because the run was killed or timed out) runs once more, straight away and on the same test
+slot, for those cases alone: the cases that passed are not run again. Only when a case still does not pass does the
+card go to its fix session; a card whose re-run passes goes on with no fix session. A fix session that leaves the
+card's staged change as it was is followed by a run of only the cases that had not passed, not the whole selection.
+A fix session (or any session) that changes the change is followed by a run of the cases that had not passed in the
+last run (failed, killed or timed out) and the tests the command selects for the files the session changed: the files
+whose content differs between the staged change last tested and the staged change now (the two trees are compared,
+not the two patches, so a whitespace edit counts). Every other case that passed in the last run is not run again and
+counts as passed. Each run has the same time limit.
+
+A run after the card's change moved onto a newer main (merged there, or rebuilt there by a session, or a retried
+card's kept change applied to a main that moved since its last run) keeps the passes of the last run too. It runs
+again only:
+
+- what had not passed in the last run (failed, killed or timed out);
+- the tests of the files of the card's change whose content differs between the tree last tested and the tree now;
+- the tests the command selects for the files main changed between the commit last tested on and the one now, where
+  the command's selection for the card's change holds them too.
+
+It runs the whole selection again when the merge is in doubt: the merge left a file that does not parse (the parse
+check's fix session), the session that brought the change onto main edited it outside the conflicts, or a file of the
+card's change that main did not change differs (the session that rebuilt or ported the change edited it beyond what
+main changed). A run that passed
+keeps what it passed for that, and a blocked card's list is kept with its patch: a retried card whose kept change
+applies to the same main commit it was last tested on runs only what had not passed. Every test step's line, a first
+run's as well as a run again's, says why each file ran in `why`, `{"<file>": [reasons]}`, each reason `main changed
+<file>`, `the card changed <file>` or `did not pass`; from the command's log lines
+`TESTRUN why<TAB><file><TAB><reason>`.
+
+Before a failure goes to the fix session, what still did not pass after the run again runs on main (a fix session cannot repair main or the
+machine): in a worktree of main's commit as it is now, on a test
+slot, with the pack's `test.command`, its `CONVEYOR_TEST_RERUN` list naming every other file of the card's runs as
+passed and, of each failing file, its failing cases (a file that failed naming no case, or ran out of time, as a
+`fail` line with no case: the command runs it whole, since nothing else selects it on main's clean tree). Each
+failure gets a verdict:
+
+- **main**: the same case failed on main too (a timeout or a kill there says nothing of the case). Conveyor files no
+  GitHub issue: the case goes to the fix card of main's commit, a card of issue 0 that the
+  loop picks ahead of the queue, one per broken main commit. The loop picks it whatever the priority switches say
+  (`control rules P0=off` to `P3=off` included), by design: held, every card that meets the red main would wait for
+  good. Its brief names main's commit, each case and the last
+  commit that changed the case's file (the test file at main's commit that defines the case, `t_<case>()`,
+  `<case>()` or the name quoted, when the failure names a runner such as the engine's `conveyor/conveyor.test.sh`),
+  and asks for the cases to pass on main; it is labelled as a P0 bug and builds, is reviewed, tested, landed and
+  pushed like any card. The Board shows it titled "Main is red: <cases>"; its commit names the cases and main's
+  commit. A case found failing on the same commit, while its card runs too, is added to that card (its title on the
+  Board, and the reviews and fix sessions after it, name the case); a case an open fix card of an earlier commit
+  holds starts nothing more. `retry <card id>` gives the card back when it blocks (built again from nothing), and
+  `shut <card id>` shuts it; the Board's Retry and Close in Needs you send its card id. `mainred.json` in the state folder keeps the commits,
+  their cases and their cards. The brief also names the landing that broke a case, when it is known: the first
+  landing on main after the last one whose card's test step ran the case's file (within the last 500 commits). The
+  case's entry keeps a link from each file that landing changed to the case's test file, and the fix card stages
+  those links in `.conveyor/test-links.json` (`{"<changed file>": ["<test file>", ...]}`), so they land with its fix.
+  From then on, a card that changes a linked file runs its linked test files too (a whole-only file in its card
+  mode), and its log says so (`TESTRUN linked<TAB><test file><TAB><changed file>`); a link to a test file that no
+  longer exists is dropped. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
+  Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
+  and its test step runs again (the same change keeps its passes, so the cases that failed run again). Those cards
+  hold their slots while they wait, so the loop starts a main-red fix card even with the project's cap
+  reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap,
+  `maxLoad` and `minFreeMemMB` apply as to any card. The Board shows that card as "beyond the cap: main is red".
+- **card**: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
+  select it). The card goes to its fix session.
+- **flaky**: it failed on the first run and passed on the run again (Flaky tests, below).
+
+When main has moved since the card's commit, a card with a failure that is not main's does not go to its fix session
+yet. The card is brought onto current main first, as a card whose main moved during its tests is (its change fitted
+there, or brought there by a session when it no longer applies), and the failed cases run again there: main may have
+fixed them since the card was built. A pass there lands with no fix session. Only a failure on current main goes to
+the fix session. This happens once before each fix session, so a card whose own change fails does not follow a busy
+main for ever. When main has not moved, the card goes to its fix session. A card that waited for a red main
+to change is brought onto current main in the same way before its test runs again.
+
+The test line keeps them: `verdicts` (`[{case, verdict}]`) and, when the cases ran on main, `mainRun` (`{sha, sec,
+exit}`: main's commit, the seconds that run took, its slot wait included, and its exit). A pass on re-run's line has a
+flaky verdict for each case that had not passed. The Board's Metrics (All numbers, "Test failures") count them by
+verdict, with the seconds spent running them on main.
+
+The card's test line records both runs: `rerun` holds the first run's exit and failing files and cases, and a pass on
+re-run has the reason `passed on re-run: <file>: <case>, ...`. The Board draws such a card's Test step as "Test passed
+on re-run", never as a plain pass, and a later `reused` line keeps it so.
+
+What passed and what failed is told to the command in the file `CONVEYOR_TEST_RERUN` names (empty on a first run, but
+for the `ok` and `off` lines for each case kept off as flaky: Flaky tests, below):
+a line `change<TAB><id>` (the staged change it holds for), `base<TAB><commit>` and `tree<TAB><tree>` (what the next
+run compares), then `pass<TAB><file>` for each file whose log says it
+ended ok (`-- ok <file>`, below), `ok<TAB><file><TAB><case>` for each case of a file that did not end ok whose output
+line `ok <case>` says it passed (a file killed part-way), and `fail<TAB><file><TAB><case>` for each case that failed.
+A command that reads it runs no file it lists as passed; of a file it names passed cases of, the rest of its cases;
+of a file it names only failed cases of, only those cases; a file it does not name (one that failed naming no case, never finished or never
+began) runs whole. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
+file the session changed: the command runs the tests it selects for those files too, whether or not they passed, and
+says in its log how many cases of its selection it kept as passed and did not run (`TESTRUN kept=<n>`; the test line's
+`selected.kept`). Of a file that ran again in that run, a case that failed is no longer listed as passed, and the
+cases it did not run stay listed as they were: a file listed as passed keeps its `pass` line beside its new `fail`
+lines, and of such a file the command runs those failed cases alone. A file that failed naming no case or never
+finished in that run (its time ran out) loses only what it had of the cases the run selected of it, when the command's
+log names them (`TESTRUN case<TAB><file><TAB><case>`, one line a case, for a file it runs only some cases of): their
+`ok` lines go, and a `pass` line stays beside a `fail` line for each of them that did not print `ok`; its other cases
+stay kept. A file whose log names none of its cases (one run whole) keeps nothing it had. After the change moved onto
+a newer main, the file has a line `main<TAB><file>` for each file main changed since the commit in its `base` line: the
+command runs the tests it selects for those files that its selection for the card's change holds too. A command that
+ignores the file runs its whole selection again; one that reads `pass` lines but not `main` lines keeps passes main
+may have broken. Files and cases are read from the logs the command writes to the folder `CONVEYOR_TEST_LOG` names:
+`== <file>` as a file begins, `-- ok|FAIL <file>` as it ends.
+
+### When a full test run is allowed
+
+A full run, of the whole selection, is allowed in three cases only:
+
+1. a card's first test run: no test line of the card before it. A retried card's first run is one when main moved
+   since its kept list was made; on the same main, it keeps its passes.
+2. a merge in doubt: a file the merge onto main changed does not parse, or the session that brought the change onto
+   main edited it outside the conflicts (or, for a rebuild or a port, beyond what main changed).
+3. the full test suite: `full-test`, the Board's Run full test suite and Push landed (the pack's `test.full`), and the
+   whole test on main (`test.main`).
+
+Before it runs, the test step finds why it would run each file: what did not pass, what the card's change changed and
+what main changed (above). When that cannot be found (the last run's list is missing, or names a tree or commit that
+cannot be compared), it would run the whole selection. A card's run that would, and is none of the three, refuses the
+full run: it runs only what its list did not keep as passed (with no list, nothing was kept and every file runs), its
+test line records `refused: "refused full run: <the reason seen>"`, and `health` lists it under
+`refused` (`{card, issue, reason, since}`, for 24 hours), which wakes the Foreman once.
+
+A card's build or fix session runs no whole suite by hand either. The command guard
+(`.claude/hooks/bash-guardrails.sh`, one of the card hooks every project gets) refuses there, by the commands the pack
+names:
+
+- a command of `test.wholeCommands` (runners that run every case when none is named, as paths from the repository
+  root) with no case named: no word after it but options and redirections, and no `CONVEYOR_SHELL_TEST_CASE=<cases>`
+  before it;
+- `test.changed` (the script that runs the tests a change touches) a second time in one session;
+- `node --test` over a folder, a glob or nothing, rather than named files.
+
+Each refusal says to name the cases or files instead; a run that names them is allowed.
+
+### The session test budget
+
+A card's build or fix session has a test-time budget: the pack's `test.sessionBudget`, in CPU seconds (default
+3600). The command guard adds up, per session, the CPU time of the test commands it lets through: any `node --test`,
+`*.test.sh`, `pytest`, `vitest` or `jest` run, also as `python3 -m pytest` or `npx vitest`. It runs each one behind an
+EXIT trap that writes the call's CPU seconds (the user and system times of all it ran, as `times` gives them) to the
+session's ledger (in `CONVEYOR_GUARD_STATE`, else `/tmp/conveyor-test-budget-<uid>`, one file per card and session id,
+so a new session starts at 0). The session's own shell writes the ledger, so it is under /tmp: a Codex session's
+sandbox lets it write there, and not in `~/.cache`. A call that leaves a test running in the background (`( ... ) &`) adds its CPU seconds
+when that test ends, sampled each second, so the CPU of its last second is not counted. A test that waits uses no CPU
+and spends none of the budget. Once the session's test CPU time is over the budget, the guard refuses its next test
+command; other commands still run. The refusal tells the session to narrow to one case by reading its code and the
+output it has, or to stop and report what it knows. The card's test step still runs the tests before the card lands. Not counted: a command that sets its own EXIT trap, and a test run from a
+script or `bash -c` text.
+
+### The CPU budget of a test file
+
+The budget is CPU seconds, not clock seconds: on a busy machine (a load of 8 to 90) a file's clock time measures
+the load, not the file. Its CPU seconds (user plus system, of the file's
+process tree) stay the same however busy the machine is.
+
+A runner times each test file it runs, from its start to its end, and measures its CPU seconds, and says so in its
+log as the file ends: `TESTRUN sec<TAB><file><TAB><seconds><TAB><CPU seconds>` (the last line of a file counts; a
+run again, and a run after a fix session that keeps what passed, keep the times the runs before them took of the
+files they do not run). A line with no CPU seconds is recorded, and its file held to no budget. The card's test line
+holds each test file its change adds or modifies with both times (`timed`). A file over the pack's
+`test.fileBudget` CPU seconds (default 8: a file whose CPU stays under 8 s fits in about 4 s of clock time on a
+quiet machine, with its worker threads) is on the card's test line (`slow`). A file with a budget of its own
+(`test.files`, below, The test files in the snapshot) is held to that budget in place of `test.fileBudget`, and a file
+marked slow on purpose is held to no budget: it is never on the `slow` line and no CPU test rule files it. The test
+line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`).
+
+A project whose test command prints no `TESTRUN sec` lines records no test times, and no file of it is held to the
+budget. The plugin ships a helper for it, `conveyor/tools/testtime.sh <file> -- <command>...`: it runs the command
+once, then prints the file's `TESTRUN sec` line, with its clock seconds and its CPU seconds (the user plus system time
+of all the command started); the command's output and exit code stay its own. A test script that runs the test files
+one by one, writing `== <file>` and `-- ok|FAIL <file>` lines to its log in `CONVEYOR_TEST_LOG`, copies the helper
+beside it and wraps each file's run, putting the helper's line in that log before the `-- ` line:
+
+```bash
+./testtime.sh "$f" -- <the file's command> > "$out" 2>&1; rc=$?
+cat "$out"; grep '^TESTRUN sec' "$out" >> "$CONVEYOR_TEST_LOG/<its log>"
+```
+
+`setup` says so, with the path of the helper, when the pack's test command runs a shell script of the project that has
+no `TESTRUN sec` and no `testtime.sh` in it; it never changes the script. `doctor` warns, and the Board's Health shows
+a "Test times" warning, when the project's last card test runs (up to 5 that ran tests) recorded no test times
+(`health`'s `untimed`: how many), each naming this section.
+
+**The test results cache.** A runner can also give, for each test file it runs whole, the files that the test file
+reads: `TESTRUN inputs<TAB><file><TAB><input file>...` in its log (the test file's imports; for an engine case file,
+the engine files that the coverage map gives for its cases, else every engine file). Paths are relative to the
+checkout. When the file passes (its `-- ok` line, and no `TESTRUN case` line or `ok`, `fail` or `off` line of the
+list names it), Conveyor keeps a hash of the contents of the file and its inputs in `testcache.tsv` in the state
+folder (the last 5000). A later test run of any card, or the whole test on main, keeps off a file whose hash in its
+worktree matches a kept one: its list gets a `pass<TAB><file>` and an `off<TAB><file>` line (unless the list names
+failed cases of it). The run's log says so with `TESTRUN why<TAB><file><TAB>passed before with the same inputs`, so
+the test line's `why` holds it too. A file with no `TESTRUN inputs` line is never kept off in this way.
+The full test suite does not use the cache. A path that is absolute or contains `..` is not kept.
+
+Slow-test findings are notes. A file over the budget never sends a card to its review, a fix or another test step:
+the card lands on its passing run, its test line names the file, the Board's Tests bar of the card shows it ("slow:
+<file> <CPU s>"), and nothing is filed as a follow-up. Conveyor files an issue about a test file only by a test
+rule (Test rules, below), behind its switch and guards. The pack's `test.slowIssues` files nothing.
+
+The issue that filing kept for each file is still in `slow.json` in the state folder. A file it names comes off card
+test steps until a card of that issue lands: each card's run is told to keep it as passed (a
+`pass<TAB><file>` line in its `CONVEYOR_TEST_RERUN` list, and an `off<TAB><file>` line, with no case, that keeps it
+off though a `fail`, `changed` or `main` line selects it). The card of the issue itself runs it, as its change is what makes the file
+cheaper. The full test suite and the whole test on main are given no such list and run it. The snapshot's `slowOff`
+lists the files kept off, with why and their issue; the Board's Health panel draws them as its "Kept off card tests"
+line. An issue a test rule files keeps no file off.
+
+Main's CPU seconds of a file (its "before") come from records, never from running the tests again: no test runs a
+second time only to be timed, and the card's test step runs each selected file once, in the card's own worktree. The
+before is the newest of these records of the file:
+
+- the newest card that ran the file and landed: its test lines' `times` (above), the last of them holding the file,
+  dated by its `landed` line (`card #<issue>, <day>`);
+- the latest test-speed survey (below): `.conveyor/test-times.json` on the commit the change is on,
+  `{"files": {"<file>": {"sec": <s>, "cpu": <CPU s>}}}`, dated by the commit that last wrote it (`test-speed survey,
+  <day>`);
+- a run of the file by hand that passed (`conveyor.sh testaction run`, below, Test actions): its record's `cpu`, dated
+  by its end (`run by hand, <day>`).
+
+A file none of them records has no before.
+
+### The test files in the snapshot
+
+One budget for all test files cannot tell a file that is slow on purpose from one that got slower: a file over the
+budget from the start shows no change when it gets three times slower. So the snapshot's `tests` part compares each
+file with its own usual time. It is made from the card test lines (those of retried cards too) and holds:
+
+- `settings`: the pack's `fileBudget`, `slowIssues`, `slower` (`{share, runs, minRuns}`) and `files` (each file's own
+  settings, as the pack holds them);
+- `rules`: the test rules (Test rules, below): `on`, `perDay`, `maxOpen`, `quietDays`, `burst` and `list`, as the
+  pack holds them with their defaults, and `last`, the list of the last pass (`{time, on, matches, burst}`), null
+  before the first;
+- `files`: each test file with a CPU time on a card's test line (`times`), the highest CPU seconds first: `file`,
+  `cpu` (its last run), `median` (of every run on record), `change` (`cpu` against `median`, as a share: 0.5 is 50%
+  over; null when the median is 0), `runs` (its last 5 runs, newest first: `cpu`, `sec`, the clock seconds, null on a
+  line written before the test line held `clocks`; `card`, `time`), `lastRun` (`sec`, `cpu` and `clockPerCpu` of its
+  last run), `timedRuns`, `failedSteps` (the test steps that failed in it: it was a failed file, a runner such as
+  `conveyor/conveyor.test.sh` named a failed case that the file defines (`t_<case>()` or `<case>()` in main's
+  checkout) and the file names that runner, or the run timed
+  out in it; a case the named file defines itself is that file's alone), `flaky` (its entries in the flaky-test record, its cases' entries too, the
+  entries a runner names as its own among them), `issue` (the issue last
+  filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
+  `conveyor.sh testissue`, else null), `budget` and `budgetFrom` (`file`: its own; `project`: `test.fileBudget`), `slowOnPurpose`
+  (the reason of its mark, else null), `over` (`cpu` is over its budget), `usual` and `slower` (below);
+- `slower`: the names of the files slower than their usual;
+- `totals`: `files` (timed), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
+  test steps that ran in the 7 days to today, `{count, waitSec, runSec}`, with the seconds they waited for a test slot
+  and the seconds their test commands ran.
+
+A project with no file time recorded has the part with an empty `files` list and its step totals. The part is `null`
+only when the pack cannot be read.
+
+A file is slower than its usual when its CPU seconds in each of its last `test.slower.runs` runs (default 3) are over
+its usual by more than `test.slower.share` (default 0.25: 25%), and at least `test.slower.minRuns` runs (default 5)
+of it are on record. Its usual (`usual`) is the median of its runs before those last runs, so the slow runs do not
+raise the time they are compared with; it is null with fewer runs on record. Conveyor files nothing for such a file.
+
+A file's own settings are in the pack's `test.files`, by its path from the repository root:
+
+- `budget`: the CPU seconds the file may use, in place of `test.fileBudget` (at least 1);
+- `slowOnPurpose`: why the file is slow on purpose, one line that is not blank. Such a file is held to no budget.
+- `cardMode` and `wholeOnly`, of a meta-runner, a test file that starts other test files whole (read by the
+  project's changed-tests script, which marks each file it starts and logs `TESTRUN nested <file> <inner file>`
+  for each such start): `cardMode` is the `NAME=VALUE` that makes the file run its own checks with a stub in place of
+  the files it starts, which a card's Test step runs it with; `wholeOnly: true` keeps it off a card's Test step, which says so (`TESTRUN whole-only`),
+  and leaves it to the nightly whole test. A meta-runner with neither fails a card's Test step, which names the file
+  and the two marks.
+
+```json
+"test": {"command": "...", "files": {"conveyor/tests/merge.test.sh": {"budget": 30},
+  "conveyor/tests/e2e.test.sh": {"slowOnPurpose": "runs the whole loop end to end"}}}
+```
+
+The Board saves these settings with `conveyor.sh test-settings`, which changes main's pack (`.conveyor/project.json`)
+and nothing else. Each command checks its value and the changed pack (lib/pack.sh) before it saves; a bad value is
+refused with the reason, and the pack does not change:
+
+- `test-settings budget <CPU s>`: `test.fileBudget`, a number of at least 1;
+- `test-settings slow-issues <true | false>`: `test.slowIssues`, which files nothing now (Test rules, below);
+- `test-settings file-budget <file> <CPU s>`: the budget of one file that main's checkout tracks;
+- `test-settings file-budget-clear <file>`: that budget removed; the file is held to `test.fileBudget` again;
+- `test-settings slow-mark <file> <reason>`: the "slow on purpose" mark of one file that main's checkout tracks, with
+  its reason (the spaces at its ends removed);
+- `test-settings slow-mark-clear <file>`: that mark removed.
+
+A file with no setting left is removed from `test.files`. The next snapshot shows each change.
+
+### Test rules
+
+Rules the owner sets in the pack (`test.rules`, `lib/testrules.sh`) file one issue about a test file that meets
+their limit. One switch, `test.rules.on`, turns every rule on or off; it is off by default, and a new install starts
+with it off and with no rule on (no `test.rules` in the pack `setup` writes). With the switch off, no rule files
+anything.
+
+A rule has a `name`, `on`, one `measure`, one `limit`, `runs` (the card test runs in a row that each meet the limit)
+and `minRuns` (the least count of the file's card test runs on record). The measures, from the card test lines and
+the flaky-test record:
+
+- `budget`: CPU seconds over `limit` times the file's budget (its own in `test.files`, else `test.fileBudget`);
+- `usual`: CPU seconds over `limit` times its usual, the median of its runs before its last `runs` runs ("slower than
+  its usual");
+- `clock`: clock seconds over `limit` times its CPU seconds, in runs of at least `minClock` clock seconds (default 0);
+- `flaky`: at least `limit` entries of the flaky-test record for its cases (a case kept off as flaky) in the last
+  `days` days (default 7);
+- `failed`: at least `limit` card test steps that failed in it in the last `days` days (default 7).
+
+`budget` and `usual` are the CPU rules. A file two rules match is filed by the first rule in the list.
+
+```json
+"test": {"rules": {"on": true, "perDay": 3, "list": [
+  {"name": "over budget", "on": true, "measure": "budget", "limit": 1, "runs": 3, "minRuns": 3}]}}
+```
+
+The guards, each a pack setting with a default, stop a match in this order:
+
+- `off`: the switch is off;
+- `slowOnPurpose`: a file marked slow on purpose is never filed by a CPU rule;
+- `oneAFile`: an earlier rule matched the file in the same pass;
+- `open`: the issue last filed for the file is open, whichever rule matched it; an issue whose state cannot be read
+  (or that is closed with no closing time) counts as open, so nothing is filed;
+- `quietDays` (default 14): no issue for a file in that many days after its last issue closed;
+- `burst` (default true): when one pass matches more files than `perDay`, the pass files nothing and the snapshot puts
+  one line in "Needs you" (`needsYou.testRules`: `{time, matched, cap}`) until a later pass files or stops below that;
+- `perDay` (default 3): the most issues filed in one day (this machine's local day); the rest wait for the next day's
+  pass;
+- `maxOpen` (default 5): the most issues of the rules open at one time.
+
+A pass runs after each card test step that ran tests. An issue it files is titled "Test rule <name>: <file>", has the
+pack's type and last priority, and names the rule, the measured values and the cards of those figures. It has no
+Done-when line: no run count and no time target. The list of the last pass is in `testrules.json` in the state folder
+and in the snapshot (`tests.rules.last`): each match with its `result` (`filed` with its `issue`, `stopped` with its
+`guard` and `why`, or `not filed` when GitHub did not take it). With the switch off, the pass keeps the list and files
+and logs nothing.
+
+The log, `testrules.jsonl` in the state folder, has one line for each issue filed and each match a guard stopped:
+`time`, `event` (`filed` or `stopped`), `rule`, `measure`, `file`, `values` (the measured values), `cards`, and `issue`
+or `guard` and `why`. The log is also the record of the issues filed: the guards read it. The snapshot holds its last
+50 lines, newest first, in `tests.rules.log`, for the Board's Tests page.
+
+`conveyor.sh testrules preview` lists what the rules match now, one line a match: the rule, the file, the measured
+values, and "would file" or the guard that stops it. It files and writes nothing, with the switch on or off.
+
+The commands that set the rules change main's pack and nothing else; each checks its value and the changed pack before
+it saves, and a bad value is refused with the reason:
+
+- `testrules on` and `testrules off`: the switch;
+- `testrules guard <perDay | maxOpen | quietDays | burst> <value>`: a guard;
+- `testrules add <name> <measure> <limit> <runs> <minRuns> [<days | minClock>]`: a rule, added off;
+- `testrules set <name> <on | measure | limit | runs | minRuns | days | minClock> <value>`: one setting of a rule;
+- `testrules remove <name>`: a rule.
+
+## Flaky tests
+
+The flaky-test record (`flaky.json` in the state folder, `lib/flaky.sh`) keeps each time a test case failed and then
+passed when run again with nothing changed. A card whose test run passed on re-run adds one entry for each case that
+had not passed on its first run: the case as `<file>: <case>` (a file that failed naming no case, or ran out of time,
+as the file alone), the card as its source, the card's issue and the time. Each run is recorded as it ends, so a later
+run (its batch's) loses none; a batch's run counts as the card's that ran it. From outside a card,
+`conveyor.sh flaky add <case> <source> <note>` adds one entry with its source and note: a nightly whole test adds a
+case that failed in the full run and passed alone. `conveyor.sh flaky off <case> <source> <note>` adds the entry the
+same way and files no issue for it (the Board's Keep a case off, which files none); a later entry from a card still
+counts it. A call with no case name or no source adds nothing and exits 2.
+Entries older than 30 days are dropped.
+
+When a case has entries from three different sources within seven days and no open issue filed for it, Conveyor files
+one issue through its GitHub write path (the privacy check included): the title "Flaky test: <case> fails at random",
+the labels of the pack's type, its last priority, `<areaPrefix>engine` when the pack's `nonProductAreas` names it, and
+`flaky-test` (made when the repo lacks it), and a body that lists the entries of those seven days and asks for the
+test to be made reliable or removed, with "Done when: the case passes alone and in the whole test." It is an ordinary
+issue, not a review follow-up. While that issue is open, later entries file nothing; once it is closed, the next entry
+that meets the rule files a new one. When GitHub does not say whether it is open, nothing is filed until the next entry.
+
+A card whose run again still failed adds an entry for each case that passed in it (its file passed, or the case
+printed `ok`); a case that failed again, or did not run, adds none.
+
+A case the record names as `<file>: <case>` is kept off card test steps until its flaky issue
+closes: while no issue is filed for it yet, while the last one is open or GitHub does not say, and after it closed
+only when an entry came after the closing. A card's run is told to keep the case as passed (an `ok` line in its
+`CONVEYOR_TEST_RERUN` list, unless the list already names the case or its file as passed, and an
+`off<TAB><file><TAB><case>` line, unless a `fail` line names the case), so the command does not run it. An `ok` line
+alone is also a case that passed in a run killed part-way, which a `changed` or `main` line that selects it runs
+again; an `off` case stays off even then (a test file that cannot run in part runs whole); the full test suite and the whole test on main are given no such list and run it. A whole file, or a case with no
+file, is never kept off. The snapshot's `flaky` lists the cases with entries in the last seven days, each with
+its count and the issue filed for it; the Board's Health panel draws them as its "Flaky tests" line.
+
+## Bug cards: the new tests fail without the fix
+
+A card whose issue has the pack's type label (`labels.type`, a bug) is checked after its build and before its review:
+the test files its change adds or changes (paths with `__tests__`, `.test.` or `.spec.`) run on main's code without
+the fix, alone, in a worktree of the commit the card was built on (`cards/mainrun/<card>.unfixed`), with the pack's
+`test.command`. At least one must fail there. When all pass, or the change adds or changes no test file, the card goes
+back to its build session once, told "the new tests pass without the fix, so they do not prove it" (its second `build`
+line has that reason), and the check runs again; when it still does not hold, the card is blocked with that reason,
+with no review. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
+file that failed (a runner that stops the run with no test failing proves nothing). The review is shown the check's
+result. A card whose issue is not a bug, and a build that left no change, are not checked. A change to test files
+alone (every path it changes is a test file, as in a fix to a test that main made wrong) is not checked either: it has
+no fix to take out, so its tests would run on the same code and pass, and the card would be blocked though correct.
+Its result says the change is test-only, and the review judges whether each changed test still checks what it was
+written to check. A change with any other file is checked as above.
+
+## The whole test on main
+
+A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs
+only for a project whose pack names it, as `test.main`; a pack that names none has none. The loop (`serve`) runs it on
+the default branch, on the same test slots and beside the cards, so no card waits on it: at most once an hour, and
+only when the branch has moved since its last run. When it fails, Conveyor files one issue of the pack's second
+priority that names the failing cases and the commits since the last pass, and the Board lists it under Needs you
+until a run passes. A later failure of the same cases adds a comment to that issue while it is open, and files no
+other.
+
+## The test-speed survey
+
+Test times taken on a busy machine swing two to three times from one run to the next, and a project's slowest lists
+go stale as tests are added. So once a month the loop (`serve`) files one issue for the project, "Test-speed survey,
+<month> <year>", at the pack's second priority, on the first day of the month in the machine's quietest hour. The
+loop picks it only in that hour (on the 1st, or a later day when it had no room for it then), and its card measures
+first, so its measurements start while the machine is quiet. Its card:
+
+- runs each of the project's test files alone, one after another, each in one of the machine's test slots, and
+  records each file's clock seconds and CPU seconds (user plus system, of the run and all it started), in its report
+  and in `.conveyor/test-times.json`, where a card's slow-test check takes the file's time before its change (The CPU
+  budget of a test file, above);
+- rewrites the project's slowest lists and its survey report: every test
+  file with its clock and CPU seconds, and the files over the CPU budget (`test.fileBudget`, above);
+- names in the report each file newly over the budget (over it now, and not in the last report's list), for the
+  Foreman to file speed cards from.
+
+It changes no test and no budget. It is a card, not a whole-suite run on main: the whole test on main (above) runs
+only on its own schedule.
+
+The settings, in the pack's `test`:
+
+- `survey`: `true` (the default) files the survey; `false` turns it off, and no survey issue is filed.
+- `surveyHour`: the hour, local time, 0 to 23 (default `3`: from 03:00 to 03:59), in which the issue is filed on the
+  1st and the only hour in which its card is picked. The loop looks once a minute; one that is not running at any time in that hour files none that month.
+
+The state folder's `survey.json` keeps the month of the last survey filed and its issue, so a month gets one survey
+whatever the loop's restarts; one GitHub did not take is filed at the next look within the hour.
+`conveyor.sh survey` makes the same look by hand.
+
+### The first survey
+
+Setup asks "Run a first test-speed survey now?" (yes or no) while the pack has no saved answer, and saves the answer
+as the pack's `test.firstSurvey`. Yes files one issue, "Test-speed survey, first", of the same kind and picked only in
+the same hour: its card measures every test file alone (clock and CPU seconds) and writes the report as above, and
+names in it, for the Foreman to file as cards, each group of files over the budget and each shared helper the
+measurements point to (a slow library call many files repeat, a costly fixture, a runner setting). No files none.
+Either way the monthly survey still runs unless `test.survey` is `false`. Setup run again does not ask again; to run a
+survey later, run `/conveyor-belt:setup --survey`, or `conveyor.sh setup --survey yes` from a shell, which files
+another first-survey issue.
+
+### The test-speed rules
+
+Every project's cards and reviews get the plugin's general test-speed rules, with no setup: the "Keep tests fast"
+section of the core card rules (`conveyor/rules/card-core.md`). A test file runs alone in under the project's CPU budget
+(`test.fileBudget`, default 8 CPU s); no wrapper that only runs other tests again and no second case of one behaviour;
+one fixture, render or build per file where the cases allow it, and a case that runs several fixtures one after another
+split into one case per fixture; the project's shared fast test helpers rather than the slow real thing, unless the
+test is about that thing, and the function called rather than the whole program run when only the function is under
+test. The helpers themselves depend on each project's stack, so the survey finds them per project.
+
+## The full test suite
+
+A project's full test suite is its pack's `test.full`; a pack that names none has none, and the Board shows both of
+its buttons disabled with that reason. It runs only when asked, from the Board's Control tab (`conveyor.sh full-test`),
+on main as it is at that moment, in a worktree of that commit alone and on one of the machine's test slots. Cards keep
+landing while it runs. One run at a time per project: a second press while one runs is refused and says so.
+
+- **Run full test suite** (`full-test`) runs it and shows the result, passed or failed with each failed case, and
+  pushes nothing.
+- **Push landed** (`full-test push`) runs it first. Green: every landed commit of the commit it tested is pushed at
+  once, through the same push and checks a card's push uses, and never a commit the run did not test (one that landed
+  during the run waits for the next push); the Board says so. A remote whose main holds a commit the tested one lacks
+  (one made there by hand) refuses it, and it is not merged and pushed again as a card's push is: that merge is a
+  commit the run did not test, so nothing is pushed and the Board shows the push failed and why. Red: nothing is
+  pushed; press Push landed again once main is green. A press with no landed commit to push is refused.
+- **Push anyway** (`full-test anyway <run id>`), beside a red result: after a confirm that names the failed cases, the
+  commit that red run tested is pushed with no new run, logged (`fulltest.jsonl` in the state folder) as the owner's
+  push over a red suite, with the Board user who confirmed it. The Board sends the id of the red run the confirm named;
+  when a later run has ended since, nothing is pushed.
+
+A red run's failed cases are each run alone three times on the same commit (the command is told, in its
+`CONVEYOR_TEST_RERUN` list, that every other file passed and which case of the file to run: a command that ignores the
+list runs its whole selection) and judged as the nightly whole test judges them:
+
+- passed alone 3 of 3: flaky, an entry on the flaky-test record (source `full test <commit>`).
+- failed alone (1 or more of 3), and each run that failed timed out, was killed or failed with words of the machine or
+  the network (a refused or lost connection, a name not resolved, no disk space or quota, no memory): outside the code,
+  recorded as declined with that reason.
+- failed alone in the code: a fix card, an issue at the pack's second priority (P1) with the failure line, its runs
+  alone, and the landed commit that plausibly caused it (the case is run alone once more at the commit origin has: when
+  it passes there, the newest landed commit that changed the case's file, else the newest landed commit), or that it
+  was already failing before them (it fails there too, or no landed commit is unpushed). While the issue filed for the
+  same case is open it is reused, with a comment, never a second one.
+
+The Board lists each failed case and what was done with it.
+
+## Test actions
+
+A test action asks a model about one test file of the project, in one headless session that needs no code review
+and files no issue (or runs the file by hand, with no session: `testaction run`, below):
+
+- `conveyor.sh testaction judge <test file>`: is the file worth its cost? The session answers keep, speed up, split,
+  merge with another file (it names that file), or delete, with its evidence, and ends with a line
+  `VERDICT: <keep | speed up | split | merge | delete>`.
+- `conveyor.sh testaction explain <test file>`: which card made the file slower, and what in its change is the cause.
+
+The test file is a path of the repo as main has it. The session runs on the Tests seat of the control record: a CLI
+installed on the host, a model and an effort, set by `conveyor.sh control tests <cli> <model> [effort]` as the other
+seats are (any model name, listed by that CLI or not; an effort left out is medium). With no Tests seat set, the
+command starts no session and says why (exit 2).
+
+The session is given the file; its recorded times, from the test lines of the card records (`times`, `timed` and
+`slow`); the cards that ran it; and its entries on the flaky-test record. It may read the repo: it runs in a copy of
+main as it is at the ask (a worktree under the cards folder, removed when the session ends), whose files it cannot
+write. It may not write to the repo, file an issue or change state: a Claude session has only Read, Grep and Glob, a
+Codex one its read-only sandbox, an OpenCode one the review's read-only agent, and the `gh` first on its PATH refuses
+every call. The command returns the action's id once the session has started.
+
+Each action keeps two files in `testactions/` of the state folder, which stay after the session ends:
+
+- `<id>.txt`: the session's text, written as the session writes it, so the Board can show it while the session runs.
+- `<id>.json`: its record: `id`, `action` (judge or explain), `file`, `project`, `start`, `end` (null while it
+  runs), `state` (running, done, stopped, failed or timed out), `cli`, `model`, `effort`, `limit` (the time limit, in
+  seconds, so the Board can show time used against it), `verdict` (judge: the verdict word, or `no verdict` when the
+  text's last line names none; explain: null), `pid` while it runs, and `reason` for a failed one.
+
+`conveyor.sh testaction stop <id>` stops that one running action, and no other; its record says stopped. One time
+limit applies to every action: the pack's `tunables.testActionTimeout`, 900 seconds by default. An action that runs
+past it is ended, and its record says timed out.
+
+`conveyor.sh testaction run <test file>` times one test file now, with no card: is it slow, or was the machine busy?
+It is an engine command, not a session, so it needs no Tests seat. It runs the file alone with the pack's
+`test.command`, on main as it is at the ask, in a worktree of that commit (removed when the run ends), on one of the
+machine's test slots: it waits for a slot as a card's test step does, and holds one slot while it runs, so cards wait
+on it no more than on a second card. The command's `CONVEYOR_TEST_RERUN` list names the file alone, as a `fail` line
+with no case: on main's clean tree the command runs that file and no other. A path that is not a test file of main
+(a file whose own name has `.test.` or `.spec.` in it; a helper or fixture in a `__tests__` folder is not one) is
+refused (exit 2), and nothing runs. The
+command returns the action's id once the run has started. Its `<id>.txt` is the command's output, written as the
+command writes it and kept when the run ends. Its `<id>.json` holds `id`, `action` (run), `file`, `project`, `start`,
+`end`, `state` (running, done, stopped, failed or timed out), `load` (the machine's 1-minute load at the ask),
+`limit` (the pack's `testTimeout`, the seconds the run may run once it has its slot, as a card's test step),
+`result` (pass or fail; null until it ends, or when it did not run), `sec` (the file's clock seconds, as its runner
+timed it, else the command's), `cpu` (the file's CPU seconds; null when its runner gave none), `wait` (the seconds it
+waited for its slot), `pid` while it runs, and `reason` for a failed one. `conveyor.sh testaction stop <id>` ends it,
+and every process it started, and frees its slot; its record says stopped. A run that passed counts as a recorded
+time of the file, as one from a landed card does: a later card that modifies the file gets it as its before, from
+`run by hand, <day>` (above, The CPU budget of a test file).
+
+`conveyor.sh testissue <test file> <title> <body>` is the Board's File an issue about one test file: it files the
+issue through the GitHub write path, with the pack's type and its last priority, prints its address, and keeps
+`{time, event: "filed", file, issue}` in `testactions/filed.jsonl`, so the file's row has the issue and its Close its
+issue as done. A file main does not have, a title of more than one line, or an empty body files nothing and exits 2.
+
+The snapshot's `testActions` holds `seat` (the Tests seat, or null), `limit` and `actions`: the records of the 20
+newest actions, running and kept, and of each file's newest older judge with a verdict, newest first; the other
+records stay in the state folder. Each also has `text`, the last 16,000 characters of its `<id>.txt` as it is at the
+snapshot (null when there is none), and `textCut`, true when that left the start out. So the Board's Tests page shows
+the text as it comes, and each result it lists has its text after the action ends and after a reload.
+
+## Same-file cards
+
+Cards that share a file are reviewed in parallel; they line up only to land. After its review, before it lands, a card
+claims the files its change names, documentation files (`README.md` and any other `*.md`) left out: a documentation
+file never makes one card wait for another, whatever their edits to it. Two cards that share a file overlap only when
+their changes do not apply together: a card whose change merges three-way (`git apply --3way`), with no conflict left,
+onto main with the other card's change already merged there does not wait on it, so changes to different parts of one
+file land in turn without waiting, each tested on main as the one before left it. Two cards that change the same lines
+of a file still wait, one behind the other. A card waits while a card it overlaps holds one of those files, then goes
+on from main as it is then. Its change is put on main with a plain apply, or, where that fails, with a three-way
+merge: when either leaves no conflict it goes on to its tests and lands with no rebuild session and no second review
+(the merged change's own added and removed lines are what was reviewed and tested; only the lines around them moved).
+A merge counts only when it leaves those same lines: a change main holds already merges to nothing and does not.
+Test files are merged by keeping both sides: where the merge leaves a conflict in a test file the change names (a path
+holding `__tests__`, `.test.` or `.spec.`), that file is merged again keeping main's lines and then the card's (git's
+union merge), so two cards that both add a case at the end of one test file both land, with no session, in every
+project and with no setting. It counts when no conflict is left, in a code file either, and the card's lines outside
+its test files are the same. Its changed tests, those test files among them, then run once more before it lands, as
+its earlier pass no longer counts: two edits to one test that do not work together fail there and send the card to its
+fix.
+Only when the merge leaves a conflict (an earlier landing changed the same lines, of a documentation file too), or does
+not leave the card's change, does one session bring it onto main, and it is reviewed again; unless the clash is in
+documentation files (`*.md`) alone (a README: the change outside them still merges onto main) and that session left the
+change outside them as it was reviewed: then its review and, when they passed on that change, its tests stand, and only
+its product checks run before it lands. Landing is one card, or one batch of cards (below), at a time.
+
+After any merge at landing (a clean three-way merge, a union merge, the session that brings a card onto main, or the
+landing's rebuild or port), every file the merge changed is checked to parse before any check or test runs: git can
+call a merge clean that keeps two edits of one line, and a file no selected test loads would land broken. `*.js` and
+`*.mjs` are checked with `node --check`, `*.sh` with `bash -n`, `*.json` with `jq empty` and `*.py` with
+`python3 -m py_compile`, in every project. The pack's `land.parse` adds more, a glob to a command run in the worktree
+with the file's path added after it (`"land": {"parse": {"*.rb": "ruby -c"}}`); a glob there
+that is one of these replaces its command (`"*.js": "true"` turns the `.js` check off). A file that fails sends the
+card to one fix session, given each such file and its error, and nothing lands; still failing after it, the card
+blocks.
+
+Cards ready to land land in batches. A card is ready once its review gave a GO and its own product checks and changed
+tests passed: a card that waits to land runs them while it waits, holding nothing (failing tests send it to its fix and a
+failing check blocks it, as at its turn), and the card whose turn comes runs them first. When a ready card's turn to land comes, it takes the
+other ready cards waiting to land that share a file with it, or with a card taken before (in turn), up to the pack's
+`landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: another card
+waits on it only when its change does not apply together with the whole batch's. The batch is
+in `order` first, then by when each card became ready, the card whose turn it is among them. Their changes are applied
+one on another in that order and tested once. That run reuses each card's passed tests: it
+does not run a case that a card passed on its own change, unchanged since (the same patch-id as when it passed), when
+no other card of the run selects that case, nor a case the last batch run that passed passed for cards still in this
+one, on their unchanged changes (a batch formed again after a card of it left, or main moved). It runs the cases no
+card has passed: the cases two or more cards select together, and every case of a card whose change changed since
+its pass. A batch with no such case left runs nothing and passes. The command is told what to keep in the same list
+as a run again (`CONVEYOR_TEST_RERUN`, The test step, above): `pass` and `ok` lines for the passes kept, `changed`
+lines for the files of a card whose pass no longer holds; what a card's run passed is read from its logs, and a run
+whose command writes none counts as one test, which every other card of the batch selects too. The test line of a
+batch's run says how many cases it ran and how many passes it kept in `selected` (`cases` and `kept`, as the runner's
+log gives them; `cases` 0 and the kept cases summed when it ran nothing).
+What this gives up: two changes that each passed alone can fail together in a case only one of them selects; the
+whole test on main is the net. Green, main gets one commit per card, each with its own message and trailers, in one
+move, and one push carries them; each card's landed line is its own, with `batch` naming the batch's cards. Red, the
+batch is split, halves then single cards, until the card that breaks it is found: the others land, and that card goes
+to its fix with that run's output, as when its own tests fail. Each run is of the product checks on the change of the cards in it, then the
+tests; a check that fails is a red run. A batch whose run passed lands on that run when
+main moved meanwhile (a card on other files landed during it), with no second run, when no card of it has changed since
+the run and its changes still apply, in its order, to main as it is now: the product checks run again on the batch's
+combined change there before it lands, and a check that fails is a red run: the batch is run again there and split, and
+the card that breaks it goes to its fix. A card of it whose
+change no longer applies to main leaves the batch and is fitted afterwards; the others land. The accepted limit is the
+one of a card alone: changes that passed apart from what landed meanwhile can fail with it, and the next card's run shows
+it (and the whole test on main, for a project whose pack names `test.main`: below, The whole test on main). A batch
+that does not land for another reason sends that card to its tests again, alone, before it lands alone. A card whose change does not apply on top of the
+earlier ones, the card whose turn it is too, leaves the batch and is fitted afterwards, as a waiting card is. A card with follow-ups to file lands on
+its own. The Board's Landed today panel shows a batch as one landing with its cards in it.
+
+The turn goes to a card that is ready to land. A card that holds its files and has to be brought onto main, reviewed,
+fixed or tested again first gives way for that time: it holds nothing, the cards behind it that are ready land
+meanwhile, and it claims again once it is ready (its review and tests passed and its change applies to main), after
+the cards that were waiting for its files when it gave way. The Board shows it as "fitting onto main (gave way to
+#N)", N being the card that took its turn, or as "gave way to #N while fixing" when its tests failed and it gave way
+for their fix; its live record names that card too (gaveWay). A card that has given way 3 times keeps its next turn.
+
+A card's tests are not run again only because main moved. When main moved since its checks
+and tests ran (while it was away, during its tests or before its landing), its change is put on main as it is then.
+When it applies there unchanged, or merges there three-way with no conflict (the same added and removed lines; only the
+lines around them moved), its product checks run again and it lands on the tests it already passed; a change a
+session had to rework to fit is reviewed and tested again (not one it changed only in documentation files), and one whose test files were merged keeping both sides is
+tested again. Accepted limit, not a finding: two changes that each passed
+their tests alone can fail together on main, a change merged three-way onto lines another card moved among them, and
+the next card's test run shows it.
+
+A card whose issue is in the control record's `order` list does not wait for a card that is not in the list: it claims
+the files and goes on to land while that card holds them. The card it went past waits for it at its own next claim
+(before it lands), and is brought onto main and reviewed again if main moved under it, even
+when its change still applies there. Two ordered cards never go past each other. Among waiting cards with no holder, an ordered card goes first, the earlier in
+`order` first; otherwise the older pick goes first, except that a card whose change applies to main goes before an older
+waiting card whose change does not and that is not earlier in `order`.
+
+## Declined findings
+
+A review finding that is not built is one line of `declined.jsonl` in the state folder: `id`, `time`, `card`,
+`issue`, `finding`, `by` (who declined it: `code`, `judge` or `owner`), `why` and `repo`. A finding declined again
+for the same card is the line it already has. The owner declines one by hand with
+`conveyor.sh declined add <card> <issue> owner <why> <finding>`.
+
+The Board's Declined panel lists the lines of every project that are not dismissed, not built and at most 7 days old,
+newest first, each with its reason; its count is of those. "Show every line" shows the rest too, each marked and
+greyed, with a "Dismissed", "Built" or "Expired" tag beside its issue number. A review's declined count opens the panel
+on that card's lines alone, dismissed ones too, tagged the same, with a "Back to the list" button. A line with 2 days
+or less before it leaves the panel says when ("Expires in 1 d 4 h"). "File as issue", confirmed by a second click
+(`conveyor.sh declined build <id>`), files the finding as an ordinary issue that names it, with no follow-up label, so it
+is picked as any new issue is; the line keeps the issue's number (`built`), and a second ask files nothing. "Dismiss"
+and "Dismiss all shown (n)", in the panel's heading and confirmed by a second click (`conveyor.sh declined dismiss
+[--by <who>] <id>...`), take lines off the panel: each keeps who dismissed it and when (`dismissed`) and stays in the
+list, so the reviewer is still told not to raise it.
+
+Four checks hold on every review of a change (`REVIEWT`, `lib/prompts.sh`): each test the change adds names the bug it
+would catch; a test that only finds text in a source file, where the behaviour could be run, is a finding (one whose
+one-line comment says no behaviour can be run, such as a stylesheet rule in a test with no layout, is not);
+unrequested placeholder UI is a P1 finding; and a smaller change that fully solves the issue is a finding.
+
+Every review of a change is told what not to raise, under "Do not raise these" after its instructions: the project's
+stated limits (the section of the checkout's `README.md` headed `## Accepted limits`, its first 4000 characters) and
+the last 20 declined findings the owner has not asked to be built, each as its reason and the finding. A project with
+neither is told nothing. The check of an ALREADY-DONE claim is not a review of a change and is not told.
+
+## The snapshot
+
+`conveyor.sh snapshot` prints one JSON record of everything the Board's live views show: what needs you, the belt,
+the queue and the open issues, health, the day's and the week's totals of cost and metrics, and the newest of the
+history. The Board's live feed reads it again with every change, and /units reads it too, so it is kept small: each
+list that grows with every card that lands holds only its newest 20 entries (`landed`, `metrics.cards`, `cost.cards`,
+`cost.unpriced` and `declinedRest`; `landedCount` is how many landed today and `landedUsd` their cost, which the
+Board's Today figure shows), `branches` its newest 20 landed Fast-lane branches, and `pushedCards` its newest 100
+pushes. Past those 20, `landed` also keeps a card still on the belt (its push or the close of its issue not done), and
+`branches` the landing of each lane's change while the lane is left as it was, so the Board still says it landed.
+However many cards land, a snapshot stays under 512 KB;
+what is left grows with the cards open or blocked and the open issues, not with the cards that landed.
+
+Every snapshot also writes those lists whole to `history.json` in the state folder, and `conveyor.sh history` prints
+that file. The Board does not read it with the live feed: its Landed, Metrics, Cost and Declined panels ask the page
+server for it (`GET /history`) when they are drawn, at most once a minute, and show the older entries from it beside
+the live ones. The Foreman's watcher asks for it when an issue it awaits is in neither `pushedCards` nor
+`metrics.cards` of the snapshot, so a push past the cut still wakes it. The Control tab's Landed today column shows the newest, and links to the Overview's Landed today for
+the older ones.
+
+## Belt 3D
+
+The Board's Belt 3D tab (after Overview; `?tab=belt3d` opens it) shows a factory floor: one belt lane for each card
+on the belt, with six pads (Build, Review, Fix, Test, Land, Push), each coloured by what happened at that step, and the
+card's crate on the step it is in. Each lane has the card's number and title at its left and its live status at its
+right: how many tests have run, with a bar, while it is in Test, else the time in its step. Stuck cards (blocked, or
+waiting for your yes) are in red lanes below, with the reason. Four bays along the bottom hold the queued issues, those
+waiting on another card (and on which), the held ones and the cards that just landed. The header strip counts each state
+and each step. Hover a card for its full title; click it for its six steps and their times, its review rounds, why it
+is stuck or what it waits on, and its cost. It reads the snapshot's cards and nothing else, and draws only while it is
+in view; with motion off nothing glides and the belts stand still.
+
+It draws with three.js 0.170.0 (MIT), vendored in `.claude/dashboard/vendor/three/` with its licence and each
+file's sha256 in the README there, and fetched only when the panel is first shown: the page loads nothing from another
+site.
+
+## Foreman
+
+The Foreman is a Claude Code session in a project's main checkout that watches that project's Conveyor and brings
+the owner what needs them. Set it up once with `/conveyor-belt:setup --foreman`, then start it by typing
+`/conveyor-belt:foreman` in any session in the main checkout: that session becomes the Foreman at once, and its
+watchers start at the end of that turn. It stays the Foreman however it is continued or resumed (`claude --continue`,
+`claude --resume`, an IDE, a session manager); nothing needs to be set.
+
+The role also starts by itself. The plugin's SessionStart hook, in a new session (not a resumed or continued one)
+opened in a project's main checkout, on the owner's machine or the host:
+
+- when no session holds the role, or the session that holds it is gone, claims it for the new session at once and
+  says so in one line;
+- when another live session holds it, claims nothing, and the new session asks you by the picker, as its first act:
+  "Session <short id> (started <time>, last active <time>) is the Foreman of <project>. Make this session the
+  Foreman instead?". "Take over" claims the role, as `/conveyor-belt:foreman` does, and the other session's watchers
+  stop; "Leave it" leaves it a normal session, and it is not asked again.
+
+The holder is gone when no running Claude process holds its session id (Claude Code's `sessions/<pid>.json` under
+`~/.claude`, or `CLAUDE_CONFIG_DIR`, names it and that pid runs), or when its transcript has not been written for 24
+hours (a live Foreman's waiter wakes it at least every 23). A session in a worktree (a card's, a lane's, a
+reviewer's) or one the engine starts for a card or a lane never claims or asks; a resumed or continued Foreman
+session keeps the role.
+
+There is one Foreman per project, never one for the machine. A Foreman holds one project's memory, rules, saved
+state and decisions; one that watched several projects would mix them in one context and one memory, and would
+manage both worse with every project added. So each project gets its own Foreman: run the same setup and
+`/conveyor-belt:foreman` in that project's own checkout. A Foreman is woken only by its own project's Conveyor
+(blocked cards, waits on your yes, stuck cards, push errors, idle, awaited issues, a failed CI run in a release), and keeps its session mark,
+pending wakes, saved state, decision log (`rulings.jsonl`, the owner's picker answers and typed messages) and watcher positions in `foreman/` in that project's state folder (`conveyor.sh
+state-dir`). The decision log is written on the machine the owner's session runs on, in the state folder of the
+checkout that session is in, never in the plugin install: on the host that is the host file's `stateDir`
+(`<stateDir>/foreman/rulings.jsonl`); in a checkout the host file does not name (the owner's own machine, when the
+host is another) it is that checkout's own `conveyor/state/foreman/rulings.jsonl`, made on the first answer. Its open decisions are its project's own ledger (`.claude/metrics/decisions.jsonl` in that project's
+main checkout): every question its picker asks becomes a row there. No picker is refused: there is no check for a
+question that repeats an open decision, or one answered in the last 24 hours. It reaches you like any other; a repeat of an
+open decision is that decision asked again, so your answer closes it and leaves no open row for the question. Its rules are `rules.md` in that folder, loaded at its start. Claude Code's own auto-memory is kept per checkout path, so a Foreman in a project's main checkout has
+that project's memory; never point a Foreman at another project's memory or state. The Board still shows every
+project on the machine: it is a view, not a Foreman.
+
+`/conveyor-belt:foreman` in another session of the same project moves the role there, and the first session's
+watchers stop; a Foreman in another project is untouched. `/conveyor-belt:foreman off` ends the role. A session that
+was the Foreman and no longer is shows you one line saying so at its next start.
+
+Linked projects, whose work drives each other (say a product whose workflow drives the development of a tool it
+uses), may share one Foreman: list their record names together in the host file's `foreman.groups`, for example
+`"foreman": {"groups": [["shop", "tools"]]}`. A record in no group has its own Foreman. A group's Foreman is claimed
+in the main checkout of any of its projects, is woken by the cards of every project of the group and no other, names
+the project of each item it is woken for, reads every project's decisions, and keeps one folder for the group, in
+the first-named project's state folder, with the issues it awaits listed per project. A project is in one group at
+most: groups that name a project twice are refused, as that project would have two Foremen.
+
+Advanced: the launcher `conveyor.sh foreman` starts `claude` with `CONVEYOR_FOREMAN=1`, which makes its session the
+Foreman too. When the Foreman's session is marked and its transcript is still there, the launcher reopens that
+conversation (`claude --resume <id>`); with none, or with `conveyor.sh foreman --new`, it starts a fresh session,
+which takes the mark.

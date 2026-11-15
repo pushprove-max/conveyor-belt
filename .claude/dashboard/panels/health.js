@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: Apache-2.0
+// Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
+// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null), limit | null (the
+// usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
+// limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
+// accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
+// usedFor: [what it is used for] | null, cards (a card runs on it; null: not known), others (the Rules tab can move its work to another account)}]} | null,
+// stream: {live, heardAt, since, error, writtenAt} | null (Conveyor's live stream), update: {checkedAt, head, error, moved: {from, to, at,
+// restart, restartFailed?} | null} | null (the main checkout brought forward to origin/main)}.
+// A row whose chip is a fault or a warning is failing: the failing rows come first, faults before warnings, each with
+// one line of what to do next ("Next: …"); the rows that are fine fold into one "N checks fine" that opens to them.
+// A row is one plain line: a long or many-line text (a push's output, an error) shows its first line, cut, and the
+// whole under "Show output"; a wait given in seconds ("retry after 1022 s") reads "try again in 17 min".
+const HEALTH_LINE = 100; // the most characters a row's text shows before the rest goes under "Show output"
+const OLD_READING_MS = 15 * 60 * 1000; // a usage or account reading older than this shows its age and is a warning
+const ACCOUNTS_DOC = 'https://github.com/pushprove-max/conveyor-belt/blob/main/conveyor/README.md#accounts'; // how an account is added to the host file
+window.DASH_APP.panel({
+  id: 'health',
+  title: 'Health',
+  size: 'small',
+  tab: 'overview',
+  projects: true,  // filtered to one project, its record's checks and the limits of its accounts alone; the host, this machine's limit and the accounts stay the machine's
+  rows: 'all',  // a figures panel: every check shows
+  rowSelector: '.checks > dt',
+  isEmpty: (d) => !d.host.name && !d.records && !d.limit,
+  empty(el, ctx) { el.append(ctx.state('empty', 'No health reading yet', 'This checkout names no Conveyor host, and the Board read no usage limit.')); },
+  error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read Health', message)); },
+  render(el, d, ctx) {
+    const h = ctx.h, rows = [];
+    // A row: its label, its chip and what it says; next is what to do when it is failing (a row that is fine says none).
+    // A row's output ({ tail } in its detail) is drawn here, given the row's "Show output" of the draw before (known by
+    // its label), so that one keeps its place: the same node with the same output, else its scroll (ctx.output).
+    const olds = new Map(Array.from(el.querySelectorAll('dd > details.output'), (o) => [o.parentElement.previousElementSibling?.dataset.check, o]));
+    const check = (label, chip, ...detail) => {
+      const dd = h('dd');
+      const shown = detail.flat().map((x) => (x && Object.prototype.hasOwnProperty.call(x, 'tail') ? ctx.output(x.tail, null, null, olds.get(label)) : x));
+      dd.append(chip, ...shown.filter(Boolean).map((x) => (typeof x === 'string' ? h('span', 'detail', x) : x)));
+      const dt = h('dt', null, label);
+      dt.dataset.check = label;
+      const row = { dt, dd, next: null };
+      rows.push(row);
+      return row;
+    };
+    // A text from the host as one plain line: whole when short, else its first line cut, with the whole under "Show output".
+    const plain = (text) => {
+      if (typeof text !== 'string' || !text.trim()) return [];
+      const t = healthWaits(text.trim(), ctx);
+      if (t.length <= HEALTH_LINE && !t.includes('\n')) return [t];
+      const first = t.split('\n')[0];
+      return [h('span', 'detail', first.length > HEALTH_LINE ? `${first.slice(0, HEALTH_LINE - 1)}…` : first), { tail: t }];
+    };
+    const name = d.host.name || 'Build machine';
+    if (d.host.reachable === true) check(name, ctx.chip('Reachable', 'ok'), plain(d.host.error));
+    else if (d.host.reachable === false) check(name, ctx.chip('Unreachable', 'bad'), plain(d.host.error)).next = 'Check the build machine is on and this computer reaches it over SSH.';
+    else check(name, ctx.chip('Not checked', 'warn'), plain(d.host.error)).next = 'The Board checks it again in about a minute. Before that check, this project must name its build machine.';
+    // How old what the page shows is: dataRow below (it draws its own next step).
+    const s = d.stream;
+    if (s && typeof s === 'object') dataRow(check('Data', h('span')).dd, s, ctx);
+    // The Board's feed restarted from here, beside the data's age; the head shows it too only while the feed is at
+    // fault (app.js). What the host answered shows beside it.
+    const restart = h('button', 'btn btn-quiet', 'Restart the Board\'s feed'), said = h('span', 'detail');
+    restart.type = 'button'; restart.dataset.act = 'restart';
+    said.setAttribute('role', 'status');
+    // A restart costs the collector's time: a second click, as the head's (ctx.twice).
+    ctx.twice(restart, 'spend', 'Click again to restart the Board\'s feed', () => { restart.disabled = true; ctx.restart().then((t) => { said.textContent = t; restart.disabled = false; }); });
+    check('Board\'s feed', restart, said);
+    // A stuck card; one waiting on a same-file card names that card's issue and where it is (blocked, queued).
+    const stuck = (s) => (s.step === 'waiting' && s.waitsOn && typeof s.waitsOn === 'object'
+      ? `#${s.issue} waiting on ${typeof s.waitsOn.issue === 'number' ? `#${s.waitsOn.issue}` : 'a card'}${s.waitsOn.state ? ` (${s.waitsOn.state})` : ''}`
+      : `#${s.issue} in ${s.step}`);
+    (d.records || []).forEach((r) => {
+      const of = d.records.length > 1 ? ` (${r.repo})` : '';
+      // A loop its control record stops is not meant to run: it is off, not a fault. One meant to run with no
+      // loop process is.
+      const off = !r.loop && r.state === 'stopped';
+      const loop = check(`Conveyor${of}`, r.loop ? ctx.chip('Running', 'ok') : off ? ctx.chip('Off', 'quiet') : ctx.chip('Stopped', 'bad'), off ? 'not meant to run' : null,
+        r.newest ? 'last step recorded' : 'no step recorded', r.newest ? ctx.since(r.newest, ' ago') : null);
+      if (!r.loop && !off) loop.next = 'Start Conveyor again on the build machine: its machine command starts every project.';
+      // A failing push: one line of how long and which check, its output under "Show output".
+      if (r.pushFailingSince) {
+        const e = r.pushError || {}, line = h('span', 'detail');
+        line.append('Push failing for ', ctx.since(r.pushFailingSince, ''), typeof e.check === 'string' && e.check ? `: ${e.check} failed` : '');
+        check(`Last push${of}`, ctx.chip('Failing', 'bad'), line, { tail: e.reason }).next = e.kind === 'check'
+          ? 'It is in Needs you. The push waits until a fix lands on main, and Conveyor does not try it again before that.'
+          : 'Conveyor tries it again by itself. If a retry fails, it shows in Needs you.';
+      } else if (r.unpushed.length) {
+        check(`Last push${of}`, ctx.chip(`${r.unpushed.length} not pushed`, 'warn'), 'oldest landed', ctx.since(r.unpushed[0].since, ' ago')).next =
+          'Conveyor pushes after each landing. If Push when a card lands is off, Push landed on the Rules tab pushes them.';
+      } else check(`Last push${of}`, ctx.chip('All pushed', 'ok'), r.lastPushAt ? 'pushed' : 'no push recorded', r.lastPushAt ? ctx.since(r.lastPushAt, ' ago') : null);
+      if (r.stuck.length) check(`Stuck cards${of}`, ctx.chip(`${r.stuck.length} stuck`, 'bad'), plain(r.stuck.map(stuck).join(', '))).next =
+        "Conveyor stops a stuck session and tries it again by itself. If the session stays stuck, read the card's last step in On the belt.";
+      // A dependency cycle: its issues wait on each other, so none of them is ever picked.
+      if (Array.isArray(r.cycles) && r.cycles.length) check(`Dependency cycles${of}`, ctx.chip(`${r.cycles.length} cycle${r.cycles.length === 1 ? '' : 's'}`, 'bad'),
+        plain(r.cycles.map((c) => c.map((n) => `#${n}`).join(' ↔ ')).join('; '))).next = "Break each cycle: take one issue off another's Depends on: line on GitHub.";
+      // The cases that failed and then passed when run again in the last 7 days (conveyor/lib/flaky.sh): how many on
+      // the row's line, and under "Show output" each with how many times and the issue filed for it when there is
+      // one. A record from before the snapshot gave them has none.
+      if (Array.isArray(r.flaky)) {
+        const cases = r.flaky.filter((f) => f && typeof f.case === 'string' && typeof f.count === 'number');
+        if (cases.length) {
+          const det = h('details', 'output'), list = h('p', 'detail flaky-list');
+          cases.forEach((f, i) => {
+            if (i) list.append(h('span', null, ', '));
+            list.append(h('span', null, `${f.case} ×${f.count}`));
+            if (typeof f.issue === 'number' && f.issue > 0) list.append(h('span', null, ' '), ctx.issueLink(f));
+          });
+          det.append(h('summary', null, 'Show output'), list);
+          check(`Flaky tests${of}`, ctx.chip(`${cases.length} case${cases.length === 1 ? '' : 's'}`, 'warn'),
+            `${cases.length === 1 ? '1 case' : `${cases.length} cases`} passed only on re-run in the last 7 days`, det).next =
+            'Fix each case, or the fixture under it. If a case has an issue, fix the case through that issue.';
+        } else check(`Flaky tests${of}`, ctx.chip('None', 'ok'), 'no case passed only on re-run in the last 7 days');
+      }
+      // The test files kept off card test steps for their CPU seconds (conveyor/lib/testrun.sh slowoffs()), each with
+      // why: over the budget in two card test runs in a row, by how much, and the issue whose card brings it back.
+      if (Array.isArray(r.slowOff)) {
+        const files = r.slowOff.filter((f) => f && typeof f.file === 'string');
+        if (files.length) {
+          const n = (x) => (typeof x === 'number' ? `${Math.round(x * 10) / 10}` : '?');
+          const det = h('details', 'output'), list = h('p', 'detail slow-off-list');
+          files.forEach((f, i) => {
+            if (i) list.append(h('br'));
+            list.append(h('span', null, `${f.file}: ${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s, over the ${n(f.budget)} CPU s budget; runs only in the full test suite until`),
+              h('span', null, ' '), typeof f.issue === 'number' && f.issue > 0 ? ctx.issueLink(f) : h('span', null, 'its issue'), h('span', null, ' lands'));
+          });
+          det.append(h('summary', null, 'Show output'), list);
+          check(`Kept off card tests${of}`, ctx.chip(`${files.length} file${files.length === 1 ? '' : 's'}`, 'warn'),
+            `${files.length === 1 ? '1 test file' : `${files.length} test files`} over the CPU budget in two card test runs in a row`, det).next =
+            'Each comes back to card test steps when the card of its Slow test issue lands: make the file cheaper there.';
+        } else check(`Kept off card tests${of}`, ctx.chip('None', 'ok'), 'every test file runs in card test steps');
+      }
+      // The project's last card test runs recorded no test times (untimed: how many; conveyor/lib/views.sh): its test
+      // command prints no `TESTRUN sec` lines, so no test file is held to the CPU budget.
+      if (typeof r.untimed === 'number' && r.untimed > 0) check(`Test times${of}`, ctx.chip('Not recorded', 'warn'),
+        `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times`).next =
+        'Add them to the test command: the section "The CPU budget of a test file" in conveyor/README.md tells how.';
+      if (!r.gh) check(`GitHub${of}`, ctx.chip('Not signed in', 'bad'), 'gh cannot read or close issues').next = 'Run gh auth login on the build machine.';
+      if (typeof r.diskFreeKb === 'number' && r.diskFreeKb < 10485760) check(`Disk${of}`, ctx.chip('Low', 'warn'), `${(r.diskFreeKb / 1048576).toFixed(1)} GB free for cards`).next =
+        'Free space on the disk that holds the cards folder.';
+    });
+    const lim = d.limit;
+    // The bar is drawn with a scale, so its change is a transform.
+    const bar = (pct, says) => {
+      const meter = h('span', 'meter'), fill = h('span', 'meter-fill');
+      fill.style.transform = `scaleX(${Math.max(0, Math.min(100, pct)) / 100})`;
+      meter.append(fill);
+      meter.setAttribute('role', 'img');
+      meter.setAttribute('aria-label', says);
+      return meter;
+    };
+    const SLOW = 'lower cards at once on the Rules tab to slow it.';
+    // A machine that pays by API (billing "api") has a week of dollars against its weekly spending cap, not a
+    // percent. It shows first; the subscription reading shows beside it only when there is one.
+    const api = lim && lim.billing === 'api' ? lim.api : null;
+    if (api) {
+      const capped = typeof api.limitUsd === 'number' && api.limitUsd > 0;
+      const resets = typeof api.timeLeftSec === 'number' ? `resets in ${ctx.dur(api.timeLeftSec)}` : null;
+      const partial = api.complete ? null : 'the Board did not read and price every request';
+      if (typeof api.spentUsd !== 'number') {
+        check('Weekly spend', ctx.chip('Not read', 'warn'), capped ? `the weekly cap is ${ctx.money(api.limitUsd)}, but the Board could not price the spend this week` : 'the Board could not price the spend this week, and there is no weekly cap', resets).next =
+          'The Board prices it again in about a minute.';
+      } else if (capped) {
+        const usedPct = api.spentUsd / api.limitUsd * 100;
+        const spent = h('span', 'detail');
+        spent.append(ctx.number('api-spent', api.spentUsd, ctx.money), h('span', null, ` of the ${ctx.money(api.limitUsd)} weekly cap spent`));
+        let pace = ctx.chip('Under pace', 'ok'), next = null;
+        if (usedPct >= 100) { pace = ctx.chip('Over the cap', 'bad'); next = `Raise the weekly cap, or wait for the reset; ${SLOW}`; }
+        else if (usedPct >= 90) { pace = ctx.chip('Nearly used up', 'bad'); next = `Raise the weekly cap, or wait for the reset; ${SLOW}`; }
+        else if (typeof api.underUsd === 'number' && api.underUsd < 0) { pace = ctx.chip('Over pace', 'warn'); next = `At this pace the cap runs out before it resets; ${SLOW}`; }
+        check('Weekly spend', pace, bar(usedPct, `${Math.round(usedPct)} percent of the weekly spending cap spent`), spent, resets, partial).next = next;
+      } else {
+        const spent = h('span', 'detail');
+        spent.append(ctx.number('api-spent', api.spentUsd, ctx.money), h('span', null, ' spent this week'));
+        check('Weekly spend', ctx.chip('No cap set', 'quiet'), spent, resets, partial);
+      }
+    }
+    // A reading older than OLD_READING_MS says when it was read and how long ago ("from 9:00 AM, 6 h 00 min ago"):
+    // its figures may no longer be true. Null for a newer one, or one with no time.
+    const old = (iso) => {
+      const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+      if (Number.isNaN(t) || Date.now() - t <= OLD_READING_MS) return null;
+      const s = h('span', 'detail');
+      s.append(`from ${ctx.clock(iso)}, `, ctx.since(iso, ' ago'));
+      return s;
+    };
+    const OLD_NEXT = 'The Board reads it again by itself when the wait from the usage server ends. The reason is beside it. Until then, these figures stay this old.';
+    // The 7-day limit of each account the cards run on, as the build machine's guard reads it (limits), never this
+    // machine's own login: the cards can run on another account. One row for one account; with more (a project's
+    // builder and reviewer accounts, or more projects), each row names its project and account.
+    const limits = Array.isArray(d.limits) ? d.limits.filter((l) => l && typeof l === 'object') : [];
+    const USES = { build: 'build and fix', review: 'reviews' };
+    const AGAIN = 'Conveyor reads it again before its next pick.';
+    limits.forEach((l) => {
+      const who = l.account || 'default';
+      const label = limits.length > 1 ? `Usage limit of ${l.repo}: ${who}` : 'Usage limit';
+      const of = `account ${who}, ${l.email || 'no email recorded'}: ${(Array.isArray(l.uses) ? l.uses : []).map((s) => USES[s] || s).join(' and ')}`;
+      // Beside a weekly spend (api), an account with no subscription reading shows no row, as with no accounts.
+      if (typeof l.pct !== 'number') { if (!api) check(label, ctx.chip('Not read', 'warn'), 'no reading yet', of).next = AGAIN; return; }
+      const meter = bar(l.pct, `${Math.round(l.pct)} percent of the 7-day limit used`);
+      const pct = h('span', 'detail');
+      pct.append(ctx.number(`used:${l.repo}:${who}`, l.pct, (v) => `${Math.round(v)}%`), h('span', null, ' of the 7-day limit used'));
+      const age = old(l.readAt);
+      let chip = ctx.chip('Fine', 'ok'), next = null;
+      if (l.pct >= 90) { chip = ctx.chip('Nearly used up', 'bad'); next = `Wait for the reset, or ${SLOW}`; }
+      else if (age) { chip = ctx.chip('Old reading', 'warn'); next = AGAIN; }
+      check(label, chip, meter, pct, of, age).next = next;
+    });
+    if (!limits.length && !api) check('Usage limit', ctx.chip('Not read', 'warn'), 'no reading').next = AGAIN;
+    // Codex's quota is its own reading: it shows whether or not Claude's was read.
+    if (lim && lim.codex && typeof lim.codex.usedPct === 'number') check('Codex limit', ctx.chip(`${Math.round(lim.codex.usedPct)}% used`, lim.codex.usedPct >= 90 ? 'warn' : 'quiet')).next =
+      "Pick another reviewer on the Rules tab, or wait for Codex's reset.";
+    // Every Claude account read, on this machine and on the Conveyor host, each with its own figures and what it is
+    // used for. The email is shown here only.
+    const acc = d.accounts && typeof d.accounts === 'object' ? d.accounts : null;
+    // An account no card runs on (cards false) is one dim row with its reading and no next step: it has no work to
+    // move. One the cards run on is told to move its work on the Rules tab only when the Rules tab has another account
+    // to move it to (others); else to wait for its reset and where an account is added.
+    (acc && Array.isArray(acc.list) ? acc.list : []).forEach((a) => {
+      const used = typeof a.usedPct === 'number', age = used ? old(a.readAt) : null, idle = a.cards === false;
+      const where = a.machine || 'this machine';
+      const error = typeof a.error === 'string' && /^HTTP 401\b/.test(a.error) ? `this login has expired: sign in again on ${where}` : a.error;
+      const row = check(`Account ${a.name}${a.machine ? ` on ${a.machine}` : ' on this machine'}`,
+        used ? ctx.chip(`${Math.round(a.usedPct)}% used`, idle ? 'quiet' : a.usedPct >= 90 ? 'bad' : age ? 'warn' : 'quiet') : ctx.chip('Not read', idle ? 'quiet' : 'warn'),
+        a.email || 'no email recorded', age, typeof a.fiveHourPct === 'number' ? `5-hour window ${Math.round(a.fiveHourPct)}%` : null,
+        Array.isArray(a.usedFor) ? a.usedFor.join('; ') : 'the Board does not know its use: it did not read the records', used && !age ? null : plain(error));
+      if (idle) return;
+      const reset = typeof a.resetsAt === 'string' && a.resetsAt ? ` at ${ctx.when(a.resetsAt)}` : '';
+      const doc = h('a', null, 'Accounts');
+      doc.href = ACCOUNTS_DOC; doc.target = '_blank'; doc.rel = 'noopener';
+      row.next = !used ? 'The Board reads it again in about a minute. If an account has no login, sign in to it again on its machine.'
+        : a.usedPct < 90 && age ? OLD_NEXT
+        : a.others === true ? `Move this account's work to another on the Rules tab, or wait for its reset${reset}.`
+        : [`Wait for its reset${reset}. To move its work to another account, add one to `, h('code', null, 'accounts'), " in the build machine's host file (", doc, ').'];
+    });
+    if (acc && acc.error) check('Host accounts', ctx.chip('Not read', 'warn'), plain(acc.error)).next = 'The Board reads them again in about a minute.';
+    // A checkout that could not be brought forward says why; the last move says whether the dashboard restarted on it.
+    const u = d.update;
+    if (u && typeof u === 'object') {
+      const m = u.moved && typeof u.moved === 'object' ? u.moved : null;
+      check('Dashboard code', u.error ? ctx.chip('Not updated', 'warn') : ctx.chip('Up to date', 'ok'), u.error ? plain(u.error) : (u.head ? `main at ${u.head}` : null),
+        m ? `${m.restartFailed ? 'brought forward, restart failed' : m.restart ? 'restarted on new code' : 'brought forward'} ${m.from}..${m.to}` : null, m ? ctx.since(m.at, ' ago') : null).next =
+        m && m.restartFailed ? 'Restart the Board on this machine to run the new code.' : 'Make the main checkout the same as origin/main by hand. The reason is beside it.';
+    }
+    // Failing first (faults, then warnings, each in the order drawn), each with its next step before its output; the
+    // rest fold into "N checks fine".
+    const rank = (row) => healthRank(row.dd);
+    const failing = rows.filter((row) => rank(row) < 2).sort((a, b) => rank(a) - rank(b));
+    const fine = rows.filter((row) => rank(row) === 2);
+    const list = (rs) => {
+      const dl = h('dl', 'checks');
+      rs.forEach((row) => {
+        if (row.next && rank(row) < 2) {
+          const p = h('p', 'check-next', 'Next: ');
+          p.append(...[].concat(row.next)); // a next step is its text, or its text and nodes (a link)
+          row.dd.insertBefore(p, row.dd.querySelector(':scope > details.output'));
+        }
+        dl.append(row.dt, row.dd);
+      });
+      return dl;
+    };
+    // What the owner opened stays open through a redraw (the live feed draws the panel again with each change): "checks fine",
+    // and each row's "Show output", known by its row's label.
+    const was = el.querySelector(':scope > details.checks-fine');
+    const opened = new Set(Array.from(el.querySelectorAll('dd > details.output[open]'), (o) => o.parentElement.previousElementSibling?.dataset.check));
+    rows.forEach((row) => { const o = row.dd.querySelector(':scope > details.output'); if (o && opened.has(row.dt.dataset.check)) o.open = true; });
+    const out = [];
+    if (failing.length) out.push(list(failing));
+    if (fine.length) {
+      const det = h('details', 'checks-fine');
+      det.append(h('summary', null, `${fine.length} ${fine.length === 1 ? 'check' : 'checks'} fine`), list(fine));
+      det.open = Boolean(was && was.open);
+      out.push(det);
+    }
+    el.replaceChildren(...out);
+  },
+  tick(el, ctx) {
+    // A Live whose stream has not been written to in time turns into its age, with no new data to say so; a row that
+    // turns into a warning so leaves the rows that are fine (the panel is drawn again).
+    let moved = false;
+    el.querySelectorAll('dd[data-live-until]').forEach((dd) => {
+      if (Date.now() > Number(dd.dataset.liveUntil)) {
+        dataRow(dd, dd.stream, ctx);
+        if (dd.closest('.checks-fine') && healthRank(dd) < 2) moved = true;
+      }
+    });
+    if (moved) { ctx.redraw(); return; }
+    el.querySelectorAll('[data-age-from]').forEach((n) => {
+      const text = healthAge(n.dataset.ageFrom, ctx);
+      if (n.textContent !== text) n.textContent = text;
+    });
+  },
+});
+// A row's place: 0 a fault (its chip bad), 1 a warning, 2 fine (ok, quiet, or no chip).
+function healthRank(dd) {
+  const c = dd.querySelector(':scope > .chip');
+  return c && c.classList.contains('chip-bad') ? 0 : c && c.classList.contains('chip-warn') ? 1 : 2;
+}
+// A text the build machine gives, in the Board's words: a wait in seconds ("retry after 1022 s", dashboard_limit.py) is
+// "try again in 17 min"; a failed fetch of main names GitHub, not git's remote branch.
+function healthWaits(text, ctx) {
+  return text.replace(/\bretry after ([0-9]+) s\b/g, (m, n) => `try again in ${ctx.dur(Number(n))}`)
+    .replace(/\brate limited \(429\)/g, 'the usage server asked for a pause')
+    .replace(/^origin\/main could not be fetched: /, 'the Board could not get main from GitHub: ');
+}
+// The live feed rewrites the stream (writtenAt) every 10 s while it runs, and builds data.js again with each change, or
+// after 45 s with none (dashboard_stream.py KEEP), so data.js and this page's feed carry a write at most about 60 s old:
+// a stream not written to for STREAM_EXPIRE_MS is one whose feed has stopped, whatever its last word said.
+const STREAM_EXPIRE_MS = 90000;
+// The Data row's chip and detail, drawn into dd: Live while Conveyor's stream from the host is live, its feed still
+// writes, and this page's own feed is open; otherwise its age, counting each second: from when the host was last heard
+// from, or, with the stream up and this page reading data.js every 15 s, from when data.js was published. Its age
+// carries its next step.
+function dataRow(dd, s, ctx) {
+  const h = ctx.h;
+  const f = typeof ctx.feed === 'function' ? ctx.feed() : { open: false, updatedAt: null };
+  const written = typeof s.writtenAt === 'string' ? Date.parse(s.writtenAt) : NaN;
+  const until = Number.isNaN(written) ? 0 : written + STREAM_EXPIRE_MS;
+  const live = !!s.live && Date.now() <= until;
+  dd.stream = s;
+  delete dd.dataset.liveUntil;
+  if (live && f.open) {
+    dd.dataset.liveUntil = String(until);
+    dd.replaceChildren(ctx.chip('Live', 'ok'), h('span', 'detail', 'each change as it happens'));
+    return;
+  }
+  if (live) dd.dataset.liveUntil = String(until);
+  const from = live ? (typeof f.updatedAt === 'number' ? new Date(f.updatedAt).toISOString() : null) : s.heardAt;
+  const c = ctx.chip(healthAge(from, ctx), 'warn');
+  if (typeof from === 'string') c.lastChild.dataset.ageFrom = from;
+  const why = live ? 'this page asks the build machine for news every 15 s'
+    : s.live ? 'the live feed stopped' : (s.error || 'the live stream is down');
+  const next = live ? 'Reload the page to open its live feed again.' : 'Reload the page. If the data stays old, make sure that the build machine is on. Then press Restart the Board\'s feed.';
+  dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`));
+}
+// "N s old" (minutes and hours past two minutes); "Age unknown" with no time to count from.
+function healthAge(iso, ctx) {
+  const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return 'Age unknown';
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  return sec < 120 ? `${sec} s old` : `${ctx.dur(sec)} old`;
+}

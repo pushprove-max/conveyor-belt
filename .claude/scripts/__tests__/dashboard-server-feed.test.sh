@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 60
+# The page server's work for each open page (issue 566), by function: GET /events and GET /history called on a
+# stand-in request, with no server, socket or login. Every open page did again work one could do for all: each /events
+# connection serialised every panel of data.js (about 1.1 MB) on each update, and each GET /history started bash,
+# every 60 s a page, though dashboard.sh kept the answer for 60 s.
+set -euo pipefail
+SOURCE=$(git rev-parse --show-toplevel)
+# The server imports the Board's own packages: its virtualenv, as dashboard-server.test.sh runs it.
+PY=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv/bin/python3
+"$PY" -c 'import pyotp, segno, cryptography' || { echo "FAIL: the Board's virtualenv $PY lacks its packages: run conveyor.sh setup" >&2; exit 1; }
+T=$(cd "$(mktemp -d /tmp/dashboard-server-feed-test.XXXXXX)" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl \
+  "$PY" - "$SOURCE/.claude/scripts" "$T" <<'EOF'
+import io, json, os, subprocess, sys, threading, time
+sys.path.insert(0, sys.argv[1])
+import dashboard_server as ds
+T = sys.argv[2]
+fail = []
+def check(ok, why):
+    if not ok:
+        fail.append(why)
+
+class Page:
+    """A stand-in request: logged in, its replies kept; `gone` makes its next write fail, as a closed page's does."""
+    def __init__(self, directory=T):
+        self.directory, self.out, self.code, self.gone, self.close_connection = directory, io.BytesIO(), None, False, False
+        self.wfile = self
+    def authed(self, store=None):
+        return True
+    def send_response(self, code):
+        self.code = code
+    def send_header(self, *a):
+        pass
+    def end_headers(self):
+        pass
+    def reply(self, code, text, headers=None):
+        self.code, self.text = code, text
+    def write(self, b):
+        if self.gone:
+            raise OSError('the page went away')
+        self.out.write(b)
+    def flush(self):
+        pass
+    def events(self):
+        return [e.split('\n', 1)[0] for e in self.out.getvalue().decode().split('\n\n') if e.startswith('event: ')]
+
+def until(cond, why):
+    end = time.monotonic() + 5
+    while not cond():
+        if time.monotonic() > end:
+            fail.append(why)
+            return
+        time.sleep(0.01)
+
+# D1. Bug: each /events connection serialised every panel again on each update, so two open pages paid twice. Two
+# connections, two versions of data.js with two panels: one serialisation of each panel a version, four in all.
+def data_js(n, a):
+    with open(os.path.join(T, 'data.js'), 'w') as f:
+        f.write('window.DASH = %s;\n' % json.dumps({'updatedAt': 't%d' % n, 'panels': {'a': {'n': a}, 'b': {'n': 'same' * n}}}))
+data_js(1, 1)
+serialised, real_dumps = [], json.dumps
+def dumps(obj, *a, **k):
+    if k.get('sort_keys'):
+        serialised.append(obj)
+    return real_dumps(obj, *a, **k)
+ds.json.dumps = dumps
+ds.PING = 0.1  # a closed page is found at its next ping
+feed = ds.FEED[0] = ds.Feed(T)
+feed.look()  # the feed's thread has read it: each page's own look finds it unchanged
+pages = [Page(), Page()]
+threads = [threading.Thread(target=ds.Handler.events, args=(p,), daemon=True) for p in pages]
+for t in threads:
+    t.start()
+until(lambda: all(p.events() == ['event: snapshot'] for p in pages), 'events: each page opens with its snapshot')
+data_js(2, 2)
+feed.look()
+until(lambda: all(len(p.events()) == 3 for p in pages), 'events: each page gets both changed panels')
+for p in pages:
+    p.gone = True
+for t in threads:
+    t.join(5)
+ds.json.dumps = real_dumps
+check(not any(t.is_alive() for t in threads), 'events: a closed page ends its connection')
+check(all(p.events() == ['event: snapshot', 'event: panel', 'event: panel'] for p in pages),
+      'events: each page gets its snapshot, then a panel event for each changed panel: %r' % [p.events() for p in pages])
+check(len(serialised) == 4, 'events_serialise_each_panel_once_a_version: two pages, two versions, two panels must be '
+      '4 serialisations, not one set a page: %d' % len(serialised))
+
+# D2. Bug: each GET /history started bash, every 60 s for each open page, though dashboard.sh --history only printed
+# its copy of the last minute. A fresh copy is served from the file and starts no process; an old one runs the script.
+started = []
+def no_process(*a, **k):
+    started.append(a[0] if a else k.get('args'))
+    return subprocess.CompletedProcess(a[0] if a else None, 0, '{"updatedAt":"built","panels":{}}\n', '')
+ds.run_script = no_process
+real_popen = subprocess.Popen
+def popen(*a, **k):
+    started.append(a[0] if a else k.get('args'))
+    return real_popen(*a, **k)
+ds.subprocess.Popen = popen
+os.makedirs(os.path.join(T, 'cache'))
+cached = os.path.join(T, 'cache', 'history.json')
+with open(cached, 'w') as f:
+    f.write('{"updatedAt":"cached","panels":{}}\n')
+fresh = Page()
+ds.Handler.history(fresh)
+check(started == [], 'history_with_a_fresh_cache_starts_no_process: started %r' % started)
+check(fresh.code == 200 and json.loads(fresh.out.getvalue())['updatedAt'] == 'cached',
+      'history: a fresh cache is the answer: %s %r' % (fresh.code, fresh.out.getvalue()[:200]))
+old = time.time() - 120  # two minutes: past dashboard.sh's HISTORY_TTL of 60 s
+os.utime(cached, (old, old))
+stale = Page()
+ds.Handler.history(stale)
+check(len(started) == 1 and stale.code == 200 and json.loads(stale.out.getvalue())['updatedAt'] == 'built',
+      'history: a cache older than HISTORY_TTL runs dashboard.sh --history and gives its answer: %r %s' % (started, stale.code))
+subprocess.Popen = real_popen
+
+for f in fail:
+    print('FAIL: ' + f, file=sys.stderr)
+sys.exit(1 if fail else 0)
+EOF
+echo "PASS: dashboard-server-feed"

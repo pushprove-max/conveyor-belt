@@ -1,0 +1,33 @@
+# The engine cases that take 20 s or more, slowest first, as measured, eight at a time on 16 cores, with each case's
+# seconds. The runner (conveyor.test.sh) starts these first and the rest after, so no long case starts last.
+# Re-measure and rewrite this list when a case's time changes a lot; a case missing from it still runs.
+visible 75
+sameoff 75
+before 74
+serve 68
+control 68
+adopt 67
+snapshot 53
+live 53
+resume 53
+donewhen 50
+checkrun 48
+kept 48
+inherit 38
+since 34
+rebase 33
+tests 32
+pack 32
+trailers 30
+reviewretry 30
+doctor 29
+start 27
+claudereview 26
+watch 26
+slowpush 25
+restart 25
+track 23
+privacy 23
+only 23
+depends 22
+retry 21

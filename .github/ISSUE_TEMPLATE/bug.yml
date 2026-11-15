@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Bug report
+description: Conveyor does something wrong.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security vulnerability goes in a private report, not here (SECURITY.md).
+  - type: input
+    id: conveyor-version
+    attributes:
+      label: Conveyor version
+      description: The commit `conveyor doctor` names, or the release you installed.
+    validations:
+      required: true
+  - type: input
+    id: claude-code-version
+    attributes:
+      label: Claude Code version
+      description: What `claude --version` prints.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example macOS 15.2 or Ubuntu 24.04.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The card's log lines
+      description: The lines that show the bug. Remove private words first (names, email addresses, host names, paths in your home folder, tokens and keys).
+      render: text

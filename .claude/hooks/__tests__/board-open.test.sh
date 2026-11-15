@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Pins when a session opens the Board: only a fresh start (source startup) in a repo with a pack, with the plugin
+# option on, opens it, once, at the host file's URL. A resume, clear or compact would stack another tab each time, a
+# repo with no pack has no Board of its own, and a card session must never open one: it runs headless on the loop.
+# The opener (open / xdg-open) is a stub that records what it was asked to open. Each case runs the command
+# hooks/hooks.json registers, so through shim.sh and the pinned install it resolves, as Claude Code runs it.
+set -u
+SRC=$(cd "$(dirname "$0")/../../.." && pwd)
+CMD=$(jq -r '.hooks.SessionStart[].hooks[].command | select(test("board-open"))' "$SRC/hooks/hooks.json")
+PIN=0123456789abcdef0123456789abcdef01234567
+T=$(mktemp -d); LSN='' RAW_LSN='' FULL_LSN='' FORGE_LSN=''
+trap 'kill $LSN $RAW_LSN $FULL_LSN $FORGE_LSN 2>/dev/null; rm -rf "$T"' EXIT
+mkdir -p "$T/bin" "$T/repo/.conveyor" "$T/bare" "$T/config/conveyor" "$T/data/conveyor/versions/$PIN/.claude/hooks"
+cp "$SRC/.claude/hooks/board-open.sh" "$T/data/conveyor/versions/$PIN/.claude/hooks/"
+jq -n --arg c "$PIN" '{plugin: {commit: $c}}' > "$T/repo/.conveyor/project.json"
+echo '{}' > "$T/config/conveyor/host.json"
+for o in open xdg-open; do printf '#!/usr/bin/env bash\necho "$1" >> %q\n' "$T/opened" > "$T/bin/$o"; chmod +x "$T/bin/$o"; done
+free_port() { python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+PORT=$(free_port)
+# The Board's own page server, with its login store and certificate in this test's folder. It runs on the Board's
+# own virtualenv (conveyor.sh setup fills it), never the system Python.
+PY=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv/bin/python3
+"$PY" -c 'import pyotp, segno, cryptography' || { echo "FAIL: the Board's virtualenv $PY lacks its packages: run conveyor.sh setup" >&2; exit 1; }
+export CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json
+mkdir -p "$T/auth" "$T/out"
+# The login page is the served folder's login.html, which the Board's install copies there.
+cp "$SRC/.claude/dashboard/login.html" "$T/out/"
+"$PY" "$SRC/.claude/scripts/dashboard_server.py" make-cert >/dev/null
+"$PY" "$SRC/.claude/scripts/dashboard_server.py" "$PORT" "$T/out" 2>/dev/null & LSN=$!
+for _ in $(seq 50); do curl -sk -o /dev/null "https://127.0.0.1:$PORT/login" && break; sleep 0.1; done
+
+PASS=0 FAIL=0
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+# start <source> <project> [<option value>|-] [<port>]: runs the registered command as a session start in <project>;
+# prints its output and errors, then what the opener was given (one line each, after a moment for the background
+# opener). How long the hook held the start, in milliseconds, is left in $T/took.
+start() {
+  rm -f "$T/opened"
+  local t0=${EPOCHREALTIME/./}
+  local opt=(); [ "${3:--}" = - ] || opt=("CLAUDE_PLUGIN_OPTION_boardAutoOpen=$3")
+  jq -cn --arg s "$1" --arg c "$2" '{hook_event_name: "SessionStart", source: $s, cwd: $c}' \
+    | (cd "$2" && env -u CLAUDE_PLUGIN_OPTION_boardAutoOpen "${opt[@]}" PATH="$T/bin:$PATH" CLAUDE_PROJECT_DIR="$2" \
+        CLAUDE_PLUGIN_ROOT="$SRC" XDG_DATA_HOME="$T/data" XDG_CONFIG_HOME="$T/config" CONVEYOR_DASHBOARD_PORT="${4:-$PORT}" \
+        bash -c "$CMD" 2>&1)
+  echo "rc=$?"
+  echo $(( (${EPOCHREALTIME/./} - t0) / 1000 )) > "$T/took"
+  sleep 0.5
+  [ ! -f "$T/opened" ] || sed 's/^/opened /' "$T/opened"
+}
+
+check "option on, a pack and a fresh start open the Board once, on localhost" \
+  "rc=0|opened https://localhost:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
+check "the option unset (its default) opens it too" \
+  "rc=0|opened https://localhost:$PORT/" "$(start startup "$T/repo" | paste -sd'|')"
+echo '{"board": {"lan": true}}' > "$T/config/conveyor/host.json"
+check "a host file that says LAN opens the Board at this machine's LAN name" \
+  "rc=0|opened https://$(hostname -s).local:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
+echo '{}' > "$T/config/conveyor/host.json"
+check "option off opens nothing" "rc=0" "$(start startup "$T/repo" false | paste -sd'|')"
+for s in resume clear compact; do
+  check "a $s start opens nothing (no stacked tabs)" "rc=0" "$(start "$s" "$T/repo" true | paste -sd'|')"
+done
+# No pack, so no pin: the shim would fail the start with "pins no Conveyor Belt commit" if the command reached it.
+check "a repo with no pack opens nothing and reports no error" "rc=0" "$(start startup "$T/bare" true | paste -sd'|')"
+DEAD=$(free_port)
+check "a Board that is not running is named in one line and nothing opens" \
+  "conveyor: the Board is not running (nothing serves https://localhost:$DEAD/), so it was not opened|rc=0" \
+  "$(start startup "$T/repo" true "$DEAD" | paste -sd'|')"
+# Another service on the Board's port is not the Board: a listener that accepts connections and never answers must
+# not open a tab, even once the background check gives up (its two-second limit).
+RAW=$(free_port)
+python3 -I -c 'import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(8)
+time.sleep(600)' "$RAW" & RAW_LSN=$!
+for _ in $(seq 50); do (exec 3<>"/dev/tcp/127.0.0.1/$RAW") 2>/dev/null && break; sleep 0.1; done
+check "another service listening on the port is not the Board: the start is not held for it" \
+  "rc=0" "$(start startup "$T/repo" true "$RAW" | paste -sd'|')"
+took=$(<"$T/took")
+check "and the hook returns within a second, not after the check's two-second limit" yes \
+  "$([ "$took" -lt 1000 ] && echo yes || echo "no, $took ms")"
+sleep 2.5
+check "and nothing opens once its check gives up" no "$([ -f "$T/opened" ] && echo yes || echo no)"
+# Another HTTPS service serving the very same login page, under a certificate of its own, is not the Board either:
+# the page alone can be copied, the Board's certificate cannot.
+FORGE=$(free_port)
+mkdir -p "$T/forge"
+CONVEYOR_DASHBOARD_AUTH=$T/forge/dashboard-auth.json "$PY" "$SRC/.claude/scripts/dashboard_server.py" make-cert >/dev/null
+CONVEYOR_DASHBOARD_AUTH=$T/forge/dashboard-auth.json "$PY" "$SRC/.claude/scripts/dashboard_server.py" "$FORGE" "$T/out" 2>/dev/null & FORGE_LSN=$!
+for _ in $(seq 50); do curl -sk -o /dev/null "https://127.0.0.1:$FORGE/login" && break; sleep 0.1; done
+check "the forged service does serve the Board's login page" yes \
+  "$(curl -sk "https://127.0.0.1:$FORGE/login" | grep -qF '<title>Conveyor Board</title>' && echo yes || echo no)"
+check "another HTTPS service serving the Board's login page under its own certificate: named in one line, nothing opens" \
+  "conveyor: the Board is not running (nothing serves https://localhost:$FORGE/), so it was not opened|rc=0" \
+  "$(start startup "$T/repo" true "$FORGE" | paste -sd'|')"
+# A curl configuration that turns certificate checks off must not let the forged service through either.
+mkdir -p "$T/curlhome"; echo insecure > "$T/curlhome/.curlrc"
+check "the forged service, with the user's curl configuration saying insecure, still opens nothing" \
+  "conveyor: the Board is not running (nothing serves https://localhost:$FORGE/), so it was not opened|rc=0" \
+  "$(CURL_HOME=$T/curlhome start startup "$T/repo" true "$FORGE" | paste -sd'|')"
+# A listener whose accept queue is full: a connect to it waits on, so the hook must not wait for it to hold the start.
+FULL=$(free_port)
+python3 -I -c 'import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(0)
+cs = [socket.socket() for _ in range(3)]
+for c in cs:
+    c.setblocking(False)
+    try: c.connect(("127.0.0.1", int(sys.argv[1])))
+    except BlockingIOError: pass
+time.sleep(600)' "$FULL" & FULL_LSN=$!
+sleep 1
+check "a Board whose accept queue is full does not hold the start" "rc=0" \
+  "$(start startup "$T/repo" true "$FULL" | paste -sd'|')"
+took=$(<"$T/took")
+check "and the hook returns within a second, not after the check's two-second limit" yes \
+  "$([ "$took" -lt 1000 ] && echo yes || echo "no, $took ms")"
+sleep 2.5
+check "and nothing opens once its check gives up" no "$([ -f "$T/opened" ] && echo yes || echo no)"
+
+# A card session opens no Board: it is launched with no setting sources (so no plugin and its SessionStart hook;
+# conveyor/tests codex.test.sh t_codexclaude and opencode.test.sh t_opencodeclaude check the launch args), and the
+# settings it is given carry no such hook (conveyor/tests/rules.test.sh t_packrules).
+
+echo; echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# Every engine, Board and hook test, and the privacy check's generic patterns, on Ubuntu and macOS. It runs only at a
+# release: release.yml calls it at the commit it releases, and tags only when both jobs pass. The owner can also run it
+# by hand from the Actions tab. No push or pull request starts it (each run costs the owner's Actions minutes). A test
+# that fails turns its job red. A second start cancels the run still going.
+name: CI
+on:
+  workflow_call:
+  workflow_dispatch:
+concurrency:
+  group: ci
+  cancel-in-progress: true
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      # What the engine itself needs on macOS (its require_bash and p_tools stop it without them, conveyor/lib/portable.sh);
+      # the runner has bash 3.2 and none of the GNU tools. The tests run the same tools through p_tools, as the engine does.
+      - if: runner.os == 'macOS'
+        run: brew install bash jq coreutils findutils gnu-sed grep flock
+      # The closure suite runs the install in a bwrap sandbox; Ubuntu 24.04 refuses it the user namespace unless asked.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -yq bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npm ci
+      # The Board's own virtualenv, where conveyor.sh setup puts it: the page server and its tests run its python3.
+      - run: python3 -m venv ~/.local/share/conveyor/board-venv && ~/.local/share/conveyor/board-venv/bin/python3 -m pip install -q --require-hashes -r .claude/scripts/requirements.txt
+      - run: git config --global user.name ci && git config --global user.email ci@users.noreply.github.com
+      - name: Privacy check (generic patterns)
+        run: git ls-files -z | xargs -0 bash conveyor/privacy/check.sh
+      # Run even when the privacy check fails, so a privacy hit never hides the test results; the job still fails.
+      - name: Every test
+        if: always()
+        run: |
+          rc=0
+          while IFS= read -r t; do
+            case $t in
+              *.mjs) c=(node --max-old-space-size=4096 --test "$t") ;;
+              *.py) c=(python3 "$t") ;;
+              *) c=(bash "$t") ;;
+            esac
+            echo "::group::$t"
+            if "${c[@]}" < /dev/null; then r=ok; else r=FAIL; rc=1; fi
+            echo "::endgroup::"
+            echo "$r $t"
+          done < <(git ls-files '*.test.sh' '*.test.mjs' '*.test.py')
+          exit $rc

@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conveyor/schema/pack.schema.json",
+  "title": "Conveyor project pack (.conveyor/project.json)",
+  "description": "What Conveyor knows of one project. conveyor/lib/pack.sh checks a pack against this file with jq, so it may use only the keywords pack.sh lists; a field with a default may be left out.",
+  "type": "object",
+  "required": ["owner", "labels", "productPaths", "test", "linkFromMain", "push", "remote", "defaultBranch", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "plugin": {
+      "description": "The plugin this project runs (plan section 7): one commit it is pinned to (commit), or the plugin's newest release or its main as they move (follow), never both.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commit": { "type": "string", "minLength": 40 },
+        "follow": { "description": "Each machine takes the plugin's newest published release (releases) or its pushed main (main, for testing changes before they are released) once it passes its check (docs/setup.md, Following releases or main, or pinning a commit).", "type": "string", "enum": ["releases", "main"] }
+      }
+    },
+    "owner": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "description": "Whose yes a visible change needs, and the word an approval line may hold.", "type": "string", "minLength": 1 }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "required": ["built", "followup", "type", "priorities", "areaPrefix", "nonProductAreas"],
+      "additionalProperties": false,
+      "properties": {
+        "built": { "description": "Built and merged, waiting for the owner's deploy: never picked.", "type": "string", "minLength": 1 },
+        "followup": { "description": "The label of the follow-ups Conveyor files.", "type": "string", "minLength": 1 },
+        "type": { "description": "The type label a filed follow-up carries.", "type": "string", "minLength": 1 },
+        "priorities": { "description": "The priority labels, most urgent first.", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "areaPrefix": { "type": "string", "minLength": 1 },
+        "nonProductAreas": { "description": "Area labels whose issues are not product work.", "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "productPaths": {
+      "description": "Path prefixes of product code: a change under one needs the owner's yes when it is visible.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "pipelineFiles": {
+      "description": "The files, and the folders (each file under one), that are how cards are built, reviewed, fixed, tested, landed or pushed, as paths from the repository root: a follow-up whose finding names one is filed held, and built only once the owner releases it.",
+      "type": "array",
+      "default": [],
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "test": {
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "description": "Run in a card's worktree before the card lands.", "type": "string", "minLength": 1 },
+        "fileBudget": { "description": "The CPU seconds (user plus system, of the file's process tree) one test file may use in a card's run (its runner's `TESTRUN sec` log line), not its clock seconds, which on a busy machine measure the load: a test file the card adds or changes that uses more is a P2 finding of its review, unless it was over before and the card made it use no more than 20% more. 8 CPU s fits in about 4 s of clock time on a quiet machine, with its worker threads. A file with a budget of its own in files is held to that budget instead.", "type": "number", "minimum": 1, "default": 8 },
+        "files": {
+          "description": "Settings of one test file, by its path from the repository root (conveyor/README.md, The test files in the snapshot). budget: the CPU seconds that file may use, in place of fileBudget. slowOnPurpose: the reason the file is slow on purpose, one line; such a file is held to no budget, so it is in no slow note and no CPU test rule (budget, usual) files an issue about it. Set and cleared with `conveyor.sh test-settings`. cardMode and wholeOnly, of a meta-runner (a test file that starts other test files), are read by the project's card test command (this project's .conveyor/test-changed.sh): cardMode, the NAME=VALUE that makes the file run its own checks with a stub in place of the files it starts, which a card's test step runs it with; wholeOnly: true, a card's test step does not run it, the nightly whole test does. A meta-runner with neither fails a card's test step.",
+          "type": "object", "default": {},
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false,
+            "properties": {
+              "budget": { "type": "number", "minimum": 1 },
+              "slowOnPurpose": { "type": "string", "minLength": 1 },
+              "cardMode": { "type": "string", "minLength": 1 },
+              "wholeOnly": { "type": "boolean" }
+            }
+          }
+        },
+        "slower": {
+          "description": "When the snapshot's tests part names a test file slower than its usual: its CPU seconds in each of its last runs card runs are over its usual (the median of its runs before those) by more than share (0.25: 25%), and at least minRuns runs of it are on record.",
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "share": { "type": "number", "minimum": 0, "default": 0.25 },
+            "runs": { "type": "integer", "minimum": 1, "default": 3 },
+            "minRuns": { "type": "integer", "minimum": 2, "default": 5 }
+          }
+        },
+        "slowIssues": { "description": "Files nothing: the test rules (rules) replace the \"Slow test\" issues it filed. A file over its budget is still a note on the card's test line (slow).", "type": "boolean", "default": false },
+        "rules": {
+          "description": "The test rules (conveyor/README.md, Test rules): each files one issue about a test file that meets its limit, behind one switch and the guards. Set with `conveyor.sh testrules`; `conveyor.sh testrules preview` lists what they match now and files nothing.",
+          "type": "object", "additionalProperties": false, "default": {},
+          "properties": {
+            "on": { "description": "The switch of every rule. false (the default): no rule files anything.", "type": "boolean", "default": false },
+            "perDay": { "description": "The most issues the rules file in one day; the rest wait for the next day.", "type": "integer", "minimum": 1, "default": 3 },
+            "maxOpen": { "description": "The most issues of the rules open at one time.", "type": "integer", "minimum": 1, "default": 5 },
+            "quietDays": { "description": "The days after the last issue filed for a file closes in which no issue is filed for that file.", "type": "integer", "minimum": 0, "default": 14 },
+            "burst": { "description": "true (the default): a pass that matches more files than perDay files nothing and puts one line in \"Needs you\".", "type": "boolean", "default": true },
+            "list": {
+              "description": "The rules, in the order they are read: a file two rules match is filed by the first.",
+              "type": "array", "default": [],
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["name", "on", "measure", "limit", "runs", "minRuns"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 },
+                  "on": { "type": "boolean" },
+                  "measure": { "description": "budget: CPU seconds over limit times the file's budget; usual: CPU seconds over limit times its usual (the median of its runs before the last runs); clock: clock seconds over limit times CPU seconds, with at least minClock clock seconds; flaky: at least limit flaky entries of its cases in the last days days; failed: at least limit failed test steps in it in the last days days.", "type": "string", "enum": ["budget", "usual", "clock", "flaky", "failed"] },
+                  "limit": { "type": "number", "minimum": 0 },
+                  "runs": { "description": "The card test runs in a row that each meet the limit (budget, usual, clock).", "type": "integer", "minimum": 1 },
+                  "minRuns": { "description": "The least count of the file's card test runs on record.", "type": "integer", "minimum": 0 },
+                  "days": { "description": "flaky and failed: the days counted.", "type": "integer", "minimum": 1, "default": 7 },
+                  "minClock": { "description": "clock: the least clock seconds of a run.", "type": "number", "minimum": 0, "default": 0 }
+                }
+              }
+            }
+          }
+        },
+        "survey": { "description": "The monthly test-speed survey: on the first day of each month, in the hour surveyHour, `serve` files one issue whose card runs each test file alone, records its clock and CPU seconds, rewrites the slowest lists and the survey report, and names the files newly over fileBudget. false: none is filed.", "type": "boolean", "default": true },
+        "firstSurvey": { "description": "The answer setup saved to its question \"Run a first test-speed survey now?\": true, setup filed one survey issue; false, none. Unset, setup asks it and changes nothing until it is answered; once saved, it is not asked again, and `setup --survey yes|no` answers it again.", "type": "boolean" },
+        "surveyHour": { "description": "The machine's quietest hour, local time (0 to 23), in which the monthly test-speed survey's issue is filed on the 1st, and the only hour in which its card is picked: 3 is 03:00 to 03:59.", "type": "integer", "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], "default": 3 },
+        "main": { "description": "The whole test, run by the loop in a worktree of the default branch, never by a card: at most once an hour, when the branch has moved since its last run. A failure files one issue naming the failing cases and the commits since the last pass. None: no such run.", "type": "string", "minLength": 1 },
+        "full": { "description": "The full test suite, run on the default branch from the Board: its Run full test suite, and Push landed, which pushes what landed only once it passes. Each failed case is run again alone and judged (flaky, a fix card, or declined). None: both buttons are off.", "type": "string", "minLength": 1 },
+        "wholeCommands": { "description": "Test runners that run the whole suite when no case is named, as paths from the repository root: the command guard refuses one in a card's build or fix session unless the command names a case (conveyor/README.md, When a full test run is allowed).", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } },
+        "changed": { "description": "The script that runs the tests a change touches, as a path from the repository root: the command guard refuses it a second time in one card session.", "type": "string", "minLength": 1 },
+        "sessionBudget": { "description": "The CPU seconds of test commands (node --test, a *.test.sh, pytest, vitest or jest) one card build or fix session may use: once the session's test commands have used more, the command guard refuses its next test command (conveyor/README.md, The session test budget). The card's test step still runs the tests. 3600 CPU s is an estimate, not a measurement: the 95th percentile (3596.5 CPU s), rounded up, of 175 logged sessions' test commands, each given its test files' CPU seconds from other runs' test steps, or its clock seconds where none was recorded.", "type": "number", "minimum": 1, "default": 3600 }
+      }
+    },
+    "linkFromMain": {
+      "description": "Worktree-relative paths linked from the main checkout into each card's worktree.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "push": {
+      "type": "object",
+      "required": ["env"],
+      "additionalProperties": false,
+      "properties": {
+        "env": { "description": "Variables set for the engine's push.", "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "remote": { "type": "string", "minLength": 1 },
+    "defaultBranch": { "type": "string", "minLength": 1 },
+    "models": {
+      "type": "object",
+      "required": ["allowed"],
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "description": "Default models for the builder and the reviewer, by the program that runs them: the first for a seat is its default. They limit nothing the control record sets (a CLI installed on the host and a model it has registered: docs/configuration.md, Models).",
+          "type": "object",
+          "required": ["claude", "codex", "claude-reviewer"],
+          "additionalProperties": false,
+          "properties": {
+            "claude": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "codex": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "claude-reviewer": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "codex-builder": {
+              "description": "Builder models Codex runs (conveyor/README.md, Codex builder), each a model name as models.allowed.codex names one.",
+              "type": "array", "items": { "type": "string", "minLength": 1 }
+            },
+            "opencode": {
+              "description": "The OpenCode models the builder (conveyor/README.md, OpenCode builder), the reviewer and the judge may run on, each opencode:<provider>/<model> (OpenCode's provider/model, as `opencode models` lists it); a name of another shape is never offered or run.",
+              "type": "array", "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "claudeProxy": {
+          "description": "The API proxy every Claude card session runs through: its base URL and the NAME of the environment variable that holds its key (never the key). toolSearch is ENABLE_TOOL_SEARCH for a base URL that is not api.anthropic.com (true when left out). The host file's claudeProxy, when it names one, is used instead.",
+          "type": "object",
+          "required": ["baseUrl"],
+          "additionalProperties": false,
+          "properties": {
+            "baseUrl": { "type": "string", "minLength": 1 },
+            "keyEnv": { "type": "string", "minLength": 1 },
+            "toolSearch": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "prices": {
+      "description": "Model price overrides, by model name, in $ per million tokens: each wins over the Board's built-in price of that model (cache writes follow the built-in multipliers). Set on the Board (Rules, Model prices) or with conveyor.sh prices.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["input", "output", "cacheRead"],
+        "properties": {
+          "input": { "type": "number", "minimum": 0 },
+          "output": { "type": "number", "minimum": 0 },
+          "cacheRead": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "rulings": {
+      "type": "object",
+      "required": ["log"],
+      "additionalProperties": false,
+      "properties": {
+        "log": { "description": "The ruling log, a path under the user's home (~/...).", "type": "string", "minLength": 1 }
+      }
+    },
+    "checks": {
+      "description": "Extra check commands run before a card lands, repo-relative: the list itself, or an object whose run is that list and whose progress is a command, run from the repo root, printing the current or most recent check run as one JSON object (nothing when there has been none) for the Board and /units: {name, sha, started, ended (null while it runs), result (pass, fail or null), lanes: [{name, state (queued, running, passed, failed or reused), started, sec}]}, times in UTC ISO.",
+      "type": ["array", "object"],
+      "default": [],
+      "items": { "type": "string", "minLength": 1 },
+      "additionalProperties": false,
+      "properties": {
+        "run": { "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } },
+        "progress": { "type": "string", "minLength": 1 }
+      }
+    },
+    "commit": {
+      "description": "The commit trailers of a card's commit: a card writes its own in <worktree>.trailers.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "trailers": {
+          "description": "Trailers required by condition: when a path the change adds matches when (an ERE), the commit carries a token line; ask is the sentence the build prompt gives for it.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": ["when", "token", "ask"],
+            "additionalProperties": false,
+            "properties": {
+              "when": { "type": "string", "minLength": 1 },
+              "token": { "type": "string", "minLength": 1 },
+              "ask": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "forbid": {
+          "description": "Trailer tokens a card may not write (Co-Authored-By never may).",
+          "type": "array",
+          "default": [],
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "areas": {
+      "description": "Area rule files a card is given, by path glob (plan section 10).",
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "lanes": {
+      "description": "Lane models and efforts (plan section 11b).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "research": { "$comment": "a model and an effort", "type": "object", "required": ["model", "effort"], "additionalProperties": false,
+          "properties": { "model": { "type": "string", "minLength": 1 }, "effort": { "type": "string", "minLength": 1 } } }
+      }
+    },
+    "foreman": {
+      "description": "The Foreman's model and effort (plan section 11b).",
+      "type": "object",
+      "required": ["model", "effort"],
+      "additionalProperties": false,
+      "properties": { "model": { "type": "string", "minLength": 1 }, "effort": { "type": "string", "minLength": 1 } }
+    },
+    "review": {
+      "description": "How the card review is asked.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "proof": { "description": "any: any proof that can be reproduced makes a finding; real: a finding's proof must happen with what the project really runs, else it is an UNPROVEN line (a security finding is exempt).", "enum": ["any", "real"], "default": "any" },
+        "rereviewWhole": { "description": "The review after a fix of review findings reviews the fix's diff and the findings it was told to fix, not the whole change again, unless the fix touches more than this percent of the change's added and removed lines: then it reviews the whole change. 0 reviews the whole change after every fix that changes a line.", "type": "integer", "minimum": 0, "default": 50 },
+        "wording": { "description": "A file of the project, from its checkout's root, holding the wording /conveyor-belt:review gives Codex, in place of the plugin's conveyor/rules/review.md: a `# adversarial` section and a `# review` section (conveyor.sh wording).", "type": "string", "minLength": 1 }
+      }
+    },
+    "auto": {
+      "description": "/conveyor-belt:auto, where the Foreman decides the owner's open decisions for them (conveyor.sh auto).",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "reserved": { "description": "What is never decided for the owner: an open decision whose question, recommended option or options hold one of these words or phrases (in any case) waits for the owner.", "type": "array", "items": { "type": "string", "minLength": 1 }, "default": ["production deploy", "prod deploy", "delete", "feature flag", "security", "password", "product setting", "configured value", "licence", "license", "consent"] }
+      }
+    },
+    "privacy": {
+      "description": "How the privacy check (conveyor/privacy/check.sh) gates every GitHub write the engine and the Board make.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "description": "public: a hit keeps the text local and posts nothing, and so does a terms file the host file names that cannot be read (the terms file is optional); private: a hit is a warning and the text is posted.", "enum": ["public", "private"], "default": "public" }
+      }
+    },
+    "landBatch": {
+      "description": "At most this many cards that are ready to land and share files land together, on one test run (1: each lands alone).",
+      "type": "integer",
+      "minimum": 1,
+      "default": 8
+    },
+    "land": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "parse": {
+          "description": "After any merge at landing, each file the merge changed is checked to parse before any test runs: a glob (its * matches a / too) to the command run on each file it matches, the file's path added after it. These add to the engine's own (*.js and *.mjs: node --check, *.sh: bash -n, *.json: jq empty, *.py: python3 -m py_compile); one of the same glob replaces it.",
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "tunables": {
+      "description": "The loop's timings, in seconds (waitLimitMin: in minutes).",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "poll": { "description": "A loop with a free builder slot looks for an issue at least this often.", "type": "integer", "minimum": 1, "default": 30 },
+        "idle": { "description": "serve with nothing in flight and nothing to pick looks again after this.", "type": "integer", "minimum": 1, "default": 60 },
+        "stuck": { "description": "health lists an open card with no new line and no output for this long; a build, fix, rebase or review with no output, file change or commit for this long is ended and runs once more, and a second stall blocks the card.", "type": "integer", "minimum": 1, "default": 1200 },
+        "sessionStuck": { "description": "health lists a card whose session (build, fix, rebase) has had no output for this long, when that is sooner than stuck.", "type": "integer", "minimum": 1, "default": 600 },
+        "caseStuck": { "description": "health lists a card whose test step has one case running for this long: the ceiling of one case.", "type": "integer", "minimum": 1, "default": 600 },
+        "waitLimitMin": { "description": "health lists a card that has waited on other cards for more than this many minutes in total.", "type": "integer", "minimum": 1, "default": 30 },
+        "sample": { "description": "A sample is taken at most this often.", "type": "integer", "minimum": 1, "default": 60 },
+        "live": { "description": "A running step's live record is brought up to date this often.", "type": "number", "minimum": 0, "default": 1 },
+        "closeWait": { "description": "After a push, GitHub is given this long to show a landed card's issue closed.", "type": "integer", "minimum": 0, "default": 60 },
+        "pushRetry": { "description": "A failed push is tried again at least this often.", "type": "integer", "minimum": 1, "default": 600 },
+        "pushTimeout": { "type": "integer", "minimum": 1, "default": 900 },
+        "buildTimeout": { "type": "integer", "minimum": 1, "default": 3600 },
+        "reviewTimeout": { "type": "integer", "minimum": 1, "default": 900 },
+        "reviewPause": { "description": "A review that ended with no verdict, and a build, fix, rebase or review ended for no progress, runs once more after this pause.", "type": "integer", "minimum": 0, "default": 60 },
+        "apiPause": { "description": "A session the model API refused (403 Cloudflare, 429, 5xx, overloaded, connection reset) runs again after 1, 2, 4 and 8 times this, and no new card starts for 5 times this.", "type": "number", "minimum": 0, "default": 60 },
+        "testTimeout": { "type": "integer", "minimum": 1, "default": 3600 },
+        "limitTtl": { "description": "The weekly limit reading is asked for again once the last asking is this old (0: at every asking).", "type": "integer", "minimum": 0, "default": 300 },
+        "limitOld": { "description": "A weekly limit reading older than this is no reading.", "type": "integer", "minimum": 1, "default": 1800 },
+        "testActionTimeout": { "description": "A test action's session (conveyor.sh testaction) is ended once it has run this long, and its record says timed out.", "type": "integer", "minimum": 1, "default": 900 }
+      }
+    }
+  }
+}

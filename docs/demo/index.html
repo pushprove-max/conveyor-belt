@@ -1,0 +1,218 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- The product demo (docs/demo.gif, docs/demo.mp4): a HyperFrames composition of the twelve storyboard beats, 89.5 s at
+     1280x720. make.sh copies it beside the captures it cuts together (captures/: beat2.js from record-terminal.sh,
+     beat4.mp4 to beat8.mp4 and tests.mp4 from capture-board.js, beat9.mp4 and foreman.mp4 from record-cli.sh) and renders it. Its
+     visible text says nothing of how the demo is made (index.test.mjs). Motion is CSS animation, which the
+     HyperFrames runtime seeks frame by frame; each animation's time counts from its clip's start. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280, height=720">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 720px; overflow: hidden; background: #0d0f14; color: #e6e8ef;
+    font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .clip { position: absolute; inset: 0; overflow: hidden; }
+  .center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
+
+  /* The caption: one short line a beat, sliding up from the foot of the frame. */
+  .cap { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 10; white-space: nowrap;
+    background: rgba(13, 15, 20, 0.92); border: 2px solid #8b8cf8; border-radius: 999px; padding: 12px 26px;
+    font-size: 26px; font-weight: 650; animation: cap-in 0.5s ease-out 0.15s both; }
+  .cap b { display: inline-block; min-width: 34px; margin-right: 10px; color: #0d0f14; background: #4ade80; border-radius: 999px;
+    text-align: center; padding: 0 8px; }
+  @keyframes cap-in { from { transform: translate(-50%, 90px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+  /* The camera on a Board capture: the page at full width, zoomed onto the panel the beat is about. */
+  .cam { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; transform-origin: var(--ox) var(--oy);
+    animation: zoom var(--zt, 1.4s) ease-in-out var(--zd, 0.6s) both; }
+  .cam video { width: 1280px; height: 800px; display: block; }
+  @keyframes zoom { from { transform: scale(1); } to { transform: scale(var(--z, 1.35)); } }
+
+  /* The logo, which assembles on its tile: the tile, then the arc drawn, then the parcel sliding onto it. */
+  .logo { width: 220px; height: 220px; overflow: visible; }
+  .logo .tile { transform-origin: 32px 32px; animation: tile-in 0.6s cubic-bezier(.2, 1.4, .4, 1) 0.1s both; }
+  .logo .arc { stroke-dasharray: 76; animation: arc-in 0.8s ease-out 0.5s both; }
+  .logo .parcel { animation: parcel-in 0.5s ease-out 1.15s both; }
+  @keyframes tile-in { from { transform: scale(0.2) rotate(-25deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes arc-in { from { stroke-dashoffset: 76; } to { stroke-dashoffset: 0; } }
+  @keyframes parcel-in { from { transform: translateX(-30px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .title { font-size: 64px; font-weight: 800; letter-spacing: -0.02em; animation: rise 0.6s ease-out 1.5s both; }
+  .tag { font-size: 34px; color: #4ade80; font-weight: 650; animation: rise 0.6s ease-out 1.9s both; }
+  @keyframes rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* Beat 2: the terminal, with the session record-terminal.sh recorded, line by line. */
+  .term { position: absolute; left: 20px; top: 12px; width: 1240px; height: 632px; border-radius: 12px; background: #11141b;
+    border: 1px solid #2a2f3d; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+  .term-bar { height: 34px; background: #1b1f2a; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-size: 15px; color: #9aa1b2; }
+  .term-bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a4050; display: inline-block; }
+  .term-bar span { margin-left: 12px; }
+  .term pre { padding: 12px 18px; font: 15.5px/20px "DejaVu Sans Mono", Menlo, Consolas, monospace; white-space: pre; color: #c9cfdc; }
+  .term pre div { animation: line-in 0.01s linear both; }
+  .term .prompt { color: #8b8cf8; font-weight: 700; }
+  .term .ok { color: #4ade80; }
+  @keyframes line-in { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Beat 3: three issues filed on GitHub drop onto the belt. */
+  .gh { position: absolute; left: 190px; top: 50px; width: 900px; border: 1px solid #30363d; border-radius: 10px; background: #0d1117; overflow: hidden; }
+  .gh-head { padding: 16px 22px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 22px; font-weight: 650; }
+  .gh-head span { color: #8b949e; font-weight: 400; }
+  .issue { display: flex; gap: 14px; align-items: baseline; padding: 16px 22px; border-bottom: 1px solid #21262d; font-size: 22px;
+    animation: filed 0.4s ease-out var(--d) both, drop 0.8s cubic-bezier(.5, 0, .8, .4) var(--drop) forwards; }
+  .issue .dot { width: 16px; height: 16px; border-radius: 50%; border: 3px solid #3fb950; flex: none; align-self: center; }
+  .issue small { color: #8b949e; font-size: 17px; margin-left: auto; }
+  @keyframes filed { from { transform: translateX(-40px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes drop { to { transform: translateY(var(--fall)) scale(0.55); opacity: 0; } }
+  .belt { position: absolute; left: 0; right: 0; top: 520px; height: 64px; background: repeating-linear-gradient(90deg, #1d2230 0 40px, #252b3b 40px 80px);
+    border-top: 3px solid #8b8cf8; border-bottom: 3px solid #4ade80; animation: belt-run 4.5s linear both; }
+  @keyframes belt-run { from { background-position: 0 0; } to { background-position: 360px 0; } }
+  .parcels { position: absolute; top: 528px; left: 0; display: flex; gap: 24px; animation: parcels 2s ease-in 2.6s both; }
+  .parcels div { width: 180px; height: 48px; border-radius: 9px; background: #4ade80; color: #0d0f14; font-weight: 800; font-size: 22px;
+    display: flex; align-items: center; justify-content: center; }
+  @keyframes parcels { from { transform: translateX(160px); opacity: 0; } 15% { opacity: 1; } to { transform: translateX(1300px); opacity: 1; } }
+
+  /* Beat 4: the landed card's commit on main. */
+  .commit { position: absolute; right: 30px; top: 150px; z-index: 9; background: #11141b; border: 2px solid #4ade80; border-radius: 12px;
+    padding: 14px 20px; font: 600 22px "DejaVu Sans Mono", Menlo, Consolas, monospace; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    animation: commit-in 0.5s cubic-bezier(.2, 1.3, .4, 1) 5.1s both; }
+  .commit span { color: #facc15; }
+  .commit em { font-style: normal; color: #4ade80; margin-left: 8px; }
+  @keyframes commit-in { from { transform: translateX(120px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* The end card. */
+  .cmd { font: 600 32px "DejaVu Sans Mono", Menlo, Consolas, monospace; background: #151821; border: 2px solid #4ade80; border-radius: 12px;
+    padding: 14px 26px; animation: rise 0.6s ease-out 0.9s both; }
+  .link { font-size: 30px; color: #8b8cf8; animation: rise 0.6s ease-out 1.3s both; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="89.5" data-width="1280" data-height="720" data-fps="30">
+
+  <!-- 1. Title card -->
+  <section class="clip center" data-start="0" data-duration="3.5">
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+      <defs><linearGradient id="cv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b8cf8"/><stop offset="1" stop-color="#4ade80"/></linearGradient></defs>
+      <rect class="tile" x="1.5" y="1.5" width="61" height="61" rx="17" fill="#151821" stroke="url(#cv)" stroke-width="3"/>
+      <path class="arc" d="M42.5 20.5A16 16 0 1 0 42.5 43.5" fill="none" stroke="url(#cv)" stroke-width="7.5" stroke-linecap="round"/>
+      <rect class="parcel" x="35" y="26.5" width="16" height="11" rx="3" fill="#4ade80"/>
+    </svg>
+    <div class="title">Conveyor Belt</div>
+    <div class="tag">Issues in. Merged commits out.</div>
+  </section>
+
+  <!-- 2. Terminal: setup's checks, then conveyor doctor -->
+  <section class="clip" data-start="3.5" data-duration="6">
+    <div class="term"><div class="term-bar"><i></i><i></i><i></i><span>dev@acme: ~/acme-api</span></div><pre id="term"></pre></div>
+    <div class="cap"><b>2</b>/conveyor-belt:setup, then conveyor doctor: all green</div>
+  </section>
+
+  <!-- 3. GitHub: three issues are filed; they drop onto the belt -->
+  <section class="clip" data-start="9.5" data-duration="4.5">
+    <div class="gh">
+      <div class="gh-head">example/acme-api <span>· Issues</span></div>
+      <div class="issue" style="--d: 0.2s; --drop: 2.3s; --fall: 360px"><span class="dot"></span><span>Rate-limit the login endpoint</span><small>#41 · opened just now</small></div>
+      <div class="issue" style="--d: 0.7s; --drop: 2.45s; --fall: 300px"><span class="dot"></span><span>Add cursor pagination to /orders</span><small>#42 · opened just now</small></div>
+      <div class="issue" style="--d: 1.2s; --drop: 2.6s; --fall: 240px"><span class="dot"></span><span>Return 404 for unknown customers</span><small>#43 · opened just now</small></div>
+    </div>
+    <div class="belt"></div>
+    <div class="parcels"><div>#43</div><div>#42</div><div>#41</div></div>
+    <div class="cap"><b>3</b>Three issues filed: onto the belt they go</div>
+  </section>
+
+  <!-- 4. The Board, Overview: cards move along the belt, the counters tick, a card lands -->
+  <section class="clip" data-start="14" data-duration="7">
+    <div class="cam" style="--ox: 0%; --oy: 0%; --z: 1.2"><video src="captures/beat4.mp4" muted data-start="14" data-duration="7" data-media-start="1"></video></div>
+    <!-- #42 lands at 5 s into the beat (timeline.js): its commit on main. -->
+    <div class="commit"><span>4f2c9e1</span> Add cursor pagination to /orders <em>Closes #42</em></div>
+    <div class="cap"><b>4</b>The Board: Pick, Build, Review, Test, Land, Push, live</div>
+  </section>
+
+  <!-- 5. A card's detail: review 1 finds a P1, the fix round, review 2 clean, it lands. Beats 5 to 8: capture-board.js
+       fits each clip to its section's data-duration (its length), so the cut shows each beat to its last action. -->
+  <section class="clip" data-start="21" data-duration="8.5">
+    <div class="cam" style="--ox: 0%; --oy: 10%; --z: 1.45"><video src="captures/beat5.mp4" muted data-start="21" data-duration="8.5" data-media-start="0"></video></div>
+    <div class="cap"><b>5</b>Review finds a P1, the fix runs, review 2 is clean, it lands</div>
+  </section>
+
+  <!-- 6. Needs you: a blocked card, its work kept; one Retry and it is back on the belt -->
+  <section class="clip" data-start="29.5" data-duration="6">
+    <div class="cam" style="--ox: 0%; --oy: 15%; --z: 1.4"><video src="captures/beat6.mp4" muted data-start="29.5" data-duration="6" data-media-start="0"></video></div>
+    <div class="cap"><b>6</b>Needs you: blocked, work kept. One Retry and it is back</div>
+  </section>
+
+  <!-- 7. The controls: the cards-at-once setting changed, here to 6, the builder model, an issue held, then released -->
+  <section class="clip" data-start="35.5" data-duration="9.5">
+    <div class="cam" style="--ox: 0%; --oy: 25%; --z: 1.5; --zd: 0.3s; --zt: 0.9s"><video src="captures/beat7.mp4" muted data-start="35.5" data-duration="9.5" data-media-start="0"></video></div>
+    <div class="cap"><b>7</b>Cards at once: a setting, changed here to 6. New model, hold, release</div>
+  </section>
+
+  <!-- 8. The Rules tab: P2 off and on, follow-ups on -->
+  <section class="clip" data-start="45" data-duration="6">
+    <div class="cam" style="--ox: 0%; --oy: 30%; --z: 1.6; --zd: 0.2s; --zt: 0.8s"><video src="captures/beat8.mp4" muted data-start="45" data-duration="6" data-media-start="0"></video></div>
+    <div class="cap"><b>8</b>Rules: P2 off and on again, follow-ups on</div>
+  </section>
+
+  <!-- 9. The Tests tab: each file's CPU s, median, last runs and status; the file over budget opens, Explain the
+       slowdown shows its answer, then Judge this test gives a second file its verdict. Not zoomed: the status column
+       is at the page's right edge. -->
+  <section class="clip" data-start="51" data-duration="11">
+    <div class="cam" style="--z: 1"><video src="captures/tests.mp4" muted data-start="51" data-duration="11" data-media-start="0"></video></div>
+    <div class="cap"><b>9</b>Tests: every file's CPU, budget and flakes; a model explains a slowdown</div>
+  </section>
+
+  <!-- 10. Claude Code with the /units pane beside the chat, its cards moving step by step (record-cli.sh, which fits the
+       clip to this section's data-duration). -->
+  <section class="clip center" data-start="62" data-duration="9">
+    <video class="clip" src="captures/beat9.mp4" muted data-start="62" data-duration="9" style="width: 1280px; height: 720px; object-fit: cover"></video>
+    <div class="cap"><b>10</b>/units: the belt beside your chat</div>
+  </section>
+
+  <!-- 11. The Foreman in the same session: "start your role" claims the Foreman; its wake names a blocked card, it asks
+       the owner one question with a picker, the owner picks, the Foreman runs the retry and the card is back on the
+       belt in the /units pane (record-cli.sh, fitted likewise). -->
+  <section class="clip center" data-start="71" data-duration="14">
+    <video class="clip" src="captures/foreman.mp4" muted data-start="71" data-duration="14" style="width: 1280px; height: 720px; object-fit: cover"></video>
+    <div class="cap"><b>11</b>Foreman: it asks, you pick, the card is back</div>
+  </section>
+
+  <!-- 12. End card -->
+  <section class="clip center" data-start="85" data-duration="4.5">
+    <!-- Its own gradient: Chrome draws no gradient from an SVG that is not shown, as the title card's is by now. -->
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true" style="width: 150px; height: 150px">
+      <defs><linearGradient id="cv-end" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b8cf8"/><stop offset="1" stop-color="#4ade80"/></linearGradient></defs>
+      <rect class="tile" x="1.5" y="1.5" width="61" height="61" rx="17" fill="#151821" stroke="url(#cv-end)" stroke-width="3"/>
+      <path class="arc" d="M42.5 20.5A16 16 0 1 0 42.5 43.5" fill="none" stroke="url(#cv-end)" stroke-width="7.5" stroke-linecap="round"/>
+      <rect class="parcel" x="35" y="26.5" width="16" height="11" rx="3" fill="#4ade80"/>
+    </svg>
+    <div class="cmd">/plugin install conveyor-belt@conveyor-belt</div>
+    <div class="link">github.com/pushprove-max/conveyor-belt</div>
+  </section>
+</div>
+<script src="captures/beat2.js"></script>
+<script>
+  // Beat 2's lines: the prompt lines typed with a pause before them, the rest printed one after another; an ok line green.
+  (function () {
+    const pre = document.getElementById('term');
+    const lines = String(window.BEAT2 || '').replace(/\n$/, '').split('\n');
+    let at = 0.4;
+    lines.forEach((text) => {
+      const div = document.createElement('div');
+      const prompt = /^dev@acme:/.test(text);
+      at += prompt ? 0.6 : 0.11;
+      if (prompt) {
+        const i = text.indexOf('$ ') + 2;
+        const p = document.createElement('span'); p.className = 'prompt'; p.textContent = text.slice(0, i);
+        div.append(p, text.slice(i));
+      } else {
+        div.textContent = text;
+        if (/^ok:|^conveyor: (wrote|created|took|saved|the project)/.test(text)) div.className = 'ok';
+      }
+      div.style.animationDelay = `${at.toFixed(2)}s`;
+      pre.append(div);
+    });
+  }());
+  window.__timelines = window.__timelines || {};
+</script>
+</body>
+</html>

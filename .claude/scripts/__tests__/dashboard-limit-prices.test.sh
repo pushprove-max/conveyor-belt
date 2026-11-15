@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# timeout: 300
+# The pack's model price overrides (prices) on the Board's request costs (dashboard_limit.py build, the top strip's cost
+# today and the limit card): an override wins over a model's built-in row, its fast mode and its long-prompt rate.
+# Bug caught: overrides that priced card steps but never the requests, so "today" stayed at the built-in price.
+set -euo pipefail
+. "$(dirname "$0")/../../../conveyor/lib/portable.sh"; p_tools
+SOURCE=$(git rev-parse --show-toplevel)
+LIM=$SOURCE/.claude/scripts/dashboard_limit.py
+T=$(cd "$(mktemp -d /tmp/dashboard-limit-prices-test.XXXXXX)" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+unset XDG_CONFIG_HOME
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# One request's price with the overrides put over the table: [model, input, 5-min write, 1-hour write, read, output].
+# Sonnet 5.5 overridden at $1 in: its fast mode is twice that ($2 for 1M in, not the built-in $4). Opus 5.5 overridden
+# at $1 in: its fast mode is $2, not the built-in fast row's $8. Haiku 5.5 overridden at $1 in: a 1M-token prompt is
+# $1, not its built-in long-prompt rate. gpt-6-astra:fast overridden itself keeps that rate on a long prompt.
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+d.use_prices({m: {'input': 1, 'output': 5, 'cacheRead': 0.1} for m in ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'gpt-6-astra:fast')})
+print(json.dumps([d.price([0, m, 1000000, 0, 0, 0, 0]) for m in ('claude-sonnet-5-5:fast', 'claude-opus-5-5:fast', 'claude-haiku-5-5', 'claude-haiku-5-5:fast', 'gpt-6-astra:fast', 'gpt-6-astra')]))")
+[ "$got" = '[2.0, 2.0, 1.0, 2.0, 1.0, 20.0]' ] || fail "the overridden request prices: $got"
+
+# Through the Board's collect: the pack's override reaches the cost today. One request today, 1M input tokens of
+# Sonnet 5.5 in fast mode: $4 at the built-in price, $2 at the pack's $1 override.
+MAIN=$T/main BIN=$T/bin OUT=$T/out H=$T/home
+mkdir -p "$MAIN/.conveyor" "$MAIN/.claude/metrics" "$BIN" "$H/.claude/projects/p" "$T/empty"
+git -C "$MAIN" init -q -b main
+git -C "$MAIN" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "feat: base commit"
+echo '{"prices": {"claude-sonnet-5-5": {"input": 1, "output": 5, "cacheRead": 0.1}}}' > "$MAIN/.conveyor/project.json"
+printf '{"type":"assistant","requestId":"r1","timestamp":"%s","cwd":"%s","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":1000000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0,"speed":"fast"}}}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$MAIN" > "$H/.claude/projects/p/s1.jsonl"
+rc=0
+env -u CONVEYOR_HOOK_FIRE_LOG -u CODEX_HOME TZ=UTC HOME="$H" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" \
+  CONVEYOR_CODEX_REVIEW_HOME="$T/empty" CONVEYOR_WORKSPACES="$T/empty" CONVEYOR_SCRATCH="$T/empty" CONVEYOR_DASHBOARD_DIR="$OUT" \
+  timeout 120 bash "$SOURCE/.claude/scripts/dashboard.sh" || rc=$?
+[ "$rc" -eq 0 ] || fail "dashboard.sh exited $rc"
+got=$(sed -e '1s/^window\.DASH = //' -e '$s/;$//' "$OUT/data.js" | jq -c '.panels.health.data.limit.today | [.claudeUsd, .requests]')
+[ "$got" = '[2.0,1]' ] || fail "the cost today at the pack's override: $got"
+echo "PASS: dashboard-limit-prices"

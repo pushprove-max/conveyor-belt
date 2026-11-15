@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# research-bash <bash argument>... -- the research lane's shell. The lane's settings name it CLAUDE_CODE_SHELL, so
+# Claude Code runs each Bash call through it (research-bash -c <command>). It runs bash with its arguments where the
+# operating system lets it write only the lane's reports folder (CONVEYOR_RESEARCH_REPORTS), the lane's own folder
+# (CONVEYOR_RESEARCH_DIR) and the temp folder (TMPDIR, else /tmp); every other file, the worktree and its git folder
+# among them, is read-only, whatever the command. Linux: bubblewrap, in a session of its own (no terminal to type
+# into), in a process namespace of its own (/proc shows no process outside, whose root it could write through), with a
+# /dev of its own (the host's /dev/shm is out of reach) and with /run/user hidden (its session bus could start a
+# command outside: systemd-run --user) and with no Unix socket of its own making (seccomp: a host server's socket, a
+# tmux one say, could run a command outside, wherever it is), and in a network namespace of its own, which reaches no
+# host but itself. macOS: sandbox-exec, which lets it write no device but the terminal and null and make no outbound
+# connection at all. So nothing in it reaches GitHub (curl, gh api) but through the lane's filing command
+# (research-file), whose filer it runs outside the sandbox, on file descriptors 7 and 6 of the command: an issue filed
+# that way starts held.
+# Exit 126, running nothing, when a folder is not there, one holds or is in the worktree or its git folders (but
+# reports/), git tracks a file in reports/, or no sandbox can run here.
+set -uo pipefail
+no() { echo "conveyor: the research lane's shell runs nothing: $1" >&2; exit 126; }
+w=()
+for d in "${CONVEYOR_RESEARCH_REPORTS:-}" "${CONVEYOR_RESEARCH_DIR:-}" "${TMPDIR:-/tmp}"; do
+  [ -n "$d" ] && [ -d "$d" ] || no "a folder it may write (${d:-unnamed}) is not there"
+  w+=("$(cd "$d" && pwd -P)")
+done
+# A folder it may write must not hold the worktree or its git folders, nor be in them (but for reports/ in the
+# worktree), and reports/ must hold no file git tracks: a write there would change what git tracks.
+top=$(git -C "${w[0]}" rev-parse --show-toplevel 2>/dev/null) && top=$(cd "$top" && pwd -P) \
+  && gd=$(cd "${w[0]}" && cd "$(git rev-parse --git-dir)" && pwd -P) && cm=$(cd "${w[0]}" && cd "$(git rev-parse --git-common-dir)" && pwd -P) \
+  || no "its reports folder (${w[0]}) is in no git worktree"
+for i in "${!w[@]}"; do
+  for p in "$top" "$gd" "$cm"; do
+    [[ $p/ != "${w[$i]}"/* ]] && { [[ ${w[$i]}/ != "$p"/* ]] || { [ "$i" = 0 ] && [ "$p" = "$top" ]; }; } \
+      || no "a folder it may write (${w[$i]}) holds or is in the worktree or its git folder ($p); set TMPDIR to a folder apart from them"
+  done
+done
+[ -z "$(git -C "$top" ls-files -- "${w[0]}")" ] || no "git tracks a file in its reports folder (${w[0]})"
+# The filer, outside the sandbox, in the worktree, reading requests on 7 and answering on 6 until every process in the
+# sandbox has ended. Its pipes are named only until both ends are open. Its lock is in its folder (research-filer,
+# beside the lane's folder), and what it keeps between holding new issues and starting them in the queue again is in
+# the filing folder every Foreman and filer shares, beside the host file (foreman/foreman.sh, SF): neither may be in a
+# folder the sandbox may write, as what is read there decides whether an issue is filed held. Each is compared where
+# it is, its links followed, as the folders it may write are.
+fd=${w[1]%/*}/research-filer sf=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/filing
+mkdir -p "$fd" && fd=$(cd "$fd" && pwd -P) || no "could not make the filer's folder ($fd)"
+mkdir -p "$sf" && sf=$(cd "$sf" && pwd -P) || no "could not make the shared filing folder ($sf)"
+for d in "${w[@]}"; do
+  [[ $fd/ != "$d"/* ]] || no "the filer's folder ($fd) is in a folder it may write ($d)"
+  [[ $sf/ != "$d"/* ]] || no "the shared filing folder ($sf) is in a folder it may write ($d)"
+done
+f=$(mktemp -d) && mkfifo "$f/q" "$f/a" || no "could not make the filer's pipes"
+(cd "$top" && CONVEYOR_LANE=research CONVEYOR_FOREMAN_DIR=$fd exec "$(dirname "${BASH_SOURCE[0]}")/research-file" --serve) \
+  < "$f/q" > "$f/a" 2>/dev/null &
+exec 7>"$f/q" 6<"$f/a"
+rm -rf "$f"
+if [ "$(uname -s)" = Darwin ]; then
+  command -v sandbox-exec >/dev/null || no "this Mac has no sandbox-exec"
+  p='(version 1) (allow default) (deny file-write*) (allow file-write* (literal "/dev/null") (literal "/dev/tty") (subpath "/dev/fd")'
+  for d in "${!w[@]}"; do p+=" (subpath (param \"W$d\"))"; done
+  p+=') (deny network-outbound)'
+  a=(); for d in "${!w[@]}"; do a+=(-D "W$d=${w[$d]}"); done
+  exec sandbox-exec "${a[@]}" -p "$p" "$BASH" "$@"
+fi
+command -v bwrap >/dev/null || no "this host has no bubblewrap (bwrap); install it (apt install bubblewrap, dnf install bubblewrap)"
+a=(--ro-bind / / --dev /dev --unshare-pid --unshare-net --proc /proc)
+[ ! -d /run/user ] || a+=(--tmpfs /run/user)
+for d in "${w[@]}"; do a+=(--bind "$d" "$d"); done
+# The seccomp filter: a call of another architecture (32-bit, x32) and io_uring (which opens sockets by itself) fail,
+# and so do socket(AF_UNIX), a datagram socketpair (which could send to a socket's path) and socketcall (whose
+# arguments it cannot see); a stream pair is kept. Big-endian hosts, and i686 (whose C library makes sockets by
+# socketcall), are not covered.
+case $(uname -m) in
+  x86_64) arch=0xc000003e sock=41 pair=53 call=425 ;;
+  aarch64 | arm64) arch=0xc00000b7 sock=198 pair=199 call=425 ;;
+  riscv64) arch=0xc00000f3 sock=198 pair=199 call=425 ;;
+  loongarch64) arch=0xc0000102 sock=198 pair=199 call=425 ;;
+  arm*) arch=0x40000028 sock=281 pair=288 call=102 ;;
+  ppc64le) arch=0xc0000015 sock=326 pair=333 call=102 ;;
+  *) no "its seccomp filter knows no $(uname -m) system calls" ;;
+esac
+# op <code> <jump if true> <jump if false> <value>: one classic BPF instruction, little-endian.
+op() { printf "$(printf '\\x%02x' $(($1 & 255)) $(($1 >> 8)) "$2" "$3" $(($4 & 255)) $(($4 >> 8 & 255)) $(($4 >> 16 & 255)) $(($4 >> 24 & 255)))"; }
+bpf() {
+  op 0x20 0 0 4; op 0x15 0 12 "$arch"; op 0x20 0 0 0; op 0x35 10 0 0x40000000; op 0x15 9 0 425; op 0x15 8 0 "$call"
+  op 0x15 0 2 "$sock"; op 0x20 0 0 16; op 0x15 5 4 1
+  op 0x15 0 3 "$pair"; op 0x20 0 0 24; op 0x54 0 0 15; op 0x15 1 0 2
+  op 0x06 0 0 0x7fff0000; op 0x06 0 0 0x0005000d
+}
+exec bwrap "${a[@]}" --new-session --die-with-parent --seccomp 9 -- "$BASH" "$@" 9< <(bpf)

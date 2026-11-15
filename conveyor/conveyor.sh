@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Conveyor: one issue = one card. Pick, build in a fresh worktree, review, land, record.
+# cards.jsonl in the state folder (`conveyor.sh state-dir`) is the only state; report.sh is the only readout.
+# Usage: the command table below; `conveyor.sh` with no command, or with one the table does not hold, prints it.
+# The rules are in README.md beside this script: the review rule, a landing conflict, an issue already fixed, the
+# changed tests, a visible change, the push, land-branch, a blocked card's kept work, the marks, the live record, the
+# stream, the control record and what is measured. The large jq programs are in jq/.
+# Approve before build. A product issue may hold a section headed `## What customers or staff
+# will see`: the screen, message or document, what it shows today and what it will show; or the one line `Nothing
+# visible changes.` An issue whose section names a change and has no `Visible change approved:` line is not picked: it
+# waits in "Needs you" to be approved before the build. Once approved, the build is held to that section, no more and
+# no less: for a card that touches product code, the reviewer answers on the USER-VISIBLE line whether what the change
+# shows matches it. A match lands with no second ask; any difference (more, less or other, wording included) stops the
+# card with its patch kept, and the ask names the difference only. An issue with no section, or whose section says
+# nothing visible changes, stops after review for the owner's yes when its change is visible, as before.
+# All of this holds while the control record's rule "visible changes need the owner's yes" (rules.visible) is on, its
+# default; off, no issue or card waits for an approval line and no brief or review asks for one (yesrule()).
+set -uo pipefail
+# The environment Conveyor was started with, taken before any variable of its own can shadow a name in it: a proxy's
+# key is read from here by the variable name the user gave (proxyenv, codexmodel), whatever the engine's locals are called.
+# `envof <name>` prints that variable's value as it was. The snapshot is kept in the function's own body, not in a
+# variable, so no variable of the user's is taken or unset for it and every one still reaches the commands the engine
+# runs (codex exec among them); it is not exported, so a variable proxyenv drops is not handed on inside it.
+envof() {
+  local -A e=(); local x d; while IFS= read -r -d '' x; do e[${x%%=*}]=${x#*=}; done; d=$(declare -p e)
+  eval "envof() { local ${d#declare }
+printf %s \"\${e[\$1]-}\"; }"; export -nf envof
+}
+envof < <(env -0)
+# This script's folder, by bash's own text handling, not a dirname program (one started per command adds up); a path
+# with no slash is in the current folder.
+HERE=.; [[ ${BASH_SOURCE[0]} != */* ]] || HERE=${BASH_SOURCE[0]%/*}; HERE=$(cd "$HERE" && pwd -P)
+# bash 5.1 for `wait -n -p`; flock, and on macOS the GNU tools (lib/portable.sh, plan section 4).
+. "$HERE/lib/portable.sh" && require_bash 5.1 && p_tools || exit 1
+exec {LOGFD}>&2 # the engine's own stderr: gh_write's privacy warnings, whatever a caller does with its stderr
+# Every git the engine runs, without the loop's run lock (fd 8): the project's hooks git starts (pre-commit, post-checkout,
+# reference-transaction...) are not the loop, and one given the lock could pass it on to a second loop (run()).
+git() { command git "$@" 8>&-; }
+# The engine, one file a concern under lib/. Every command runs these two first: the main checkout, the installs, the
+# host file, the state and cards folders, the accounts (paths.sh); the state folder made, the move into the main
+# checkout, the record lines (records.sh). The command's script (commands/, below) then sources the other engine files
+# it uses, each in this order, into this one shell: slots, prompts, control, views, snapshot, issues, pick, session,
+# review, testrun, claim, push, followups, flaky, fulltest, testaction, testfiles, testrules, survey, card, lane, run,
+# machine, install, setup.
+. "$HERE/lib/paths.sh" || exit 1
+. "$HERE/lib/records.sh" || exit 1
+# The command table, one line a command: `cmd <command> <its script under commands/> <its part of the usage message>`
+# (- for a command the message leaves out). The line of the command given runs its script, in this shell, with this
+# script's arguments; with no command, or one no line names, the usage message is built from the lines, in order.
+CMD_RUN=; CMD_USAGE=
+cmd() { [ "$3" = - ] || CMD_USAGE+=${CMD_USAGE:+ | }$3; [ "$1" != "${CMD_ARG-}" ] || CMD_RUN=$2; }
+CMD_ARG=${1:-}
+cmd run run.sh 'run [--only <issue>[,<issue>...]] [max-cards]'
+cmd serve serve.sh 'serve'
+cmd land-branch land-branch.sh 'land-branch <branch>'
+cmd retry retry.sh 'retry <issue | card id>'
+cmd shut shut.sh 'shut <issue | card id>'
+cmd control control.sh 'control [<action>]'
+cmd check check.sh 'check'
+cmd cards cards.sh 'cards'
+cmd health health.sh 'health'
+cmd snapshot snapshot.sh 'snapshot'
+cmd history history.sh 'history'
+cmd clis clis.sh 'clis'
+cmd state-dir state-dir.sh 'state-dir'
+cmd pick pick.sh 'pick --dry --issues <file> --state <dir>'
+cmd gh-write gh-write.sh 'gh-write <gh arguments>'
+cmd product product.sh 'product <sha>'
+cmd pushable pushable.sh 'pushable'
+cmd install install.sh 'install <commit>'
+cmd take take.sh 'take'
+cmd install-service install-service.sh 'install-service'
+cmd board board.sh 'board'
+cmd machine machine.sh 'machine [pause | resume | load <number | off>]'
+cmd setup setup.sh 'setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]'
+cmd doctor doctor.sh 'doctor'
+cmd wording wording.sh 'wording adversarial | review'
+cmd auto auto.sh 'auto on | narrow | off | status | band | rules | decide'
+cmd foreman foreman.sh 'foreman [<claude argument>...]'
+cmd lane lane.sh 'lane research create | lane fast create | review | land | reset [--drop <sha>]'
+cmd flaky flaky.sh 'flaky add <case> <source> <note> | flaky off <case> <source> <note>'
+cmd full-test full-test.sh 'full-test [push | anyway <run id> [--by <who>]]'
+cmd release-prep release-prep.sh 'release-prep <version>'
+cmd testaction testaction.sh 'testaction <judge | explain | run> <test file> | testaction stop <id>'
+cmd testissue testaction.sh 'testissue <test file> <title> <body>'
+cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'
+cmd prices prices.sh 'prices set <model> <input> <output> <cache read> | prices clear <model>'
+cmd testrules testrules.sh -
+cmd watch watch.sh -
+cmd github github.sh -
+cmd main-test main-test.sh -
+cmd survey survey.sh -
+cmd declined declined.sh -
+unset -f cmd
+[ -n "$CMD_RUN" ] || { echo "usage: conveyor.sh $CMD_USAGE" >&2; exit 2; }
+# shellcheck disable=SC1090 # the script is the table's, named at run time
+. "$HERE/commands/$CMD_RUN"

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Feature request
+description: Something Conveyor does not do today and should.
+body:
+  - type: textarea
+    id: today
+    attributes:
+      label: What is missing today
+      description: What you want to do, and what stops you now.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change
+    validations:
+      required: true
