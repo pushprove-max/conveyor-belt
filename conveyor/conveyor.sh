@@ -15,8 +15,8 @@
 # shows matches it. A match lands with no second ask; any difference (more, less or other, wording included) stops the
 # card with its patch kept, and the ask names the difference only. An issue with no section, or whose section says
 # nothing visible changes, stops after review for the owner's yes when its change is visible, as before.
-# All of this holds while the control record's rule "visible changes need the owner's yes" (rules.visible) is on, its
-# default; off, no issue or card waits for an approval line and no brief or review asks for one (yesrule()).
+# All of this holds while the control record's rule "visible changes need the owner's yes" (rules.visible) is on (it is
+# off by default, lib/control-defaults.json); off, no issue or card waits for an approval line and no brief or review asks for one (yesrule()).
 set -uo pipefail
 # The environment Conveyor was started with, taken before any variable of its own can shadow a name in it: a proxy's
 # key is read from here by the variable name the user gave (proxyenv, codexmodel), whatever the engine's locals are called.

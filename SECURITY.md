@@ -15,7 +15,7 @@ Only the newest release gets security fixes. A fix comes out as a new release; t
 
 - What an attacker can do, and what they need first (access to the machine, to the repository, to an issue).
 - The steps that show it, as short as you can make them.
-- The Conveyor version: the commit `conveyor doctor` names, or the release you installed.
+- The Conveyor version: the commit `conveyor.sh doctor` names, or the release you installed.
 - Your Claude Code version and your operating system.
 - The log lines that show it. Remove private words first: names, email addresses, host names, paths in your home
   folder, tokens and keys.

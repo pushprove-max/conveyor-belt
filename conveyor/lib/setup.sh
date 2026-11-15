@@ -33,7 +33,7 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 MPS=mattpocock-skills@claude-plugins-official
 mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length > 0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" >/dev/null 2>&1; }
 setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]
-  local owner='' test='' prods=() need=() b p f have l n fm='' pin='' sv='' first full
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' first full
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
     [ "$1" != --foreman ] || { fm=1; shift; continue; }
@@ -89,6 +89,11 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
     echo "conveyor: saved the answer to the first test-speed survey ($sv) as the pack's test.firstSurvey"
   fi
   timinghint || return 1
+  # The default state folder, conveyor/state in the checkout, is never committed: git's exclude file for the
+  # repository (read by every worktree of it, as deps() in lib/push.sh uses it) names it, once.
+  x=$(git -C "$MAIN" rev-parse --path-format=absolute --git-path info/exclude) && mkdir -p "${x%/*}" \
+    && { grep -qxF /conveyor/state/ "$x" 2>/dev/null || { { [ ! -s "$x" ] || [ -z "$(tail -c 1 "$x")" ] || echo >> "$x"; } && echo /conveyor/state/ >> "$x" && echo "conveyor: wrote /conveyor/state/ in git's exclude file $x, so git leaves out the state folder"; }; } \
+    || { echo "conveyor: the state folder conveyor/state/ could not be added to git's exclude file" >&2; return 1; }
   hostadd || return 1
   [ -z "$fm" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" setup || return 1
   packget test.full full || return 1
@@ -140,7 +145,7 @@ hostput() { # [checkout]
     || { rm -f "$t"; return 1; }
   echo "conveyor: added $n to the machine's Conveyor (a record of $HOST$([ -z "$e" ] || echo ", run from its own checkout"))"
 }
-# conveyor doctor: each thing Conveyor needs on this machine for the project it is called in, one line each, "ok: ..."
+# conveyor.sh doctor: each thing Conveyor needs on this machine for the project it is called in, one line each, "ok: ..."
 # or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code. Exit 1 when anything is missing. bash older than 5.1 stops at require_bash, above,
 # which says how to get a newer one. The project's checks need jq and git; without either they are named as not checked.
 doctor() {
@@ -155,7 +160,15 @@ doctor() {
   if [ ! -e "$HOST" ]; then no "the host file $HOST" "run /conveyor-belt:setup, which writes it"
   elif ! command -v jq >/dev/null; then echo "not checked: the host file $HOST: it is read with jq"
   elif ! jq -e 'type == "object"' "$HOST" >/dev/null 2>&1; then no "a readable host file at $HOST" "make it a JSON object"
-  else ok "the host file $HOST"; fi
+  else ok "the host file $HOST"
+    # A record of the host file whose main is this checkout (links followed): with none, the machine's Conveyor does
+    # not serve it (setup adds none when another record has its folder's name).
+    p=$(cd "$MAIN" 2>/dev/null && pwd -P) && e='' && while IFS= read -r t; do
+      [ "$(cd "$t" 2>/dev/null && pwd -P)" != "$p" ] || { e=1; break; }
+    done < <(jq -r '.records | arrays | .[] | objects | .main | strings' "$HOST")
+    [ -n "$e" ] || no "a record of the host file $HOST for this checkout $MAIN (the machine's Conveyor serves only the checkouts its records name)" \
+      "run /conveyor-belt:setup; when it says another record has this checkout's name, add {\"repo\": \"<name>\", \"main\": \"$MAIN\"} to the host file's records by hand"
+  fi
   # One Conveyor per machine: the machine's loop (`machine`), and no loop of a project beside it that it did not start
   # (a per-project service left from before, or a `serve` started by hand). Each loop alive names its pid.
   if command -v jq >/dev/null; then
@@ -197,16 +210,19 @@ doctor() {
   # to, but a restart or a reboot does not start it.
   while IFS=$'\t' read -r t c; do
     [ -f "$c" ] || no "the file $c that the service $t starts (a restart or a reboot does not start its loop)" \
-      "run conveyor install-service in the project's checkout, which writes the machine's service on an installed commit"
+      "run conveyor.sh install-service in the project's checkout, which writes the machine's service on an installed commit"
   done < <(services)
-  for p in $BOARD_PKGS; do
+  # setup makes the virtualenv with python3 -m venv, which Debian and Ubuntu leave out of python3 (python3-venv).
+  if [ ! -x "$BOARD_VENV/bin/python3" ]; then no "the Board's virtualenv $BOARD_VENV" \
+    "run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)"
+  else for p in $BOARD_PKGS; do
     if "$BOARD_VENV/bin/python3" -c "import $p" 2>/dev/null; then ok "$p, in the Board's virtualenv $BOARD_VENV"
     else no "$p, for the Board, in its virtualenv $BOARD_VENV" "run /conveyor-belt:setup, which installs it there"; fi
-  done
+  done; fi
   if ! command -v jq >/dev/null || ! type -P git >/dev/null; then
     echo "not checked: the pack, its models' programs, the pin and the terms file: they are read with jq and git"; return 1
   fi
-  git -C "$CALLED" rev-parse --git-dir >/dev/null 2>&1 || { no "a git checkout of the project at $CALLED" "run conveyor doctor in the project's checkout"; return 1; }
+  git -C "$CALLED" rev-parse --git-dir >/dev/null 2>&1 || { no "a git checkout of the project at $CALLED" "run conveyor.sh doctor in the project's checkout"; return 1; }
   if [ ! -e "$PACK" ]; then no "the pack $PACK" "run /conveyor-belt:setup"; return 1; fi
   e=$("$HERE/lib/pack.sh" check "$PACK" 2>&1) || { no "a valid pack" "correct what the check names: ${e//$'\n'/; }"; return 1; }
   ok "the pack $PACK"

@@ -2,7 +2,7 @@
 
 ## In Claude Code
 
-- `/conveyor-belt:setup` sets up the project and runs `conveyor doctor`. `/conveyor-belt:setup --foreman` also sets up
+- `/conveyor-belt:setup` sets up the project and runs `conveyor.sh doctor`. `/conveyor-belt:setup --foreman` also sets up
   the Foreman. `/conveyor-belt:setup --survey` asks for a test-speed survey.
 - `/conveyor-belt:foreman` makes this session the project's Foreman. `/conveyor-belt:foreman off` ends it.
 - `/conveyor-belt:away`, in the Foreman session: the owner is away. The Foreman works by the owner's own away rules,
@@ -67,7 +67,7 @@ Tests:
 - `survey` files the monthly test-speed survey's issue when one is due (the pack's `test.survey`).
 - `flaky add <case> <source> <note>` adds a flaky-test entry. `flaky off` adds one and files no issue.
 - `testaction <judge | explain> <test file>` asks the Tests seat (the model set for test actions) about one test
-  file in a read-only session.
+  file in a read-only session. `testaction run <test file>` runs that test file alone, now, on a test slot.
   `testaction stop <id>` stops one (`conveyor/README.md`, Test actions).
 - `testissue <test file> <title> <body>` files the Board's issue about one test file.
 - `test-settings` saves a test setting in the pack: the budget of all files or of one, a "slow on purpose" mark, and
@@ -88,7 +88,9 @@ Lanes and the Foreman:
 - `lane fast create | review | land | reset [--drop <sha>]` and `lane research create` ([Lanes](lanes.md)).
 - `foreman [--new] [<claude argument>...]` starts the Foreman's Claude Code session in the main checkout. It resumes the
   last one unless you give `--new`.
-- `auto` is the Foreman's auto mode. `conveyor.sh auto decide` is its decide step.
+- `auto on | narrow | off | status | band | rules` is the Foreman's auto mode ([Foreman](foreman.md)): `on` and
+  `narrow` start it, `off` ends it, `status` prints one line about it, `band` prints its state for the plugin's band,
+  and `rules` prints what the Foreman is told while it is on. `conveyor.sh auto decide` is its decide step.
 
 Setup and the engine:
 

@@ -31,7 +31,8 @@ as the commit's author. To sign off commits you made already, run `git rebase --
   Both run on macOS and Linux (`conveyor/lib/portable.sh`).
 - The plugin is generic: no project's own names, paths or labels outside docs that name one as an example.
 - This repository is public. No person's name, no email that is not a GitHub noreply address, no home path, no
-  private host name or address goes into code, comments, tests, fixtures, docs or commit messages. Fixtures use
+  private host name or address goes into code, comments, tests, fixtures, docs or commit messages. A commit's
+  author and its credit lines (such as `Co-Authored-By:`) are the exception: they may name a person. Fixtures use
   example.com addresses, `$HOME`-relative paths and 192.0.2.x addresses. The privacy check finds most of these:
   `git ls-files -z | xargs -0 bash conveyor/privacy/check.sh`.
 
@@ -59,8 +60,8 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   once and writes the map; run it by hand and commit the map, never on a card's test step. The map check
   (`test-changed.sh --check`) says how old the map is.
 - No whole test runs on main: the whole test on main is off for this project (its pack, `.conveyor/project.json`,
-  names no `test.main`), and its pack names no `test.full`, so the Board shows its Run full test suite and Push landed
-  buttons disabled.
+  names no `test.main`). Its `test.full` runs `.conveyor/test-full.sh`, so the Board's Run full test suite and Push
+  landed buttons are enabled.
 - `bash conveyor/conveyor.test.sh` runs the whole engine test by hand. A new engine case goes in its area's file under
   `conveyor/tests/` (no case file over 600 lines), and a new engine source file in one area of
   `.conveyor/engine-areas.json` that names its case files: `test-changed.sh --check` fails for a file under

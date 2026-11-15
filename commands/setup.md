@@ -18,7 +18,8 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
      the answers, each `--product` once per path, `--survey yes` or `--survey no`, every value quoted for the shell.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
-3. When `git ls-files --error-unmatch .conveyor/project.json` fails (the pack is not committed), give the user the
+3. When `git status --porcelain -- .conveyor/project.json` prints a line (the pack is not committed, or setup changed
+   it since its commit), give the user the
    one command that commits it, on the default branch: `git add .conveyor/project.json && git commit -m "Add the
    Conveyor pack"`. Do not run it yourself.
 4. When doctor printed no `missing:` line, ask the user "Start Conveyor now as this machine's service?" (yes / no).

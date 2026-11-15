@@ -95,8 +95,8 @@ tunables() {
       '(($s[0].properties.tunables.properties | map_values(.default)) + .) as $t | $k | split(" ") | map($t[.] | tostring) | join(" ")' <<<"$TUNED") \
     && read -r POLL IDLE STUCK SESSION_STUCK CASE_STUCK WAIT_LIMIT SAMPLE LIVE CLOSE_WAIT PUSH_RETRY PUSH_TIMEOUT BUILD_TIMEOUT REVIEW_TIMEOUT TEST_TIMEOUT LIMIT_TTL LIMIT_OLD REVIEW_PAUSE API_PAUSE TESTACTION_TIMEOUT <<<"$t"
 }
-# Does a visible change need the owner's yes? The control record's rule (rules.visible), on by default and when the
-# record cannot be read. Off, no card or issue waits for a `Visible change approved:` line, and no brief or review
+# Does a visible change need the owner's yes? The control record's rule (rules.visible), off by default
+# (lib/control-defaults.json), and on when the record cannot be read. Off, no card or issue waits for a `Visible change approved:` line, and no brief or review
 # asks for one.
 yesrule() { # [the control record, when the caller has read it]
   [ "$(jq -r '.rules.visible' <<<"${1:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]

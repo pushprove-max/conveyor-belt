@@ -54,7 +54,7 @@ or `conveyor.sh control model default`. For a seat, the default is the pack's fi
 
 A model set with its CLI runs as set, whether the pack's `models.allowed` lists it or not. A model set without a CLI
 must be one that `models.allowed` lists for the seat; if it is not, the seat runs on its default. A seat whose
-CLI is not installed does not start, and `conveyor doctor` names it.
+CLI is not installed does not start, and `conveyor.sh doctor` names it.
 
 Models can run through an API proxy. `claudeProxy` in the host file, or the pack's `models.claudeProxy`, names its base
 URL and the name of the variable that holds its key. It never holds the key. Codex uses the provider that its own
@@ -115,4 +115,4 @@ through the same check.
 The terms file is optional. It holds words that must never reach GitHub, such as people's names, private host names
 and client names, one a line. To use one, name it in the host file as `"terms": "<file>"`. With no terms file, the
 check runs with no word list. When the host file names a terms file that cannot be read, a `public` project posts
-nothing, and `conveyor doctor` names the file.
+nothing, and `conveyor.sh doctor` names the file.

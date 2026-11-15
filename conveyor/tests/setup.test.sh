@@ -112,6 +112,10 @@ t_setup() {
   # The Board's packages go into its own virtualenv, from the pinned file, every hash checked.
   grep -qxE -- "-m pip install -q --require-hashes -r .*/\.claude/scripts/requirements\.txt" "$G/pip" || fail "setup did not fill the Board's virtualenv with hashes checked: $(cat "$G/pip" 2>&1)"
   [ ! -e "$S/conveyor/state/cards.jsonl" ] || fail "setup made a state folder"
+  # Bug caught (#17): the default state folder showed as untracked in the project, so `git add -A` committed it.
+  mkdir -p "$S/conveyor/state" && echo '{}' > "$S/conveyor/state/cards.jsonl" \
+    && [ -z "$(git -C "$S" status --porcelain --untracked-files=all -- conveyor/state)" ] || fail "git status lists the state folder after setup: $(git -C "$S" status --porcelain -- conveyor/state)"
+  rm -r "$S/conveyor"
   # Bug: Matt Pocock's skills, which /conveyor-belt:plan reads, were left uninstalled: setup installs them from the
   # official marketplace once, and a rerun, finding them installed, does not install them again.
   [ "$(cat "$G/claude-installs" 2>&1)" = mattpocock-skills@claude-plugins-official ] || fail "setup did not install mattpocock-skills: $(cat "$G/claude-installs" 2>&1)"
@@ -277,13 +281,20 @@ t_doctormissing() {
   rm "$T/$CASE/terms" "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"; : > "$G/out"; uninstalled; echo segno > "$G/nopkg"
   local gone=d791d168d791d168d791d168d791d168d791d168; mkdir -p "$XDG_CONFIG_HOME/systemd/user" \
     && printf '[Service]\nExecStart="/bin/bash" "%s" serve\n' "$V/$gone/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service"
+  # The host file's one record is another checkout of the same folder name (setup adds no second record of a name).
+  jq --arg m "$T/$CASE/other/sample" '.records = [{repo: "sample", main: $m}]' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" \
+    && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file was not rewritten"
   out=$(cd "$S" && PATH=$(without codex) bash "$X" doctor 2>&1) && fail "doctor passed with pieces missing: $out"
+  # Bug caught (#17): the machine's Conveyor did not serve this checkout, as no record of the host file named it, and
+  # doctor printed only "ok: the host file".
+  grep -q "^missing: a record of the host file $XDG_CONFIG_HOME/conveyor/host.json for this checkout $S .*; fix: run /conveyor-belt:setup; .*add {\"repo\": \"<name>\", \"main\": \"$S\"}" <<<"$out" \
+    || fail "doctor did not name the missing record of this checkout in the host file: $out"
   grep -qx "missing: segno, for the Board, in its virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
     && grep -q "^ok: pyotp, in the Board's virtualenv " <<<"$out" || fail "doctor did not name the Board's missing package with its fix: $out"
   rm "$G/nopkg"
   # Bug caught (#573): a service named an install that prune had removed, so a restart or a reboot would not start
   # its loop, and doctor said nothing.
-  grep -qxF "missing: the file $V/$gone/conveyor/conveyor.sh that the service $XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service starts (a restart or a reboot does not start its loop); fix: run conveyor install-service in the project's checkout, which writes the machine's service on an installed commit" <<<"$out" \
+  grep -qxF "missing: the file $V/$gone/conveyor/conveyor.sh that the service $XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service starts (a restart or a reboot does not start its loop); fix: run conveyor.sh install-service in the project's checkout, which writes the machine's service on an installed commit" <<<"$out" \
     || fail "doctor did not name a service whose conveyor.sh is gone, with that file: $out"
   grep -q '^missing: codex, .*; fix: install it (npm install -g @openai/codex)' <<<"$out" && grep -qx 'missing: gh signed in; fix: run gh auth login' <<<"$out" \
     && grep -qx "missing: the install of the pinned commit $B; fix: run /conveyor-belt:setup, which installs it" <<<"$out" \
@@ -328,6 +339,14 @@ t_doctorclimb() {
   [ -d "$T/$CASE/outside" ] && ! grep -q 'rm -\|remove it' <<<"$out" || fail "doctor offered to remove a folder outside the versions folder: $out"
 }
 # A snapshot folder that says gh is signed in is no word on this machine's gh (signed out here).
+# Bug caught (#17): on Debian or Ubuntu with no python3-venv, setup cannot make the Board's virtualenv, and doctor's
+# fix, "run setup", failed the same way: with no virtualenv, the fix names python3-venv.
+t_doctornovenv() {
+  local X out; doctordone; rm -r "$XDG_DATA_HOME/conveyor/board-venv"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) && fail "doctor passed with no Board virtualenv: $out"
+  grep -qxF "missing: the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)" <<<"$out" \
+    && ! grep -q 'for the Board, in its virtualenv' <<<"$out" || fail "doctor's fix for a missing Board virtualenv does not name python3-venv: $out"
+}
 t_doctorsnap() {
   local X out; doctordone; : > "$G/out"
   mkdir -p "$T/$CASE/snap"; echo true > "$T/$CASE/snap/gh"

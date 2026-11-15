@@ -5,11 +5,12 @@ This page lists what Conveyor needs, and how to install, set up, run and remove 
 
 ## Requirements
 
-- bash 5.1 or newer, jq, git, `flock` (on Linux, from util-linux) and Python 3.
+- bash 5.1 or newer, jq, git, `flock` (on Linux, from util-linux) and Python 3. On Debian or Ubuntu, Python 3 also
+  needs `python3-venv` (`sudo apt install python3-venv`) for the Board's virtualenv.
 - The GitHub CLI, `gh`, signed in (`gh auth login`).
 - The Claude Code CLI, 2.1.322 or newer (`npm install -g @anthropic-ai/claude-code`).
 - Matt Pocock's skills, the plugin `mattpocock-skills` of the official marketplace. `/conveyor-belt:plan` reads it.
-  Setup installs it (`claude plugin install mattpocock-skills@claude-plugins-official`), and `conveyor doctor` names
+  Setup installs it (`claude plugin install mattpocock-skills@claude-plugins-official`), and `conveyor.sh doctor` names
   it when it is missing.
 - The Codex CLI, for the Codex reviewer and the Codex builder models (`npm install -g @openai/codex`).
 - OpenCode 1.x, only for OpenCode models (`npm install -g opencode-ai`). See [Models](configuration.md#models).
@@ -34,7 +35,7 @@ setup installs the commit.
 Setup installs the newest release of the engine, and the loop runs from it. You do not clone the repository for
 the loop. The shell commands in these pages are that release's `conveyor/conveyor.sh`, in
 `~/.local/share/conveyor/versions/<commit>` (under `$XDG_DATA_HOME` when that is set), run in your project's checkout.
-`conveyor doctor` names the commit.
+`conveyor.sh doctor` names the commit.
 
 ## The host file
 
@@ -65,7 +66,8 @@ again. To ask for a survey later, run
 `/conveyor-belt:setup --survey`, or `setup --survey yes` from a shell.
 
 Then setup writes the pack, sets the project to follow the plugin's releases, installs the newest release, adds the
-project to the host file, creates the labels the pack names and runs `conveyor doctor`. It gives the command that
+project to the host file, adds `/conveyor/state/` to `.git/info/exclude` so that git does not list the state folder,
+creates the labels the pack names and runs `conveyor.sh doctor`. It gives the command that
 commits the pack, `.conveyor/project.json`. Commit it on your default branch. `doctor` prints one `ok:` line for each thing in place. It prints a
 `missing:` line, with its fix, for each thing that is not. You can run `setup` again: it changes only what is not there
 yet.
@@ -134,7 +136,7 @@ The host file holds the machine's settings. Each is unset by default:
 - `testSlots`: the size of the machine's pool of test slots, one core each (`conveyor/README.md`, Test slots).
 
 None of these stops a card that already runs. While the host file is there and cannot be read, no new card starts.
-`conveyor doctor` names a second loop that runs beside the machine's.
+`conveyor.sh doctor` names a second loop that runs beside the machine's.
 
 ## Uninstall
 

@@ -21,8 +21,10 @@ cards go on.
 ## Requirements
 
 A default setup needs macOS or Linux, bash 5.1 or newer, jq, git, `flock`, Python 3, the GitHub CLI (`gh`, signed
-in), the Claude Code CLI and the Codex CLI. The Codex CLI runs the default reviewer. Without it, set the reviewer to
-Claude on the Board's Rules tab. Conveyor runs its sessions in Claude Code, Codex or OpenCode.
+in), the Claude Code CLI and the Codex CLI. On Debian or Ubuntu, Python 3 also needs `python3-venv`. The Codex CLI
+runs the default reviewer. Without it, set the reviewer to Claude on the Board's Rules tab. Also remove the `codex`
+models from `models.allowed` in `.conveyor/project.json`, then run `/conveyor-belt:setup` again. Conveyor runs its
+sessions in Claude Code, Codex or OpenCode.
 [Setup](docs/setup.md#requirements) lists each requirement with its version and how to install it.
 
 ## Install
@@ -36,7 +38,7 @@ In Claude Code, in your project's checkout, run `/conveyor-belt:setup`. It asks 
 see, where the product code is and the command that runs the tests. Then it installs the newest release of Conveyor
 and saves its settings: the project's settings in `.conveyor/project.json`, and this machine's settings in your home
 folder. It gives the command that commits `.conveyor/project.json`. Commit that file on your default branch. Last,
-setup runs `conveyor doctor` ([Setup](docs/setup.md#setup)).
+setup runs doctor, which checks the setup ([Setup](docs/setup.md#setup)).
 
 ## Start
 

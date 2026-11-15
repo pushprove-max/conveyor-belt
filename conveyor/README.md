@@ -29,7 +29,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
 
-Every rule is on by default. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push` and `visible`, which are off. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule as on.
 
 `conveyor.sh control dep-guard on|off` sets the dependency guard (`depGuard` in the record; a record saved before it
