@@ -234,6 +234,27 @@ t_followpruneother() {
   pushed 'echo 7 > n.txt'; C7=$NEW; takeby "$C6" >/dev/null || fail "$C7 was not taken"
   [ ! -e "$V/$C4" ] || fail "the install of another project's card that ended was kept: $(ls "$V")"
 }
+# Bug (#36): the Foreman's waiter and its watchers ran from versions/$A, and an update removed $A under them: every
+# watcher read files that were gone, and the landings the Foreman awaited never woke it. A live waiter, of this project
+# or of another of the host file (a group's Foreman folder is in its first project's state folder), keeps the commit
+# its waiter.pid names; once that pid has ended, the next update removes it.
+t_followprunewaiter() {
+  prunesetup
+  local O=$T/$CASE/other; mkdir -p "$O/.conveyor" "$O/conveyor/state/foreman" "$ST/foreman" "$XDG_CONFIG_HOME/conveyor" \
+    && jq -n '{plugin: {follow: "main"}}' > "$O/.conveyor/project.json" \
+    && jq -n --arg r "$R" --arg o "$O" '{records: [{repo: "proj", main: $r}, {repo: "other", main: $o}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    || fail "the other project was not written"
+  sleep 60 & w1=$!; sleep 60 & w2=$!; trap 'kill $w1 $w2 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT # sleep: stand-in waiters
+  echo "$w1 $A s1" > "$ST/foreman/waiter.pid"
+  pushed 'echo 1 > n.txt'; C1=$NEW; takeby "$A" >/dev/null || fail "$C1 was not taken"
+  pushed 'echo 2 > n.txt'; C2=$NEW; takeby "$C1" >/dev/null || fail "$C2 was not taken"
+  [ -d "$V/$A" ] && engine '.taken[]' | grep -qxF "$A" || fail "the install this project's live Foreman waiter runs from was removed: $(ls "$V")"
+  kill $w1; wait $w1 2>/dev/null
+  echo "$w2 $C1 s2" > "$O/conveyor/state/foreman/waiter.pid"
+  pushed 'echo 3 > n.txt'; C3=$NEW; takeby "$C2" >/dev/null || fail "$C3 was not taken"
+  [ ! -e "$V/$A" ] || fail "the install of a Foreman waiter that ended was kept: $(ls "$V")"
+  [ -d "$V/$C1" ] || fail "the install another project's live Foreman waiter runs from was removed: $(ls "$V")"
+}
 t_followprunelist() {
   prunesetup
   pushed 'echo 6 > n.txt'; C6=$NEW; takeby "$A" >/dev/null || fail "$C6 was not taken"

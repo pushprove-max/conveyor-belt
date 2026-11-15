@@ -138,7 +138,8 @@ taken() {
 # lane's settings, the machine's service) or a Conveyor service of this machine (services: a per-project one of before
 # too, whose restart or reboot runs the file it names) still names by its path, or another project of the host file
 # runs (its pack's pin, a card of it in flight or its loop: a pinned project repinned while a card runs on its old pin) or the
-# machine's Conveyor runs from: those stay in the list, to be looked at again at the next prune. Every other leaves
+# machine's Conveyor runs from, or the Foreman's waiter of this project or another runs from while it runs (foremanon):
+# those stay in the list, to be looked at again at the next prune. Every other leaves
 # the list, and its folder is removed unless another following project's own taken list names it (that project's
 # prune removes it; were it kept in both lists, neither would). A <refused> commit (installed to be checked, never
 # taken) not in the list goes the same way: no card runs on it, and it is never tried again.
@@ -146,7 +147,8 @@ prune() { # [<refused>]
   local old keep held others c f t m s gone=()
   old=$(jq -r '(.taken // []) as $t | $t[:-2] + ($ARGS.positional - $t) | .[]' "$ENGINE" --args "$@" 2>/dev/null) && [ -n "$old" ] || return 0
   keep=$(inflight <(stdb ask lines cards 2>/dev/null)
-    while IFS= read -r f; do grep -oE 'versions/[0-9a-f]{40}/' "$f" 2>/dev/null | cut -c10-49; done 2>/dev/null < <(cat "$USES" 2>/dev/null; services | cut -f1))$'\n'$OWN$'\n'$RAN
+    while IFS= read -r f; do grep -oE 'versions/[0-9a-f]{40}/' "$f" 2>/dev/null | cut -c10-49; done 2>/dev/null < <(cat "$USES" 2>/dev/null; services | cut -f1)
+    foremanon "$ST")$'\n'$OWN$'\n'$RAN
   # The other projects: what they run (held), each line "h <commit>", and what their own taken lists name, "t <commit>".
   others=$(jq -r '.commit // empty | "h \(.)"' "$MACH/loop.json" 2>/dev/null
     projects 2>/dev/null | while IFS=$'\t' read -r _ m _; do
@@ -154,7 +156,7 @@ prune() { # [<refused>]
       # Its state folder as paths.sh names it: the host file's stateDir for the host's own checkout, else its conveyor/state.
       s=$m/conveyor/state; [ "$(cd "$m" 2>/dev/null && pwd -P)" != "${hm:-}" ] || s=${hp[0]:-$s}
       { jq -r '.plugin.commit // empty | "h \(.)"' "$m/.conveyor/project.json"; jq -r '.taken // [] | .[] | "t \(.)"' "$m/.git/conveyor-engine.json"
-        inflight "$s/cards.jsonl" | sed 's/^/h /'; jq -r '.commit // empty | "h \(.)"' "$s/loop.json"; } 2>/dev/null
+        { inflight "$s/cards.jsonl"; foremanon "$s"; } | sed 's/^/h /'; jq -r '.commit // empty | "h \(.)"' "$s/loop.json"; } 2>/dev/null
     done)
   held=$(sed -n 's/^h //p' <<<"$others"); others=$(sed -n 's/^t //p' <<<"$others")
   for c in $old; do
@@ -167,6 +169,13 @@ prune() { # [<refused>]
   done
   [ ${#gone[@]} != 0 ] || return 0
   t=$(mktemp "$ENGINE.XXXXXX") && jq '.taken -= $ARGS.positional' "$ENGINE" --args "${gone[@]}" > "$t" && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
+}
+# The commit the Foreman's waiter of the state folder <dir> runs from (foreman/waiter.pid: "<pid> <commit> <session>",
+# foreman/waiter.sh) while that pid runs; its watchers end before it does (waiter.sh, stop_all). The pid is asked,
+# not waiter.lock: a probe of the lock could make a waiter starting that instant find it taken and not start.
+foremanon() { # <dir>
+  local p c
+  read -r p c _ 2>/dev/null < "$1/foreman/waiter.pid" && [[ $p =~ ^[0-9]+$ ]] && kill -0 "$p" 2>/dev/null && printf '%s\n' "$c"
 }
 # The engine commits the cards in flight of the card records <file> run on (each worktree line's engine), one a line.
 inflight() { jq -rs 'group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not)) | .[].engine // empty' "$1" 2>/dev/null; }

@@ -117,7 +117,7 @@ claim_() {
   if [ -n "$1" ]; then printf '%s %s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARK.new"; else : > "$MARK.new"; fi
   mv "$MARK.new" "$MARK" || return 1
   # A waiter writes waiter.pid, then checks the mark (waiter.sh): one that wrote it after this read sees the new mark.
-  { read -r pid sid < "$FD/waiter.pid"; } 2>/dev/null || return 0
+  { read -r pid _ sid < "$FD/waiter.pid"; } 2>/dev/null || return 0
   [ "$sid" != "$1" ] || return 0
   flock -n "$FD/waiter.lock" true 2>/dev/null && return 0 # no waiter alive
   kill -TERM "$pid" 2>/dev/null; flock -w 10 "$FD/waiter.lock" true \

@@ -12,16 +12,35 @@
 # The text relayed is never cut: every wake names every item (watch-conveyor.sh). It is kept as last-wake.txt, so the
 # reply check (stop.sh) knows a turn a wake started. A relayed wake leaves pending only once it is on stderr: a kill
 # before that relays it again, never loses it.
+# The waiter and its watchers run from the install the shim started it from (versions/<commit>). Once a minute it
+# reads the commit the project runs now (its pack's plugin.commit, else for a pack that follows the plugin its
+# conveyor-engine.json commit, as shim.sh reads them); when that is another installed commit, it stops its watchers
+# and runs again from that install, in this same hook, so no wake is missed while the install moves. An update of
+# the install (lib/install.sh, prune) keeps the version folder waiter.pid names while this waiter's pid runs.
 # For tests: CONVEYOR_FOREMAN_WATCHERS (the watchers, one command line each, in place of the four),
-# CONVEYOR_FOREMAN_RENEW (seconds, 82800).
+# CONVEYOR_FOREMAN_RENEW (seconds, 82800), CONVEYOR_FOREMAN_LOOK (seconds between two reads of the commit, 60).
 set -u
 SID=$(jq -r '.session_id // empty | strings' 2>/dev/null)
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
 foreman "$SID" || exit 0
-# waiter.pid (in the Foreman's folder, lib.sh FD) names the live waiter and its session: a claim by another session
-# of the same Foreman stops it (lib.sh claim). The mark is read again once waiter.pid is written: a claim or off
+# FROM: the commit of the install this copy runs from, by the path it was started by (the shim's, links not
+# followed); empty when it runs from a checkout, which never moves.
+VERSIONS=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions
+FROM=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+[ "${FROM%/*}" = "$VERSIONS" ] && [[ ${FROM##*/} =~ ^[0-9a-f]{40}$ ]] && FROM=${FROM##*/} || FROM=''
+# moved: prints the commit the project runs now when it is installed and is not FROM; nonzero otherwise.
+moved() {
+  local c
+  [ -n "$FROM" ] || return 1
+  c=$(jq -r '.plugin.commit // empty | strings' "$CONVEYOR_MAIN/.conveyor/project.json" 2>/dev/null)
+  [ -n "$c" ] || c=$(jq -r '.commit // empty | strings' "$CONVEYOR_MAIN/.git/conveyor-engine.json" 2>/dev/null)
+  [[ $c =~ ^[0-9a-f]{40}$ ]] && [ "$c" != "$FROM" ] && [ -f "$VERSIONS/$c/conveyor/foreman/waiter.sh" ] && printf '%s' "$c"
+}
+# waiter.pid (in the Foreman's folder, lib.sh FD), "<pid> <commit it runs from, - from a checkout> <session>", names
+# the live waiter: a claim by another session of the same Foreman stops it (lib.sh claim), and an update keeps that
+# commit's install. The session is last, as it may be empty. The mark is read again once waiter.pid is written: a claim or off
 # between the first check and then read the old waiter.pid, so it is this waiter that stands down.
-mkdir -p "$FD" && exec 7>>"$FD/waiter.lock" && flock -n 7 && printf '%s %s\n' "$$" "$SID" > "$FD/waiter.pid" || exit 0
+mkdir -p "$FD" && exec 7>>"$FD/waiter.lock" && flock -n 7 && printf '%s %s %s\n' "$$" "${FROM:--}" "$SID" > "$FD/waiter.pid" || exit 0
 foreman "$SID" || exit 0
 ACK=$(mktemp) || exit 0
 deliver() { # 0 when anything pending went to stderr
@@ -56,17 +75,24 @@ start() { # <name>: in its own process group, so stopping it stops its sleep too
   set -m; bash -c "${CMD[$1]}" > /dev/null 2>&1 7>&- & PID[$1]=$!; set +m
 }
 for w in "${!CMD[@]}"; do start "$w"; done
-renew=${CONVEYOR_FOREMAN_RENEW:-82800}
-end=$(( $(date +%s) + renew ))
+renew=${CONVEYOR_FOREMAN_RENEW:-82800} look=${CONVEYOR_FOREMAN_LOOK:-60}
+# The renew time, an epoch: a waiter that took a moved one's place (below) keeps that one's, as the hook it runs in
+# is the same, ended at the same timeout.
+end=${CONVEYOR_FOREMAN_END:-$(( $(date +%s) + renew ))}
 while :; do
   left=$(( end - $(date +%s) ))
   if [ "$left" -le 0 ]; then
     echo "Renew: $((renew / 3600)) hours with nothing to report; no action needed. Reply: Idle" | pending_put
     deliver; stop_all; exit 2
   fi
-  sleep "$left" 7>&- & sp=$!
+  sleep "$(( left < look ? left : look ))" 7>&- & sp=$!
   wait -n -p done "${PID[@]}" "$sp"; kill "$sp" 2>/dev/null
   deliver && { stop_all; exit 2; }
+  # The install moved: the watchers stop, and the waiter of the new install takes this one's place (its exec 7>>
+  # closes this waiter.lock, so its flock takes it), with this one's renew time.
+  if new=$(moved); then
+    stop_all; CONVEYOR_FOREMAN_END=$end exec bash "$VERSIONS/$new/conveyor/foreman/waiter.sh" <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')"
+  fi
   for w in "${!PID[@]}"; do
     [ "${PID[$w]}" = "${done:-}" ] || continue
     now=$(date +%s); kept=()

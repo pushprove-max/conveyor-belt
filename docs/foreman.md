@@ -40,6 +40,11 @@ it up:
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 
+The watchers run from the Conveyor version that the project uses. When the project moves to a new version, as when
+it follows the plugin's main and a new commit lands, the watchers stop within a minute and start again from the new
+version. A card that lands while the version changes still wakes the Foreman. An update does not delete a version
+that the Foreman's watchers still use. A later update deletes it, after those watchers stop.
+
 ## The Foreman on your own machine
 
 The Foreman can run on your own machine while the belt runs on a host. Give your machine's host file (its
