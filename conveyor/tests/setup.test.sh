@@ -347,6 +347,19 @@ t_doctornovenv() {
   grep -qxF "missing: the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)" <<<"$out" \
     && ! grep -q 'for the Board, in its virtualenv' <<<"$out" || fail "doctor's fix for a missing Board virtualenv does not name python3-venv: $out"
 }
+# Bug caught (#20): with no python3-venv, python3 -m venv makes bin/python3 and then fails in ensurepip; doctor took
+# that virtualenv for made and said only to run setup again, and setup's rerun did not make it again.
+t_doctorvenvnopip() {
+  local X out py; doctordone; py=$(type -P python3) || fail "no python3 on PATH"
+  echo pip > "$G/nopkg" # the virtualenv's python3 has no pip
+  # python3 as on Debian with no python3-venv: venv records its arguments and fails.
+  printf '#!/usr/bin/env bash\n[ "$1 $2" != "-m venv" ] || { echo "$*" >> "%s/venv"; exit 1; }\nexec "%s" "$@"\n' "$G" "$py" > "$G/python3" && chmod +x "$G/python3"
+  ! (cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no --pin >/dev/null 2>&1) || fail "setup passed with a virtualenv with no pip"
+  grep -qxF -- "-m venv --clear $XDG_DATA_HOME/conveyor/board-venv" "$G/venv" || fail "setup did not make again a virtualenv with no pip: $(cat "$G/venv" 2>&1)"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) && fail "doctor passed with a virtualenv with no pip: $out"
+  grep -qxF "missing: the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)" <<<"$out" \
+    && ! grep -q 'for the Board, in its virtualenv' <<<"$out" || fail "doctor's fix for a virtualenv with no pip does not name python3-venv: $out"
+}
 t_doctorsnap() {
   local X out; doctordone; : > "$G/out"
   mkdir -p "$T/$CASE/snap"; echo true > "$T/$CASE/snap/gh"

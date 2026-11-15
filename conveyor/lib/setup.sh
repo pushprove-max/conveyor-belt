@@ -73,7 +73,8 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
   else install "$p" || return 1; fi
   mpsinstalled || { timeout 300 claude plugin install "$MPS" && mpsinstalled && echo "conveyor: installed the plugin $MPS, for /conveyor-belt:plan"; } \
     || { echo "conveyor: the plugin $MPS could not be installed (claude plugin install $MPS)" >&2; return 1; }
-  { [ -x "$BOARD_VENV/bin/python3" ] || python3 -m venv "$BOARD_VENV"; } \
+  # A virtualenv with no pip is what python3 -m venv leaves when ensurepip fails (no python3-venv): it is made again.
+  { "$BOARD_VENV/bin/python3" -c 'import pip' 2>/dev/null || python3 -m venv --clear "$BOARD_VENV"; } \
     && "$BOARD_VENV/bin/python3" -m pip install -q --require-hashes -r "$BOARD_REQ" \
     || { echo "conveyor: the Board's virtualenv $BOARD_VENV could not be filled from $BOARD_REQ" >&2; return 1; }
   packget labels l && l=$(jq -r '[.built, .followup, .type] + .priorities + .nonProductAreas | unique[]' <<<"$l") || return 1
@@ -212,8 +213,9 @@ doctor() {
     [ -f "$c" ] || no "the file $c that the service $t starts (a restart or a reboot does not start its loop)" \
       "run conveyor.sh install-service in the project's checkout, which writes the machine's service on an installed commit"
   done < <(services)
-  # setup makes the virtualenv with python3 -m venv, which Debian and Ubuntu leave out of python3 (python3-venv).
-  if [ ! -x "$BOARD_VENV/bin/python3" ]; then no "the Board's virtualenv $BOARD_VENV" \
+  # setup makes the virtualenv with python3 -m venv, which Debian and Ubuntu leave out of python3 (python3-venv); there,
+  # it leaves a virtualenv with a python3 but no pip, which counts as no virtualenv.
+  if ! "$BOARD_VENV/bin/python3" -c 'import pip' 2>/dev/null; then no "the Board's virtualenv $BOARD_VENV" \
     "run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)"
   else for p in $BOARD_PKGS; do
     if "$BOARD_VENV/bin/python3" -c "import $p" 2>/dev/null; then ok "$p, in the Board's virtualenv $BOARD_VENV"
