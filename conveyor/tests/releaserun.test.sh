@@ -42,6 +42,18 @@ until [ -e "$STUB/go2" ]; do sleep 0.1; done'
     and (.commits | map(.subject)) == ["feat: Not pushed yet", "fix: A fix", "feat(engine): A new thing (#5)"]' > /dev/null \
     || fail "the snapshot's release does not show main since v1.0.0: $(loop snapshot | jq -c .release)"
 }
+# Bug: the Release panel says main moved only once the suite ends, so the owner waits for a whole suite whose result
+# no release can use. A card lands (main moves) while the stub suite waits; the snapshot must say moved before it ends.
+t_relmoving() {
+  local O pid
+  relsetup ': > "$STUB/at1"; until [ -e "$STUB/go" ]; do sleep 0.1; done'
+  loop release-prep 1.1.0 > "$T/$CASE.prep" 2>&1 & pid=$!
+  wait_until '[ -e "$STUB/at1" ]' || fail "the suite did not start: $(cat "$T/$CASE.prep")"
+  relsnap "the snapshot says main moved before any card landed" '.state == "running" and .moved == false and (has("main") | not)'
+  git -C "$R" commit -q --allow-empty -m 'fix: A card landed' || fail "the fixture could not be made"
+  relsnap "the snapshot does not say main moved while the suite runs" '.state == "running" and .moved == true'
+  : > "$STUB/go"; wait "$pid" || fail "release-prep failed: $(cat "$T/$CASE.prep")"
+}
 # The Board's Release (release-run): cutsetup, with gh keeping each conveyor/release-suite status it is sent, so release
 # takes release-prep's pass, and the suite counting its runs in $STUB/runs.
 runsetup() {

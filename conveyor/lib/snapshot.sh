@@ -233,7 +233,8 @@ CHECKRUN_SHOW='
           + [.lanes[] | select(.state == "running") | "  ▶ \(.name)" + (if .started != null then " \(now - (.started | t) | took)" else "" end)][:3])})}
   end'
 # The whole-suite runs, each in one shape (suites, above): the release's (its record, commands/release-prep.sh) and
-# the full test's (fulltest()). One under way is counted from its runner's marks (suiteprog()). A release record left
+# the full test's (fulltest()). One under way is counted from its runner's marks (suiteprog()), and says main moved once
+# main's head is not the one its suite started on (the record's main). A release record left
 # running with its lock free was ended from outside before it could say so: stopped, when the record was last written.
 suites() {
   local r fr l t
@@ -242,7 +243,9 @@ suites() {
       if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
         t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '.state = "stopped" | .ended = ($t | todate)' <<<"$r")
       elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
-        r=$(jq -c --argjson p "$(suiteprog "$CARDS/release/wt")" '. + $p' <<<"$r"); fi
+        # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end.
+        r=$(jq -c --argjson p "$(suiteprog "$CARDS/release/wt")" --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
+          '. + $p | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi
   if ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
@@ -251,7 +254,7 @@ suites() {
     fr=$(jq -c '{kind: "full test", version: null, step: (if .push then "push" else "run" end), sha, since: null, ended: .time, state, done: null,
       failed: (.cases | length), cases: [.cases[].case], moved: false, reasons: (if .reason then [.reason] else [] end)}' <<<"$l")
   else fr=''; fi
-  printf '%s\n' "$r" "$fr" | jq -cs 'map(objects)'
+  printf '%s\n' "$r" "$fr" | jq -cs 'map(objects | del(.main))'
 }
 # What the Release panel shows of main (docs/board.md): the newest vX.Y.Z tag, the commits since it (count; the newest
 # 20, {sha, subject}), the next minor version, whether main holds its notes (docs/releases/<next>.md), and main's head.

@@ -32,8 +32,9 @@
 # passed (release-prep), released (release), failed (the suite failed), refused (any other refusal) or stopped), sha
 # (the commit the suite runs or ran on, null before it), done, failed and cases (the cases ended, those failed and their
 # names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), moved (main moved while the suite
-# ran), reasons (each line the command printed to stderr, its "conveyor: <command>: " taken off) and pid (the process
-# whose tree `release-run stop` ends)}. A release after a passed release-prep of the same version keeps that run's
+# ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reasons
+# (each line the command printed to stderr, its "conveyor: <command>: " taken off) and pid (the process whose tree
+# `release-run stop` ends)}. A release after a passed release-prep of the same version keeps that run's
 # suite (sha, done, failed, cases, moved, since); one after a refused release of it keeps that one's (all but moved).
 # `conveyor.sh release-run <version>` is the Board's Release (docs/board.md): the owner's yes, given there. It starts
 # release-prep, then, when it passes, release, in the background, and returns; their output is in
@@ -140,7 +141,7 @@ relsuite() { # <command name> <commit>
   [ -n "$cmd" ] || { echo "conveyor: $n: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   # main as the suite starts: a card that lands while it runs moves it (the record's moved).
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  relrec --arg s "$sha" '.sha = $s | .done = 0 | .failed = 0 | .cases = [] | .moved = false'
+  relrec --arg s "$sha" --arg m "$m0" '.sha = $s | .done = 0 | .failed = 0 | .cases = [] | .moved = false | .main = (if $m == "" then null else $m end)'
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }
