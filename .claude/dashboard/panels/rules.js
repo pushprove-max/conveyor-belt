@@ -597,14 +597,15 @@
       if (d.cli && !m) { say(`Pick the ${name}'s model first.`); return; }
       if (d.cli && !MODEL.test(m)) { say('A model is one word of letters, digits and . _ : / @ [ ] -, starting with a letter or a digit.'); return; }
       const args = d.cli ? [d.cli, m].concat(d.effort ? [d.effort] : []) : ['default'];
-      // Refused, the draft stays, still unsaved, with the host's refusal in the row.
-      const repo = S.d.repo;
+      // Refused, the draft stays, still unsaved, with the host's refusal in the row. Saved, the line shows in this
+      // panel (where), not the one clicked or typed in while the host answered.
+      const repo = S.d.repo, where = S.from;
       send(action, args).then((ok) => {
         if (!ok) return;
         draftDrop(key, repo);
         if (repo !== S.d.repo) return;
         draw();
-        say(`Saved: ${key} now ${d.cli ? `${m} · ${d.effort || 'default effort'}` : 'the default'}`);
+        say(`Saved: ${key} now ${d.cli ? `${m} · ${d.effort || 'default effort'}` : 'the default'}`, null, where);
       });
     });
     const cancel = button('Cancel', 'btn-quiet', `${key}-cancel`, `Put the ${name} back as it is in force`, () => { draftDrop(key); draw(); });

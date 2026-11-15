@@ -2,7 +2,7 @@
 // The dashboard page's Rules tab: the Builder, Reviewer and Judge rows (CLI, model and effort), picked from lists and
 // sent by Save. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, record, rulesP, ruled, CLAUDE4, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, record, rulesP, heldP, ruled, CLAUDE4, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const DRAFT_KEY = 'conveyor-board-rules-drafts';
@@ -176,6 +176,27 @@ test('Rules: a Builder, Reviewer or Judge change sends nothing until Save, which
   await settle();
   assert.deepEqual(w.posts, [], 'no model picked: nothing sent');
   assert.match(rulesP(w).querySelector('.rules-note').textContent, /Pick the Builder's model first/);
+});
+
+// Bug: a Save said "Saved" in the panel last typed in when the host answered, so a search typed in Held issues while
+// the Save was out took the line, and the Rules panel's own line was emptied.
+test('Rules: a role\'s Saved line shows in the Rules panel even when Held issues is typed in before the host answers', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, full());
+  set(w, 'builder', 'builder-model', 'claude-sonnet-5-5');
+  let answer;
+  const late = new Promise((r) => { answer = r; });
+  const rec = record({ model: { cli: 'claude', model: 'claude-sonnet-5-5', effort: 'high' } });
+  w.reply = { ...rec, text: () => late.then(() => rec.text()) };
+  act(row(w, 'builder'), 'builder-save').click();
+  await settle();
+  const search = act(heldP(w), 'held-search');
+  search.value = '35';
+  search.dispatchEvent(new w.Event('input', { bubbles: true }));
+  answer();
+  await settle();
+  assert.equal(rulesP(w).querySelector('.rules-note').textContent, 'Saved: builder now claude-sonnet-5-5 · high');
+  assert.equal(heldP(w).closest('.panel').querySelector('.rules-note').textContent, '', 'Held issues does not say Saved');
 });
 
 // Bug (owner): a choice made and not saved must be neither lost nor sent by a redraw, a tab change or a reload.
