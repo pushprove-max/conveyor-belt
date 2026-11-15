@@ -136,7 +136,8 @@ relrun() { # <function> <version>
 }
 # The newest vX.Y.Z tag, after the remote's branch and tags are fetched.
 lasttag() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1; }
-# The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite.
+# The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite,
+# and its files' results and times kept for the Tests page (suiterec(), lib/testrun.sh).
 # 0: passed and posted; 1: failed (failure posted), or a step could not be done; 2: the pack names no test.full.
 relsuite() { # <command name> <commit>
   local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc state desc m0 m1 p
@@ -148,7 +149,7 @@ relsuite() { # <command name> <commit>
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }
-  tests "$wt" test.full; rc=$?
+  tests "$wt" test.full; rc=$?; suiterec "$wt" release "$sha"
   # The cases its runner named as ended; a red run whose runner named no failed case has those its output names
   # (testfails()), each named as fulljudge() names it.
   p=$(suiteprog "$wt")

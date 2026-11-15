@@ -108,6 +108,11 @@ t_fullred() {
   [ "$(head -n 1 "$STUB/fulls")" = "$A " ] || fail "the full test suite's run was not of the whole suite: $(cat "$STUB/fulls")"
   # Red: nothing is pushed, and each failed case is judged from its runs alone.
   [ "$(ftl '[.state, .exit, .pushed]')" = '["failed",1,null]' ] && [ "$(ftorigin)" = "$O0" ] || fail "a red run pushed, or is not recorded red: $(cat "$ST/fulltest.jsonl")"
+  # Its files' results reach the Tests page (testrun.sh suiterec()): one line for the whole run, none for the runs of a
+  # case alone. Bug caught: a whole-suite run's results were dropped with its worktree, so the page never showed them.
+  [ "$(jq -sc --arg a "$A" 'map([.how, .sha == $a, (.files | map_values(.result))])' "$ST/suiteruns.jsonl" 2>&1)" \
+    = '[["full",true,{"ok.test":"ok","code.test":"fail","old.test":"fail","flaky.test":"fail","net.test":"fail"}]]' ] \
+    || fail "the whole run's files are not kept once for the Tests page: $(cat "$ST/suiteruns.jsonl" 2>&1)"
   [ "$(ftl '[.cases[] | [.case, .verdict, (.runs | join(","))]]')" = '[["code.test: breaks","fix","failed,failed,failed"],["flaky.test: flips","flaky","passed,passed,passed"],["net.test: fetch","declined","failed,failed,failed"],["old.test: old","fix","failed,failed,failed"]]' ] \
     || fail "the failed cases are not judged from three runs alone each: $(fl .cases)"
   # The runs: the whole suite once, three alone for each of the four cases, and one alone at origin's commit for each

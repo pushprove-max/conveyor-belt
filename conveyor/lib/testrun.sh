@@ -186,6 +186,21 @@ timed() { # <worktree>
     | jq -cRn '[inputs | capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
       | {key: .f, value: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}] | from_entries'
 }
+# A whole-suite run's files, for the Tests page (the snapshot's tests part, testspart() of lib/testfiles.sh): a line
+# for the run appended to $SUITERUNS, {time, how (full: the Board's full test suite, lib/fulltest.sh; release:
+# release-prep's, commands/release-prep.sh), sha, files: {<file>: {result: ok or fail (its `-- ok|FAIL <file>` line;
+# null with none), sec, cpu (its last `TESTRUN sec` line's; null with none)}}}, read from the logs the run in <worktree>
+# wrote (testlogs()) and its output (<worktree>.test). A run that names no file adds no line.
+SUITERUNS=${STATE%/*}/suiteruns.jsonl
+suiterec() { # <worktree> <full | release> <commit>
+  local logs=()
+  mapfile -t logs < <(testlogs "$1")
+  cat "${logs[@]}" "$1.test" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | jq -cRn --arg t "$(clock)" --arg h "$2" --arg s "$3" '
+    reduce (inputs | (capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
+        | {f, v: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}),
+      (capture("^-- (?<r>ok|FAIL) (?<f>.+)$") | {f, v: {result: (if .r == "ok" then "ok" else "fail" end)}})) as $x ({}; .[$x.f] += $x.v)
+    | select(length > 0) | {time: $t, how: $h, sha: $s, files: map_values({result: null, sec: null, cpu: null} + .)}' >> "$SUITERUNS" 2>/dev/null
+}
 # Main's recorded CPU seconds of each test file, {file: {cpu, from}}, the newer of two records of it: the test lines
 # (times) of the newest card that ran it and landed, as of its landed line, "card #<issue>, <day>"; and the latest
 # test-speed survey's, the file .conveyor/test-times.json on the commit <worktree>'s change is on, {files: {file:

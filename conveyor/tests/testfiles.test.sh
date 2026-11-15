@@ -39,7 +39,7 @@ t_tfpart() {
     {"case": "a.testx: y", "source": "s", "time": "2026-11-10T00:00:00Z"}], "filed": []}' > "$ST/flaky.json"
   echo '{"filed": [{"file": "a.test", "issue": 41}, {"file": "a.test", "issue": 42}, {"file": "b.test", "issue": 43}]}' > "$ST/slow.json"
   got=$(tf_file a.test | jq -c '{cpu, median, change, runs: [.runs[].cpu], lastRun, timedRuns, failedSteps, flaky, issue, budget, budgetFrom, over}')
-  [ "$got" = '{"cpu":10,"median":3.5,"change":1.857,"runs":[10,3,4,2],"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1},"timedRuns":4,"failedSteps":2,"flaky":2,"issue":42,"budget":8,"budgetFrom":"project","over":true}' ] \
+  [ "$got" = '{"cpu":10,"median":3.5,"change":1.857,"runs":[10,3,4,2],"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:03:00Z","whole":false},"timedRuns":4,"failedSteps":2,"flaky":2,"issue":42,"budget":8,"budgetFrom":"project","over":true}' ] \
     || fail "a.test's figures: $got"
   # Bug it catches: the issue came from the slow-test record alone, which nothing writes now, so a file the test rules
   # (their log) or the Board's File an issue ($TAFILED) filed for had no issue, and no Close its issue as done.
@@ -84,6 +84,22 @@ t_tfslower() {
   [ "$(jq -c '[(.files[] | select(.file == "s.test") | .usual), (.files[] | select(.file == "f.test") | .usual)]' <<<"$got")" = '[10,null]' ] || fail "the usual times: $got"
 }
 
+# The Tests page lists every test file of main's checkout. c.test.sh ran on a card; w.test.sh, wholeOnly in the pack,
+# ran only in a whole-suite run, whose files the run's output names (suiterec(): its `TESTRUN sec` and `-- FAIL` lines);
+# n.test.sh never ran. Bug caught: the part was made from card test lines alone, so a whole-only file
+# (conveyor/conveyor.test.sh) and a file never run were missing, and no whole-suite run reached the page.
+t_tfeveryfile() {
+  setup '[]'; tune '.test.files = {"w.test.sh": {wholeOnly: true}}'
+  touch "$R/c.test.sh" "$R/w.test.sh" "$R/n.test.sh" && git -C "$R" add c.test.sh w.test.sh n.test.sh && git -C "$R" commit -qm tests || fail "main's tests"
+  tf_runs c.test.sh 2
+  printf 'TESTRUN sec\tw.test.sh\t48\t30.5\n-- FAIL w.test.sh\n' > "$T/$CASE/suite.test"
+  CONVEYOR_NOW=1794700800 tf_as full-test suiterec "$T/$CASE/suite" full 0123abcd || fail "suiterec failed"
+  got=$(tf_in testspart 2026-11-09 | jq -c '[.files[] | {file, cpu, wholeOnly, runs: [.runs[] | {card, whole, result, sec, cpu}], last: (.lastRun | if . then {time, whole} else . end)}]')
+  [ "$got" = '[{"file":"w.test.sh","cpu":30.5,"wholeOnly":true,"runs":[{"card":null,"whole":true,"result":"fail","sec":48,"cpu":30.5}],"last":{"time":"2026-11-15T00:00:00Z","whole":true}},'\
+'{"file":"c.test.sh","cpu":2,"wholeOnly":false,"runs":[{"card":"c-c.test.sh-0","whole":false,"result":null,"sec":3,"cpu":2}],"last":{"time":"2026-11-10T12:00:00Z","whole":false}},'\
+'{"file":"n.test.sh","cpu":null,"wholeOnly":false,"runs":[],"last":null}]' ] || fail "the three files: $got"
+}
+
 # A project with no recorded file time still has the part (the page shows its step totals, never an error): an empty
 # list and the steps of the 7 days, their slot wait and run seconds added up; a step before the 7 days, and one that
 # reused a pass (it ran nothing), are not counted. Bug caught: a project with no test line at all had no part (the
@@ -111,7 +127,7 @@ t_tfownbudget() {
   tf_card slowtests "$R" || fail "slowtests failed"
   [ "$(jq -c 'map({file, budget})' "$R.slow")" = '[{"file":"b.test","budget":2},{"file":"c.test","budget":5}]' ] || fail "the slow note: $(cat "$R.slow")"
   tf_card slowrec "$R" | jq -c '{card: "c-1", issue: 1, step: "test", time: "2026-11-10T12:00:00Z", result: "pass"} + .' >> "$ST/cards.jsonl"
-  [ "$(tf_file a.test | jq -c '{budget, budgetFrom, over, lastRun}')" = '{"budget":20,"budgetFrom":"file","over":false,"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1}}' ] \
+  [ "$(tf_file a.test | jq -c '{budget, budgetFrom, over, lastRun}')" = '{"budget":20,"budgetFrom":"file","over":false,"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:00:00Z","whole":false}}' ] \
     || fail "a.test in the part: $(tf_file a.test)"
   [ "$(tf_file c.test | jq -c '{budget, budgetFrom, over}')" = '{"budget":5,"budgetFrom":"project","over":true}' ] || fail "c.test in the part: $(tf_file c.test)"
 }

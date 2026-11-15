@@ -5,13 +5,17 @@
 // First, the figures: files with a CPU time, files over budget, files slower than usual, files that wait more than
 // they work (their last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the
 // 7 days: their slot wait and their run time.
-// Then the table, one row a test file: file, CPU s now, median, change against its own median, its last runs as bars
-// (oldest first), clock against CPU, runs on record, and its status chips (Over budget, Slower than usual, Faster,
-// Waits, Flaky, Fails often, Has an issue, Slow on purpose). Filter chips over it, each with its count, show one
-// status alone. The rows that need a look (over budget and not slow on purpose, slower than usual, waits, flaky or
-// fails often) come first, then the highest CPU s. A row opens to show its runs, each with a link to its card's
-// issue, its budget and its mark, and the actions that run at once ("now"): Set a budget for this file, Mark as slow
-// on purpose (it asks for the reason) and Clear for each.
+// Then the table, one row a test file (every test file of main's checkout, run or not): file, CPU s now, median,
+// change against its own median, its last runs as bars (oldest first), clock against CPU, runs on record, the clock
+// time its newest run took (Last run took, with that run's date and time on hover), and its status chips (Over
+// budget, Slower than usual, Faster, Waits, Flaky, Fails often, Has an issue, Slow on purpose, Whole suite only, Never
+// run). A search box over it keeps the rows whose path holds its text (any case); filter chips, each with its count,
+// show one status alone; the two apply together. Each column heading sorts the table by that column (file names A to
+// Z, any other highest first; a second click reverses it, and an arrow shows which). With no sort picked, the rows
+// that need a look (over budget and not slow on purpose, slower than usual, waits, flaky or fails often) come first,
+// then the highest CPU s. A row opens to show its runs, each with a link to its card's issue or marked "whole suite"
+// with its result, its budget and its mark, and the actions that run at once ("now"): Set a budget for this file,
+// Mark as slow on purpose (it asks for the reason) and Clear for each.
 // Last, the panel Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
 // project): CPU budget for a test file (test.fileBudget), the budgets of single files and the files slow on purpose
@@ -65,8 +69,11 @@
   const MARKS = [
     ['over', 'Over budget', 'bad', true], ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
     ['waits', 'Waits', 'info', true], ['flaky', 'Flaky', 'warn', true], ['fails', 'Fails often', 'bad', true],
-    ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false]];
+    ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false],
+    ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false]];
   const S = { el: null, ctx: null, d: null, read: null, repo: undefined, filter: 'all', open: new Set(), busy: false,
+    sort: null,          // the column the table is sorted by, {key, dir: asc | desc}; null: rows that need a look first, then the highest CPU s
+    query: '', search: null,  // the text of the search box, and the box: the same node from one draw to the next, so it keeps the caret
     held: false, late: false,  // the pointer is pressed in the panel; a snapshot came meanwhile, to draw on its release
     drafts: new Map(),   // the values typed and not yet saved, by dk(key)
     pending: new Map(),  // the values saved here, by dk(key): {key, v, was, at, read}, until a snapshot names them
@@ -119,9 +126,24 @@
       over: f.over === true && !f.slowOnPurpose, slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
       fails: (num(f.failedSteps) || 0) >= FAILS, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
+      whole: f.wholeOnly === true, never: !list(f.runs).length,
     })[k]);
   }
   const look = (f) => marks(f).some((m) => m[3]);
+  // The clock time of a run: "48 s", "8 min 7 s".
+  const clockTook = (s) => { if (num(s) === null) return '—'; const r = Math.round(s); return r < 60 ? `${r} s` : `${Math.floor(r / 60)} min ${r % 60} s`; };
+  // The table's columns: key, heading, and the value a sort by it reads (null sorts last both ways). A first click
+  // sorts the file names A to Z and every other column highest first.
+  const COLS = [
+    ['file', 'File', (f) => f.file],
+    ['cpu', 'CPU s now', (f) => num(f.cpu)],
+    ['median', 'Median', (f) => num(f.median)],
+    ['change', 'Against its median', (f) => num(f.change)],
+    ['runs', 'Last runs', (f) => { const c = list(f.runs).filter(obj).map((r) => num(r.cpu)).filter((x) => x !== null); return c.length ? Math.max(...c) : null; }],
+    ['clock', 'Clock / CPU', (f) => num((obj(f.lastRun) || {}).clockPerCpu)],
+    ['count', 'Runs', (f) => (list(f.runs).length ? num(f.timedRuns) || 0 : null)],
+    ['took', 'Last run took', (f) => num((obj(f.lastRun) || {}).sec)],
+    ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length]];
 
   function say(text) { const n = S.el && S.el.querySelector('.tests-note'); if (n) n.textContent = text; }
   function button(text, cls, act, label, fn) {
@@ -626,12 +648,15 @@
     runs.setAttribute('aria-label', `Runs of ${file}`);
     list(f.runs).filter(obj).forEach((r) => {
       const li = h('li', 'tests-run');
-      const card = r.issue ? S.ctx.issueLink(r) : h('span', 'issue', String(r.card || 'a card'));
-      li.append(h('span', null, `${one(r.cpu)} CPU s · ${num(r.sec) === null ? 'clock not recorded' : `${one(r.sec)} s on the clock`} · `), h('span', null, 'card '), card,
-        h('span', 'board-from', ` · ${S.ctx.when(r.time)}`));
+      const cpu = num(r.cpu) === null ? 'CPU not recorded' : `${one(r.cpu)} CPU s`;
+      li.append(h('span', null, `${cpu} · ${num(r.sec) === null ? 'clock not recorded' : `${one(r.sec)} s on the clock`} · `));
+      if (r.whole === true) li.append(h('span', null, `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`));
+      else li.append(h('span', null, 'card '), r.issue ? S.ctx.issueLink(r) : h('span', 'issue', String(r.card || 'a card')));
+      li.append(h('span', 'board-from', ` · ${S.ctx.when(r.time)}`));
       runs.append(li);
     });
     if (!runs.children.length) runs.append(h('li', 'board-from', 'No run on record.'));
+    if (f.wholeOnly === true) el.append(h('p', 'tests-fact', 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it.'));
     // As in force, or as saved here and not yet in a snapshot.
     const mine = shown(`budget:${file}`), all = shown('fileBudget'), reason = shown(`mark:${file}`) || 'none';
     const budget = mine !== '' ? `${one(Number(mine))} CPU s, its own` : all !== '' ? `${one(Number(all))} CPU s, the project budget` : 'not known';
@@ -660,13 +685,44 @@
       b.dataset.filter = k; b.setAttribute('aria-pressed', String(S.filter === k));
       bar.append(b);
     });
-    // The rows that need a look first; the snapshot's order (the highest CPU s first) inside each.
-    const shownFiles = files.map((f, i) => [f, i]).filter(([f]) => S.filter === 'all' || marks(f).some((m) => m[0] === S.filter))
+    // The search box: any part of the path, in any case, with the filter chip picked.
+    if (!S.search) {
+      const s = h('input', 'field tests-search');
+      s.type = 'search'; s.placeholder = 'Search test files'; s.dataset.act = 'search'; s.setAttribute('aria-label', 'Search the test files by name');
+      s.addEventListener('input', () => { S.query = s.value; draw(); });
+      S.search = s;
+    }
+    S.search.value = S.query;
+    const find = h('div', 'tests-filters'); find.append(S.search);
+    const q = S.query.trim().toLowerCase();
+    // With no sort picked, the rows that need a look first; the snapshot's order (the highest CPU s first) inside each.
+    // A sort keeps that order among equal values.
+    let shownFiles = files.map((f, i) => [f, i]).filter(([f]) => (S.filter === 'all' || marks(f).some((m) => m[0] === S.filter)) && (!q || f.file.toLowerCase().includes(q)))
       .sort((a, b) => (look(b[0]) - look(a[0])) || (a[1] - b[1])).map(([f]) => f);
+    const col = S.sort && COLS.find((c) => c[0] === S.sort.key);
+    if (col) {
+      const by = col[2], up = S.sort.dir === 'asc' ? 1 : -1;
+      shownFiles = shownFiles.slice().sort((a, b) => {
+        const x = by(a), y = by(b);
+        if (x === null || y === null) return (x === null) - (y === null);
+        return up * (typeof x === 'string' ? x.localeCompare(y) : x - y);
+      });
+    }
     const t = h('table', 'tests-table'), head = h('tr');
-    ['File', 'CPU s now', 'Median', 'Against its median', 'Last runs', 'Clock / CPU', 'Runs', 'Status'].forEach((x) => { const th = h('th', null, x); th.scope = 'col'; head.append(th); });
+    COLS.forEach(([key, words]) => {
+      const th = h('th'), on = col && col[0] === key, dir = on ? S.sort.dir : null;
+      th.scope = 'col';
+      th.setAttribute('aria-sort', on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
+      const b = button(`${words}${on ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}`, 'btn-quiet tests-sort', `sort-${key}`, `Sort by ${words}`, () => {
+        S.sort = { key, dir: on ? (dir === 'asc' ? 'desc' : 'asc') : key === 'file' ? 'asc' : 'desc' };
+        S.keep = { act: `sort-${key}` }; draw();
+        say(`Sorted by ${words}, ${S.sort.dir === 'asc' ? (key === 'file' ? 'A to Z' : 'lowest first') : key === 'file' ? 'Z to A' : 'highest first'}`);
+      });
+      th.append(b); head.append(th);
+    });
     const thead = h('thead'); thead.append(head);
     const body = h('tbody');
+    if (!shownFiles.length) { const tr = h('tr', 'tests-none'), td = h('td', 'board-from', 'No test file matches'); td.colSpan = COLS.length; tr.append(td); body.append(tr); }
     shownFiles.forEach((f) => {
       const open = S.open.has(f.file), tr = h('tr', 'tests-row'), last = obj(f.lastRun) || {};
       tr.dataset.file = f.file;
@@ -675,14 +731,20 @@
       const cell = (x, cls) => { const td = h('td', cls); td.append(x); return td; };
       const chips = h('span', 'rules-marks');
       marks(f).forEach(([, words, tone]) => chips.append(S.ctx.chip(words, tone)));
+      // The newest run's clock time, with its date and time on hover.
+      const took = cell(clockTook(last.sec), 'tests-num');
+      if (num(last.sec) !== null && typeof last.time === 'string' && !Number.isNaN(Date.parse(last.time))) {
+        took.title = `${new Date(last.time).toLocaleString()}, ${last.whole === true ? 'whole suite' : 'card'}`;
+      }
+      const count = COLS.find((c) => c[0] === 'count')[2](f);
       tr.append(cell(name, 'tests-file'), cell(one(f.cpu), 'tests-num'), cell(one(f.median), 'tests-num'), cell(pct(f.change), 'tests-num'),
-        cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(String(num(f.timedRuns) || 0), 'tests-num'), cell(chips));
+        cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, cell(chips));
       body.append(tr);
-      if (open) { const more2 = h('tr', 'tests-open'), td = h('td'); td.colSpan = 8; td.append(more(f)); more2.dataset.file = f.file; more2.append(td); body.append(more2); }
+      if (open) { const more2 = h('tr', 'tests-open'), td = h('td'); td.colSpan = COLS.length; td.append(more(f)); more2.dataset.file = f.file; more2.append(td); body.append(more2); }
     });
     t.append(thead, body);
     const wrap = h('div', 'tests-scroll'); wrap.append(t);
-    el.append(bar, wrap);
+    el.append(find, bar, wrap);
     return el;
   }
 
@@ -756,7 +818,7 @@
     el.replaceChildren(root, note);
     const wide = root.querySelector('.tests-scroll');
     if (wide) wide.scrollLeft = left;
-    if (S.busy) root.querySelectorAll('button, input, select, textarea').forEach((b) => { if (!['filter', 'open', 'view', 'copy'].includes(b.dataset.act)) b.disabled = true; });
+    if (S.busy) root.querySelectorAll('button, input, select, textarea').forEach((b) => { if (!['filter', 'open', 'view', 'copy', 'search'].includes(b.dataset.act) && !(b.dataset.act || '').startsWith('sort-')) b.disabled = true; });
     if (keep) {
       const scope = keep.file ? Array.from(el.querySelectorAll('[data-file]')).filter((x) => x.dataset.file === keep.file) : [el];
       const again = scope.map((x) => x.querySelector(`[data-act="${keep.act}"]`)).find(Boolean);
@@ -771,7 +833,7 @@
     const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Tests: ${view.repo}` : null);
-    if (S.repo !== undefined && view.repo !== S.repo) { S.open.clear(); S.filter = 'all'; S.refused = null; S.ask = null; S.viewed = null; }
+    if (S.repo !== undefined && view.repo !== S.repo) { S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null; S.viewed = null; }
     Object.assign(S, { el, ctx, d: view, read, repo: view.repo });
     if (view.repo !== null) {
       const after = (p) => read !== null && (p.at !== null && p.at !== undefined ? read >= p.at : read !== p.read);

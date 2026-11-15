@@ -10,17 +10,21 @@
 # rules: the test rules (lib/testrules.sh): the pack's switch, guards and rules (testrulesettings()), and last: the
 #   list of the last pass (testrulespass()), {time, on, matches, burst}, null before the first, and log: the last
 #   TESTRULES_SHOWN lines of the rules' log ($TESTRULESLOG), newest first; null when the pack cannot be read;
-# files: each test file with a CPU time on a card's test line (times), the highest CPU seconds now first: file, cpu
-#   (its last run's), median (of every run on record), change (cpu against median, as a share: 0.5 is 50% over; null
-#   when the median is 0), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
-#   gives none; card, time}), lastRun ({sec, cpu, clockPerCpu} of its last run), timedRuns, failedSteps (the test steps
+# files: each test file main's checkout tracks (a name with `.test.` in it), and each other file with a run on record:
+#   a card's test line (times) or a whole-suite run ($SUITERUNS, suiterec() of lib/testrun.sh); the highest CPU seconds
+#   now first, a file with none last: file, cpu (its newest run's that has CPU seconds; null with none), median (of
+#   every run on record with CPU seconds), change (cpu against median, as a share: 0.5 is 50% over; null when the
+#   median is 0 or null), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
+#   gives none; card (null for a whole-suite run), time, whole (a whole-suite run), and a whole-suite run's result: ok,
+#   fail or null}; [] for a file never run), lastRun ({sec, cpu, clockPerCpu, time, whole} of its newest run; null with
+#   none), timedRuns (its runs with CPU seconds), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it),
 #   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), budget and budgetFrom (file: its own;
-#   project: test.fileBudget), slowOnPurpose (its reason, else null), over (cpu over its budget), usual (the median of
+#   project: test.fileBudget), slowOnPurpose (its reason, else null), over (cpu over its budget; false with no cpu), usual (the median of
 #   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
-# totals: files (timed), overBudget (over and not slow on purpose), slower, and steps: the card test steps that ran in
+# totals: files (those with CPU seconds on record), overBudget (over and not slow on purpose), slower, and steps: the card test steps that ran in
 #   the 7 days to today ({count, waitSec: their seconds waiting for a test slot, runSec: their test commands' seconds}).
 TESTKEEP=5
 # A runner (the engine's conveyor/conveyor.test.sh) names its cases' failures and flaky entries as its own, while the
@@ -42,8 +46,9 @@ OWNERS='def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
         | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings)] | unique;'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru
+  local b si sh rn mn fs fl sf defs refs ru all
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
+  all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
   ru=$(testrulesettings) || ru=null
@@ -51,7 +56,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # A project with no test line has its part all the same: grep finding none is no failure.
   { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" \
     --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
-    --argjson ru "$ru" --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --argjson ru "$ru" --argjson all "$all" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) "$OWNERS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
@@ -59,26 +64,30 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     [inputs | fromjson? | objects | select(.step == "test")] | sort_by(.time) as $ls
     | (reduce ($ls[] | select(.result == "fail") | failedfiles[]) as $f ({}; .[$f] += 1)) as $failed
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
-    | [$ls[] | . as $l | .times | objects | to_entries[] | select(.value | type == "number") | .key as $f
-        | {file: $f, cpu: .value, sec: (($l.clocks | objects | .[$f] | numbers) // null), card: $l.card, time: $l.time}]
+    | [($ls[] | . as $l | .times | objects | to_entries[] | select(.value | type == "number") | .key as $f
+        | {file: $f, cpu: .value, sec: (($l.clocks | objects | .[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
+       ($su[] | . as $w | .files | objects | to_entries[] | select(.value | type == "object")
+        | {file: .key, cpu: ((.value.cpu | numbers) // null), sec: ((.value.sec | numbers) // null), card: null, time: $w.time, whole: true,
+           result: ((.value.result | strings) // null)}),
+       ($all[] | {file: ., none: true})]
     | group_by(.file)
-    | map(. as $r | $r[0].file as $f | [$r[].cpu] as $c | ($c | median) as $m | $c[-1] as $now
+    | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud
-        | (if ($r | length) >= $mn and ($r | length) > $rn then $c[:-$rn] | median else null end) as $usual
+        | (if ($c | length) >= $mn and ($c | length) > $rn then $c[:-$rn] | median else null end) as $usual
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
            runs: ($r[-$keep:] | reverse | map(del(.file))),
-           lastRun: ($r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end)}),
-           timedRuns: ($r | length), failedSteps: ($failed[$f] // 0),
+           lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} end),
+           timedRuns: ($c | length), wholeOnly: ($own.wholeOnly == true), failedSteps: ($failed[$f] // 0),
            flaky: ($flaky[$f] // 0),
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
            budget: $bud, budgetFrom: (if $own.budget != null then "file" else "project" end), slowOnPurpose: ($own.slowOnPurpose // null),
-           over: ($now > $bud), usual: ($usual | r3), slower: ($usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)))})
-    | sort_by(-.cpu, .file)
+           over: ($now != null and $now > $bud), usual: ($usual | r3), slower: ($usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)))})
+    | sort_by(-(.cpu // -1), .file)
     | [$ls[] | select(.reused != true and ((.time | fromdate? | strflocaltime("%Y-%m-%d")) // "") >= $since)] as $wk
     | {settings: {fileBudget: $b, slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
        rules: (if $ru == null then null else $ru + {last: $last[0], log: ($lg[0] // [])} end),
        files: ., slower: map(select(.slower) | .file),
-       totals: {files: length, overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length),
+       totals: {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length),
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}'
 }
 

@@ -40,6 +40,9 @@ until [ -e "$STUB/go2" ]; do sleep 0.1; done'
   relsnap "the snapshot's cases done do not rise as the suite runs" '.state == "running" and .done == 2'
   : > "$STUB/go2"; wait "$pid" || fail "release-prep failed: $(cat "$T/$CASE.prep")"
   relsnap "the snapshot does not show the passed run on $O once it ended" --arg o "$O" '.state == "passed" and .sha == $o and .done == 2 and .failed == 0 and .ended != null'
+  # Bug (issue 34): a release's suite kept no file's result, so the Tests page never showed a whole-suite run.
+  [ "$(jq -sc --arg o "$O" 'map([.how, .sha == $o, .files])' "$ST/suiteruns.jsonl" 2>&1)" = '[["release",true,{"a.test":{"result":"fail","sec":null,"cpu":null}}]]' ] \
+    || fail "the release's suite run is not kept for the Tests page: $(cat "$ST/suiteruns.jsonl" 2>&1)"
   # Bug: the Release panel cannot say what a release would hold: main's newest tag (the one release-prep fetched), the
   # commits since it, the next version and whether main holds its notes.
   loop snapshot | jq -e --arg h "$(git -C "$R" rev-parse HEAD)" '.release | .tag == "v1.0.0" and .count == 3 and .next == "1.1.0" and .notes == true and .head == $h

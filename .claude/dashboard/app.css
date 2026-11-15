@@ -654,6 +654,8 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tests-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .tests-table th { text-align: left; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); padding: var(--sp-1) var(--sp-2); }
 .tests-table td { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--surface-2); vertical-align: middle; }
+/* A column heading is a button that sorts the table: it reads as the heading it replaces. */
+.tests-sort { min-height: 32px; padding: 0; border-color: transparent; font: inherit; color: inherit; white-space: nowrap; }
 .tests-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The least width of the File column: short of room, the table scrolls in .tests-scroll and a name breaks at its
    slashes, not one letter a line. */

@@ -12,9 +12,12 @@
 # total names them already.
 # Its second line, `TESTRUN files=<n>`, is the number of files it runs, the total of the progress's files (suiteprog()
 # reads that line and the `-- ok|FAIL <file>` lines). Its files' own lines of these forms are left out of its output.
+# Before each file's `-- ok|FAIL` line it prints the file's `TESTRUN sec<TAB><file><TAB><clock s><TAB><CPU s>` (as
+# conveyor/tools/testtime.sh does), which the engine keeps for the Board's Tests page (testrun.sh suiterec()); a file's
+# own `TESTRUN sec` lines, of the files it starts, are left out, so each line is of a file this suite ran.
 # A file named a case when a name was added, or written again (a case file runs cases the runner named already).
 rc=0
-stamp=$(mktemp); trap 'rm -f "$stamp"' EXIT
+stamp=$(mktemp); tt=$(mktemp); trap 'rm -f "$stamp" "$tt"' EXIT
 marks() { find "$CONVEYOR_TEST_LOG/cases/ok" "$CONVEYOR_TEST_LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
 mapfile -t files < <(git ls-files '*.test.sh' '*.test.mjs' '*.test.py')
 engine=0 other=0
@@ -29,8 +32,12 @@ for t in "${files[@]}"; do
     *) c=(bash "$t") ;;
   esac
   n=$(marks); touch "$stamp"
-  "${c[@]}" < /dev/null | awk '!/^(TESTRUN (cases|files)=|-- (ok|FAIL) )/ { print; fflush() }'
-  if [ "${PIPESTATUS[0]}" = 0 ]; then echo "-- ok $t"; r=ok; else echo "-- FAIL $t"; rc=1; r=failed; fi
+  times > "$tt"; s=${EPOCHREALTIME/,/.}
+  "${c[@]}" < /dev/null | awk '!/^(TESTRUN (cases|files)=|TESTRUN sec\t|-- (ok|FAIL) )/ { print; fflush() }'
+  st=${PIPESTATUS[0]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
+  awk -v f="$t" -v a="$s" -v b="$e" 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
+    NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "TESTRUN sec\t%s\t%.1f\t%.1f\n", f, b - a, n[4] - n[2] }' "$tt"
+  if [ "$st" = 0 ]; then echo "-- ok $t"; r=ok; else echo "-- FAIL $t"; rc=1; r=failed; fi
   [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || [ "$(marks)" != "$n" ] || [ "$(marks -newer "$stamp")" != 0 ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/$r" && : > "$CONVEYOR_TEST_LOG/cases/$r/${t//\//:}"; }
 done
 exit $rc

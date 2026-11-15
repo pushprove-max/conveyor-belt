@@ -22,6 +22,8 @@ echo 'echo pass >> "$(dirname "$0")/../ran"' > "$R/lib/fx-pass.test.sh"
 printf 'import os, sys\nopen(os.path.join(os.path.dirname(__file__), "..", "ran"), "a").write("py\\n")\nsys.exit(1)\n' > "$R/lib/fx-fail.test.py"
 # A runner that names its own case as ended in the engine's test log folder, as the engine's runner does.
 echo '[ -z "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/own"; }' >"$R/lib/fx-own.test.sh"
+# It also times a file it starts, as a meta-runner does: that line is not the suite's.
+printf 'printf "TESTRUN sec\\tlib/inner.test.sh\\t1.0\\t1.0\\n"\n' >> "$R/lib/fx-own.test.sh"
 # Two engine case files that run the same two cases under the same names, as the engine's runner and each case file
 # do. Their names end in no tracked test file's path, so the test step does not take this test for a meta-runner.
 mkdir -p "$R/conveyor/tests"
@@ -49,6 +51,11 @@ of=$(awk -F= '/^TESTRUN cases=/ { n += $2 } END { print n + 0 }' "$T/out")
 [ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "pass py " ] || no "the full suite did not run each tracked test file alone: $(cat "$R/ran" 2>&1)"
 grep -qx -- '-- ok lib/fx-pass.test.sh' "$T/out" && grep -qx -- '-- FAIL lib/fx-fail.test.py' "$T/out" \
   || no "the full suite does not name each file's result: $(cat "$T/out")"
+# Bug: a whole-suite run timed no file, so the Tests page had no time for a file that only whole-suite runs run
+# (conveyor/conveyor.test.sh, wholeOnly). Each file it ran has its own `TESTRUN sec` line, and a nested file has none.
+got=$(awk -F'\t' '$1 == "TESTRUN sec" && $3 ~ /^[0-9]+\.[0-9]$/ && $4 ~ /^[0-9]+\.[0-9]$/ { print $2 }' "$T/out" | sort | tr '\n' ' ')
+[ "$got" = "conveyor/tests/fx-a.test.sh conveyor/tests/fx-b.test.sh lib/fx-fail.test.py lib/fx-own.test.sh lib/fx-pass.test.sh " ] \
+  || no "the full suite does not time each file it runs, and only those: $got"
 # Bug: the suite printed `ok <file>` and no file total, so the Release panel's progress (fulltest.sh suiteprog(), which
 # reads `TESTRUN files=` and `-- ok|FAIL <file>`) had no files done of total and no failed file names.
 cp "$T/out" "$T/wt.test"

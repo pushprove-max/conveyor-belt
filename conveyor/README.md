@@ -529,32 +529,39 @@ A file none of them records has no before.
 
 One budget for all test files cannot tell a file that is slow on purpose from one that got slower: a file over the
 budget from the start shows no change when it gets three times slower. So the snapshot's `tests` part compares each
-file with its own usual time. It is made from the card test lines (those of retried cards too) and holds:
+file with its own usual time. It is made from the card test lines (those of retried cards too), the whole-suite runs
+and the test files of main's checkout, and holds:
 
 - `settings`: the pack's `fileBudget`, `slowIssues`, `slower` (`{share, runs, minRuns}`) and `files` (each file's own
   settings, as the pack holds them);
 - `rules`: the test rules (Test rules, below): `on`, `perDay`, `maxOpen`, `quietDays`, `burst` and `list`, as the
   pack holds them with their defaults, and `last`, the list of the last pass (`{time, on, matches, burst}`), null
   before the first;
-- `files`: each test file with a CPU time on a card's test line (`times`), the highest CPU seconds first: `file`,
-  `cpu` (its last run), `median` (of every run on record), `change` (`cpu` against `median`, as a share: 0.5 is 50%
-  over; null when the median is 0), `runs` (its last 5 runs, newest first: `cpu`, `sec`, the clock seconds, null on a
-  line written before the test line held `clocks`; `card`, `time`), `lastRun` (`sec`, `cpu` and `clockPerCpu` of its
-  last run), `timedRuns`, `failedSteps` (the test steps that failed in it: it was a failed file, a runner such as
+- `files`: every test file of main's checkout (each file git lists with `.test.` in its name), and each other file
+  with a run on record, the highest CPU seconds first and the files with none last. A run on record is a card's test
+  line (`times`) or a whole-suite run: the full test suite (Run full test suite and Push landed on the Board) and
+  the suite of `release-prep` and `release` each keep, as they end, the result (`-- ok|FAIL <file>`) and the `TESTRUN sec` line of each file
+  they ran. Each file has `file`, `cpu` (its newest run with CPU seconds; null with none), `median` (of every run on
+  record with CPU seconds), `change` (`cpu` against `median`, as a share: 0.5 is 50% over; null when the median is 0
+  or null), `runs` (its last 5 runs, newest first, empty for a file never run: `cpu`, `sec`, the clock seconds, null
+  on a line written before the test line held `clocks`; `card`, null for a whole-suite run; `time`; `whole`, true for
+  a whole-suite run; and a whole-suite run's `result`, `ok` or `fail`), `lastRun` (`sec`, `cpu`, `clockPerCpu`, `time`
+  and `whole` of its newest run; null with none), `timedRuns` (its runs with CPU seconds), `wholeOnly` (its
+  `test.files` entry has `wholeOnly: true`), `failedSteps` (the card test steps that failed in it: it was a failed file, a runner such as
   `conveyor/conveyor.test.sh` named a failed case that the file defines (`t_<case>()` or `<case>()` in main's
   checkout) and the file names that runner, or the run timed
   out in it; a case the named file defines itself is that file's alone), `flaky` (its entries in the flaky-test record, its cases' entries too, the
   entries a runner names as its own among them), `issue` (the issue last
   filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
   `conveyor.sh testissue`, else null), `budget` and `budgetFrom` (`file`: its own; `project`: `test.fileBudget`), `slowOnPurpose`
-  (the reason of its mark, else null), `over` (`cpu` is over its budget), `usual` and `slower` (below);
+  (the reason of its mark, else null), `over` (`cpu` is over its budget; false with no `cpu`), `usual` and `slower` (below);
 - `slower`: the names of the files slower than their usual;
-- `totals`: `files` (timed), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
+- `totals`: `files` (those with CPU seconds on record), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
   test steps that ran in the 7 days to today, `{count, waitSec, runSec}`, with the seconds they waited for a test slot
   and the seconds their test commands ran.
 
-A project with no file time recorded has the part with an empty `files` list and its step totals. The part is `null`
-only when the pack cannot be read.
+A project with no test file and no run on record has the part with an empty `files` list and its step totals. The
+part is `null` only when the pack cannot be read.
 
 A file is slower than its usual when its CPU seconds in each of its last `test.slower.runs` runs (default 3) are over
 its usual by more than `test.slower.share` (default 0.25: 25%), and at least `test.slower.minRuns` runs (default 5)
@@ -569,8 +576,8 @@ A file's own settings are in the pack's `test.files`, by its path from the repos
   project's changed-tests script, which marks each file it starts and logs `TESTRUN nested <file> <inner file>`
   for each such start): `cardMode` is the `NAME=VALUE` that makes the file run its own checks with a stub in place of
   the files it starts, which a card's Test step runs it with; `wholeOnly: true` keeps it off a card's Test step, which says so (`TESTRUN whole-only`),
-  and leaves it to the nightly whole test. A meta-runner with neither fails a card's Test step, which names the file
-  and the two marks.
+  so only a whole-suite run runs it: the full test suite (Run full test suite and Push landed on the Board) and
+  the suite of `release-prep` and `release`. A meta-runner with neither fails a card's Test step, which names the file and the two marks.
 
 ```json
 "test": {"command": "...", "files": {"conveyor/tests/merge.test.sh": {"budget": 30},

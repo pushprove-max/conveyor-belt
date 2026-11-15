@@ -34,7 +34,8 @@
 # run's: each {case, line, runs: each run alone, passed, failed, timeout or killed, verdict: flaky, fix or declined, why,
 # issue, reused}; an anyway line's: those of the red run it pushed over), pushed ({ok, reason}; null: nothing was to be
 # pushed) and by (who pushed anyway). $FULLTEST.running holds {since, sha, how} while the lock is held, and, once a red
-# run's failed cases are run alone, counts: the whole run's suiteprog().
+# run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
+# times, also go to $SUITERUNS (suiterec(), lib/testrun.sh) for the Tests page.
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
 # How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
@@ -146,7 +147,7 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
       '{kind: "run", push: $p, sha: $s, state: "error", reason: $r, exit: null, cases: [], pushed: null}')"
     return
   }
-  tests "$wt" test.full; rc=$?
+  tests "$wt" test.full; rc=$?; suiterec "$wt" full "$sha"
   if [ $rc = 0 ]; then
     [ "$how" != push ] || pushed=$(fullpush "$sha" "$c" "$n")
   else

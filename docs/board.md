@@ -202,9 +202,17 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows the project's test files: each file's CPU seconds, its median, its last runs and its status (Over
-budget, Slower than usual, Waits, Flaky and others). A row opens to show its runs, to set a budget for the file or to
-mark it slow on purpose (`conveyor.sh test-settings`). Test limits holds the Load limit (`maxLoad`, in the host file)
+The Tests tab shows every test file of the project: each file's CPU seconds, its median, its last runs, the clock
+time of its newest run (Last run took; point at it to see when that run was) and its status (Over budget, Slower than
+usual, Waits, Flaky and others). The runs are those of card Test steps and of whole-suite runs (Run full test suite,
+Push landed, and the suite of a release). A file that no run ran yet shows "Never run" and dashes. A file that only
+whole-suite runs run (`wholeOnly` in the pack's `test.files`) shows "Whole suite only".
+
+Click a column heading to sort the table by that column. Click it again to reverse the order. An arrow shows the
+column and the direction. Until you pick a column, the files that need a look come first, then the highest CPU
+seconds. Type part of a file's path in the search box to see only the files that match it. The search and a filter
+chip work together. A row opens to show its runs, each marked with its card or "whole suite", to set a budget for the
+file or to mark it slow on purpose (`conveyor.sh test-settings`). Test limits holds the Load limit (`maxLoad`, in the host file)
 and the project's test budget (in the pack).
 
 An opened row has the test actions. "now" runs at once and files no issue. "issue" files an issue. Judge this test and
