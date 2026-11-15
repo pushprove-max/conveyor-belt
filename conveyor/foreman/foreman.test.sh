@@ -344,6 +344,13 @@ mkdir -p "$T/beta/.claude/metrics"
 jq -cn '{id: "d1", question: "Approve", askedAt: "2026-01-01T00:00:00Z", answeredAt: null}' > "$T/beta/.claude/metrics/decisions.jsonl"
 bash "$SRC/watch-alerts.sh" --once || fail "an overdue owner decision in a project's ledger did not wake its Foreman"
 [[ $(cat "$FD"/pending/*.wake) == 'Alert: Question waiting on the owner over 1 h: beta: Approve.'* ]] || fail "the question wake is wrong: $(cat "$FD"/pending/*.wake)"
+# Bug: a ledger that did not read on one poll dropped its project's questions from the seen file, so the next poll,
+# with the ledger read again, woke a second time for the decision already reported.
+rm -f "$FD"/pending/*.wake; cp "$T/beta/.claude/metrics/decisions.jsonl" "$T/ledger.ok"
+echo '{broken' >> "$T/beta/.claude/metrics/decisions.jsonl"
+bash "$SRC/watch-alerts.sh" --once && fail "a ledger that does not read woke: $(cat "$FD"/pending/*.wake)"
+mv "$T/ledger.ok" "$T/beta/.claude/metrics/decisions.jsonl"
+bash "$SRC/watch-alerts.sh" --once && fail "a decision already reported woke again after its ledger failed to read once: $(cat "$FD"/pending/*.wake)"
 rm -f "$FD"/pending/*.wake "$T/beta/.claude/metrics/decisions.jsonl"
 # The decisions are the projects' own, so they wake with no Board at all; and a limit alert the Board raised stays
 # seen while the Board does not read, so it does not wake again when the Board comes back with it still active.

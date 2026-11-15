@@ -91,10 +91,15 @@ const wanted = (v: Views) => overrides[v] ?? (option[v] === 'on' ? true : option
 const anyWanted = () => wanted('band') || wanted('pane') || wanted('status')
 
 // The Research lane's run: the newest write to a Claude session log of its worktree (Claude Code keeps a worktree's
-// sessions in ~/.claude/projects/<its path, every other character a dash>).
+// sessions in <CLAUDE_CONFIG_DIR, else ~/.claude>/projects/<its path, every other character a dash, cut past 200
+// characters to those and a dash and a hash>, as conveyor/foreman/foreman.sh launch reads it).
 const readResearch = async ($: EngineInterface, wt: string, home: string): Promise<Research> => {
   if (!wt || !(await $.fs.stat(`${wt}/.git`).catch(() => undefined))) return { state: 'none' }
-  const logs = await $.fs.list(`${home}/.claude/projects/${wt.replace(/[^A-Za-z0-9]/g, '-')}`).catch(() => [])
+  const projects = `${(await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${home}/.claude`}/projects`
+  const enc = wt.replace(/[^A-Za-z0-9]/g, '-')
+  const dirs = enc.length <= 200 ? [enc]
+    : (await $.fs.list(projects).catch(() => [])).filter(e => e.kind === 'dir' && e.name.startsWith(`${enc.slice(0, 200)}-`)).map(e => e.name)
+  const logs = (await Promise.all(dirs.map(d => $.fs.list(`${projects}/${d}`).catch(() => [])))).flat()
   const times = logs.filter(e => e.name.endsWith('.jsonl')).map(e => e.mtimeMs)
   return { state: 'ok', lastAt: times.length ? Math.max(...times) : null }
 }

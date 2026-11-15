@@ -39,15 +39,19 @@ poll() { # 0 when a wake was put in pending
   # The owner's open decisions are each project's, so they are read from the ledger of each of the Foreman's own
   # records (lib.sh mine; .claude/metrics/decisions.jsonl in its checkout, lib.sh ledger), each named for its project, never from
   # the Board's Needs panel, which shows the one ledger of the Board's checkout whichever Foreman reads it. A ledger
-  # that does not read is passed over here (the live summary names it). They run apart from the limit, so no Board
-  # holds them up.
+  # that does not read is passed over here (the live summary names it), and its project's questions seen stay seen
+  # (question-<repo>-*), so a ledger that reads again does not wake one already reported. They run apart from the
+  # limit, so no Board holds them up.
   decs=$(mine | while IFS=$'\t' read -r repo main; do
-    main=$(ledger "$repo" "$main") || continue
-    jq -cs --arg r "$repo" 'group_by(.id) | map(last) | .[] | select(.answeredAt == null)
-      | {id: "\($r)-\(.id)", askedAt, question: "\($r): \(.question)"}' "$main/.claude/metrics/decisions.jsonl" 2>/dev/null
+    main=$(ledger "$repo" "$main") && d=$(jq -cs --arg r "$repo" 'group_by(.id) | map(last) | .[] | select(.answeredAt == null)
+      | {id: "\($r)-\(.id)", askedAt, question: "\($r): \(.question)"}' "$main/.claude/metrics/decisions.jsonl" 2>/dev/null) \
+      && { [ -z "$d" ] || printf '%s\n' "$d"; } && continue
+    jq -cn --arg r "$repo" '{unread: $r}'
   done | jq -cs .) || return 1
-  all=$(rules null "$decs") || return 1
-  all=$(printf '%s\n' "$board" "$all" | sed '/^$/d')
+  kept=$(jq -c --rawfile seen "$SEEN" '($seen | split("\n")) as $s | .[] | .unread | strings | . as $r
+    | $s[] | select(startswith("question-\($r)-")) | {key: .}' <<<"$decs") || return 1
+  all=$(rules null "$(jq -c 'map(select(has("unread") | not))' <<<"$decs")") || return 1
+  all=$(printf '%s\n' "$board" "$kept" "$all" | sed '/^$/d')
   new=$(jq -c --rawfile seen "$SEEN" '($seen | split("\n")) as $s | select(.key | IN($s[]) | not)' <<<"$all") \
     || return 1
   [ -z "$new" ] || jq -r '"Alert: \(.line)"' <<<"$new" | pending_put || return 1

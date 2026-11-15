@@ -34,7 +34,7 @@
 #   when no session is marked, or the marked one is gone (running), it claims it and says so in one line; when a live
 #   session holds it, it claims nothing and is told to ask the owner by the picker, as its first act, whether to take
 #   it over ("Take over" runs the claim; "Leave it" leaves it a normal session, not asked again in it).
-# live: the live summary, at most 1500 bytes of whole lines: for each of the Foreman's records (mine), its Conveyor health (loop, state, in
+# live: the live summary, at most 1500 bytes of whole lines, apart from unavailable lines, which always print: for each of the Foreman's records (mine), its Conveyor health (loop, state, in
 #   flight, blocked, waiting on the owner's yes, after a card or before its build, push), and the open decisions of
 #   each of those records' ledgers (.claude/metrics/decisions.jsonl in its main checkout, where its sessions' decision
 #   hooks write; in this checkout for a record matched by its repository whose main is on another machine: lib.sh

@@ -33,8 +33,10 @@ const FULL = snapshot({ needsYou: { waiting: [WAITING], blocked: [] }, belt: [BE
 // writes: the key of each of the mod's atoms written, in order.
 type World = { files: Map<string, { text: string; at: number }>; reads: string[]; writes: string[]; fetch: string; fetchRc: number; fetchCut?: boolean; boardDir: string | null; runs: { argv: string[]; cwd?: string }[]; status: (string | undefined)[]; toasts: string[]; registered: string[]; opened: string[]; clock: ReturnType<typeof mock.clock>; placed?: boolean; hold?: Promise<void>; run: (argv: readonly string[], cwd?: string) => any }
 
-const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<string, string> = {}, installed = true): World => {
+// env: the session's environment variables the mod reads (none set unless given).
+const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<string, string> = {}, installed = true, env: Record<string, string> = {}): World => {
   const clock = mock.clock(on, { now: NOW })
+  mock.env(on, env)
   const w: World = { files: new Map(), reads: [], writes: [], fetch, fetchRc: 0, boardDir: BOARD, runs: [], status: [], toasts: [], registered: [], opened: [], clock, run: () => undefined }
   for (const [p, text] of Object.entries(files)) w.files.set(p, { text, at: NOW - 1000 })
   if (installed) w.files.set(`${MAIN}/.conveyor/project.json`, { text: '', at: 0 })
@@ -52,11 +54,14 @@ const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<st
     return out('', 127)
   }
   on('process.run', (_, e) => w.run(e.argv, e.init?.cwd))
+  // A folder's entries: its files, and each folder a file is in below it.
   on('fs.list', (_, e) => {
     const dir = e.path ?? ''
     const names = [...w.files].filter(([p]) => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
-    if (!names.length) throw new Error(`ENOENT ${dir}`)
-    return { value: names.map(([p, f]) => ({ name: p.slice(dir.length + 1), kind: 'file' as const, size: f.text.length, mtimeMs: f.at, isLink: false })) }
+    const dirs = [...new Set([...w.files.keys()].filter(p => p.startsWith(`${dir}/`) && p.slice(dir.length + 1).includes('/')).map(p => p.slice(dir.length + 1).split('/')[0]))]
+    if (!names.length && !dirs.length) throw new Error(`ENOENT ${dir}`)
+    return { value: [...names.map(([p, f]) => ({ name: p.slice(dir.length + 1), kind: 'file' as const, size: f.text.length, mtimeMs: f.at, isLink: false })),
+      ...dirs.map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false }))] }
   })
   on('fs.read', (_, e) => {
     w.reads.push(e.path)
@@ -112,6 +117,26 @@ test('/units prints the header, the four sections and the two lanes from one fet
   expect(fetches(w).length).toBeGreaterThan(0)
   expect(fetches(w).every(r => r.cwd === MAIN && r.argv.length === 2)).toBe(true)
   expect(w.registered).toEqual(['units'])
+})
+
+// Bug: the Research lane's session logs were looked for under ~/.claude whatever CLAUDE_CONFIG_DIR was, so the lane
+// showed no run recorded (lastAt null) though its sessions wrote under that folder.
+test('the Research lane reads its session logs under CLAUDE_CONFIG_DIR when it is set', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [`${WS}/Research/.git`]: 'gitdir: x', '/r/cfg/projects/-r-ws-Research/a.jsonl': '{}' }, true, { CLAUDE_CONFIG_DIR: '/r/cfg' })
+  await start($, 'main')
+  await w.clock.settle()
+  expect(await units($)).toMatch(/\nRESEARCH LANE  working · last activity 1m ago$/)
+})
+
+// Bug: Claude Code cuts a project folder's name past 200 characters to those, a dash and a hash; the lane looked for
+// the whole name, so a worktree with a long path showed no run recorded.
+test('the Research lane of a worktree whose path is over 200 characters finds its logs in the cut folder', async ($, on) => {
+  const wt = `/r/${'x'.repeat(210)}/Research`
+  const dir = `${HOME}/.claude/projects/${wt.replace(/[^A-Za-z0-9]/g, '-').slice(0, 200)}-1a2b3c`
+  const w = world(on, 'main', answer(FULL).replace(`${WS}/Research`, wt), { [`${wt}/.git`]: 'gitdir: x', [`${dir}/a.jsonl`]: '{}' })
+  await start($, 'main')
+  await w.clock.settle()
+  expect(await units($)).toMatch(/\nRESEARCH LANE  working · last activity 1m ago$/)
 })
 
 // /units is every project's on the machine, not only the plugin's own: a host file with two projects (bakery and

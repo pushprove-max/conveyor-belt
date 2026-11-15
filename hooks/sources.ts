@@ -99,10 +99,11 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 
 // The fetch's answer (hooks/units-fetch.sh), one tab-separated line each: `paths <Research lane worktree> <home>
 // <own>`, `fast <state> [<branch> <commits ahead of main> <tracked files changed> <first subject>]`, `host <name> <how>
-// <exit>` and then, for every record in the host file's order, `<repo> <its snapshot, or null>`. own: the repo of the
-// record whose main is this checkout, the session's own project; empty when no record is. `how` is local (a record of
-// the host file is this checkout) or ssh, else the reason nothing was asked: nofile, config or nossh.
-export type Fetched = { research: string; home: string; own: string; fast: Fast; host: { name: string; how: string; rc: number } | null; records: { repo: string; json: unknown }[] }
+// <exit> [<path looked at>...]` and then, for every record in the host file's order, `<repo> <its snapshot, or null>`.
+// own: the repo of the record whose main is this checkout, the session's own project; empty when no record is. `how`
+// is local (a record of the host file is this checkout) or ssh, else the reason nothing was asked: nofile (with the
+// paths of the host file looked at), config or nossh.
+export type Fetched = { research: string; home: string; own: string; fast: Fast; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
 export const parseFetch = (stdout: string): Fetched | null => {
   const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, host: null, records: [] }
   for (const line of stdout.split('\n')) {
@@ -112,7 +113,7 @@ export const parseFetch = (stdout: string): Fetched | null => {
     else if (f[0] === 'fast' && f[1] === 'none') out.fast = { state: 'none' }
     else if (f[0] === 'fast' && f[1] === 'norecord') out.fast = { state: 'norecord' }
     else if (f[0] === 'fast' && f[1] === 'ok' && /^\d+$/.test(f[3] ?? '') && /^\d+$/.test(f[4] ?? '')) out.fast = { state: 'ok', branch: f[2], ahead: Number(f[3]), dirty: Number(f[4]), subject: one(f[5]) }
-    else if (f[0] === 'host') out.host = { name: f[1] ?? '', how: f[2] ?? '', rc: Number(f[3]) }
+    else if (f[0] === 'host') out.host = { name: f[1] ?? '', how: f[2] ?? '', rc: Number(f[3]), looked: f.slice(4).filter(Boolean) }
   }
   // An empty Research lane is one the host file does not name: the board still reads.
   return out.home ? out : null
@@ -212,7 +213,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
 }
 
 const CANNOT = 'units: the Conveyor snapshot cannot be read'
-const WHY: Record<string, string> = { nofile: 'this machine has no host file, ~/.config/conveyor/host.json', config: 'the host file is not understood', nossh: 'the host file names no ssh target' }
+const WHY: Record<string, string> = { nofile: 'this machine has no host file', config: 'the host file is not understood', nossh: 'the host file names no ssh target' }
 // The snapshot of every record as one board, or the one line saying why there is none. A record that cannot be read
 // costs only its own note while another's can; nothing is ever shown from an earlier fetch. cut: why the fetch's output
 // was cut short, when it was; then no record is trusted.
@@ -221,7 +222,8 @@ export const boardOf = (f: Fetched | null, cut: string | null = null): Pick<Stat
   if (cut) return none(cut, f?.host?.name ?? '')
   if (!f) return none('the fetch did not run')
   if (!f.host) return none('the fetch did not finish')
-  const { name, how, rc } = f.host
+  const { name, how, rc, looked } = f.host
+  if (how === 'nofile' && looked.length) return none(`${WHY.nofile} at ${looked.join(' or ')}`, name)
   if (how !== 'local' && how !== 'ssh') return none(WHY[how] ?? 'the fetch did not finish', name)
   if (how === 'ssh' && rc === 255) return none(`${name} is unreachable`, name)
   if (rc === 124 || rc === 137) return none(`${name} did not answer in time`, name)

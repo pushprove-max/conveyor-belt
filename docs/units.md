@@ -125,14 +125,16 @@ Then two reads on this machine:
   `panels.health.data.limit.usedPct` and `.resetsAt`), read again only when the file's write time changes; with no
   folder named, `usage limit not read`.
 - The Research lane's last activity: the newest write to a Claude session log of its folder
-  (`~/.claude/projects/<that path with dashes>/*.jsonl`); it is working while that is under five minutes old.
+  (`~/.claude/projects/<that path with dashes>/*.jsonl`, under `$CLAUDE_CONFIG_DIR` in place of `~/.claude` when that
+  is set; a name over 200 characters is cut to its first 200, a dash and a hash, as Claude Code names the folder); it
+  is working while that is under five minutes old.
 
 ## When something cannot be read
 
 A snapshot that cannot be read is one plain line in every view, and nothing from an earlier fetch:
 `units: the Conveyor snapshot cannot be read (<why>)`, where the reason is one of `<host> is unreachable`,
 `<host> did not answer in time`, `<host> gave no snapshot`,
-`this machine has no host file, ~/.config/conveyor/host.json`, `the host file is not understood`,
+`this machine has no host file at <paths looked at>`, `the host file is not understood`,
 `the host file names no ssh target`, `the fetch did not run` or `the fetch did not finish`, or
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
 

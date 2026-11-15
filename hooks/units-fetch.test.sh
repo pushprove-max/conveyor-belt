@@ -47,10 +47,13 @@ same 'two projects: their snapshots in the host file order, read here, as the fi
 # with no name and looked for its Fast lane's card among bakery's. The own project is the record whose main is here.
 same 'a session in the second project names that project its own' "$(sed '1s/\tbakery$/\tgadgetlab/' <<<"$WANT")" "$(fetch "$M/gadgetlab")"
 
-# No host file: the board says so, and the lanes have no record to come from.
+# No host file: the board says so, naming the paths looked at (XDG_CONFIG_HOME's, then the checkout's; bug: /units
+# named ~/.config/conveyor/host.json whatever XDG_CONFIG_HOME was), and the lanes have no record to come from.
 machine nofile
 rm -f "$H/.config/conveyor/host.json"
-same 'no host file: nofile, and no record for the lanes' $'paths\t\t/r/home\t\nfast\tnorecord\nhost\t\tnofile\t0' "$(fetch "$M/bakery")"
+same 'no host file: nofile with the paths looked at, and no record for the lanes' \
+  "$(printf 'paths\t\t/r/home\t\nfast\tnorecord\nhost\t\tnofile\t0\t/r/home/xdg/conveyor/host.json\t%s' "$M/bakery/conveyor/host.json")" \
+  "$(cd "$M/bakery" && HOME=$H XDG_CONFIG_HOME=$H/xdg PATH=$M/bin:$PATH bash "$FETCH" | sed "s|$H|/r/home|g")"
 
 # A checkout that is no record of the host file (the owner's own machine): the snapshots come over ssh to the host
 # file's target, here a stub that runs the command it is given.

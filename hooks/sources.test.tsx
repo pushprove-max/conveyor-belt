@@ -531,7 +531,9 @@ test('a snapshot that cannot be read is one plain line saying why, in /units, th
   const cases: [string, string][] = [
     ['', 'the fetch did not run'],
     ['paths\t/r/ws\t/r/home\nfast\tnone\n', 'the fetch did not finish'],
-    [fetched([], 'host\t\tnofile\t0'), 'this machine has no host file, ~/.config/conveyor/host.json'],
+    // Bug: the line always named ~/.config/conveyor/host.json, though the fetch looks under XDG_CONFIG_HOME and then
+    // in the checkout: it names the paths the fetch looked at.
+    [fetched([], 'host\t\tnofile\t0\t/r/xdg/conveyor/host.json\t/r/main/conveyor/host.json'), 'this machine has no host file at /r/xdg/conveyor/host.json or /r/main/conveyor/host.json'],
     [fetched([], 'host\t\tconfig\t0'), 'the host file is not understood'],
     [fetched([], 'host\tbuildbox\tnossh\t0'), 'the host file names no ssh target'],
     [fetched([], 'host\tbuildbox\tssh\t255'), 'buildbox is unreachable'],

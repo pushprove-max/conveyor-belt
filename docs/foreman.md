@@ -26,7 +26,7 @@ settings file, `~/.config/conveyor/host.json`) the host's `ssh` target and the p
 ```
 
 A checkout here whose `origin` remote is that repo gets that record, even when its path is different. The Foreman then
-asks the host about the record over ssh. Open decisions in the host's ledger show as unavailable.
+asks the host about the record over ssh. Open decisions for that record come from the ledger of this checkout.
 
 ## Away and auto
 

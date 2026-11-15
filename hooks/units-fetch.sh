@@ -4,7 +4,8 @@
 # hooks/sources.ts parseFetch reads, one tab-separated line each:
 #   paths <the Research lane's worktree, empty when none is named> <home> <this checkout's record's repo, empty when none>
 #   fast norecord | none | unread | ok <branch> <commits ahead of the default branch> <tracked files changed> <first subject>
-#   host <name> <how> <exit>, then for every record of the host file, in its order: <repo> <its snapshot, or null>
+#   host <name> <how> <exit> [<path looked at>...], then for every record of the host file, in its order: <repo> <its
+#   snapshot, or null>
 # The lanes are the worktrees the host file names for this checkout's record (the record whose main is this checkout:
 # lanes.fast.worktree and lanes.research.worktree, which `conveyor.sh lane ... create` writes; a path that starts with
 # ~/ is under the home folder). norecord: the host file has no record of this checkout. That record's repo is the
@@ -12,16 +13,16 @@
 # The snapshots are read as the Board reads them (.claude/scripts/dashboard.sh, conveyor()): `conveyor.sh snapshot` of
 # the clone the host file's main names, for every record, in one command. It runs here when this checkout is a record
 # of the host file or that clone, else over ssh to the host file's ssh target. A record whose snapshot fails prints
-# null; the others still print. how: local or ssh, else why nothing was asked: nofile (no host file), config (it is
-# not understood) or nossh (it names no ssh target).
+# null; the others still print. how: local or ssh, else why nothing was asked: nofile (no host file; the line then
+# names the two paths looked at), config (it is not understood) or nossh (it names no ssh target).
 # Usage: units-fetch.sh [feed]. feed: the Board's live feed is fresh, so the board is the feed's: only the lanes are
 # read, and the host line is `host <empty> feed 0`.
 set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
 # This machine's host file, else the checkout's committed conveyor/host.json (as the Board reads it).
-cfg=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json
-[ -e "$cfg" ] || cfg=$here/conveyor/host.json
+mine=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json cfg=$here/conveyor/host.json
+[ ! -e "$mine" ] || cfg=$mine
 
 rec=0 fast='' research='' own=''
 if [ -e "$cfg" ]; then
@@ -49,7 +50,7 @@ else
 fi
 [ "${1:-}" != feed ] || { printf 'host\t\tfeed\t0\n'; exit 0; }
 
-[ -e "$cfg" ] || { printf 'host\t\tnofile\t0\n'; exit 0; }
+[ -e "$cfg" ] || { printf 'host\t\tnofile\t0\t%s\t%s\n' "$mine" "$cfg"; exit 0; }
 host=$(jq -er '.host | select(test("^[A-Za-z0-9._-]+$"))' "$cfg" 2>/dev/null) \
   && main=$(jq -er '.main | select(test("^/[A-Za-z0-9._/-]+$"))' "$cfg" 2>/dev/null) \
   && recs=$(jq -ec --arg m "$main" '(.records // [{repo: "project", main: $m}]) | select(type == "array" and length > 0
