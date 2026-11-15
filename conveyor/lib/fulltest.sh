@@ -33,7 +33,8 @@
 # push (asked to push), sha (the commit run or pushed), state (passed, failed or error, with reason), exit, cases (a red
 # run's: each {case, line, runs: each run alone, passed, failed, timeout or killed, verdict: flaky, fix or declined, why,
 # issue, reused}; an anyway line's: those of the red run it pushed over), pushed ({ok, reason}; null: nothing was to be
-# pushed) and by (who pushed anyway). $FULLTEST.running holds {since, sha, how} while the lock is held.
+# pushed) and by (who pushed anyway). $FULLTEST.running holds {since, sha, how} while the lock is held, and, once a red
+# run's failed cases are run alone, counts: the whole run's suiteprog().
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
 # How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
@@ -117,6 +118,8 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
     [ "$how" != push ] || pushed=$(fullpush "$sha" "$c" "$n")
   else
     state=failed; f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
+    # Each case run alone below runs in this worktree and starts a new log folder: the suite's counts are kept first.
+    jq -c --argjson p "$(suiteprog "$wt")" '. + {counts: $p}' "$FULLTEST.running" > "$FULLTEST.running.new" 2>/dev/null && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
     cases=$(fulljudge "$wt" "$sha" "$3" "$f") || cases='[]'
   fi
   git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*

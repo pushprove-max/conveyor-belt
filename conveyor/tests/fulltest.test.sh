@@ -154,6 +154,25 @@ t_fullred() {
   out=$(loop full-test anyway "$(jq -rs '.[2].id' "$ST/fulltest.jsonl")" 2>&1); [ $? = 2 ] && grep -q 'not a red one' <<<"$out" || fail "push anyway with no red run to push over was not refused: $out"
 }
 
+# Bug this guards: while a red run's failed case ran alone, the snapshot counted that run's new log folder, so the
+# suite's counts (done 3, failed 1, its case) dropped to nothing until the run ended.
+t_fullredprog() {
+  setup '[]'
+  local s
+  tune '.test.full = ". \"$STUB/full-cmd\""'
+  cat > "$STUB/full-cmd" <<'EOF'
+C=$CONVEYOR_TEST_LOG/cases; mkdir -p "$C/ok" "$C/failed"
+if [ -n "${CONVEYOR_TEST_RERUN:-}" ]; then : > "$STUB/alone"; until [ -e "$STUB/go" ]; do sleep 0.1; done; exit 1; fi
+: > "$C/ok/one"; : > "$C/ok/two"; : > "$C/failed/three"; echo "FAIL [three]: no"; exit 1
+EOF
+  loop full-test > /dev/null || fail "the full test did not start"
+  wait_until '[ -e "$STUB/alone" ]' 'cat "$ST/fulltest.jsonl.log"' || fail "the failed case was not run alone"
+  s=$(loop snapshot)
+  : > "$STUB/go"; ftended 1
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .done, .failed, .cases]]' <<<"$s")" = '[["running",3,1,["three"]]]' ] \
+    || fail "while a failed case ran alone, the suite's counts were lost: $(jq -c .suites <<<"$s")"
+}
+
 # Bug this guards: Push landed, refused by a remote whose main holds a commit made there by hand, merged it into the
 # tested commit and pushed the merge, a commit the run did not test.
 t_fullpushdiverged() {

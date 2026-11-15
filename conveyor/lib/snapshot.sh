@@ -233,7 +233,8 @@ CHECKRUN_SHOW='
           + [.lanes[] | select(.state == "running") | "  ▶ \(.name)" + (if .started != null then " \(now - (.started | t) | took)" else "" end)][:3])})}
   end'
 # The whole-suite runs, each in one shape (suites, above): the release's (its record, commands/release-prep.sh) and
-# the full test's (fulltest()). One under way is counted from its runner's marks (suiteprog()), and says main moved once
+# the full test's (fulltest()). One under way is counted from its runner's marks (suiteprog(); a red full test's, while
+# its failed cases run alone, from those kept as its run ended), and says main moved once
 # main's head is not the one its suite started on (the record's main). A release record left
 # running with its lock free was ended from outside before it could say so: stopped, when the record was last written.
 suites() {
@@ -249,7 +250,7 @@ suites() {
     fi
   fi
   if ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
-    fr=$(jq -c --argjson p "$(suiteprog "$CARDS/fulltest/wt")" '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + $p' <<<"$fr")
+    fr=$(jq -c --argjson p "$(suiteprog "$CARDS/fulltest/wt")" '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + (.counts // $p)' <<<"$fr")
   elif l=$(tail -n 1 "$FULLTEST" 2>/dev/null | jq -ce 'select(.kind == "run")' 2>/dev/null); then
     fr=$(jq -c '{kind: "full test", version: null, step: (if .push then "push" else "run" end), sha, since: null, ended: .time, state, done: null,
       failed: (.cases | length), cases: [.cases[].case], moved: false, reasons: (if .reason then [.reason] else [] end)}' <<<"$l")
