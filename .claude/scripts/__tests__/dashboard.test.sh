@@ -1363,6 +1363,21 @@ kill -0 "$standin" 2>/dev/null || fail "loop_check_ignores_another_loop: the sta
 kill "$standin"; wait "$standin" 2>/dev/null || true
 ) & started install
 
+( fresh queuewait
+# Bug (issue 19): an issue waiting on another (sample's #16 on #7) with nothing else queued must still reach the Queue
+# part, on the whole Board and, when the other record's issues were not listed, in byRepo for its own project.
+W16='{"queue": {"next": [], "waiting": [{"issue": 16, "title": "Second half", "waitsFor": [7], "forced": false}]}}'
+answer "$(snap "$W16")" "$P_URL" 0 "$(snap)" "$C_URL" 0
+run
+q '.panels.queue.data | .next == [] and (.waiting | map([.repo, .issue, .waitsFor])) == [["sample", 16, [7]]]' \
+  "every project: the Queue part's waiting has the issue that waits on another, with next empty"
+answer "$(snap "$W16")" "$P_URL" 0 "$(snap '{"queue": {"next": null}}')" "$C_URL" 0
+run
+q '.panels.queue.data | .waiting == null and (.byRepo.sample.waiting | map([.repo, .issue, .waitsFor])) == [["sample", 16, [7]]]
+  and .byRepo.sample.next == [] and .byRepo.widgetshop.waiting == null' \
+  "byRepo: its own project's part has the waiting issue when another project's issues were not listed"
+) & started queuewait
+
 # Every part ended and passed; a part that failed stopped at its FAIL line, above.
 bad=()
 for p in "${PARTS[@]}"; do wait "${p#*:}" || bad+=("${p%%:*}"); done

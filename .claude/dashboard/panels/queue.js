@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Queue: the open issues Conveyor takes next, in its order (follow-ups first). Its part: {next, held, awaitingDeploy,
-// issuesError}; next, held and awaitingDeploy are null when GitHub did not list the issues, which is said, never shown
-// as an empty queue. awaitingDeploy is the issues built and merged that stay open until the owner deploys them to
+// waiting, issuesError}; next, held and awaitingDeploy are null when GitHub did not list the issues, which is said,
+// never shown as an empty queue. awaitingDeploy is the issues built and merged that stay open until the owner deploys them to
 // PROD: the loop never picks them, and they are listed on their own under the queue. waiting is the issues
 // that depend on one still open, each shown as "Waiting on #N"; a next row forced past its wait is "Forced past #N".
 // A next row with room is held back by the machine (the machine cap, or its room: "waiting for machine room: load
@@ -9,6 +9,8 @@
 // How many open issues are held (held: the Board's Held column's count, by you, a label, a rule or a wait); null
 // when the open issues were not listed.
 const queueHeld = (d) => (d && typeof d.held === 'number' && d.held >= 0 ? d.held : null);
+// The issues listed under "Waiting on another card": one forced past its wait is in next, so not here.
+const queueWaits = (d) => (d.waiting || []).filter((w) => Array.isArray(w.waitsFor) && w.waitsFor.length && w.forced !== true);
 window.DASH_APP.panel({
   id: 'queue',
   title: 'Queue',
@@ -16,8 +18,9 @@ window.DASH_APP.panel({
   tab: 'overview',
   projects: true,  // filtered to one project, held is that project's own (the part's byRepo)
   rows: 8,
-  count: (d) => (d.next ? d.next.length : null),
-  isEmpty: (d) => Array.isArray(d.next) && d.next.length === 0 && !(d.awaitingDeploy || []).length && !(d.waiting || []).length,
+  // The issues it would pick and those waiting on another card: every queued issue still open.
+  count: (d) => (d.next ? d.next.length + queueWaits(d).length : null),
+  isEmpty: (d) => Array.isArray(d.next) && d.next.length === 0 && !(d.awaitingDeploy || []).length && !queueWaits(d).length,
   // Empty says whether issues are held, and where they are: an empty queue with none held is normal.
   empty(el, ctx, d) {
     const n = queueHeld(d);
@@ -60,7 +63,7 @@ window.DASH_APP.panel({
     // Waiting: an issue that depends on one still open is not picked until that one closes.
     // One forced past its wait (`control force`) is in next, tagged "Forced past #N", not here.
     const waitsFor = (ns) => `Waiting on ${ns.map(ctx.depRef).join(', ')}`;
-    const waits = (d.waiting || []).filter((w) => Array.isArray(w.waitsFor) && w.waitsFor.length && w.forced !== true);
+    const waits = queueWaits(d);
     if (waits.length) {
       const list = h('ul', 'rows');
       waits.forEach((w) => {

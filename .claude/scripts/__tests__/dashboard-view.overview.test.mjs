@@ -277,7 +277,7 @@ test('an issue waiting on another is "Waits on #N" in the queue and on the Board
   const rows = Array.from(panel(w, 'queue').querySelectorAll('.rows')).map((l) => Array.from(l.children, (li) => li.textContent));
   assert.equal(rows.length, 3, 'next, waiting and the PROD deploys are three lists');
   assert.match(rows[1][0], /Second half.*Waiting on #20, #22/);
-  assert.equal(panel(w, 'queue').querySelector('.panel-count').textContent.trim(), '2', 'the count is the queue pick takes');
+  assert.equal(panel(w, 'queue').querySelector('.panel-count').textContent.trim(), '3', 'the count is the queue pick takes and the issue waiting on another');
   assert.match(panel(w, 'health').textContent, /Dependency cycles.*1 cycle.*#40 ↔ #41/s);
   const c = boot({ tab: 'control' });
   deliver(c, data);
