@@ -473,11 +473,11 @@ def request_row(r):
 
 # List prices in $ per million tokens: (input, output, cache read). Cache writes
 # are 1.25x input for the 5-minute TTL and 2x for 1 hour. Source:
-# https://platform.claude.com/docs/en/about-claude/pricing, as cached 2026-10-06.
+# https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-15.
 # The ":fast" Claude rows are that page's "Fast mode pricing" table, read
-# 2026-10-12; the cache multipliers stack on the fast input price. The gpt-*
+# 2026-11-15; the cache multipliers stack on the fast input price. The gpt-*
 # rows are Codex's models, from the Standard and Fast tables of
-# https://developers.openai.com/api/docs/pricing, read 2026-10-12 (a cache
+# https://developers.openai.com/api/docs/pricing, read 2026-11-15 (a cache
 # write is 1.25x input there too; "priority" in a Codex log is its fast mode).
 # A mode with no published price is priced by estimate() and its dollars are
 # reported as estimated. A model with no row and nothing to estimate from is
@@ -486,12 +486,27 @@ def request_row(r):
 # short-prompt rate, LONG_PRICES the rest, LONG_AT a threshold that is not 100K.
 PRICES = {
     "claude-fable-5-2": (8.0, 40.0, 0.20),
+    "claude-mythos-5-2": (8.0, 40.0, 0.20),
     "claude-fable-5-1": (10.0, 50.0, 0.25),
+    "claude-mythos-5-1": (10.0, 50.0, 0.25),
+    "claude-fable-5": (10.0, 50.0, 1.00),
+    "claude-mythos-5": (10.0, 50.0, 1.00),
     "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-opus-5": (5.0, 25.0, 0.50),
     "claude-opus-4-8": (5.0, 25.0, 0.50),
+    "claude-opus-4-7": (5.0, 25.0, 0.50),
+    "claude-opus-4-6": (5.0, 25.0, 0.50),
+    "claude-opus-4-5": (5.0, 25.0, 0.50),
     "claude-sonnet-5-5": (2.0, 10.0, 0.10),
+    "claude-sonnet-5": (2.0, 10.0, 0.20),
+    "claude-sonnet-4-6": (3.0, 15.0, 0.30),
+    "claude-sonnet-4-5": (3.0, 15.0, 0.30),
     "claude-haiku-5-5": (0.10, 0.50, 0.01),
+    "claude-haiku-4-5": (1.0, 5.0, 0.10),
+    "claude-fable-5-2:fast": (16.0, 80.0, 0.40),
+    "claude-mythos-5-2:fast": (16.0, 80.0, 0.40),
     "claude-opus-5-5:fast": (8.0, 40.0, 0.40),
+    "claude-opus-5:fast": (10.0, 50.0, 1.00),
     "claude-opus-4-8:fast": (10.0, 50.0, 1.00),
     "gpt-6.1-sol": (2.0, 10.0, 0.10),
     "gpt-6.1-sol:fast": (4.0, 20.0, 0.20),
