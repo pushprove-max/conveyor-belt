@@ -84,6 +84,7 @@ cmd flaky flaky.sh 'flaky add <case> <source> <note> | flaky off <case> <source>
 cmd full-test full-test.sh 'full-test [push | anyway <run id> [--by <who>]]'
 cmd release-prep release-prep.sh 'release-prep <version>'
 cmd release release-prep.sh 'release <version>'
+cmd release-run release-prep.sh 'release-run <version> | release-run stop'
 cmd testaction testaction.sh 'testaction <judge | explain | run> <test file> | testaction stop <id>'
 cmd testissue testaction.sh 'testissue <test file> <title> <body>'
 cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'

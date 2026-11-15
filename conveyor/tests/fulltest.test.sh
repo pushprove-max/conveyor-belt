@@ -39,7 +39,7 @@ t_landonly() {
 # started a second run beside the first; a project with no full test suite was offered one.
 t_fullpush() {
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
-  local A B out
+  local A B out s
   # No test.full: both are refused with the reason, and the snapshot says it.
   out=$(loop full-test 2>&1); [ $? = 2 ] && grep -q 'names no full test suite' <<<"$out" || fail "a full test with no test.full was not refused: $out"
   out=$(loop full-test push 2>&1); [ $? = 2 ] || fail "a push landed with no test.full was not refused: $out"
@@ -55,7 +55,10 @@ t_fullpush() {
   out=$(loop full-test 2>&1) || fail "full-test did not start: $out"
   wait_until '[ -s "$STUB/full-at" ]' || fail "the full test suite did not start"
   out=$(loop full-test push 2>&1); [ $? = 2 ] && grep -q 'already running' <<<"$out" || fail "a second press during a run was not refused: $out"
-  [ "$(loop snapshot | jq -c '.fullTest.running | [.how, .sha]')" = "[\"run\",\"$A\"]" ] || fail "the snapshot does not show the run: $(loop snapshot | jq -c .fullTest)"
+  s=$(loop snapshot)
+  [ "$(jq -c '.fullTest.running | [.how, .sha]' <<<"$s")" = "[\"run\",\"$A\"]" ] || fail "the snapshot does not show the run: $(jq -c .fullTest <<<"$s")"
+  # Bug: the run is not shown as a release's suite is (/units, the Release panel), so the two kinds look different.
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .ended]]' <<<"$s")" = "[[\"running\",\"$A\",null]]" ] || fail "the snapshot's suites do not show the run: $(jq -c .suites <<<"$s")"
   : > "$STUB/go"; ftended 1
   [ "$(ftl '[.kind, .push, .state, .sha, .pushed]')" = "[\"run\",false,\"passed\",\"$A\",null]" ] && [ "$(ftorigin)" != "$A" ] && [ "$(wc -l < "$STUB/full-at")" = 1 ] \
     || fail "Run full test suite did not pass on main alone, or pushed: $(cat "$ST/fulltest.jsonl")"
@@ -95,7 +98,7 @@ EOF
 # machine's failure became a fix card; a case that failed again got a second fix card; the cause named no commit.
 t_fullred() {
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
-  local A O0 c
+  local A O0 c s
   tune '.test.full = ". \"$STUB/full-cmd\""'; ftsuite
   loop control rules push=off > /dev/null; loop run 1 > "$STUB/run.out" 2>&1 || fail "the run failed: $(cat "$STUB/run.out")"
   A=$(ftmain); O0=$(ftorigin); [ "$O0" != "$A" ] || fail "the landing was pushed with land only"
@@ -121,7 +124,11 @@ t_fullred() {
   [ "$(jq -c '[.entries[] | [.case, .source]]' "$ST/flaky.json")" = "[[\"flaky.test: flips\",\"full test ${A:0:12}\"]]" ] || fail "the flaky case is not on the flaky record: $(cat "$ST/flaky.json" 2>&1)"
   jq -se 'length == 1 and (.[0] | (.finding | startswith("net.test: fetch")) and (.why | contains("ECONNREFUSED")) and .by == "code")' "$ST/declined.jsonl" > /dev/null \
     || fail "the network's failure is not declined with its reason: $(cat "$ST/declined.jsonl" 2>&1)"
-  [ "$(loop snapshot | jq -c '.fullTest.last | [.state, (.cases | map(.verdict))]')" = '["failed",["fix","flaky","declined","fix"]]' ] || fail "the snapshot does not carry the red run: $(loop snapshot | jq -c .fullTest)"
+  s=$(loop snapshot)
+  [ "$(jq -c '.fullTest.last | [.state, (.cases | map(.verdict))]' <<<"$s")" = '["failed",["fix","flaky","declined","fix"]]' ] || fail "the snapshot does not carry the red run: $(jq -c .fullTest <<<"$s")"
+  # Bug: the red run's result is not shown as a release's suite is, with its failed cases by name.
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .failed, .cases, (.ended != null)]]' <<<"$s")" \
+    = "[[\"failed\",\"$A\",4,[\"code.test: breaks\",\"flaky.test: flips\",\"net.test: fetch\",\"old.test: old\"],true]]" ] || fail "the snapshot's suites do not show the red run: $(jq -c .suites <<<"$s")"
   # Red again with both fix cards open: they are reused, a comment each, and no second card is filed.
   echo OPEN > "$STUB/state.100101"; echo OPEN > "$STUB/state.100102"
   loop full-test > /dev/null || fail "the second run did not start"; ftended 2

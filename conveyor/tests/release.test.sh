@@ -196,13 +196,16 @@ t_cutfail() {
   cutrefused 1.1.0 'the whole suite did not pass'
   [ "$(cat "$STUB/full-at" 2>/dev/null)" = "$O" ] || fail "the suite did not run on the commit to release"
 }
-# Bug: a commit made in the checkout while the suite ran (a card landed there) is tagged and pushed unchecked.
+# Bug: a commit made in the checkout while the suite ran (a card landed there) is tagged and pushed unchecked; or the
+# run's record does not say main moved, so the Board's Release panel offers no run on the new main and shows no reason.
 t_cutmoved() {
   local O out; cutsetup 'git -C "$R" commit -q --allow-empty -m "landed meanwhile"'
   out=$(loop release 1.1.0 2>&1); [ $? = 1 ] && grep -q 'refused, nothing tagged or released: the checkout moved or changed while the suite ran' <<<"$out" \
     || fail "a checkout that moved during the suite was not refused: $out"
   [ -z "$(git -C "$R" tag -l v1.1.0)" ] && [ "$(git -C "$T/$CASE/origin" tag -l)" = v1.0.0 ] && [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$O" ] \
     && [ "$(git -C "$R" log -1 --format=%s)" = 'landed meanwhile' ] || fail "the refused release tagged, pushed or committed"
+  jq -e --arg o "$O" '.moved == true and .state == "refused" and .sha == $o and .ended != null and any(.reasons[]; test("the checkout moved"))' "$T/$CASE/cards/release/run.json" > /dev/null \
+    || fail "the run's record does not say main moved, with the moved reason: $(cat "$T/$CASE/cards/release/run.json" 2>&1)"
 }
 # All checks pass, with no status from release-prep: the suite runs; the tag is on a commit whose plugin.json says
 # 1.1.0 and whose marketplace names v1.1.0; main's marketplace pins v1.1.0 at that commit, the other entry untouched;

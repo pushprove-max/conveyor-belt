@@ -356,13 +356,20 @@ C=$(snap '{"belt": [{"card": "c4-5", "issue": 5, "title": "Plugin thing", "step"
   "landed": [{"card": "c'"$TODAY"'T090000-4", "issue": 4, "title": "CD fixed already", "step": "closed", "time": "'"$TODAY_ISO"'T09:10:00Z", "usd": 0.5, "reviews": 1, "followups": [], "sha": "", "pushed": null}],
   "health": {"loop": false, "builderCap": 2, "unpushed": [{"card": "c9-2", "issue": 2, "sha": "def", "since": "'"$(ago 3600)"'"}]},
   "cost": {"today": 0.5, "week": 4, "perLanded": 0.5, "landedAfter": {"1": 3, "2": 0, "3": 0, "more": 0}, "unpricedSteps": 1,
-    "cards": [{"card": "c8-4", "issue": 4, "title": "CD fixed already", "state": "retried", "today": 0.5, "week": 0.5}]}}')
+    "cards": [{"card": "c8-4", "issue": 4, "title": "CD fixed already", "state": "retried", "today": 0.5, "week": 0.5}]},
+  "release": {"tag": "v1.0.0", "count": 2, "commits": [], "next": "1.1.0", "notes": true, "head": "abc"},
+  "suites": [{"kind": "release", "version": "1.1.0", "sha": "abc", "ended": null, "state": "running", "done": 3, "failed": 1, "cases": ["x: y"]}]}')
 PU=https://github.com/example/sample-project/issues CU=https://github.com/example/WidgetShop/issues
 }
 
 ( fresh cards; cards_fixture
 answer "$P" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
+# Bug: the Release panel gets nothing of a record's main or its release run, or a record from an older engine breaks it.
+q '.panels.release == {error: null, data: {records: [{repo: "sample", release: null, suites: null}, {repo: "widgetshop",
+  release: {tag: "v1.0.0", count: 2, commits: [], next: "1.1.0", notes: true, head: "abc"},
+  suites: [{kind: "release", version: "1.1.0", sha: "abc", ended: null, state: "running", done: 3, failed: 1, cases: ["x: y"]}]}]}}' \
+  "the Release part is each record's release and suites as its snapshot gives them, null from a snapshot from before them"
 q '.panels.belt.data | .cap == 5 and (.cards | map([.repo, .issue, .step, .url])) == [["sample", 801, "review", "'"$PU"'/801"], ["widgetshop", 5, "build", "'"$CU"'/5"]]' "belt rows name their repo and link to that repo's issue (an ssh origin is the repo's https address)"
 q '.panels.belt.data.cards[0] | .review == 2 and .of == 3 and .model == "gpt-x" and .usd == 1.25 and (.stepAt | fromdateiso8601) > 0' "a belt row keeps its step, review number, model, cost and the time the step began"
 q '.panels.needs.data.cards | (.waiting | map([.repo, .issue, .sentence, .url])) == [["sample", 12, "Staff see a new button.", "'"$PU"'/12"]] and (.blocked | map([.issue, .reason])) == [[13, "tests failed twice"]]' "what waits on the owner: the visible change with the reviewer's sentence, and the blocked card with its reason"

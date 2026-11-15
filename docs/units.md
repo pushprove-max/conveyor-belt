@@ -18,6 +18,10 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. In `/units` a third line gives how
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).
+- **The whole suite**, in `/units` and the pane, under the head: while a release suite or a full test run is in
+  progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
+  done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). When the run
+  ends, the line shows the result (`passed 3m ago`) for 10 minutes, then it goes away.
 - **The judge**, in `/units` only: a card (needing you, on the belt or landed) whose latest review the judge ran on has
   a dim line `judge: 2 accepted, 1 declined`, with ` · GO from declines only` when the GO came from the judge declining
   every finding. A latest review the judge did not run on (off, failed, nothing to judge) has no such line.

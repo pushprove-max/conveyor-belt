@@ -162,7 +162,7 @@ test('reordering, resizing, collapsing and hiding persist in the browser and are
   key(w, panel(w, 'needs').querySelector('.drag'), 'ArrowDown');
   assert.deepEqual(order(w).slice(0, 3), ['belt', 'needs', 'queue'], 'an arrow key on the handle moves the panel');
   assert.equal(w.document.activeElement, panel(w, 'needs').querySelector('.drag'), 'and the handle keeps the focus');
-  assert.match(w.document.getElementById('announce').textContent, /Needs you moved to place 2 of 9/);
+  assert.match(w.document.getElementById('announce').textContent, /Needs you moved to place 2 of 10/);
   key(w, panel(w, 'needs').querySelector('.drag'), 'ArrowUp');
   assert.deepEqual(order(w), OVERVIEW);
   panel(w, 'cost').querySelector('.move-up').click();
@@ -187,7 +187,7 @@ test('reordering, resizing, collapsing and hiding persist in the browser and are
   assert.equal($(w, '#customize-open .label').textContent, 'Customize (1 hidden)');
   assert.deepEqual(saved(w), {
     tabs: {
-      overview: { order: ['needs', 'belt', 'queue', 'landed', 'declined', 'health', 'cost', 'lanes', 'metrics'], sizes: { ...SIZES0, queue: 'full' }, lengths: {}, collapsed: ['landed'], hidden: ['belt'] },
+      overview: { order: ['needs', 'belt', 'queue', 'landed', 'release', 'declined', 'health', 'cost', 'lanes', 'metrics'], sizes: { ...SIZES0, queue: 'full' }, lengths: {}, collapsed: ['landed'], hidden: ['belt'] },
       belt3d: { order: BELT3D_IDS, sizes: { belt3d: 'full' }, lengths: {}, collapsed: [], hidden: [] },
       control: { order: CONTROL_IDS, sizes: CONTROL_SIZES, lengths: {}, collapsed: [], hidden: [] },
       rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] },
@@ -198,7 +198,7 @@ test('reordering, resizing, collapsing and hiding persist in the browser and are
   assert.equal(w.posts.length, 0, 'the layout is kept in the browser: nothing was sent to the host');
 
   const again = boot({ store: { [STORE]: w.localStorage.getItem(STORE) } });
-  assert.deepEqual(order(again), ['needs', 'queue', 'landed', 'declined', 'health', 'cost', 'lanes', 'metrics']);
+  assert.deepEqual(order(again), ['needs', 'queue', 'landed', 'release', 'declined', 'health', 'cost', 'lanes', 'metrics']);
   assert.equal(panel(again, 'belt').hidden, true);
   assert.equal(panel(again, 'queue').dataset.size, 'full');
   assert.equal(panel(again, 'landed').querySelector('.panel-body').hidden, true);
@@ -235,7 +235,7 @@ test('restore default layout puts everything back and keeps it that way', () => 
   const store = { [STORE]: JSON.stringify({ order: ['cost', 'belt', 'needs', 'board'], sizes: { belt: 'small', board: 'small' }, lengths: { queue: 3 }, collapsed: ['cost'], hidden: ['belt', 'queue'], density: 'compact', theme: 'dark' }) };
   const w = boot({ store });
   const root = w.document.documentElement;
-  assert.deepEqual(order(w), ['cost', 'needs', 'landed', 'declined', 'health', 'lanes', 'metrics'], 'a kept order comes first; a panel it does not name follows in the default order');
+  assert.deepEqual(order(w), ['cost', 'needs', 'landed', 'release', 'declined', 'health', 'lanes', 'metrics'], 'a kept order comes first; a panel it does not name follows in the default order');
   assert.equal(root.dataset.density, 'compact');
   assert.equal(root.dataset.theme, 'dark');
   w.document.getElementById('customize-open').click();

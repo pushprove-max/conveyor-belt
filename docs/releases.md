@@ -40,6 +40,14 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
    and makes the GitHub release with the notes as its text (`gh release create`).
 
+## A release from the Board
+
+The Release panel on the Board's Overview tab does steps 4 to 6 ([The Board](board.md#release)). Type the version and
+click **Release** two times. The second click is the owner's yes. Conveyor runs `conveyor.sh release-run <version>`:
+`release-prep`, then `release` when the suite passes. The output of the two is in `release/run.log` in the cards
+folder. When a step stops, the panel shows each reason, and nothing more runs. `/units` shows the run while it is in
+progress ([/units](units.md)). `conveyor.sh release-run stop` is the panel's **Stop**.
+
 ## Release notes
 
 The release notes are for the people who use Conveyor. Each release has its notes in `docs/releases/<version>.md`,

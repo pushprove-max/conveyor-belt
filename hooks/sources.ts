@@ -80,9 +80,11 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // loops: each record's loop as its control record makes it: running, paused, stopped, "paused by guard"
 // or "control record unreadable" ("" when the snapshot does not say), reason: why it picks nothing ("" when the
 // snapshot gives none), and loop: whether its process runs. judgeDeclined: when each finding the judge declined was
-// declined, from every record's declined list, each line once.
+// declined, from every record's declined list, each line once. suites: each record's whole-suite runs (the snapshot's
+// suites: a release's suite, the full test), under way (ended null) or ended.
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null }
-export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[] }
+export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
+export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -160,7 +162,7 @@ const parentOf = (x: any) => { const n = num(x.parent); return n !== null && n >
 
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[] }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[] }
 // One record's snapshot. null: it is not the object `conveyor.sh snapshot` prints, so nothing of it is shown.
 export const parseRecord = (repo: string, json: unknown): Rec | null => {
   let j: any = json
@@ -201,6 +203,9 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     judgeDeclined: [j.declined, j.declinedRest].flatMap(l => (Array.isArray(l) ? l : []))
       .filter((x: any) => x && typeof x === 'object' && x.by === 'judge' && time(x.time) !== null)
       .map((x: any) => ({ id: one(x.id), at: time(x.time) as number })),
+    // A snapshot from an older engine has no suites.
+    suites: (Array.isArray(j.suites) ? j.suites : []).filter((x: unknown) => x && typeof x === 'object')
+      .map((x: any): Suite => ({ repo, kind: one(x.kind), version: one(x.version), sha: one(x.sha), since: time(x.since), ended: time(x.ended), state: one(x.state), done: num(x.done), failed: num(x.failed) })),
   }
 }
 
@@ -272,6 +277,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       todayLeftOut: recs.reduce((n, r) => n + (r.todayLeftOut ?? 0), 0),
       // Records that keep their state under one folder share a declined list, so a line is counted once by its id.
       judgeDeclined: [...new Map(recs.flatMap(r => r.judgeDeclined).map((d, i) => [d.id || `#${i}`, d.at])).values()],
+      suites: recs.flatMap(r => r.suites),
     },
   }
 }
@@ -707,10 +713,26 @@ const declinedTodayText =(s: State, snap: Snap): string => {
   return `judge declined ${n ? count(n, 'finding') : 'no findings'} today`
 }
 
+// A whole-suite run (a release's suite, the full test): one line while it runs, its kind, short commit, time running,
+// cases done and failures so far; once it ended, its result for SUITE_SHOWN_MS, then nothing.
+export const SUITE_SHOWN_MS = 10 * 60 * 1000
+export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
+  .filter(x => x.ended === null || s.now - x.ended < SUITE_SHOWN_MS)
+  .map((x): Line => {
+    const what = `${x.repo ? `${x.repo} ` : ''}${x.kind === 'release' ? `release ${x.version}` : x.kind}${x.sha ? ` · ${x.sha.slice(0, 7)}` : ''}`
+    const failed = x.failed ? [{ t: ` · ${count(x.failed, 'failure')}`, c: C.bad }] : []
+    if (x.ended === null) {
+      return [{ t: what, c: C.work, b: true }, { t: ` · running${x.since === null ? '' : ` ${fmtSec((s.now - x.since) / 1000)}`}${x.done === null ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]
+    }
+    const good = x.state === 'passed' || x.state === 'released'
+    return [{ t: what, c: good ? C.ok : C.bad, b: true }, { t: ` · ${x.state || 'ended'} ${fmtSec((s.now - x.ended) / 1000)} ago`, d: true }, ...failed]
+  })
+
 const noteLine = (s: State): Line => [{ t: s.note, c: C.you }]
 const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   ...headerModel(s, snap, w),
-  ...(short ? [] : [[{ t: declinedTodayText(s, snap), d: true }] as Line]), [],
+  ...(short ? [] : [[{ t: declinedTodayText(s, snap), d: true }] as Line]),
+  ...suitesModel(s, snap).map(l => (short ? fitWidth(l, w) : l)), [],
   ...needsModel(s, snap, w, short), [],
   ...beltModel(s, snap, w, short, frame), [],
   ...queueModel(snap, w), [],

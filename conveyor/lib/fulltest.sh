@@ -36,6 +36,14 @@
 # pushed) and by (who pushed anyway). $FULLTEST.running holds {since, sha, how} while the lock is held.
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
+# How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
+# runner named as ended (cases/ok and cases/failed of its log folder, session.sh testdone()): {done, failed, cases: the
+# names of the failed ones}.
+suiteprog() { # <worktree>
+  local d=$1.testlog/cases
+  { find "$d/ok" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|ok\t|'; find "$d/failed" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|failed\t|'; } \
+    | jq -Rsc '[split("\n")[] | select(. != "") | split("\t")] | {done: length, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort}'
+}
 FULL_OUTSIDE='ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|Could not resolve host|Network is unreachable|Temporary failure in name resolution|Connection (refused|reset|timed out)|No space left on device|Disk quota exceeded|Cannot allocate memory|out of memory'
 fulltest() { # [push | anyway <run id> [--by <who>]]
   local how=${1:-run} by=owner cmd lk sha o='' last=null id=${2:-}

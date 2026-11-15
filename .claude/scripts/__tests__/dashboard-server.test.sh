@@ -836,6 +836,19 @@ for a in now anyway 'anyway 0123456789AB' 'anyway 0123456789a' 'anyway 012345678
 done
 [ -z "$(calls)" ] || fail "full_test_takes_no_other_argument: ran '$(calls)'"
 pass=$((pass + 4))
+# The Release panel's Release (the version typed) and Stop reach `conveyor.sh release-run` on the record. Bug: a press
+# reaches no command, or a version the engine does not take (or a word the shell reads) reaches the host.
+for a in 1.2.0 stop; do
+  fresh_control
+  [ "$(ctl "$(act release-run $a)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run $a" ] || fail "release_run_${a}_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+done
+fresh_control
+for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id'; do
+  # shellcheck disable=SC2086 # each word an argument
+  [ "$(ctl "$(act release-run $a)")" = 400 ] || fail "release_run_takes_a_version_or_stop: '$a' answered '$(cat "$M/ctl.out")'"
+done
+[ -z "$(calls)" ] || fail "release_run_takes_a_version_or_stop: ran '$(calls)'"
+pass=$((pass + 3))
 # The Tests page's limits and a file's budget or mark reach `conveyor.sh test-settings` on the record, each argument
 # one quoted word (a reason with spaces too). Bug: a Save reaches no command, or a shape the engine does not take
 # (no value, a budget below 1, a path that reads as an option, a reason of two lines) is sent on.

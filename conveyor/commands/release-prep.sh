@@ -27,6 +27,20 @@
 # tagged commit, since a commit cannot hold its own id. The branch and the tag are pushed together (--atomic: if the
 # remote's branch moved, neither is, and the commits and the tag are undone here), then the GitHub release is made
 # with the notes file as its body (gh release create). Exit 0: released; 1: refused, or a step could not be done.
+# Each run of either keeps its record in $CARDS/release/run.json, which the snapshot reads (its suites and release):
+# {kind: "release", step (release-prep or release), version, since, ended (null while it runs), state (running, then
+# passed (release-prep), released (release), failed (the suite failed), refused (any other refusal) or stopped), sha
+# (the commit the suite runs or ran on, null before it), done, failed and cases (the cases ended, those failed and their
+# names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), moved (main moved while the suite
+# ran), reasons (each line the command printed to stderr, its "conveyor: <command>: " taken off) and pid (the process
+# whose tree `release-run stop` ends)}. A release after a passed release-prep of the same version keeps that run's
+# suite (sha, done, failed, cases, moved, since); one after a refused release of it keeps that one's (all but moved).
+# `conveyor.sh release-run <version>` is the Board's Release (docs/board.md): the owner's yes, given there. It starts
+# release-prep, then, when it passes, release, in the background, and returns; their output is in
+# $CARDS/release/run.log. That release is told the commit the suite passed on: a main that moved since is refused and
+# its record says moved, so it is never tested and released again without the owner's yes. `conveyor.sh release-run
+# stop` ends the run under way: the processes of that run alone (the tree of the record's pid), never a process group,
+# and its record says stopped. Exit 2: refused (a run is already under way; none to stop).
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
@@ -38,6 +52,7 @@
 . "$HERE/lib/push.sh" || exit 1
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/flaky.sh" || exit 1
+. "$HERE/lib/fulltest.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
@@ -84,18 +99,62 @@ rellock() { # <command name>
   mkdir -p "$CARDS/release" && { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: $1: its lock could not be made; nothing run" >&2; return 1; }
   flock -n "$lk" || { echo "conveyor: $1: release-prep or release is already running; this one is not started" >&2; return 2; }
 }
+# The run's record (above), begun once the lock is held. RELSTARTED says it was, so a run refused before it (or at the
+# lock) leaves the record of the one under way as it is.
+RELRUN=$CARDS/release/run.json
+RELSTARTED=''
+relrec() { jq -c "$@" "$RELRUN" > "$RELRUN.new" 2>/dev/null && mv -f "$RELRUN.new" "$RELRUN"; } # <jq arguments, the filter first>
+relstart() { # <command name> <version>
+  local was=null
+  # release keeps the suite's commit and cases from release-prep's pass of its version, or from a release of it
+  # refused since (a retry takes the pass from the status and runs no suite).
+  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, done, failed, cases, moved}
+    elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases} else empty end' "$RELRUN" 2>/dev/null) || was=null
+  jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reasons: [], pid: $p} + $w' > "$RELRUN.new" \
+    && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
+  unset CONVEYOR_RELEASE_PID # the suite's own commands are no part of this run's record
+}
+# The record at the command's end: its state, and each line it printed to stderr (<file>) as a reason.
+relend() { # <exit> <stderr file>
+  [ -n "$RELSTARTED" ] || return 0
+  relrec --arg t "$(clock)" --argjson rc "$1" --rawfile e "$2" '.ended = $t
+    | .reasons = [$e | split("\n")[] | select(. != "") | sub("^conveyor: [a-z-]+: (refused, nothing tagged or released: )?"; "")]
+    | .state = (if $rc == 0 then (if .step == "release" then "released" else "passed" end) elif .state == "failed" then "failed" else "refused" end)'
+}
+# The command, its record kept; its stderr is printed once it ends.
+relrun() { # <function> <version>
+  local e rc
+  e=$(mktemp) || { echo "conveyor: $1: no scratch file; nothing run" >&2; return 1; }
+  "$1" "$2" 2> "$e"; rc=$?
+  cat "$e" >&2; relend "$rc" "$e"; rm -f "$e"
+  return $rc
+}
 # The newest vX.Y.Z tag, after the remote's branch and tags are fetched.
 lasttag() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1; }
 # The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite.
 # 0: passed and posted; 1: failed (failure posted), or a step could not be done; 2: the pack names no test.full.
 relsuite() { # <command name> <commit>
-  local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc state desc
+  local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc state desc m0 m1 p
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: $n: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
+  # main as the suite starts: a card that lands while it runs moves it (the record's moved).
+  m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
+  relrec --arg s "$sha" '.sha = $s | .done = 0 | .failed = 0 | .cases = [] | .moved = false'
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }
   tests "$wt" test.full; rc=$?
+  # The cases its runner named as ended; a red run whose runner named no failed case has those its output names
+  # (testfails()), each named as fulljudge() names it.
+  p=$(suiteprog "$wt")
+  [ $rc = 0 ] || [ "$(jq .failed <<<"$p")" != 0 ] || p=$(testfails "$wt.test" "$rc" test.full | jq -c --argjson p "$p" --arg cmd "$cmd" \
+    '$p + {cases: [.files[]? | .file as $f | if (.cases // []) == [] then $f else .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end end] | unique}
+      | .failed = (.cases | length)' 2>/dev/null) || p=$(suiteprog "$wt")
+  m1=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
+  relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" \
+    '. + $p | .moved = $mv | .state = $st'
+  [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
   git worktree remove --force "$wt" 2>/dev/null
   if [ $rc = 0 ]; then state=success desc="The whole suite (test.full) passed on the build machine"
   else state=failure desc="The whole suite (test.full) failed on the build machine (exit $rc)"; fi
@@ -109,6 +168,7 @@ releaseprep() { # <version>
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
+  relstart release-prep "$v"
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's.
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}") || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
@@ -129,14 +189,23 @@ releaseprep() { # <version>
 }
 release() { # <version>
   local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=()
-  local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json
+  local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-}
+  [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
+  unset CONVEYOR_RELEASE_SHA
   rellock release || return 1
+  relstart release "$v"
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify 'HEAD^{commit}') \
     || { echo "conveyor: release: refused, nothing tagged or released: $REMOTE/$BRANCH or the checkout's HEAD could not be read" >&2; return 1; }
   [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] && [ "$sha" = "$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}")" ] \
     || why+=("the checkout is not on $BRANCH at the head of $REMOTE/$BRANCH")
   [ -z "$(git status --porcelain --untracked-files=no)" ] || why+=("the checkout has uncommitted changes")
+  # The Board's Release (releasego()): the commit its release-prep tested. A card landed since: refused, the record
+  # moved, for the owner to press Run again on the new main.
+  if [ -n "$tested" ] && [ "$tested" != "$sha" ]; then
+    why+=("$BRANCH moved while the suite ran, from ${tested:0:12} to ${sha:0:12}: a card landed; press Run again on the new main")
+    relrec '.moved = true'
+  fi
   last=$(lasttag)
   if git rev-parse -q --verify "refs/tags/v$v" > /dev/null; then why+=("the tag v$v already exists")
   elif [ -n "$last" ] && [ "$(printf '%s\n' "${last#v}" "$v" | sort -V | tail -n 1)" != "$v" ]; then why+=("the version $v is not higher than the newest release, $last")
@@ -165,7 +234,10 @@ release() { # <version>
   # The suite last: it takes the longest, and a refusal above needs none of it.
   state=$(timeout 60 gh api "repos/{owner}/{repo}/commits/$sha/statuses?per_page=100" < /dev/null 2>/dev/null \
     | jq -r '[.[] | select(.context == "conveyor/release-suite")][0].state // "none"' 2>/dev/null)
-  if [ "$state" = success ]; then echo "conveyor: release: the whole suite passed on ${sha:0:12} (release-prep's status); it is not run again"
+  if [ "$state" = success ]; then
+    # The record names the commit the pass is of; its cases are known only from a run of that commit kept above.
+    relrec --arg s "$sha" 'if .sha == $s then . else .sha = $s | .done = 0 | .failed = 0 | .cases = [] end'
+    echo "conveyor: release: the whole suite passed on ${sha:0:12} (release-prep's status); it is not run again"
   else relsuite release "$sha" || { echo "conveyor: release: refused, nothing tagged or released: the whole suite did not pass on ${sha:0:12}" >&2; return 1; }; fi
   # The suite takes long: a checkout that moved meanwhile would tag commits no check above read.
   [ "$(git rev-parse -q --verify HEAD)" = "$sha" ] && [ -z "$(git status --porcelain --untracked-files=no)" ] \
@@ -184,12 +256,44 @@ release() { # <version>
     || { echo "conveyor: release: v$v is pushed, but its GitHub release could not be made: make it from the tag with $notes as its body" >&2; return 1; }
   echo "conveyor: release: v$v is released at ${t:0:12}"
 }
+# The Board's Release: release-prep, then on its pass release, in the background (above).
+releasego() { # <version>
+  ( flock -n 9 ) 9>>"$CARDS/release/lock" || { echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
+  ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
+    export CONVEYOR_RELEASE_PID=$BASHPID
+    # release is told the commit release-prep's suite passed on, so a main that moved meanwhile is refused, never run
+    # and released again without the owner's second press.
+    bash "$HERE/conveyor.sh" release-prep "$1" && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1" ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
+  echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"
+}
+# The run under way ended: its record's pid and every process under it, told to end, then killed 10 s later if they
+# have not. Only a pid that runs conveyor.sh is taken, so a record left by a run that died names no other process.
+releasestop() {
+  local p ps i
+  p=$(jq -er 'select(.ended == null) | .pid | numbers' "$RELRUN" 2>/dev/null) && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' \
+    || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
+  ps=$(ps -A -o pid= -o ppid= | awk -v r="$p" '{ k[$2] = k[$2] " " $1 } END { q[1] = r; n = 1
+    for (i = 1; i <= n; i++) { print q[i]; m = split(k[q[i]], c, " "); for (j = 1; j <= m; j++) q[++n] = c[j] } }')
+  # shellcheck disable=SC2086 # one pid a word
+  kill -TERM $ps 2>/dev/null
+  for ((i = 0; i < 100; i++)); do kill -0 $ps 2>/dev/null || break; sleep 0.1; done
+  # shellcheck disable=SC2086
+  kill -KILL $ps 2>/dev/null
+  relrec --arg t "$(clock)" '.state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"]'
+  echo "conveyor: release-run: the release run of $(jq -r .version "$RELRUN") is stopped"
+}
 shift
 if [ "$CMD_ARG" = release ]; then
   [ "${1:-}" != --help ] || { echo "usage: conveyor.sh release <version: X.Y.Z>"; echo "$RELHELP"; exit 0; }
   [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf 'usage: conveyor.sh release <version: X.Y.Z>\n%s\n' "$RELHELP" >&2; exit 2; }
-  release "$1"
+  relrun release "$1"
+elif [ "$CMD_ARG" = release-run ]; then
+  if [ "$*" = stop ]; then releasestop
+  else
+    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run <version: X.Y.Z> | release-run stop" >&2; exit 2; }
+    mkdir -p "$CARDS/release" && releasego "$1"
+  fi
 else
   [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-prep <version: X.Y.Z>" >&2; exit 2; }
-  releaseprep "$1"
+  relrun releaseprep "$1"
 fi

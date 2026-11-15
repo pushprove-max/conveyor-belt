@@ -22,13 +22,13 @@ function page(heights, width = 1440) {
 }
 const columnsOf = (w) => Object.fromEntries(OVERVIEW.map((id) => [id, panel(w, id).dataset.col]));
 const frames = (w) => { while (w.frames.length) w.frames.shift()(); };
-// The Queue, in the right column, grown so tall that a fresh packing puts Health, Lanes and Cost in the left columns.
+// The Queue, in the right column, grown so tall that a fresh packing puts the panels under it in the left columns.
 const TALL = { queue: 1500 };
 
 test('a refresh where one panel grows taller keeps every panel in the column it had', () => {
   const w = page({});
   const before = columnsOf(w);
-  assert.deepEqual([before.queue, before.health, before.lanes, before.cost], ['2', '2', '2', '2'], 'the four start in the right column');
+  assert.deepEqual([before.queue, before.release, before.health, before.lanes], ['2', '2', '2', '2'], 'the four start in the right column');
   w.heights = TALL;
   next(w, full());
   frames(w);

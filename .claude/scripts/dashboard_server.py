@@ -164,6 +164,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or dismiss of declined findings (its "Dismiss" and "Dismiss all shown": the ids of their lines),
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
 # or full-test (the Rules tab's Run full test suite, Push landed and Push anyway: `conveyor.sh full-test [push | anyway <run id>]`),
+# or release-run (the Release panel's Release and Stop: `conveyor.sh release-run <version> | release-run stop`),
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
 # or prices (the Rules tab's Model prices: one model's price override set or cleared: `conveyor.sh prices`),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
@@ -191,6 +192,7 @@ KINDS_MAX = 20
 RULE = re.compile(r'(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,79})=(on|off)')
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
 RUN_ID = re.compile(r'[0-9a-f]{12}')  # a full test run's id, as conveyor.sh's full-test anyway takes it
+VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})')  # a release's, as conveyor.sh's release-run takes it
 HOST_NAME = re.compile(r'[A-Za-z0-9._-]+')
 HOST_MAIN = re.compile(r'/[A-Za-z0-9._/-]+')
 SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
@@ -359,6 +361,8 @@ def control_ok(body):
         return 3 <= n <= 2 + DEPENDS_MAX and ISSUE.fullmatch(v[0]) is not None and v[1] in ('add', 'remove') and all(ISSUE.fullmatch(x) for x in v[2:])
     if a == 'full-test':  # Run full test suite (none), Push landed (push), Push anyway over the red run shown (anyway, its id)
         return v in ([], ['push']) or (n == 2 and v[0] == 'anyway' and RUN_ID.fullmatch(v[1]) is not None)
+    if a == 'release-run':  # the Release panel's Release (the version typed) and Stop (stop)
+        return n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)
     if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's budget or mark
         return test_settings_ok(v)
     if a == 'prices':  # the Rules tab's Model prices: one model's override set (input, output, cache read) or cleared
@@ -519,6 +523,9 @@ def control_script(action, args, main, today, record=None, user=None):
         # The run goes on on the host after the answer (conveyor.sh full-test starts it and returns); a push over a red
         # suite names the red run the confirm showed and is logged under the Board user who confirmed it.
         return '%s full-test%s%s' % (conv, ''.join(' ' + q(x) for x in args), ' --by %s' % q('Board user %s' % user) if args[:1] == ['anyway'] else '')
+    if action == 'release-run':
+        # Release: the owner's yes to release-prep, then release, which run on the host after the answer; or Stop.
+        return '%s release-run %s' % (conv, q(args[0]))
     if action in ('test-settings', 'prices'):
         # The record's pack (.conveyor/project.json of its main), changed by the engine's own command, which checks it.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))

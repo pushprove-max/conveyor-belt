@@ -33,7 +33,7 @@ serves the Board, because its requests come from a loopback address. An admin se
 
 ## Tabs and panels
 
-- **Overview**: the panels Needs you, On the belt, Queue, Landed today, Declined, Health, Lanes, Cost and Metrics. The
+- **Overview**: the panels Needs you, On the belt, Queue, Landed today, Release, Declined, Health, Lanes, Cost and Metrics. The
   tab shows the count of cards stopped for you, "Overview · 4".
 - **Control**: the panels **Projects and Foremen**, **Loop**, **Push landed and full test suite** and **Board**. Loop
   has the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit bar, and
@@ -109,6 +109,27 @@ record. A case that fails in the code becomes a P1 fix card. A case that fails f
 declined, with its reason. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full test
 suite** runs the suite and pushes nothing. A project with no `test.full` shows both buttons greyed
 (`conveyor/README.md`, The full test suite).
+
+## Release
+
+The Release panel on Overview shows, for each project:
+
+- the newest release tag, and the commits on `main` since that tag;
+- if `main` has the notes of the next version, `docs/releases/<version>.md`;
+- the release run in progress: its step, its commit, how long it has run, the cases done, the cases that failed and
+  their names. A full test run in progress shows here too.
+- else the result of the last release run, on the commit that it tested, and if that commit is still the head of `main`.
+  When a step stops the run, the panel shows each reason that the step gave: no notes file, a change that is not
+  committed, `main` moved while the suite ran, a privacy hit, or a failed suite.
+
+**Release** has a version field, with the next minor version in it. Click Release, then click again. This second click
+is your yes to the release. Conveyor runs `conveyor.sh release-prep <version>`. When the whole suite passes on the head
+of `main`, Conveyor runs `conveyor.sh release <version>` ([Releases](releases.md)). Nothing else starts a release.
+
+**Stop**, on a run in progress, stops the processes of that run, after a second click. Conveyor itself continues.
+
+When a card lands while the suite runs, the panel says that `main` moved, and shows **Run again on the new main**. The run
+does not start again by itself.
 
 ## Card steps
 

@@ -20,7 +20,12 @@
 #   since, exit), null when its last run passed or none ran, when the pack names no test.main, or when its issue is
 #   known closed. fullTest is the full test suite of the Board (fulltest()): command (the pack names test.full), why
 #   (the reason both buttons are off, else null), running ({since, sha, how} while a run or push holds its lock, else
-#   null) and last (the last line of its record, else null). The
+#   null) and last (the last line of its record, else null). suites is each whole-suite run, the release's and the
+#   full test's, in one shape (suites()): {kind ("release" or "full test"), version (a release's), step, sha, since,
+#   ended (null while under way), state, done, failed, cases (the failed cases' names), moved, reasons}: the release
+#   record of commands/release-prep.sh, its cases counted as the suite runs; the full test's run under way, else its
+#   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, head},
+#   null when main cannot be read. The
 #   first two carry reviews
 #   and track, as below: a blocked card is off the belt, and its track is where the step it stopped in is failed,
 #   with the seconds that step ran.
@@ -227,6 +232,39 @@ CHECKRUN_SHOW='
           + [.lanes[] | select(.state == "failed") | "  ✗ \(.name)"][:3]
           + [.lanes[] | select(.state == "running") | "  ▶ \(.name)" + (if .started != null then " \(now - (.started | t) | took)" else "" end)][:3])})}
   end'
+# The whole-suite runs, each in one shape (suites, above): the release's (its record, commands/release-prep.sh) and
+# the full test's (fulltest()). One under way is counted from its runner's marks (suiteprog()). A release record left
+# running with its lock free was ended from outside before it could say so: stopped, when the record was last written.
+suites() {
+  local r fr l t
+  if r=$(jq -ce 'objects | select(.kind == "release") | del(.pid)' "$CARDS/release/run.json" 2>/dev/null); then
+    if [ "$(jq -r .ended <<<"$r")" = null ]; then
+      if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
+        t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '.state = "stopped" | .ended = ($t | todate)' <<<"$r")
+      elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
+        r=$(jq -c --argjson p "$(suiteprog "$CARDS/release/wt")" '. + $p' <<<"$r"); fi
+    fi
+  fi
+  if ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
+    fr=$(jq -c --argjson p "$(suiteprog "$CARDS/fulltest/wt")" '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + $p' <<<"$fr")
+  elif l=$(tail -n 1 "$FULLTEST" 2>/dev/null | jq -ce 'select(.kind == "run")' 2>/dev/null); then
+    fr=$(jq -c '{kind: "full test", version: null, step: (if .push then "push" else "run" end), sha, since: null, ended: .time, state, done: null,
+      failed: (.cases | length), cases: [.cases[].case], moved: false, reasons: (if .reason then [.reason] else [] end)}' <<<"$l")
+  else fr=''; fi
+  printf '%s\n' "$r" "$fr" | jq -cs 'map(objects)'
+}
+# What the Release panel shows of main (docs/board.md): the newest vX.Y.Z tag, the commits since it (count; the newest
+# 20, {sha, subject}), the next minor version, whether main holds its notes (docs/releases/<next>.md), and main's head.
+releasemain() {
+  local h tag next
+  h=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || { echo null; return; }
+  tag=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+  next=$(awk -F. '{ print $1 "." $2 + 1 ".0" }' <<<"${tag:-v0.0.0}"); next=${next#v}
+  git log -n 20 --format='%H%x09%s' "${tag:+$tag..}$h" 2>/dev/null | jq -Rcs --arg h "$h" --arg t "$tag" --arg n "$next" \
+    --argjson c "$(git rev-list --count "${tag:+$tag..}$h" 2>/dev/null || echo null)" --argjson nt "$(git cat-file -e "$h:docs/releases/$next.md" 2>/dev/null && echo true || echo false)" \
+    '{tag: (if $t == "" then null else $t end), count: $c, commits: [split("\n")[] | select(. != "") | split("\t") | {sha: .[0], subject: (.[1:] | join("\t"))}],
+      next: $n, notes: $nt, head: $h}'
+}
 checkrun() { # <scratch folder>; prints {} when the pack names no progress command, else {checkRun: ...}
   local cmd f=${STATE%/*}/checkrun.json out rc v
   cmd=''; ! packget checks cmd 2>/dev/null || cmd=$(jq -r 'objects | .progress // empty' <<<"$cmd" 2>/dev/null)
@@ -369,7 +407,9 @@ snapshot() (
   fr=null; ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null) || fr=null
   ft=$({ tail -n 1 "$FULLTEST" 2>/dev/null || :; } | jq -cs --arg ft "$ft" --argjson r "$fr" '{command: ($ft != ""),
       why: (if $ft == "" then "the pack names no full test suite (test.full)" else null end), running: $r, last: (map(objects) | last)}' 2>/dev/null) || ft=null
-  jq -cn --slurpfile all "$d/priced" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
+  # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).
+  su=$(suites) || su='[]'; rl=$(releasemain) || rl=null
+  jq -cn --slurpfile all "$d/priced" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --argjson q "$queue" --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -572,6 +612,8 @@ snapshot() (
            | sort_by(.issue) end)},
        mainTest: $mt,
        fullTest: $ft,
+       suites: $su,
+       release: $rl,
        flaky: $fl,
        slowOff: $so,
        belt: [($c[] | select(.result == "")), ($c[] | select(.x.after != null)) | sofar as $s | (.x.after != null) as $landed

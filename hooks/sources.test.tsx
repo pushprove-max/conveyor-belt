@@ -50,6 +50,20 @@ test('a head with no limit in the data file says so, and a day with an unpriced 
   expect(text.split('\n')[1]).toMatch(/^weekly limit not read +0 on belt · 0 queued$/)
 })
 
+// Bug: a release's whole suite (about 15 minutes) runs and /units shows nothing of it, so the owner asks the Foreman
+// whether it runs, how far it is and whether anything failed; or a run long over stays on the board.
+const SUITE = { kind: 'release', version: '1.2.0', step: 'release-prep', sha: 'a1b2c3d4e5f6a7b8', since: ago(12), ended: null, state: 'running', done: 140, failed: 2, cases: ['x: a', 'y: b'], moved: false, reasons: [] }
+test('a release suite under way is one line under the head: its version, short commit, time running, cases done and failures so far', () => {
+  const lines = tableText(board({ suites: [SUITE] }), 80).split('\n')
+  expect(lines[3]).toBe('release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures')
+  expect(tableText(board({ suites: [] }), 80)).not.toMatch(/release|running|cases done/)
+})
+test('an ended run shows its result for a short time, then goes away', () => {
+  const ended = { ...SUITE, kind: 'full test', version: '', ended: ago(3), state: 'failed' }
+  expect(tableText(board({ suites: [ended] }), 80).split('\n')[3]).toBe('full test · a1b2c3d · failed 3m ago · 2 failures')
+  expect(tableText(board({ suites: [{ ...ended, ended: ago(11) }] }), 80)).not.toMatch(/full test/)
+})
+
 // a snapshot that prices what it can gives today's priced dollars and the steps it leaves out, never hiding both.
 test('the head gives today\'s priced dollars and how many steps they leave out', () => {
   const text = tableText(board({ cost: { today: 4.5, todayLeftOut: 2 } }), 80)
