@@ -27,7 +27,7 @@ awk '/^## / { on = ($0 == "## Tests"); next } on' "$R" | grep -qF '](docs/board.
 for s in 'judge' 'Declined' 'with no second run' '/conveyor-belt:foreman' 'setup --foreman' 'lane fast review' \
   'lane fast land' 'lane fast reset' 'Research lane**, read-only' '/conveyor-belt:review' '/conveyor-belt:away' \
   'control hold' 'control release' 'conveyor.sh retry' 'Users and authenticator codes' 'Accounts' 'API proxy' 'Belt 3D' \
-  'Depends on: #N' 'waiting list' 'Dependency guard' 'control dep-guard off' 'control force <issue>' 'Build anyway' \
+  'Depends on: #N' 'waiting list' 'Dependency guard' 'control dep-guard off' 'control force <issue>' 'Queue anyway' \
   'control reviewer opencode ' 'opencode auth login' 'codex debug models' 'conveyor.sh clis' \
   '`history` prints, whole, the lists the snapshot cuts'; do # bug: a reader cannot find the cut lists' full history
   grep -qF -- "$s" "${PAGES[@]}" || fail "no page names: $s"
