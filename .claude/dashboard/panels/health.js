@@ -55,7 +55,7 @@ window.DASH_APP.panel({
     const error = (text) => {
       if (typeof text !== 'string' || text.trim().includes('\n')) return plain(text);
       const e = healthError(text, ctx);
-      return e ? [e.line, e.raw ? { tail: e.raw, label: 'Raw error' } : null] : [];
+      return e ? [e.line, { tail: e.raw, label: 'Raw error' }] : [];
     };
     // One row of a Health list (a test case or file), in a review finding's row styles: its name, a chip of its count
     // and the issue filed for it (f) as a link when there is one on a line; what more it says (why) under it.
@@ -229,8 +229,9 @@ window.DASH_APP.panel({
     (acc && Array.isArray(acc.list) ? acc.list : []).forEach((a) => {
       const used = typeof a.usedPct === 'number', age = used ? old(a.readAt) : null, idle = a.cards === false;
       const where = a.machine || 'this machine';
-      // An expired login is the Board's own sentence, whole; any other error is the host's (error()).
-      const why = typeof a.error === 'string' && /^HTTP 401\b/.test(a.error) ? `this login has expired: sign in again on ${where}` : error(a.error);
+      // An expired login is the Board's own sentence, the host's error under "Raw error"; any other error is the host's (error()).
+      const why = typeof a.error === 'string' && /^HTTP 401\b/.test(a.error)
+        ? [`this login has expired: sign in again on ${where}`, { tail: a.error.trim(), label: 'Raw error' }] : error(a.error);
       const row = check(`Account ${a.name}${a.machine ? ` on ${a.machine}` : ' on this machine'}`,
         used ? ctx.chip(`${Math.round(a.usedPct)}% used`, idle ? 'quiet' : a.usedPct >= 90 ? 'bad' : age ? 'warn' : 'quiet') : ctx.chip('Not read', idle ? 'quiet' : 'warn'),
         a.email || 'no email recorded', age, typeof a.fiveHourPct === 'number' ? `5-hour window ${Math.round(a.fiveHourPct)}%` : null,
@@ -317,14 +318,14 @@ function healthWaits(text, ctx) {
 // An error from the host as {line, raw}: line is a short plain sentence that says what failed, the words before the
 // first ": " of its first line when they are more than one and fit HEALTH_LINE ("the Board could not get main from
 // GitHub: fatal: …" is "The Board could not get main from GitHub."), else that line in the Board's words (healthWaits),
-// cut to HEALTH_LINE. raw is the text as the host gave it, for a closed "Raw error" under the sentence; null when the
-// sentence already says all of it. null for no text.
+// cut to HEALTH_LINE. raw is the text as the host gave it, for a closed "Raw error" (with its Copy output) under the
+// sentence, also when the sentence says all of it. null for no text.
 function healthError(text, ctx) {
   if (typeof text !== 'string' || !text.trim()) return null;
   const raw = text.trim(), t = healthWaits(raw, ctx), first = t.split('\n')[0], cut = first.indexOf(': '), head = cut > 0 ? first.slice(0, cut).trim() : '';
   const line = /\s/.test(head) && head.length < HEALTH_LINE ? `${head[0].toUpperCase()}${head.slice(1)}.`
     : first.length > HEALTH_LINE ? `${first.slice(0, HEALTH_LINE - 1)}…` : first;
-  return { line, raw: line === t ? null : raw };
+  return { line, raw };
 }
 // The live feed rewrites the stream (writtenAt) every 10 s while it runs, and builds data.js again with each change, or
 // after 45 s with none (dashboard_stream.py KEEP), so data.js and this page's feed carry a write at most about 60 s old:
@@ -356,7 +357,7 @@ function dataRow(dd, s, ctx) {
   const why = live ? 'this page asks the build machine for news every 15 s'
     : s.live ? 'the live feed stopped' : e ? e.line : 'the live stream is down';
   const next = live ? 'Reload the page to open its live feed again.' : 'Reload the page. If the data stays old, make sure that the build machine is on. Then press Restart the Board\'s feed.';
-  const raw = e && e.raw ? ctx.output(e.raw, null, 'Raw error', dd.querySelector(':scope > details.output')) : null;
+  const raw = e ? ctx.output(e.raw, null, 'Raw error', dd.querySelector(':scope > details.output')) : null;
   dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`), ...(raw ? [raw] : []));
 }
 // "N s old" (minutes and hours past two minutes); "Age unknown" with no time to count from.

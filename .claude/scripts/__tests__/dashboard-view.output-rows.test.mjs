@@ -50,6 +50,26 @@ test('Health: a one-line git error is a plain sentence, the raw line under a clo
   assert.equal(feed.querySelector(':scope > details.output pre.output-text').textContent, 'the snapshot of buildhost failed: jq: parse error');
 });
 
+// Bug it catches: an error with no ": " (its sentence is the whole line) and an expired login (HTTP 401, said in the
+// Board's own sentence) showed no "Raw error" and no Copy output, so the owner could not copy the host's error.
+test('Health: a one-line error its sentence says whole, and an expired login, still keep the raw error with Copy output', () => {
+  const data = full(), hd = data.panels.health.data;
+  const merge = 'a merge is in progress in the checkout; it is left as it is', expired = 'HTTP 401 Unauthorized';
+  hd.update = { checkedAt: null, head: 'abc1234', error: merge, moved: null };
+  hd.accounts = { error: null, list: [{ machine: null, name: 'default', email: 'noreply@example.com', usedPct: null, fiveHourPct: null,
+    resetsAt: null, readAt: null, error: expired, usedFor: ['build'] }] };
+  const w = boot();
+  deliver(w, data);
+  for (const [label, sentence, raw] of [['Dashboard code', 'a merge is in progress in the checkout; it is left as it is', merge],
+    ['Account default on this machine', 'this login has expired: sign in again on this machine', expired]]) {
+    const row = dd(w, label), out = row.querySelector(':scope > details.output');
+    assert.ok(Array.from(row.querySelectorAll(':scope > .detail'), (s) => s.textContent).includes(sentence), label);
+    assert.equal(out && out.querySelector('summary').textContent, 'Raw error', `${label}: the raw error is folded under it`);
+    assert.equal(out.querySelector('pre.output-text').textContent, raw, `${label}: as the host gave it`);
+    assert.ok(out.querySelector('button.output-copy'), `${label}: Copy output`);
+  }
+});
+
 test('Lanes: a blocked Fast lane landing shows its reason as one plain line, then its log under "Show output" in mono', () => {
   const data = full();
   const reason = 'the changed tests failed again after their one fix round (exit 1); nothing landed.\nsecond line of the reason';

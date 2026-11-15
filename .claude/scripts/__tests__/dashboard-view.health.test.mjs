@@ -65,7 +65,8 @@ test('Health: a failing push is one plain line with its output under "Show outpu
   const flaky = dd(w, 'Flaky tests');
   assert.match(flaky.textContent, /^1 case1 case passed only on re-run in the last 7 days/);
   assert.ok(flaky.querySelector(':scope > details.output .issue'), 'each case and its issue under Show output');
-  const usage = dd(w, 'Account default on this machine').textContent;
+  // The row's words, less its closed "Raw error" that holds the error as the host gave it.
+  const usage = Array.from(dd(w, 'Account default on this machine').children).filter((n) => !n.matches('details.output')).map((n) => n.textContent).join('');
   assert.ok(usage.includes('the usage server asked for a pause; try again in 17 min') && !/retry after|rate limited/.test(usage), usage);
   const host = dd(w, 'buildhost');
   const cut = host.querySelector(':scope > .detail').textContent;
@@ -257,5 +258,6 @@ test('Health: a used account at 92% with another account to move to names the Ru
 test('Health: a read refused with HTTP 401 says the login has expired and where to sign in again', () => {
   const row = account({ usedPct: null, readAt: null, error: 'HTTP 401' });
   assert.match(row.textContent, /this login has expired: sign in again on devbox/);
-  assert.doesNotMatch(row.textContent, /HTTP 401/);
+  // The host's words only under the closed "Raw error".
+  assert.doesNotMatch(Array.from(row.children).filter((n) => !n.matches('details.output')).map((n) => n.textContent).join(''), /HTTP 401/);
 });
