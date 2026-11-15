@@ -24,7 +24,7 @@ see only that project. It shows:
 - each card on the belt, one a line: its issue, step, time in that step and title
 - the cards that wait on other issues, and the held issues, by number
 - the release or full-test run in progress: its commit, how long it has run, the cases done of all its cases, and the
-  failed files. With no run in progress, it shows how the last run ended.
+  failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
   error and a problem of the engine
 
@@ -36,7 +36,7 @@ it up:
 
 - A card that the Foreman waits for lands: the wake names its commit.
 - A blocked card: the wake names the reason.
-- A release or full-test run that ends: the wake names the result and the failed files.
+- A release or full-test run that ends: the wake names the result and the failed cases.
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 

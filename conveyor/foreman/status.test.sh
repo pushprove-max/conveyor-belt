@@ -30,7 +30,7 @@ card() { echo "{card: \"c$1\", issue: $1, title: \"$2\", step: \"$3\", stepAt: \
 poll() { CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --once 2>"$T/err"; }
 
 # D1: one call gives the whole state, in plain text, each item on its own line: the cards in flight with their step
-# and time in it, a card waiting on others, a held issue, the release run under way with its failed files, the blocked
+# and time in it, a card waiting on others, a held issue, the release run under way with its failed cases, the blocked
 # card and the push error.
 t_status() {
 CASE=status; fixture status
@@ -39,11 +39,11 @@ snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it kee
   | .health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
   | .health.pushFailingSince = "2026-11-15T11:59:00Z" | .health.pushError = {reason: "remote rejected the push"}
   | .suites = [{kind: "release", version: "1.2.0", step: "release-prep", sha: "abcdef0123456789", since: "2026-11-15T11:30:00Z", ended: null,
-      state: "running", done: 40, of: 120, failed: 2, cases: ["a.test.sh", "b.test.sh"], moved: false, reasons: []}]'
+      state: "running", done: 40, of: 120, failed: 2, cases: ["stall", "metrics"], moved: false, reasons: []}]'
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
 for l in 'alpha: 3 on the belt' '  #3 build 12m Fix the login form on the account page so that it keeps the' '  #4 review 12m Add a field' \
   '  #5 tests 12m Speed up tests' 'waiting: #6 on #3' 'held: #8' \
-  'release 1.2.0 running on abcdef012345 for 30m: 40 of 120 cases done, 2 failed: a.test.sh, b.test.sh' \
+  'release 1.2.0 running on abcdef012345 for 30m: 40 of 120 cases done, 2 failed: stall, metrics' \
   'needs you: #7 is blocked since 2026-11-15T11:00:00Z: tests failed twice' \
   'needs you: the push has failed since 2026-11-15T11:59:00Z: remote rejected the push'; do
   grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
@@ -73,18 +73,20 @@ grep -qxF 'alpha: #3 landed as 0123456789ab: your step is due' <<<"$w" || fail "
 grep -qxF 'alpha: #4 is blocked since 2026-11-15T11:58:00Z: the review found the change breaks the form' <<<"$w" || fail "the wake does not name the block reason: $w"
 }
 
-# D3: a release run that ends red wakes the Foreman with its result and its failed files; while it runs, it wakes no one.
+# D3: a release run that ends red wakes the Foreman with its result and its failed cases; while it runs, it wakes no one.
+# Bug (#26): the wake called the failed names "failed files", but a suite's runner names cases (an engine case by its
+# own name, as conveyor/tests/lib.sh marks it), so the Foreman read a case name as a file.
 t_suite() {
 CASE=suite; fixture suite
 run='{kind: "release", version: "1.2.0", step: "release-prep", sha: "abcdef0123456789", since: "2026-11-15T11:30:00Z", ended: null,
-  state: "running", done: 40, failed: 1, cases: ["a.test.sh"], moved: false, reasons: []}'
+  state: "running", done: 40, failed: 1, cases: ["stall"], moved: false, reasons: []}'
 snap ".belt = [$(card 3 One build)] | .suites = [$run]"
 poll && fail "a release run under way woke the Foreman: $(cat "$FD"/pending/*.wake)"
-snap ".belt = [$(card 3 One build)] | .suites = [$run + {ended: \"2026-11-15T11:59:00Z\", state: \"failed\", done: 140, failed: 2, cases: [\"a.test.sh\", \"b.test.sh\"]}]"
+snap ".belt = [$(card 3 One build)] | .suites = [$run + {ended: \"2026-11-15T11:59:00Z\", state: \"failed\", done: 140, failed: 2, cases: [\"stall\", \"metrics\"]}]"
 poll || fail "a release run that ended red woke nothing: $(cat "$T/err")"
 w=$(cat "$FD"/pending/*.wake)
-grep -qxF 'alpha: release 1.2.0 failed on abcdef012345 at 2026-11-15T11:59:00Z; failed files: a.test.sh, b.test.sh' <<<"$w" \
-  || fail "the wake does not name the result and the failed files: $w"
+grep -qxF 'alpha: release 1.2.0 failed on abcdef012345 at 2026-11-15T11:59:00Z; failed cases: stall, metrics' <<<"$w" \
+  || fail "the wake does not name the result and the failed cases: $w"
 }
 
 cases=(status wake suite)

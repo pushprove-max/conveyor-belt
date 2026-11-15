@@ -304,7 +304,7 @@ context() {
 # Filing: file issues only in your own projects; an issue you file starts held (the filing hooks hold it in Conveyor, in its record); release it (conveyor.sh control release <issue>, in that record) only once the owner has said yes to it.
 # Questions to the owner go only by the picker (AskUserQuestion), never as a question in your reply.
 # A wake (a watcher's message) gets a reply that says only what needs the owner; when nothing does, reply with the one word Idle.
-# Check status with conveyor.sh foreman status, not your own snapshot reads. A wake already names what changed: a landed card's commit, a blocked card's reason, a suite run's result and failed files.
+# Check status with conveyor.sh foreman status, not your own snapshot reads. A wake already names what changed: a landed card's commit, a blocked card's reason, a suite run's result and failed cases.
 # Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.
 # Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.
 # To be woken when an issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it).

@@ -15,7 +15,7 @@
 #     group's Foreman claimed in another checkout awaits the same issues of the same projects; one whose card has
 #     pushed wakes once, naming the commit it landed as. The Foreman only appends to it: what was dropped is counted in await-done-<repo>.txt
 #     ("<issue> <its lines in await-<repo>.txt then>"), so a line appended later awaits it again
-#   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit and failed files
+#   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit and failed cases
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
@@ -48,13 +48,15 @@ jq -e 'arrays | all(.[]; (.kind | strings) and (.from | arrays))' "$KINDS" >/dev
 RECS=$(mine) || exit 1
 
 # A whole-suite run of the snapshot's suites (a release's or the full test's) on one line: under way, its commit, how
-# long it has run, the cases done of the cases selected (the total when its runner gives it) and failed; ended, its result and commit; either way the failed files by name.
+# long it has run, the cases done of the cases selected (the total when its runner gives it) and failed; ended, its result and commit; either way the failed cases by name.
+# The names are the cases its runner named as ended (fulltest.sh suiteprog()): an engine case by its own name, never
+# its file, so the line says cases, not files.
 SUITE='def took: if . < 3600 then "\(. / 60 | floor)m" else "\(. / 3600 | floor)h\(. % 3600 / 60 | floor)m" end;
   def suiteline($now): (if .kind == "release" then "release \(.version // "")" else "full test" end) as $k
     | (.sha // "" | if . == "" then "no commit yet" else .[0:12] end) as $c
     | ([.cases | arrays | .[] | tostring] | if length > 20 then "\(.[:20] | join(", ")) and \(length - 20) more" else join(", ") end) as $f
     | if .ended == null then "\($k) running on \($c) for \((.since | fromdate? | $now - .) // null | if . == null then "?" else took end): \(.done // 0)\(if .of == null then "" else " of \(.of)" end) cases done, \(.failed // 0) failed\(if $f == "" then "" else ": \($f)" end)"
-      else "\($k) \(.state // "ended") on \($c) at \(.ended)\(if $f == "" then "" else "; failed files: \($f)" end)" end;'
+      else "\($k) \(.state // "ended") on \($c) at \(.ended)\(if $f == "" then "" else "; failed cases: \($f)" end)" end;'
 # The issues of a snapshot, or of its history ($hist: `conveyor.sh history`, null when not read), whose card pushed:
 # landed and not in health's unpushed, or in pushedCards. The snapshot holds only the newest of both lists (#544:
 # with 110 pushed today an awaited issue among the oldest was in neither, and never woke the Foreman).
@@ -64,7 +66,7 @@ PUSHED='def pushed($hist): [.health.unpushed | arrays | .[] | objects | .card] a
 # A snapshot's problems, one per line: <key> TAB <kind> TAB <issue numbers, "#n" by spaces> TAB <text>. Fails for
 # anything but a snapshot holding a health record. idle is a candidate here: record() reports it on its second poll.
 # An awaited issue that landed names its commit (the snapshot's or the history's landed line of it); a whole-suite run
-# that ended (snapshot suites) is one item, its line as the status command prints it, the failed files named.
+# that ended (snapshot suites) is one item, its line as the status command prints it, the failed cases named.
 PROBLEMS=$SUITE$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   (type == "object" and .belt == [] and (.queue.next // null) == []) as $idle
   | pushed($hist[0]) as $pushed
