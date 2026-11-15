@@ -132,6 +132,11 @@ test('a card in its Test step shows its tests run of how many and those failed, 
   assert.match(live(), /3 of 6 test files/, `with no case count, the test files: ${live()}`);
   assert.doesNotMatch(live(), /turn/);
   assert.deepEqual(detail(), ['3 of 6 test files']);
+  // Bug (#15): a run of one file read "1 of 1 test files".
+  const one = clone(files);
+  one.panels.belt.data.cards[0].track.files = { run: 1, of: 1 };
+  next(w, one);
+  assert.match(live(), /1 of 1 test file(?!s)/, `one file is singular: ${live()}`);
   // A build session's turns are still drawn.
   const build = full();
   build.panels.belt.data.cards[0].live = { turns: 4, lastOutputAt: iso(T0 - 4000), action: null };

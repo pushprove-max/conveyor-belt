@@ -161,3 +161,22 @@ test('the loop\'s controls print what they do under them at phone width only', (
   const phone = /@media \(max-width: 700px\) \{([\s\S]*?)\n\}/.exec(css)[1];
   assert.match(phone, /\.phone-note \{ display: block;/, 'shown at phone width');
 });
+
+// Bug (#15): stopped, the note said "Start: Conveyor picks again", a button the bar does not have (it is "Resume
+// <repo>"), and explained Stop now, which is disabled while stopped.
+test('the stopped loop\'s phone note names Resume and says nothing of the disabled Stop now', () => {
+  const w = boot({ tab: 'control' });
+  const data = full();
+  Object.assign(data.panels.board.data, { state: 'stopped', control: { ...data.panels.board.data.control, mode: 'stop' } });
+  deliver(w, data);
+  assert.equal(panel(w, 'board-loop').querySelector('.board-bar .phone-note').textContent, 'Resume sample: Conveyor picks again.');
+});
+
+// Bug (#15): a lane not landing named fast-lane.sh, a script the plugin does not ship; the command is conveyor.sh lane land.
+test('a lane that is not landing names the command that lands it', () => {
+  const w = boot();
+  const data = full();
+  data.panels.lanes.data.records[0].fast.landing = { state: 'none' };
+  deliver(w, data);
+  assert.match(panel(w, 'lanes').querySelector('li[data-lane="Fast lane"]').textContent, /Not landing\s*conveyor\.sh lane land starts it/);
+});

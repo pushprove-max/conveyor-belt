@@ -34,7 +34,7 @@ serves the Board, because its requests come from a loopback address. An admin se
 ## Tabs and panels
 
 - **Overview**: the panels Needs you, On the belt, Queue, Landed today, Declined, Health, Lanes, Cost and Metrics. The
-  tab shows the Needs you count, "Overview · 4".
+  tab shows the count of cards stopped for you, "Overview · 4".
 - **Control**: the panels **Projects and Foremen**, **Loop**, **Push landed and full test suite** and **Board**. Loop
   has the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit bar, and
   today's landed count and cost. Board has the cards in their columns. The machine head has **Pause all projects**.
@@ -53,7 +53,7 @@ you. **Restart the Board's feed** is in the Health panel.
 
 - **Retry and Close.** Each blocked card has a **Retry** button (`conveyor.sh retry`) and a **Close** button. Close
   asks once, then closes the card's issue with a comment and shuts the card (`conveyor.sh shut`).
-- **Build this and Close.** Each entry under "Pipeline changes held for you" has a **Build this** button, which releases
+- **Queue and Close.** Each entry under "Pipeline changes held for you" has a **Queue** button, which releases
   the issue (`conveyor.sh control release`), and a **Close** button.
 
 ## Rules
@@ -90,7 +90,7 @@ An issue that is not being built is in Held for one of four reasons: **Held by y
 
 On the Rules tab, "waiting on another card" opens the waiting list. It shows each waiting card with the cards it waits
 on, as "waits on #12 (testing), #13 (landed)". The **Dependency guard** row sets the guard On or Off. With it Off,
-each card of the waiting list has **Build anyway**, which asks once and then sends `control force`.
+each card of the waiting list has **Queue anyway**, which asks once and then sends `control force`.
 
 Each card in the Held and Queue columns has **Depends on…**: type or pick open issues, or remove one (×). The host
 writes the issue's `Depends on: #N` line on GitHub (`conveyor.sh control depends`). It refuses a self-dependency, an
@@ -114,7 +114,7 @@ suite** runs the suite and pushes nothing. A project with no `test.full` shows b
 
 - A finished review reads "Review 2: passed" or "Review 2: changes asked". A review the judge read says "judge: N
   accepted, M declined".
-- A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main moved** or
+- A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it** or
   **Fix 4: tests failed**. Hover over the label for the full reason.
 - A reply-check fix after the build shows on the Build step, "Build · reply check fix" and then "Build · reply check
   fixed". The Fix step shows the other fixes.

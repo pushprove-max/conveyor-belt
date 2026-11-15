@@ -790,7 +790,7 @@
     el.append(row('dep-guard', 'Dependency guard', 'an issue waits while one it depends on is open',
       gOn, gOff, knows ? offLine(guardOn, 'Conveyor can build a waiting issue all the same') : newer(knows)));
 
-    // Push when a card lands: On (the default) pushes each card once it lands; Off lands only, and what landed waits for
+    // Push when a card lands: On pushes each card once it lands; Off (the default, control-defaults.json) lands only, and what landed waits for
     // Push landed on the Board.
     const pushOn = r.push !== false, pushKnown = typeof r.push === 'boolean';
     const pOn = choice('On', 'push-on', 'Push when a card lands: on', pushOn, () => { if (!pushOn) send('rules', ['push=on'], null, ['rules', ['push=off']]); });

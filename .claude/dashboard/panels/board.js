@@ -277,7 +277,8 @@
     acts.append(stop);
     el.append(acts);
     // What the two controls do, printed under them at phone width (app.css, .phone-note), where no hover text shows.
-    el.append(h('p', 'phone-note', `${mode === 'run' ? 'Pause after current: the cards in progress finish, and Conveyor picks nothing new.' : 'Start: Conveyor picks again.'} Stop now: the cards in progress end and go back to the queue.`));
+    // Stopped, Stop now is disabled, so the note says nothing of it.
+    el.append(h('p', 'phone-note', `${mode === 'run' ? 'Pause after current: the cards in progress finish, and Conveyor picks nothing new.' : `Resume ${repo}: Conveyor picks again.`}${mode === 'stop' ? '' : ' Stop now: the cards in progress end and go back to the queue.'}`));
 
     // The weekly limit with the guard's mark on it (the guard is set on the Rules tab).
     const guard = c && num(c.guard) !== null ? c.guard : null;

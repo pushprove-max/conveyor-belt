@@ -14,7 +14,7 @@
     else if (x.state === 'waiting') p.append(ctx.chip('Landing: waiting for your yes', 'warn'), h('span', null, x.reason));
     else if (x.state === 'blocked') p.append(ctx.chip('Landing: blocked', 'bad'), h('span', null, x.reason));
     else if (x.state === 'landed') p.append(ctx.chip('Landed', 'ok'), h('span', null, `${x.since ? `at ${ctx.clock(x.since)}` : 'on an earlier day'}; reset the lane to main before the next change`));
-    else p.append(ctx.chip('Not landing', 'quiet'), h('span', null, 'fast-lane.sh land starts it'));
+    else p.append(ctx.chip('Not landing', 'quiet'), h('span', null, 'conveyor.sh lane land starts it'));
     return p;
   }
   // What is true of the lane, the first that holds: a session working in it, uncommitted files, commits ahead of

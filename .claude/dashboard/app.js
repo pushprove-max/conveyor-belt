@@ -445,7 +445,7 @@
   // card: the card's id, so the output a step keeps shows its worktree as ./.
   const SETUP = /^(picked|worktree ready|dependencies linked|brief written|making the worktree|linking dependencies|writing the brief)$/;
   const BAR_NAME = { building: 'Build', landing: 'Land', pushed: 'Push', push: 'Push', 'push failed': 'Push', 'tests passed': 'Tests', 'tests failed': 'Tests' };
-  // What started a fix session, as its bar in "Every step" and the card's step pill name it ("Fix 3: main moved"): its
+  // What started a fix session, as its bar in "Every step" and the card's step pill name it ("Fix 3: main changed under it"): its
   // line's reason when it names one (a failed Done-when check on the reply, main moved), else the step before it (a
   // NO-GO review's findings, a failed test run). The fix in progress has no line yet, so it is named only where the step
   // before it leaves one cause: failed tests; a build, rebuild or fix with no reason (the Done-when check on its reply);
@@ -491,7 +491,7 @@
   function testProgress(t) {
     const c = t && t.tests && typeof t.tests === 'object' ? t.tests : null, f = t && t.files && typeof t.files === 'object' ? t.files : null;
     if (c && num(c.done) && num(c.of)) return `${c.done} of ${c.of} tests${num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : ''}`;
-    if (f && num(f.run)) return num(f.of) ? `${f.run} of ${f.of} test files` : `${f.run} test files`;
+    if (f && num(f.run)) return `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;
     return null;
   }
   // was: the timeline this one replaces, if any: whether it and its set-up were open is kept. A timeline with a step in
