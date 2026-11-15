@@ -233,7 +233,7 @@ test('the Board: "Depends on…" on an open issue sends depends <issue> add <n>,
   act(bcard(r, n), 'dep-add').click();
   await settle(); await settle();
   assert.doesNotMatch(bcard(r, n).textContent, /waits on #76/);
-  assert.match(r.document.querySelector('.board-note').textContent, /Not done: .*dependency cycle/);
+  assert.match(panel(r, 'board').querySelector('.board-note').textContent, /Not done: .*dependency cycle/);
 });
 
 // Bug: the Rules waiting list named what each card waits on but could not take a dependency off it or add one. And

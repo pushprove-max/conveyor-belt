@@ -23,7 +23,7 @@ test('settings the build machine could not read: Rules, the Board and Projects s
     "Conveyor could not read its settings on the build machine. You cannot see or change the rules here, and Conveyor picks no new card. Run Conveyor's control command on the build machine: it says what is wrong.");
   const c = boot({ tab: 'control' });
   deliver(c, d);
-  assert.equal(board(c).querySelector('.board-state .chip').textContent, 'Settings not read');
+  assert.equal(panel(c, 'board-loop').querySelector('.board-state .chip').textContent, 'Settings not read');
   const p = panel(c, 'machine').querySelector('.project');
   assert.equal(p.querySelector('.project-head .chip').textContent, 'Settings not read');
   assert.match(p.querySelector('.project-acts').textContent, /^Conveyor could not read its settings on the build machine\. You cannot pause it from here, and it picks no new card\. Run Conveyor's control command on the build machine: it says what is wrong\./);

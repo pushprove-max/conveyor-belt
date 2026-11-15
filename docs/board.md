@@ -35,9 +35,12 @@ serves the Board, because its requests come from a loopback address. An admin se
 
 - **Overview**: the panels Needs you, On the belt, Queue, Landed today, Declined, Health, Lanes, Cost and Metrics. The
   tab shows the Needs you count, "Overview · 4".
-- **Control**: the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit
-  bar, today's landed count and cost, and the cards in their columns. The machine head has **Pause all projects**.
-- **Rules**: the settings.
+- **Control**: the panels **Projects and Foremen**, **Loop**, **Push landed and full test suite** and **Board**. Loop
+  has the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit bar, and
+  today's landed count and cost. Board has the cards in their columns. The machine head has **Pause all projects**.
+- **Rules**: the panels **Rules**, **What these rules produce**, **Model prices**, **Held by you or a label** and
+  **Open issues**. On Control and Rules, the line that says what an action did, with its Undo, shows in the panel
+  where you did it.
 - **Tests**: the project's test files.
 - **Belt 3D**: the belt drawn as a conveyor line, each card on the track of its step (`conveyor/README.md`, Belt 3D).
 

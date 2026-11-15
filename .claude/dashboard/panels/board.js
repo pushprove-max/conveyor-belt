@@ -45,6 +45,9 @@
 // it ("Board: sample"); every change names it. One row filters every column by number or title,
 // priority, area and label and sorts it by priority, number or time in the column, the choices but the text kept in the
 // address too; a column the filter empties says so, with Clear. Landed today shows its newest five, then "Show all (N)".
+// Its one part is drawn as three panels of the Control tab (PANELS): Loop (the control bar), Push landed and full test
+// suite (pushTest and the check runs), and Board (the row that filters, the split, its line and the columns). Each
+// panel has its own line, saying what an action in it did (say).
 (function () {
   'use strict';
   const MOTION_MS = 260;
@@ -60,7 +63,7 @@
   // The reasons an issue is held, in the order its group is drawn: the first reason of an issue is its group.
   // approve: it waits for the owner's yes before its build, answered in Needs you.
   const KINDS = ['you', 'label', 'rule', 'standing', 'approve', 'card', 'parent', 'waits', 'other'];
-  const S = { d: null, ctl: null, el: null, ctx: null, armed: false, unarm: null, dragging: null, busy: false, keep: null, ctlAt: null, moved: new Map(), floor: null, read: null, turned: false, lanesOpen: {}, lanesShown: {},
+  const S = { d: null, ctl: null, at: new Map(), from: 'board', heard: new WeakSet(), raw: null, ctx: null, armed: false, unarm: null, dragging: null, busy: false, keep: null, ctlAt: null, moved: new Map(), floor: null, read: null, turned: false, lanesOpen: {}, lanesShown: {},
     groups: new Map(), filter: { text: '' }, text: null, unlabeled: new Set(), released: new Set(),
     dep: null, depText: '', depSaid: new Map() };
   const DEPENDS_MAX = 20;  // the issues one depends takes (dashboard_server.py)
@@ -123,23 +126,42 @@
   // Removing its labels queues it: nothing holds it but labels (and you, which the removal releases too).
   const unlabelable = (x) => labelsOf(x).length > 0 && kinds(x).every((k) => k === 'label' || k === 'you');
 
-  // The board's line: what was asked or done, with Undo after a change easily undone (undo sends its opposite).
-  function say(text, undo) { const n = S.el && S.el.querySelector('.board-note'); if (n) n.replaceChildren(undo ? S.ctx.undoLine(text, undo) : text); }
+  // The part, and the ids of the tab's panels drawn from it (PANELS): Board is the part's own id.
+  const PART = 'board', LOOP = `${PART}-loop`, PUSH = `${PART}-push`;
+  // The place and the page's ctx of one of the tab's panels (PANELS), once the page has drawn it.
+  const elOf = (id) => (S.at.has(id) ? S.at.get(id).el : null);
+  const cx = (id) => (S.at.has(id) ? S.at.get(id).ctx : S.ctx);
+  // Each of the tab's panels works its length out again: rows came or went (a group opened, a card moved).
+  const relength = () => S.at.forEach((p) => p.ctx.relength());
+  // The board's line: what was asked or done, with Undo after a change easily undone (undo sends its opposite). Each of
+  // the tab's panels has its own (in Board, over the columns): the line shows in the panel the action came from (where,
+  // by default S.from: the panel last clicked, typed or dropped in), so a panel folded away never holds what another
+  // panel's action said, and the other panels' lines are emptied.
+  function say(text, undo, where = S.from) {
+    S.at.forEach(({ el }, id) => {
+      const n = el.querySelector('.board-note');
+      if (n) n.replaceChildren(...(id !== where ? [] : [undo ? S.ctx.undoLine(text, undo) : text]));
+    });
+  }
+  // A panel's line, empty until an action there says something.
+  const noteLine = () => { const n = S.ctx.h('p', 'board-note'); n.setAttribute('aria-live', 'polite'); return n; };
   // One action to the page's host. A control action's answer is the record as it now stands. One at a time: while an
   // action is out, the board's controls are off and no other is sent, so a second click cannot resend what the first
   // sent (two raises of the cap from the same number would be one raise). undo: what Undo on the line sends, once done;
   // it is called with the project this change went to, and sends to that one even after another project is picked.
   function send(action, args, done, repo, undo) {
     if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return Promise.resolve(false); }
+    // Its answer shows in the panel it was asked from, whatever panel is clicked while it is out.
+    const where = S.from, tell = (text, u) => say(text, u, where);
     S.busy = true; draw();
-    say('Sending…');
+    tell('Sending…');
     const free = (ok) => { S.busy = false; draw(); return ok; };
     // Every action names the project it is for: the one on screen when it was asked for, or the card's own (Needs
     // you). An answer that comes after another project was picked is that project's record: it is not shown.
     const to = repo || S.d.repo;
     return S.ctx.post('control', { action, args, repo: to }).then((r) => r.text().then((t) => {
       const said = String(t).trim();
-      if (!r.ok) { say(`Not done: ${said ? S.ctx.refusal(said) : `the build machine answered ${r.status}`}`); return false; }
+      if (!r.ok) { tell(`Not done: ${said ? S.ctx.refusal(said) : `the build machine answered ${r.status}`}`); return false; }
       let rec = null;
       try { rec = JSON.parse(said); } catch (e) { rec = null; }
       const here = to === S.d.repo;
@@ -155,10 +177,10 @@
         new Set([...was, ...now]).forEach((n) => { if (was.has(n) !== now.has(n)) S.moved.set(n, when); });
       }
       // The build machine's own reply is shown only when the action failed.
-      say('Done. The Board shows it in about a minute.', here && undo ? () => undo(to) : null);
+      tell('Done. The Board shows it in about a minute.', here && undo ? () => undo(to) : null);
       if (done && here) done(Number.isFinite(at) && at > 0 ? at * 1000 : null);
       return true;
-    })).then(free, () => { say('Not done: the build machine did not answer. Make sure that it is on. Then try again.'); return free(false); });
+    })).then(free, () => { tell('Not done: the build machine did not answer. Make sure that it is on. Then try again.'); return free(false); });
   }
 
   // ---- moving cards between Held and Queue ----
@@ -280,7 +302,7 @@
     const day = d.today || {}, n = num(day.landed);
     const today = h('div', 'board-ctl board-today');
     today.dataset.figure = 'today';
-    today.append(h('span', 'board-label', 'Today'), h('span', 'board-value', n === null ? 'not read' : `${n} landed`), S.ctx.number('board-usd', num(day.usd), S.ctx.money));
+    today.append(h('span', 'board-label', 'Today'), h('span', 'board-value', n === null ? 'not read' : `${n} landed`), cx(LOOP).number('board-usd', num(day.usd), S.ctx.money));
     el.append(today);
     return el;
   }
@@ -351,7 +373,7 @@
     const det = h('details', 'board-check-lanes'), ul = h('ul', 'board-check-list');
     det.append(h('summary', null, `Every lane (${lanes.length})`), ul);
     det.open = !!S.lanesOpen[key];
-    det.addEventListener('toggle', () => { S.lanesOpen[key] = det.open; S.ctx.relength(); });
+    det.addEventListener('toggle', () => { S.lanesOpen[key] = det.open; relength(); });
     const shown = S.lanesShown[key] || LANES;
     ul.append(...lanes.slice(0, shown).map((l) => {
       const li = h('li', null, `${l.name} · ${l.state}`);
@@ -514,7 +536,7 @@
       S.dragging = { item, col }; card.classList.add('dragging');
       if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(item.issue)); }
     });
-    card.addEventListener('dragend', () => { S.dragging = null; card.classList.remove('dragging'); S.el.querySelectorAll('.over').forEach((x) => x.classList.remove('over')); });
+    card.addEventListener('dragend', () => { S.dragging = null; card.classList.remove('dragging'); elOf(PART).querySelectorAll('.over').forEach((x) => x.classList.remove('over')); });
   }
   // "Depends on…": the issue's Depends on: line on GitHub, written by the host (POST control depends). The owner types
   // or picks open issues of the project to add, or removes one its Depends on: lines name (×; another repository's
@@ -820,7 +842,7 @@
     a.dataset.act = 'held-see';
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      const col = S.el.querySelector('.board-col[data-col="held"]');
+      const col = elOf(PART).querySelector('.board-col[data-col="held"]');
       if (col) { col.scrollIntoView({ block: 'nearest' }); const head = col.querySelector('.board-head'); if (head) { head.tabIndex = -1; head.focus({ preventScroll: true }); } }
     });
     li.append(`Nothing queued. Holds keep ${n === 1 ? '1 issue' : `${n} issues`} back: `, a, '.');
@@ -875,14 +897,14 @@
         ul.append(...list.map((x) => card('held', x)));
         det.append(sum, ul);
         det.open = S.groups.has(k) ? S.groups.get(k) : of <= LONG;
-        det.addEventListener('toggle', () => { S.groups.set(k, det.open); S.ctx.relength(); });
+        det.addEventListener('toggle', () => { S.groups.set(k, det.open); relength(); });
         return det;
       }));
       if (!all.length) box.replaceChildren(h('p', 'board-empty', EMPTY.held));
       else if (!shown.length) box.replaceChildren(unmatched('p', UNMATCHED.held));
       lock(box);
     };
-    return S.ctx.more('held', shown, paint, PAGE);
+    return cx(PART).more('held', shown, paint, PAGE);
   }
   // "What these mean", under the Held heading: the four reasons an issue is not being built, each with where it is changed.
   function meanings() {
@@ -916,7 +938,7 @@
         fold.textContent = on ? 'Hide' : 'Show';
         fold.setAttribute('aria-expanded', String(on));
         fold.setAttribute('aria-label', `${on ? 'Hide' : 'Show'} ${title}`);
-        S.ctx.relength();
+        relength();
       });
       head.append(fold);
     }
@@ -933,7 +955,7 @@
       col.addEventListener('dragover', (e) => {
         if (!S.dragging) return;
         e.preventDefault();
-        if (!col.classList.contains('over')) { S.el.querySelectorAll('.over').forEach((x) => x.classList.remove('over')); col.classList.add('over'); }
+        if (!col.classList.contains('over')) { elOf(PART).querySelectorAll('.over').forEach((x) => x.classList.remove('over')); col.classList.add('over'); }
       });
       col.addEventListener('dragleave', (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('over'); });
       col.addEventListener('drop', (e) => {
@@ -957,37 +979,59 @@
   // to the board comes in with `enter`.
   // While a change is out the cards' controls are off, on a page drawn by "Show more" too.
   const lock = (root) => { if (S.busy) root.querySelectorAll('.bcard button').forEach((b) => { b.disabled = true; }); };
-  function draw() {
-    const el = S.el, h = S.ctx.h, motion = S.ctx.motion();
-    // No record steered, and another record's check run to show: the empty Board, then the runs; another project on the
-    // host is picked in the machine head.
+  // The tab's panels, in their default order, each drawn from the one Board part: [id, title].
+  const PANELS = [[LOOP, 'Loop'], [PUSH, 'Push landed and full test suite'], [PART, 'Board']];
+  // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
+  function draw(only) {
+    const h = S.ctx.h, motion = S.ctx.motion(), at = (id) => (!only || only === id ? elOf(id) : null);
+    const top = at(LOOP), pushes = at(PUSH), el = at(PART);
+    // No record steered, and another record's check run to show: the empty Board, then the runs (in Push landed and
+    // full test suite); another project on the host is picked in the machine head.
     if (S.d.repo === null) {
-      el.replaceChildren(noLoop(S.ctx, issues(S.d.repos).length > 1), h('div', 'board-check'));
-      el.querySelector('.board-check').replaceChildren(...checkTiles());
-      S.ctx.relength();
+      [top, pushes, el].forEach((x) => { if (x) x.replaceChildren(noLoop(S.ctx, issues(S.d.repos).length > 1)); });
+      if (pushes) { const check = h('div', 'board-check'); check.append(...checkTiles()); pushes.append(check); }
+      relength();
       return;
     }
+    const a = document.activeElement, from = a ? Array.from(S.at).find(([, p]) => p.el.contains(a)) : null;
+    // The focus a pending action took (its control was off) comes back when the controls do.
+    const keep = (from ? { panel: from[0], issue: a.closest('.bcard') && a.closest('.bcard').dataset.issue, act: a.dataset.act || null, card: a.classList.contains('bcard'), filter: a.dataset.filter || null } : null) || S.keep;
+    S.keep = null;
+    if (top) {
+      if (!top.querySelector('.board-top')) top.replaceChildren(h('div', 'board-top'), noteLine());
+      top.querySelector('.board-top').replaceChildren(bar());
+    }
+    if (pushes) {
+      if (!pushes.querySelector('.board-pushes')) pushes.replaceChildren(h('div', 'board-pushes'), noteLine(), h('div', 'board-check'));
+      pushes.querySelector('.board-pushes').replaceChildren(pushTest());
+      pushes.querySelector('.board-check').replaceChildren(...checkTiles());
+    }
+    if (S.busy) [top, pushes].forEach((x) => { if (x) x.querySelectorAll('.board-top button, .board-top select, .board-pushes button').forEach((b) => { b.disabled = true; }); });
+    if (el) cards(el, motion);
+    const to = keep && at(keep.panel);
+    if (to) {
+      const c = keep.issue ? to.querySelector(`.bcard[data-issue="${keep.issue}"]`) : null;
+      const again = keep.filter ? to.querySelector(`[data-filter="${keep.filter}"]`) : keep.card ? c : (keep.act ? (c || to).querySelector(`[data-act="${keep.act}"]`) : null);
+      if (again && !again.disabled) again.focus({ preventScroll: true });
+      else if (S.busy) S.keep = keep;
+    } else if (keep && !from) S.keep = keep;  // kept for a panel not drawn now
+    relength();
+  }
+  // The Board panel: the row that filters, the split, the tab's line and the columns.
+  function cards(el, motion) {
+    const h = S.ctx.h;
     if (!el.querySelector('.board')) {
-      const note = h('p', 'board-note');
-      note.setAttribute('aria-live', 'polite');
       const board = h('div', 'board');
       COLS.forEach(([k, t]) => board.append(column(k, t)));
-      el.replaceChildren(h('div', 'board-view'), h('div', 'board-top'), h('div', 'board-pushes'), h('div', 'board-check'), h('div', 'board-counts'), note, board,
+      el.replaceChildren(h('div', 'board-view'), h('div', 'board-counts'), noteLine(), board,
         h('p', 'foot', 'Drag a card between Held and Queue, or onto a queued card to put it first. On a card, the arrow keys do the same.'));
     }
     // Each card's box and its place: its column and its index among that column's cards. A card glides only when its
-    // place changed; one pushed down by the bar, the push test, the check tiles or the counts growing above it does not.
+    // place changed; one pushed down by the row that filters or the counts growing above it does not.
     const placeOf = (c) => { const col = c.closest('.board-col'); return col ? `${col.dataset.col}:${Array.from(col.querySelectorAll('.bcard')).indexOf(c)}` : ''; };
     const before = new Map();
     if (motion) el.querySelectorAll('.bcard').forEach((c) => before.set(c.dataset.issue, { box: c.getBoundingClientRect(), place: placeOf(c) }));
-    const focused = document.activeElement && el.contains(document.activeElement) ? document.activeElement : null;
-    // The focus a pending action took (its control was off) comes back when the controls do.
-    const keep = (focused ? { issue: focused.closest('.bcard') && focused.closest('.bcard').dataset.issue, act: focused.dataset.act || null, card: focused.classList.contains('bcard'), filter: focused.dataset.filter || null } : null) || S.keep;
-    S.keep = null;
     el.querySelector('.board-view').replaceChildren(viewBar());
-    el.querySelector('.board-top').replaceChildren(bar());
-    el.querySelector('.board-pushes').replaceChildren(pushTest());
-    el.querySelector('.board-check').replaceChildren(...checkTiles());
     el.querySelector('.board-counts').replaceChildren(split());
     const raw = unshaped(), filled = el.querySelector('.board').dataset.filled === '1';
     COLS.forEach(([k]) => {
@@ -1005,7 +1049,7 @@
         // Landed today pages by landing: the cards of one batch are one entry, so a page never cuts a batch short.
         const rows = k === 'landed' ? landings(got || []) : got || [];
         const none = () => (filtering() && raw[k] && raw[k].length ? unmatched('li', UNMATCHED[k]) : k === 'queue' ? queueEmpty(raw.held) : h('li', 'board-empty', EMPTY[k]));
-        more = S.ctx.more(k, rows, (xs) => { list.replaceChildren(...(xs.length || got === null ? xs.map((x) => (Array.isArray(x) ? landing(x) : card(k, x))) : [none()])); lock(list); }, k === 'landed' ? LANDED : PAGE);
+        more = cx(PART).more(k, rows, (xs) => { list.replaceChildren(...(xs.length || got === null ? xs.map((x) => (Array.isArray(x) ? landing(x) : card(k, x))) : [none()])); lock(list); }, k === 'landed' ? LANDED : PAGE);
       }
       const old = col.querySelector('.show-more');
       if (old) old.remove();
@@ -1030,7 +1074,6 @@
       col.querySelector('.board-head .panel-count').textContent = n === of ? String(all !== null && all > of ? `${n} of ${all}` : n) : `${n} of ${of}`;
     });
     el.querySelector('.board').dataset.filled = '1';
-    if (S.busy) el.querySelectorAll('.board-top button, .board-top select, .board-pushes button').forEach((b) => { b.disabled = true; });
     lock(el);
     el.querySelectorAll('.bcard').forEach((c) => {
       const was = before.get(c.dataset.issue);
@@ -1045,13 +1088,6 @@
       c.style.transform = '';
       window.setTimeout(() => { c.style.transition = ''; }, MOTION_MS + 20);
     });
-    if (keep) {
-      const c = keep.issue ? el.querySelector(`.bcard[data-issue="${keep.issue}"]`) : null;
-      const again = keep.filter ? el.querySelector(`[data-filter="${keep.filter}"]`) : keep.card ? c : (keep.act ? (c || el).querySelector(`[data-act="${keep.act}"]`) : null);
-      if (again && !again.disabled) again.focus({ preventScroll: true });
-      else if (S.busy) S.keep = keep;
-    }
-    S.ctx.relength();
   }
 
   // A new snapshot is the loop as it stands: it replaces the answers sent, and the record the host answered with
@@ -1062,12 +1098,18 @@
   // arrives later still would bring the old record back, so the Board keeps what it shows and redraws it.
   // The part holds every project on the host: the one the address picks is drawn. Another project picked drops
   // what was answered for the last one.
-  function render(el, d, ctx) {
+  // Every panel of the tab is drawn from the same part: the first of them to get a snapshot takes it and draws them
+  // all; the others, given the same snapshot for the same project, draw only themselves.
+  const render = (id) => (el, d, ctx) => {
+    S.at.set(id, { el, ctx });
+    // The panel acted in last (S.from), for the line that says what the action did (say): heard before the control's own handler.
+    if (!S.heard.has(el)) { S.heard.add(el); ['click', 'input', 'change', 'keydown', 'drop'].forEach((t) => el.addEventListener(t, () => { S.from = id; }, true)); }
     const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
     const view = ctx.project(d);
-    S.el = el; S.ctx = ctx; S.read = read;
-    // The Board shows one project: with more than one on the host its heading names it, whatever Show says.
-    ctx.title(issues(view.repos).length > 1 && view.repo ? `Board: ${view.repo}` : null);
+    // The Board shows one project: with more than one on the host the Board panel's heading names it, whatever Show says.
+    if (id === PART) ctx.title(issues(view.repos).length > 1 && view.repo ? `Board: ${view.repo}` : null);
+    if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
+    S.raw = [d, read, view.repo]; S.ctx = ctx; S.read = read;
     if (S.d && view.repo !== S.d.repo) { S.ctl = null; S.ctlAt = null; S.moved.clear(); S.floor = null; S.turned = false; S.unlabeled.clear(); S.groups.clear(); S.released.clear(); S.armed = false; S.dep = null; S.depSaid.clear(); }
     d = view;
     // A dependency answered shows on the card until a snapshot begun at or after the answer (with no time, the next).
@@ -1076,27 +1118,28 @@
     if (S.ctl && (S.ctlAt === null || (read !== null && read >= S.ctlAt))) { if (S.ctlAt !== null) S.floor = S.ctlAt; S.ctl = null; S.ctlAt = null; S.moved.clear(); S.unlabeled.clear(); }
     S.d = d; S.turned = false;
     draw();
-  }
+  };
 
-  window.DASH_APP.panel({
-    id: 'board',
-    title: 'Board',
+  PANELS.forEach(([id, title]) => window.DASH_APP.panel({
+    id,
+    title,
     size: 'full',
     tab: 'control',  // it changes the loop
+    part: PART,
     rows: 'all',     // its own columns; a long Held group starts closed
     rowSelector: '.bcard',
     // The count of a paused loop is on the Rules tab, where the pause setting is.
     isEmpty: (d) => d.repo === null && !(Array.isArray(d.checkRuns) && d.checkRuns.length) && !(d.others && typeof d.others === 'object' && Object.keys(d.others).length),
     empty(el, ctx) { el.append(noLoop(ctx)); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the Board panel', message)); },
-    render,
+    render: render(id),
     // A part equal to the one drawn last, in a snapshot begun at another time (app.js draws no part twice), is weighed
     // like any other when an answer is still shown or a snapshot was turned away: cap 4 answered, a cap-3
     // snapshot begun before it, then a fresh one equal to that after cap was set back to 3 elsewhere shows 3, and the
     // next raise sends 4. The same snapshot read again changes nothing.
     same(el, d, ctx) {
       const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
-      if ((S.ctl || S.turned) && read !== S.read) render(el, d, ctx);
+      if ((S.ctl || S.turned) && read !== S.read) render(id)(el, d, ctx);
     },
     // Each second, whether or not a new snapshot came: a running check run's elapsed time and its running lanes'
     // times count on (a snapshot equal to the last one is not drawn again).
@@ -1106,5 +1149,5 @@
         if (n.textContent !== text) n.textContent = text;
       });
     },
-  });
+  }));
 }());

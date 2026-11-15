@@ -3,7 +3,7 @@
 // Rules tab follow, each change sent for that project. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { T0, iso, clone, P, boot, deliver, next, settle, CONTROL, full, tabBtn,
-  board, bcard, column, inCol, act, record, dragTo, rulesP, fig, cases, pickProject, heading } from './dashboard-view.helpers.mjs';
+  board, bcard, column, inCol, act, record, dragTo, rulesP, rulesAll, panel, fig, cases, pickProject, heading } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -53,7 +53,9 @@ function two() {
 }
 const pickRepo = pickProject;
 const choose = (w, root, a, value) => { const s = act(root, a); s.value = value; s.dispatchEvent(new w.Event('change')); };
-const rows = (w) => Array.from(rulesP(w).querySelectorAll('.rules-issue'), (r) => [Number(r.dataset.issue), r.dataset.state]);
+// The Rules tab's Open issues panel.
+const listP = (w) => panel(w, 'rules-issues');
+const rows = (w) => Array.from(listP(w).querySelectorAll('.rules-issue'), (r) => [Number(r.dataset.issue), r.dataset.state]);
 
 test('every project: the Board shows the picked project\'s cards and rules, and a hold from it is sent for that project alone', async () => {
   const w = boot({ tab: 'control' });
@@ -74,7 +76,7 @@ test('every project: the Board shows the picked project\'s cards and rules, and 
   assert.ok(act(column(w, 'needs').querySelector('.bcard[data-issue="41"]'), 'needs-open'), 'the blocked card links into Needs you');
   // The Rules tab shows the same project: its rules, and its changes go to it.
   w.document.getElementById('tab-rules').click();
-  assert.equal(act(rulesP(w), 'repo'), null, 'the Rules have no picker of their own');
+  assert.ok(rulesAll(w).every((p) => act(p, 'repo') === null), 'the Rules have no picker of their own');
   assert.equal(heading(rulesP(w)), 'Rules: widgetshop');
   assert.equal(rulesP(w).querySelector('.rules-row[data-rule="order"]').textContent.includes('#46 Widget next'), true, 'its pinned order');
   act(rulesP(w), 'rule-P1').click();
@@ -94,7 +96,7 @@ test('every project: a host file with one record shows no picker and steers that
   assert.equal(act(board(w), 'repo'), null, 'no picker');
   const r = boot({ tab: 'rules' });
   deliver(r, full());
-  assert.equal(act(rulesP(r), 'repo'), null, 'no picker on Rules either');
+  assert.ok(rulesAll(r).every((p) => act(p, 'repo') === null), 'no picker on Rules either');
   assert.deepEqual([heading(board(w)), heading(rulesP(r))], ['Board', 'Rules'], 'one project: the heading names none');
   act(bcard(w, 21), 'hold').click();
   await settle();
@@ -105,55 +107,55 @@ test('every project: the Rules list shows every open issue with its state; block
   const w = boot({ query: '?tab=rules&repo=widgetshop' });
   deliver(w, two());
   assert.deepEqual(rows(w).sort((a, b) => a[0] - b[0]), [[5, 'building'], [41, 'blocked'], [42, 'blocked'], [43, 'blocked'], [44, 'you'], [45, 'label'], [46, 'next'], [47, 'waits'], [48, 'rule'], [49, 'next']]);
-  const row = (n) => rulesP(w).querySelector(`.rules-issue[data-issue="${n}"]`);
+  const row = (n) => listP(w).querySelector(`.rules-issue[data-issue="${n}"]`);
   assert.match(row(47).textContent, /Waiting on #46/);
   assert.match(row(41).textContent, /Blocked middle.*P1.*cart.*40 d 0 h old.*Blocked/s, 'number, title, priority, area, age and state');
   assert.match(row(45).textContent, /backlog.*Held by a label/s, 'its labels');
-  choose(w, rulesP(w), 'istate', 'blocked');
-  choose(w, rulesP(w), 'isort', 'age');
+  choose(w, listP(w),'istate', 'blocked');
+  choose(w, listP(w),'isort', 'age');
   assert.deepEqual(rows(w).map((r) => r[0]), [42, 41, 43], 'oldest first');
   const u = new URL(w.location.href).searchParams;
   assert.deepEqual([u.get('repo'), u.get('istate'), u.get('isort')], ['widgetshop', 'blocked', 'age'], 'kept in the address with the project');
-  choose(w, rulesP(w), 'idir', 'asc');
+  choose(w, listP(w),'idir', 'asc');
   assert.deepEqual(rows(w).map((r) => r[0]), [43, 41, 42]);
   // Filters by priority, area and label, and the search by number or title.
-  choose(w, rulesP(w), 'istate', '');
-  choose(w, rulesP(w), 'iarea', 'shop:pay');
+  choose(w, listP(w),'istate', '');
+  choose(w, listP(w),'iarea', 'shop:pay');
   assert.deepEqual(rows(w).map((r) => r[0]).sort((a, b) => a - b), [43, 46]);
-  choose(w, rulesP(w), 'iarea', '');
-  choose(w, rulesP(w), 'ilabel', 'backlog');
+  choose(w, listP(w),'iarea', '');
+  choose(w, listP(w),'ilabel', 'backlog');
   assert.deepEqual(rows(w).map((r) => r[0]), [45]);
-  choose(w, rulesP(w), 'ilabel', '');
-  choose(w, rulesP(w), 'iprio', 'P0');
+  choose(w, listP(w),'ilabel', '');
+  choose(w, listP(w),'iprio', 'P0');
   assert.deepEqual(rows(w).map((r) => r[0]), [43]);
-  choose(w, rulesP(w), 'iprio', '');
-  const s = act(rulesP(w), 'iq'); s.value = 'widget'; s.dispatchEvent(new w.Event('input'));
+  choose(w, listP(w),'iprio', '');
+  const s = act(listP(w), 'iq'); s.value = 'widget'; s.dispatchEvent(new w.Event('input'));
   assert.deepEqual(rows(w).map((r) => r[0]).sort((a, b) => a - b), [44, 46, 49]);
 });
 
 test('every project: three filtered rows held at once, for that project only; select all takes only the rows shown', async () => {
   const w = boot({ query: '?tab=rules&repo=widgetshop' });
   deliver(w, two());
-  const pick = (n) => { const b = rulesP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new w.Event('change')); };
+  const pick = (n) => { const b = listP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new w.Event('change')); };
   // Select all takes only the filtered rows: the three blocked ones.
-  choose(w, rulesP(w), 'istate', 'blocked');
-  const all = act(rulesP(w), 'pick-all'); all.checked = true; all.dispatchEvent(new w.Event('change'));
-  assert.equal(act(rulesP(w), 'bulk-hold').textContent, 'Hold 3', 'the action names its count before it runs');
-  assert.equal(act(rulesP(w), 'bulk-retry').textContent, 'Retry 3');
-  act(rulesP(w), 'bulk-hold').click();
+  choose(w, listP(w),'istate', 'blocked');
+  const all = act(listP(w), 'pick-all'); all.checked = true; all.dispatchEvent(new w.Event('change'));
+  assert.equal(act(listP(w), 'bulk-hold').textContent, 'Hold 3', 'the action names its count before it runs');
+  assert.equal(act(listP(w), 'bulk-retry').textContent, 'Retry 3');
+  act(listP(w), 'bulk-hold').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'hold', args: ['41', '42', '43'], repo: 'widgetshop' } }], 'exactly those three, for this project');
-  assert.equal(act(rulesP(w), 'bulk-hold').textContent, 'Hold 0', 'the selection is cleared once done');
+  assert.equal(act(listP(w), 'bulk-hold').textContent, 'Hold 0', 'the selection is cleared once done');
   // Picked one at a time, across filters; Queue takes the ones held by you, Retry the blocked ones, one a request, on
   // a second click (a retry costs a build).
-  choose(w, rulesP(w), 'istate', '');
+  choose(w, listP(w),'istate', '');
   [44, 41, 42].forEach(pick);
-  assert.equal(act(rulesP(w), 'bulk-release').textContent, 'Queue 1');
-  act(rulesP(w), 'bulk-retry').click();
+  assert.equal(act(listP(w), 'bulk-release').textContent, 'Queue 1');
+  act(listP(w), 'bulk-retry').click();
   await settle();
   assert.deepEqual(w.posts, [], 'the first click of Retry only asks');
-  assert.equal(act(rulesP(w), 'bulk-retry').textContent, 'Click again to retry 2');
-  act(rulesP(w), 'bulk-retry').click();
+  assert.equal(act(listP(w), 'bulk-retry').textContent, 'Click again to retry 2');
+  act(listP(w), 'bulk-retry').click();
   await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'retry', args: ['41'], repo: 'widgetshop' }, { action: 'retry', args: ['42'], repo: 'widgetshop' }]);
 });
@@ -162,16 +164,16 @@ test('every project: Retry armed for one selection does not retry another: chang
   // The bug: the armed key was the same for any selection, so a Retry armed for #41 retried #42 at once.
   const w = boot({ query: '?tab=rules&repo=widgetshop' });
   deliver(w, two());
-  const pick = (n, on) => { const b = rulesP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = on; b.dispatchEvent(new w.Event('change')); };
+  const pick = (n, on) => { const b = listP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = on; b.dispatchEvent(new w.Event('change')); };
   pick(41, true);
-  act(rulesP(w), 'bulk-retry').click();
-  assert.equal(act(rulesP(w), 'bulk-retry').textContent, 'Click again to retry 1');
+  act(listP(w), 'bulk-retry').click();
+  assert.equal(act(listP(w), 'bulk-retry').textContent, 'Click again to retry 1');
   pick(41, false); pick(42, true);
-  assert.equal(act(rulesP(w), 'bulk-retry').textContent, 'Retry 1', 'a new selection is not shown as armed');
-  act(rulesP(w), 'bulk-retry').click();
+  assert.equal(act(listP(w), 'bulk-retry').textContent, 'Retry 1', 'a new selection is not shown as armed');
+  act(listP(w), 'bulk-retry').click();
   await settle();
   assert.deepEqual(w.posts, [], 'the first click for #42 only asks');
-  act(rulesP(w), 'bulk-retry').click();
+  act(listP(w), 'bulk-retry').click();
   await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'retry', args: ['42'], repo: 'widgetshop' }]);
 });
@@ -181,8 +183,8 @@ test('every project: a held issue that is also blocked can be released from the 
   const d = two();
   d.panels.rules.data.others.widgetshop.control.held = [44, 41];
   deliver(w, d);
-  const b = rulesP(w).querySelector('.rules-issue[data-issue="41"] [data-act="pick"]'); b.checked = true; b.dispatchEvent(new w.Event('change'));
-  assert.deepEqual(['bulk-release', 'bulk-hold', 'bulk-retry'].map((a) => act(rulesP(w), a).textContent), ['Queue 1', 'Hold 0', 'Retry 1']);
+  const b = listP(w).querySelector('.rules-issue[data-issue="41"] [data-act="pick"]'); b.checked = true; b.dispatchEvent(new w.Event('change'));
+  assert.deepEqual(['bulk-release', 'bulk-hold', 'bulk-retry'].map((a) => act(listP(w), a).textContent), ['Queue 1', 'Hold 0', 'Retry 1']);
 });
 
 // The host's answer, held back until `open` is called: another project can be picked while it is out.
@@ -205,10 +207,10 @@ test('every project: a change in several requests names the project it began in,
   // Rules: two retries, one a request.
   const r = boot({ query: '?tab=rules&repo=widgetshop' });
   deliver(r, two());
-  [41, 42].forEach((n) => { const b = rulesP(r).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new r.Event('change')); });
+  [41, 42].forEach((n) => { const b = listP(r).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new r.Event('change')); });
   const go = gated(r);
-  act(rulesP(r), 'bulk-retry').click();
-  act(rulesP(r), 'bulk-retry').click();
+  act(listP(r), 'bulk-retry').click();
+  act(listP(r), 'bulk-retry').click();
   pickRepo(r, 'sample');
   await settle(); go();
   await settle(); await settle(); await settle();
@@ -218,10 +220,10 @@ test('every project: a change in several requests names the project it began in,
 test('every project: Order first pins the picked issues in that project\'s order; Move up and down reorder the pins; Unpin removes one', async () => {
   const w = boot({ query: '?tab=rules&repo=widgetshop' });
   deliver(w, two());
-  const pick = (n) => { const b = rulesP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new w.Event('change')); };
+  const pick = (n) => { const b = listP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new w.Event('change')); };
   pick(49);
-  assert.equal(act(rulesP(w), 'bulk-order').textContent, 'Order first 1');
-  act(rulesP(w), 'bulk-order').click();
+  assert.equal(act(listP(w), 'bulk-order').textContent, 'Order first 1');
+  act(listP(w), 'bulk-order').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'order', args: ['49', '46'], repo: 'widgetshop' } }], 'first, ahead of the pin already there');
   w.reply = record({ held: [44], order: [49, 46], rules: { ...CONTROL.rules, never: [] }, guard: null });
@@ -315,10 +317,10 @@ test('every project: a stopped card waiting for the owner\'s yes is not blocked 
   // #42's card stopped for the owner's yes: Needs you lists it as waiting, not blocked.
   d.panels.rules.data.others.widgetshop.blocked = d.panels.rules.data.others.widgetshop.blocked.filter((x) => x.issue !== 42);
   deliver(w, d);
-  assert.equal(rulesP(w).querySelector('.rules-issue[data-issue="42"]').dataset.state, 'approve');
-  const b = rulesP(w).querySelector('.rules-issue[data-issue="42"] [data-act="pick"]'); b.checked = true; b.dispatchEvent(new w.Event('change'));
-  assert.equal(act(rulesP(w), 'bulk-retry').textContent, 'Retry 0');
-  assert.equal(act(rulesP(w), 'bulk-retry').disabled, true);
+  assert.equal(listP(w).querySelector('.rules-issue[data-issue="42"]').dataset.state, 'approve');
+  const b = listP(w).querySelector('.rules-issue[data-issue="42"] [data-act="pick"]'); b.checked = true; b.dispatchEvent(new w.Event('change'));
+  assert.equal(act(listP(w), 'bulk-retry').textContent, 'Retry 0');
+  assert.equal(act(listP(w), 'bulk-retry').disabled, true);
 });
 
 test('every project: Order first is not offered when the order would be longer than the host takes in one request', () => {
@@ -326,9 +328,9 @@ test('every project: Order first is not offered when the order would be longer t
   const d = two();
   d.panels.rules.data.others.widgetshop.control.order = Array.from({ length: 500 }, (_, i) => 1000 + i);
   deliver(w, d);
-  const b = rulesP(w).querySelector('.rules-issue[data-issue="49"] [data-act="pick"]'); b.checked = true; b.dispatchEvent(new w.Event('change'));
-  assert.equal(act(rulesP(w), 'bulk-order').disabled, true, '501 issues in one order: the host refuses it');
-  act(rulesP(w), 'bulk-order').click();
+  const b = listP(w).querySelector('.rules-issue[data-issue="49"] [data-act="pick"]'); b.checked = true; b.dispatchEvent(new w.Event('change'));
+  assert.equal(act(listP(w), 'bulk-order').disabled, true, '501 issues in one order: the host refuses it');
+  act(listP(w), 'bulk-order').click();
   assert.deepEqual(w.posts, [], 'nothing is sent');
 });
 

@@ -5,7 +5,7 @@
 // under "Held (N) · Show" (UX32); Landed today cut to its newest five (UX33).
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, deliver, next, settle, panel, P, CONTROL, full, board, bcard, column, inCol, act, note, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, deliver, next, settle, panel, P, CONTROL, full, board, loopP, bcard, column, inCol, act, note, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const head = (w) => w.document.getElementById('machine-head');
@@ -20,17 +20,17 @@ test('UX10: the machine, a project and the Board name what each pause stops; Sto
   deliver(w, full());
   assert.equal(act(head(w), 'machine-pause').textContent, 'Pause all projects');
   assert.equal(act(project(w), 'pause').textContent, 'Pause sample');
-  assert.equal(act(board(w), 'pause').textContent, 'Pause sample after current');
+  assert.equal(act(loopP(w), 'pause').textContent, 'Pause sample after current');
   // Building #5 and Review #63 are in progress.
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 2 cards');
-  assert.equal(board(w).querySelector('.board-paused'), null, 'a running loop says nothing of a pause');
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 2 cards');
+  assert.equal(loopP(w).querySelector('.board-paused'), null, 'a running loop says nothing of a pause');
   assert.equal(project(w).querySelector('.project-paused'), null);
   assert.equal(head(w).querySelector('.machine-paused'), null);
   // One more building is in progress.
   const d = full(T0 + 60000), b = d.panels.board.data;
   b.building.push({ ...b.building[0], card: 'c9-10', issue: 10, step: 'tests' });
   next(w, d);
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 3 cards');
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 3 cards');
   // Bug: the count took in cards the engine's stop leaves running (halt() in conveyor/lib/run.sh): landed and still
   // pushing, filing its follow-ups, landing, or filed them, so the label promised to requeue cards it never would.
   // The server marks each such card stays (dashboard.test.sh proves it from the snapshot's fields).
@@ -38,10 +38,10 @@ test('UX10: the machine, a project and the Board name what each pause stops; Sto
     { ...b.building[0], card: 'c9-12', issue: 12, step: 'landing', stays: true });
   b.review.push({ ...b.review[0], card: 'c9-13', issue: 13, stays: true });
   next(w, d);
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 3 cards', 'cards Stop now leaves running are not requeued');
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 3 cards', 'cards Stop now leaves running are not requeued');
   b.building = []; b.review = [];
   next(w, d);
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 0 cards');
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 0 cards');
 });
 
 test('UX10: paused, paused by the guard or stopped, each says in one line who did it and how to resume', () => {
@@ -54,18 +54,18 @@ test('UX10: paused, paused by the guard or stopped, each says in one line who di
   const w = boot({ tab: 'control' });
   deliver(w, at('paused', 'pause'));
   const line = 'Paused by you (Pause sample). Resume sample to pick again.';
-  assert.equal(board(w).querySelector('.board-paused').textContent, line);
+  assert.equal(loopP(w).querySelector('.board-paused').textContent, line);
   assert.equal(project(w).querySelector('.project-paused').textContent, line);
-  assert.equal(act(board(w), 'resume').textContent, 'Resume sample', 'the button the line names');
+  assert.equal(act(loopP(w), 'resume').textContent, 'Resume sample', 'the button the line names');
   assert.equal(act(project(w), 'resume').textContent, 'Resume sample');
   const g = boot({ tab: 'control' });
   deliver(g, at('paused by guard', 'run'));
   const guard = 'Paused by the weekly-limit guard at 90%. Raise or turn off "Pause when the weekly limit reaches" in Rules to pick again.';
-  assert.equal(board(g).querySelector('.board-paused').textContent, guard);
+  assert.equal(loopP(g).querySelector('.board-paused').textContent, guard);
   assert.equal(project(g).querySelector('.project-paused').textContent, guard);
   const s = boot({ tab: 'control' });
   deliver(s, at('stopped', 'stop'));
-  assert.match(board(s).querySelector('.board-paused').textContent, /^Stopped by Stop now: the cards in progress went back to the queue\. Resume sample to pick again\.$/);
+  assert.match(loopP(s).querySelector('.board-paused').textContent, /^Stopped by Stop now: the cards in progress went back to the queue\. Resume sample to pick again\.$/);
   // The machine paused for every project.
   const m = boot({ tab: 'control' }), d = full();
   d.panels.machine.data.state = 'paused';
@@ -112,10 +112,10 @@ test('UX19: the Rules waiting list shows each dependency\'s title and each numbe
   r.open = { ...(r.open || {}), issues: [{ issue: 24, title: 'Second half', dependsOn: [20] }, { issue: 20, title: 'Next up', dependsOn: [] }, { issue: 21, title: 'Later', dependsOn: [] }] };
   const w = boot({ tab: 'rules' });
   deliver(w, d);
-  const rules = panel(w, 'rules');
-  act(rules, 'waits-open').click();
+  const produce = panel(w, 'rules-produce');
+  act(produce, 'waits-open').click();
   await settle();
-  const row = () => rules.querySelector('.rules-wait[data-issue="24"]');
+  const row = () => produce.querySelector('.rules-wait[data-issue="24"]');
   assert.deepEqual(Array.from(row().querySelectorAll('.board-dep'), (x) => x.textContent), ['× #20Next up']);
   act(row(), 'depends').click();
   await settle();
@@ -125,7 +125,7 @@ test('UX19: the Rules waiting list shows each dependency\'s title and each numbe
   w.reply = said(false, 'conveyor: #24 depending on #21 would make a dependency cycle (#21, #24): none of them would ever be picked; nothing changed');
   act(row(), 'dep-add').click();
   await settle(); await settle();
-  assert.equal(rules.querySelector('.rules-note').textContent, 'Not done: #24 cannot wait on #21: #21 already waits on #24.');
+  assert.equal(produce.querySelector('.rules-note').textContent, 'Not done: #24 cannot wait on #21: #21 already waits on #24.');
 });
 
 // Bug: a filter left on emptied a column, which then read "The queue is empty." as if the queue were empty.

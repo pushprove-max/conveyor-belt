@@ -4,7 +4,7 @@
 // with why it failed, and a push failing while it is tried again is said under Needs you's tick. Each case names the
 // bug it catches. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, panel, deliver, next, settle, full, trackOf, counts, board, bcard, act, note, record, rulesP, clone, cases, pickProject } from './dashboard-view.helpers.mjs';
+import { boot, panel, deliver, next, settle, full, trackOf, counts, board, loopP, bcard, act, note, record, rulesP, clone, cases, pickProject } from './dashboard-view.helpers.mjs';
 const test = cases(import.meta.url);
 
 const blockedRow = (w, card = 'c2-13') => panel(w, 'needs').querySelector(`li[data-key="blocked:${card}"]`);
@@ -117,7 +117,8 @@ test('the Board: Hold, Queue, Move and Pause act on one click, and the line that
   const w = boot({ tab: 'control' });
   const d = full();
   deliver(w, d);
-  const undo = async (body) => { act(board(w), 'undo').click(); await settle(); assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { ...body, repo: 'sample' } }]); };
+  // at: the panel the action was done in, whose line has its Undo.
+  const undo = async (body, at = board(w)) => { act(at, 'undo').click(); await settle(); assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { ...body, repo: 'sample' } }]); };
   act(bcard(w, 21), 'hold').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'hold', args: ['21'], repo: 'sample' } }]);
@@ -140,12 +141,12 @@ test('the Board: Hold, Queue, Move and Pause act on one click, and the line that
   await settle();
   assert.equal(w.posts.splice(0)[0].body.action, 'order');
   await undo({ action: 'order', args: was });
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   w.posts.splice(0);
-  await undo({ action: 'resume', args: [] });
-  assert.equal(act(board(w), 'stop').dataset.guard, undefined, 'Stop now has its own second click');
-  assert.ok(act(board(w), 'stop').classList.contains('btn-final'), 'and looks like a button that cannot be undone');
+  await undo({ action: 'resume', args: [] }, loopP(w));
+  assert.equal(act(loopP(w), 'stop').dataset.guard, undefined, 'Stop now has its own second click');
+  assert.ok(act(loopP(w), 'stop').classList.contains('btn-final'), 'and looks like a button that cannot be undone');
 });
 
 // Bug: Undo was sent to the project on screen when it was pressed: a card held in one project, another project
@@ -219,7 +220,7 @@ test('every tab: one word, Queue, for an issue joining the queue, and File as is
   for (const tab of ['overview', 'control', 'rules']) {
     const w = boot({ tab });
     deliver(w, d);
-    if (tab === 'rules') { const open = act(rulesP(w), 'waits-open'); if (open && !open.disabled) open.click(); await settle(); }
+    if (tab === 'rules') { const open = act(panel(w, 'rules-produce'), 'waits-open'); if (open && !open.disabled) open.click(); await settle(); }
     const words = Array.from(w.document.querySelectorAll('#grid button'), (b) => b.textContent);
     for (const old of ['Release', 'Build this', 'Queue again', 'Build anyway']) assert.ok(!words.some((x) => x === old || x.startsWith(`${old} `)), `${tab}: no "${old}" button: ${words.join(' | ')}`);
     if (tab === 'overview') assert.ok(words.includes('Queue') && words.includes('File as issue'), `${tab}: ${words.join(' | ')}`);

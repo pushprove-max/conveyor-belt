@@ -3,7 +3,7 @@
 // board-held file holds the rest of what was dashboard-view.board.test.mjs, split so the runner runs the two side by
 // side. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, clone, boot, state, deliver, next, tick, later, settle, key, P, CONTROL, full, tabBtn, panel, board, bcard, column, inCol, act, note, record, dragTo, ruled, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, state, deliver, next, tick, later, settle, key, P, CONTROL, full, tabBtn, panel, board, loopP, pushP, bcard, column, inCol, act, note, record, dragTo, ruled, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -46,7 +46,7 @@ test('the Board: each column with its cards, each one empty, and the queue when 
   assert.deepEqual(Array.from(board(w).querySelectorAll('.board-empty'), (x) => x.textContent),
     ['Drag a card here to hold it.', 'Nothing queued, and nothing holds an issue: each open issue is on the belt, or Conveyor built it.', 'Conveyor builds no card now.', 'Nothing is in review.', 'Nothing needs you.', 'No card landed today.']);
   assert.deepEqual(Array.from(board(w).querySelectorAll('.board-head .panel-count'), (x) => x.textContent), ['0', '0', '0', '0', '0', '0']);
-  assert.ok(board(w).textContent.includes('0 landed') && act(board(w), 'pause'), 'the bar stays');
+  assert.ok(loopP(w).textContent.includes('0 landed') && act(loopP(w), 'pause'), 'the bar stays');
   const unlisted = clone(data);
   Object.assign(unlisted.panels.board.data, { held: null, queue: null, skipped: null, issuesError: 'GitHub did not list the open issues on buildhost.' });
   next(w, unlisted);
@@ -69,14 +69,14 @@ test('the Board: a check run shows its counts, failed and running lanes, every l
     counts: { passed: 3, failed: 1, running: 2, queued: 4, reused: 0 }, done: 4, all: 10, leftSec: 225 };
   Object.assign(data.panels.board.data, { state: 'paused', control: { ...clone(CONTROL), mode: 'pause' }, checkRuns: [run] });
   deliver(w, data);
-  const tile = () => board(w).querySelector('[data-figure="checkrun"]');
+  const tile = () => pushP(w).querySelector('[data-figure="checkrun"]');
   const t = tile().textContent;
   for (const s of ['nightly', '0123456', '10 min', '4/10 lanes', '~3 min left', '3 passed', '1 failed', '2 running', '4 queued', 'Failed: broken-0', 'Running: busy-0 (1 min), busy-1 (30 s)']) {
     assert.ok(t.includes(s), `the tile says ${s}: ${t}`);
   }
   assert.ok(!t.includes('0123456789ab'), 'the commit is short');
   assert.equal(tile().querySelector('.meter-fill').style.transform, 'scaleX(0.4)', 'the bar is the lanes done of all');
-  assert.match(board(w).querySelector('.board-state').textContent, /Paused for nightly/);
+  assert.match(loopP(w).querySelector('.board-state').textContent, /Paused for nightly/);
   // The same snapshot a minute on: the run's time and its running lanes' times count on.
   tick(w, 60000);
   next(w, clone(data));
@@ -93,12 +93,12 @@ test('the Board: a check run shows its counts, failed and running lanes, every l
   next(w, bad);
   assert.ok(tile().textContent.includes('check run: progress unreadable: jq: parse error'), 'an unreadable run is said');
   assert.deepEqual(inCol(w, 'review'), [63], 'the rest of the Board still draws');
-  assert.match(board(w).querySelector('.board-state .chip').textContent, /Paused$/,'paused, and not for a run it cannot read');
+  assert.match(loopP(w).querySelector('.board-state .chip').textContent, /Paused$/,'paused, and not for a run it cannot read');
   // A record the Board does not steer: its run is drawn, named by its repo, and the loop is not paused for it.
   const other = clone(data); other.panels.board.data.checkRuns = [{ ...run, repo: 'widgetshop' }];
   next(w, other);
   assert.ok(tile().textContent.includes('Check run, widgetshop'), `the run of another record names it: ${tile().textContent}`);
-  assert.match(board(w).querySelector('.board-state .chip').textContent, /Paused$/,'paused, and not for another record\'s run');
+  assert.match(loopP(w).querySelector('.board-state .chip').textContent, /Paused$/,'paused, and not for another record\'s run');
   // No record steered: the Board says so, and another record's run is still drawn, its lanes still five at a time.
   const unsteered = clone(data); unsteered.panels.board = { error: null, data: { repo: null, checkRuns: [{ ...run, repo: 'widgetshop' }] } };
   next(w, unsteered);
@@ -234,21 +234,21 @@ test('the Board: a card released with no place in the order goes where pick puts
 test('the Board: Stop now asks for a second click, and forgets the first after a while', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());
-  act(board(w), 'stop').focus();
-  act(board(w), 'stop').click();
+  act(loopP(w), 'stop').focus();
+  act(loopP(w), 'stop').click();
   await settle();
   assert.deepEqual(w.posts, [], 'one click stops nothing');
-  assert.equal(act(board(w), 'stop').textContent, 'Click again: stop and requeue 2 cards', 'its second click names what it ends');
-  assert.equal(act(board(w), 'stop').getAttribute('aria-pressed'), 'true');
-  assert.equal(w.document.activeElement, act(board(w), 'stop'), 'the focus stays on it');
-  act(board(w), 'stop').click();
+  assert.equal(act(loopP(w), 'stop').textContent, 'Click again: stop and requeue 2 cards', 'its second click names what it ends');
+  assert.equal(act(loopP(w), 'stop').getAttribute('aria-pressed'), 'true');
+  assert.equal(w.document.activeElement, act(loopP(w), 'stop'), 'the focus stays on it');
+  act(loopP(w), 'stop').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'stop', args: [], repo: 'sample' } }]);
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 2 cards');
-  act(board(w), 'stop').click();
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 2 cards');
+  act(loopP(w), 'stop').click();
   later(w);
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 2 cards', 'the first click is forgotten');
-  act(board(w), 'stop').click();
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 2 cards', 'the first click is forgotten');
+  act(loopP(w), 'stop').click();
   await settle();
   assert.deepEqual(w.posts, [], 'so the next click is a first one again');
 });
@@ -282,20 +282,22 @@ test('the Board: the bar pauses and starts the loop and shows the weekly limit a
   const sends = async (fn, body) => { fn(); await settle(); assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { ...body, repo: 'sample' } }]); };
   const SETTINGS = ['cards at once-up', 'cards at once-down', 'cap-off', 'guard-up', 'guard-down', 'guard-off', 'guard-on', 'builder-model', 'builder-effort',
     'reviewer-model', 'reviewer-effort', 'judge-on', 'judge-off', 'judge-model', 'judge-effort', 'judge-kind'];
-  const bar = () => board(w).querySelector('.board-bar');
-  for (const a of SETTINGS) assert.equal(act(board(w), a), null, `the Control tab draws no ${a}`);
+  const bar = () => loopP(w).querySelector('.board-bar');
+  // A control anywhere on the Board part's three panels.
+  const onTab = (a) => [loopP(w), pushP(w), board(w)].map((p) => act(p, a)).find(Boolean) || null;
+  for (const a of SETTINGS) assert.equal(onTab(a), null, `the Control tab draws no ${a}`);
   assert.equal(bar().querySelector('.board-stepper, .board-models, .board-model, [data-role]'), null, 'no stepper, and no Build, Review or Judge row');
   assert.doesNotMatch(bar().textContent, /At once|Pause at|pause at/, 'neither cards at once nor pause at is named');
   assert.ok(bar().querySelector('.board-state').textContent.includes('Running'), 'the loop state');
-  assert.ok(act(board(w), 'pause') && act(board(w), 'stop'), 'Pause after current and Stop now');
-  assert.equal(act(board(w), 'pause').textContent, 'Pause sample after current');
-  assert.equal(act(board(w), 'stop').textContent, 'Stop now and requeue 2 cards');
-  const meter = board(w).querySelector('.board-meter');
+  assert.ok(act(loopP(w), 'pause') && act(loopP(w), 'stop'), 'Pause after current and Stop now');
+  assert.equal(act(loopP(w), 'pause').textContent, 'Pause sample after current');
+  assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 2 cards');
+  const meter = loopP(w).querySelector('.board-meter');
   assert.equal(meter.querySelector('.board-guard').style.left, '90%', 'the guard is marked on the meter');
   assert.equal(meter.querySelector('.meter-fill').style.transform, 'scaleX(0.44)');
   assert.match(meter.getAttribute('aria-label'), /44 percent of the weekly limit used, Conveyor pauses when the weekly limit reaches 90 percent/);
-  assert.equal(board(w).querySelector('[data-figure="limit"] .board-value').textContent, '44%', 'the weekly limit with its percentage');
-  assert.match(board(w).querySelector('[data-figure="today"]').textContent, /^Today2 landed\$3\.00$/, 'today\'s landed count and cost');
+  assert.equal(loopP(w).querySelector('[data-figure="limit"] .board-value').textContent, '44%', 'the weekly limit with its percentage');
+  assert.match(loopP(w).querySelector('[data-figure="today"]').textContent, /^Today2 landed\$3\.00$/, 'today\'s landed count and cost');
   // The Rules tab still draws every one of them.
   tabBtn(w, 'rules').click();
   for (const a of ['cards at once-up', 'cards at once-down', 'guard-off', 'guard-90', 'guard-95', 'guard-98', 'builder-model', 'builder-effort', 'reviewer-model', 'reviewer-effort',
@@ -303,19 +305,19 @@ test('the Board: the bar pauses and starts the loop and shows the weekly limit a
   for (const k of ['build', 'cap', 'guard', 'builder', 'reviewer', 'judge']) assert.ok(ruled(w).querySelector(`[data-rule="${k}"]`), `the Rules tab has its ${k} row`);
   tabBtn(w, 'control').click();
   w.reply = record({ mode: 'pause' });
-  await sends(() => act(board(w), 'pause').click(), { action: 'pause', args: [] });
-  assert.ok(board(w).querySelector('.board-state').textContent.includes('Paused'), 'the host\'s answer shows at once');
+  await sends(() => act(loopP(w), 'pause').click(), { action: 'pause', args: [] });
+  assert.ok(loopP(w).querySelector('.board-state').textContent.includes('Paused'), 'the host\'s answer shows at once');
   w.reply = record({ mode: 'run' });
-  await sends(() => act(board(w), 'resume').click(), { action: 'resume', args: [] });
-  assert.ok(act(board(w), 'pause'));
+  await sends(() => act(loopP(w), 'resume').click(), { action: 'resume', args: [] });
+  assert.ok(act(loopP(w), 'pause'));
   w.reply = undefined;
   const guarded = full(T0 + 60000);
   Object.assign(guarded.panels.board.data, { state: 'paused by guard', limit: { pct: 92, from: 'loop' }, control: { ...CONTROL, guard: null, cap: 5 }, cap: 5 });
   next(w, guarded);
-  assert.ok(board(w).textContent.includes('Paused by guard') && board(w).textContent.includes('no guard'));
-  assert.equal(board(w).querySelector('.board-guard'), null);
-  assert.equal(board(w).querySelector('[data-figure="limit"] .board-value').textContent, '92%');
-  for (const a of SETTINGS) assert.equal(act(board(w), a), null, `with no guard set either, the Control tab draws no ${a}`);
+  assert.ok(loopP(w).textContent.includes('Paused by guard') && loopP(w).textContent.includes('no guard'));
+  assert.equal(loopP(w).querySelector('.board-guard'), null);
+  assert.equal(loopP(w).querySelector('[data-figure="limit"] .board-value').textContent, '92%');
+  for (const a of SETTINGS) assert.equal(onTab(a), null, `with no guard set either, the Control tab draws no ${a}`);
 });
 
 test('the Board: while a change is out its controls are off, and a second click sends nothing', async () => {
@@ -323,24 +325,26 @@ test('the Board: while a change is out its controls are off, and a second click 
   deliver(w, full());
   let answer;
   w.reply = { ok: true, status: 200, text: () => new Promise((r) => { answer = r; }) };
-  const pause = act(board(w), 'pause');
+  const pause = act(loopP(w), 'pause');
   pause.focus();
   pause.click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'pause', args: [], repo: 'sample' } }]);
-  for (const b of board(w).querySelectorAll('.board-top button, .board-top select, .board-cards button')) assert.equal(b.disabled, true, `${b.dataset.act} is off while the change is out`);
-  act(board(w), 'pause').click();
+  const off = [...loopP(w).querySelectorAll('.board-top button, .board-top select'), ...board(w).querySelectorAll('.board-cards button')];
+  assert.ok(off.length > 2, 'the bar\'s controls and the cards\' are there');
+  for (const b of off) assert.equal(b.disabled, true, `${b.dataset.act} is off while the change is out`);
+  act(loopP(w), 'pause').click();
   key(w, bcard(w, 20), 'ArrowLeft');
   await settle();
   assert.deepEqual(w.posts, [], 'nothing more is sent until the host answers');
   assert.match(note(w), /^Wait/);
   answer(JSON.stringify(CONTROL));
   await settle();
-  assert.equal(act(board(w), 'pause').disabled, false, 'the answer turns the controls back on');
-  assert.equal(w.document.activeElement, act(board(w), 'pause'), 'and gives the focus back');
+  assert.equal(act(loopP(w), 'pause').disabled, false, 'the answer turns the controls back on');
+  assert.equal(w.document.activeElement, act(loopP(w), 'pause'), 'and gives the focus back');
   w.reply = record({ mode: 'pause' });
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'pause', args: [], repo: 'sample' } }]);
-  assert.ok(act(board(w), 'resume'), 'the host\'s answer is what the bar offers next');
+  assert.ok(act(loopP(w), 'resume'), 'the host\'s answer is what the bar offers next');
 });

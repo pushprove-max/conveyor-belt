@@ -2,19 +2,19 @@
 // The dashboard page's Board, on the Control tab: the host's answer against the snapshots, and every open issue in its
 // column, Held with its reasons and filters, and a long column. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, clone, boot, deliver, next, later, settle, P, CONTROL, full, board, bcard, column, inCol, act, note, record, dragTo, OPEN, withOpen, moreText, rulesP, groupEl, rowsOf, heldMany, cases } from './dashboard-view.helpers.mjs';
+import { T0, clone, boot, deliver, next, later, settle, P, CONTROL, full, board, loopP, pushP, bcard, column, inCol, act, note, record, dragTo, OPEN, withOpen, moreText, rulesP, groupEl, rowsOf, heldMany, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
 // The loop's state as the bar shows it: running, or what the host's answer set.
-const loopShown = (w) => board(w).querySelector('.board-state').dataset.state;
+const loopShown = (w) => loopP(w).querySelector('.board-state').dataset.state;
 const pausedAt = (t) => { const d = full(t); Object.assign(d.panels.board.data, { state: 'paused', control: { ...CONTROL, mode: 'pause' } }); return d; };
 
 test('the Board: a snapshot collected before the host answered does not take the answer back', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());
   w.reply = record({ mode: 'pause' });
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'pause', args: [], repo: 'sample' } }]);
   assert.equal(loopShown(w), 'paused');
@@ -23,9 +23,9 @@ test('the Board: a snapshot collected before the host answered does not take the
   w.clock += 180000;
   next(w, older);
   assert.equal(loopShown(w), 'paused', 'the snapshot from before the answer does not erase it');
-  assert.ok(act(board(w), 'resume'), 'so the bar offers Start, not a second Pause');
+  assert.ok(act(loopP(w), 'resume'), 'so the bar offers Start, not a second Pause');
   w.reply = record({ mode: 'run' }, w.clock);
-  act(board(w), 'resume').click();
+  act(loopP(w), 'resume').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'resume', args: [], repo: 'sample' } }]);
   // One begun a second before that answer, even showing another record, is still older than it.
@@ -45,7 +45,7 @@ test('the Board: a snapshot collected before the host answered does not take the
   assert.equal(loopShown(w), 'running');
   // An answer that came with no time is replaced by the next snapshot.
   w.reply = record({ mode: 'pause' }, null);
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   assert.equal(loopShown(w), 'paused');
   w.clock += 60000;
@@ -58,7 +58,7 @@ test('the Board: a fresh snapshot whose part equals one it turned away still set
   deliver(w, full());
   const at = (t) => { const d = full(t); d.panels.board.data.landed.pop(); return d; };
   w.reply = record({ mode: 'pause' });
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   w.posts.splice(0);
   // Pause answered; a running snapshot begun before the answer arrives, then one begun after it, its board part the
@@ -71,7 +71,7 @@ test('the Board: a fresh snapshot whose part equals one it turned away still set
   next(w, at(w.clock + 20000));
   assert.equal(loopShown(w), 'running', 'the fresh snapshot, equal to the older one, rules');
   w.reply = record({ mode: 'pause' }, w.clock);
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'pause', args: [], repo: 'sample' } }]);
   // With the answer settled, a snapshot begun before it is turned away; a fresh one equal to it is then taken.
@@ -117,7 +117,7 @@ test('the Board: a refresh where only the push test above the cards grows moves 
   const d = full();
   d.panels.board.data.unpushed = [{ card: 'c1-7', issue: 7, since: '2026-11-14T07:00:00Z' }, { card: 'c2-8', issue: 8, since: '2026-11-14T07:30:00Z' }];
   next(w, d);
-  assert.equal(board(w).querySelectorAll('.board-push-item').length, 2, 'the push test grew above the cards');
+  assert.equal(pushP(w).querySelectorAll('.board-push-item').length, 2, 'the push test grew above the cards');
   for (const c of board(w).querySelectorAll('.bcard')) assert.equal(c.style.transform + c.style.transition, '', `#${c.dataset.issue} kept its column and place: it does not glide`);
 });
 
@@ -311,7 +311,7 @@ test('the Board and Rules: a page shown while a change is out has its controls o
   const w = boot({ tab: 'control' });
   deliver(w, d);
   w.reply = { ok: true, status: 200, text: () => new Promise(() => {}) };
-  act(board(w), 'pause').click();
+  act(loopP(w), 'pause').click();
   await settle();
   for (const k of ['queue', 'held']) {
     act(column(w, k), 'list-more').click();

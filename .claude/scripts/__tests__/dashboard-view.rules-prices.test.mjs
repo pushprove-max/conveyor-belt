@@ -1,12 +1,14 @@
 // The Rules tab's Model prices: the built-in prices and the pack's overrides, each override saved or removed through
 // `conveyor.sh prices` (POST control). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, settle, full, act, rulesP, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, settle, full, act, panel, pricesP, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const type = (el, v) => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input')); };
-const prices = (w) => rulesP(w).querySelector('.rules-prices');
-const rowOf = (w, m) => Array.from(prices(w).querySelectorAll('.rules-price')).find((r) => r.dataset.model === m);
+const prices = pricesP;
+// The line of the Model prices panel: what a Save or Remove override there did.
+const said = (w) => panel(w, 'rules-prices').querySelector('.rules-note');
+const rowOf =(w, m) => Array.from(prices(w).querySelectorAll('.rules-price')).find((r) => r.dataset.model === m);
 const cells = (r) => Array.from(r.children, (td) => td.textContent).slice(0, 5);
 const PRICES = { builtIn: [{ model: 'claude-opus-5-5', input: 4, output: 20, cacheRead: 0.2 }, { model: 'claude-sonnet-5-5', input: 2, output: 10, cacheRead: 0.1 },
   { model: 'claude-opus-5-5:fast', input: 8, output: 40, cacheRead: 0.4 }, { model: 'claude-sonnet-5-5:fast', input: 4, output: 20, cacheRead: 0.2 }],
@@ -47,7 +49,7 @@ test('Rules: Save sends the model and its three prices; a refusal says why; Remo
   act(prices(w), 'price-save').click();
   await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'prices', args: ['set', 'claude-sonnet-5-5', '-1', '10', '0.1'], repo: 'sample' }]);
-  assert.match(rulesP(w).querySelector('.rules-note').textContent, /^Not done: .*the input price is dollars per million tokens/);
+  assert.match(said(w).textContent, /^Not done: .*the input price is dollars per million tokens/);
   assert.equal(act(prices(w), 'price-input').value, '-1', 'refused: the value typed stays');
   w.reply = null;
   type(act(prices(w), 'price-input'), '2.5');
@@ -59,7 +61,7 @@ test('Rules: Save sends the model and its three prices; a refusal says why; Remo
   await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'prices', args: ['clear', 'claude-new-9'], repo: 'sample' }]);
   // Its Undo puts the override back as it was.
-  act(rulesP(w).querySelector('.rules-note'), 'undo').click();
+  act(said(w), 'undo').click();
   await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'prices', args: ['set', 'claude-new-9', '3', '15', '0.3'], repo: 'sample' }]);
 });

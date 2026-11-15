@@ -4,7 +4,7 @@
 // Needs you. Shared setup: dashboard-view.helpers.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, board } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, board, pushP } from './dashboard-view.helpers.mjs';
 
 const A = 'a'.repeat(40);
 const RED = { time: '2026-11-14T08:00:00Z', id: '0123456789ab', kind: 'run', push: true, sha: A, state: 'failed', exit: 1, pushed: null, cases: [
@@ -21,8 +21,8 @@ function data({ push = true, unpushed = [{ card: 'c1-7', issue: 7, since: '2026-
   return d;
 }
 const row = (w, k) => ruled(w).querySelector(`[data-rule="${k}"]`);
-// The Board's Push landed and Full test suite, each with what it acts on.
-const part = (w, k) => board(w).querySelector(`[data-push="${k}"]`);
+// The Board's Push landed and Full test suite, each with what it acts on, in their own panel.
+const part = (w, k) => pushP(w).querySelector(`[data-push="${k}"]`);
 const sent = async (w, fn) => { fn(); await settle(); return w.posts.splice(0).map((p) => p.body); };
 
 // Bugs this guards: the rule could not be set from the Board, or an engine that does not know it was sent it.
@@ -56,20 +56,20 @@ test('Control: the landed cards not pushed are counted and named, and Push lande
   deliver(w, data({ push: false }));
   assert.match(part(w, 'landed').textContent, /2 landed, not pushed/);
   assert.deepEqual(Array.from(part(w, 'landed').querySelectorAll('.board-push-item'), (x) => x.textContent), ['#7', '#8']);
-  assert.equal(act(board(w), 'push-landed').disabled, false);
+  assert.equal(act(pushP(w), 'push-landed').disabled, false);
   assert.equal(part(w, 'landed').querySelector('.board-push-why'), null, 'a button that can work gives no reason');
   // A full run costs time (issue 407): each button acts on a second click, the first saying what it does.
-  assert.deepEqual(await sent(w, () => act(board(w), 'push-landed').click()), [], 'the first click only asks');
-  assert.equal(act(board(w), 'push-landed').textContent, 'Click again to run the full suite, then push');
-  assert.deepEqual(await sent(w, () => act(board(w), 'push-landed').click()), [{ action: 'full-test', args: ['push'], repo: 'sample' }]);
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'push-landed').click()), [], 'the first click only asks');
+  assert.equal(act(pushP(w), 'push-landed').textContent, 'Click again to run the full suite, then push');
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'push-landed').click()), [{ action: 'full-test', args: ['push'], repo: 'sample' }]);
   // Nothing landed to push: Push landed is off, and says why.
   next(w, data({ unpushed: [] }));
   assert.match(part(w, 'landed').textContent, /0 landed, not pushed/);
-  assert.equal(act(board(w), 'push-landed').disabled, true);
+  assert.equal(act(pushP(w), 'push-landed').disabled, true);
   assert.equal(part(w, 'landed').querySelector('.board-push-why').textContent, 'Cannot work now: nothing that landed waits for a push.');
   // Run full test suite runs it and pushes nothing.
-  assert.deepEqual(await sent(w, () => act(board(w), 'full-test').click()), [], 'the first click only asks');
-  assert.deepEqual(await sent(w, () => act(board(w), 'full-test').click()), [{ action: 'full-test', args: [], repo: 'sample' }]);
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'full-test').click()), [], 'the first click only asks');
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'full-test').click()), [{ action: 'full-test', args: [], repo: 'sample' }]);
   // The Rules tab has neither action, nor their rows.
   const r = boot({ tab: 'rules' });
   deliver(r, data());
@@ -83,18 +83,18 @@ test('Control: the landed cards not pushed are counted and named, and Push lande
 test('Control: no test.full, or a run under way, turns both buttons off with the reason', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, data({ fullTest: { command: false, why: 'the pack names no full test suite (test.full)', running: null, last: null } }));
-  assert.ok(act(board(w), 'push-landed').disabled && act(board(w), 'full-test').disabled, 'both are off');
+  assert.ok(act(pushP(w), 'push-landed').disabled && act(pushP(w), 'full-test').disabled, 'both are off');
   // In the Board's words, never the setting's file key (issue 415).
   for (const k of ['landed', 'full-test']) assert.equal(part(w, k).querySelector('.board-push-why').textContent, 'Cannot work now: this project has no full test suite set up for Conveyor.');
   next(w, data({ fullTest: { command: true, why: null, running: { since: '2026-11-14T08:00:00Z', sha: A, how: 'push' }, last: null } }));
-  assert.ok(act(board(w), 'push-landed').disabled && act(board(w), 'full-test').disabled, 'one run at a time');
+  assert.ok(act(pushP(w), 'push-landed').disabled && act(pushP(w), 'full-test').disabled, 'one run at a time');
   assert.match(part(w, 'full-test').textContent, new RegExp(`running on ${A.slice(0, 12)}, to push it if green`));
   assert.match(part(w, 'landed').textContent, /a full test run is under way/);
   // A press the host refuses (a run another page started) shows the host's words.
   next(w, data());
   w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: a full test run is already running (push, since 2026-11-14T08:00:00Z); this one is not started') };
-  act(board(w), 'full-test').click(); act(board(w), 'full-test').click(); await settle();
-  assert.match(board(w).querySelector('.board-note').textContent, /^Not done: conveyor: a full test run is already running/);
+  act(pushP(w), 'full-test').click(); act(pushP(w), 'full-test').click(); await settle();
+  assert.match(pushP(w).querySelector('.board-note').textContent, /^Not done: conveyor: a full test run is already running/);
 });
 
 // Bugs this guards: a red run did not say what failed and what was done with each case; Push anyway pushed with no
@@ -113,18 +113,18 @@ test('Control: a red run lists each failed case and its outcome, and Push anyway
     ['declined', 'net.test: fetchdeclined: outside the code: the machine or the network: ECONNREFUSED'],
   ]);
   w.confirm = () => { throw new Error('no browser dialog'); };
-  assert.equal(act(board(w), 'push-anyway').dataset.guard, 'final', 'a push cannot be undone');
-  assert.deepEqual(await sent(w, () => act(board(w), 'push-anyway').click()), [], 'the first click sends nothing');
-  assert.equal(act(board(w), 'push-anyway').textContent, 'Click again: push 2 landed cards over a red suite, with no new run. These cases failed: code.test: breaks, flaky.test: flips, net.test: fetch.');
-  assert.deepEqual(await sent(w, () => act(board(w), 'push-anyway').click()), [{ action: 'full-test', args: ['anyway', '0123456789ab'], repo: 'sample' }]);
+  assert.equal(act(pushP(w), 'push-anyway').dataset.guard, 'final', 'a push cannot be undone');
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'push-anyway').click()), [], 'the first click sends nothing');
+  assert.equal(act(pushP(w), 'push-anyway').textContent, 'Click again: push 2 landed cards over a red suite, with no new run. These cases failed: code.test: breaks, flaky.test: flips, net.test: fetch.');
+  assert.deepEqual(await sent(w, () => act(pushP(w), 'push-anyway').click()), [{ action: 'full-test', args: ['anyway', '0123456789ab'], repo: 'sample' }]);
   // A red run line with no id to name offers no Push anyway (the host would refuse it).
   next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...RED, id: undefined } } }));
-  assert.equal(act(board(w), 'push-anyway'), null);
+  assert.equal(act(pushP(w), 'push-anyway'), null);
   // Nothing landed to push, or a green run: no Push anyway.
   next(w, data({ unpushed: [], fullTest: { command: true, why: null, running: null, last: RED } }));
-  assert.equal(act(board(w), 'push-anyway'), null);
+  assert.equal(act(pushP(w), 'push-anyway'), null);
   next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...RED, state: 'passed', exit: 0, cases: [], pushed: { ok: true, reason: null } } } }));
-  assert.equal(act(board(w), 'push-anyway'), null);
+  assert.equal(act(pushP(w), 'push-anyway'), null);
   assert.match(part(w, 'full-test').textContent, new RegExp(`Passed on ${A.slice(0, 12)}; pushed ${A.slice(0, 12)}`));
   // The push over a red suite is shown as the owner's.
   next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...RED, kind: 'anyway', by: 'Board user owner', pushed: { ok: true, reason: null } } } }));

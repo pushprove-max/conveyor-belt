@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // The dashboard page as a whole: the tabs and the head line's tiles. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { css, T0, STORE, iso, clone, CONTROL_IDS, RULES_IDS, BELT3D_IDS, TESTS_IDS, OVERVIEW, boot, $, panel, state, order, kept, deliver, next, later, key, full, tabBtn, tiles, tile, fig, shownTiles, cases, setSize } from './dashboard-view.helpers.mjs';
+import { css, T0, STORE, iso, clone, CONTROL_IDS, RULES_IDS, RULES_SIZES, BELT3D_IDS, TESTS_IDS, OVERVIEW, boot, $, panel, state, order, kept, deliver, next, later, key, full, tabBtn, tiles, tile, fig, shownTiles, cases, setSize } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
 // ---- the tabs: Overview reports, Control changes the loop; Rules is a tab of its own ----
-test('Overview shows no Board or Rules panel, Control only the Board, and Rules only the Rules panel', () => {
+test('Overview shows no Board or Rules panel, Control only the machine and the Board\'s panels, and Rules only the Rules panels', () => {
   const w = boot();
   deliver(w, full());
   assert.deepEqual(order(w), OVERVIEW);
@@ -17,9 +17,9 @@ test('Overview shows no Board or Rules panel, Control only the Board, and Rules 
   for (const id of OVERVIEW.concat(RULES_IDS)) assert.equal(panel(w, id), null, `${id} is not on Control`);
   assert.equal(state(w, 'board'), 'ready', 'the tab opened is drawn from the data already read');
   tabBtn(w, 'rules').click();
-  assert.deepEqual(order(w), ['rules']);
+  assert.deepEqual(order(w), RULES_IDS);
   for (const id of OVERVIEW.concat(CONTROL_IDS)) assert.equal(panel(w, id), null, `${id} is not on Rules`);
-  assert.equal(state(w, 'rules'), 'ready');
+  for (const id of RULES_IDS) assert.equal(state(w, id), 'ready', `${id} is drawn from the data already read`);
   tabBtn(w, 'control').click();
   // Needs you stays on Overview whatever its cause.
   const paused = full();
@@ -117,14 +117,14 @@ test('each tab keeps its own layout, and restore restores the tab in view', () =
   assert.deepEqual([kept(w, 'overview').sizes.queue, kept(w, 'rules').collapsed, kept(w, 'control').collapsed], ['wide', ['rules'], []]);
   w.document.getElementById('restore-layout').click();
   assert.deepEqual(order(w), RULES_IDS, 'restore restores the tab in view');
-  assert.deepEqual(kept(w, 'rules'), { order: RULES_IDS, sizes: { rules: 'full' }, lengths: {}, collapsed: [], hidden: [] });
+  assert.deepEqual(kept(w, 'rules'), { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] });
   assert.equal(kept(w, 'overview').sizes.queue, 'wide', 'and leaves the other tabs as they were');
   tabBtn(w, 'overview').click();
   assert.equal(panel(w, 'queue').dataset.size, 'wide');
   // A layout kept when Rules was on Control: Control keeps the Board alone, and Rules has its panel.
   const before = JSON.stringify({ tabs: { overview: kept(w, 'overview'), control: { order: ['rules', 'board'], sizes: { board: 'full', rules: 'full' }, lengths: {}, collapsed: ['rules'], hidden: [] } }, density: 'comfortable', theme: 'system' });
   const c = boot({ tab: 'control', store: { [STORE]: before } });
-  assert.deepEqual(order(c), ['board', 'machine'], 'the Board as kept, then the panel added since, last');
+  assert.deepEqual(order(c), ['board', 'machine', 'board-loop', 'board-push'], 'the Board as kept, then the panels added since, last');
   tabBtn(c, 'rules').click();
   assert.deepEqual(order(c), RULES_IDS);
 });

@@ -764,6 +764,8 @@
 
   // ---- the layout: each tab's order, widths, lengths, collapsed and hidden panels; density and theme ----
   const tabOf = (id) => modules.get(id).tab;
+  // The part a panel is drawn from: its own, or the part of the panel file that registered it (part, panel()).
+  const partOf = (id) => modules.get(id).part || id;
   // A panel that states alwaysShown (Needs you) has no hide control and no hide box, and a kept layout cannot hide it.
   const hideable = (id) => modules.get(id).alwaysShown !== true;
   const idsOf = (t) => Array.from(modules.keys()).filter((id) => tabOf(id) === t);
@@ -1147,7 +1149,7 @@
   const histDue = () => histCan() && (histAt === null || now() - histAt >= HISTORY_MS);
   const olderShown = () => Boolean(last) && Array.from(panels).some(([id, p]) => typeof p.mod.older === 'function' && tabOf(id) === tab);
   function drawOlder() {
-    if (last) panels.forEach((p, id) => { if (typeof p.mod.older === 'function' && tabOf(id) === tab) draw(p, last.panels[id]); });
+    if (last) panels.forEach((p, id) => { if (typeof p.mod.older === 'function' && tabOf(id) === tab) draw(p, last.panels[partOf(id)]); });
     arrangeSoon();
   }
   function readHistory() {
@@ -1186,7 +1188,7 @@
   }
   function redrawAll() {
     panels.forEach((p) => { p.json = undefined; });
-    if (last) idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[id]));
+    if (last) idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[partOf(id)]));
     drawHead();
     arrangeSoon();
   }
@@ -1213,7 +1215,7 @@
   function attention(t) {
     if (!last || !last.panels) return 0;
     return idsOf(t).reduce((n, id) => {
-      const mod = modules.get(id), part = last.panels[id];
+      const mod = modules.get(id), part = last.panels[partOf(id)];
       if (typeof mod.attention !== 'function' || !part || !part.data || typeof part.data !== 'object') return n;
       try { const k = Number(mod.attention(part.data)); return n + (Number.isFinite(k) && k > 0 ? k : 0); } catch (e) { return n; }
     }, 0);
@@ -1265,7 +1267,7 @@
     tab = t;
     grid.classList.remove('fresh');
     applyLayout();
-    if (last) idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[id]));
+    if (last) idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[partOf(id)]));
     else if (!loaded && failedLoads) idsOf(tab).forEach((id) => draw(panels.get(id), { error: NOTHING, data: null }));
     arrange();
     say(`${TABS.find((x) => x[0] === t)[1]} tab`);
@@ -1441,7 +1443,7 @@
       // relength(): the panel's rows changed without a new part (a group opened): its length and place are worked out again.
       relength() { clip(p); arrangeSoon(); },
       // redraw(): the panel drawn again from the part it has, its count too (what the owner did changed what it shows).
-      redraw() { p.json = undefined; if (last) draw(p, last.panels[mod.id]); arrangeSoon(); },
+      redraw() { p.json = undefined; if (last) draw(p, last.panels[partOf(mod.id)]); arrangeSoon(); },
       // more(key, items, show, size): the shared long list (see more above), kept per panel and key.
       more: (key, items, show, size) => more(`${mod.id}:${key}`, items, show, size, () => { clip(p); arrangeSoon(); }),
     };
@@ -1681,7 +1683,7 @@
     tiles.filter((t) => t.spec.drop).sort((a, b) => a.spec.drop - b.spec.drop).forEach((t) => {
       if (total > room) { total -= width.get(t); t.a.hidden = true; }
     });
-    // The sticky head's height, for what stays in view under it (the Rules' "What these rules produce", app.css).
+    // The sticky head's height, for a box that fits the window under it (the Rules' "What these rules produce", app.css).
     const top = box.closest('.top');
     if (top) doc.documentElement.style.setProperty('--head-h', `${Math.ceil(top.getBoundingClientRect().height)}px`);
   }
@@ -1751,14 +1753,14 @@
     if (doc.hidden) return;
     if (grid) grid.setAttribute('aria-busy', 'false');
     // Only the tab in view is drawn; the other's panels are drawn from this data when it is opened.
-    panels.forEach((p, id) => { if (tabOf(id) === tab) draw(p, data.panels[id]); });
+    panels.forEach((p, id) => { if (tabOf(id) === tab) draw(p, data.panels[partOf(id)]); });
     drawTabs();
     drawHead();
     arrange();
     status();
   }
-  // One panel's new part from the live feed: that panel is drawn again, and no other (a panel of the other tab is
-  // kept for when that tab opens). A page with the head alone (account.html) has no panels: it keeps the change of
+  // One panel's new part from the live feed: the panels drawn from it are drawn again, and no other (a panel of the
+  // other tab is kept for when that tab opens). A page with the head alone (account.html) has no panels: it keeps the change of
   // any part its snapshot holds, so its head tiles follow the feed as the Board's do.
   function applyPanel(msg) {
     if (!loaded || !msg || typeof msg !== 'object') return;
@@ -1769,7 +1771,8 @@
     if (known) last.panels[msg.id] = msg.part;
     if (doc.hidden) return;
     if (known) {
-      if (panels.has(msg.id) && tabOf(msg.id) === tab) { draw(panels.get(msg.id), msg.part); arrangeSoon(); }
+      const ids = idsOf(tab).filter((id) => partOf(id) === msg.id);
+      if (ids.length) { ids.forEach((id) => draw(panels.get(id), msg.part)); arrangeSoon(); }
       drawTabs();
       drawHead();
     }
@@ -1780,7 +1783,7 @@
     if (feedOpen === open) return;
     feedOpen = open;
     if (doc.hidden) return;  // shownAgain() draws every panel again
-    if (loaded) panels.forEach((p, id) => { p.json = undefined; if (tabOf(id) === tab) draw(p, last.panels[id]); });
+    if (loaded) panels.forEach((p, id) => { p.json = undefined; if (tabOf(id) === tab) draw(p, last.panels[partOf(id)]); });
     if (loaded) arrangeSoon();
   }
   // The page shown again: drawn once from what it kept while hidden.
@@ -1870,11 +1873,14 @@
   // the machine head's filter and sort apply to its part: shownData), and declinedOf (the address parameter that cuts
   // it to the declined findings of one card: a review's declined count opens it there, judged()), and phoneFolded
   // (true: a report panel that starts collapsed to its heading on a phone, until the owner opens it: defaults()), and
-  // older(live, history) (its live part with the older entries of the history laid in: withOlder())}.
+  // older(live, history) (its live part with the older entries of the history laid in: withOlder())}, and part (the id
+  // of the panel on the list whose part it is drawn from: one file's part shown as more than one panel, such as the
+  // Rules tab's; default its own id).
   function panel(mod) {
     const need = ['render', 'empty', 'error', 'isEmpty'];
     if (!mod || typeof mod.id !== 'string' || typeof mod.title !== 'string' || !need.every((k) => typeof mod[k] === 'function')) throw new Error('a panel needs id, title, render, empty, error and isEmpty');
     modules.set(mod.id, Object.assign({}, mod, {
+      part: typeof mod.part === 'string' && mod.part ? mod.part : mod.id,
       size: SIZES.includes(mod.size) ? mod.size : 'small',
       tab: TABS.some((x) => x[0] === mod.tab) ? mod.tab : 'overview',
       rows: lengthOk(mod.rows) ? mod.rows : ROWS,
@@ -1918,8 +1924,9 @@
     watchMotion();
     grid = byId('grid');
     (Array.isArray(window.DASH_PANELS) ? window.DASH_PANELS : []).forEach((id) => { if (!modules.has(id)) modules.set(id, missing(id)); });
-    // The list decides the default order, whatever order the files loaded in.
-    const ordered = (window.DASH_PANELS || []).filter((id) => modules.has(id)).map((id) => [id, modules.get(id)]);
+    // The list decides the default order, whatever order the files loaded in. The panels drawn from one listed part
+    // take its place on the list, in the order its file registered them; one drawn from a part not on the list is not shown.
+    const ordered = (window.DASH_PANELS || []).flatMap((part) => Array.from(modules).filter(([id]) => partOf(id) === part));
     modules.clear();
     ordered.forEach(([id, mod]) => modules.set(id, mod));
     readLayout();
@@ -1941,7 +1948,7 @@
       const t = tabFromAddress(), was = tab;
       panels.forEach((p) => { p.json = undefined; });
       if (t) setTab(t, false);
-      if (tab === was && last) { idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[id])); arrangeSoon(); }
+      if (tab === was && last) { idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[partOf(id)])); arrangeSoon(); }
       drawHead();
     });
     window.addEventListener('resize', () => { fitHead(); arrangeSoon(); });

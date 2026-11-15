@@ -388,7 +388,8 @@ test('the live feed: a change to a panel of the other tab is kept and drawn when
   assert.equal(w.document.getElementById('tab-rules').querySelector('.tab-count').textContent, '· 1', 'Rules counts the pause');
   w.document.getElementById('tab-rules').click();
   assert.equal(state(w, 'rules'), 'ready');
-  assert.equal(panel(w, 'rules').querySelector('[data-figure]') !== null, true);
+  // Its figures are in What these rules produce, a panel drawn from the same part.
+  assert.equal(panel(w, 'rules-produce').querySelector('[data-figure]') !== null, true);
 });
 
 test('the seconds since a running step\'s last output count each second', () => {

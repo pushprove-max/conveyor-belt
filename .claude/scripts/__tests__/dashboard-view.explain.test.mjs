@@ -153,7 +153,7 @@ test('a head tile\'s mark opens its words on a tap and does not follow the tile\
 test('the loop\'s controls print what they do under them at phone width only', () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());
-  const note = panel(w, 'board').querySelector('.board-bar .phone-note');
+  const note = panel(w, 'board-loop').querySelector('.board-bar .phone-note');
   assert.equal(note.textContent, 'Pause after current: the cards in progress finish, and Conveyor picks nothing new. Stop now: the cards in progress end and go back to the queue.');
   assert.match(panel(w, 'machine').querySelector('.project-acts .phone-note').textContent, /^sample picks no new card; its cards running finish/);
   assert.match(w.document.querySelector('#machine-head .phone-note').textContent, /^No project starts a new card; cards running finish/);

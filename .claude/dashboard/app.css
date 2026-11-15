@@ -582,12 +582,9 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-last { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); flex: 1 1 100%; padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--accent); border-left-width: 4px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-md); }
 .rules-last-what { min-width: 0; overflow-wrap: anywhere; }
-.rules-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); }
-/* What these rules produce stays in view, under the sticky head (--head-h, app.js), while the rules beside it scroll:
-   that is when it is read. One taller than the window scrolls inside. */
+/* What these rules produce, its own panel: one taller than the window scrolls inside. */
 .rules-side { min-width: 0; }
-.rules-produce { position: sticky; top: calc(var(--head-h, 64px) + var(--sp-3)); align-self: start;
-  max-height: calc(100vh - var(--head-h, 64px) - 2 * var(--sp-3)); overflow-y: auto; }
+.rules-produce { max-height: calc(100vh - var(--head-h, 64px) - 2 * var(--sp-3)); overflow-y: auto; }
 .rules-row { display: grid; grid-template-columns: minmax(12ch, 16ch) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--surface-2); }
 .rules-key { display: grid; }
 .rules-what { font-size: var(--fs-xs); color: var(--muted); }
@@ -653,7 +650,6 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-wait { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }
 .rules-deps, .board-deps { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: baseline; }
 .board-deps { margin-top: var(--sp-1); }
-.rules-held { padding-top: var(--sp-3); border-top: 1px solid var(--border); }
 .rules-held-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .rules-search { flex: 1 1 22ch; min-height: 32px; }
 .rules-by { display: inline-flex; align-items: center; gap: var(--sp-2); }
@@ -674,7 +670,6 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 /* An issue's area, labels, age and state go to the next line when the row has no room (a phone), never past the panel. */
 .rules-issue { flex-wrap: wrap; }
 .rules-issue .board-title { flex-basis: 12ch; }
-.rules-issues { margin-top: var(--sp-4); }
 .rules-issue-list { list-style: none; margin: 0; padding: 0; }
 .rules-issue-acts { margin-bottom: var(--sp-2); }
 /* The Board's filters and sort for every column. */
@@ -1045,8 +1040,7 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
   .panel[data-panel="belt3d"]:fullscreen .tool.full { display: inline-flex; }
   .panel[data-panel="belt3d"]:fullscreen .b3-phone { display: none; }
   .board-today { margin-left: 0; }
-  .rules-cols { grid-template-columns: minmax(0, 1fr); }
-  .rules-produce { position: static; max-height: none; overflow-y: visible; }
+  .rules-produce { max-height: none; overflow-y: visible; }
   .rules-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
   /* Builder, Reviewer and Judge lay out alike: CLI, model and effort each a full-width line, so no model is cut. */
   .rules-model { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 100%; }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Rules tab (the owner chose R1's rules and their effect with R3's held issues grouped by
 // area). It is a tab of its own, after Overview and Control, and carries the count
-// of a paused loop, since the pause setting is here.
-// First, one line, where the Machine section was: "Test limits are on the Tests page." (Load limit moved there, #520).
-// Left, one row a rule, each with what it does and its control: Build (P0, P1, P2, P3, Follow-ups), Never build (the
+// of a paused loop, since the pause setting is here. Its one part is drawn as five panels (PANELS): Rules, What these
+// rules produce, Model prices, the held issues and Open issues.
+// Rules: first, one line, where the Machine section was: "Test limits are on the Tests page." (Load limit moved there, #520).
+// Then one row a rule, each with what it does and its control: Build (P0, P1, P2, P3, Follow-ups), Never build (the
 // labels, each removable, and a field to add one, with the area labels of the open issues to pick from), At once, Pause
 // at (Off, 90%, 95%, 98%, beside the weekly limit's
 // reading), Builder and Reviewer (CLI, model and effort), Judge (on or off, CLI, model and effort, the finding kinds it always
@@ -22,29 +23,29 @@
 // Build choice off, or a Never build label about to be added, says first how many queued issues it would skip; a
 // Build choice that would skip any takes a second click, its button naming the count, and so does an Undo (the head's
 // or the line's) that would turn one off.
-// Right, read from the snapshot alone: four counts (ready to build, waiting on another card, held by you, skipped by a
+// What these rules produce, read from the snapshot alone: four counts (ready to build, waiting on another card, held by you, skipped by a
 // rule; waiting counts and opens the list of the waiting cards, held or skipped ones too, each with the issues it
 // waits on and where each is, what else holds or skips it, and, on one nothing else keeps, with the
 // dependency guard Off a "Queue anyway" that acts on a second click, sending force; each row removes a dependency (×) or adds
 // one, sending depends), Next up (the next five in pick order, each
 // ready or "waits on #N"), the queue's dollar forecast as one line,
 // the guard's warning when the forecast says it pauses the loop before the queue ends, and the skipped issues.
-// Under both, full width: Model prices (the built-in prices and the pack's overrides, each override set or removed
-// here: pricesSection), then the issues held by you (the control record) or by a label (awaiting-deploy),
+// Model prices: the built-in prices and the pack's overrides, each override set or removed
+// here (pricesSection). Held by you or a label: the issues held by you (the control record) or by a label (awaiting-deploy),
 // one line a group (by area by default, or by priority or holding label): its name, count and how
 // many a label holds. Groups start closed, largest first; one opens to five issues, then "Show 5 more"
 // and "Show all (M)" (the page's shared long list). Queue releases an issue the record holds; on one a label holds it removes the label
 // and queues it, as the Board's "Remove the label and queue it", after saying so with a first click. Queue
 // all asks once, naming the count and how many a label holds, and leaves those out unless asked. A search by number
 // or title opens the groups with matches. Every change is POST control; the record the host answers with shows at
-// once, and the right waits for the next snapshot: this panel never computes the queue.
+// once, and What these rules produce waits for the next snapshot: this file never computes the queue.
 // The guard rule, as everywhere on the Board: a change easily undone (a switch, a cap, a pin, Queue, Hold) acts on one
 // click and the line that says it was done has Undo; one that costs money or time (Retry, Queue all, Queue anyway) or
 // cannot be undone (removing a label) acts on a second click, as does a Build choice that would skip queued issues.
 // No browser dialog.
-// Last, every open issue of the project, each with its state, filtered, sorted, picked and managed (issuesSection).
+// Open issues: every open issue of the project, each with its state, filtered, sorted, picked and managed (issuesSection).
 // With more than one project on the host the machine head's Show picks the one shown, as on the Board, and the
-// heading names it ("Rules: sample"); every change names it.
+// Rules panel's heading names it ("Rules: sample"); every change names it.
 // Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), state, control, cap, guard,
 // modelSettings, areaPrefix, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps,
 // blocked, forecast, prices, open (with issues: every open issue), repos, others}.
@@ -68,8 +69,10 @@
   const ROLES = ['builder', 'reviewer', 'judge'];
   const OTHER = '*other';  // the model list's Other…: a name it does not list, typed in (no model starts with *: MODEL)
   const BY = [['area', 'Area'], ['priority', 'Priority'], ['label', 'Label']];
+  // The part, and the ids of the tab's panels drawn from it (PANELS): Rules is the part's own id.
+  const PART = 'rules', HELD_P = `${PART}-held`;
   const S = { d: null, ctl: null, ctlAt: null, was: {}, guessed: false, floor: null, read: null, turned: false, refused: null,
-    kept: new Map(), el: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
+    kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, unlabeled: new Set(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, price: null };  // price: the Model prices form as typed (pricesSection); drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them
 
@@ -212,8 +215,16 @@
     return null;
   }
 
-  // The tab's line: what was asked or done, with Undo after a change easily undone (undo sends its opposite).
-  function say(text, undo) { const n = S.el && S.el.querySelector('.rules-note'); if (n) n.replaceChildren(undo ? S.ctx.undoLine(text, undo) : text); }
+  // The tab's line: what was asked or done, with Undo after a change easily undone (undo sends its opposite). Each of
+  // the tab's panels (PANELS) has its own: the line shows in the panel the action came from (where, by default S.from:
+  // the panel last clicked or typed in), so a panel folded away never holds what another panel's action said, and
+  // the other panels' lines are emptied.
+  const tabLine = (where = S.from) => (S.at.has(where) ? S.at.get(where).el.querySelector('.rules-note') : null);
+  function say(text, undo, where = S.from) {
+    S.at.forEach(({ el }, id) => { const n = el.querySelector('.rules-note'); if (n && id !== where) n.replaceChildren(); });
+    const n = tabLine(where);
+    if (n) n.replaceChildren(undo ? S.ctx.undoLine(text, undo) : text);
+  }
   // One action to the page's host, for the project named: {ok, said, rec, at}. at: when the page's host had the
   // answer (X-Answered-At: its clock, in whole seconds rounded up), in ms, or null.
   function post(action, args, repo) {
@@ -234,8 +245,10 @@
   // project was picked goes to the project the change was made in, never to the one picked since.
   function run(steps, what, done, undo, to) {
     if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return Promise.resolve(false); }
+    // Its answer shows in the panel it was asked from, whatever panel is clicked while it is out.
+    const where = S.from, tell = (text, u) => say(text, u, where);
     S.busy = true; S.refused = null; draw();
-    say('Sending…');
+    tell('Sending…');
     const repo = to || S.d.repo;
     let i = 0;
     const next = () => {
@@ -255,7 +268,7 @@
         put(guess ? { guessed: false, ctl: was.shown, ctlAt: at !== null ? at : was.at, refused: { row: guess[1], text } } : { guessed: false });
       };
       return post(action, args, repo).then((res) => {
-        if (!res.ok) { back(res.said, res.at); say(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
+        if (!res.ok) { back(res.said, res.at); tell(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
         put({ guessed: false });
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
         // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
@@ -276,10 +289,10 @@
       if (ok) {
         lastWrite(what, undo || null, repo);
         if (done && repo === S.d.repo) done();
-        say('Done. What the rules produce updates in about a minute.', undo && undo.length && repo === S.d.repo ? () => undoAsk(undo, () => run(undo, `undid: ${what}`, null, null, repo), repo) : null);
+        tell('Done. What the rules produce updates in about a minute.', undo && undo.length && repo === S.d.repo ? () => undoAsk(undo, () => run(undo, `undid: ${what}`, null, null, repo), repo) : null);
       }
       return free(ok);
-    }, () => { say('Not done: the host did not answer.'); return free(false); });
+    }, () => { tell('Not done: the host did not answer.'); return free(false); });
   }
   // undo: the one [action, args] that undoes this change; without one, it is read from the record shown before it is
   // sent (undoOf).
@@ -310,7 +323,7 @@
     if (!skips.length || S.armed === key) { if (skips.length) S.armed = null; return go(); }
     arm(key);
     say(`${skips.map(([name, k]) => skipWords(name, k)).join(' ')} Click Undo again to turn ${skips.map(([name]) => name).join(', ')} off.`, () => undoAsk(steps, go, repo));
-    const b = S.el && S.el.querySelector('.rules-note [data-act="undo"]');
+    const b = tabLine() && tabLine().querySelector('[data-act="undo"]');
     if (b) { b.textContent = undoLabel(skips); b.classList.add('board-danger'); }
     return Promise.resolve(false);
   }
@@ -1066,7 +1079,7 @@
     tog.append(h('span', 'rules-caret', open ? '▾' : '▸'), h('span', 'rules-group-name', g.name), h('span', 'rules-group-count', String(items.length)));
     if (mark) tog.append(h('span', 'rules-group-mark', mark));
     tog.setAttribute('aria-label', `${g.name}: ${plural(items.length, 'issue', 'issues')}${mark ? `, ${mark}` : ''}; ${open ? 'open' : 'closed'}`);
-    tog.addEventListener('click', () => { if (S.open.has(key)) S.open.delete(key); else S.open.add(key); draw(); S.ctx.relength(); });
+    tog.addEventListener('click', () => { if (S.open.has(key)) S.open.delete(key); else S.open.add(key); draw(); relength(); });
     // Queue all costs a build of each: its second click is the "Queue N" of the question it opens.
     const all = button('Queue all', 'btn-cost', 'queue-all', `Queue all ${g.items.length} of ${g.name}`, () => { S.asking = key; S.withLabels = false; draw(); });
     all.dataset.guard = 'spend';
@@ -1098,7 +1111,7 @@
     if (open) {
       const ul = h('ul', 'rules-held-list');
       ul.setAttribute('aria-label', `Held: ${g.name}`);
-      el.append(ul, S.ctx.more(`held:${key}`, items, (xs) => { ul.replaceChildren(...xs.map(heldRow)); lock(ul); }));
+      el.append(ul, (S.at.has(HELD_P) ? S.at.get(HELD_P).ctx : S.ctx).more(`held:${key}`, items, (xs) => { ul.replaceChildren(...xs.map(heldRow)); lock(ul); }));
     }
     return el;
   }
@@ -1126,13 +1139,13 @@
     search.addEventListener('input', () => {
       S.search = search.value;
       el.querySelector('.rules-groups').replaceWith(heldGroups(held()));
-      S.ctx.relength();
+      relength();
     });
     const by = h('select', 'field board-select');
     by.dataset.act = 'held-by';
     by.setAttribute('aria-label', 'Group the held issues by');
     BY.forEach(([v, text]) => { const o = h('option', null, text); o.value = v; o.selected = v === S.by; by.append(o); });
-    by.addEventListener('change', () => { S.by = by.value; S.asking = null; draw(); S.ctx.relength(); });
+    by.addEventListener('change', () => { S.by = by.value; S.asking = null; draw(); relength(); });
     const byLab = h('label', 'rules-by');
     byLab.append(h('span', 'board-from', 'Group by'), by);
     tools.append(search, byLab);
@@ -1242,13 +1255,13 @@
       el.replaceWith(fresh);
       const again = fresh.querySelector('[data-act="iq"]');
       again.focus();
-      S.ctx.relength();
+      relength();
     });
     const sel = (act, name, opts, cur) => {
       const s = h('select', 'field board-select');
       s.dataset.act = act; s.setAttribute('aria-label', name);
       opts.forEach(([value, text]) => { const o = h('option', null, text); o.value = value; o.selected = value === cur; s.append(o); });
-      s.addEventListener('change', () => { S.ctx.params(act === 'isort' ? { isort: s.value, idir: null } : { [act]: s.value }); draw(); S.ctx.relength(); });
+      s.addEventListener('change', () => { S.ctx.params(act === 'isort' ? { isort: s.value, idir: null } : { [act]: s.value }); draw(); relength(); });
       return s;
     };
     tools.append(search,
@@ -1378,40 +1391,56 @@
   const STILL = new Set(['held-search', 'held-by', 'held-link', 'list-more', 'list-all', 'pick', 'pick-all'].concat(IFILTERS));
   // While a change is out every other control is off, a page drawn by "Show more" too.
   const lock = (root) => { if (S.busy) root.querySelectorAll('button, input, select').forEach((b) => { if (!STILL.has(b.dataset.act)) b.disabled = true; }); };
-  function draw() {
-    const el = S.el, h = S.ctx.h;
+  // The tab's panels, in their default order, each drawn from the one Rules part: [id, title, width, its sections].
+  // Each has its own line (.rules-note: say) under its sections.
+  const PANELS = [
+    [PART, 'Rules', 'wide', (all) => [limitsLine(), head(), rules(all)]],
+    [`${PART}-produce`, 'What these rules produce', 'small', (all) => [produce(all)]],
+    [`${PART}-prices`, 'Model prices', 'full', () => [pricesSection()]],
+    [HELD_P, HELD, 'full', (all) => [heldSection(all)]],
+    [`${PART}-issues`, 'Open issues', 'full', () => [issuesSection()]],
+  ];
+  // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
+  function draw(only) {
+    const h = S.ctx.h, at = Array.from(S.at).filter(([id]) => !only || id === only);
     // No record on the host's main, and another to pick (under Show in the machine head): nothing until one is picked.
     if (S.d.repo === null) {
-      el.replaceChildren(S.ctx.state('empty', 'No rules to show', 'Conveyor did not run on this project on the build machine yet, so it has no rules. Pick a project under Show, above the tabs.'));
+      at.forEach(([, p]) => p.el.replaceChildren(S.ctx.state('empty', 'No rules to show', 'Conveyor did not run on this project on the build machine yet, so it has no rules. Pick a project under Show, above the tabs.')));
       return;
     }
-    if (!el.querySelector('.rules')) {
-      const note = h('p', 'board-note rules-note');
-      note.setAttribute('aria-live', 'polite');
-      el.replaceChildren(h('div', 'rules'), note);
-    }
-    // The focus a control had comes back to the control with the same action (on the same issue, in the same group),
-    // if it is still there. While a change is out its control is off and cannot take the focus: it is kept, and given
-    // back when the controls are on again.
-    const a = document.activeElement && el.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement : null;
-    const item = a && a.closest('[data-issue]'), grp = a && a.closest('[data-group]');
-    const keep = (a && a.dataset.act ? { act: a.dataset.act, issue: item ? item.dataset.issue : null, group: grp ? grp.dataset.group : null } : null) || S.keep;
+    // The focus a control had comes back to the control with the same action (on the same issue, in the same group,
+    // in the same panel), if it is still there. While a change is out its control is off and cannot take the focus: it
+    // is kept, and given back when the controls are on again.
+    const a = document.activeElement && document.activeElement.dataset ? document.activeElement : null;
+    const from = a ? Array.from(S.at).find(([, p]) => p.el.contains(a)) : null;
+    const item = from && a.closest('[data-issue]'), grp = from && a.closest('[data-group]');
+    const keep = (from && a.dataset.act ? { panel: from[0], act: a.dataset.act, issue: item ? item.dataset.issue : null, group: grp ? grp.dataset.group : null } : null) || S.keep;
     S.keep = null;
     const all = held();
-    const cols = h('div', 'rules-cols');
-    // "What these rules produce" scrolls inside when taller than the window (app.css): a new snapshot keeps its place.
-    const was = el.querySelector('.rules-produce'), top = was ? was.scrollTop : 0, out = produce(all);
-    cols.append(rules(all), out);
-    el.querySelector('.rules').replaceChildren(limitsLine(), head(), cols, pricesSection(), heldSection(all), issuesSection());
-    out.scrollTop = top;
-    lock(el.querySelector('.rules'));
-    if (keep) {
+    at.forEach(([id, { el }]) => {
+      if (!el.querySelector('.rules')) {
+        const note = h('p', 'board-note rules-note');
+        note.setAttribute('aria-live', 'polite');
+        el.replaceChildren(h('div', 'rules'), note);
+      }
+      // "What these rules produce" scrolls inside when taller than the window (app.css): a new snapshot keeps its place.
+      const was = el.querySelector('.rules-produce'), top = was ? was.scrollTop : 0;
+      el.querySelector('.rules').replaceChildren(...PANELS.find((x) => x[0] === id)[3](all));
+      const out = el.querySelector('.rules-produce');
+      if (out) out.scrollTop = top;
+      lock(el.querySelector('.rules'));
+    });
+    const to = keep && at.find(([id]) => id === keep.panel);
+    if (to) {
+      const el = to[1].el;
       const scope = keep.group !== null && keep.group !== undefined ? Array.from(el.querySelectorAll('[data-group]')).find((g) => g.dataset.group === keep.group) : el;
       const again = scope && scope.querySelector(keep.issue ? `[data-issue="${keep.issue}"] [data-act="${keep.act}"]` : `[data-act="${keep.act}"]`);
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (S.busy && again) S.keep = keep;
-    }
+    } else if (keep && !from) S.keep = keep;  // kept for a panel not drawn now
   }
+  // Each of the tab's panels works its length out again: rows came or went (a group opened, a search typed).
+  const relength = () => S.at.forEach((p) => p.ctx.relength());
 
   // A new snapshot is the record and what it produces. It replaces the record the host answered with once the
   // collector began it at or after the answer (both times are the page host's clock); one begun before it would show
@@ -1423,11 +1452,18 @@
   // starts with nothing selected, open or asked. A project's changes, answers and refusals are kept while another is
   // drawn; one whose answer a snapshot has replaced keeps that snapshot's record until one begun at or after the
   // answer, so picking it again does not show an older snapshot's value.
-  function render(el, d, ctx) {
+  // Every panel of the tab is drawn from the same part: the first of them to get a snapshot takes it and draws them
+  // all; the others, given the same snapshot for the same project, draw only themselves.
+  const render = (id) => (el, d, ctx) => {
+    S.at.set(id, { el, ctx });
+    // The panel acted in last (S.from), for the line that says what the action did (say): heard before the control's own handler.
+    if (!S.heard.has(el)) { S.heard.add(el); ['click', 'input', 'change', 'keydown', 'drop'].forEach((t) => el.addEventListener(t, () => { S.from = id; }, true)); }
     const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
     const view = ctx.project(d);
-    // The Rules show one project: with more than one on the host the heading names it, whatever Show says.
-    ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Rules: ${view.repo}` : null);
+    // The Rules show one project: with more than one on the host the Rules panel's heading names it, whatever Show says.
+    if (id === PART) ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Rules: ${view.repo}` : null);
+    if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
+    S.raw = [d, read, view.repo];
     if (S.d && view.repo !== S.d.repo) {
       S.picked.clear(); S.open.clear(); S.armed = null; S.asking = null; S.turned = false; S.dep = null;
       const pin = !S.ctl && S.floor !== null ? ctl() : null;
@@ -1435,7 +1471,7 @@
       Object.assign(S, { ctl: null, ctlAt: null, was: {}, guessed: false, floor: null, refused: null }, S.kept.get(view.repo));
       S.kept.delete(view.repo);
     }
-    S.el = el; S.ctx = ctx; S.read = read;
+    S.ctx = ctx; S.read = read;
     if (S.d && !S.ctl && S.floor !== null && read !== null && read < S.floor) { S.turned = true; draw(); return; }
     const rec = view.control && typeof view.control === 'object' ? view.control : {};
     const stale = Object.keys(S.was).some((k) => same(rec[k], S.was[k]));
@@ -1445,27 +1481,29 @@
     }
     S.d = view; S.turned = false; S.unlabeled.clear();
     draw();
-  }
+  };
 
-  window.DASH_APP.panel({
-    id: 'rules',
-    title: 'Rules',
-    size: 'full',
+  PANELS.forEach(([id, title, size]) => window.DASH_APP.panel({
+    id,
+    title,
+    size,
     tab: 'rules',  // a tab of its own
+    part: PART,
     rows: 'all',
     // Its rows: each rule, the figures, the next issues and each group of the held issues (so its length can be set).
     rowSelector: '.rules-row, .rules-stats, .rules-next, .rules-group',
-    // The Rules tab says when the loop is paused, or the guard has paused it: the pause setting is here.
-    attention: (d) => (d.state === 'paused' || d.state === 'paused by guard' ? 1 : 0),
+    // The Rules tab says when the loop is paused, or the guard has paused it: the pause setting is here. Its first
+    // panel counts it, once.
+    attention: id === PART ? (d) => (d.state === 'paused' || d.state === 'paused by guard' ? 1 : 0) : undefined,
     isEmpty: (d) => d.repo === null && !(d.others && typeof d.others === 'object' && Object.keys(d.others).length),
     empty(el, ctx) { el.append(ctx.state('empty', 'No rules to show', 'Conveyor did not run on this project on the build machine yet, so it has no rules. Start Conveyor there, and they show here.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the rules', message)); },
-    render,
+    render: render(id),
     // A part equal to the one drawn last, in a snapshot begun at another time, is weighed like any other while an
     // answer is shown or a snapshot was turned away (as the Board's).
     same(el, d, ctx) {
       const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
-      if ((S.ctl || S.turned) && read !== S.read) render(el, d, ctx);
+      if ((S.ctl || S.turned) && read !== S.read) render(id)(el, d, ctx);
     },
-  });
+  }));
 }());

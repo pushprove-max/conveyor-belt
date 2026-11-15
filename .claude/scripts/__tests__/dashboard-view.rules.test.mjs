@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// The dashboard page's Rules tab: the rules on the left, what they produce on the right, and the held issues.
+// The dashboard page's Rules tab: the rules, what they produce, and the held issues, each its own panel.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { T0, clone, boot, state, deliver, next, settle, P, CONTROL, MODELS, CLIS, full, act, record,
-  rulesP, ruled, produced, figure, nextUp, heldP, groupsOf, groupEl, rowsOf, heldMany, cases, pickProject } from './dashboard-view.helpers.mjs';
+  rulesP, rulesAll, rulesText, ruled, produced, figure, nextUp, heldP, groupsOf, groupEl, rowsOf, heldMany, cases, pickProject } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -28,12 +28,12 @@ test('Rules: one row a rule on the left, what the snapshot says they produce on 
   assert.deepEqual(nextUp(w), [[21, 'ready'], [20, 'ready'], [22, 'ready'], [24, 'waits on #20']], 'the snapshot\'s order, never re-sorted here');
   assert.equal(produced(w).querySelector('[data-figure="usd"]').textContent, 'Forecast for the queue: about $2.85.');
   // No limit after the queue; no time to empty the queue.
-  assert.doesNotMatch(rulesP(w).textContent, /limit after the queue/i);
+  assert.doesNotMatch(rulesText(w), /limit after the queue/i);
   assert.equal(produced(w).querySelector('[data-figure="after"], [data-figure="minutes"]'), null);
   assert.doesNotMatch(produced(w).textContent, /to empty the queue/);
   assert.deepEqual(Array.from(produced(w).querySelectorAll('.rules-skip'), (x) => [Number(x.dataset.issue), x.lastChild.textContent]), [[23, 'Conveyor never builds area:infra']]);
   // The overrides of before are gone: no chip a held issue, no Overrides heading; a pin is one line among the rules.
-  assert.doesNotMatch(rulesP(w).textContent, /Overrides|: held/);
+  assert.doesNotMatch(rulesText(w), /Overrides|: held/);
   assert.equal(ruled(w).querySelector('[data-rule="order"]').textContent.includes('#21 Later'), true);
   assert.ok(Number(rulesP(w).dataset.rows) > 0, `the Rules panel counts its rows: ${rulesP(w).dataset.rows}`);
   // A waiting issue pinned first keeps its pin's place in Next up.
@@ -82,13 +82,13 @@ test('Rules: one row a rule on the left, what the snapshot says they produce on 
 });
 
 test('Rules: a new snapshot keeps where "What these rules produce" was scrolled to', () => {
-  // The box is pinned and scrolls inside when taller than the window (app.css .rules-produce); a snapshot rebuilds it,
+  // The box, its own panel, scrolls inside when taller than the window (app.css .rules-produce); a snapshot rebuilds it,
   // and without carrying its place over every live update threw it back to its top.
   const w = boot({ tab: 'rules' });
   deliver(w, full());
   const was = produced(w);
-  assert.ok(was.classList.contains('rules-produce'), 'the box carries the class the pinning hangs on');
-  assert.ok(!ruled(w).classList.contains('rules-produce'), 'the rules column is not pinned');
+  assert.ok(was.classList.contains('rules-produce'), 'the box carries the class its scrolling hangs on');
+  assert.ok(!ruled(w).classList.contains('rules-produce'), 'the rules do not scroll inside a box');
   was.scrollTop = 120;
   const after = full(T0 + 60000);
   after.panels.rules.data.queue = after.panels.rules.data.queue.filter((x) => x.issue !== 20);
@@ -124,11 +124,11 @@ test('Rules: with 183 held issues the rules list none, and the held section is o
   assert.equal(groupEl(w, 'web').querySelector('.show-more').hidden, true, 'all shown: no control');
   assert.ok(Array.from(groupEl(w, 'web').querySelectorAll('.rules-held-row')).some((r) => r.textContent.includes('ux-change')), 'and its holding label');
   // Group by priority, or by holding label.
-  const by = act(rulesP(w), 'held-by');
+  const by = act(heldP(w), 'held-by');
   assert.deepEqual(Array.from(by.options, (o) => o.textContent), ['Area', 'Priority', 'Label']);
   by.value = 'priority'; by.dispatchEvent(new w.Event('change'));
   assert.deepEqual(groupsOf(w).map((g) => [g[0], g[1]]), [['P2', 120], ['P1', 63]], 'every third issue of an area is P1');
-  const by2 = act(rulesP(w), 'held-by');
+  const by2 = act(heldP(w), 'held-by');
   by2.value = 'label'; by2.dispatchEvent(new w.Event('change'));
   assert.deepEqual(groupsOf(w).map((g) => [g[0], g[1]]), [['No label: held by you', 143], ['ux-change', 31], ['dormant', 9]]);
 });
@@ -136,11 +136,11 @@ test('Rules: with 183 held issues the rules list none, and the held section is o
 test('Rules: the search narrows the groups to their matches, by number or title, and opens them', () => {
   const w = boot({ tab: 'rules' });
   deliver(w, heldMany());
-  const search = act(rulesP(w), 'held-search');
+  const search = act(heldP(w), 'held-search');
   search.value = 'console thing 1'; search.dispatchEvent(new w.Event('input'));
   assert.deepEqual(groupsOf(w).map((g) => [g[0], g[1]]), [['console', 2]], 'console thing 1 and 10');
   assert.equal(rowsOf(groupEl(w, 'console')).length, 2, 'a group with matches opens');
-  assert.equal(w.document.activeElement === search || act(rulesP(w), 'held-search') === search, true, 'the field is the same one: typing goes on');
+  assert.equal(w.document.activeElement === search || act(heldP(w), 'held-search') === search, true, 'the field is the same one: typing goes on');
   search.value = '#100000'; search.dispatchEvent(new w.Event('input'));
   assert.deepEqual(groupsOf(w).map((g) => g[0]), ['web']);
   assert.deepEqual(rowsOf(groupEl(w, 'web')), [100000]);
@@ -171,7 +171,7 @@ test('Rules: Queue releases an issue the record holds; on one a label holds it s
   q().click();
   await settle();
   assert.deepEqual(w.posts, [], 'nothing is sent on the first click');
-  assert.match(rulesP(w).querySelector('.rules-note').textContent, /The label ux-change holds #35\. Click once more to remove it on GitHub for good and queue #35/);
+  assert.match(heldP(w).closest('.panel').querySelector('.rules-note').textContent, /The label ux-change holds #35\. Click once more to remove it on GitHub for good and queue #35/);
   assert.equal(q().textContent, 'Click again: remove the label ux-change on GitHub');
   q().click();
   await settle();
@@ -329,7 +329,7 @@ test('Rules: each rule sends its one change through POST control; the host\'s re
   act(rulesP(w), 'rule-P0').click();
   await settle();
   assert.equal(w.posts.splice(0).length, 1);
-  for (const b of rulesP(w).querySelectorAll('.rules button, .rules input, .rules select')) {
+  for (const b of rulesAll(w).flatMap((p) => Array.from(p.querySelectorAll('.rules button, .rules input, .rules select')))) {
     assert.equal(b.disabled, !['held-search', 'held-by'].includes(b.dataset.act), `${b.dataset.act} is ${b.disabled ? 'off' : 'on'} while the change is out`);
   }
   answer(JSON.stringify(CONTROL));

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { VIEW, read, html, LIST, panelState, PANEL_STATES, CONTROL_IDS, RULES_IDS, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases } from './dashboard-view.helpers.mjs';
+import { VIEW, read, html, LIST, panelState, PANEL_STATES, CONTROL_IDS, RULES_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -19,10 +19,10 @@ test('every panel is one file in panels/ and one entry of the list', () => {
   for (const id of OVERVIEW) assert.equal($(w, `#panel-${id} .panel-title`).textContent, SAYS[id].title);
   const c = boot({ tab: 'control' });
   assert.deepEqual(order(c), CONTROL_IDS);
-  for (const id of CONTROL_IDS) assert.equal($(c, `#panel-${id} .panel-title`).textContent, SAYS[id].title);
+  for (const id of CONTROL_IDS) assert.equal($(c, `#panel-${id} .panel-title`).textContent, titleOf(id));
   const r = boot({ tab: 'rules' });
-  assert.deepEqual(order(r), RULES_IDS, 'the Rules tab holds the Rules panel alone');
-  assert.equal($(r, '#panel-rules .panel-title').textContent, 'Rules');
+  assert.deepEqual(order(r), RULES_IDS, 'the Rules tab holds the panels of the Rules part alone');
+  for (const id of RULES_IDS) assert.equal($(r, `#panel-${id} .panel-title`).textContent, titleOf(id));
   const b = boot({ tab: 'belt3d' });
   assert.deepEqual(order(b), BELT3D_IDS, 'the Belt 3D tab holds the Belt 3D panel alone');
   assert.equal($(b, '#panel-belt3d .panel-title').textContent, 'Belt 3D');
@@ -36,10 +36,11 @@ test('every panel is one file in panels/ and one entry of the list', () => {
 // A panel states its tab and its default length in its module; the page shows it on that tab, cut to that length.
 // A panel's name is in its own file and the list only: the page has no code for one panel by its id. So every real
 // panel is given a new id here (one boot a tab serves both checks); one the page knew by its old id would leave its
-// tab, its place, its drawing or its length.
+// tab, its place, its drawing or its length. A file whose part is drawn as more than one panel names every one of
+// them from its PART, so its panels are renamed with it.
 test('each panel states its tab and its default length: about 5 to 8 rows for a list, the whole content for figures; the page knows no panel by its id', () => {
   const as = (id) => `renamed${id}`;
-  const extra = LIST.map((id) => read(`panels/${id}.js`).replace(`id: '${id}'`, `id: '${as(id)}'`)).join('\n');
+  const extra = LIST.map((id) => read(`panels/${id}.js`).replace(`id: '${id}'`, `id: '${as(id)}'`).replace(`PART = '${id}'`, `PART = '${as(id)}'`)).join('\n');
   const data = full();
   for (const id of LIST) data.panels[as(id)] = data.panels[id];
   const stated = {};
@@ -49,13 +50,14 @@ test('each panel states its tab and its default length: about 5 to 8 rows for a 
     assert.deepEqual(order(w), ids.map(as), `the ${tab} tab holds its panels in their order`);
     for (const id of ids) {
       assert.equal(state(w, as(id)), 'ready', `${id} draws under its new id`);
-      assert.equal($(w, `#panel-${as(id)} .panel-title`).textContent, SAYS[id].title);
+      assert.equal($(w, `#panel-${as(id)} .panel-title`).textContent, titleOf(id));
       const length = panel(w, as(id)).dataset.length;
       stated[id] = [tab, length === 'all' ? 'all' : Number(length)];
     }
   }
   assert.deepEqual(stated, {
-    machine: ['control', 'all'], board: ['control', 'all'], rules: ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], queue: ['overview', 8], landed: ['overview', 6], declined: ['overview', 6],
+    machine: ['control', 'all'], 'board-loop': ['control', 'all'], 'board-push': ['control', 'all'], board: ['control', 'all'],
+    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], queue: ['overview', 8], landed: ['overview', 6], declined: ['overview', 6],
     health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 8], metrics: ['overview', 8],
   });
   for (const [id, [, rows]] of Object.entries(stated)) if (rows !== 'all') assert.ok(rows >= 5 && rows <= 8, `${id} shows ${rows} rows by default`);

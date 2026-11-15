@@ -97,8 +97,20 @@ export const clone = (x) => JSON.parse(JSON.stringify(x));
 
 // The Board changes the loop: it is on the Control tab; the Rules panel is a tab of its own, Rules, and Belt 3D
 // one of its own, Belt 3D, and the Tests panel one of its own, Tests; every other panel reports, on Overview.
-export const CONTROL_IDS = ['machine', 'board'];
-export const RULES_IDS = ['rules'];
+// The Board's part and the Rules part are each drawn as more than one panel, [id, title] in their default order.
+export const SPLIT = {
+  board: [['board-loop', 'Loop'], ['board-push', 'Push landed and full test suite'], ['board', 'Board']],
+  rules: [['rules', 'Rules'], ['rules-produce', 'What these rules produce'], ['rules-prices', 'Model prices'], ['rules-held', 'Held by you or a label'], ['rules-issues', 'Open issues']],
+};
+// The panels drawn from one part of the list: the part's own panel, or each one SPLIT names for it.
+export const family = (id) => (SPLIT[id] ? SPLIT[id].map(([x]) => x) : [id]);
+// A panel's heading: SAYS's for a part's own panel, SPLIT's for another panel drawn from a part.
+export const titleOf = (id) => (SAYS[id] ? SAYS[id].title : Object.values(SPLIT).flat().find(([x]) => x === id)[1]);
+export const CONTROL_IDS = ['machine', ...family('board')];
+export const RULES_IDS = family('rules');
+// Their default widths: the rules beside what they produce, every other one the tab's width.
+export const CONTROL_SIZES = { machine: 'full', 'board-loop': 'full', 'board-push': 'full', board: 'full' };
+export const RULES_SIZES = { rules: 'wide', 'rules-produce': 'small', 'rules-prices': 'full', 'rules-held': 'full', 'rules-issues': 'full' };
 export const BELT3D_IDS = ['belt3d'];
 export const TESTS_IDS = ['tests'];
 export const TAB = (id) => (CONTROL_IDS.includes(id) ? 'control' : RULES_IDS.includes(id) ? 'rules' : BELT3D_IDS.includes(id) ? 'belt3d' : TESTS_IDS.includes(id) ? 'tests' : 'overview');
@@ -508,6 +520,10 @@ export const tabBtn = (w, t) => w.document.getElementById(`tab-${t}`);
 
 // The Board: the loop steered from the page, one POST control a change.
 export const board = (w) => panel(w, 'board');
+// The Board part's other two panels: Loop (the bar: state, Pause, Stop now, the weekly limit, today) and Push landed
+// and full test suite (the two actions and the check runs).
+export const loopP = (w) => panel(w, 'board-loop');
+export const pushP = (w) => panel(w, 'board-push');
 export const bcard = (w, n) => board(w).querySelector(`.bcard[data-issue="${n}"]`);
 export const column = (w, k) => board(w).querySelector(`.board-col[data-col="${k}"]`);
 export const inCol = (w, k) => Array.from(column(w, k).querySelectorAll('.bcard'), (c) => Number(c.dataset.issue));
@@ -539,11 +555,16 @@ export const withOpen = (over = {}) => { const d = full(); d.panels.board.data.o
 
 // The Rules tab.
 export const rulesP = (w) => panel(w, 'rules');
+// Every panel of the Rules tab, in order, and what they say together.
+export const rulesAll = (w) => RULES_IDS.map((id) => panel(w, id));
+export const rulesText = (w) => rulesAll(w).map((p) => p.textContent).join('\n');
 export const ruled = (w) => rulesP(w).querySelectorAll('.rules-side')[0];
-export const produced = (w) => rulesP(w).querySelectorAll('.rules-side')[1];
+export const produced = (w) => panel(w, 'rules-produce').querySelector('.rules-side');
 export const figure = (w, k) => produced(w).querySelector(`[data-figure="${k}"] .rules-big`).textContent;
 export const nextUp = (w) => Array.from(produced(w).querySelectorAll('.rules-next'), (x) => [Number(x.dataset.issue), x.querySelector('.rules-marks').textContent]);
-export const heldP = (w) => rulesP(w).querySelector('.rules-held');
+export const heldP = (w) => panel(w, 'rules-held').querySelector('.rules-held');
+export const issuesP = (w) => panel(w, 'rules-issues').querySelector('.rules-issues');
+export const pricesP = (w) => panel(w, 'rules-prices').querySelector('.rules-prices');
 export const groupsOf = (w) => Array.from(heldP(w).querySelectorAll('.rules-group'), (g) => [g.querySelector('.rules-group-name').textContent, Number(g.querySelector('.rules-group-count').textContent),
   (g.querySelector('.rules-group-mark') || { textContent: '' }).textContent]);
 export const groupEl = (w, name) => Array.from(heldP(w).querySelectorAll('.rules-group')).find((g) => g.querySelector('.rules-group-name').textContent === name);
@@ -586,15 +607,17 @@ export const shownTiles = (w) => tiles(w).filter((t) => !t.hidden).map((t) => t.
 // own line, `test('<id>: <case>', () => panelState.<key>('<id>'))`, for .conveyor/test-changed.sh counts a file's
 // cases by its `test(` lines (filecases()); page-panels checks the two files name all four for every panel of the list.
 export const PANEL_STATES = { data: 'with data', empty: 'empty', failed: 'failed to load', own: 'draws from its own part alone' };
+// What the panels drawn from one part show, together (a part drawn as more than one panel: SPLIT).
+const shown = (w, id) => family(id).map((x) => panel(w, x).textContent).join('\n');
 export const panelState = {
   data(id) {
     const w = boot({ tab: TAB(id) });
     deliver(w, full());
-    assert.equal(state(w, id), 'ready');
-    const text = panel(w, id).textContent;
+    for (const x of family(id)) assert.equal(state(w, x), 'ready', `${x} is drawn`);
+    const text = shown(w, id);
     for (const s of SAYS[id].data) assert.ok(text.includes(s), `${id} shows "${s}": ${text}`);
     assert.equal($(w, `#panel-${id} .panel-count`).textContent, SAYS[id].count);
-    assert.equal(panel(w, id).querySelector('.skeleton'), null, 'the loading skeleton is gone');
+    for (const x of family(id)) assert.equal(panel(w, x).querySelector('.skeleton'), null, 'the loading skeleton is gone');
   },
   empty(id) {
     const w = boot({ tab: TAB(id) });
@@ -625,8 +648,8 @@ export const panelState = {
   own(id) {
     const w = boot({ tab: TAB(id) });
     deliver(w, { updatedAt: iso(T0), panels: { [id]: full().panels[id] } });
-    assert.equal(state(w, id), 'ready');
-    for (const s of SAYS[id].data) assert.ok(panel(w, id).textContent.includes(s), `${id} needs no other panel's part to show "${s}"`);
+    for (const x of family(id)) assert.equal(state(w, x), 'ready', `${x} is drawn`);
+    for (const s of SAYS[id].data) assert.ok(shown(w, id).includes(s), `${id} needs no other panel's part to show "${s}"`);
   },
 };
 
