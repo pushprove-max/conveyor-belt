@@ -75,6 +75,23 @@ bash_hook() { # <command>: the exit of the registered git-safety hook on a Bash 
 check "set up: git-safety still refuses a forced push to main" 2 "$(bash_hook 'git push --force origin main')"
 check "set up: git-safety lets git status through" 0 "$(bash_hook 'git status')"
 
+# Issue 18: a project that follows the plugin's releases, on a machine that has taken no commit. The first take waits
+# on its lock and on GitHub for longer than a hook's 30 s timeout, so a hook that waits for it blocks the call. Here the
+# plugin copy's take is a stub that waits up to 60 s for $T/go: each hook must end well before that, with the notice
+# once, and the take must still be started beside it.
+mkdir -p "$T/plug/conveyor" "$T/takes"; cp "$SRC/shim.sh" "$T/plug/"
+printf '#!/usr/bin/env bash\ntouch "%s/takes/$$"\nfor i in $(seq 600); do [ -e "%s/go" ] && break; sleep 0.1; done\nrm -f "%s/takes/$$"\n' \
+  "$T" "$T" "$T" > "$T/plug/conveyor/conveyor.sh"
+git init -q "$T/follow"; mkdir -p "$T/follow/.conveyor"
+jq -n '{plugin: {follow: "releases"}}' > "$T/follow/.conveyor/project.json"
+start=$SECONDS
+out=$(CLAUDE_PLUGIN_ROOT=$T/plug every "$T/follow" s-follow)
+check "no commit taken: every hook ends within its timeout, not after the take" yes "$([ $((SECONDS - start)) -lt 30 ] && echo yes || echo "no, $((SECONDS - start)) s")"
+check "no commit taken: no hook fails, and the session hears it once" "$want" "$out"
+for i in $(seq 100); do compgen -G "$T/takes/*" >/dev/null && break; sleep 0.1; done
+check "no commit taken: the hooks started the take" yes "$(compgen -G "$T/takes/*" >/dev/null && echo yes || echo no)"
+touch "$T/go"; for i in $(seq 100); do compgen -G "$T/takes/*" >/dev/null || break; sleep 0.1; done
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

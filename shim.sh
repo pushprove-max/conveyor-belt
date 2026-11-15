@@ -5,8 +5,9 @@
 # runs that path from the install of the project's engine, never from this copy: the commit the project's pack pins,
 # or, for a pack that follows the plugin's main, the project's current engine on this machine (the newest commit taken
 # here, in the main checkout's git folder: lib/install.sh, take()). A machine that has taken none takes one first,
-# with this copy's engine. On a machine that has, it starts a take of main with that engine once a minute at most,
-# beside the hook and never waited for, so a machine that runs hooks and commands but no loop moves with main too:
+# with this copy's engine (a hook starts that take and does not wait for it). On a machine that has, it starts a take
+# of main with that engine once a minute at most, beside the hook and never waited for, so a machine that runs hooks
+# and commands but no loop moves with main too:
 # the hook runs on the engine it has, and a later one on the commit taken. Otherwise it only resolves and execs.
 # import.sh places it at the plugin's top as shim.sh.
 # A plugin hook (hooks/hooks.json sets CONVEYOR_HOOK=1) must never cost a session its tools, as the plugin is on in
@@ -43,7 +44,16 @@ if [ -z "$commit" ] && [ -n "$(jq -r '.plugin.follow // empty' "$pack" 2>/dev/nu
   # which is the hook's own input.
   # When this machine last looked at the plugin's main (the file's time): a take is started once a minute at most.
   look=$main/.git/conveyor-engine.look
-  [ -n "$commit" ] || { touch "$look"; CONVEYOR_MAIN=$main bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/conveyor/conveyor.sh" take < /dev/null >&2; commit=$(engine); }
+  first=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/conveyor/conveyor.sh
+  # A hook never waits for that first take (its lock and GitHub can take longer than the hook's timeout): it starts
+  # the take beside it, once a minute at most, and runs with the guards off until the take ends.
+  if [ -z "$commit" ] && [ -n "${CONVEYOR_HOOK:-}" ]; then
+    if [ -z "$(find "$look" -mmin -1 2>/dev/null)" ] && touch "$look"; then
+      CONVEYOR_MAIN=$main nohup bash "$first" take < /dev/null > /dev/null 2>&1 &
+    fi
+  elif [ -z "$commit" ]; then
+    touch "$look"; CONVEYOR_MAIN=$main bash "$first" take < /dev/null >&2; commit=$(engine)
+  fi
   [ -n "$commit" ] || off "this project follows the plugin's $(jq -r .plugin.follow "$pack") and has taken no commit of it on this machine; run /conveyor-belt:setup"
 fi
 # A pin names a version folder, so only a full commit id may: anything else could name a path outside versions/.
