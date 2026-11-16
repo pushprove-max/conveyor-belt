@@ -103,7 +103,7 @@ t_dwrebase() {
 }
 
 # Bugs: a named file that is not there (a bare root name too, or two on one line) fails its item, or is not a note
-# shown to the review; the record check takes notes that are not a list of strings.
+# shown to the review; the record check takes notes that are not a list of strings (it sets that line aside).
 t_dwnotes() {
   # #12: a pytest case after a missing path, a missing name with a one-letter extension and a :line, and one with no
   # :line and a one-letter extension (beside an e.g., which names no file), a missing path with no extension and a
@@ -126,7 +126,10 @@ t_dwnotes() {
     || fail "#12's fix reply did not pass with its missing file as a note shown to the review, or #12 did not land: $(st 'select(.issue == 12)')"
   loop check || fail "a line with doneWhen is not a whole record"
   local bad; bad=$(jq -c 'select(.issue == 12 and .step == "fix") | .doneWhen.notes = false' "$ST/cards.jsonl"); echo "$bad" >> "$ST/cards.jsonl"
-  ! loop check >/dev/null 2>&1 || fail "the record check took doneWhen notes that are not a list of strings"
+  # A refused line is set aside (#157), not passed: it leaves the records for the quarantine, named by its field.
+  local n; n=$(wc -l < "$ST/cards.jsonl")
+  loop check >/dev/null 2>&1 && jq -se --argjson n "$n" 'last | .line == $n and .field == "doneWhen"' "$ST/quarantined.jsonl" >/dev/null \
+    && ! grep -qF '"notes":false' "$ST/cards.jsonl" || fail "the record check took doneWhen notes that are not a list of strings: $(cat "$ST/quarantined.jsonl" 2>&1)"
 }
 
 # Bug: an issue with no `## Done when` is checked, or its reviewer is given Done-when lines.

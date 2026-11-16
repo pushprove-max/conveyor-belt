@@ -178,12 +178,12 @@ drypick() { # <open issues file> <state folder>
   READ=$2/$(basename "$STATE"); READ_OLD=$2/$(basename "$RETRIED"); CONTROL=$2/control.json; LIMIT=$2/$(basename "$LIMIT")
   [ -e "$READ" ] || READ=/dev/null; [ -e "$READ_OLD" ] || READ_OLD=/dev/null
   # Only the records' whole lines are read (check() says why), straight from the file: a copy would be a write.
+  # A line the check refuses is left out, as the loop sets it aside (check(), views.sh) before it picks.
   w=$(($(wc -l < "$READ"))) || return 1
-  bad=$(head -n "$w" "$READ" | jq -Rrn -f "$HERE/jq/check.jq" | head -n 1)
-  [ -z "$bad" ] || { echo "conveyor: $READ line $bad is not a whole record of a known step; stopping" >&2; return 1; }
+  bad=$(head -n "$w" "$READ" | jq -Rrn -f "$HERE/jq/check.jq") || return 1
   c=$(ctl) && c=$(adopted "$c" "$issues") && [ -n "$c" ] || return 1
   [ "$(state "$c" "$(guardread "$c" | jq -r '.pct // empty')")" = running ] || return 0
-  READ=<(head -n "$w" "$READ") upnext "$issues" '' '' "$c" | jq -r '.[0].number // empty'
+  READ=<(head -n "$w" "$READ" | awk -F'\t' 'NR == FNR { b[$1]; next } !(FNR in b)' <(printf '%s\n' "$bad") -) upnext "$issues" '' '' "$c" | jq -r '.[0].number // empty'
 }
 
 # The same-file check before a pick (docs/commands.md, Issues), run by the loop outside the records' lock, as a model

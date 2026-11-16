@@ -31,13 +31,15 @@ poll() { CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --once 2>"$T/err"; }
 
 # D1: one call gives the whole state, in plain text, each item on its own line: the cards in flight with their step
 # and time in it, a card waiting on others, a held issue, the release run under way with its failed cases, the blocked
-# card and the push error.
+# card, the push error and (#157) a card records line set aside with the field the check refused: the loop reads on
+# without it, so only the status tells the Foreman it is gone.
 t_status() {
 CASE=status; fixture status
 snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it keeps the address typed' build),$(card 4 'Add a field' review),$(card 5 'Speed up tests' tests)"']
   | .queue.waiting = [{issue: 6, title: "Later", waitsFor: [3]}] | .open.held = [{issue: 8}]
   | .health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
   | .health.pushFailingSince = "2026-11-15T11:59:00Z" | .health.pushError = {reason: "remote rejected the push"}
+  | .health.quarantined = [{line: 2518, field: "list", time: "2026-11-15T11:57:00Z"}]
   | .suites = [{kind: "release", version: "1.2.0", step: "release-prep", sha: "abcdef0123456789", since: "2026-11-15T11:30:00Z", ended: null,
       state: "running", done: 40, of: 120, failed: 2, cases: ["stall", "metrics"], moved: false, reasons: []}]'
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
@@ -45,7 +47,8 @@ for l in 'alpha: 3 on the belt' '  #3 build 12m Fix the login form on the accoun
   '  #5 tests 12m Speed up tests' 'waiting: #6 on #3' 'held: #8' \
   'release 1.2.0 running on abcdef012345 for 30m: 40 of 120 cases done, 2 failed: stall, metrics' \
   'needs you: #7 is blocked since 2026-11-15T11:00:00Z: tests failed twice' \
-  'needs you: the push has failed since 2026-11-15T11:59:00Z: remote rejected the push'; do
+  'needs you: the push has failed since 2026-11-15T11:59:00Z: remote rejected the push' \
+  'needs you: the card records line 2518 is set aside in quarantined.jsonl: the record check refused its field list'; do
   grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
 done
 grep -q '[{}]' <<<"$out" && fail "the status holds JSON: $out"

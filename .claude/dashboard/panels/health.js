@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null), limit | null (the
+// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, quarantined: [{line, field, time}] | null: the card records' lines set aside), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -150,6 +150,12 @@ window.DASH_APP.panel({
       if (typeof r.untimed === 'number' && r.untimed > 0) check(`Test times${of}`, ctx.chip('Not recorded', 'warn'),
         `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times`).next =
         'Add them to the test command: the section "The CPU budget of a test file" in conveyor/README.md tells how.';
+      // The card records' lines the record check set aside (quarantined: [{line, field, time}]; conveyor/lib/views.sh
+      // check()): the loop reads on without them, and the owner decides what each was.
+      const quarantined = Array.isArray(r.quarantined) ? r.quarantined.filter((q) => q && typeof q === 'object') : [];
+      if (quarantined.length) check(`Records set aside${of}`, ctx.chip(`${quarantined.length} line${quarantined.length === 1 ? '' : 's'}`, 'warn'),
+        plain(quarantined.map((q) => `line ${q.line}: ${q.field} refused, ${q.time}`).join('; '))).next =
+        'Look at each line in quarantined.jsonl in the state folder: fix the writer or conveyor/jq/check.jq, then remove the line from that file.';
       // Each Claude route (routes; conveyor/lib/control.sh routesnow()): the subscription login and the API proxy, each
       // in the state the last session on it found. A failed login is a warning while a fallback proxy works.
       const routes = r.routes && typeof r.routes === 'object' ? r.routes : null;

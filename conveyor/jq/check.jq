@@ -1,14 +1,20 @@
-# check() in conveyor.sh: the number of every line that is not one whole record of a known step.
+# check() in views.sh: every line that is not one whole record of a known step, as `<line number> TAB <field>`: the
+# field the check refused (one not in the list below, a required one missing, or the first whose value it refuses),
+# "(not JSON)", "(not an object)", or "step" when only the fields together are refused for that step.
 def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . == null or type == "number")
   and (.files | type == "array" and all((.file | type == "string") and (.cases | type == "array" and all(keys == ["line", "name"] and all(type == "string")))))
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
-[inputs] | to_entries[] | select(.value | (try (fromjson
-      | (keys - ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
-          "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-          "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
-        and ([.card, .result, .sha, .reason] | all(type == "string")) and (.issue | type == "number")
-        and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
-        and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
+def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
+def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
+  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
+  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route"];
+def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
+# Each required field's own test.
+def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
+  elif $k == "tokens" then .tokens | type == "object" and keys == ["claude", "codex"] and all(type == "number")
+  elif $k == "step" then .step | IN(steps[]) else .[$k] | type == "string" end;
+def ok: . as $r | (keys - known) == need
+        and all(need[]; . as $k | $r | needok($k))
         # A bugproof line: the bug-card check was skipped (bugproof()), its reason saying why; or a speed-up card's check
         # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof(), optproof()), and the fix
         # it made with the test files it added or changed (a line written before the fix was recorded has neither).
@@ -80,5 +86,12 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
         and (.testedits // [] | type == "array" and all(type == "object" and keys == ["casesDeleted", "changedExpected", "file", "read", "removedAsserts", "skipsAdded", "timeoutsRaised"]
           and (.file | type == "string") and (.read | type == "boolean") and (.read as $read
           | [.removedAsserts, .changedExpected, .skipsAdded, .timeoutsRaised, .casesDeleted] | all(if $read then type == "number" else . == null end))))
-        and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"))) catch false) | not)
-    | .key + 1
+        and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"));
+def good: try ok catch false;
+# The field refused: one the list does not know, then a required one missing, then the first other field whose removal
+# makes the record pass, then the first required one whose own test fails; else the step, whose fields together fail.
+def why: if type != "object" then "(not an object)" else . as $r
+  | first((keys - known - need)[], (need - keys)[], ((keys - need)[] | select(. as $k | $r | del(.[$k]) | good)),
+      (need[] | select(. as $k | $r | needok($k) | not)), "step") end;
+[inputs] | to_entries[] | (.key + 1) as $n | (try (.value | fromjson | {r: .}) catch null)
+  | if . == null then "\($n)\t(not JSON)" elif .r | good then empty else "\($n)\t\(.r | why)" end

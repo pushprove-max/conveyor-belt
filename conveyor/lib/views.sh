@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Every reader stops at a line, named by its number, that is not one whole record of a known step, exactly as
-# line() writes it: nothing is skipped and nothing half-understood is trusted. A push line (result fail) is not a
+# Every reader reads only whole records of a known step, exactly as line() writes them: nothing half-understood is
+# trusted. A line that is not one is set aside before anything reads it (check(), quarantine()), so one bad line
+# never stops the loop or the snapshot. A push line (result fail) is not a
 # step of its card: it is written under the card that landed last, names the commit that did not reach origin, and
 # cards() leaves it out of the card's steps. The dashboard's rows need three
 # fields a step may add: the issue title (picked), a session's or review's token split (usage), the kept folder (blocked).
@@ -24,7 +25,46 @@
 # bytes no longer give that checksum (`retry` rewrote it, or a hand did) is read from its first line again. A check
 # and a rewrite (moveout) never overlap: each holds the lock on $STATE.checked.lock, taken after the records' lock
 # and never before it.
-check() (
+# A line the check refuses (jq/check.jq names the field it refused) is set aside, not read: quarantine() moves it out
+# of the card records to $QUARANTINE, under the records' lock (taken here unless the caller holds it: LOCKHELD), and
+# health names it until the owner deals with it. A copy a reader holds (READ, not STATE: whole(), the snapshot)
+# drops the same lines. The check then reads the rest again; a line still refused after three tries stops the reader.
+check() {
+  local rc
+  for _ in 1 2 3; do
+    checkpart; rc=$?
+    [ $rc = 3 ] || return $rc
+    if [ -n "${LOCKHELD:-}" ]; then quarantine; else locked quarantine; fi || return 1
+    [ "$READ" = "$STATE" ] || dropbad "$READ" || return 1
+  done
+  echo "conveyor: $READ still holds a line that is not a whole record of a known step after it was set aside; stopping" >&2
+  return 1
+}
+# The lines of a copy of the card records that the check refuses, dropped from it.
+dropbad() { # <copy>
+  local bad
+  bad=$(jq -Rrn -f "$HERE/jq/check.jq" < "$1") || return 1
+  [ -z "$bad" ] || { awk -F'\t' 'NR == FNR { b[$1]; next } !(FNR in b)' <(printf '%s\n' "$bad") "$1" > "$1.kept" && mv -f "$1.kept" "$1"; }
+}
+# Under the records' lock: every line of the card records the check refuses moves to $QUARANTINE as {line (its number
+# in the records), field (the one the check refused), time, record (the line as it was)}, and the records are rewritten
+# without it (as moveout() rewrites them, under the lock on $STATE.checked.lock). Each is named on stderr.
+quarantine() {
+  local bad
+  stdb ask -o "$STATE.qall" lines cards && bad=$(jq -Rrn -f "$HERE/jq/check.jq" < "$STATE.qall") \
+    || { rm -f "$STATE.qall"; echo "conveyor: cannot read the card records to set a bad line aside; nothing changed" >&2; return 1; }
+  [ -n "$bad" ] || { rm -f "$STATE.qall"; return 0; }
+  awk -F'\t' 'NR == FNR { b[$1] = $2; next } FNR in b { print FNR "\t" b[FNR] "\t" $0 }' <(printf '%s\n' "$bad") "$STATE.qall" \
+    | jq -cR --arg at "$(date -u +%FT%TZ)" 'split("\t") | {line: (.[0] | tonumber), field: .[1], time: $at, record: (.[2:] | join("\t"))}' >> "$QUARANTINE" \
+    && awk -F'\t' 'NR == FNR { b[$1]; next } !(FNR in b)' <(printf '%s\n' "$bad") "$STATE.qall" > "$STATE.qrest" \
+    || { rm -f "$STATE.qall" "$STATE.qrest"; echo "conveyor: cannot write $QUARANTINE; the card records are unchanged" >&2; return 1; }
+  ( flock 5 || exit 1; stdb rewrite cards < "$STATE.qrest" ) 5>>"$STATE.checked.lock" \
+    || { echo "conveyor: the card records were not rewritten whole; what they held is in $STATE.qall" >&2; return 1; }
+  rm -f "$STATE.qall" "$STATE.qrest"
+  while IFS=$'\t' read -r l f; do echo "conveyor: $STATE line $l is not a whole record of a known step (the check refused $f); it is set aside in $QUARANTINE" >&2; done <<<"$bad"
+}
+# 3: a whole line the check refuses.
+checkpart() (
   flock 5 || exit 1
   n=0; l=0; sum=''
   { read -r n l sum < "$STATE.checked"; } 2>/dev/null
@@ -39,7 +79,7 @@ check() (
   size=$((n + $(new | head -n "$lines" | wc -c)))
   [ "$size" -gt "$n" ] || exit 0
   bad=$(new | jq -Rrn -f "$HERE/jq/check.jq" | head -n 1)
-  [ -z "$bad" ] || { echo "conveyor: $STATE line $((l + bad)) is not a whole record of a known step; stopping" >&2; exit 1; }
+  [ -z "$bad" ] || exit 3
   { echo "$size $((l + lines)) $(head -c "$size" "$READ" | cksum)" > "$STATE.checked.new" && mv -f "$STATE.checked.new" "$STATE.checked"; } 2>/dev/null
   exit 0
 ) 5>>"$STATE.checked.lock"
@@ -132,9 +172,10 @@ cards() {
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
 # untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; routes: each
-# Claude route, subscription and proxy, with its state (routesnow()). Every object of it that names a main-red fix card
+# Claude route, subscription and proxy, with its state (routesnow()); quarantined (line, field, time): each line of the
+# card records the check set aside ($QUARANTINE, check()), until the owner removes it from that file. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it: the card has no issue (issue 0) to be shown by.
-# Records that do not check give no record: the reason and exit 1.
+# A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
 # the weekly limit reading is at or over the guard, or "control record unreadable"; a loop that is not running picks
 # nothing, whatever `loop` says of there being one; the running loop's own "control record unreadable" stands over
@@ -228,7 +269,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
     --argjson cap "$cap" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" \
-    --slurpfile old "$READ_OLD" --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
+    --slurpfile old "$READ_OLD" --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
@@ -291,6 +332,6 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, diskFreeKb: $free, builderCap: $cap, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed, routes: $routes}
+       untimed: untimed, routes: $routes, quarantined: $qt}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"
 }

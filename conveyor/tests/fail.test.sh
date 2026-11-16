@@ -187,28 +187,44 @@ t_conflict() {
   st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'not on the main branch' && [ "$(git -C "$R" rev-parse refs/heads/main)" = "$landed" ] || fail "a landing ran with main's checkout on another branch"
 }
 
-# Bugs: a line that does not parse, or parses but is not a whole record of a known step (a landing with no commit,
-# an unknown step), is skipped or trusted, so the loop, the counts and the report run on a state they cannot read.
+# Bugs (#157): a line that does not parse, or parses but is not a whole record of a known step (a landing with no
+# commit, an unknown step, a required field missing), stopped the loop and every snapshot until a hand fixed it; or,
+# before that, was skipped or trusted. Now each is set aside: moved out of the records to quarantined.jsonl with its
+# line number and the field the check refused, so no reader trusts it and every reader goes on with the rest.
 t_corrupt() {
   setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST"
   good='{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}'
+  S=$ST/cards.jsonl Q=$ST/quarantined.jsonl
+  # Set aside: the check goes on and names the line and field, the records keep only good lines, the quarantine has it last.
+  aside() { # <line> <field> <what>
+    out=$(loop check 2>&1) || fail "the check stopped on $3: $out"
+    grep -qF "line $1 is not a whole record of a known step (the check refused $2)" <<<"$out" || fail "the check did not name line $1 and $2 for $3: $out"
+    [ "$(grep -c . "$S")" = "$(grep -cxF "$good" "$S")" ] || fail "a bad line is still in the records after $3: $(cat "$S")"
+    jq -se --argjson l "$1" --arg f "$2" 'last | .line == $l and .field == $f and (.record | type == "string")' "$Q" > /dev/null \
+      || fail "the quarantine does not name line $1 and $2 for $3: $(cat "$Q" 2>&1)"
+  }
   # A bugproof line only says the bug-card check was skipped: one with another result is not a record of it.
-  for bad in '{"card":"c0-5","iss' '{"card":"c","issue":7,"step":"landed"}' "${good/picked/future}" "${good/picked/landed}" "${good/picked/bugproof}"; do
-    printf '%s\n' "$good" "$bad" > "$ST/cards.jsonl"
-    out=$(loop run 2>&1) && fail "loop ran on: $bad"; grep -q 'line 2' <<<"$out" || fail "loop did not name line 2: $bad"
-    out=$(loop cards 2>&1) && fail "cards answered: $bad"
-    out=$(CONVEYOR_MAIN=$R bash "$SRC/report.sh" 2>&1) && fail "report ran on: $bad"; grep -q 'line 2' <<<"$out" || fail "report did not name line 2: $bad"
-    [ "$(wc -l < "$ST/cards.jsonl")" = 2 ] || fail "loop wrote past the bad line"
-  done
+  while IFS='|' read -r field bad; do
+    printf '%s\n' "$good" "$bad" > "$S"; aside 2 "$field" "$bad"
+    out=$(loop cards 2>&1) && [ "$(jq -c '.cards | map(.card)' <<<"$out")" = '["c0-4"]' ] || fail "cards did not answer with the good line after $bad: $out"
+  done <<EOT
+(not JSON)|{"card":"c0-5","iss
+reason|{"card":"c","issue":7,"step":"landed"}
+step|${good/picked/future}
+step|${good/picked/landed}
+step|${good/picked/bugproof}
+EOT
+  # A reader of a copy (cards, as the snapshot) that meets the line first sets it aside too, and reads its copy without it.
+  printf '%s\n' "$good" "${good/picked/future}" > "$S"
+  out=$(loop cards 2>/dev/null) && [ "$(jq -c '.cards | map(.card)' <<<"$out")" = '["c0-4"]' ] || fail "cards did not read its copy without the bad line: $out"
+  [ "$(grep -c . "$S")" = 1 ] && [ "$(jq -sc 'last | [.line, .field]' "$Q")" = '[2,"step"]' ] || fail "cards did not set the line aside: $(cat "$S" "$Q")"
   # A check reads only the lines no check has passed, so the records can grow without every pick slowing down. What
-  # it skips must still be what it passed: a bad line written later and a passed line changed by hand both stop it.
-  S=$ST/cards.jsonl; printf '%s\n' "$good" "$good" > "$S"
+  # it skips must still be what it passed: a bad line written later and a passed line changed by hand are both set aside.
+  printf '%s\n' "$good" "$good" > "$S"
   loop check || fail "two whole records did not check"
   [ "$(cut -d' ' -f1 "$S.checked")" = "$(wc -c < "$S")" ] || fail "the check did not note how far it has read: $(cat "$S.checked" 2>&1)"
-  echo "${good/picked/future}" >> "$S"
-  out=$(loop check 2>&1) && fail "a bad line written after a check passed"; grep -q 'line 3' <<<"$out" || fail "the later bad line was not named as line 3: $out"
-  printf '%s\n' "${good/picked/future}" "$good" > "$S"
-  out=$(loop check 2>&1) && fail "a passed line changed by hand still passed"; grep -q 'line 1' <<<"$out" || fail "the changed line was not named as line 1: $out"
+  echo "${good/picked/future}" >> "$S"; aside 3 step "a bad line written after a check passed"
+  printf '%s\n' "${good/picked/future}" "$good" > "$S"; aside 1 step "a passed line changed by hand"
   # Bug: the check reads without the records' lock, so it can see a long line another process is still writing; a
   # half-written last line stopped the loop for minutes though it was whole a moment later.
   printf '%s\n' "$good" > "$S"; printf '%s' "${good:0:40}" >> "$S"
@@ -221,13 +237,15 @@ t_corrupt() {
   printf '%s\n' "${good:40}" >> "$S"
   loop check || fail "the line, once whole, did not check"
   [ "$(cut -d' ' -f1-2 "$S.checked")" = "$(wc -c < "$S") 2" ] || fail "the check did not pass the line once whole: $(cat "$S.checked" 2>&1)"
-  mkdir -p "$STUB/dry"; cp "$S" "$STUB/dry/cards.jsonl"; printf '%s' "${good:0:40}" >> "$STUB/dry/cards.jsonl"; echo '[]' > "$STUB/dry/issues.json"
+  # The dry pick leaves a bad whole line out, as the loop sets it aside, and stops on it no more.
+  mkdir -p "$STUB/dry"; { cat "$S"; echo "${good/picked/future}"; printf '%s' "${good:0:40}"; } > "$STUB/dry/cards.jsonl"; echo '[]' > "$STUB/dry/issues.json"
+  cp "$STUB/dry/cards.jsonl" "$STUB/dry.was"
   # The dry pick writes nothing (t_dry), so it reads those whole lines without copying them anywhere either.
   mkdir -p "$STUB/drytmp"; chmod 500 "$STUB/drytmp"
-  out=$(TMPDIR=$STUB/drytmp loop pick --dry --issues "$STUB/dry/issues.json" --state "$STUB/dry" 2>&1) || fail "a half-written last line stopped the dry pick, or it needed somewhere to write: $out"
+  out=$(TMPDIR=$STUB/drytmp loop pick --dry --issues "$STUB/dry/issues.json" --state "$STUB/dry" 2>&1) || fail "a bad line or a half-written last line stopped the dry pick, or it needed somewhere to write: $out"
   chmod 700 "$STUB/drytmp"
-  echo "${good/picked/future}" >> "$S"
-  out=$(loop check 2>&1) && fail "a whole bad line passed"; grep -q 'line 3' <<<"$out" || fail "the whole bad line was not named as line 3: $out"
+  cmp -s "$STUB/dry/cards.jsonl" "$STUB/dry.was" || fail "the dry pick changed the records it read"
+  echo "${good/picked/future}" >> "$S"; aside 3 step "a whole bad line"
 }
 
 # Bug: a session the model API refused (a Cloudflare 403 challenge on every request for some minutes) blocked its card

@@ -251,6 +251,25 @@ test('Health: card test runs that recorded no test times are a warning that name
   assert.equal(panel(at(0), 'health').querySelector('dt[data-check="Test times"]'), null, 'runs that recorded times show no row');
 });
 
+// Issue 157. Bug: a record line the check refused stopped the loop and the snapshot; now it is set aside, and Health
+// must name it, or the owner never learns a line left the records. Each line set aside is a warning row naming its
+// line and the field refused; none shows no row.
+test('Health: a card record line set aside names its line and the field the check refused', () => {
+  const at = (q) => {
+    const data = full();
+    data.panels.health.data.records[0].quarantined = q;
+    const w = boot();
+    deliver(w, data);
+    return w;
+  };
+  const w = at([{ line: 2518, field: 'list', time: iso(T0) }]);
+  assert.deepEqual(failingRows(w), ['Records set aside']);
+  const row = dd(w, 'Records set aside');
+  assert.equal(row.querySelector(':scope > .chip.chip-warn').textContent, '1 line');
+  assert.match(row.textContent, /line 2518: list refused.*Next: .*quarantined\.jsonl/);
+  assert.equal(panel(at([]), 'health').querySelector('dt[data-check="Records set aside"]'), null, 'nothing set aside shows no row');
+});
+
 // Issue 629. Bug: Health told the owner to "Move this account's work to another on the Rules tab" for a 92% account
 // no card runs on, and for one the cards use when the host file listed no other account to move to; a failed read
 // showed "HTTP 401". Each fixture is one Claude account on the build machine.

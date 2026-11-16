@@ -20,7 +20,9 @@ keepcards() {
 { [[ ${1:-} =~ ^(pick|install|install-service|board|setup|doctor|state-dir|machine)$ ]] || [ "${1:-}:${2:-}" = lane:research ] || { mkdir -p "${STATE%/*}" && keepcards && mkdir -p "$CARDS" && : >> "$STATE" && : >> "$RETRIED"; }; } && cd "$MAIN" || exit 1
 
 # Every append and every pick holds one flock on the state file itself, so lines never interleave.
-locked() { ( flock 9 && "$@" ) 9>>"$STATE"; }
+# LOCKHELD tells what runs under it that the lock is held (check(), views.sh): a second flock on the file would wait for ever.
+# shellcheck disable=SC2034 # read by check() in lib/views.sh
+locked() { ( flock 9 && LOCKHELD=1 && "$@" ) 9>>"$STATE"; }
 # The state database (state.py): the only reader and writer of the history files (the card records, the retried
 # lines, the declined list, the samples and the limit readings). Every line is appended, and every rewrite written,
 # through it, to its table and its file both; every reader asks it, but check() (views.sh), which checks the card

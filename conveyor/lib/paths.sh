@@ -110,6 +110,9 @@ choosecards() {
 [ -n "${CONVEYOR_CARDS:-}" ] || CARDS=$(dirname "$MAIN")/$(keptcards "$CARDSNAME" || choosecards)
 STATE=$ST/cards.jsonl
 RETRIED=${STATE%/*}/retried.jsonl # the lines of blocked cards that `retry` took out of the card records
+# The card records' lines the record check refused, set aside (quarantine(), views.sh): {line, field, time, record}.
+# shellcheck disable=SC2034 # read by lib/views.sh, which conveyor.sh sources beside this file
+QUARANTINE=${STATE%/*}/quarantined.jsonl
 READ=$STATE; READ_OLD=$RETRIED          # what the readers read: these two files, or the snapshot's one copy of each
 CONTROL=${STATE%/*}/control.json  # the control record; the snapshot reads its own copy of this too
 # What the running loop makes of the control record: {pid, started (p_started: with pid, it names the loop's
