@@ -28,6 +28,10 @@ followsetup() {
 }
 # takeby and engine are tests/followmain.test.sh's. doctor's output, run by the install of <commit>:
 reldoctor() { (cd "$R" && CONVEYOR_MAIN=$R bash "$V/$1/conveyor/conveyor.sh" doctor 2>&1); } # <commit>
+# What doctor says of the release <commit> is, as the install of <commit> would (released(), lib/install.sh), with no
+# whole doctor run around it.
+# shellcheck disable=SC2034 # HERE, OWN and ENGINE are read by released(), from the sourced lib/install.sh
+relreleased() { (HERE=$V/$1/conveyor OWN='' ENGINE=$R/.git/conveyor-engine.json; . "$SRC/lib/install.sh"; released "$1") 2>&1; } # <commit>
 
 # Bugs: a project that follows releases takes main, where changes are tested before they are released, or a release
 # still a draft; it does not move on once a newer release is published; doctor does not name the release it is on.
@@ -55,11 +59,10 @@ t_followreleaserefuse() {
   out=$(takeby "$A" 2>&1)
   [ "$(engine .commit)" = "$A" ] && [ "$(engine '"\(.refused.commit) \(.refused.release)"')" = "$E v1.2.0" ] \
     || fail "a release that fails its check was taken, or not recorded: $out $(cat "$R/.git/conveyor-engine.json")"
-  s=$(loop snapshot) || fail "snapshot exited non-zero"
-  jq -e --arg e "$E" '.needsYou.engine | objects | .commit == $e and (.reason | test("its check of the pack failed: .*zzz: missing"))' <<<"$s" >/dev/null \
-    || fail "Needs you does not name the refused release's commit and why: $(jq -c .needsYou.engine <<<"$s")"
-  out=$(reldoctor "$A"); grep -qx "ok: the project follows the plugin's releases: it runs Conveyor commit $A, release v1.0.1; a newer release is published: v1.2.0 (commit $E)" <<<"$out" \
-    || fail "doctor did not say a newer release is published: $out"
+  # Needs you reads the refused entry whatever the pack follows (snapshot.sh): followmain.test.sh's t_followrefuse
+  # proves it. doctor's line is released()'s, run through doctor in t_followrelease.
+  out=$(relreleased "$A"); [ "$out" = "release v1.0.1; a newer release is published: v1.2.0 (commit $E)" ] \
+    || fail "doctor's line does not say a newer release is published: $out"
 }
 
 # The plugin's repository, $G, as https://github.com/example-owner/plugin (git reads that address from $G:
