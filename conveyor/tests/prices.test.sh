@@ -42,6 +42,33 @@ t_pricessnap() {
   jq -e '.prices.research == "claude-fable-5-2"' <<<"$out" > /dev/null || fail "the research lane's model: $(jq -c .prices.research <<<"$out")"
 }
 
+# The research lane's sessions are no card's step, so seen reads the models they ran from their transcripts: the lane
+# of this checkout's record (~/lane), a session begun in a folder of the lane (~/lane/reports, filed apart), one session
+# a model however many transcripts (its subagent's) name it, and none of a line older than 30 days, of a folder outside
+# the lane that Claude Code files under the same name or a name the lane's starts (~/lane-x), of "<synthetic>", or of
+# another checkout's lane. Bug caught: a model ID only a research session ran (one begun in ~/lane/reports too) never
+# reached Seen but not priced, so the owner could not price it.
+t_pricesresearch() {
+  local out lane other t
+  export HOME=$T/$CASE/home; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$HOME/lane" "$HOME/other"
+  jq -n --arg m "$T/$CASE/main" --arg o "$T/$CASE/elsewhere" '{records: [{repo: "o", main: $o, lanes: {research: {worktree: "~/other"}}},
+    {repo: "main", main: $m, lanes: {research: {worktree: "~/lane"}}}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  setup '[]'
+  lane=$HOME/.claude/projects/$(sed 's/[^a-zA-Z0-9]/-/g' <<<"$HOME/lane"); other=$HOME/.claude/projects/$(sed 's/[^a-zA-Z0-9]/-/g' <<<"$HOME/other")
+  mkdir -p "$lane/s1/subagents" "$other"; t=$(date -u +%FT%TZ)
+  line() { jq -cn --arg m "$1" --arg c "$2" --arg s "$3" --arg t "$4" '{type: "assistant", cwd: $c, sessionId: $s, timestamp: $t, message: {model: $m, usage: {}}}'; }
+  { line research-9 "$HOME/lane/sub" s1 "$t"; line '<synthetic>' "$HOME/lane" s1 "$t"; line old-9 "$HOME/lane" s2 2020-01-01T00:00:00Z
+    line outside-9 "$HOME/lane-x" s3 "$t"; } > "$lane/s1.jsonl"
+  line research-9 "$HOME/lane" s1 "$t" > "$lane/s1/subagents/a.jsonl"
+  line other-9 "$HOME/other" s4 "$t" > "$other/s4.jsonl"
+  mkdir -p "$lane-reports" "$lane-x"
+  line reports-9 "$HOME/lane/reports" s5 "$t" > "$lane-reports/s5.jsonl"
+  line outside-9 "$HOME/lane-x" s6 "$t" > "$lane-x/s6.jsonl"
+  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  jq -e '.prices.seen == [{model: "reports-9", sessions: 1, routes: [], as: null}, {model: "research-9", sessions: 1, routes: [], as: null}]' <<<"$out" > /dev/null \
+    || fail "the model IDs seen: $(jq -c .prices.seen <<<"$out")"
+}
+
 # `prices set` saves a price in main's pack (with a cache write price when given), keeping the entry's name and
 # aliases, and `prices clear` takes the price off, keeping them too (an entry left with nothing goes, and so does
 # prices). An OpenCode model takes a price (your price, over the cost OpenCode reports). A bad value is refused with

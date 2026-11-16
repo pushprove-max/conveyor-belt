@@ -151,8 +151,8 @@
 #   (lib/testfiles.sh testspart() says what it holds); null when the pack cannot be read.
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
 #   cacheWrite, in $ per million tokens), overrides (the pack's prices, added models and aliases, which win over it),
-#   names (each model's display name) and seen (each model ID the steps of the last 30 days ran: model, sessions,
-#   routes, as: the model it is priced as, or null) and research (the pack's research lane model, or null); null when the
+#   names (each model's display name) and seen (each model ID the steps and the research lane's sessions of the last
+#   30 days ran: model, sessions, routes, as: the model it is priced as, or null) and research (the pack's research lane model, or null); null when the
 #   table cannot be run.
 # checkRun: the check run the pack's checks.progress prints, as checkrun() below says; no such field without one.
 # cost: usd of the steps that ended today and in the 7 days to today, those of a blocked card that `retry` moved
@@ -373,7 +373,20 @@ snapshot() (
   # has none. The models the steps of the last 30 days ran are counted from since (seen).
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
   packget lanes.research.model rmodel 2>/dev/null || rmodel=''
-  jq -c --argjson p "$pp" '.prices = $p | .since = ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate)' "$d/all" \
+  # The research lane's sessions are no card's step: seen counts the models they ran from their transcripts in the
+  # default login's projects folder. The lane is the host file's lanes.research.worktree of this checkout's record (the
+  # record whose main is this checkout, compared as lanenote does; ~/ is the home folder); none, and none is read.
+  rwt=''
+  if [ -e "$HOST" ]; then
+    while IFS= read -r -d '' m && IFS= read -r -d '' w; do
+      [ "$m" = "$MAIN" ] || { [[ $m == /* ]] && [ "$m" -ef "$MAIN" ]; } || continue
+      rwt=$w; break
+    done < <(jq -j '.records | arrays | .[] | objects | select([.main, (try .lanes.research.worktree catch null)] | all(type == "string" and . != "" and (test("\u0000") | not)))
+      | "\(.main)\u0000\(.lanes.research.worktree)\u0000"' "$HOST" 2>/dev/null)
+    [[ $rwt != \~/* ]] || rwt=$HOME/${rwt#"~/"}
+  fi
+  jq -c --argjson p "$pp" --arg rw "$rwt" --arg pj "$HOME/.claude/projects" '.prices = $p | .since = ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate)
+      | if $rw == "" then . else .research = {worktree: $rw, projects: $pj} end' "$d/all" \
     | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards > "$d/pricedall" 2>/dev/null \
     && jq -ce .cards "$d/pricedall" > "$d/priced" 2>/dev/null && pricedok=true \
     || { pricedok=false; jq -c '.cards | map(.usd = null | .steps |= map(.usd = null) | if .live then .live.usd = null else . end)' "$d/all" > "$d/priced"; } || exit 1

@@ -21,7 +21,7 @@
       reading, never summed with Claude's. With project folders, `today`
       counts only the sessions run in them; every other figure is the account's. The env PP_PRICES holds
       the pack's model prices, added models and aliases (its `prices`, as JSON), put over the built-in table (use_prices).
-  dashboard_limit.py cards  < {cards: [...]}
+  dashboard_limit.py cards  < {cards: [...], prices, since, research}
       Conveyor's cards with each finished session, review and test run priced at list price (conveyor.sh snapshot).
 
 Every figure comes from that reading or from Claude Code's own transcripts; a
@@ -634,6 +634,50 @@ def price(row):
     return (i * inp + w5 * write_rate(p) + w1 * inp * 2 + r * read + o * out) / 1e6 + sum(advisors)
 
 
+def lane_models(projects, worktree, since):
+    """{model ID: the sessions that ran it} of the Claude Code sessions run in `worktree` (a research lane, whose
+    sessions are no card's step) from `since` (epoch) on, read from their transcripts under `projects` (Claude Code's
+    projects folder: one folder a working folder, its path with each other character than a letter or a digit as -,
+    and subagents' transcripts below it). A session begun in a folder inside the worktree is filed under that folder's
+    name, which starts with the worktree's name and a -, so each such folder is read too. A line counts only when its
+    own cwd is the worktree or inside it, as two folders can share a name (and a name can start with another's).
+    "<synthetic>" is no model: Claude Code writes it on a message no model answered. A file that cannot be read
+    counts nothing."""
+    if not isinstance(projects, str) or not isinstance(worktree, str) or not worktree.startswith("/") or since is None:
+        return {}
+    enc = re.sub(r"[^a-zA-Z0-9]", "-", worktree.rstrip("/"))
+    try:
+        dirs = [d for d in os.listdir(projects) if d == enc or d.startswith(enc + "-")]
+    except OSError:
+        return {}
+    out = {}
+    for root, _, files in (w for d in dirs for w in os.walk(os.path.join(projects, d))):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                if not name.endswith(".jsonl") or os.stat(path).st_mtime < since:
+                    continue
+                with open(path, "rb") as f:
+                    for line in f:
+                        if b'"model"' not in line:
+                            continue
+                        try:
+                            r = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(r, dict):
+                            continue
+                        msg = r.get("message")
+                        m = msg.get("model") if isinstance(msg, dict) else None
+                        if r.get("type") != "assistant" or not isinstance(m, str) or m in ("", "<synthetic>") \
+                                or (epoch(r.get("timestamp")) or 0) < since or not under(r.get("cwd"), [worktree]):
+                            continue
+                        out.setdefault(m, set()).add(r.get("sessionId") if isinstance(r.get("sessionId"), str) else path)
+            except OSError:
+                continue
+    return {m: len(s) for m, s in out.items()}
+
+
 def card_costs(part):
     """Conveyor's cards priced: each finished session (build, fix, rebase) and review (Codex too) at the list
     price of the model that ran it, from the token split its record line holds. A finished step is priced only at the
@@ -679,7 +723,9 @@ def card_costs(part):
     the pack has when the pack gives it none (display), for the Rules tab's Model prices. With `since` (a time as the steps' lines write it), it
     gets `seen` too: each model ID the steps of that time or later ran ({model, sessions: how many steps, routes: the
     routes their lines name (proxy, subscription), as: the model it is priced as, null when none prices it}), the most
-    used first.
+    used first. The part's `research` ({worktree, projects}: the research lane's folder and Claude Code's projects
+    folder), taken out of the part, adds the model IDs its sessions ran from that time on (lane_models), one session
+    each: they are no card's step, and an ID only they ran would never reach Seen but not priced.
     """
     def known(m):
         if not isinstance(m, str):
@@ -806,6 +852,11 @@ def card_costs(part):
         card["usd"] = None if any(s["usd"] is None for s in steps) else round(sum(s["usd"] for s in steps), 4)
         if isinstance(card.get("live"), dict):
             card["live"]["usd"] = usd(card["live"], models)[0]
+    research = part.pop("research", None)
+    if isinstance(since, str) and isinstance(research, dict):
+        for x, n in lane_models(research.get("projects"), research.get("worktree"), epoch(since)).items():
+            k, ways = seen.get(x, (0, set()))
+            seen[x] = (k + n, ways)
     if isinstance(since, str):
         part["seen"] = [{"model": x, "sessions": k, "routes": sorted(ways), "as": known(x)}
                         for x, (k, ways) in sorted(seen.items(), key=lambda t: (-t[1][0], t[0]))]
