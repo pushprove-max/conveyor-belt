@@ -121,3 +121,46 @@ EOF
   [ "$(st 'select(.issue == 7 and (.step | IN("review", "landed"))) | "\(.step) \(.route // "")"' | tr '\n' ,)" = 'review proxy,landed ,' ] \
     || fail "the card did not land with its review through the proxy: $(st 'select(.issue == 7) | [.step, .route, .reason] | join(" ")' | tr '\n' ,)"
 }
+
+# The one-answer calls (the judge, askmodel(), a test action, a check session), each called alone in the engine shell
+# as `conveyor.sh run` makes it, with no card run. claude logs each call's route in $STUB/routes; on the subscription
+# its login has expired, through the proxy it answers. Both roles take the proxy as their fallback.
+pxone() { # <the engine command>
+  setup "[$(issue 7 2026-01-01)]"; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, roles: {builder: "fallback", reviewer: "fallback"}}'
+  unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ENABLE_TOOL_SEARCH
+  cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+cat > /dev/null; echo "${ANTHROPIC_BASE_URL:-subscription}" >> "$STUB/routes"
+[ -n "${ANTHROPIC_BASE_URL:-}" ] || { echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed","num_turns":1}'; exit 1; }
+echo '{"type":"result","is_error":false,"result":"F1 DECLINE: wrong","num_turns":1,"usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":2}}'
+EOF
+  chmod +x "$STUB/claude"; mkdir -p "$T/$CASE/cards"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && eval "$1" ) > "$T/$CASE/out" 2>&1
+}
+pxtwice() { [ "$(cat "$STUB/routes" 2>/dev/null)" = "subscription"$'\n'"$PXURL" ] || fail "$1 did not run again through the proxy once its login failed: $(cat "$STUB/routes" 2>&1) $(cat "$T/$CASE/out")"; } # <what>
+
+# Bug: with the proxy as the reviewer's fallback and an expired login, the default Claude judge ran once on the
+# subscription and failed, so every finding stood unjudged.
+t_pxjudge() {
+  pxone 'w=$CARDS/c7 && git -C "$MAIN" worktree add -q --detach "$w" && judgecall "$w" judge "F1 a finding"' || fail "the judge call failed: $(cat "$T/$CASE/out")"
+  pxtwice "the judge"
+}
+# Bug: the same-file check (askmodel()) on an expired login never tried the builder's fallback proxy.
+t_pxask() {
+  pxone 'd=$(mktemp -d) && askmodel "$d" 60 low "" question' || fail "askmodel failed: $(cat "$T/$CASE/out")"
+  pxtwice "askmodel"
+}
+# Bug: a test action on an expired login ended failed without trying the fallback proxy.
+t_pxtarun() {
+  pxone 'w=$CARDS/ta && mkdir -p "$w" "$TESTACTS" && tarun "{\"id\": \"px1\", \"cli\": \"claude\", \"model\": \"m\", \"effort\": \"low\", \"action\": \"explain\"}" "$w" question \
+    && jq -r .state "$TESTACTS/px1.json"' || fail "tarun failed: $(cat "$T/$CASE/out")"
+  [ "$(tail -n 1 "$T/$CASE/out")" = "done" ] || fail "the test action did not end done: $(cat "$T/$CASE/out")"
+  pxtwice "the test action"
+}
+# Bug: a check session on an expired login failed without trying the fallback proxy, so a card blocked on that login
+# was never put back by itself though the proxy worked.
+t_pxcheck() {
+  pxone 'startcheck "{\"seat\": \"reviewer\", \"cli\": \"claude\", \"model\": \"m\", \"account\": \"\"}"' || fail "the check session failed: $(cat "$T/$CASE/out")"
+  pxtwice "the check session"
+}

@@ -352,6 +352,8 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   fi
   [ -n "$f" ] || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s}')
   [ $rc = 0 ] && [ -s "$1.judge" ] && { printf '%s\n' "$f"; return 0; }
+  # Its login failed and the proxy is the reviewer's fallback: asked again at once through the proxy.
+  ! loginfallback "$rc" "$agent" "$1.judge.events" "$1.judge.err" || { PROXY_NOW=1 judgecall "$@"; return; }
   jq -c --arg r "the judge call failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT")), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
 }
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.

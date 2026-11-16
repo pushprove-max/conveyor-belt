@@ -550,6 +550,21 @@ NOSTARTSAID='[inputs | select(test("\\S")) | (fromjson? // {type: "plain", messa
   | if .type == "result" then select(.is_error == true) | .result elif .type == "turn.failed" then .error.message?
     elif .type == "error" then (.message? // .error.data.message? // .error.message? // .error.name?) elif .type == "plain" then .message else empty end
   | strings] | .[-5:][]'
+# The words of a CLI whose login failed (nostart(), loginfallback()).
+LOGINSAID='not logged in|log ?in|invalid api key|authenticat|unauthori[sz]ed|oauth|credentials'
+# Whether a one-answer call on Claude or Codex that failed (the judge, askmodel(), a test action, a check session)
+# runs again at once through the proxy: it failed (its exit not 0 and not the timeout's 124) and its words
+# (NOSTARTSAID, then the last lines of its stderr) say its login failed, and the proxy set for its CLI is its role's
+# fallback (proxyfallback()). Sets NOSTART_LOGIN as nostart() does.
+loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stderr file>]
+  local raw
+  NOSTART_LOGIN=''
+  [ "$1" != 0 ] && [ "$1" != 124 ] && [ "$2" != opencode ] || return 1
+  raw=$( { jq -rRn "$NOSTARTSAID" "$3" 2>/dev/null; [ -z "${4:-}" ] || tail -n 20 "$4" 2>/dev/null; } | tr -d '\000')
+  grep -Eqi "$LOGINSAID" <<<"$raw" && ! grep -Eqi "(^|[^a-z])$2: (command )?not found" <<<"$raw" || return 1
+  NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
+  proxyfallback "$2"
+}
 # A session or review that failed (its exit not 0 and not the timeout's 124) with no turn past its first and no token
 # never began its work: its CLI stopped before it (not logged in, a model this account does not have, a settings
 # error). Sets NOSTART_WHY to its reason: the cause, named from the CLI's own words, its exit and what to do; under it
@@ -580,7 +595,7 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
   fi
   if [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
     cause="the $5 CLI is not installed"; todo="install it, or set the $7 to a CLI this host has (conveyor.sh control, or Rules on the Board)"
-  elif grep -Eqi 'not logged in|log ?in|invalid api key|authenticat|unauthori[sz]ed|oauth|credentials' <<<"$raw"; then
+  elif grep -Eqi "$LOGINSAID" <<<"$raw"; then
     cause="the $5 CLI is not logged in"
     NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
     case $5 in
@@ -626,10 +641,12 @@ startcheck() { # <{seat, cli, model, account}>
   local PROXY_ROLE; PROXY_ROLE=$(jq -r '.seat // "builder"' <<<"$1"); [ "$PROXY_ROLE" = reviewer ] || PROXY_ROLE=builder
   case $cli in
     claude) (cd "$d" && a=$(acctenv "$a") && proxyenv && acctrun "$a" \
-      && exec timeout --kill-after=10 120 claude -p --model "$m" --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
-    codex) (cd "$d" && codexargs && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$m" - <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
+      && exec timeout --kill-after=10 120 claude -p --model "$m" --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." >"$d.out" 2>&1 8>&-) ;;
+    codex) (cd "$d" && codexargs && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$m" - <<<"Reply with the one word OK." >"$d.out" 2>&1 8>&-) ;;
     opencode) (cd "$d" && OPENCODE_DISABLE_PROJECT_CONFIG=1 exec timeout --kill-after=10 120 opencode run --model "${m#opencode:}" <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
     *) false ;;
   esac; rc=$?
-  rm -rf "$d"; return $rc
+  # Its login failed and the proxy is its role's fallback: checked again at once through the proxy.
+  if loginfallback "$rc" "$cli" "$d.out"; then PROXY_NOW=1 startcheck "$1"; rc=$?; fi
+  rm -rf "$d" "$d.out"; return $rc
 }

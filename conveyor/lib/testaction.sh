@@ -162,14 +162,18 @@ tadrop() { chmod -R u+w "$1" 2>/dev/null; git -C "$MAIN" worktree remove --force
 # TESTACTION_TIMEOUT with its text going to <id>.txt as it comes, and its record written last with how it ended.
 # A TERM (tastop()) ends the session: its CLI's process group is told to end, and killed 10 s later if it has not.
 tarun() { # <the record> <worktree> <prompt>
-  local r=$1 wt=$2 f tp='' tx txp stopped='' rc=0 t0=$EPOCHSECONDS state v=null why=null hv='{}' k acct cli model effort id me=$BASHPID
+  local r=$1 wt=$2 f tp='' tx txp stopped='' rc=0 t0=$EPOCHSECONDS state v=null why=null hv='{}' k acct cli model effort id me=$BASHPID px=''
   trap 'stopped=1' TERM
   jqget "$r" id id cli cli model model effort effort || return 1
   f=$TESTACTS/$id
   taput "$f.json" "$(jq -c --argjson p "$me" '. + {pid: $p}' <<<"$r")" || { tadrop "$wt"; return 1; }
   : > "$f.txt"; acct=$(ctlacct "$(ctl 2>/dev/null)")
+  # A try whose login failed, with the proxy as the builder's fallback, runs again at once through the proxy
+  # (loginfallback()): its output is read once it is all written, so each try has its own writer.
+  while :; do
   exec {tx}> >(tee -a "$f.events" | jq --unbuffered -Rrj "$TATEXT" >> "$f.txt"); txp=$!
   ( unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; export PATH=$CARDS/testactions/bin:$PATH
+    [ -z "$px" ] || export PROXY_NOW=1
     case $cli in
       claude) d=$(acctenv "$acct") || { echo "$d" >&2; exit 1; }
         cd "$wt" && proxyenv && acctrun "$d" && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default \
@@ -187,6 +191,9 @@ tarun() { # <the record> <worktree> <prompt>
     wait "$tp" 2>/dev/null; kill "$k" 2>/dev/null; wait "$k" 2>/dev/null
   fi
   exec {tx}>&-; wait "$txp" 2>/dev/null
+  [ -z "$stopped" ] && [ -z "$px" ] && loginfallback "$rc" "$cli" "$f.events" "$f.err" || break
+  px=1
+  done
   if [ -n "$stopped" ]; then state=stopped
   elif [ $rc = 124 ] || { [ $rc = 137 ] && [ $((EPOCHSECONDS - t0)) -ge "$TESTACTION_TIMEOUT" ]; }; then state="timed out"
   elif [ $rc = 0 ]; then state=done
