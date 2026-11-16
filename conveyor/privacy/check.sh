@@ -15,7 +15,9 @@ terms=''
 [ -z "$terms" ] || { [ -r "$terms" ] && [ ! -d "$terms" ]; } || { echo "privacy: the terms file cannot be read" >&2; exit 2; }
 
 # name<TAB>extended regular expression, matched with grep -E. An email is a hit unless it holds "noreply" or is at a
-# domain reserved for examples (example.com, example.org, example.net or a subdomain of one, RFC 2606). A home path is
+# domain reserved for examples (example.com, example.org, example.net or a subdomain of one, RFC 2606) or is a git SSH
+# address, not a person's: git@ after ssh://, git@<host> before a colon, or git@<host> alone where the host is
+# github.com or gitlab.com (any other user at those hosts is still a hit). A home path is
 # a hit unless its user is dev, the neutral user of the demo's container (docs/demo/record-terminal.sh).
 PATTERNS=$'email\t[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}
 private address\t(^|[^0-9.])(10\\.[0-9]{1,3}|192\\.168|172\\.(1[6-9]|2[0-9]|3[01]))\\.[0-9]{1,3}\\.[0-9]{1,3}($|[^0-9])
@@ -36,7 +38,9 @@ one() { # <file> <name shown>
     if [ "$name" = email ] && [[ ${2,,} =~ \.(gif|mp4|png|jpe?g|webm|webp)$ ]]; then
       :
     elif [ "$name" = email ]; then
-      grep -anoE -- "$rx" "$1" | grep -vi noreply | grep -viE '@([a-z0-9-]+\.)*example\.(com|org|net)$' | cut -d: -f1
+      # Each match is taken with the ssh:// before it and the colon after it, where there is one, to tell an SSH address.
+      grep -anoE -- "(ssh://)?$rx:?" "$1" | grep -vi noreply | grep -viE '@([a-z0-9-]+\.)*example\.(com|org|net):?$' \
+        | grep -vE '^[0-9]+:(ssh://git@|git@[^:]+:$|git@(github\.com|gitlab\.com)$)' | cut -d: -f1
     elif [ "$name" = 'home path' ]; then
       grep -anoE -- "$rx" "$1" | grep -vE '^[0-9]+:/(Users|home)/dev\.*([^A-Za-z0-9._-].*)?$' | cut -d: -f1
     else

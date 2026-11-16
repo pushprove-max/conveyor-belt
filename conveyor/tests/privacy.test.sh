@@ -155,6 +155,18 @@ t_privcheck() {
   printf '%s\n' "Q${AT}fs.gt" > "$d/a.txt"; [ "$("$c" "$d/a.txt")" = "$d/a.txt:1: email" ] || fail "an email in a text file was not a hit"
 }
 
+# Bug: the release was refused on docs that name git${AT}github.com, a git SSH address, not a person's email. A git SSH
+# address (lines 1 to 4) is not a hit; a person's address at those hosts (5, 6), and git${AT} at another host with no
+# colon or ssh:// (7), still are, as is an address beside an SSH address on its line (8). An example address before a
+# colon (9) still passes.
+t_privssh() {
+  local c=$SRC/privacy/check.sh f=$T/$CASE/f out; mkdir -p "$T/$CASE"
+  printf '%s\n' "fails with git${AT}github.com: Permission denied" "clone git${AT}codeberg.org:o/r.git" "ssh://git${AT}git.sr.ht/~o/r" \
+    "git${AT}gitlab.com" "someone${AT}github.com" "ssh://someone${AT}gitlab.com/o/r" "git${AT}corp.io" \
+    "git${AT}github.com:o/r by someone${AT}gmail.com" "t${AT}example.com: the test user" > "$f"
+  out=$("$c" "$f"); [ "$out" = "$(printf '%s\n' "$f:5: email" "$f:6: email" "$f:7: email" "$f:8: email")" ] || fail "hits: $out"
+}
+
 # P5: every GitHub write the engine and the Board make goes through gh_write (conveyor.sh gh-write): a gh write
 # anywhere else in them is a fail. A gh api call is allowed only as a graphql read.
 t_ghwrite() {

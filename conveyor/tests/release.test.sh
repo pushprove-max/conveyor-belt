@@ -210,6 +210,17 @@ t_cutprivacy() {
     && git -C "$R" rm -q new.txt && git -C "$R" commit -qm remove && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
   cutrefused 1.1.0 "privacy check finds something in commits since v1.0.0: ${h:0:12}"
 }
+# Bug: a GitHub web edit's Signed-off-by trailer, which holds the commit's own author email, refused the release. A
+# sign-off (A) or co-author (D) trailer with the commit's own author or committer email is not a hit; a sign-off with
+# another email (B), or a body line with another email beside an own sign-off (C), still is.
+t_cutsignoff() {
+  local O b c AT=@; local m=dev${AT}mail.io o=other${AT}mail.io; cutsetup true
+  com() { GIT_COMMITTER_EMAIL=$1 git -C "$R" commit -q --allow-empty --author="dev <$m>" -m x -m "$2" && git -C "$R" rev-parse HEAD; } # <committer> <body>
+  com "$m" "Signed-off-by: dev <DEV${AT}mail.io>" > /dev/null && b=$(com "$m" "Signed-off-by: other <$o>") \
+    && c=$(com "$m" "$(printf 'Ask %s\n\nSigned-off-by: dev <%s>' "$o" "$m")") && com "$o" "Co-authored-by: other <$o>" > /dev/null \
+    && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
+  cutrefused 1.1.0 "privacy check finds something in commits since v1.0.0: ${c:0:12} ${b:0:12} \(run"
+}
 # A private text in a tracked file from before the last release, which no commit since it touches.
 t_cutfiles() {
   local O AT=@; cutsetup true "someone${AT}gmail.com"

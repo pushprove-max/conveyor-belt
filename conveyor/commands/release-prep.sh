@@ -26,7 +26,7 @@
 # - docs/releases/<version>.md is on that commit, is not empty, and passes the notes style check (tools/notes-check.sh);
 # - the privacy check (privacy/check.sh, with the host file's terms file, as gh_write() runs it) finds nothing in the
 #   tracked files, nor in the changes since the newest tag: each commit's message and added lines, so a hit a later
-#   commit removed is still one;
+#   commit removed is still one (a sign-off or co-author trailer's email that is the commit's own is not: relmessage);
 # - the whole suite passed on that commit: the newest conveyor/release-suite status is success (release-prep's
 #   pass), else this command runs the suite, as release-prep does, once every other check has passed.
 # Then: a commit (made only when either changes) sets plugin.json's version and the marketplace entry's ref to
@@ -169,6 +169,19 @@ relrun() { # <function> <version>
   return $rc
 }
 # The newest vX.Y.Z tag, after the remote's branch and tags are fetched.
+# relmessage <commit>: the commit's message for the privacy check, with the email taken out of each Signed-off-by: or
+# Co-authored-by: trailer whose last <email> is the commit's own author or committer email (case aside), which the
+# commit already shows in its author fields. The rest of each such line, and every other email, is still checked.
+relmessage() {
+  local m; m=$(git log -1 --format='%ae%n%ce' "$1") || return 1
+  git log -1 --format=%B "$1" | RELA=${m%%$'\n'*} RELC=${m#*$'\n'} awk '
+    BEGIN { a = tolower(ENVIRON["RELA"]); c = tolower(ENVIRON["RELC"]) }
+    tolower($0) ~ /^(signed-off-by|co-authored-by):/ && match($0, /<[^<>]*>[[:space:]]*$/) {
+      e = substr($0, RSTART + 1, RLENGTH - 1); sub(/>[[:space:]]*$/, "", e); e = tolower(e)
+      if (e != "" && (e == a || e == c)) $0 = substr($0, 1, RSTART - 1)
+    }
+    { print }'
+}
 lasttag() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1; }
 # The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite,
 # its files' results and times kept for the Tests page (suiterec(), lib/testrun.sh) and its results in the whole-suite
@@ -288,7 +301,7 @@ release() { # <version>
       || why+=("the privacy check finds something in the tracked files, or cannot read one: $(head -n 5 <<<"$out" | paste -sd ';' -)")
     if [ -n "$last" ]; then
       while read -r c; do
-        { git log -1 --format=%B "$c"; git show --format= --no-color --no-ext-diff --text -U0 --diff-merges=first-parent "$c" | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)'; } \
+        { relmessage "$c"; git show --format= --no-color --no-ext-diff --text -U0 --diff-merges=first-parent "$c" | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)'; } \
           | "$HERE/privacy/check.sh" ${terms:+--terms "$terms"} - > /dev/null; rc=${PIPESTATUS[1]} # the check's own: grep finding no added line is no hit
         [ "$rc" = 0 ] || hits+=("${c:0:12}$([ "$rc" = 1 ] || echo ' (the check failed)')")
       done < <(git rev-list "$last..$sha")
