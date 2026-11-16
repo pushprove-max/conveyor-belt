@@ -78,6 +78,21 @@ t_visibleyes() {
   loop check || fail "the record check refuses the lines of a card that landed from a kept patch"
   [ "$(loop cards | jq -c --arg c "$(st 'select(.issue == 8 and .step == "landed") | .card')" '.cards[] | select(.card == $c) | [.step, .stage, .reviews]')" = '["landed",5,0]' ] || fail "dashboard row of a card landed from a kept patch: $(loop cards)"
 }
+# Bug: a card stopped for the yes stays under Needs you once the approval line is added to its issue, until someone
+# runs `retry`. The next turn gives it back by itself, and the new card lands from the kept patch.
+t_visibleapproved() {
+  visiblestart 23; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
+  loop run >/dev/null; old=$(st 'select(.issue == 23 and .step == "blocked") | .card')
+  [ -n "$old" ] && [ "$(loop snapshot | jq -c '.needsYou.waiting | map(.issue)')" = '[23]' ] || fail "#23 was not under Needs you for Dana's yes: $(steps 23)"
+  # A turn with no approval line added gives nothing back.
+  loop run >/dev/null; [ "$(st 'select(.issue == 23 and .step == "picked") | .card')" = "$old" ] && [ ! -s "$ST/retried.jsonl" ] || fail "#23 was given back with no approval line: $(steps 23)"
+  issue 23 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"
+  loop run >/dev/null || fail "run after the approval line exited non-zero"
+  grep -q "\"card\":\"$old\"" "$ST/retried.jsonl" || fail "the turn did not give #23 back once its approval line was added"
+  [ "$(st 'select(.issue == 23 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
+    || fail "the approved #23 did not land from its kept patch with no second review: $(steps 23)"
+  [ "$(loop snapshot | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)')" = '[]' ] || fail "Needs you still lists the approved #23: $(loop snapshot | jq -c .needsYou)"
+}
 # Bug: with the rule "visible changes need the owner's yes" turned off after a card stopped for the yes, retry says
 # the next card stops again for the yes, though it lands from the kept patch with no build and no review.
 t_retryoff() {

@@ -116,6 +116,23 @@ reopened() { # <open issues, a json list>
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and (.step != "closed" or .reason == $shut)))
     | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(turncards) 2>/dev/null)
 }
+# At a turn of the loop, outside the lock: an issue of the open list given whose newest card stopped for the owner's
+# yes is given back with `retry` (under the lock) once its body, as the list has it, holds more approval lines than
+# the body that card's review read (the .body file it kept: keptway()): a line added after the stop. The next card
+# then takes up the kept patch as `retry` would have it. A card that kept no body is left for `retry`.
+approved() { # <open issues, a json list>
+  local n c k
+  [ -n "${YES:-}" ] || return 0
+  while read -r n c k; do
+    jq -en --argjson open "$1" --argjson n "$n" --slurpfile was "$ST/$k/$c.body" "$SEE"'
+      ($open | map(select(.number == $n)) | first) as $now | $now != null and ($was[0] | type) == "object"
+      and ($now | approvals) > ($was[0] | approvals)' >/dev/null 2>&1 || continue
+    { locked retry "$n"; stdbkeeps; } || true
+  done < <(jq -rs --arg yes "$YES" --argjson open "$1" 'map(select(.step != "push")) | group_by(.issue)[]
+    | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and .step != "closed"))
+    | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
+    | select((.reason | startswith($yes)) and (.kept // "") != "") | "\(.issue) \(.card) \(.kept)"' < <(turncards) 2>/dev/null)
+}
 # Under the lock: the lines the jq test picks (asked of each record, with the jq arguments given) move from the card
 # records to the retried file; MOVETAG, when set, is a jq filter each moved line goes through ($at: now).
 moveout() { # <jq test> <jq arguments>...

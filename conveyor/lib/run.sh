@@ -334,6 +334,8 @@ run() { # [max-cards] [serve]
     fi
     # A shut card's issue opened again is given back as `retry` gives it, before this turn's pick reads the open list.
     [ "$asking" != 1 ] || [ -z "$issues" ] || reopened "$issues"
+    # So is a card stopped for the owner's yes whose issue has an approval line added since (approved()).
+    [ "$asking" != 1 ] || [ -z "$issues" ] || approved "$issues"
     # The sample of the minute, and while a card is in progress a weekly limit reading (reading() asks at
     # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks
     # GitHub for the queue, and a job of the loop's would count as a card).
