@@ -45,6 +45,26 @@ it follows the plugin's main and a new commit lands, the watchers stop within a 
 version. A card that lands while the version changes still wakes the Foreman. An update does not delete a version
 that the Foreman's watchers still use. A later update deletes it, after those watchers stop.
 
+## Is the Foreman listening?
+
+`/units`, its band, its pane and the status line show one Foreman line:
+
+- **Foreman listening**, in the colour for success: this session is the Foreman, its waiter runs from the Conveyor
+  version that the project uses now, and its four watchers run.
+- **Foreman not listening**, in the colour for a warning, with the reason:
+  - `not the Foreman session`: another session has the Foreman role, or no session has it. In the Foreman's own
+    session, run `/conveyor-belt:foreman` to take the role again.
+  - `no waiter running`: no waiter runs for this session. The next end of a turn starts it.
+  - `waiter on an old install`: the waiter runs from a version that the project does not use now.
+  - `watcher down: <name>`: one of the watchers (`conveyor`, `limit`, `alerts` or `idle`) stopped and did not start
+    again.
+
+`/units` and the pane show one more line under it: the session that has the role, the waiter's process and its
+version, and the state of each watcher. A project where no session has the role and no Foreman is set up shows no
+Foreman line. The line comes from
+the files in the Foreman's folder and from the process list of this machine. It does not start the waiter, and it
+does not ask the host.
+
 ## The Foreman on your own machine
 
 The Foreman can run on your own machine while the belt runs on a host. Give your machine's host file (its

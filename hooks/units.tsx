@@ -2,7 +2,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { refresh as refreshAutoBand } from './auto'
-import { bandModel, boardOf, boardOfFeed, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, summaryLine, tableText, toasts } from './sources'
+import { bandModel, boardOf, boardOfFeed, foremanOf, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, summaryLine, tableText, toasts } from './sources'
 import type { Line } from './elements'
 import type { Research, Seen, State } from './sources'
 
@@ -214,6 +214,8 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
     limit: f ? lim.limit : null,
     fast: f ? f.fast : { state: 'unread' },
     research: f ? await readResearch($, f.research, f.home).catch((): Research => ({ state: 'none' })) : { state: 'none' },
+    // The fetch reads the Foreman's folder; whether this session is the one it names is the session's own id.
+    foreman: f ? foremanOf(f.foreman, await $.session.id().catch(() => '')) : null,
   }
   return { st, fedAt: fed && f ? fed.at : null, fedKey: fed && f ? fed.key : null }
 }

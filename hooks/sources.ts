@@ -90,8 +90,12 @@ export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[]
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
-// snap is null when no record's snapshot could be read; note then holds the one line every view shows instead.
-export type State = { now: number; snap: Snap | null; note: string; notes: string[]; host: string; limit: Limit | null; fast: Fast; research: Research }
+// snap is null when no record's snapshot could be read; note then holds the one line every view shows instead, with
+// the Foreman indicator still under it.
+// The Foreman indicator (foremanOf): null where no Foreman is expected; else listening or not, why not, and the line
+// of details under it.
+export type Foreman = { ok: boolean; why: string; detail: string }
+export type State = { now: number; snap: Snap | null; note: string; notes: string[]; host: string; limit: Limit | null; fast: Fast; research: Research; foreman?: Foreman | null }
 
 const time = (v: unknown) => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null }
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -102,10 +106,11 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 // <exit> [<path looked at>...]` and then, for every record in the host file's order, `<repo> <its snapshot, or null>`.
 // own: the repo of the record whose main is this checkout, the session's own project; empty when no record is. `how`
 // is local (a record of the host file is this checkout) or ssh, else the reason nothing was asked: nofile (with the
-// paths of the host file looked at), config or nossh.
-export type Fetched = { research: string; home: string; own: string; fast: Fast; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
+// paths of the host file looked at), config or nossh. foreman: its line's fields after the word, where a Foreman is
+// expected (the fetch says which); null where none is.
+export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
 export const parseFetch = (stdout: string): Fetched | null => {
-  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, host: null, records: [] }
+  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, host: null, records: [] }
   for (const line of stdout.split('\n')) {
     const f = line.split('\t')
     if (out.host) { if (f.length >= 2 && f[0]) out.records.push({ repo: f[0], json: f.slice(1).join('\t') }) }
@@ -113,6 +118,7 @@ export const parseFetch = (stdout: string): Fetched | null => {
     else if (f[0] === 'fast' && f[1] === 'none') out.fast = { state: 'none' }
     else if (f[0] === 'fast' && f[1] === 'norecord') out.fast = { state: 'norecord' }
     else if (f[0] === 'fast' && f[1] === 'ok' && /^\d+$/.test(f[3] ?? '') && /^\d+$/.test(f[4] ?? '')) out.fast = { state: 'ok', branch: f[2], ahead: Number(f[3]), dirty: Number(f[4]), subject: one(f[5]) }
+    else if (f[0] === 'foreman') out.foreman = f.slice(1)
     else if (f[0] === 'host') out.host = { name: f[1] ?? '', how: f[2] ?? '', rc: Number(f[3]), looked: f.slice(4).filter(Boolean) }
   }
   // An empty Research lane is one the host file does not name: the board still reads.
@@ -502,6 +508,37 @@ export const fastText = (s: State): string => {
     ...(f.ahead ? [laneCard(s)] : []),
   ].join(' · ')
 }
+// The Foreman indicator for the session `sid`, from the fetch's foreman fields: <session the role mark names> <waiter
+// pid> <its commit, - from a checkout> <its session> <1: that waiter runs> <the commit the project runs now> <each
+// watcher name:up|down>. Listening: this session holds the role, and its waiter runs from the install the project
+// runs now with every watcher up. An install is old only when both commits are named and differ: a waiter from a
+// checkout, or a project that names no commit, never moves (waiter.sh moved).
+const COMMIT = /^[0-9a-f]{40}$/
+export const foremanOf = (f: string[] | null, sid: string): Foreman | null => {
+  if (!f) return null
+  const [mark = '', pid = '', commit = '', wsid = '', live = '', cur = '', watch = ''] = f
+  const watchers = watch.split(' ').filter(Boolean).map(w => w.split(':'))
+  const running = live === '1' && !!sid && wsid === sid
+  const detail = [
+    `role: ${mark || 'no session'}${mark && mark === sid ? ' (this one)' : ''}`,
+    running || live === '1' ? `waiter ${pid} on ${COMMIT.test(commit) ? commit.slice(0, 7) : 'a checkout'}${running ? '' : ` for ${wsid || 'no session'}`}` : 'no waiter',
+    ...(watchers.length ? [`watchers: ${watchers.map(([n, st]) => `${n} ${st}`).join(', ')}`] : []),
+  ].join(' · ')
+  const down = watchers.find(([, st]) => st !== 'up')
+  const why = !sid || mark !== sid ? 'not the Foreman session'
+    : !running ? 'no waiter running'
+    : COMMIT.test(commit) && COMMIT.test(cur) && commit !== cur ? 'waiter on an old install'
+    : down ? `watcher down: ${down[0]}`
+    : ''
+  return { ok: !why, why, detail }
+}
+const foremanText = (m: Foreman) => (m.ok ? 'Foreman listening' : `Foreman not listening: ${m.why}`)
+// The indicator, and with `details` the line under it. None where no Foreman is expected.
+export const foremanModel = (s: State, w: number, details: boolean): Line[] => (s.foreman ? [
+  [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }],
+  ...(details ? [fitWidth([{ t: `  ${s.foreman.detail}`, d: true }], w)] : []),
+] : [])
+
 // The Research lane's run is its newest Claude session in the lane's worktree: working while that session wrote in the
 // last five minutes.
 const WORKING_MS = 5 * 60_000
@@ -736,6 +773,7 @@ const noteLine = (s: State): Line => [{ t: s.note, c: C.you }]
 const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   ...headerModel(s, snap, w),
   ...(short ? [] : [[{ t: declinedTodayText(s, snap), d: true }] as Line]),
+  ...foremanModel(s, w, true),
   ...suitesModel(s, snap).map(l => (short ? fitWidth(l, w) : l)), [],
   ...needsModel(s, snap, w, short), [],
   ...beltModel(s, snap, w, short, frame), [],
@@ -746,21 +784,23 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
   ...(s.notes.length ? [[], ...s.notes.map((n): Line => [{ t: n, c: C.you }])] : []),
 ]
 
-// `/units`: every section in full. A snapshot that cannot be read is one plain line and nothing else.
-export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0).map(plain).join('\n') : s.note)
+// `/units`: every section in full. A snapshot that cannot be read is one plain line, and the Foreman indicator: the
+// Foreman's state is read from its folder, not from the snapshot.
+export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w, true)]).map(plain).join('\n')
 
 // The side pane: the same sections, each item one line, the landed list cut to five.
-export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s)])
+export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s), ...foremanModel(s, w, true)])
 
 // The band: the header with each section's count, the first thing that needs you, the belt, then the lanes set up on this machine.
 export const bandModel = (s: State, w: number, frame: number): Line[] => {
   const snap = s.snap
-  if (!snap) return [fitWidth(noteLine(s), w)]
+  if (!snap) return [fitWidth(noteLine(s), w), ...foremanModel(s, w, false)]
   const queued = snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} queued`
   const out: Line[] = [spread(
     [{ t: 'CONVEYOR', c: C.head, b: true }, ...loopSegs(snap), ...(snap.needs.length ? [{ t: ' · ' }, { t: `${snap.needs.length} need${snap.needs.length === 1 ? 's' : ''} you`, c: C.you, b: true }] : []),
       { t: ` · ${snap.belt.length} on the belt · ${queued} · ${snap.landed.length} landed` }],
     [...limitSegs(s, true), { t: ' · ' }, todaySeg(snap), { t: ' · ' }, ...hostSegs(s)], w)]
+  out.push(...foremanModel(s, w, false))
   const n = snap.needs[0]
   if (n) out.push(spread([n.yes ? { t: '◆ ', c: C.you } : { t: '✗ ', c: C.bad }, { t: ref(n), c: C.name, b: true }, { t: ` · ${whatOf(n)}` }], snap.needs.length > 1 ? { t: `+${snap.needs.length - 1} more`, c: C.you } : null, w))
   if (snap.belt.length) {
@@ -779,7 +819,7 @@ export const bandModel = (s: State, w: number, frame: number): Line[] => {
 }
 
 export const summaryLine = (s: State): string =>
-  s.snap ? `conveyor: ${loopText(s.snap) ? `${loopText(s.snap)} · ` : ''}${s.snap.needs.length ? `${s.snap.needs.length} need${s.snap.needs.length === 1 ? 's' : ''} you · ` : ''}${s.snap.belt.length} on the belt · ${s.snap.landed.length} landed · ${plain([todaySeg(s.snap)])}` : s.note
+  s.snap ? `conveyor: ${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${loopText(s.snap) ? `${loopText(s.snap)} · ` : ''}${s.snap.needs.length ? `${s.snap.needs.length} need${s.snap.needs.length === 1 ? 's' : ''} you · ` : ''}${s.snap.belt.length} on the belt · ${s.snap.landed.length} landed · ${plain([todaySeg(s.snap)])}` : `${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${s.note}`
 
 // What the toasts compare between two polls: the cards that need you and the cards that landed, by card id.
 export type Seen = { needs: Map<string, string>; landed: Map<string, string> }

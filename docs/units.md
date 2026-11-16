@@ -18,6 +18,11 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. In `/units` a third line gives how
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).
+- **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
+  session`, `no waiter running`, `waiter on an old install`, `watcher down: <name>`). In `/units` and the pane a dim
+  line under it gives the session that has the role, the waiter's process and version, and the state of each watcher.
+  The band shows the Foreman line alone, and the status line starts with it. A project where no session has the
+  Foreman role and no Foreman is set up shows no Foreman line. [Foreman](foreman.md) tells what each reason means.
 - **The whole suite**, in `/units` and the pane, under the head: while a release suite or a full test run is in
   progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
   done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). When the run
@@ -137,6 +142,7 @@ A snapshot that cannot be read is one plain line in every view, and nothing from
 `this machine has no host file at <paths looked at>`, `the host file is not understood`,
 `the host file names no ssh target`, `the fetch did not run` or `the fetch did not finish`, or
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
+The Foreman line still shows under it, and the status line starts with it.
 
 Smaller gaps are named where they are: `usage limit not read`, `today partial` and `cost partial` (a step could not be
 priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed

@@ -246,7 +246,7 @@ const reloaded = (w: World) => {
   }
   const $r: any = {
     plugin: { name: 'conveyor-belt', root: '/r/plugin' },
-    session: { root: async () => MAIN },
+    session: { root: async () => MAIN, id: async () => 'me' },
     process: { run: async (argv: string[], init?: { cwd?: string }) => (await w.run(argv, init?.cwd)).value },
     fs: {
       stat: async (p: string) => { const f = file(p); return { kind: 'file', size: f.text.length, mtimeMs: f.at, isLink: false } },
@@ -942,4 +942,70 @@ test('with a fetch out and one waiting, three more /units in a row start no new 
   release()
   await w.clock.settle()
   expect(fetches(w).length).toBe(2)
+})
+
+// The Foreman indicator (issue 47). Bugs: the Foreman lost its role on a restart, or its waiter or a watcher was gone,
+// or the waiter ran on a deleted install, and /units said nothing, so the owner learnt it only when cards landed or
+// blocked with no word from the Foreman. The fetch's foreman line (units-fetch.test.sh reads it from a fixture
+// Foreman folder with a live stand-in waiter) is given here; this session's id is `me`. One case a fixture.
+const COMMIT_A = 'a'.repeat(40)
+const COMMIT_B = 'b'.repeat(40)
+const UP = 'conveyor:up limit:up alerts:up idle:up'
+const withForeman = (fields: string[]) => answer(FULL).replace('\nhost\t', `\nforeman\t${fields.join('\t')}\nhost\t`)
+const foremanWorld = async ($: any, on: On, fetch: string) => {
+  const w = world(on, 'main', fetch)
+  on('session.id', () => ({ value: 'me' }))
+  await start($, 'main')
+  await w.clock.settle()
+  return { w, text: await units($) }
+}
+
+test('D1: this session holds the role and its live waiter runs the current install: Foreman listening, in /units, the pane, the band and the status line', async ($, on) => {
+  const { w, text } = await foremanWorld($, on, withForeman(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP]))
+  expect(text).toContain('\nForeman listening\n  role: me (this one) · waiter 4242 on aaaaaaa · watchers: conveyor up, limit up, alerts up, idle up\n')
+  const pane = await draw($, 'Pane')
+  expect(pane).toContain('Foreman listening')
+  expect(pane).toContain('role: me (this one) · waiter 4242 on aaaaaaa')
+  const band = await draw($, 'AbovePrompt')
+  expect(band).toContain('Foreman listening')
+  expect(band).not.toContain('role: me')
+  expect(w.status.at(-1)).toBe('conveyor: Foreman listening · 1 needs you · 1 on the belt · 1 landed · today $7.00')
+})
+
+const notListening: [string, string[], string][] = [
+  ['D2: the role is held by another session', ['other', '4242', COMMIT_A, 'other', '1', COMMIT_A, UP], 'not the Foreman session'],
+  ['D2: the role is held by no session', ['', '', '', '', '0', COMMIT_A, ''], 'not the Foreman session'],
+  ['D3: no live waiter', ['me', '4242', COMMIT_A, 'me', '0', COMMIT_A, ''], 'no waiter running'],
+  ['D3: the waiter names a commit other than the project\'s current one', ['me', '4242', COMMIT_B, 'me', '1', COMMIT_A, UP], 'waiter on an old install'],
+  ['a watcher has exited and not come back', ['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, 'conveyor:up limit:up alerts:up idle:down'], 'watcher down: idle'],
+]
+for (const [what, fields, why] of notListening) {
+  test(`${what}: Foreman not listening: ${why}, in /units and the status line`, async ($, on) => {
+    const { w, text } = await foremanWorld($, on, withForeman(fields))
+    expect(text).toContain(`\nForeman not listening: ${why}\n`)
+    expect(text).not.toContain('Foreman listening')
+    expect(w.status.at(-1)).toMatch(new RegExp(`^conveyor: Foreman not listening: ${why} · `))
+  })
+}
+
+test('D4: no Foreman is expected (the fetch prints no foreman line): no indicator anywhere', async ($, on) => {
+  const { w, text } = await foremanWorld($, on, answer(FULL))
+  expect(text).not.toContain('Foreman')
+  expect(await draw($, 'Pane')).not.toContain('Foreman')
+  expect(await draw($, 'AbovePrompt')).not.toContain('Foreman')
+  expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
+})
+
+// Bug: a snapshot that could not be read hid the indicator in every view, though the Foreman's state is read from its
+// own folder on this machine, not from the snapshot.
+test('a snapshot that cannot be read still shows the Foreman indicator in /units, the pane, the band and the status line', async ($, on) => {
+  const fetch = answer(null, 'host\tbuildbox\tssh\t255').replace('\nhost\t', `\nforeman\t${['other', '4242', COMMIT_A, 'other', '1', COMMIT_A, UP].join('\t')}\nhost\t`)
+  const { w, text } = await foremanWorld($, on, fetch)
+  expect(text.startsWith(`${CANNOT}\nForeman not listening: not the Foreman session\n  role: other · waiter 4242 on aaaaaaa for other · watchers: conveyor up`)).toBe(true)
+  expect(await draw($, 'Pane')).toContain('Foreman not listening: not the Foreman session')
+  expect(await draw($, 'Pane')).toContain('role: other')
+  const band = await draw($, 'AbovePrompt')
+  expect(band).toContain(CANNOT)
+  expect(band).toContain('Foreman not listening: not the Foreman session')
+  expect(w.status.at(-1)).toBe(`Foreman not listening: not the Foreman session · ${CANNOT}`)
 })

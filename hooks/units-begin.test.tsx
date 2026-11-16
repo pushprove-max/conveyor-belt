@@ -39,7 +39,7 @@ test('a second begin in one load, with a timer shaped as Claude Code\'s, does no
   let refused = false
   const $u: any = {
     plugin: { name: 'conveyor-belt', root: '/r/plugin' },
-    session: { root: async () => MAIN },
+    session: { root: async () => MAIN, id: async () => 'me' },
     process: { run: async (argv: string[]) => ({ exitCode: 0, stdout: out(argv), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }) },
     fs: {
       stat: async (p: string) => { const f = file(p); return { kind: 'file', size: f.text.length, mtimeMs: f.at, isLink: false } },

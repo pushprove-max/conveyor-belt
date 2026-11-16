@@ -35,7 +35,7 @@ machine() { # <case>
 }
 hostfile() { jq -n "$@" > "$H/.config/conveyor/host.json"; }
 fetch() { # <checkout> [<arg>]: the fetch's output, the home folder shown as /r/HOME
-  (cd "$1" && HOME=$H XDG_CONFIG_HOME=$H/.config PATH=$M/bin:$PATH bash "$FETCH" "${@:2}") | sed "s|$H|/r/HOME|g"
+  (cd "$1" && unset CONVEYOR_FOREMAN_DIR && HOME=$H XDG_CONFIG_HOME=$H/.config PATH=$M/bin:$PATH bash "$FETCH" "${@:2}") | sed "s|$H|/r/HOME|g"
 }
 
 # D2: a host file with two projects, neither the plugin's own, read in the first one's checkout.
@@ -87,5 +87,45 @@ hostfile --arg c "$M/clone" --arg b "$M/bakery" \
 RH=/r/HOME
 same 'the lanes from the host file' "$(printf 'paths\t%s/research\t%s\tbakery\nfast\tok\tlane-12\t1\t0\tBread oven timer\nhost\t\tfeed\t0' "$RH" "$RH")" \
   "$(fetch "$M/bakery" feed)"
+
+# The Foreman line (issue 47): read from the Foreman's folder in the project's state folder (conveyor.sh state-dir),
+# here the checkout's own conveyor/state/foreman. A stand-in waiter, started by a path that ends as the real one's
+# (versions/<commit>/conveyor/foreman/waiter.sh), holds waiter.lock, writes waiter.pid and runs its watchers as its
+# children; with "skip <name>" it leaves that watcher out. Bugs: the Foreman's waiter or a watcher was gone, or the
+# waiter ran on an old install, and nothing said so.
+A=$(printf 'a%.0s' {1..40})
+machine foreman
+FD=$M/bakery/conveyor/state/foreman
+mkdir -p "$FD" "$M/bakery/.conveyor" "$M/v/$A/conveyor/foreman"
+echo "{\"plugin\": {\"commit\": \"$A\"}}" > "$M/bakery/.conveyor/project.json"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
+printf '%s\n' '#!/usr/bin/env bash' 'exec 7>>"$1/waiter.lock"; flock -n 7 || exit 1' \
+  'for w in conveyor limit alerts idle; do [ "$w" = "${3:-}" ] && continue; bash "${0%/*}/watch-$w.sh" & done' \
+  'printf "%s %s %s\n" "$$" "$2" s1 > "$1/waiter.pid"' 'wait' > "$M/v/$A/conveyor/foreman/waiter.sh"
+for w in conveyor limit alerts idle; do echo 'sleep 60' > "$M/v/$A/conveyor/foreman/watch-$w.sh"; done
+echo 's1 2026-11-15T00:00:00Z' > "$FD/session"
+waiter() { # [<watcher left out>]: starts the stand-in in a process group of its own, once its watchers run
+  rm -f "$FD/waiter.pid"; set -m; bash "$M/v/$A/conveyor/foreman/waiter.sh" "$FD" "$A" "$@" & WP=$!; set +m
+  for _ in $(seq 100); do [ -s "$FD/waiter.pid" ] && [ "$(pgrep -P "$WP" | wc -l)" -ge $((4 - $#)) ] && return; sleep 0.05; done
+}
+trap 'kill -- -"${WP:-0}" 2>/dev/null; rm -rf "$T"' EXIT
+foreman() { fetch "$M/bakery" feed | grep '^foreman' || echo 'no foreman line'; }
+waiter
+same 'D1: the role, a live waiter on the current install and its four watchers' \
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:up' "$WP" "$A" "$A")" "$(foreman)"
+kill -- -"$WP"; wait "$WP" 2>/dev/null
+same 'D3: a waiter.pid whose waiter has exited is no live waiter' \
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t0\t%s\t' "$WP" "$A" "$A")" "$(foreman)"
+waiter idle
+same 'a watcher that is not running is down' \
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:down' "$WP" "$A" "$A")" "$(foreman)"
+kill -- -"$WP"; wait "$WP" 2>/dev/null
+# D4: no role mark and no launcher settings: no Foreman is expected, so no line (the other machines above have no
+# Foreman folder at all, and their whole output has none).
+: > "$FD/session"
+same 'D4: a Foreman folder with no role and no setup prints no line' 'no foreman line' "$(foreman)"
+echo '{}' > "$FD/settings.json"
+same 'a set-up Foreman whose role no session holds still prints its line' \
+  "$(printf 'foreman\t\t%s\t%s\ts1\t0\t%s\t' "$WP" "$A" "$A")" "$(foreman)"
 
 [ "$fails" = 0 ] || exit 1
