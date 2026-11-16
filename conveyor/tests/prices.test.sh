@@ -46,10 +46,10 @@ t_pricessnap() {
 # of this checkout's record (~/lane), a session begun in a folder of the lane (~/lane/reports, filed apart), one session
 # a model however many transcripts (its subagent's) name it, and none of a line older than 30 days, of a folder outside
 # the lane that Claude Code files under the same name or a name the lane's starts (~/lane-x), of "<synthetic>", or of
-# another checkout's lane. Bug caught: a model ID only a research session ran (one begun in ~/lane/reports too) never
-# reached Seen but not priced, so the owner could not price it.
+# another checkout's lane. Bug caught: a model ID only a research session ran (one begun in ~/lane/reports, or in the
+# main checkout and moved into the lane, too) never reached Seen but not priced, so the owner could not price it.
 t_pricesresearch() {
-  local out lane other t
+  local out lane other main t
   export HOME=$T/$CASE/home; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$HOME/lane" "$HOME/other"
   jq -n --arg m "$T/$CASE/main" --arg o "$T/$CASE/elsewhere" '{records: [{repo: "o", main: $o, lanes: {research: {worktree: "~/other"}}},
     {repo: "main", main: $m, lanes: {research: {worktree: "~/lane"}}}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
@@ -64,8 +64,12 @@ t_pricesresearch() {
   mkdir -p "$lane-reports" "$lane-x"
   line reports-9 "$HOME/lane/reports" s5 "$t" > "$lane-reports/s5.jsonl"
   line outside-9 "$HOME/lane-x" s6 "$t" > "$lane-x/s6.jsonl"
+  # A session begun in the main checkout (filed under main's folder) that works in the lane later counts from then on.
+  main=$HOME/.claude/projects/$(sed 's/[^a-zA-Z0-9]/-/g' <<<"$T/$CASE/main"); mkdir -p "$main"
+  { line mainonly-9 "$T/$CASE/main" s7 "$t"; line moved-9 "$HOME/lane" s7 "$t"; } > "$main/s7.jsonl"
   out=$(loop snapshot) || fail "snapshot exited non-zero"
-  jq -e '.prices.seen == [{model: "reports-9", sessions: 1, routes: [], as: null}, {model: "research-9", sessions: 1, routes: [], as: null}]' <<<"$out" > /dev/null \
+  jq -e '.prices.seen == [{model: "moved-9", sessions: 1, routes: [], as: null}, {model: "reports-9", sessions: 1, routes: [], as: null},
+    {model: "research-9", sessions: 1, routes: [], as: null}]' <<<"$out" > /dev/null \
     || fail "the model IDs seen: $(jq -c .prices.seen <<<"$out")"
 }
 

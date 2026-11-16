@@ -638,20 +638,17 @@ def lane_models(projects, worktree, since):
     """{model ID: the sessions that ran it} of the Claude Code sessions run in `worktree` (a research lane, whose
     sessions are no card's step) from `since` (epoch) on, read from their transcripts under `projects` (Claude Code's
     projects folder: one folder a working folder, its path with each other character than a letter or a digit as -,
-    and subagents' transcripts below it). A session begun in a folder inside the worktree is filed under that folder's
-    name, which starts with the worktree's name and a -, so each such folder is read too. A line counts only when its
-    own cwd is the worktree or inside it, as two folders can share a name (and a name can start with another's).
+    and subagents' transcripts below it). Claude Code files a session under the folder it began in, and each line
+    carries the folder it works in then (cwd): a session begun in the main checkout, or in any other folder, that
+    works in the worktree later is filed under that folder, so every folder is read. A line counts only when its own
+    cwd is the worktree or inside it; one that does not hold the worktree's path as JSON writes it is not parsed.
     "<synthetic>" is no model: Claude Code writes it on a message no model answered. A file that cannot be read
     counts nothing."""
     if not isinstance(projects, str) or not isinstance(worktree, str) or not worktree.startswith("/") or since is None:
         return {}
-    enc = re.sub(r"[^a-zA-Z0-9]", "-", worktree.rstrip("/"))
-    try:
-        dirs = [d for d in os.listdir(projects) if d == enc or d.startswith(enc + "-")]
-    except OSError:
-        return {}
+    wt = json.dumps(worktree.rstrip("/"), ensure_ascii=False)[1:-1].encode("utf-8", "replace")
     out = {}
-    for root, _, files in (w for d in dirs for w in os.walk(os.path.join(projects, d))):
+    for root, _, files in os.walk(projects):
         for name in files:
             path = os.path.join(root, name)
             try:
@@ -659,7 +656,7 @@ def lane_models(projects, worktree, since):
                     continue
                 with open(path, "rb") as f:
                     for line in f:
-                        if b'"model"' not in line:
+                        if b'"model"' not in line or wt not in line:
                             continue
                         try:
                             r = json.loads(line)
