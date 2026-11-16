@@ -13,7 +13,7 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # A stub of both providers' APIs and a local Claude proxy, on one port of this machine, in $T/$CASE/api: GET
-# /v1/models answers 200 to a key listed in $T/$CASE/api/good, sent as x-api-key (Anthropic's) or as a Bearer token
+# /v1/models answers 200 (the list in $T/$CASE/api/models, when there is one) to a key listed in $T/$CASE/api/good, sent as x-api-key (Anthropic's) or as a Bearer token
 # (OpenAI's), else 401 with an API error; each GET logs its path and both headers in $T/$CASE/api/asked. POST
 # /v1/messages answers as the Messages API does (a proxy for Claude); POST /v1/responses is not served (no proxy for
 # Codex). Exports CONVEYOR_ANTHROPIC_API and CONVEYOR_OPENAI_API, the APIs setup checks, and CONVEYOR_PROXY_PORTS.
@@ -30,7 +30,8 @@ class H(http.server.BaseHTTPRequestHandler):
         x, a = self.headers.get("x-api-key") or "-", self.headers.get("Authorization") or "-"
         with open(d + "/asked", "a") as f: f.write("%s x-api-key=%s authorization=%s\n" % (self.path, x, a))
         good = open(d + "/good").read().split()
-        if self.path == "/v1/models" and (x in good or a[len("Bearer "):] in good): self.answer(200, {"data": []})
+        if self.path == "/v1/models" and (x in good or a[len("Bearer "):] in good):
+            self.answer(200, json.load(open(d + "/models")) if os.path.exists(d + "/models") else {"data": []})
         else: self.answer(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid key"}})
     def do_POST(self):
         if self.path == "/v1/messages": self.answer(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "messages: Field required"}})
@@ -259,6 +260,23 @@ t_apienv() {
     || fail "Codex was not given the OpenAI API with its key from the key file: $out"
   [ "$(sed -n 5p <<<"$out")" = "ANTHROPIC_AUTH_TOKEN=$k ANTHROPIC_BASE_URL=https://api.anthropic.com " ] || fail "the proxy route did not send its key as a Bearer token: $out"
   [ "$(sed -n 6p <<<"$out")" = "ANTHROPIC_BASE_URL=https://api.anthropic.com " ] || fail "a key file of mode 644 was read: $out"
+}
+
+# Bug: the reviewer's model family (sol) was looked up in the OpenAI API's model list with a key read only from the
+# environment Conveyor runs in, so with the key only in codexProxy's keyFile and no Codex models cache, the list was
+# asked with no key, and a card could not start (codexready). The lookup takes the reviewer's route (its role api while
+# the builder's is the fallback) and that route's key as a session finds it.
+t_apimodel() {
+  local o=sk-openai-file-$RANDOM$RANDOM g out
+  apistub; mkdir -p "$XDG_CONFIG_HOME/conveyor"; g=$T/$CASE/openai.key
+  printf '%s\n' "$o" > "$g"; chmod 600 "$g"; echo "$o" > "$T/$CASE/api/good"
+  echo '{"data":[{"id":"gpt-6.2-sol"},{"id":"gpt-6.10-sol"},{"id":"gpt-7-astra"}]}' > "$T/$CASE/api/models"
+  jq -n --arg b "$CONVEYOR_OPENAI_API" --arg g "$g" '{codexProxy: {kind: "api", baseUrl: $b, keyEnv: "OPENAI_API_KEY", keyFile: $g, roles: {builder: "fallback", reviewer: "api"}}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  setup '[]'; tune '.models.allowed.codex += ["sol"]'; seatset reviewer sol
+  out=$( ( unset OPENAI_API_KEY; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards CODEX_HOME=$T/$CASE/codex
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
+    codexready && PROXY_ROLE=reviewer codexmodel sol ) 2>&1 )
+  [ "$out" = gpt-6.10-sol ] || fail "the family sol did not resolve through the API with the key from the key file: $out; asked: $(cat "$T/$CASE/api/asked" 2>&1)"
 }
 
 # Bug: the machine's service starts with a bare environment, so a key kept "in the environment Conveyor runs in" never

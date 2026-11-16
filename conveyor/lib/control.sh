@@ -477,7 +477,10 @@ sys.stdout.write(urllib.request.build_opener(SameOrigin).open(req, timeout=10).r
     | max_by(sub("^gpt-"; "") | split("-")[0] | split(".") | map(tonumber)) // empty'
   IFS=$'\037' read -r name base env < <(codexproxy)
   if [ -n "$base" ]; then
-    [[ $name$base == *[Cc]opilot* ]] || [[ ! $env =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || key=$(envof "$env")
+    # The host file's codexProxy: its key where a session finds it (routekey()), a key file's included.
+    if [[ $name$base == *[Cc]opilot* ]]; then :
+    elif [ "$(proxyroute codex)" = proxy ]; then local KEY_V KEY_FROM; routekey "$(codexproxyset)"; key=$KEY_V
+    elif [[ $env =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then key=$(envof "$env"); fi
     m=$(printf '%s\n%s\n' "${base%/}/models" "$key" | timeout 20 python3 -I -c "$fetch" 2>/dev/null | jq -r --arg f "$1" "[.data[]?.id, .models[]?.id] | $newest" 2>/dev/null) || m=''
   fi
   # The proxy unreachable, or listing no model of this family: Codex's models_cache.json answers.
@@ -487,7 +490,8 @@ sys.stdout.write(urllib.request.build_opener(SameOrigin).open(req, timeout=10).r
 }
 # Before a card starts: the reviewer in force, when Codex runs it, resolves to a model id (codexmodel).
 codexready() {
-  local s m a; s=$(seat reviewer) && jqget "$s" agent a model m || return 0
+  local s m a PROXY_ROLE=reviewer # the reviewer's route (proxyroute())
+  s=$(seat reviewer) && jqget "$s" agent a model m || return 0
   [ "$a" = codex ] || return 0
   m=$(codexmodel "$m") || { echo "$m"; return 1; }
 }
