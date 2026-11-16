@@ -212,7 +212,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   f=$(jq -cRn --arg m "$4" --arg e "$5" --argjson s "$sec" "$SESSIONREAD" "$1.events" 2>/dev/null | tail -n 1)
   jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
     || f=$(jq -cn --arg m "$4" --arg e "$5" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read", ok: false}')
-  f=$(routed "$f")
+  proxypack; f=$(routed "$f")
   # The answer is the text of its last result, ending in one newline (verdict() reads the last line).
   if [ $rc = 0 ] && [ "$(jq -r .ok <<<"$f")" = true ] \
     && jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null \

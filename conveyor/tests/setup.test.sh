@@ -325,7 +325,8 @@ t_setupfresh() {
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no 2>&1) || fail "setup on a machine with no host file exited non-zero: $out"
   jq -e --arg m "$S" '.records == [{repo: "sample", main: $m}] and (has("terms") | not)' "$XDG_CONFIG_HOME/conveyor/host.json" >/dev/null && [ -s "$S/.conveyor/project.json" ] \
     || fail "setup did not write the host file with the project as its record, and the pack: $(cat "$XDG_CONFIG_HOME/conveyor/host.json" 2>&1)"
-  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
+  # The Board started after setup (as setup asks the owner to), so doctor has no warning that it is not running.
+  boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:), which is information, not a check.
   ! grep -qvE '^(ok|builder|reviewer): ' <<<"$out" && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
     || fail "doctor after setup printed a line that is not ok:, or did not say the terms file is optional: $out"
@@ -404,6 +405,12 @@ without() { local p=$T/$CASE/without-${*// /-} d f n fs=(); local -A seen; mkdir
 # Each doctor case below is the sample, set up with its pin (doctordone), and the doctor runs it is about: one after
 # another, about 3 s a run, they made one case of 10 s.
 doctordone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin >/dev/null) || fail "setup exited non-zero"; }
+# The Board running (#108), for a doctor run with $T/$CASE/board first on PATH and CONVEYOR_DASHBOARD_PORT=8791: curl
+# gets its login page, under its own certificate, on the port the Board is set to.
+boardup() {
+  mkdir -p "$T/$CASE/board" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
+    && chmod +x "$T/$CASE/board/curl" || fail "the curl stub was not made"
+}
 # The pinned commit's install removed, as the fix of a damaged one leaves it.
 uninstalled() { chmod -R u+w "$V/$B" && rm -rf "$V/$B"; }
 
@@ -415,10 +422,7 @@ t_doctor() {
   doctortests '{}' '{times: {"a.test": 1}}'
   # A service whose conveyor.sh is there (the machine's, on the pinned install) is no missing piece.
   mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
-  # The Board running (#108): curl gets its login page, under its own certificate, on the port the Board is set to.
-  mkdir -p "$T/$CASE/board" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
-    && chmod +x "$T/$CASE/board/curl" || fail "the curl stub was not made"
-  out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
+  boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
   grep -qx 'ok: the Board, running at https://localhost:8791/' <<<"$out" || fail "doctor did not name the running Board's address: $out"
   ! grep -q '^missing' <<<"$out" && grep -q '^ok: the pinned commit' <<<"$out" && grep -q '^ok: codex' <<<"$out" && grep -q '^ok: the terms file' <<<"$out" \
     && grep -q "^ok: segno, in the Board's virtualenv " <<<"$out" && ! grep -q 'no test times' <<<"$out" \
@@ -428,7 +432,8 @@ t_doctor() {
 # state folder of the sample (doctor's, as it runs in that checkout; state-dir alone names the plugin copy's).
 doctortests() { # <jq object>...
   local s o; s=$(cd "$S" && CONVEYOR_MAIN=$S bash "$X" state-dir) && mkdir -p "$s" || fail "the state folder"
-  for o in "$@"; do jq -cn "{card: \"c0-1\", issue: 1, step: \"test\", time: \"2026-11-01T00:00:00Z\", result: \"pass\"} + $o"; done >> "$s/cards.jsonl"
+  # Whole records, as line() writes them: the snapshot doctor's Board check reads stops at any other line.
+  for o in "$@"; do jq -cn "{card: \"c0-1\", issue: 1, step: \"test\", time: \"2026-11-01T00:00:00Z\", result: \"pass\", sha: \"\", reason: \"\", tokens: {claude: 0, codex: 0}} + $o"; done >> "$s/cards.jsonl"
 }
 # Bug caught (#515): a project's test command printed no `TESTRUN sec` lines, so none of its cards recorded test times
 # and no file was held to the CPU budget, and doctor said nothing. Its last card test runs, a pass and a fail, recorded
@@ -460,6 +465,10 @@ t_doctormissing() {
   # doctor printed only "ok: the host file".
   grep -q "^missing: a record of the host file $XDG_CONFIG_HOME/conveyor/host.json for this checkout $S .*; fix: run /conveyor-belt:setup; .*add {\"repo\": \"<name>\", \"main\": \"$S\"}" <<<"$out" \
     || fail "doctor did not name the missing record of this checkout in the host file: $out"
+  # Bug caught (#112): the Board cannot read the host file's one record (its checkout is not there), and doctor said
+  # nothing, so every Board panel said it could not read. Doctor names it, with what the Board's read said.
+  grep -qx "missing: the Board reading the project (.* answered, but its Conveyor gave no snapshot: .*$T/$CASE/other/sample.*); fix: correct the host file $XDG_CONFIG_HOME/conveyor/host.json as that says; .*" <<<"$out" \
+    || fail "doctor did not name why the Board cannot read the host file's record: $out"
   grep -qx "missing: segno, for the Board, in its virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
     && grep -q "^ok: pyotp, in the Board's virtualenv " <<<"$out" || fail "doctor did not name the Board's missing package with its fix: $out"
   rm "$G/nopkg"
@@ -467,7 +476,7 @@ t_doctormissing() {
   # its loop, and doctor said nothing.
   grep -qxF "missing: the file $V/$gone/conveyor/conveyor.sh that the service $XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service starts (a restart or a reboot does not start its loop); fix: run conveyor.sh install-service in the project's checkout, which writes the machine's service on an installed commit" <<<"$out" \
     || fail "doctor did not name a service whose conveyor.sh is gone, with that file: $out"
-  grep -q '^missing: codex, .*; fix: install it (npm install -g @openai/codex)' <<<"$out" && grep -qx 'missing: gh signed in; fix: run gh auth login' <<<"$out" \
+  grep -q '^missing: codex, .*; fix: install it (npm install -g @openai/codex)' <<<"$out" && grep -qx 'missing: gh signed in; fix: run /conveyor-belt:setup, which starts gh auth login' <<<"$out" \
     && grep -qx "missing: the install of the pinned commit $B; fix: run /conveyor-belt:setup, which installs it" <<<"$out" \
     && grep -q '^missing: a readable terms file .*; fix: make the file it names readable' <<<"$out" && grep -q '^ok: claude' <<<"$out" \
     && grep -qx 'missing: the plugin mattpocock-skills@claude-plugins-official, for /conveyor-belt:plan; fix: run claude plugin install mattpocock-skills@claude-plugins-official' <<<"$out" \
@@ -535,7 +544,7 @@ t_doctorsnap() {
   local X out; doctordone; : > "$G/out"
   mkdir -p "$T/$CASE/snap"; echo true > "$T/$CASE/snap/gh"
   out=$(cd "$S" && CONVEYOR_GITHUB=$T/$CASE/snap bash "$X" doctor 2>&1)
-  grep -qx 'missing: gh signed in; fix: run gh auth login' <<<"$out" || fail "doctor took a snapshot's word that gh is signed in: $out"
+  grep -qx 'missing: gh signed in; fix: run /conveyor-belt:setup, which starts gh auth login' <<<"$out" || fail "doctor took a snapshot's word that gh is signed in: $out"
 }
 # A private repo needs no terms file; with no host file, that is named; with no pack, setup is the fix.
 t_doctorprivate() {

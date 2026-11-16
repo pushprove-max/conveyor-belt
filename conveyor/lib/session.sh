@@ -490,6 +490,7 @@ session1() {
     sleep "$REVIEW_PAUSE"
   done
   [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f")
+  [ "$agent" != claude ] || proxypack
   [ "$agent" = opencode ] || f=$(routed "$f" "$agent")
   # A session whose last result says it succeeded goes on, its usage or stats read or not (unread says why not).
   if [ $rc = 0 ] && [ "$(jq -r .ok <<<"$f")" = true ]; then [ "$agent" != claude ] || routedone 1; jq -c 'del(.ok)' <<<"$f"; return 0; fi

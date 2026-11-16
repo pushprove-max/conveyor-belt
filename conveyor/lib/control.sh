@@ -240,6 +240,11 @@ claudeproxy() {
   local p; p=$(jq -ce '.claudeProxy | objects' "$HOST" 2>/dev/null) || packget models.claudeProxy p 2>/dev/null || :
   [ "$p" = null ] || printf '%s' "$p"
 }
+# claudeproxy() runs in a subshell ($(claudeproxy), and $(proxyrole) and $(proxyroute) around it), which keeps no check
+# of the pack (packok, lib/prompts.sh). Called in the shell that starts those subshells, it checks the pack's text there
+# once, so each read after it takes that check and does not check the same text again. A pack that fails is left for
+# the read to fail.
+proxypack() { packok 2>/dev/null || :; }
 # Codex's, as setup writes it in the host file: codexProxy, {baseUrl, keyEnv, roles} as claudeProxy's. A Codex session
 # whose role's route takes it through the proxy is given it as its own provider settings (codexargs()).
 codexproxyset() { local p; p=$(jq -ce '.codexProxy | objects' "$HOST" 2>/dev/null) && printf '%s' "$p"; }
@@ -275,7 +280,7 @@ routesnow() {
 # A session on the subscription (proxyroute subscription) is given none of it. Through a fallback proxy with no key, a
 # stand-in token is set, as the subscription's login is the one that failed.
 proxyenv() {
-  local p b k t v='' r; r=$(proxyroute); [ "$r" = proxy ] || return 0
+  local p b k t v='' r; proxypack; r=$(proxyroute); [ "$r" = proxy ] || return 0
   p=$(claudeproxy); b=$(jq -r .baseUrl <<<"$p"); k=$(jq -r '.keyEnv // ""' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
   [[ ! $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || v=$(envof "$k")
   [ -n "$v" ] || [ -z "${PROXY_NOW:-}" ] || v=no-key
@@ -393,6 +398,7 @@ codexready() {
 # For doctor: each role's model and its route, direct or through which proxy. The builder's seat runs build, fix and rebase.
 routes() {
   local r s m a p name base env rc=0 PROXY_ROLE w
+  proxypack
   for r in builder reviewer; do
     PROXY_ROLE=$r
     s=$(seat "$r") || { echo "$r: the pack's models.allowed lists no $r model"; rc=1; continue; }

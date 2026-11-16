@@ -38,7 +38,8 @@ t_packread() {
   [ -n "$(st 'select(.issue == 7 and .step == "landed")')" ] || fail "the card with the edited pack did not land: $(st 'select(.issue == 7)')"
   c=$(wc -l < "$STUB/checks") r=$(wc -l < "$STUB/reads"); rm "$STUB/jq"
   # This run reads the pack 39 times (main before #379, which ran jq at every read, counted them): checked at each,
-  # that is 39 checks; once per process that reads a text, 8. Each check is followed by one run reading every field.
+  # that is 39 checks; once per process that reads a text, 9 (the build session's read of models.claudeProxy is one).
+  # Each check is followed by one run reading every field.
   [ "$c" -ge 1 ] && [ "$c" -le 9 ] && [ "$r" = "$c" ] || fail "the same pack text was checked again at its reads, or a read ran jq of its own: $c checks, $r reads by jq"
 }
 # A broken pack: refused at the next read, so the card is blocked, saying why, and its test command never runs.
