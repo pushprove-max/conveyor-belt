@@ -273,6 +273,62 @@ test('Needs you: a blocked main-red fix card is retried and closed by its card i
   assert.deepEqual(c.posts.splice(0), [{ url: 'control', body: { action: 'close', args: [card], repo: 'sample' } }]);
 });
 
+// Hold on a blocked card (issue 96). Bugs: there is no way to take a blocked card off the belt and keep its issue open;
+// Hold posts another action or issue, asks a second time, or leaves the card in Needs you with its buttons; Undo does
+// not release the issue; a main-red fix card, which has no issue to hold, offers Hold.
+test('Needs you: a blocked card has Hold, one click with Undo: the card leaves Needs you, and Undo releases its issue', async () => {
+  const w = boot();
+  const data = full();
+  data.panels.needs.data.cards.blocked.push({ repo: 'sample', card: 'c20261115T120000-sample-0', issue: 0, title: 'Main is red: a.test', reason: 'build: it failed', since: iso(T0), url: null });
+  deliver(w, data);
+  const row = () => panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"]');
+  const btn = (k) => row().querySelector(`button[data-act="${k}"]`);
+  const note = () => row().querySelector('.answer-note').textContent;
+  assert.deepEqual(Array.from(row().querySelectorAll('button'), (b) => b.textContent), ['Retry', 'Hold', 'Close']);
+  assert.equal(panel(w, 'needs').querySelector('li[data-key="blocked:c20261115T120000-sample-0"] button[data-act="unblock"]'), null, 'a main-red fix card has no issue to hold');
+  btn('unblock').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'unblock', args: ['13'], repo: 'sample' } }], 'one click holds it');
+  assert.equal(note(), 'Held: #13 leaves Needs you in about a minute. Undo');
+  assert.ok(row().classList.contains('is-pending') && ['retry', 'unblock', 'close'].every((k) => btn(k).hidden), 'greyed, its buttons gone');
+  btn('undo').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'release', args: ['13'], repo: 'sample' } }]);
+  assert.equal(note(), 'Undone: #13 is released. Conveyor builds it in its turn, from its kept work.');
+  assert.ok(row().classList.contains('is-pending') && btn('retry').hidden, 'released, its card is still off the belt: nothing to retry');
+  // The next data no longer lists it as blocked: it has left Needs you.
+  const after = full();
+  after.panels.needs.data.cards.blocked = [];
+  next(w, after);
+  assert.equal(row(), null);
+});
+
+// Fix on a blocked card whose reason has a fix Conveyor runs itself (issue 96). Bugs: no such card offers Fix, or one
+// whose reason has no runnable fix does; Fix does not say what it does, sends on the first click, or posts a plain
+// retry, which takes up the kept patch that stopped the card again.
+test('Needs you: a blocked card whose reason has a runnable fix shows Fix, which says what it does and posts it; others show none', async () => {
+  const w = boot();
+  const data = full();
+  data.panels.needs.data.cards.blocked.push({ repo: 'sample', card: 'c3-14', issue: 14, title: 'Kept patch', reason: 'worktree: the kept patch of card c1-14 could not be taken out of the worktree', since: iso(T0), url: `${P}/14` },
+    { repo: 'sample', card: 'c4-16', issue: 16, title: 'Port', reason: 'review 1: the engine could not compare the port with the kept patch', since: iso(T0), url: `${P}/16` });
+  deliver(w, data);
+  const row = (k) => panel(w, 'needs').querySelector(`li[data-key="blocked:${k}"]`);
+  assert.equal(row('c2-13').querySelector('button[data-act="fix"], .fix-does'), null, '"tests failed twice" has no fix Conveyor can run');
+  for (const [k, n] of [['c3-14', 14], ['c4-16', 16]]) {
+    const fix = () => row(k).querySelector('button[data-act="fix"]');
+    assert.deepEqual(Array.from(row(k).querySelectorAll('button'), (b) => b.textContent), ['Retry', 'Fix', 'Hold', 'Close'], k);
+    assert.equal(row(k).querySelector('.fix-does').textContent, `Fix builds #${n} again from nothing, without its kept work, which Conveyor cannot use. That work moves to kept-dropped/ in the state folder.`);
+    fix().click();
+    await settle();
+    assert.deepEqual(w.posts, [], `${k}: the first click only asks`);
+    assert.equal(fix().textContent, `Click again to fix #${n}`);
+    fix().click();
+    await settle();
+    assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'retry', args: [String(n), '--fresh'], repo: 'sample' } }], k);
+    assert.match(row(k).querySelector('.answer-note').textContent, new RegExp(`^Fixed: #${n} leaves Needs you in about a minute\\.`));
+  }
+});
+
 // Bug: a reply whose body could not be read (the connection dropped after the status) left Retry, Close, Approve
 // and Decline disabled under "Sending…" until the page was reloaded. The status is the host's answer.
 test('Needs you: a reply whose body cannot be read is answered by its status, and a refusal frees the buttons', async () => {

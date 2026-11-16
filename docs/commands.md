@@ -38,6 +38,9 @@
   section changed after the card stopped, the issue asks for a different change, and the next card builds from nothing.
 - `conveyor.sh retry <issue> --fresh` gives a blocked card back without its kept work: the next card builds from
   nothing. The kept work moves to a dated folder under `kept-dropped/` in the state folder; it is not deleted.
+- `conveyor.sh unblock <issue> --hold` takes a blocked card off the belt and holds its issue. Its kept work stays.
+  After `conveyor.sh control release <issue>`, the loop picks the issue again and starts from that kept work. This is
+  the Board's **Hold**.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
   the judge, accounts, the dependency guard) are in `conveyor/README.md`, Control.
 
@@ -59,7 +62,8 @@ The loop:
 
 Cards:
 
-- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` shuts a blocked card whose issue was closed. A main-red fix
+- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
+  blocked card's issue and keeps its work. A main-red fix
   card has no issue: use `retry <card id>` and `shut <card id>`.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.

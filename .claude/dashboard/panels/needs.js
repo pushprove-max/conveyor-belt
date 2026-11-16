@@ -4,7 +4,8 @@
 // (repo) and answered here (POST answer, to the page's own host). A blocked card leads with why it failed, in one plain
 // sentence (ctx.failureLine: the reason as recorded opens on a tap), then what Retry does, then its output on demand.
 // It has Retry and Close, each sent as POST /control retry or close on a second click (Retry costs a new build; Close
-// cannot be undone, and says so). Its part:
+// cannot be undone, and says so), and Hold (POST /control unblock: one click with Undo, a release). A card whose reason
+// has a fix Conveyor runs itself (FIXES) also has Fix, which says what it does. Its part:
 // {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, kinds, entries}. A group that was not read says so; it is never "nothing". A card
 // comes with its reviews and its track, as `conveyor.sh snapshot` gives them: a blocked card is off the
 // belt, so the step it failed at, with the seconds that step ran, is shown here on its six steps. There is no main
@@ -34,6 +35,15 @@
 const beforeOf = (d) => (d.cards && Array.isArray(d.cards.before) ? d.cards.before : []);
 const pipelineOf = (d) => (d.cards && Array.isArray(d.cards.pipeline) ? d.cards.pipeline : []);
 const farDepsOf = (d) => (d.cards && Array.isArray(d.cards.farDeps) ? d.cards.farDeps : []);
+// The block reasons with a fix Conveyor can run itself (docs/board.md, Needs you, which lists each): the reason's
+// start, the arguments the fix adds to retry after the issue, and what it does. Each here is a kept patch that cannot
+// be used (card(), lib/card.sh): the issue is built again from nothing. A landing conflict has no Fix of its own: Retry already brings
+// the kept patch onto main in one session. A reason not here has no fix Conveyor can run, and shows no Fix.
+const FIXES = [
+  [/^(worktree: the kept patch of card \S+ could not be taken out of the worktree|review [0-9]+: the engine could not compare the port with the kept patch)/,
+    ['--fresh'], (n) => `Fix builds ${n} again from nothing, without its kept work, which Conveyor cannot use. That work moves to kept-dropped/ in the state folder.`],
+];
+const fixOf = (c) => (c.issue > 0 && typeof c.reason === 'string' ? FIXES.find(([re]) => re.test(c.reason)) || null : null);
 const testsOf = (d) => (Array.isArray(d.tests) ? d.tests : []);
 const enginesOf = (d) => (Array.isArray(d.engines) ? d.engines : []);
 const testRulesOf = (d) => (Array.isArray(d.testRules) ? d.testRules : []);
@@ -144,7 +154,12 @@ window.DASH_APP.panel({
       if (kind === 'waiting') li.append(yesActions(c));
       // A push that keeps failing is not a card to retry (its card has landed): the loop pushes again by itself; one
       // that failed its check (c.check names it) is pushed again only once a fix lands on main.
-      else if (!c.push) li.append(h('p', 'hint', 'Fix the cause. Then press Retry.'), blockedActions(c));
+      else if (!c.push) {
+        const fix = fixOf(c);
+        li.append(h('p', 'hint', 'Fix the cause. Then press Retry.'));
+        if (fix) li.append(h('p', 'hint fix-does', fix[2](n)));
+        li.append(blockedActions(c, fix));
+      }
       return li;
     };
     // A blocked card is retried (conveyor.sh retry: it costs a new build) or its issue closed (for good), here, through
@@ -152,13 +167,19 @@ window.DASH_APP.panel({
     // is named, retried and shut by its card id.
     const target = (c) => (c.issue === 0 && typeof c.card === 'string' && c.card ? c.card : String(c.issue));
     const named = (c) => (c.issue === 0 ? target(c) : `#${c.issue}`);
-    const blockedActions = (c) => issueActions(c, [['retry', 'Retry', 'spend', `Click again to retry ${named(c)}`, 'Retried']]);
+    // A blocked card of an issue also has Fix, when its reason has one (fixOf: retry with the fix's arguments, on a
+    // second click, as it costs a build), and Hold (unblock: its issue held, its card off the belt and its kept work
+    // kept), one click with Undo (control release). A main-red fix card has no issue to hold.
+    const blockedActions = (c, fix) => issueActions(c, [['retry', 'Retry', 'spend', `Click again to retry ${named(c)}`, 'Retried'],
+      ...(fix ? [['fix', 'Fix', 'spend', `Click again to fix ${named(c)}`, 'Fixed', ['retry', ...fix[1]]]] : []),
+      ...(c.issue > 0 ? [['unblock', 'Hold', null, null, 'Held']] : [])]);
     // A pipeline change held for the owner is queued (control release), one click with Undo (control hold), or its
     // issue closed in the same way. It has no card, so the host's close shuts none.
     const pipelineActions = (x) => issueActions(x, [['release', 'Queue', null, null, 'Queued']]);
     // The first buttons (action, label, guard tier or null for one click, its second-click words, the word said once the
-    // host took it), then Close. Once the host takes one, the entry is greyed in place and its buttons go, until it
-    // leaves the panel; a refusal puts them back with the host's answer.
+    // host took it, and the action and the arguments after the issue it posts, when not the action alone), then Close.
+    // Once the host takes one, the entry is greyed in place and its buttons go, until it leaves the panel; a refusal
+    // puts them back with the host's answer.
     function issueActions(c, acts) {
       const box = h('div', 'answer'), note = h('p', 'answer-note');
       note.setAttribute('aria-live', 'polite');
@@ -166,35 +187,40 @@ window.DASH_APP.panel({
       const all = [...acts, ['close', 'Close', 'final', `Click again: close ${t} for good. Conveyor never builds it`, 'Closed']];
       const row = () => box.closest('li');
       const busy = (on) => { buttons.forEach((b) => { b.disabled = on; b.hidden = on && row() && row().classList.contains('is-pending'); }); };
-      const ask = (action) => {
+      const ask = (action, more = []) => {
         if (typeof c.repo !== 'string' || !c.repo) { note.textContent = `Not sent: the Board does not know which repository ${t} is in.`; return null; }
         busy(true);
         note.textContent = 'Sending…';
-        return ctx.post('control', { action, args: [target(c)], repo: c.repo })
+        return ctx.post('control', { action, args: [target(c), ...more], repo: c.repo })
           // A reply whose body cannot be read is still the host's answer: its status says what happened.
           .then((r) => r.text().then((x) => String(x).trim(), () => '').then((x) => ({ ok: r.ok, said: x || `the build machine answered ${r.status}` })), () => ({ ok: false, said: 'the build machine did not answer. Make sure that it is on. Then try again' }));
       };
       const refused = (r) => { if (row()) row().classList.remove('is-pending'); busy(false); note.textContent = `Not done: ${r.said}`; };
-      const send = (action, word) => {
-        const sent = ask(action);
+      const send = (post, word) => {
+        const [action, ...more] = post, sent = ask(action, more);
         if (sent) sent.then((r) => {
           if (!r.ok) { refused(r); return; }
           if (row()) row().classList.add('is-pending');
           busy(true);
-          // The build machine's reply is shown only when the action failed. A queued one can be held again.
+          // The build machine's reply is shown only when the action failed. A queued one can be held again. A held
+          // blocked card is released again: its card is off the belt, so it stays greyed, and its issue is built in
+          // its turn from its kept work.
           const said = `${word}: ${t} leaves Needs you in about a minute.`;
           note.replaceChildren(action === 'release' ? ctx.undoLine(said, () => {
             const back = ask('hold');
             if (back) back.then((u) => { if (!u.ok) { note.textContent = `Not undone: ${u.said}`; return; } if (row()) row().classList.remove('is-pending'); busy(false); note.textContent = `Undone: the hold on ${t} is back.`; });
+          }) : action === 'unblock' ? ctx.undoLine(said, () => {
+            const back = ask('release');
+            if (back) back.then((u) => { busy(true); note.textContent = u.ok ? `Undone: ${t} is released. Conveyor builds it in its turn, from its kept work.` : `Not undone: ${u.said}`; });
           }) : said);
         });
       };
-      for (const [action, label, tier, again, word] of all) {
+      for (const [action, label, tier, again, word, post = [action]] of all) {
         const b = h('button', 'btn', label);
         b.type = 'button';
         b.dataset.act = action;
-        if (tier) ctx.twice(b, tier, again, () => send(action, word));
-        else b.addEventListener('click', () => send(action, word));
+        if (tier) ctx.twice(b, tier, again, () => send(post, word));
+        else b.addEventListener('click', () => send(post, word));
         buttons.push(b);
       }
       box.append(...buttons, note);

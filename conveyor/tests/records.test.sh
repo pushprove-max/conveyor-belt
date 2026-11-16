@@ -93,6 +93,28 @@ t_retry() {
   done
 }
 
+# The Board's Hold on a blocked card (`unblock <issue> --hold`). Bugs: the issue is not held, so the loop builds it
+# again at once; its card stays blocked, so it stays in Needs you; its kept work is dropped, so once released it builds
+# from nothing; a refused unblock (no blocked card) leaves a hold behind, or takes off a hold the owner had set.
+t_unblockhold() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02))"; S=$ST; mkdir -p "$S/kept/c0-7"
+  echo two >> "$R/a.txt"; git -C "$R" diff > "$S/kept/c0-7/c0-7.patch"; git -C "$R" reset -q --hard
+  landed 7 | jq -c '.step = "blocked" | .result = "blocked" | .kept = "kept/c0-7" | .reason = "build: it failed"' >> "$S/cards.jsonl"
+  loop unblock 7 --hold >/dev/null || fail "unblock 7 --hold exited non-zero"
+  [ "$(jq -c .held "$S/control.json")" = '[7]' ] || fail "the issue is not held: $(jq -c .held "$S/control.json")"
+  ! grep -q '"issue":7,' "$S/cards.jsonl" && grep -q '"step":"blocked"' "$S/retried.jsonl" || fail "the blocked card did not leave the card records for the retried file"
+  [ -s "$S/kept/c0-7/c0-7.patch" ] || fail "the kept patch went: $(ls -R "$S/kept")"
+  # Refused (no blocked card): no hold is left, and a hold set before stays.
+  loop unblock 9 --hold >/dev/null 2>&1 && fail "unblock of #9, which has no card, exited 0"
+  loop control hold 8 >/dev/null; loop unblock 8 --hold >/dev/null 2>&1
+  [ "$(jq -c .held "$S/control.json")" = '[7,8]' ] || fail "a refused unblock changed the holds: $(jq -c .held "$S/control.json")"
+  # Released, its next card resumes from the kept patch.
+  loop control release 7 8 >/dev/null; echo "$GO" > "$STUB/review.1"; echo 'git diff --cached --name-only > "$STUB/resumed-with"' > "$STUB/build"
+  loop run --only 7 >/dev/null || fail "run of the released #7 exited non-zero"
+  st 'select(.issue == 7 and .step == "worktree") | .reason' | grep -q '^resumed from the kept patch of card c0-7:' && [ "$(cat "$STUB/resumed-with")" = a.txt ] \
+    || fail "the released #7 did not resume from its kept patch: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+
 # #10 is the run's one card; its session holds until #7 has landed (or the stub folder is gone: the test's end),
 # however long that takes. #7, blocked before, is retried while the loop waits on it.
 t_retrywait() {

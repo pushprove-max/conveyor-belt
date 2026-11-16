@@ -159,7 +159,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
   if (r.ok) location = '/login'; else m.textContent = await r.text();
 };</script>
 '''
-# POST /control is {action, args, repo}: an action of `conveyor.sh control`, or approve, decline, retry or close of a card,
+# POST /control is {action, args, repo}: an action of `conveyor.sh control`, or approve, decline, retry (with --fresh:
+# a blocked card's Fix), unblock (a blocked card's Hold: `conveyor.sh unblock <issue> --hold`) or close of a card,
 # or build of a declined finding (the Declined panel's "File as issue": the id of its line in the record's declined list),
 # or dismiss of declined findings (its "Dismiss" and "Dismiss all shown": the ids of their lines),
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
@@ -204,7 +205,7 @@ SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
-CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'close': 60, 'start': 90, 'build': 60, 'depends': 120,
+CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
                    'testaction': 60, 'test-close': 60, 'test-issue': 60}  # testaction stop waits up to 40 s for the end
 DEPENDS_MAX = 20  # the issues one `control depends` names
 # The condition the owner gives with their yes, or why they say no: one line of plain text.
@@ -351,8 +352,12 @@ def control_ok(body):
         return v in (['on'], ['off'])
     if a == 'force':  # one waiting issue built before its dependencies land (the host refuses it while the guard is on)
         return issues(1, 1)
+    if a == 'retry' and n == 2 and v[1] == '--fresh':  # a blocked card's Fix that drops its kept work, by its issue
+        return ISSUE.fullmatch(v[0]) is not None
     if a in ('retry', 'close'):  # a blocked card of Needs you, or a pipeline change held there (close), by its issue; a main-red fix card by its card id
         return issues(1, 1) or (n == 1 and REDCARD.fullmatch(v[0]) is not None)
+    if a == 'unblock':  # a blocked card's Hold, by its issue (conveyor.sh unblock <issue> --hold)
+        return issues(1, 1)
     if a == 'build':  # a declined finding, by its line's id
         return n == 1 and DECLINED_ID.fullmatch(v[0]) is not None
     if a == 'dismiss':  # declined findings, by their lines' ids ("Dismiss", "Dismiss all shown"); as many as fit the body
@@ -529,7 +534,10 @@ def control_script(action, args, main, today, record=None, user=None):
     q = shlex.quote
     conv = 'CONVEYOR_MAIN=%s bash %s' % (q(record or main), q(main + '/conveyor/conveyor.sh'))
     if action == 'retry':
-        return '%s retry %s' % (conv, q(args[0]))
+        return '%s retry %s' % (conv, ' '.join(q(x) for x in args))
+    if action == 'unblock':
+        # Hold on a blocked card of Needs you: its issue held and its card given back, its kept work kept.
+        return '%s unblock %s --hold' % (conv, q(args[0]))
     if action == 'close':
         # Close on a blocked card of Needs you: its issue, closed in the record's repository, then its blocked card shut
         # (closed in the card records) at once, as the loop's next turn would, so it leaves Needs you though the loop is

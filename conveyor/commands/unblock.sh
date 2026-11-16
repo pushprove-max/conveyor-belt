@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# `conveyor.sh unblock <issue> --hold`: the Board's Hold on a blocked card of Needs you, sourced by conveyor.sh. Under
+# the records' lock, the issue is held (control(), lib/control.sh), then its blocked card is given back as `retry`
+# gives it (retry(), lib/issues.sh): its lines move to the retried file and its kept work stays where it is. The card
+# leaves Needs you, and the issue is not picked until it is released; the card built then resumes from the kept work.
+# The hold comes first, so the loop never picks the issue between the two. A retry that is refused changes nothing:
+# the hold is taken off again, unless the issue was held before.
+. "$HERE/lib/prompts.sh" || exit 1
+. "$HERE/lib/views.sh" || exit 1
+. "$HERE/lib/issues.sh" || exit 1
+. "$HERE/lib/pick.sh" || exit 1
+. "$HERE/lib/followups.sh" || exit 1
+. "$HERE/lib/control.sh" || exit 1
+. "$HERE/lib/run.sh" || exit 1
+. "$HERE/lib/machine.sh" || exit 1
+. "$HERE/lib/install.sh" || exit 1
+[[ ${2:-} =~ ^[1-9][0-9]{0,8}$ ]] && [ $# = 3 ] && [ "$3" = --hold ] || { echo "usage: conveyor.sh unblock <issue> --hold" >&2; exit 2; }
+unblock() { # <issue>
+  local was
+  was=$(ctl | jq -r --argjson n "$1" '.held | index($n) != null') || { echo "conveyor: cannot read the control record; nothing changed" >&2; return 1; }
+  control hold "$1" >/dev/null || return 1
+  retry "$1" >/dev/null || { [ "$was" = true ] || control release "$1" >/dev/null; return 1; }
+  echo "conveyor: issue #$1 is held and its card is off the belt; its kept work is kept. Release it to build it again: conveyor.sh control release $1"
+}
+locked unblock "$2"

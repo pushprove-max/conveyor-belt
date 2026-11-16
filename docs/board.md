@@ -66,6 +66,19 @@ each panel. It never hides Needs you. **Restart the Board's feed** is in the Hea
 
 - **Retry and Close.** Each blocked card has a **Retry** button (`conveyor.sh retry`) and a **Close** button. Close
   asks once, then closes the card's issue with a comment and shuts the card (`conveyor.sh shut`).
+- **Hold.** Each blocked card of an issue has a **Hold** button (`conveyor.sh unblock <issue> --hold`). One click
+  holds the issue and takes the card off the belt and out of Needs you. Conveyor keeps the card's work. **Undo**
+  releases the issue. A released issue is built in its turn, from the kept work. A main-red fix card has no issue,
+  so it has no Hold button.
+- **Fix.** A blocked card shows a **Fix** button only when Conveyor can fix the reason itself. A line above the
+  buttons says what Fix does. Fix asks once, then runs the fix. These reasons have a Fix:
+  - "the kept patch of card ... could not be taken out of the worktree", and "the engine could not compare the
+    port with the kept patch". Conveyor cannot use the kept work. Fix runs `conveyor.sh retry <issue> --fresh`: a
+    new card builds the issue from nothing.
+
+  A landing conflict ("rebase onto main conflicts") has no Fix button. **Retry** already brings the kept patch onto
+  main. A push that fails a check needs a fix on main first. A card that waits for your yes to a visible change has
+  **Approve** and **Decline**. Other reasons need you to fix the cause, then press **Retry**.
 - **Queue and Close.** Each entry under "Pipeline changes held for you" has a **Queue** button, which releases
   the issue (`conveyor.sh control release`), and a **Close** button.
 

@@ -773,6 +773,12 @@ fresh_control
 [ "$(ctl "$(act retry 13)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM retry 13" ] && grep -q 'can be picked again' "$M/ctl.out" \
   || fail "retry_reaches_conveyor_retry: $(cat "$M/ctl.out") ran '$(calls)'"
 pass=$((pass + 1))
+# A blocked card's Hold and its Fix that drops the kept work. Bug: either is refused, or reaches another command.
+fresh_control
+[ "$(ctl "$(act unblock 13)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM unblock 13 --hold" ] || fail "unblock_reaches_conveyor_unblock_hold: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
+fresh_control
+[ "$(ctl "$(act retry 13 --fresh)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM retry 13 --fresh" ] || fail "retry_fresh_reaches_conveyor_retry: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
+pass=$((pass + 2))
 # The Board's "Depends on…": control_ok() takes depends <issue> add|remove with 1 to 20 issues, and the host's
 # `control depends` gets them as sent (its refusals are the host's). Bug: the action refused, so the Board could not
 # set a dependency; or a shape the host does not take sent to it (the refusals are in control_bad_value_refused).
@@ -1078,7 +1084,7 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act judge)" "$(act judge on off)" "$(act judge always 'a b')" "$(act judge always 'x;id')" "$(act judge always -x)" "$(act judge always $(seq 21))" "$(act judge claude m bogus)" \
   "$(act account a b)" "$(act account 'a;id')" "$(act account -x)" "$(act review-account '')" \
   "$(act dep-guard)" "$(act dep-guard maybe)" "$(act dep-guard on off)" "$(act force)" "$(act force x)" "$(act force 12 13)" "$(act force '12;id')" \
-  "$(act approve)" "$(act approve 12 a b)" "$(act retry x)" "$(act retry 12 13)" "$(act close)" "$(act close x)" "$(act close 012)" "$(act close '12;id')" "$(act close 12 13)" "$(act decline '')" "$(act approve x why)" \
+  "$(act approve)" "$(act approve 12 a b)" "$(act retry x)" "$(act retry 12 13)" "$(act retry x --fresh)" "$(act retry 12 --hold)" "$(act retry c20261115T120000-sample-0 --fresh)" "$(act unblock)" "$(act unblock x)" "$(act unblock 12 --hold)" "$(act close)" "$(act close x)" "$(act close 012)" "$(act close '12;id')" "$(act close 12 13)" "$(act decline '')" "$(act approve x why)" \
   "$(act build)" "$(act build 12)" "$(act build 'd0123456789ab;id')" "$(act build d0123456789ab d0123456789ab)" \
   "$(act approve 12 '')" "$(act approve 12 ' padded')" "$(act decline 12 $'two\nlines')" "$(act decline 12 "$(printf 'x%.0s' $(seq 301))")" \
   "$(act unlabel 12)" "$(act unlabel x backlog)" "$(act unlabel 12 '.x')" "$(act unlabel 12 'a b')" "$(act unlabel 12 'backlog;id')" "$(act unlabel 12 a b c d e f)" \
