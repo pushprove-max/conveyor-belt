@@ -28,6 +28,9 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # --research-lane yes|no, and asked (exit 2, nothing written) on every run; yes makes the lane (setuplane()) once the
 # project is in the host file, where its create writes the lane's folder. PACK0's lanes.research is the research
 # lane's model and effort, which its create needs; yes writes it into a pack that has none.
+# The question "Set the pack's tests.patterns?": answered by --test-patterns yes|no, and asked (exit 2, nothing written)
+# while the pack sets no tests.patterns and the default misses tracked files that read as tests (testoffer()), naming
+# the globs and how many tracked files they match; yes writes them as the pack's tests.patterns.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -55,9 +58,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -65,6 +68,7 @@ setup() { # as SETUP_USAGE
     [ "$1" != --pin ] || { pin=1; shift; continue; }
     case $1 in --owner) owner=${2-} ;; --product) prods+=("${2-}") ;; --test) test=${2-} ;;
       --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
+      --test-patterns) tpa=${2-}; [[ $tpa == yes || $tpa == no ]] || { set -- x; break; } ;;
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
       --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
@@ -98,6 +102,16 @@ setup() { # as SETUP_USAGE
       need+=("--link <yes or no: $w>")
     fi
   fi
+  # The project's test files, when the pack sets no tests.patterns and the default misses files that read as tests
+  # (testoffer()): asked, as the lanes are, naming the globs and how many tracked files they match; yes writes them.
+  if [ "$tpa" != no ] && ! jq -e '.tests.patterns' "$PACK" >/dev/null 2>&1; then
+    x=$test; [ ! -e "$PACK" ] || packget test.command x 2>/dev/null || x=''
+    [ -z "$x" ] || tp=$(testoffer "$x") || tp=''
+    if [ -n "$tp" ] && [ -z "$tpa" ]; then
+      tn=$(testcount "$tp") && n=$(testcount "$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA")") || return 1
+      need+=("--test-patterns <yes or no: the default test-file patterns miss $((tn - n)) tracked files that read as tests; set the pack's tests.patterns to $(jq -r 'join(", ")' <<<"$tp"), which match $tn tracked files?>")
+    fi
+  fi
   if [ -e "$PACK" ]; then
     [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
     [ ${#need[@]} = 0 ] || { printf 'conveyor: setup needs:%s\n' "$(printf ' %s;' "${need[@]}")" >&2; return 2; }
@@ -125,6 +139,11 @@ setup() { # as SETUP_USAGE
     jq --arg s "$ws" '.worktree.setup = $s' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: worktree.setup could not be written in the pack" >&2; return 1; }
     echo "conveyor: wrote the pack's worktree.setup: $ws, run in each card's worktree before its build and tests"
+  fi
+  if [ "$tpa" = yes ] && [ -n "$tp" ]; then
+    jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pack's tests.patterns could not be written" >&2; return 1; }
+    echo "conveyor: wrote the pack's tests.patterns: $(jq -r 'join(", ")' <<<"$tp") ($(testcount "$tp") tracked files)"
   fi
   packget plugin.commit p plugin.follow f || return 1
   if [ -z "$p$f" ] && [ -n "$pin" ]; then
@@ -243,6 +262,63 @@ timinghint() {
     echo "    ./testtime.sh \"\$f\" -- <the file's command> > \"\$out\" 2>&1; rc=\$?; cat \"\$out\"; grep '^TESTRUN sec' \"\$out\" >> \"\$CONVEYOR_TEST_LOG/<its log>\""
     echo "  conveyor/README.md, The CPU budget of a test file, says more."
   done
+}
+# The tracked files the test command names (docs/configuration.md, How test files are found): each word of it with a
+# * or ? in it (quotes taken off; of an --option=<value>, the value) read as a glob of paths from the checkout's root,
+# as git reads one. One a line.
+cmdtests() { # <test command>
+  local w ws=()
+  read -ra ws <<<"$1"
+  for w in "${ws[@]}"; do
+    w=${w//[\"\']/}; w=${w%%[;&|)]*}; [[ $w != -*=* ]] || w=${w#*=}; w=${w#./}
+    [[ $w == *[*?]* && $w != -* && $w != *'$'* && $w != /* ]] || continue
+    git -C "$MAIN" -c core.quotePath=false ls-files -- ":(glob)$w" 2>/dev/null
+  done | LC_ALL=C sort -u
+}
+# The tracked files the test-file globs <patterns> (a JSON list, as tests.patterns) match, counted.
+testcount() { # <patterns>
+  local rx
+  rx=$(jq -r "$GLOBRX"'globsrx' <<<"$1") || return 1
+  git -C "$MAIN" -c core.quotePath=false ls-files | { grep -cE -- "$rx" || :; }
+}
+# Setup's guess at the test files <patterns> (a JSON list) miss: of the tracked files that are not documents or data,
+# those the test command names (cmdtests()) and those whose own name reads as a test's (it starts with test or spec and
+# a - or _, or ends so, or with Test, Tests or Spec, before its extension), each made a glob: its test word kept, the
+# rest a *, in any folder; a file the command names whose name has no test word, its folder's files of its extension.
+# Prints the globs that match a file <patterns> misses, one a line.
+testguess() { # <test command> <patterns>
+  local rx
+  rx=$(jq -r "$GLOBRX"'globsrx' <<<"$2") || return 1
+  git -C "$MAIN" -c core.quotePath=false ls-files | jq -rRn --arg rx "$rx" --rawfile cf <(cmdtests "$1") '
+    ($cf | split("\n") | map(select(. != ""))) as $cf
+    | [inputs | select(test($rx) | not) | select(test("\\.(md|txt|json|ya?ml|snap|lock|csv|html|css|svg|png|jpe?g|gif)$"; "i") | not)
+      | . as $p | split("/")[-1] as $b | ($b | capture("(?<x>\\.[^.]+)$").x // "") as $e
+      | if $b | test("^(?i:test|spec)s?[-_]") then ($b | capture("^(?<w>(?i:test|spec)s?[-_])").w) + "*" + $e
+        elif $b | test("[-_.](?i:test|spec)s?\\.[^.]+$") then "*" + ($b | capture("(?<w>[-_.](?i:test|spec)s?)\\.[^.]+$").w) + $e
+        elif $b | test("(Test|Tests|Spec)\\.[^.]+$") then "*" + ($b | capture("(?<w>Test|Tests|Spec)\\.[^.]+$").w) + $e
+        elif IN($cf[]; $p) and ($p | contains("/")) then "/" + ($p | split("/")[:-1] | join("/")) + "/*" + $e
+        else empty end] | unique[]'
+}
+# What setup offers for a pack with no tests.patterns of its own (setup()): the default and testguess()'s globs, as
+# the setting (a JSON list); nothing when the default misses no file that reads as a test.
+testoffer() { # <test command>
+  local d g=()
+  d=$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA") && mapfile -t g < <(testguess "$1" "$d") || return 1
+  [ ${#g[@]} = 0 ] || jq -cn --argjson d "$d" '$d + $ARGS.positional' --args "${g[@]}"
+}
+# What doctor says of the pack's tests.patterns: a `missing:` line when they match no tracked file, or miss a file the
+# test command names (cmdtests()); else an `ok:` line with the count. Fails with a `missing:` line.
+testcheck() {
+  local p c n m=()
+  packget tests.patterns p test.command c || return 1
+  n=$(testcount "$p") || return 1
+  mapfile -t m < <(cmdtests "$c" | testpaths -v)
+  if [ "$n" = 0 ]; then
+    echo "missing: test files the pack's tests.patterns match (they match no tracked file: $(jq -r 'join(", ")' <<<"$p")); fix: set tests.patterns in .conveyor/project.json to globs of the project's test files (docs/configuration.md, How test files are found)"; return 1
+  elif [ ${#m[@]} != 0 ]; then
+    echo "missing: tests.patterns that match the ${#m[@]} file$([ ${#m[@]} = 1 ] || echo s) the test command names, such as ${m[0]}; fix: add a glob of them to tests.patterns in .conveyor/project.json (docs/configuration.md, How test files are found)"; return 1
+  fi
+  echo "ok: the pack's tests.patterns match $n tracked file$([ "$n" = 1 ] || echo s)"
 }
 # The project joins the machine's Conveyor: a record {repo, main} in the host file (made, as {}, when there is none),
 # named for its checkout's folder, unless a record already names this checkout. A name another record has is not
@@ -561,6 +637,8 @@ doctor() {
   if [ ! -e "$PACK" ]; then no "the pack $PACK" "run /conveyor-belt:setup"; return 1; fi
   e=$("$HERE/lib/pack.sh" check "$PACK" 2>&1) || { no "a valid pack" "correct what the check names: ${e//$'\n'/; }"; return 1; }
   ok "the pack $PACK"
+  # The pack's test-file globs: they must find the project's tests (testcheck()).
+  testcheck || bad=1
   # The control record setup writes (heldstart()): with none, the loop would queue every open issue. With one, the
   # open issues it holds.
   if [ ! -s "$CONTROL" ]; then no "the control record $CONTROL (with none, the loop queues every open issue)" "run /conveyor-belt:setup, which writes it with every open issue held"

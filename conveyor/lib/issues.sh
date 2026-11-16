@@ -298,11 +298,20 @@ withdrawn() { # <issue>
     | "#\(.number) \((.body | capture("(^|\n)Finding: (?<f>[^\n]*[^[:space:]])").f) // .title)"' <<<"$out" 2>/dev/null
 }
 
+# Test files: the one place that says which paths are the project's tests. A path one of the pack's tests.patterns
+# matches (TESTRX, made by names(); the schema's default when the pack sets none) is a test file. Of the paths on stdin
+# (one a line; with -z, each ended by a NUL), prints those that are test files; with -v, those that are not. Every
+# line is read, so a pipe into it never ends early. TESTRX is the one names() made last, as PRODUCT is (a pack a card
+# changed counts from the loop's next turn); with none made yet, names() makes it here. Fails when the pack cannot be
+# read.
+testpaths() { # [-v] [-z]
+  [ -n "${TESTRX:-}" ] || names || { cat > /dev/null; return 1; }
+  grep -E "$@" -e "$TESTRX" || :
+}
 # Product code: the one place that says which paths count. A file under one of the pack's productPaths
-# (PRODUCT, made by names()) is product code, its tests aside. Both product() and the visible-change check ask this of
-# a list of paths (one per line, on stdin); every line is read, so a pipe into it never ends early.
-NOTPRODUCT='(__tests__|\.test\.|\.spec\.)'
-productpaths() { [ "$(grep -Ev "$NOTPRODUCT" | grep -Ec "$PRODUCT")" != 0 ]; }
+# (PRODUCT, made by names()) is product code, its tests (testpaths()) aside. Both product() and the visible-change check
+# ask this of a list of paths (one per line, on stdin); every line is read, so a pipe into it never ends early.
+productpaths() { [ "$(testpaths -v | grep -Ec "$PRODUCT")" != 0 ]; }
 # Did this commit change product code (tests aside)?
 product() { git show --name-only --format= "$1" 2>/dev/null | productpaths; }
 

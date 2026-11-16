@@ -36,7 +36,7 @@ samplemake() { # <folder>: what sample copies, in <folder>: sample, origin.git, 
   local S=$1/sample G=$1/gh
   mkdir -p "$S" "$G" "$1/board-venv/bin" && git -C "$S" init -q -b feature \
     && git init -q --bare -b trunk "$1/origin.git" && git -C "$S" remote add origin "$1/origin.git" \
-    && echo '# Sample' > "$S/CLAUDE.md" && echo 'Read CLAUDE.md.' > "$S/AGENTS.md" && git -C "$S" add CLAUDE.md AGENTS.md \
+    && echo '# Sample' > "$S/CLAUDE.md" && echo 'Read CLAUDE.md.' > "$S/AGENTS.md" && echo true > "$S/a.test.sh" && git -C "$S" add CLAUDE.md AGENTS.md a.test.sh \
     && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -q -m one && git -C "$S" push -q origin feature:trunk \
     || return 1
   printf '%s\n' Bug Feature > "$G/labels"
@@ -226,6 +226,18 @@ t_setupasked() {
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey maybe 2>&1); [ $? = 2 ] && grep -q '^usage: .*--survey yes|no' <<<"$out" || fail "setup took --survey maybe: $out"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey no 2>&1) && [ ! -e "$G/filed" ] && jq -e '.test.firstSurvey == false' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --survey no filed a survey issue, or did not save the answer: $out $(cat "$G/filed" 2>&1)"
+}
+# #137. Bug: setup left a project whose test files the default misses (src/test-a.js, src/test-b.js) with no
+# tests.patterns, so its bug cards found no test file. It asks before changing anything, showing the globs and the
+# tracked files they match; yes writes them as the pack's tests.patterns.
+t_setuptestpatterns() {
+  local X out was; setupdone
+  mkdir -p "$S/src" && echo x > "$S/src/test-a.js" && echo x > "$S/src/test-b.js" && git -C "$S" add src && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -qm tests || fail "the test files"
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
+    && grep -qF -- '--test-patterns <yes or no: the default test-file patterns miss 2 tracked files that read as tests; set the pack'"'"'s tests.patterns to __tests__/, ' <<<"$out" \
+    && grep -qF -- 't/*.sh, test-*.js, which match 3 tracked files?>' <<<"$out" || fail "setup did not ask for the patterns it found, before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-patterns yes 2>&1) && jq -e '.tests.patterns[-1] == "test-*.js"' "$S/.conveyor/project.json" >/dev/null \
+    || fail "setup --test-patterns yes did not write the patterns: $out"
 }
 # Bug: setup made no lane, so the owner had to know to run `lane fast create` and `lane research create` by hand. It
 # asks for both on every run, before it changes anything, and no to both makes neither.

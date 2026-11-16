@@ -89,6 +89,12 @@ the project's settings file `.conveyor/project.json`, keeps the answer (`test.fi
 again. To ask for a survey later, run
 `/conveyor-belt:setup --survey`, or `setup --survey yes` from a shell.
 
+Setup also reads the names of your project's tracked files and your test command, to find how your test files are
+named ([How test files are found](configuration.md#how-test-files-are-found)). When the default test-file patterns
+miss files that look like tests, setup shows the patterns that it found and how many tracked files they match. Then it
+asks if it can write them in the pack as `tests.patterns` (`--test-patterns yes|no`). If your pack already sets
+`tests.patterns`, setup does not ask.
+
 Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
 the lane, or keeps the lane that is already there.
 
@@ -177,7 +183,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

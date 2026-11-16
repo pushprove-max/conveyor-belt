@@ -47,23 +47,35 @@ packget() { # <field> <variable> [<field> <variable>]...: sets each variable to 
 }
 # The pack's names: the remote and branch a card lands on and the loop pushes to (REMOTE, BRANCH), the labels
 # (BUILT, FOLLOWUP, TYPE, PRIOS, AREA, NONPRODUCT), the owner whose yes a visible change needs (OWNER), and what is
-# made of them, of the product paths and of review.proof: PRODUCT, YES, REVIEW and REVIEWOFF. Read at the start of every
+# made of them, of the product paths, of the test files' globs (tests.patterns) and of review.proof: PRODUCT, TESTRX,
+# TESTGLOBS, YES, REVIEW and REVIEWOFF. Read at the start of every
 # command that uses them and again at every turn of the loop, so a pack a card changed counts from the next turn; a
 # pack that fails the check fails that command, or holds that turn's push and pick.
 # BUILT is built and merged, open until the owner deploys it: such an issue looks like work not started, so it
 # is never picked, follow-up or not. The owner sets and clears it; the loop never does.
 # A string as a regular expression that matches it and nothing else, as jq and grep -E take one.
 RX='def rx: gsub("(?<c>[][\\\\.^$|?*+(){}])"; "\\\(.c)");'
+# A glob of the pack's tests.patterns as a regular expression of a path from the repository root (jq and grep -E take
+# it): * and ? match within one folder name, ** across folders, a glob ending in / matches every file under such a
+# folder, and a glob matches at any depth (after a /) unless it starts with /, which ties it to the root.
+GLOBRX=$RX'def globrx: (if startswith("/") then "^" else "(^|/)" end) as $a | endswith("/") as $d
+  | ltrimstr("/") | [scan("\\*\\*/|\\*\\*|\\*|\\?|[^*?]+")
+    | if . == "**/" then "([^/]*/)*" elif . == "**" then ".*" elif . == "*" then "[^/]*" elif . == "?" then "[^/]" else rx end]
+  | $a + join("") + (if $d then "" else "$" end);
+  def globsrx: "(" + (map(globrx) | join("|")) + ")";'
 # What names sets is kept while the pack's and the schema's text are those it read (NAMED, cleared by packok when either
 # changes), so a turn on an unchanged pack starts no program for it.
 NAMED=''
 names() {
-  local p x r y
+  local p x r y t
   packok || return 1; [ -z "$NAMED" ] || return 0
   packget remote REMOTE defaultBranch BRANCH owner.name OWNER labels.built BUILT labels.followup FOLLOWUP labels.type TYPE \
-      labels.areaPrefix AREA labels.priorities PRIOS labels.nonProductAreas NONPRODUCT productPaths p review.proof r \
-    && mapfile -d '' -t x < <(jq -j "$RX"'(map(rx) | "^(" + join("|") + ")"), join(", ") | . + "\u0000"' <<<"$p") && [ "${#x[@]}" = 2 ] || return 1
-  PRODUCT=${x[0]} p=${x[1]}
+      labels.areaPrefix AREA labels.priorities PRIOS labels.nonProductAreas NONPRODUCT productPaths p review.proof r tests.patterns t \
+    && mapfile -d '' -t x < <(jq -j --argjson t "$t" "$GLOBRX"'(map(rx) | "^(" + join("|") + ")"), join(", "), ($t | globsrx), ($t | join(", ")) | . + "\u0000"' <<<"$p") \
+    && [ "${#x[@]}" = 4 ] || return 1
+  # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof() read.
+  # shellcheck disable=SC2034 # TESTRX and TESTGLOBS are read in lib/issues.sh and lib/testrun.sh
+  PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]}
   YES="visible to customers or staff: needs $OWNER's yes: "
   [ "$r" = real ] && r=$REALPROOF || r=''
   REVIEW=${REVIEWT//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<product paths>'/"$p"}; REVIEW=${REVIEW//'<real proof>'/"$r"}
@@ -382,11 +394,21 @@ The build session ended its reply with these lines, one for each line of the iss
 whether its evidence holds: write `DONE-WHEN: D<n> holds` when it does; a claim that is false (the evidence is not
 there, or does not show the line holds) is a finding, written as any finding is. A `Note:` line names a file a D<n>
 line gives that is not in the worktree: judge whether that line'"'"'s evidence still holds.'
-# The bug-card check (bugproof(), card()): the reason a bug card goes back to its build session, what that session is
-# told after the brief (the check's result follows it), and what the review is told before that result.
+# The bug-card check (bugproof(), card()): the reasons a bug card goes back to its build session or is blocked (UNFIXED
+# only when its test files ran without the fix; NOTEST when the change has none, <patterns> the pack's tests.patterns;
+# NOTALONE when the test command ran none of them; NOTBACK when main's code could not be put back for the run), what
+# that session is told after the brief (<why>: the reason; the check's result follows it), and what the review is told
+# before that result.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
 UNFIXED='the new tests pass without the fix, so they do not prove it'
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NOTEST='no test file found in the change (patterns: <patterns>); set tests.patterns in .conveyor/project.json'
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NOTALONE='test files were found in the change, but the test command, given them, selected none of them, so they did not run without the fix; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NOTBACK='main'"'"'s code could not be put back, so the test files did not run without the fix'
 # shellcheck disable=SC2034 # used in lib/card.sh
-BUGBUILD='# Back to the build: '"$UNFIXED"'
+BUGBUILD='# Back to the build: <why>
 This issue is a bug, so at least one test case your change adds or changes must fail on main'"'"'s code without your
 fix (your test files alone are run in a worktree of main), and none does. Add or change a test case that fails on
 main'"'"'s code without the fix and passes with it, and keep the fix. The check'"'"'s result:'

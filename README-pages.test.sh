@@ -130,7 +130,7 @@ run [--only <issue>[,<issue>...]] [max-cards]
 serve
 setup
 setup --survey yes
-setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]
+setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]
 shut <card id>
 shut <issue>
 snapshot

@@ -133,9 +133,8 @@ inconflicts() { # <worktree> <tree> <files that conflict>
 }
 
 # Test files at landing (settle()). A three-way merge of the card's change (<worktree>.patch) onto main, the worktree's
-# HEAD, that left a conflict in a test file the change names (one of <test files>: a test file by the engine's own
-# test-file pattern, NOTPRODUCT in issues.sh, for every project, and with a name plain enough to write as a
-# gitattributes pattern) is made again keeping both sides of those files' conflicts, main's then the card's (git's
+# HEAD, that left a conflict in a test file the change names (one of <test files>: a test file by the pack's
+# tests.patterns, testpaths() in issues.sh, and with a name plain enough to write as a gitattributes pattern) is made again keeping both sides of those files' conflicts, main's then the card's (git's
 # union merge). It fits when that leaves no conflict, in a code file either, and a change that is not empty and
 # whose lines outside the test files the change names are the card's own (<id>: unionx() of the change as it was).
 # The worktree is left as the merge left it.
@@ -309,7 +308,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # Its change outside documentation (*.md: docs), and as its tests passed on it (dp: testedhere()), for the session below.
     docs=$(cardpatch "$3" ':(exclude)*.md'); dp=''; ! testedhere "$3" || dp=$docs
     # The test files the change names (tf: unionfit()), and its own lines outside them (ix).
-    tf=$(git -C "$3" diff --cached --name-only --no-renames 2>/dev/null | grep -E "$NOTPRODUCT" | grep -Ex '[A-Za-z0-9 ._/@+,=~-]+'); ix=''
+    tf=$(git -C "$3" diff --cached --name-only --no-renames 2>/dev/null | testpaths | grep -Ex '[A-Za-z0-9 ._/@+,=~-]+'); ix=''
     [ -z "$tf" ] || ix=$(unionx "$3" "$tf")
     err=$(git -C "$3" diff --cached --binary --no-renames > "$3.patch" && printf '%s\n' "$old" > "$3.base" && git -C "$3" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
       || { block "$1" "$2" "$3" "$5: the engine could not move the change of the card onto main:${err:0:300}"; return 1; }

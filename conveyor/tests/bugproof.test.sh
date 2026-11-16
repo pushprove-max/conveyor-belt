@@ -8,16 +8,18 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # One card of #7 with the given labels: its build fixes a.txt (adds `two`; runs $FIX in its place when set, `:` for no
-# fix) and, unless <test> is empty, adds a.test.sh holding <test>. The run on main (a worktree under cards/mainrun/) notes its folder and staged files in
-# $STUB/mainran and runs a.test.sh, then what $MAINRUN holds, if any; the reviewer's prompt is kept in $STUB/asked;
-# one GO review.
+# fix) and, unless <test> is empty, adds a.test.sh (or the file $TF names) holding <test>. The run on main (a worktree under cards/mainrun/) notes its folder and staged files in
+# $STUB/mainran and runs that test file, or what $MAINRUN holds when set; the reviewer's prompt is kept in $STUB/asked;
+# one GO review. $TUNE, when set, is a jq filter of the pack (tune).
 bugcard() { # <test> <label>...
-  local t=$1; shift
+  # shellcheck disable=SC2034 # tf is read in the build's and the run's commands below
+  local t=$1 tf=${TF:-a.test.sh}; shift
   setup "[$(issue 7 2026-01-01 "$@")]"
+  [ -z "${TUNE:-}" ] || tune "$TUNE"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
-  echo "${FIX-echo two >> a.txt}${t:+; printf '%s\n' '$t' > a.test.sh}" > "$STUB/build"
-  echo '{ pwd; git diff --cached --name-only; } >> "$STUB/mainran"; '"${MAINRUN:-bash a.test.sh}" > "$STUB/mainrun-cmd"
+  echo "${FIX-echo two >> a.txt}${t:+; mkdir -p \"\$(dirname '$tf')\"; printf '%s\n' '$t' > '$tf'}" > "$STUB/build"
+  echo '{ pwd; git diff --cached --name-only; } >> "$STUB/mainran"; '"${MAINRUN:-bash '$tf'}" > "$STUB/mainrun-cmd"
   loop run >/dev/null || fail "run exited non-zero"
 }
 
@@ -107,14 +109,54 @@ t_bugtestonly() {
   [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a test-only bug card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
-# Bug it catches: a bug card that adds no test at all goes to review unchecked. It is told the same; its only runs on
+# Bug it catches: a bug card that adds no test at all goes to review unchecked; or (#137) it is told and blocked with
+# "the new tests pass without the fix", though no test ran. It goes back to its build, then is blocked, each time
+# told no test file was found and the patterns that looked (the default, as the pack sets none); its only runs on
 # main are of its whole change (does it select a test? Here it does: its run is not "nothing selected").
 t_bugnotest() {
   bugcard '' bug
-  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|the new tests pass without the fix, so they do not prove it|" ] \
-    && grep -q '^The change adds or changes no test file' "$STUB/brief" || fail "a bug card with no test did not go back to its build, told so: $(st 'select(.step == "build")')"
+  local why; why="no test file found in the change (patterns: $(jq -r '.properties.tests.properties.patterns.default | join(", ")' "$SRC/schema/pack.schema.json")); set tests.patterns in .conveyor/project.json"
+  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|$why|" ] && grep -qxF "# Back to the build: $why" "$STUB/brief" \
+    && grep -qF "No test file found in the change (patterns: __tests__/, " "$STUB/brief" || fail "a bug card with no test did not go back to its build, told so: $(st 'select(.step == "build")')"
+  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: $why" ] && ! grep -q 'pass without the fix' "$STUB/brief" \
+    || fail "a bug card with no test was not blocked with the no-test reason alone: $(st 'select(.step == "blocked")')"
   [ "$(grep -v '/cards/mainrun/' "$STUB/mainran" | sort -u)" = a.txt ] || fail "a card with no test file ran other than its whole change on main: $(cat "$STUB/mainran" 2>&1)"
   [ -z "$(st 'select(.step == "bugproof")')" ] || fail "a code change with no test was let skip the check: $(st 'select(.step == "bugproof")')"
+}
+
+# #137. Bug it catches: a project whose tests are src/test-<name>.mjs, set in its pack's tests.patterns, had its test
+# file taken for no test file, never run on main, and the card blocked as "the new tests pass without the fix". The
+# file is found, runs alone on main's code without the fix and fails there, and the card lands with one build.
+t_bugpatterns() {
+  TF=src/test-a.mjs TUNE='.tests.patterns = ["src/test-*.mjs"]' bugcard 'grep -qx two a.txt' bug
+  [ "$(sed 1d "$STUB/mainran" | tr '\n' ' ')" = 'src/test-a.mjs ' ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
+    || fail "the run on main was not of the card's src/test-a.mjs alone, or the card went back to build: $(cat "$STUB/mainran" 2>&1)"
+  grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "the card whose test fails on main was not reviewed as proven and landed: $(st 'select(.step | IN("blocked", "landed"))')"
+}
+
+# #137. Bug it catches: test files the test command does not run when given them alone (its run selects none) were
+# reported as "the new tests pass without the fix", and the card went back to a build that cannot change the pack.
+# Here the command runs a test only when the change's code is staged: the card is blocked at once, told the files
+# were found but not run, and to set test.fileCommand.
+t_bugnotalone() {
+  MAINRUN='if git diff --cached --name-only | grep -qx a.txt; then bash a.test.sh; else echo "TESTRUN files=0 of=1" >> "$CONVEYOR_TEST_LOG/r"; fi' \
+    bugcard 'grep -qx one a.txt' bug
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/asked" ] \
+    && [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'build: test files were found in the change, but the test command, given them, selected none of them, so they did not run without the fix; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
+    && ! st 'select(.step == "blocked") | .reason' | grep -q 'pass without the fix' \
+    || fail "test files the command did not run were not reported as such: $(st 'select(.step | IN("build", "blocked", "review"))')"
+}
+
+# #137. Bug it catches: a pack whose test command cannot run one file alone has no way to run a change's test files.
+# With test.fileCommand set, the check runs it once for each test file, given the file, in place of test.command:
+# the file fails on main without the fix, and the card lands.
+t_bugfilecommand() {
+  TUNE='.test.fileCommand = "echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\"; bash"' bugcard 'grep -qx two a.txt' bug
+  [ "$(cat "$STUB/fileran" 2>&1)" = a.test.sh ] && [ ! -e "$STUB/mainran" ] \
+    || fail "the check did not run the test file alone with test.fileCommand: $(cat "$STUB/fileran" "$STUB/mainran" 2>&1)"
+  grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "the card proved through test.fileCommand did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
 # A bug card of #7 whose build only rewords a comment of s.sh (`# an old word` becomes `# a new word`), on a main that

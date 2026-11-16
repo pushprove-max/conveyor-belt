@@ -747,12 +747,16 @@ its count and the issue filed for it; the Board's Health panel draws them as its
 ## Bug cards: the new tests fail without the fix
 
 A card whose issue has the pack's type label (`labels.type`, a bug) is checked after its build and before its review:
-the test files its change adds or changes (paths with `__tests__`, `.test.` or `.spec.`) run on main's code without
-the fix, alone, in a worktree of the commit the card was built on (`cards/mainrun/<card>.unfixed`), with the pack's
-`test.command`. At least one must fail there. When all pass, or the change adds or changes no test file, the card goes
-back to its build session once, told "the new tests pass without the fix, so they do not prove it" (its second `build`
-line has that reason), and the check runs again; when it still does not hold, the card is blocked with that reason,
-with no review. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
+the test files its change adds or changes (paths the pack's `tests.patterns` match, [How test files are
+found](../docs/configuration.md#how-test-files-are-found)) run on main's code without the fix, alone, in a worktree of
+the commit the card was built on (`cards/mainrun/<card>.unfixed`), with the pack's `test.command`, or each file with
+`test.fileCommand` when the pack sets it. At least one must fail there. When all pass, the card goes back to its build
+session once, told "the new tests pass without the fix, so they do not prove it" (its second `build` line has that
+reason), and the check runs again; when it still does not hold, the card is blocked with that reason, with no review.
+When the change adds or changes no test file, the reason is "no test file found in the change (patterns: <the
+patterns>); set tests.patterns in .conveyor/project.json" in its place. When the command, given the test files,
+selects none of them, they did not run: the card is blocked with a reason that says so and names `test.fileCommand`,
+with no second build session and no review. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
 file that failed (a runner that stops the run with no test failing proves nothing). A failed run whose logs give no
 result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
 that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:

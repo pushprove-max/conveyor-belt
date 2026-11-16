@@ -212,11 +212,11 @@ card() { # <card> <issue> [<branch> <tip>]
       [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
       if [ $trc != 0 ]; then
         began "$c" "$n" build
-        redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"$BUGBUILD"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
-        checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$UNFIXED" '. + {reason: $r}' <<<"$t")" || return
+        redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"${BUGBUILD//'<why>'/"$BUGWHY"}"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
+        checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$BUGWHY" '. + {reason: $r}' <<<"$t")" || return
         bugproof "$c" "$wt" "$issue"; trc=$?
         [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-        [ $trc = 0 ] || { block "$c" "$n" "$wt" "build: $UNFIXED"$'\n'"$(<"$wt.unfixed")"; return; }
+        [ $trc = 0 ] || { block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
       fi
     fi
   fi

@@ -42,6 +42,40 @@ Some pack settings that this site names:
   For example: `{"claude-sonnet-4-6": {"aliases": ["anthropic/claude-sonnet-4-6"]}, "my-model": {"name": "My model",
   "provider": "other", "input": 1, "output": 2, "cacheRead": 0.1}}`.
 
+## How test files are found
+
+Conveyor must know which files of your project are tests. It uses this to find the tests that a card adds or
+changes, to run those tests on main's code for a bug card, and to keep tests out of product code.
+
+The pack's `tests.patterns` is a list of globs that name your test files. Each glob is matched against a path from the
+root of the repository:
+
+- `*` and `?` match inside one folder name. `**` matches across folders.
+- A glob that ends in `/`, for example `tests/`, matches each file in a folder of that name.
+- A glob matches at any depth. A glob that starts with `/`, for example `/t/*.sh`, matches only from the root.
+
+```json
+"tests": {"patterns": ["src/test-*.mjs", "tests/"]}
+```
+
+When you set `tests.patterns`, it replaces the default. Without it, Conveyor uses a default for the common
+conventions: `__tests__/`, `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `*_test.go`, `tests/`, `test/`, `spec/`,
+`*_spec.rb`, `*Test.java`, `*Tests.cs`, `test-*.mjs`, `*.t` and `t/*.sh`.
+
+For a bug card, Conveyor gives the card's test files to your test command (`test.command`) on main's code, without
+the fix. If your test command cannot run a test file that it gets alone, set `test.fileCommand` to a command that
+runs one test file, for example `"fileCommand": "node --test"`. Conveyor then runs it once for each test file, with
+the file's path added at the end.
+
+When a bug card has no file that the patterns match, the card goes back to its build. If it still has none, the card
+is blocked with the reason `no test file found in the change (patterns: <list>)`. When your test command does not run
+the test files that it gets, the card is blocked, and the reason says so. Correct `tests.patterns` or
+`test.fileCommand`, then retry the card.
+
+Setup suggests patterns when the default misses your test files ([Setup](setup.md#setup)). `conveyor.sh doctor`
+shows a `missing:` line when the patterns match no tracked file, or when they miss test files that your test command
+names.
+
 ## The host file
 
 The host file, `~/.config/conveyor/host.json`, holds this machine's settings: the terms file, the projects (`records`),

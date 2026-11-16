@@ -234,10 +234,13 @@ t_visibletooling() {
 # staged paths (card.sh: productpaths() of issues.sh, with the test pack's productPaths made into PRODUCT as names()
 # makes it), with no card run; t_visibletooling's card is one that touches none.
 t_visibleweb() {
-  local NOTPRODUCT PRODUCT; eval "$(grep '^NOTPRODUCT=' "$SRC/lib/issues.sh"; sed -n '/^productpaths() {/p' "$SRC/lib/issues.sh"; grep '^RX=' "$SRC/lib/prompts.sh")"
-  [ -n "$NOTPRODUCT" ] && declare -F productpaths >/dev/null || fail "the engine no longer defines productpaths() or NOTPRODUCT where this case reads them"
-  # shellcheck disable=SC2034 # PRODUCT is read by productpaths(), defined by the eval
-  PRODUCT=$(jq -r "$RX"'.productPaths | map(rx) | "^(" + join("|") + ")"' "$SRC/lib/test-pack.json") || fail "the test pack's productPaths could not be read"
+  local TESTRX PRODUCT; eval "$(sed -n '/^testpaths() {/,/^}/p; /^productpaths() {/p' "$SRC/lib/issues.sh"; sed -n '/^RX=/p; /^GLOBRX=/,/globsrx: /p' "$SRC/lib/prompts.sh")"
+  declare -F productpaths testpaths >/dev/null || fail "the engine no longer defines productpaths() or testpaths() where this case reads them"
+  # names() makes TESTRX of the pack's tests.patterns: here, the schema's default, as the test pack sets none.
+  names() { :; }
+  # shellcheck disable=SC2034 # PRODUCT and TESTRX are read by productpaths() and testpaths(), defined by the eval
+  PRODUCT=$(jq -r "$RX"'.productPaths | map(rx) | "^(" + join("|") + ")"' "$SRC/lib/test-pack.json") \
+    && TESTRX=$(jq -r "$GLOBRX"'.properties.tests.properties.patterns.default | globsrx' "$SRC/schema/pack.schema.json") || fail "the test pack's productPaths could not be read"
   ! printf '%s\n' .claude/dashboard/x.js web/__tests__/pay.test.ts | productpaths || fail "a tooling change and a test were taken as product code, so this case proves nothing"
   printf '%s\n' web/only.ts | productpaths || fail "a change of a file under web/ alone was not taken as product code"
   printf '%s\n' .claude/both.md web/both.ts | productpaths || fail "a change of files under .claude/ and web/ was not taken as product code"

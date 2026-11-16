@@ -370,6 +370,7 @@ cacheoff() { # <worktree>
 # refused: it runs what its list did not keep as passed (with no list, nothing was kept, and the whole selection
 # runs), and TEST_REFUSED, "refused full run: <why>", goes on its test line as refused (testrec()), which health lists
 # for the Foreman's watcher (views.sh).
+# The field test.fileCommand runs one test file: the run (filecmd()) gives it each file its list names `fail`.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''
@@ -379,6 +380,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # either goes.
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
+  [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)
     b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); t=$(git -C "$1" write-tree 2>/dev/null)
@@ -497,12 +499,18 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   jq -cn --argjson v "$v" --argjson m "$m" '{verdicts: [$v[] | {case, verdict}]} + if $m then {mainRun: $m} else {} end'
 }
 # The bug-card check (card(): a card whose issue has the pack's type label, labels.type, after its build and before its
-# review). The test files its staged change adds or changes (a path NOTPRODUCT matches) run on main's code without the
+# review). The test files its staged change adds or changes (paths testpaths() takes for test files: the pack's
+# tests.patterns) run on main's code without the
 # fix: in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.unfixed, holding those
 # files alone, staged, on a test slot, with the card's own command (test.command), which selects them as that change's
-# tests. At least one must fail there: a test that passes without the fix does not prove it. Writes the result in
+# tests; or, when the pack sets test.fileCommand, each of them alone with that command (tests()). At least one must
+# fail there: a test that passes without the fix does not prove it. Writes the result in
 # <worktree>.unfixed, which the review is shown, and fails when the check does not hold: the change adds or changes no
-# test file, or no test failed in their run on main (it passed, or only its runner failed it). A failed run on main
+# test file, or no test failed in their run on main (it passed, or only its runner failed it). BUGWHY is the reason,
+# which card() gives the build session and the block: "the new tests pass without the fix" (UNFIXED) only when its
+# test files ran without the fix; with none found it names the patterns (NOTEST). Test files the command, given them,
+# selected none of (its run ended "nothing selected") could not be run alone: the check fails with exit 2 and says
+# so (NOTALONE), as a build session cannot change the pack. A failed run on main
 # that gave no result for one of those files (noresult(): no pass and no fail of it) proves nothing either way: it runs
 # once more, and when that run gives none either, the result's first line is "the proof run on main gave no result for
 # <file>: <the run's last lines>" and the check fails with exit 2 (the card is blocked, as a build session cannot
@@ -512,47 +520,76 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # says it is test-only, and the review judges its tests.
 # A change that selects no test of its own (the command, run on main's code with the whole change staged, ended
 # "nothing selected": every changed line is a comment, or it touches no code the command knows) is proved by the test
-# files the issue's `## Done when` section names that are test files of that commit (a name with `.test.` or `.spec.`
-# in it): each named in the command's list (CONVEYOR_TEST_RERUN) as `fail<TAB><file>`, so the command runs them
+# files the issue's `## Done when` section names that are test files of that commit (testpaths()): each named in the
+# command's list (CONVEYOR_TEST_RERUN) as `fail<TAB><file>`, so the command (or test.fileCommand) runs them
 # alone, with the fix and then without it. At least one must fail without it, and they must pass with it. When the
 # issue names none, the check is skipped and holds: the result and the card's `bugproof` line (result skipped) say why.
 # That selection run is made only when the change adds or changes no test file, or its test files' run selected nothing.
+# The command of a run with the pack's test.fileCommand (tests()): each file its list (CONVEYOR_TEST_RERUN) names
+# `fail`, in order, runs alone with that command, the file's path added as its last argument and in CONVEYOR_TEST_FILE.
+# It logs each as a runner does (`== <file>`, then `-- ok <file>` or `-- FAIL <file>`, and `TESTRUN files=<n>`), so the
+# run is read as any other (testfails()); it fails when a file fails.
+filecmd() { # <the pack's test.fileCommand>
+  local q; q=$(printf %q "$1")
+  printf '%s\n' 'n=0 r=0; l=$CONVEYOR_TEST_LOG/files' \
+    'while IFS=$'"'"'\t'"'"' read -r k f _; do' \
+    '  [ "$k" = fail ] || continue; n=$((n + 1)); echo "== $f" | tee -a "$l"' \
+    "  if CONVEYOR_TEST_FILE=\$f bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null; then echo \"-- ok \$f\" | tee -a \"\$l\"; else echo \"-- FAIL \$f\" | tee -a \"\$l\"; r=1; fi" \
+    'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"' \
+    'echo "TESTRUN files=$n" >> "$l"; exit $r'
+}
+# One run of the bug-card check with the pack's command <field>, in <worktree>: given files, it runs them alone, each a
+# `fail` line of the run's list (CONVEYOR_TEST_RERUN); given none, the command selects the staged change's tests.
+bugrun() { # <worktree> <field> [<file>...]
+  local w=$1 f=$2; shift 2
+  [ $# != 0 ] || { tests "$w" "$f"; return; }
+  printf 'fail\t%s\n' "$@" > "$w.rerun" && tests "$w" "$f" alone
+}
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() nf=() f out rc fx held='' sha='' why nr=''
-  rm -f "$2.unfixed"
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() nf=() fl=() f out rc fx held='' sha='' why nr='' fc='' fld alone=''
+  rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
-  # A change to test files alone (every changed path, deleted ones too, matches NOTPRODUCT) has no fix to take out:
+  # A change to test files alone (every changed path, deleted ones too, is a test file: testpaths()) has no fix to take out:
   # its tests would run on the same code and pass, so it is not run. The review is told, and judges the tests.
   # The paths are counted, not tested with grep -q: under pipefail its early exit could fail the pipe and pass a change
-  # with a source file as test-only. A diff that cannot be read counts as a change with one.
-  if out=$(git -C "$2" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | { grep -zvE "$NOTPRODUCT" || :; } | tr -cd '\000' | wc -c) \
+  # with a source file as test-only. A diff that cannot be read, or a pack that cannot, counts as a change with one.
+  if out=$(git -C "$2" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -vz | tr -cd '\000' | wc -c) \
     && [ "$((out))" = 0 ]; then
     { echo 'The change is test-only: every file it changes is a test file, so it has no fix to take out, and its tests were not run on main'"'"'s code.'
       echo 'Judge whether each test it changes still checks what it was written to check.'; } > "$2.unfixed"
     return 0
   fi
-  mapfile -d '' -t fs < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | grep -zE "$NOTPRODUCT")
+  mapfile -d '' -t fs < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | testpaths -z)
+  [ ${#fs[@]} != 0 ] || { [ -n "${TESTGLOBS:-}" ] || names 2>/dev/null; BUGWHY=${NOTEST//'<patterns>'/"${TESTGLOBS:-}"}; }
+  # A per-file command (test.fileCommand) runs each test file alone, whatever its language, as the list names it.
+  packget test.fileCommand fc 2>/dev/null || fc=''
+  fld=test.command fl=(); [ -z "$fc" ] || { fld=test.fileCommand fl=("${fs[@]}"); }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
       && { [ ${#fs[@]} = 0 ] || git -C "$2" diff --cached --binary --no-renames HEAD -- "${fs[@]/#/:(literal)}" | git -C "$mwt" apply --index; }; } 2>&1 < /dev/null); then
     if [ ${#fs[@]} = 0 ]; then
-      echo "The change adds or changes no test file: $UNFIXED." > "$2.unfixed"
+      printf '%s.\n' "${BUGWHY^}" > "$2.unfixed"
     else
-      tests "$mwt" test.command; rc=$?
+      bugrun "$mwt" "$fld" "${fl[@]}"; rc=$?
       ! testfailed "$mwt" "$rc" || held=1
       # A failed run that proved nothing and gave no result for a file it was given (noresult()) says nothing either
       # way: it runs once more, and when that run gives none either the card is blocked with that reason (exit 2).
       if [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
-        tests "$mwt" test.command; rc=$?
+        bugrun "$mwt" "$fld" "${fl[@]}"; rc=$?
         ! testfailed "$mwt" "$rc" || held=1
         [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
       fi
+      # A run given the files that selected none of them did not run them: it is no run without the fix, and the
+      # reason is the result's first line, as the block (card()) shows it.
+      [ "$rc" != 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" != 'nothing selected' ] || { alone=1; BUGWHY=$NOTALONE; }
       { [ -z "$nr" ] || printf 'the proof run on main gave no result for %s: %s\n' "$nr" \
           "$(tail -n 5 "$mwt.test" 2>/dev/null | tr -d '\000\r' | sed 's/\x1b\[[0-9;]*m//g' | awk 'NF { sub(/^[ \t]+/, ""); s = s (s == "" ? "" : " / ") $0 } END { print substr(s, 1, 300) }')"
-        printf 'Its test files, run on main'"'"'s code at %s without the fix:\n' "$sha"; printf -- '- %s\n' "${fs[@]}"
-        if [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
+        [ -z "$alone" ] || printf '%s\n' "$NOTALONE"
+        printf 'Its test files, %s on main'"'"'s code at %s without the fix:\n' "$([ -n "$alone" ] && echo 'given to the test command' || echo run)" "$sha"; printf -- '- %s\n' "${fs[@]}"
+        if [ -n "$alone" ]; then echo "The command selected none of them, so none ran without the fix."
+        elif [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
         elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."
         elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
         else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; fi
@@ -565,12 +602,14 @@ bugproof() { # <card> <worktree> <issue json>
       && git -C "$mwt" reset -q --hard && rm -f "$mwt.rerun" \
       && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>/dev/null \
       && { tests "$mwt" test.command alone; rc=$?; [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; }; then
+      # The files the issue names are the proof now, and its result replaces that of the change's own test files.
+      alone=''; BUGWHY=$UNFIXED
       mapfile -t nf < <(jq -r '[.body // "" | splits("\r?\n")] as $l
         | ([range($l | length) | select($l[.] | test("^#{1,2}\\s+Done when\\s*$"; "i"))] | first) as $i | select($i != null)
         | $l[($i + 1):] | ((map(test("^#{1,2}\\s")) | index(true)) as $e | if $e == null then . else .[:$e] end)[]
         | scan("[^\\s`\"'"'"'(),;<>]+") | sub("::.*$"; "") | sub("(:[0-9]+(-[0-9]+)?)?[.,:;]*$"; "")' <<<"$3" 2>/dev/null \
-        | LC_ALL=C sort -u | while IFS= read -r f; do
-            [[ ${f##*/} =~ \.(test|spec)\. && $f != *$'\t'* ]] && [ "$(git -C "$mwt" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] && printf '%s\n' "$f"
+        | LC_ALL=C sort -u | testpaths | while IFS= read -r f; do
+            [[ $f != *$'\t'* ]] && [ "$(git -C "$mwt" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] && printf '%s\n' "$f"
           done)
       if [ ${#nf[@]} = 0 ]; then
         why='the change selects no test (every changed line is a comment, or it touches no code the test command knows), and the issue'"'"'s Done-when names no test file'
@@ -578,14 +617,14 @@ bugproof() { # <card> <worktree> <issue json>
         record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof skipped "$(jq -cn --arg r "$why" '{reason: $r}')"
       else
         # With the fix (staged above), then without it: the named files alone, each a `fail` line of the list.
-        printf 'fail\t%s\n' "${nf[@]}" > "$mwt.rerun"; tests "$mwt" test.command alone; fx=$?
+        bugrun "$mwt" "$fld" "${nf[@]}"; fx=$?
         # Main's code put back fails the check (rc empty): the logs left are those of the run with the fix.
-        if git -C "$mwt" reset -q --hard && printf 'fail\t%s\n' "${nf[@]}" > "$mwt.rerun"; then tests "$mwt" test.command alone; rc=$?; else rc=''; fi
+        if git -C "$mwt" reset -q --hard; then bugrun "$mwt" "$fld" "${nf[@]}"; rc=$?; else rc=''; fi
         [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" || held=1
         { printf 'The change selects no test of its own (every changed line is a comment, or it touches no code the test command knows), so the test files its issue'"'"'s Done-when names were run alone on main'"'"'s code at %s, with the fix and without it:\n' "$sha"
           printf -- '- %s\n' "${nf[@]}"
           if [ "$fx" != 0 ]; then echo "They failed with the fix (exit $fx): $UNFIXED."
-          elif [ -z "$rc" ]; then echo "Main's code could not be put back without the fix, so they did not run without it: $UNFIXED."
+          elif [ -z "$rc" ]; then BUGWHY=$NOTBACK; echo "Main's code could not be put back without the fix, so they did not run without it."
           elif [ "$rc" = 0 ]; then echo "They all passed without the fix: $UNFIXED."
           elif [ -z "$held" ]; then echo "The run without the fix failed (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
           else echo "They pass with the fix, and the run without it failed (exit $rc): at least one fails without the fix, as it should."; fi
@@ -593,13 +632,13 @@ bugproof() { # <card> <worktree> <issue json>
       fi
     fi
   elif [ ${#fs[@]} = 0 ]; then
-    echo "The change adds or changes no test file: $UNFIXED." > "$2.unfixed"
+    printf '%s.\n' "${BUGWHY^}" > "$2.unfixed"
   else
     printf 'Its test files could not be run on main'"'"'s code at %s: %s\nThe check says nothing of them.\n' "${sha:-a commit that could not be read}" "${out:0:600}" > "$2.unfixed"
     held=1
   fi
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
-  [ -z "$nr" ] || return 2
+  [ -z "$nr$alone" ] || return 2
   [ -n "$held" ]
 }
 # The test file of a speed-up issue (card()): an issue whose title starts SPEEDUP (or the title start given: OPTIMIZE),
@@ -672,12 +711,11 @@ optproof() { # <card> <worktree> <issue json> <test file>
   local mwt=$CARDS/mainrun/$1.speed f=$4 sha='' out='' rc='' before cs='' add=() into=()
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || { rm -f "$2.unfixed"; return 0; }
-  mapfile -t add < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null \
-    | while IFS= read -r x; do [[ $x != "$f" && ${x##*/} =~ \.(test|spec)\. ]] && printf '%s\n' "$x"; done)
+  mapfile -t add < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null | testpaths \
+    | while IFS= read -r x; do [[ $x != "$f" ]] && printf '%s\n' "$x"; done)
   if [ -e "$2/$f" ] || [ ${#add[@]} != 0 ]; then speedproof "$@" "${add[@]}"; return; fi
   rm -f "$2.unfixed"
-  mapfile -t into < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=M HEAD 2>/dev/null \
-    | while IFS= read -r x; do [[ ${x##*/} =~ \.(test|spec)\. ]] && printf '%s\n' "$x"; done)
+  mapfile -t into < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=M HEAD 2>/dev/null | testpaths)
   before=$(testspart "$(date +%F)" 2>/dev/null | jq -r --arg f "$f" 'first(.files[]? | select(.file == $f) | .median | numbers) // empty' 2>/dev/null)
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
