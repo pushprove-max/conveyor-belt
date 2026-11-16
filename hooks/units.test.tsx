@@ -966,6 +966,10 @@ test('D1: this session holds the role and its live waiter runs the current insta
   const pane = await draw($, 'Pane')
   expect(pane).toContain('Foreman listening')
   expect(pane).toContain('role: me (this one) · waiter 4242 on aaaaaaa')
+  // Bug: the details were cut at the pane's 72 columns and at a narrow /units, so the last watchers' states were lost.
+  expect(pane).toContain('alerts up, idle up')
+  const narrow = (await $.command.run({ command: 'units', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 40 } })).text as string
+  expect(narrow).toContain('\nForeman listening\n  role: me (this one) ·\n    waiter 4242 on aaaaaaa ·\n    watchers: conveyor up, limit up,\n    alerts up, idle up\n')
   const band = await draw($, 'AbovePrompt')
   expect(band).toContain('Foreman listening')
   expect(band).not.toContain('role: me')

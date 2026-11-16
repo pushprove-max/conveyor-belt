@@ -21,6 +21,7 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
 - **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
   session`, `no waiter running`, `waiter on an old install`, `watcher down: <name>`). In `/units` and the pane a dim
   line under it gives the session that has the role, the waiter's process and version, and the state of each watcher.
+  A narrow view wraps that line onto more lines, so no watcher is lost.
   The band shows the Foreman line alone, and the status line starts with it. A project where no session has the
   Foreman role and no Foreman is set up shows no Foreman line. [Foreman](foreman.md) tells what each reason means.
 - **The whole suite**, in `/units` and the pane, under the head: while a release suite or a full test run is in

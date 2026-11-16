@@ -533,10 +533,22 @@ export const foremanOf = (f: string[] | null, sid: string): Foreman | null => {
   return { ok: !why, why, detail }
 }
 const foremanText = (m: Foreman) => (m.ok ? 'Foreman listening' : `Foreman not listening: ${m.why}`)
-// The indicator, and with `details` the line under it. None where no Foreman is expected.
+// The details wrapped at the width after a " · " or ", ", never cut: a watcher's state must not fall off a narrow
+// pane. A wrapped line is indented two more; only one piece wider than the whole line is cut.
+const foremanDetail = (detail: string, w: number): Line[] => {
+  const out: string[] = []
+  let cur = '  '
+  for (const p of detail.split(/(?<=, | · )/)) {
+    if (cur.trim() && cols(`${cur}${p}`.trimEnd()) > w) { out.push(cur.trimEnd()); cur = '    ' }
+    cur += p
+  }
+  out.push(cur.trimEnd())
+  return out.map(t => fitWidth([{ t, d: true }], w))
+}
+// The indicator, and with `details` the lines under it. None where no Foreman is expected.
 export const foremanModel = (s: State, w: number, details: boolean): Line[] => (s.foreman ? [
   [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }],
-  ...(details ? [fitWidth([{ t: `  ${s.foreman.detail}`, d: true }], w)] : []),
+  ...(details ? foremanDetail(s.foreman.detail, w) : []),
 ] : [])
 
 // The Research lane's run is its newest Claude session in the lane's worktree: working while that session wrote in the
