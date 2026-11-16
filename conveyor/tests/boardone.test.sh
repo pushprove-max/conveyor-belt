@@ -18,12 +18,12 @@ t_boardone() {
   n=$(uname -n | cut -d. -f1 | tr -c 'A-Za-z0-9._\n-' -)
   grep -qx "ok: the Board reads the project on this machine ($n)" <<<"$out" || fail "doctor did not find setup's host file read by the Board: $out"
   # ssh fails the case's run if anything asks for it; the Board's usage reads find no login in the case's home.
-  mkdir -p "$T/$CASE/bin" "$T/$CASE/home" && printf '#!/bin/sh\necho "$*" >> "%s/ssh-calls"; exit 255\n' "$T/$CASE" > "$T/$CASE/bin/ssh" \
+  mkdir -p "$T/$CASE/bin" "$T/$CASE/h" && printf '#!/bin/sh\necho "$*" >> "%s/ssh-calls"; exit 255\n' "$T/$CASE" > "$T/$CASE/bin/ssh" \
     && chmod +x "$T/$CASE/bin/ssh" || fail "the ssh stub was not made"
   # This machine's Foreman: the sample's marked session, whose transcript is in the default login's folder.
-  st=$(cd "$S" && CONVEYOR_MAIN=$S bash "$X" state-dir) && mkdir -p "$st/foreman" "$T/$CASE/home/.claude/projects/p" \
-    && echo 'sess-f 2026-11-16T08:00:00Z' > "$st/foreman/session" && : > "$T/$CASE/home/.claude/projects/p/sess-f.jsonl" || fail "the Foreman mark"
-  (cd "$S" && HOME=$T/$CASE/home PATH=$T/$CASE/bin:$PATH CONVEYOR_MAIN=$S CONVEYOR_DASHBOARD_DIR=$T/$CASE/dash \
+  st=$(cd "$S" && CONVEYOR_MAIN=$S bash "$X" state-dir) && mkdir -p "$st/foreman" "$T/$CASE/h/.claude/projects/p" \
+    && echo 'sess-f 2026-11-16T08:00:00Z' > "$st/foreman/session" && : > "$T/$CASE/h/.claude/projects/p/sess-f.jsonl" || fail "the Foreman mark"
+  (cd "$S" && HOME=$T/$CASE/h PATH=$T/$CASE/bin:$PATH CONVEYOR_MAIN=$S CONVEYOR_DASHBOARD_DIR=$T/$CASE/dash \
     timeout 120 bash "$D/.claude/scripts/dashboard.sh" > "$T/$CASE/dash.out" 2>&1) || fail "the Board's collection failed: $(tail -n 5 "$T/$CASE/dash.out")"
   [ ! -e "$T/$CASE/ssh-calls" ] || fail "the Board asked over ssh on one machine: $(cat "$T/$CASE/ssh-calls")"
   sed 's/^[^{]*//; s/;[[:space:]]*$//' "$T/$CASE/dash/data.js" > "$T/$CASE/data.json" || fail "no data.js"

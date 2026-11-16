@@ -144,6 +144,10 @@ t_privcheck() {
     "$d/f:15: private term (terms file line 4)")" ] || fail "hits: $out"
   [ "$(echo clean | "$c")" = '' ] && echo clean | "$c" || fail "a clean text is a hit"
   printf 'a\0b\n%s\n' "$H/user/x" > "$d/nul"; [ "$("$c" "$d/nul")" = "$d/nul:2: home path" ] || fail "a file holding a NUL was not checked"
+  # Bug (#131): the release was refused on a test's fake home <case>/home/.claude, read as a user's home. A folder after
+  # /home/ or /Users/ that starts with a dot is no user's (1, 3); a user's path is still a hit, with a dot folder in it (2) or not (4).
+  printf '%s\n' "$H/.claude" "$H/alice/.claude" "$U/.config" "$U/bob" > "$d/dot"
+  [ "$("$c" "$d/dot")" = "$(printf '%s\n' "$d/dot:2: home path" "$d/dot:4: home path")" ] || fail "dot folders: $("$c" "$d/dot")"
   "$c" --terms "$d/none" "$d/f" >/dev/null 2>&1; [ $? = 2 ] || fail "an unreadable terms file is not exit 2"
   "$c" --terms "$d" "$d/f" >/dev/null 2>&1; [ $? = 2 ] || fail "a directory as the terms file is not exit 2"
   "$c" "$d" >/dev/null 2>&1; [ $? = 2 ] || fail "a directory to check is not exit 2"
