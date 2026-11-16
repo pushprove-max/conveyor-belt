@@ -1560,7 +1560,7 @@ done_part
 # lost XDG_CONFIG_HOME.
 SA=$M/standalone R=$M/standalone/release C=$HM
 mkdir -p "$R/.claude/scripts" "$C/.claude/metrics" "$SA/config/conveyor" "$SA/userhome" "$SA/ws"
-cp "$HERE"/../{dashboard.sh,dashboard_server.py,dashboard_stream.py,dashboard_limit.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh} "$R/.claude/scripts/"
+cp "$HERE"/../{dashboard.sh,dashboard_server.py,dashboard_stream.py,dashboard_limit.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh,hostfile.sh} "$R/.claude/scripts/"
 cp -R "$HERE/../../dashboard" "$R/.claude/"
 jq -n --arg m "$C" --arg l "$C/.claude/metrics/decisions.jsonl" '{host: "buildhost", ssh: "user@standalone", main: $m, records: [{repo: "sample", main: $m, ledger: $l}]}' > "$SA/config/conveyor/host.json"
 [ ! -e "$C/conveyor/host.json" ] || fail "standalone setup: the checkout must have no conveyor/host.json"

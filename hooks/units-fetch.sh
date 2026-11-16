@@ -12,11 +12,13 @@
 # lanes.fast.worktree and lanes.research.worktree, which `conveyor.sh lane ... create` writes; a path that starts with
 # ~/ is under the home folder). norecord: the host file has no record of this checkout. That record's repo is the
 # session's own project: its cards show with no project name, and the Fast lane's card is one of them.
-# The snapshots are read as the Board reads them (.claude/scripts/dashboard.sh, conveyor()): `conveyor.sh snapshot` of
-# the clone the host file's main names, for every record, in one command. It runs here when this checkout is a record
-# of the host file or that clone, else over ssh to the host file's ssh target. A record whose snapshot fails prints
-# null; the others still print. how: local or ssh, else why nothing was asked: nofile (no host file; the line then
-# names the two paths looked at), config (it is not understood) or nossh (it names no ssh target).
+# The snapshots are read as the Board reads them (.claude/scripts/dashboard.sh, conveyor()), from the host and engine
+# its one reader of the host file gives (.claude/scripts/hostfile.sh): `conveyor.sh snapshot` of that engine, for every
+# record, in one command. It runs here on one machine (the host file names no ssh target, as setup writes it, and the
+# engine is this copy of Conveyor), or when this checkout is a record of the host file or the host's main, else over
+# ssh to the host file's ssh target. A record whose snapshot fails prints null; the others still print. how: local or
+# ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
+# is not understood).
 # Usage: units-fetch.sh [feed]. feed: the Board's live feed is fresh, so the board is the feed's: only the lanes and
 # the Foreman are read, and the host line is `host <empty> feed 0`.
 set -uo pipefail
@@ -85,19 +87,16 @@ n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0
 [ "${1:-}" != feed ] || { printf 'host\t\tfeed\t0\n'; exit 0; }
 
 [ -e "$cfg" ] || { printf 'host\t\tnofile\t0\t%s\t%s\n' "$mine" "$cfg"; exit 0; }
-host=$(jq -er '.host | select(test("^[A-Za-z0-9._-]+$"))' "$cfg" 2>/dev/null) \
-  && main=$(jq -er '.main | select(test("^/[A-Za-z0-9._/-]+$"))' "$cfg" 2>/dev/null) \
-  && recs=$(jq -ec --arg m "$main" '(.records // [{repo: "project", main: $m}]) | select(type == "array" and length > 0
-      and all(type == "object" and (.repo | type == "string" and test("^[A-Za-z0-9._-]+$")) and (.main | type == "string" and test("^/[A-Za-z0-9._/-]+$"))))' "$cfg" 2>/dev/null) \
-  || { printf 'host\t%s\tconfig\t0\n' "${host:-}"; exit 0; }
-# Each name and path was checked above to hold no character the shell reads, so they go into the command as they are.
-cmd=$(jq -r '.[] | [.repo, .main] | @tsv' <<<"$recs" | while IFS=$'\t' read -r r m; do
-  printf 'printf "%%s\\t" %s; { CONVEYOR_MAIN=%s bash %s/conveyor/conveyor.sh snapshot 2>/dev/null || echo null; }; ' "$r" "$m" "$main"
-done)
-if [ "$rec" = 1 ] || [ "$here" -ef "$main" ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
-else
-  target=$(jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$cfg" 2>/dev/null) \
-    || { printf 'host\t%s\tnossh\t0\n' "$host"; exit 0; }
-  out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$cmd" 2>/dev/null); rc=$?; how=ssh
+# Which machine and which checkout, as the Board reads them: hostfile.sh, the one reader of the host file.
+got=$(bash "${BASH_SOURCE[0]%/*}/../.claude/scripts/hostfile.sh" "$here"); ok=$?
+host='' main='' engine='' target=''
+{ IFS= read -r -d '' host; IFS= read -r -d '' main; IFS= read -r -d '' engine; IFS= read -r -d '' target; } \
+  < <(jq -j '(.host // ""), "\u0000", (.main // ""), "\u0000", (.engine // ""), "\u0000", (.target // ""), "\u0000"' <<<"$got" 2>/dev/null)
+[ "$ok" = 0 ] || { printf 'host\t%s\tconfig\t0\n' "$host"; exit 0; }
+# Every name and path is quoted for the shell (@sh), here or on the host.
+cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '.records[]
+  | "printf \"%s\\t\" \(.repo | @sh); { CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot 2>/dev/null || echo null; }; "' <<<"$got")
+if [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef "$main" ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
+else out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$cmd" 2>/dev/null); rc=$?; how=ssh
 fi
 printf 'host\t%s\t%s\t%s\n%s\n' "$host" "$how" "$rc" "$out"

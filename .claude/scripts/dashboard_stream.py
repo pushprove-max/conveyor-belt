@@ -27,7 +27,6 @@ import datetime
 import glob
 import json
 import os
-import re
 import select
 import shlex
 import signal
@@ -43,9 +42,6 @@ BACKOFF = float(os.environ.get('CONVEYOR_STREAM_BACKOFF') or 1)
 BACKOFF_MAX = 30.0
 GAP = 2.0    # s from the start of one build of data.js to the start of the next, at least
 KEEP = 45.0  # s with no change after which data.js is built again for its writtenAt: under health.js STREAM_EXPIRE_MS
-NAME = re.compile(r'^[A-Za-z0-9._-]+$')
-PATH = re.compile(r'/[^\x00-\x1f\x7f]*')  # an absolute path, spaces and all: each command quotes it
-SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
 OPEN = set()  # the ssh of every stream open now: each in a group of its own, so each is ended with this process
 
 
@@ -62,47 +58,37 @@ def iso(t):
     return None if t is None else datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-def this_host():
-    """This machine's short name, as dashboard.sh's thishost gives it."""
-    return re.sub(r'[^A-Za-z0-9._-]', '-', os.uname().nodename.split('.')[0]) or 'localhost'
-
-
 def config(main):
     """(host, the steered record's main, [(repo, main)], ssh target or None, the checkout whose conveyor.sh runs), or
-    (host or None, reason naming the field that is wrong) when it cannot be read: the same rules as dashboard.sh's
-    hostof(): this machine's host file when there is one, else main's conveyor/host.json. One machine (no ssh target,
-    as setup writes it, or this machine named as the host): no target, the Board's own copy of Conveyor runs here."""
-    path = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'conveyor', 'host.json')
-    if not os.path.exists(path):
-        path = os.path.join(main, 'conveyor', 'host.json')
+    (host or None, reason naming the field that is wrong) when it cannot be read: as hostfile.sh, the one reader of
+    the host file, gives it for the checkout main. On one machine there is no target, and the Board's own copy of
+    Conveyor runs here."""
     try:
-        with open(path) as f:
-            cfg = json.load(f)
-    except OSError:
-        return None, 'this checkout has no conveyor/host.json'
-    except ValueError:
-        return None, 'conveyor/host.json is not a JSON object'
-    if not isinstance(cfg, dict):
-        return None, 'conveyor/host.json is not a JSON object'
-    host, hmain, target = cfg.get('host'), cfg.get('main'), cfg.get('ssh')
-    if target is None or host == this_host():
-        host = host if isinstance(host, str) and NAME.match(host) else this_host()
-        hmain = hmain if isinstance(hmain, str) and PATH.fullmatch(hmain) else main
-        target, engine = None, os.path.dirname(os.path.dirname(HERE))
-    else:
-        if not (isinstance(host, str) and NAME.match(host)):
-            return None, 'conveyor/host.json names an ssh target, but its host is not a machine name'
-        if not (isinstance(hmain, str) and PATH.fullmatch(hmain)):
-            return host, 'conveyor/host.json names no main: the path of the main checkout on %s' % host
-        # The ssh target: host.json's own `ssh` (the Board reads no host list of the project's own).
-        if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
-            return host, 'conveyor/host.json names no ssh target for %s that ssh can use' % host
-        engine = hmain
-    recs = cfg.get('records', [{'repo': 'project', 'main': hmain}])
-    if not (isinstance(recs, list) and recs and all(isinstance(r, dict) and isinstance(r.get('repo'), str) and NAME.match(r['repo'])
-                                                     and isinstance(r.get('main'), str) and PATH.fullmatch(r['main']) for r in recs)):
-        return host, 'conveyor/host.json records are not understood: each needs a repo name and the path of its main checkout'
-    return (host, hmain, [(r['repo'], r['main']) for r in recs], target, engine), None
+        run = subprocess.run(['bash', os.path.join(HERE, 'hostfile.sh'), main], capture_output=True, text=True, timeout=30)
+        got = json.loads(run.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        return None, 'conveyor/host.json could not be read: %s' % e
+    if not isinstance(got, dict):
+        return None, 'conveyor/host.json could not be read'
+    if run.returncode != 0 or got.get('error') is not None:
+        return got.get('host'), got.get('error') or 'conveyor/host.json could not be read'
+    return (got['host'], got['main'], [(r['repo'], r['main']) for r in got['records']], got['target'], got['engine']), None
+
+
+def put(out, d):
+    """<out>/stream.json replaced by d, whole: a reader never sees half of it."""
+    tmp = os.path.join(out, '.stream.json.%d' % threading.get_ident())
+    try:
+        with open(tmp, 'w') as f:
+            json.dump(d, f, separators=(',', ':'))
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, os.path.join(out, 'stream.json'))
+    except OSError as e:
+        sys.stderr.write('dashboard_stream: could not write stream.json: %s\n' % e)
+        try:
+            os.remove(tmp)  # not left: each process names its own, so leftovers add up
+        except OSError:
+            pass
 
 
 class Feed:
@@ -279,19 +265,7 @@ class Feed:
         end()
 
     def _write(self, d=None):
-        d = d or self.doc()
-        tmp = os.path.join(self.out, '.stream.json.%d' % threading.get_ident())
-        try:
-            with open(tmp, 'w') as f:
-                json.dump(d, f, separators=(',', ':'))
-            os.chmod(tmp, 0o644)
-            os.replace(tmp, os.path.join(self.out, 'stream.json'))
-        except OSError as e:
-            sys.stderr.write('dashboard_stream: could not write stream.json: %s\n' % e)
-            try:
-                os.remove(tmp)  # not left: each process names its own, so leftovers add up
-            except OSError:
-                pass
+        put(self.out, d or self.doc())
 
     # ---- data.js, built again after a change: one build at a time, at most every GAP s, and the changes during the
     # wait or a build give one more ----
@@ -347,8 +321,14 @@ def main(argv):
         signal.signal(sig, end)
     cfg, why = config(main)
     if cfg is None or why:
-        # Nothing to follow: the cycle's own read says why on the page. Waiting here keeps the loop from restarting it.
+        # Nothing to follow: logged, and stream.json says why, with no record, so neither the page nor /units takes it
+        # for a feed (each reads Conveyor itself, and the cycle's read says why on the page), and no earlier feed's
+        # "the stream restarts on it" is left standing. Waiting here keeps the loop from restarting it.
         sys.stderr.write('dashboard_stream: no stream: %s\n' % why)
+        t = iso(time.time())
+        os.makedirs(out, exist_ok=True)
+        put(out, {'host': cfg, 'reachable': None, 'error': why, 'records': None,
+                  'stream': {'live': False, 'heardAt': None, 'since': t, 'error': 'the live stream cannot start: %s' % why, 'writtenAt': t}})
         while config(main) == (cfg, why):
             time.sleep(TICK)
         end()  # the host file changed: dashboard.sh --loop starts the stream again on it

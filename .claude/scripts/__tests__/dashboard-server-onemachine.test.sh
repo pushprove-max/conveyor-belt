@@ -21,7 +21,7 @@ mkdir -p "$T/out" "$T/auth" "$T/config/conveyor" "$T/my proj" && echo page > "$T
 jq -n --arg m "$T/my proj" '{records: [{repo: "proj", main: $m}]}' > "$T/config/conveyor/host.json"
 CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl XDG_CONFIG_HOME=$T/config \
   HOME=$T CONVEYOR_MAIN="$T/my proj" "$PY" -I - "$HERE/.." "$T/out" "$T/my proj" <<'EOF'
-import functools, http.client, json, os, shlex, subprocess, sys, threading
+import functools, http.client, json, os, re, shlex, subprocess, sys, threading
 sys.path.insert(0, sys.argv[1])
 import dashboard_server as ds
 
@@ -49,7 +49,8 @@ def post(path, body):
 
 
 host, target, engine, records = ds.conveyor_host()
-if (host, target, engine, records) != (ds.this_host(), None, ENGINE, {'proj': PROJ}):
+ME = re.sub(r'[^A-Za-z0-9._-]', '-', os.uname().nodename.split('.')[0]) or 'localhost'  # this machine's short name
+if (host, target, engine, records) != (ME, None, ENGINE, {'proj': PROJ}):
     fail('setup_host_file_read_as_one_machine', (host, target, engine, records))
 conv = 'CONVEYOR_MAIN=%s bash %s' % (shlex.quote(PROJ), shlex.quote(ENGINE + '/conveyor/conveyor.sh'))
 r = post('/control', {'action': 'prices', 'args': ['clear', 'claude-new-9'], 'repo': 'proj'})

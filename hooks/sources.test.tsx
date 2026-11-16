@@ -546,7 +546,6 @@ test('a snapshot that cannot be read is one plain line saying why, in /units, th
     // in the checkout: it names the paths the fetch looked at.
     [fetched([], 'host\t\tnofile\t0\t/r/xdg/conveyor/host.json\t/r/main/conveyor/host.json'), 'this machine has no host file at /r/xdg/conveyor/host.json or /r/main/conveyor/host.json'],
     [fetched([], 'host\t\tconfig\t0'), 'the host file is not understood'],
-    [fetched([], 'host\tbuildbox\tnossh\t0'), 'the host file names no ssh target'],
     [fetched([], 'host\tbuildbox\tssh\t255'), 'buildbox is unreachable'],
     [fetched([], 'host\tbuildbox\tssh\t124'), 'buildbox did not answer in time'],
     [fetched([['bookstore', 'null']]), 'buildbox gave no snapshot'],

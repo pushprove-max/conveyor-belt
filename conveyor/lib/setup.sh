@@ -177,6 +177,8 @@ setup() { # as SETUP_USAGE
     setuplane research || return 1
   fi
   [ -z "$fm" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" setup || return 1
+  # A Board left on older Conveyor would keep running it (it may not read the host file just written): started again.
+  boardrenew
   agentfiles
   packget test.full full || return 1
   echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
@@ -542,8 +544,13 @@ doctor() {
     if "$BOARD_VENV/bin/python3" -c "import $p" 2>/dev/null; then ok "$p, in the Board's virtualenv $BOARD_VENV"
     else no "$p, for the Board, in its virtualenv $BOARD_VENV" "run /conveyor-belt:setup, which installs it there"; fi
   done; fi
-  # The Board is optional, so one not running is a warning with its fix (bad stays 0), named by its address.
-  if ! command -v curl >/dev/null; then echo "not checked: the Board: it is checked with curl"
+  # The Board is optional, so one not running is a warning with its fix (bad stays 0), named by its address. One that
+  # runs older Conveyor than the project's (boardold) is missing: it may not read what this one writes, such as the
+  # host file setup writes, and shows no card.
+  e=$(boardold | head -n 1)
+  if [ -n "$e" ]; then IFS=$'\t' read -r _ t c <<<"$e"
+    no "the Board runs engine $t but the project has $c" "run /conveyor-belt:setup, which starts it again on $c, or conveyor.sh board in the project's checkout"
+  elif ! command -v curl >/dev/null; then echo "not checked: the Board: it is checked with curl"
   elif boardup; then ok "the Board, running at $(boardurl)"
   else echo "warning: the Board is not running (nothing serves $(boardurl)); fix: run /conveyor-belt:setup and answer yes to \"Start the Board now?\", or conveyor.sh board in the project's checkout"; fi
   agentfiles

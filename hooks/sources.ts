@@ -108,8 +108,8 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 // <own>`, `fast <state> [<branch> <commits ahead of main> <tracked files changed> <first subject>]`, `host <name> <how>
 // <exit> [<path looked at>...]` and then, for every record in the host file's order, `<repo> <its snapshot, or null>`.
 // own: the repo of the record whose main is this checkout, the session's own project; empty when no record is. `how`
-// is local (a record of the host file is this checkout) or ssh, else the reason nothing was asked: nofile (with the
-// paths of the host file looked at), config or nossh. foreman: its line's fields after the word, where a Foreman is
+// is local (one machine, or a record of the host file is this checkout) or ssh, else the reason nothing was asked:
+// nofile (with the paths of the host file looked at) or config. foreman: its line's fields after the word, where a Foreman is
 // expected (the fetch says which); null where none is. pluginBugs: `pluginbugs <how many> <file>`, null when the Foreman
 // noted none.
 export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; pluginBugs: PluginBugs | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
@@ -224,7 +224,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
 }
 
 const CANNOT = 'units: the Conveyor snapshot cannot be read'
-const WHY: Record<string, string> = { nofile: 'this machine has no host file', config: 'the host file is not understood', nossh: 'the host file names no ssh target' }
+const WHY: Record<string, string> = { nofile: 'this machine has no host file', config: 'the host file is not understood' }
 // The snapshot of every record as one board, or the one line saying why there is none. A record that cannot be read
 // costs only its own note while another's can; nothing is ever shown from an earlier fetch. cut: why the fetch's output
 // was cut short, when it was; then no record is trusted.

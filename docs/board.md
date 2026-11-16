@@ -30,7 +30,9 @@ It installs the Board from the release of Conveyor that setup installed, with th
 asks for no password, because **No login on this device** (below) lets you in from this machine. To log in from other
 devices, add an admin on the Board's account page. The new user sets their password from a one-time link. The Board
 runs as a user service and prints the address to open. `conveyor.sh doctor` also names the address, or says that the
-Board is not running. After the project takes a new release, run `conveyor.sh board` again to move the Board to it.
+Board is not running. When the project takes a new release, setup, `conveyor.sh install-service` and the engine's
+own update start a Board on an older release again on the new one. If the Board still runs older code than the
+project, `conveyor.sh doctor` names both commits; `conveyor.sh board` moves the Board to the project's release.
 
 When **No login on this device** is off and no admin has a password, `conveyor.sh board` stops and names the fix. Then
 setup asks you for an admin password in Claude Code's prompt. It runs `conveyor.sh board --password-file <file>`,

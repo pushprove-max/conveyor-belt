@@ -292,45 +292,20 @@ cached() {
 # one the Board steers through POST /control), repoUrl, lastPushAt}. reachable is false when ssh itself did not get through (its exit 255, or
 # the time limit) and true when the host answered, whatever it said; records is null, with the reason in error, unless
 # every record answered with a snapshot: never an earlier answer, and never a part of the records.
-# thishost -- this machine's short name, as dashboard_stream.py's and dashboard_server.py's this_host() give it.
-thishost() { local n; n=$(uname -n | cut -d. -f1 | tr -c 'A-Za-z0-9._\n-' -); echo "${n:-localhost}"; }
-# onemachine -- 0 when Conveyor runs on this machine, with no separate build machine: the host file names no ssh
-# target (as setup writes it), or names this machine as its host. A host file that is not there or does not read sets
-# up no build machine either.
-onemachine() {
-  local cfg=$HOST_FILE
-  [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
-  ! jq -e --arg h "$(thishost)" 'objects | .ssh != null and .host != $h' "$cfg" >/dev/null 2>&1
-}
-# hostof -- what the one command of a read needs of the host file: host (the machine Conveyor runs on), main (the
-# checkout of the record the Board steers), engine (the checkout whose conveyor.sh runs), target (host.json's own
-# `ssh`: the Board reads no host list of the project's own) and recs (its records, [{repo, main}]). On one machine
-# (onemachine) target is empty and every read runs here: host is host.json's host or this machine's name, main is
-# host.json's main or this checkout, and engine is the Board's own copy of Conveyor. With a build machine, host, main
-# and ssh must all be there, and engine is main. 1, with why naming the field that is wrong, when it does not say them.
+# hostof -- what the one command of a read needs of the host file, as hostfile.sh (its one reader, which says the
+# rules) gives it: host (the machine Conveyor runs on), main (the checkout of the record the Board steers), engine (the
+# checkout whose conveyor.sh runs), target (host.json's own `ssh`; empty on one machine, where every read runs here)
+# and recs (its records, [{repo, main}]); remote is 1 when the file names a build machine, even one it does not say
+# all of. 1, with why naming the field that is wrong, when it does not say them.
 hostof() {
-  # This machine's host file when there is one (plan section 6), else the checkout's committed conveyor/host.json.
-  local cfg=$HOST_FILE
-  host='' main='' engine='' target='' why=''
-  [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
-  [ -e "$cfg" ] || { why="this checkout has no conveyor/host.json"; return 1; }
-  jq -e 'objects' "$cfg" >/dev/null 2>&1 || { why="conveyor/host.json is not a JSON object"; return 1; }
-  if onemachine; then
-    host=$(jq -er '.host | strings | select(test("^[A-Za-z0-9._-]+$"))' "$cfg" 2>/dev/null) || host=$(thishost)
-    main=$(jq -er '.main | strings | select(test("^/[^[:cntrl:]]*$"))' "$cfg" 2>/dev/null) || main=$PP_MAIN
-    engine=$(cd "$HERE/../.." && pwd) || { why="the Board's own copy of Conveyor cannot be found"; return 1; }
-  else
-    host=$(jq -er '.host | strings | select(test("^[A-Za-z0-9._-]+$"))' "$cfg" 2>/dev/null) \
-      || { why="conveyor/host.json names an ssh target, but its host is not a machine name"; return 1; }
-    main=$(jq -er '.main | strings | select(test("^/[^[:cntrl:]]*$"))' "$cfg" 2>/dev/null) \
-      || { why="conveyor/host.json names no main: the path of the main checkout on $host"; return 1; }
-    target=$(jq -er '.ssh | strings | select(test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$cfg" 2>/dev/null) \
-      || { why="conveyor/host.json names no ssh target for $host that ssh can use"; return 1; }
-    engine=$main
-  fi
-  recs=$(jq -ec --arg m "$main" '(.records // [{repo: "project", main: $m}]) | select(type == "array" and length > 0
-      and all(type == "object" and (.repo | type == "string" and test("^[A-Za-z0-9._-]+$")) and (.main | type == "string" and test("^/[^[:cntrl:]]*$"))))' "$cfg" 2>/dev/null) \
-    || { why="conveyor/host.json records are not understood: each needs a repo name and the path of its main checkout"; return 1; }
+  local r rc=0
+  host='' main='' engine='' target='' recs='' why='' remote=''
+  r=$(bash "$HERE/hostfile.sh" "$PP_MAIN") || rc=$?
+  { IFS= read -r -d '' host; IFS= read -r -d '' main; IFS= read -r -d '' engine; IFS= read -r -d '' target
+    IFS= read -r -d '' recs; IFS= read -r -d '' why; IFS= read -r -d '' remote; } < <(jq -j '(.host // ""), "\u0000", (.main // ""), "\u0000",
+      (.engine // ""), "\u0000", (.target // ""), "\u0000", (.records | if . == null then "" else tojson end), "\u0000",
+      (.error // ""), "\u0000", (if .local == false then "1" else "" end), "\u0000"' <<<"$r" 2>/dev/null)
+  [ "$rc" = 0 ] || { why=${why:-the host file could not be read}; return 1; }
 }
 # onhost <command> -- runs one read's command where Conveyor runs: over ssh to target, or here when there is none,
 # under the same time limit. The keepalive ends a host that stops answering mid-command; the time limit one that
@@ -345,7 +320,7 @@ onhost() {
 # runs (hostof), by the read every panel takes: the snapshot of every record (conveyor). Prints where, or why it
 # cannot, and then fails. On one machine the Board's own copy of Conveyor must have its conveyor.sh.
 check() {
-  local host main engine target recs why out
+  local host main engine target recs why remote out
   hostof || { echo "$why"; return 1; }
   [ -n "$target" ] || [ -f "$engine/conveyor/conveyor.sh" ] || { echo "the Board's copy of Conveyor at $engine has no conveyor/conveyor.sh"; return 1; }
   RUN=$(mktemp -d) || return 1
@@ -355,10 +330,11 @@ check() {
 }
 
 conveyor() {
-  local host main engine target recs why cmd out rc=0 one=false
-  ! onemachine || one=true
+  local host main engine target recs why remote cmd out rc=0 one=false read=0
+  hostof || read=1
+  [ -n "$remote" ] || one=true
   fail() { jq -cn --arg h "${host:-}" --argjson r "$1" --arg e "$2" --argjson l "$one" '{host: (if $h == "" then null else $h end), local: $l, reachable: $r, error: $e, records: null}'; }
-  hostof || { fail null "$why"; return 0; }
+  [ "$read" = 0 ] || { fail null "$why"; return 0; }
   cmd=$(jq -r --arg e "$engine/conveyor/conveyor.sh" 'map((.main | @sh) as $m | "CONVEYOR_MAIN=\($m) bash \($e | @sh) snapshot && { git -C \($m) remote get-url origin 2>/dev/null || echo; } && { stat -c %Y \"$(CONVEYOR_MAIN=\($m) bash \($e | @sh) state-dir)\"/pushed 2>/dev/null || echo 0; }") | join(" && ")
     + " && echo @@end"' <<<"$recs")
   out=$(onhost "$cmd" 2>"$RUN/err-conveyor") || rc=$?
@@ -428,12 +404,8 @@ decisions() {
 # usage, as the host's dashboard_limit.py reads them; over ssh to host.json's target, as conveyor() checks the host file.
 # Prints the list.
 hostaccounts() {
-  local cfg=$HOST_FILE main target
-  [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
-  jq -e '(.host | test("^[A-Za-z0-9._-]+$")) and ((.records // [{main: .main}]) | type == "array" and all(.[]; .main | type == "string" and test("^/[^[:cntrl:]]*$")))' "$cfg" >/dev/null 2>&1 \
-    && main=$(jq -er '.main | select(test("^/[^[:cntrl:]]*$"))' "$cfg" 2>/dev/null) \
-    && target=$(jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$cfg" 2>/dev/null) \
-    || { echo "no Conveyor host is named" >&2; return 1; }
+  local host main engine target recs why remote
+  hostof && [ -n "$target" ] || { echo "no Conveyor host is named" >&2; return 1; }
   timeout -k 2 "$SSH_LIMIT" ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
     "$target" "python3 $(jq -rn --arg p "$main" '$p | @sh')/.claude/scripts/dashboard_limit.py accounts \"\${XDG_CACHE_HOME:-\$HOME/.cache}/conveyor/accounts\"" | jq -ce 'arrays'
 }
@@ -442,19 +414,21 @@ hostaccounts() {
 # Conveyor host's (hostaccounts, asked at most once a TTL: cached). Prints {here, host: {name, accounts, error}}. The
 # emails are for the page alone.
 accounts() {
-  local here host st
+  local here acc st host main engine target recs why remote
   # The account in use is shown from limit()'s reading, never read a second time (a second read kept it refused, 429).
   here=$(python3 "$HERE/dashboard_limit.py" accounts "$CACHE" "$CACHE/claude-usage" 2>/dev/null | jq -ce 'arrays') || here=null
-  # On one machine (onemachine) the Conveyor host is this machine: its accounts are the ones just read, listed once,
-  # as the host's (no name: the page says "this machine"), so each shows what the cards use it for.
-  if onemachine; then
+  # On one machine (the host file names no build machine: hostof) the Conveyor host is this machine: its accounts are
+  # the ones just read, listed once, as the host's (no name: the page says "this machine"), so each shows what the
+  # cards use it for.
+  hostof
+  if [ -z "$remote" ]; then
     jq -cn --argjson h "$here" '{here: [], host: {name: null, accounts: $h,
       error: (if $h == null then "the accounts on this machine were not read" else null end)}}'
     return 0
   fi
-  host=$(cached host-accounts hostaccounts) || host=''
+  acc=$(cached host-accounts hostaccounts) || acc=''
   st=$(cat "$RUN/st-host-accounts")
-  jq -cn --argjson h "$here" --argjson a "${host:-null}" --arg st "$st" --rawfile why "$RUN/why-host-accounts" --arg n "$(jq -r '.host // empty' "$HOST_FILE" "$PP_MAIN/conveyor/host.json" 2>/dev/null | head -n 1)" \
+  jq -cn --argjson h "$here" --argjson a "${acc:-null}" --arg st "$st" --rawfile why "$RUN/why-host-accounts" --arg n "$host" \
     '{here: $h, host: {name: (if $n == "" then null else $n end), accounts: $a,
       error: (if $st == "fresh" then null elif $st == "stale" then "the accounts on the host were not read again (\($why)); showing the last read" else "the accounts on the host were not read: \($why)" end)}}'
 }
@@ -570,17 +544,19 @@ checkout_of() {
   return 1
 }
 foremen() {
-  local cfg=$HOST_FILE rows projects main hm sd ssh led here dir sid since wake f out='[]' waiting bugs url
+  local cfg=$HOST_FILE rows projects main hm sd ssh led here dir sid since wake f out='[]' waiting host engine target recs why remote bugs url
   # The copies are made again each read: a Foreman whose notes are gone has none left.
   rm -rf "$OUT/plugin-bugs"
   [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
   [ -e "$cfg" ] || { echo '{"foremen":[],"error":null}'; return 0; }
-  rows=$(jq -ec '(.records // []) as $r | (.foreman.groups // []) as $g
+  # The host's main and its ssh target as hostof reads them (a host file it cannot read names neither).
+  hostof || main=''
+  rows=$(jq -ec --arg hm "$main" --arg ssh "$target" '(.records // []) as $r | (.foreman.groups // []) as $g
       | select(($r | type == "array" and all(type == "object" and (.repo | type == "string") and (.main | type == "string")))
           and ($g | type == "array" and all(type == "array" and all(type == "string"))))
       | (if ([$g[][]] | length == (unique | length)) then $g else [] end) as $g
-      | (.main // $r[0].main // null) as $hm | (.stateDir | if type == "string" and . != "" then . else null end) as $sd
-      | (.ssh | type == "string" and . != "") as $ssh
+      | (if $hm == "" then null else $hm end) as $hm | (.stateDir | if type == "string" and . != "" then . else null end) as $sd
+      | ($ssh != "") as $ssh
       | [$r[].repo] as $at
       | [$r[] | .repo as $n | (first($g[] | select(index($n))) // [$n]) | map(select(. as $x | $at | index($x)))]
       | unique_by(.[0]) | sort_by(.[0] as $n | $at | index($n))
@@ -1057,7 +1033,7 @@ kept_parts() {
 # HISTORY_TTL seconds old. The rest of each record is the live feed's (with none running, read as a cycle reads it),
 # the other parts those the last cycle kept. A host that gives no history of every record prints nothing: exit 1.
 history() {
-  local host main engine target recs why cmd f=$CACHE/history.json at
+  local host main engine target recs why remote cmd f=$CACHE/history.json at
   at=$(stat -c %Y "$f" 2>/dev/null) && [ $(( $(date +%s) - at )) -lt $HISTORY_TTL ] && jq -ce 'objects' "$f" 2>/dev/null && return 0
   NOW=$(date +%s)
   RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1

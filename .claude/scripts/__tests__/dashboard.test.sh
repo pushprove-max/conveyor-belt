@@ -946,7 +946,7 @@ cp "$T/ledger.ok" "$PPL"
 HF=$T/hostfile; mkdir -p "$HF/conveyor" "$MAIN/.claude/scripts"
 jq -cn --arg l "$PPL" '{host: "devbox", ssh: "user@devbox", main: "/srv/linux-only",
   records: [{repo: "sample", main: "/srv/linux-only", ledger: $l}, {repo: "widgetshop", main: "/srv/cd"}]}' > "$HF/conveyor/host.json"
-cp "$SOURCE"/.claude/scripts/{dashboard.sh,dashboard_limit.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh} "$MAIN/.claude/scripts/"
+cp "$SOURCE"/.claude/scripts/{dashboard.sh,dashboard_limit.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh,hostfile.sh} "$MAIN/.claude/scripts/"
 quiet; : > "$T/ssh-calls"
 new_cycle
 env -u CONVEYOR_MAIN -u CONVEYOR_HOOK_FIRE_LOG -u CODEX_HOME HOME="$T/userhome" XDG_CONFIG_HOME="$HF" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux \

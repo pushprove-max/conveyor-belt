@@ -200,9 +200,6 @@ RULE = re.compile(r'(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
 RUN_ID = re.compile(r'[0-9a-f]{12}')  # a full test run's id, as conveyor.sh's full-test anyway takes it
 VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})')  # a release's, as conveyor.sh's release-run takes it
-HOST_NAME = re.compile(r'[A-Za-z0-9._-]+')
-HOST_MAIN = re.compile(r'/[^\x00-\x1f\x7f]*')  # an absolute path, spaces and all: control_script quotes it
-SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
 # every other action: 30 s. start outlasts conveyor.sh's 60 s `timeout 60 gh issue list` (control start), so the
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
@@ -496,11 +493,6 @@ def host_file():
         raise ValueError('conveyor/host.json is missing or not understood') from e
 
 
-def this_host():
-    """This machine's short name, as dashboard.sh's thishost gives it."""
-    return re.sub(r'[^A-Za-z0-9._-]', '-', os.uname().nodename.split('.')[0]) or 'localhost'
-
-
 def record_ledger(repo):
     """The decision ledger the host file's record for repo names (records[].ledger), the one dashboard.sh read the
     decision from; the page names only the record, never a path. ValueError when that record names none."""
@@ -514,32 +506,24 @@ def record_ledger(repo):
 
 def conveyor_host():
     """(host, ssh target, the checkout whose conveyor.sh runs, {repo: checkout} of its records) from conveyor/host.json,
-    as dashboard.sh's hostof() reads it (no records: the one record, "project", on main). On one machine (no ssh
-    target, as setup writes it, or this machine named as the host) the target is None and the Board's own copy of
-    Conveyor runs here; with a build machine it is the host's main. ValueError naming the field that is wrong when it
-    does not say."""
-    cfg = host_file()
-    if not isinstance(cfg, dict):
-        raise ValueError('conveyor/host.json is not a JSON object')
-    host, hmain, target = cfg.get('host'), cfg.get('main'), cfg.get('ssh')
-    if target is None or host == this_host():
-        host = host if isinstance(host, str) and HOST_NAME.fullmatch(host) else this_host()
-        hmain = hmain if isinstance(hmain, str) and HOST_MAIN.fullmatch(hmain) else board_main()
-        target, engine = None, os.path.dirname(os.path.dirname(HERE))
-    else:
-        if not (isinstance(host, str) and HOST_NAME.fullmatch(host)):
-            raise ValueError('conveyor/host.json names an ssh target, but its host is not a machine name')
-        if not (isinstance(hmain, str) and HOST_MAIN.fullmatch(hmain)):
-            raise ValueError('conveyor/host.json names no main: the path of the main checkout on %s' % host)
-        if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
-            raise ValueError('conveyor/host.json names no ssh target for %s that ssh can use' % host)
-        engine = hmain
-    recs = cfg.get('records', [{'repo': 'project', 'main': hmain}])
-    if not (isinstance(recs, list) and recs and all(
-            isinstance(r, dict) and isinstance(r.get('repo'), str) and REPO.fullmatch(r['repo'])
-            and isinstance(r.get('main'), str) and HOST_MAIN.fullmatch(r['main']) for r in recs)):
-        raise ValueError('conveyor/host.json records are not understood: each needs a repo name and the path of its main checkout')
-    return host, target, engine, {r['repo']: r['main'] for r in recs}
+    as hostfile.sh, its one reader, gives it for this machine's checkout (board_main()). On one machine the target is
+    None and the Board's own copy of Conveyor runs here; with a build machine it is the host's main. ValueError naming
+    the field that is wrong when it does not say."""
+    got = read_host_file(board_main())
+    return got['host'], got['target'], got['engine'], {r['repo']: r['main'] for r in got['records']}
+
+
+def read_host_file(main):
+    """hostfile.sh's answer for the checkout main: {host, main, engine, target, records}. ValueError with its reason
+    when the host file does not say them."""
+    try:
+        run = subprocess.run(['bash', os.path.join(HERE, 'hostfile.sh'), main], capture_output=True, text=True, timeout=30)
+        got = json.loads(run.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        raise ValueError('conveyor/host.json could not be read: %s' % e) from e
+    if run.returncode != 0 or not isinstance(got, dict) or got.get('error') is not None:
+        raise ValueError(got.get('error') if isinstance(got, dict) and got.get('error') else 'conveyor/host.json could not be read')
+    return got
 
 
 def control_script(action, args, main, today, record=None, user=None):

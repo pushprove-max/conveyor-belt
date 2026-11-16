@@ -180,7 +180,21 @@ data | jq -e '.panels.belt.data.cards == [] and .panels.health.data.host.name ==
   || fail "data.js still shows the old host's cards after the host file changed: $(data | jq -c '[.panels.belt, .panels.health.data.host]' | cut -c1-600)"
 wait_until '! pgrep -f "$HELD"' || :
 ! pgrep -f "$HELD" >/dev/null || { pkill -f "$HELD"; fail "a stream outlived the feed whose host file changed"; }
-pass=$((pass + 4))
+# Started again, as dashboard.sh --loop starts an ended feed, the feed streams from the new host.
+feed
+until_is "the_feed_streams_from_the_new_host" stream '.host == "otherbox" and .stream.live == true and (.records | length) == 1' .
+tail -n 1 "$T/ssh-calls" | grep -q ' max@otherbox CONVEYOR_MAIN=/srv/other ' || fail "the restarted feed did not ask the new host: $(tail -n 1 "$T/ssh-calls")"
+# Bug caught (#134): a feed started again on a host file it could not read waited in silence, so stream.json kept
+# "the stream restarts on it" for hours. Now it logs why and stream.json says why, with no record.
+echo '{"host":"far","ssh":"max@far"}' > "$MAIN/conveyor/host.json"
+wait_until '! kill -0 "$PID" 2>/dev/null' || :
+! kill -0 "$PID" 2>/dev/null || fail "the feed kept running after the host file changed again"
+feed
+until_is "stream_json_says_why_the_feed_cannot_start" stream '.records == null and .stream.live == false
+  and .stream.error == "the live stream cannot start: conveyor/host.json names no main: the path of the main checkout on far"' .
+grep -qxF 'dashboard_stream: no stream: conveyor/host.json names no main: the path of the main checkout on far' "$T/feed.err" \
+  || fail "the feed that cannot start did not log why: $(cat "$T/feed.err")"
+pass=$((pass + 7))
 echo "$pass" > "$T/pass"
 ) & started hostchange
 
@@ -218,13 +232,14 @@ echo "$pass" > "$T/pass"
 # checkout has a space in its path (setup records it unchanged) is read too, and its path is quoted in the command.
 echo "{\"records\":[{\"repo\":\"sample\",\"main\":\"$MAIN\"},{\"repo\":\"spaced\",\"main\":\"/srv/my project\"}]}" > "$MAIN/conveyor/host.json"
 python3 - "$FEED" "$MAIN" "$T/home" "$SOURCE" <<'PY' || fail "the feed on one machine: see above"
-import importlib.util, os, sys
+import importlib.util, os, re, sys
 os.environ['XDG_CONFIG_HOME'] = sys.argv[3]  # no host file of this machine: main's
 spec = importlib.util.spec_from_file_location('feed', sys.argv[1]); ds = importlib.util.module_from_spec(spec); spec.loader.exec_module(ds)
 main, engine = sys.argv[2], sys.argv[4]
 cfg, why = ds.config(main)
 assert why is None, why
-assert cfg == (ds.this_host(), main, [('sample', main), ('spaced', '/srv/my project')], None, engine), cfg
+me = re.sub(r'[^A-Za-z0-9._-]', '-', os.uname().nodename.split('.')[0]) or 'localhost'
+assert cfg == (me, main,[('sample', main), ('spaced', '/srv/my project')], None, engine), cfg
 class Stop(Exception):
     pass
 calls = []
@@ -267,8 +282,9 @@ class Clock:  # each sleep moves it on, with a beat from the host; past `until` 
         if self.t > self.until: raise Stop
 clock = Clock(); ds.time = clock
 builds = []
+cfg, why = ds.config(sys.argv[3]); assert why is None, why  # before run is stubbed: hostfile.sh is run to read it
+ds.config = lambda main: (cfg, None)  # the host file does not change: each tick's read is not run again
 ds.subprocess.run = lambda *a, **k: builds.append(clock.t) or type('R', (), {'returncode': 0})()
-cfg, why = ds.config(sys.argv[3]); assert why is None, why
 f = ds.Feed(sys.argv[2], '/nowhere/dashboard.sh', sys.argv[3], *cfg)
 rec = f.recs[0]
 clock.beat = lambda: f.take(rec, {'type': 'beat'})

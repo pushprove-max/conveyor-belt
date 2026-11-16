@@ -146,7 +146,7 @@ A snapshot that cannot be read is one plain line in every view, and nothing from
 `units: the Conveyor snapshot cannot be read (<why>)`, where the reason is one of `<host> is unreachable`,
 `<host> did not answer in time`, `<host> gave no snapshot`,
 `this machine has no host file at <paths looked at>`, `the host file is not understood`,
-`the host file names no ssh target`, `the fetch did not run` or `the fetch did not finish`, or
+`the fetch did not run` or `the fetch did not finish`, or
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
 The Foreman line still shows under it, and the status line starts with it.
 

@@ -153,6 +153,8 @@ taken() {
       else . + {refused: ({commit: $c, reason: $r[0:1500], since: (now | todate)} + (if $f == "releases" then {release: $v} else {} end))} end' > "$t" \
       && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
     if [ -z "$why" ]; then echo "conveyor: took Conveyor commit $h of the plugin's $n: the loop restarts on it at its next pick"
+      # The Board does not restart on it by itself: one on the commit before is started again on this one.
+      boardrenew
     else echo "conveyor: did not take Conveyor commit $h of the plugin's $n, as $why; the project stays on $(jq -r '.commit // "no commit"' "$ENGINE")" >&2; fi
   fi
   prune ${why:+"$h"}
@@ -397,6 +399,8 @@ UNIT
   # The service names the install by its path: listed in USES, so prune() keeps it.
   grep -qxF "$f" "$USES" 2>/dev/null || echo "$f" >> "$USES" || return 1
   echo "conveyor: $f runs $code machine for every project of $HOST"
+  # A Board on older Conveyor than the project's is started again on it, as the machine's loop is.
+  boardrenew || :
 }
 # `conveyor.sh board`, in a project's checkout: the Board installed as this user's service (dashboard.sh --install),
 # reading this project, from the install of the commit the project runs (its pin, or the commit it took of the
@@ -406,6 +410,7 @@ UNIT
 # the password the user typed in Claude Code's prompt), board adds the admin `admin` with it, or sets it for an `admin`
 # that has none, on stdin, never on a command line, and removes the file first, whatever happens next.
 # The service names the install by its path: listed in USES, so prune() keeps it.
+# shellcheck disable=SC2120 # the password file comes from commands/board.sh; boardrenew, here, passes none
 board() { # [password file]
   local repo pin f s pw=''
   if [ -n "${1-}" ]; then
@@ -451,4 +456,36 @@ boardurl() {
 boardup() {
   [[ $(curl -q -s --cacert "$(dirname "$(boardauth)")/dashboard-tls/cert.pem" --max-time 2 "https://127.0.0.1:${CONVEYOR_DASHBOARD_PORT:-8790}/login" 2>/dev/null) \
     == *'<title>Conveyor Board</title>'* ]]
+}
+# The Board loops running on this machine from an install, "<pid> TAB <commit>" a line: a bash running
+# VERSIONS/<commit>/.claude/scripts/dashboard.sh --loop, as board() installs it. Its page server and live feed are its
+# children and end with it. A Board run from a checkout is not listed.
+boardloops() {
+  p_procs | awk -v v="$VERSIONS/" '{ a = $0; sub(/^ *[0-9]+ +[0-9]+ +/, "", a); i = index(a, v); if (!i) next
+    c = substr(a, i + length(v)); b = substr(a, 1, i - 1)
+    if (b ~ /(^|\/)bash( .*)? $/ && c ~ /^[0-9a-f]{40}\/\.claude\/scripts\/dashboard\.sh --loop$/) print $1 "\t" substr(c, 1, 40) }'
+}
+# Each Board loop that runs older Conveyor than the project's (enginepin), "<pid> TAB <its commit> TAB <the project's>"
+# a line. A Board on a newer commit (the project's commit is in its history: another project's newer install) is left.
+boardold() {
+  local p pid c d
+  enginepin p 2>/dev/null && [ -n "$p" ] || return 0
+  while IFS=$'\t' read -r pid c; do
+    [ "$c" != "$p" ] || continue
+    for d in "$VERSIONS/$c" "$VERSIONS/$p"; do git -C "$d" merge-base --is-ancestor "$p" "$c" 2>/dev/null && continue 2; done
+    printf '%s\t%s\t%s\n' "$pid" "$c" "$p"
+  done < <(boardloops)
+}
+# A Board that runs older Conveyor than the project's (boardold), with its feed, started again on the project's
+# install: board() rewrites its service and restarts it, and an old loop still running after that (one no service
+# runs, started by hand) is stopped. Run by setup, install-service and take. Nothing when no Board is old.
+boardrenew() {
+  local old pid c p
+  old=$(boardold) && [ -n "$old" ] || return 0
+  IFS=$'\t' read -r _ c p <<<"$old"
+  echo "conveyor: the Board runs Conveyor commit $c, older than this project's $p: starting it again on $p"
+  CALLED=$MAIN board </dev/null || { echo "conveyor: the Board could not be started again on $p: run conveyor.sh board in the project's checkout" >&2; return 1; }
+  while IFS=$'\t' read -r pid c _; do
+    kill "$pid" 2>/dev/null && echo "conveyor: stopped the Board loop on Conveyor commit $c (pid $pid), which no service runs"
+  done < <(boardold)
 }

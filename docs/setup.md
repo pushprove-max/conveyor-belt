@@ -219,7 +219,8 @@ Conveyor runs once per machine, and each project is a record of the host file. S
 user unit on Linux, a launchd agent on macOS. Install it while no card is in flight.
 
 Setup's last question is "Start Conveyor now as this machine's service?". Yes runs `install-service`. Beside it,
-when the Board is not running, setup asks "Start the Board now?". Yes runs `conveyor.sh board`, which starts the
+when the Board is not running, setup asks "Start the Board now?". A Board that runs an older release than the
+project is not asked about: setup starts it again on the project's release. Yes runs `conveyor.sh board`, which starts the
 [Board](board.md) as this machine's user service. It asks for no password: **No login on this device** lets you in
 from this machine. When that setting is off and no admin has a password, setup asks you for one in Claude Code's
 prompt and gives it to `conveyor.sh board` in a file that it deletes. To log in from another device, add a user on the

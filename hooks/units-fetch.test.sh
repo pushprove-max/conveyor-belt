@@ -67,11 +67,12 @@ got=$(fetch "$M/elsewhere")
 same 'a checkout outside the records: the snapshots over ssh' "$(sed '1s/\tbakery$/\t/; s/^fast\tnone$/fast\tnorecord/; s/^host\tlab\tlocal\t0$/host\tlab\tssh\t0/' <<<"$WANT")" "$got"
 same 'the ssh target is the host file'"'"'s' 'owner@lab' "$(cat "$M/bin/target" 2>/dev/null)"
 
-# The same with no ssh target: nothing is asked, and the board says why.
-machine nossh
-hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
+# The same with an ssh target ssh cannot use: nothing is asked, and the board says the host file is not understood.
+# (With no ssh target at all the host file sets up one machine: conveyor/tests/boardone.test.sh, t_boardonereaders.)
+machine badssh
+hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", ssh: "-oProxyCommand=x", main: $c, records: [{repo: "bakery", main: $b}]}'
 mkdir -p "$M/elsewhere"
-same 'no ssh target: nossh' $'paths\t\t/r/HOME\t\nfast\tnorecord\nhost\tlab\tnossh\t0' "$(fetch "$M/elsewhere")"
+same 'an ssh target ssh cannot use: config' $'paths\t\t/r/HOME\t\nfast\tnorecord\nhost\tlab\tconfig\t0' "$(fetch "$M/elsewhere")"
 
 # The lanes are the worktrees this checkout's record names (~/ is the home folder): the Fast lane's branch, its
 # commits ahead of the pack's default branch (trunk here, not main) and its first subject; the Research lane's folder
