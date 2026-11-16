@@ -84,6 +84,17 @@ t_testmapnew() {
   grep -qF 'conveyor: test map: mapped test/d.test.js on its first run' "$T/$CASE/cards/c7.test" || fail "the run did not say it mapped the new test: $(cat "$T/$CASE/cards/c7.test")"
 }
 
+# Bug it catches (#155): a Node test file the pack's tests.patterns name but not named *.test.*, *.spec.* or under
+# __tests__/ (src/test-a.mjs, checks/one.js) never entered the map, made (mapbuild()) or added (mapnew()), as a fixed
+# filename filter dropped it. The map's Node tests are the pack's test files that are JS or TS files.
+t_testmapfiles() {
+  setup '[]'; tune '.tests.patterns = ["src/test-*.mjs", "checks/"]'
+  mkdir -p "$R/src" "$R/checks" && for f in src/test-a.mjs src/a.mjs checks/one.js checks/notes.md; do echo x > "$R/$f"; done
+  git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
+  mapeng 'maptests "$R" node' && [ "$(cat "$T/$CASE/eng.out")" = $'checks/one.js\nsrc/test-a.mjs' ] \
+    || fail "the map's Node tests are not the pack's JS test files: $(cat "$T/$CASE/eng.out")"
+}
+
 # Bug it catches: a map made under another test command, or long ago, kept sending changes to the tests of code that
 # moved. Such a map is due (mapdue()), with why; one of this command and commit is not.
 t_testmapdue() {

@@ -35,13 +35,14 @@ maptool() { # <language> <dir>
     *) echo 'its language has no coverage tool the test map knows (Node, Python, Go, Rust or Ruby)'; return 1 ;;
   esac
 }
-# The tracked test files (testpaths()) of <language> in <dir>, one a line: Node's are .js, .mjs, .cjs, .ts and the like,
-# under __tests__/ or named *.test.*, *.spec.*; Python's test_*.py and *_test.py; Go's *_test.go; Rust's test
-# binaries, tests/*.rs; Ruby's *_spec.rb. A file a test reads (a helper under test/) is no test of its own.
+# The tracked test files (testpaths(), the pack's tests.patterns) of <language> in <dir>, one a line: Node's are all of
+# those that are .js, .mjs, .cjs, .ts and the like (src/test-a.mjs, checks/one.js), as node --test runs any file it is
+# given; Python's test_*.py and *_test.py; Go's *_test.go; Rust's test binaries, tests/*.rs; Ruby's *_spec.rb. Of the
+# others, a file a test reads (a helper under test/) is no test of its own.
 maptests() { # <dir> <language>
   local rx
   case $2 in
-    node) rx='((^|/)__tests__/.*|[._-](test|spec))\.[cm]?[jt]sx?$' ;; python) rx='(^|/)(test_[^/]*|[^/]*_test)\.py$' ;;
+    node) rx='\.[cm]?[jt]sx?$' ;; python) rx='(^|/)(test_[^/]*|[^/]*_test)\.py$' ;;
     go) rx='_test\.go$' ;; rust) rx='^tests/[^/]+\.rs$' ;; ruby) rx='_spec\.rb$' ;; *) return 0 ;;
   esac
   git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths | grep -E "$rx" || :
