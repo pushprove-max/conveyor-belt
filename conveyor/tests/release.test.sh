@@ -157,7 +157,7 @@ cutsetup() {
     'while [ $# -gt 0 ]; do [ "$1" != --notes-file ] || cp "$2" "$STUB/body"; shift; done' \
     'else cat "$STUB/statuses" 2>/dev/null || echo "[]"; fi' > "$STUB/gh"
   mkdir -p "$R/.claude-plugin" "$R/docs/releases" && jq -n '{name: "p", version: "1.0.0"}' > "$R/.claude-plugin/plugin.json" \
-    && jq -n --arg s "$(printf 'a%.0s' {1..40})" '{name: "m", plugins: [{name: "p", source: {source: "github", repo: "o/p", ref: "v1.0.0", sha: $s}},
+    && jq -n --arg s "$(printf 'a%.0s' {1..40})" '{name: "m", plugins: [{name: "p", source: {source: "url", url: "https://github.com/o/p.git", ref: "v1.0.0", sha: $s}},
       {name: "q", source: {source: "github", repo: "o/q", ref: "v9.0.0"}}]}' > "$R/.claude-plugin/marketplace.json" \
     && { [ -z "${2:-}" ] || echo "$2" > "$R/old.txt"; } \
     && git -C "$R" add -A && git -C "$R" commit -qm 'the first release' && git -C "$R" tag -a v1.0.0 -m 'Release 1.0.0' \
@@ -243,8 +243,11 @@ t_cutpass() {
   [ "$(git -C "$R" show "$t:.claude-plugin/plugin.json" | jq -r .version)" = 1.1.0 ] || fail "plugin.json's version at the tag is not 1.1.0"
   [ "$(git -C "$R" show "$t:.claude-plugin/marketplace.json" | jq -c '.plugins[0].source | [.ref, .sha]')" = '["v1.1.0",null]' ] \
     || fail "the marketplace at the tag does not name v1.1.0, or still pins the old sha"
+  # The pin is written into the url source as it is: still a url source with its https:// URL, so it installs with no
+  # GitHub SSH key.
   [ "$(git -C "$T/$CASE/origin" show main:.claude-plugin/marketplace.json | jq -c '[.plugins[].source | [.ref, .sha]]')" = "[[\"v1.1.0\",\"$t\"],[\"v9.0.0\",null]]" ] \
-    && [ "$(git -C "$T/$CASE/origin" rev-parse main^)" = "$t" ] || fail "origin's main does not pin v1.1.0 at the tagged commit $t, right after it"
+    && [ "$(git -C "$T/$CASE/origin" show main:.claude-plugin/marketplace.json | jq -c '.plugins[0].source | [.source, .url]')" = '["url","https://github.com/o/p.git"]' ] \
+    && [ "$(git -C "$T/$CASE/origin" rev-parse main^)" = "$t" ] || fail "origin's main does not pin v1.1.0 at the tagged commit $t, right after it, in the same url source"
   grep -q '^release create v1.1.0 --verify-tag ' "$STUB/gh-calls" && cmp -s "$STUB/body" "$R/docs/releases/1.1.0.md" \
     || fail "the GitHub release is not v1.1.0 with the notes file as its body: $(cat "$STUB/gh-calls" 2>&1)"
   loop release --help | grep -q 'Only the owner decides a release: the Foreman runs conveyor.sh release only after the owner says yes in chat' \

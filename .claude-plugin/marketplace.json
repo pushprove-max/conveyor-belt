@@ -7,8 +7,8 @@
     {
       "name": "conveyor-belt",
       "source": {
-        "source": "github",
-        "repo": "pushprove-max/conveyor-belt",
+        "source": "url",
+        "url": "https://github.com/pushprove-max/conveyor-belt.git",
         "ref": "v1.1.0",
         "sha": "a6f4d0009bf5119ff92647c0284ba5eebf696fb4"
       },

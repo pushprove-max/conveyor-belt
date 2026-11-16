@@ -62,19 +62,20 @@ enginepin() { # <commit variable> [<follow variable>]
 }
 # The plugin's repository as its manifest names it, for a plugin folder that is no clone of its own (a marketplace
 # install runs from Claude Code's plugin cache, a copy with no .git; one inside a repository kept above it, such as a
-# config folder in git, is no clone either): plugin.json's repository, else the marketplace entry's source.repo for
-# that plugin, as https://github.com/<owner>/<repo>. When neither names one on GitHub, says which sources it read.
+# config folder in git, is no clone either): plugin.json's repository, else the marketplace entry's source for that
+# plugin (its url source's git URL), as https://github.com/<owner>/<repo>. When neither names one on GitHub, says
+# which sources it read.
 manifestrepo() {
   local p=${HERE%/*} m r
   m=$p/.claude-plugin
   r=$(jq -r '.repository | if type == "object" then .url else . end | strings' "$m/plugin.json" 2>/dev/null)
   [ -n "$r" ] || r=$(jq -r --arg n "$(jq -r '.name | strings' "$m/plugin.json" 2>/dev/null)" \
-    '[.plugins[]? | select(.name == $n) | .source | objects | select(.source == "github") | .repo | strings][0] // empty' "$m/marketplace.json" 2>/dev/null)
+    '[.plugins[]? | select(.name == $n) | .source | objects | select(.source == "url") | .url | strings][0] // empty' "$m/marketplace.json" 2>/dev/null)
   r=${r%/}; r=${r%.git}
   if [[ $r =~ ^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$ ]]; then
     echo "https://github.com/${BASH_REMATCH[2]}"
   else
-    echo "conveyor: the plugin's repository could not be found: $p is no clone with an origin, and neither $m/plugin.json (repository) nor $m/marketplace.json (the plugin's source.repo) names one on GitHub" >&2
+    echo "conveyor: the plugin's repository could not be found: $p is no clone with an origin, and neither $m/plugin.json (repository) nor $m/marketplace.json (the plugin's source.url) names one on GitHub" >&2
     return 1
   fi
 }

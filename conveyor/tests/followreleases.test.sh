@@ -86,7 +86,8 @@ plugmain() { (HERE=$1/conveyor OWN=''; . "$SRC/lib/install.sh"; mainof main); } 
 
 # Bugs: a plugin installed from its marketplace runs from a copy with no .git, so it has no origin and its releases
 # (and main) could not be read; one in a config folder kept in git reads that repository's origin as the plugin's; when
-# no source names the repository, the message does not say which sources were read.
+# no source names the repository, the message does not say which sources were read; the marketplace entry's url
+# source (the form that installs over HTTPS) is not read, so a cache copy finds no repository.
 t_releasecache() {
   plugfixture; GHREPO=$U; local c=$T/$CASE P=$T/$CASE/cache/plugin/1.0.0
   # The cache copy sits in a repository of its own whose origin is not the plugin's.
@@ -94,14 +95,15 @@ t_releasecache() {
     && git -C "$c/w" archive v1.0.0 | tar -x -C "$P" || fail "the cache copy was not made"
   [ "$(plugrel "$P")" = "$U"$'\t'"$H"$'\t'v1.0.0 ] || fail "the release was not read from the repository plugin.json names: $(plugrel "$P" 2>&1)"
   [ "$(plugmain "$P")" = "$U"$'\t'"$M" ] || fail "main was not read from the repository plugin.json names: $(plugmain "$P" 2>&1)"
-  # No repository in plugin.json: the marketplace entry for the plugin names it, as owner/repo.
+  # No repository in plugin.json: the marketplace entry for the plugin names it, as the https:// git URL of its url
+  # source (the form that installs with no GitHub SSH key).
   jq -n '{name: "plugin"}' > "$P/.claude-plugin/plugin.json" \
-    && jq -n '{plugins: [{name: "other", source: {source: "github", repo: "example-owner/other"}}, {name: "plugin", source: {source: "github", repo: "example-owner/plugin"}}]}' \
+    && jq -n '{plugins: [{name: "other", source: {source: "url", url: "https://github.com/example-owner/other.git"}}, {name: "plugin", source: {source: "url", url: "https://github.com/example-owner/plugin.git"}}]}' \
       > "$P/.claude-plugin/marketplace.json" || fail "the manifests were not written"
   [ "$(plugrel "$P")" = "$U"$'\t'"$H"$'\t'v1.0.0 ] || fail "the release was not read from the repository the marketplace entry names: $(plugrel "$P" 2>&1)"
   rm "$P/.claude-plugin/marketplace.json"
   out=$(plugrel "$P" 2>&1) && fail "a release was read with no source naming the repository: $out"
-  grep -qF "$P is no clone with an origin, and neither $P/.claude-plugin/plugin.json (repository) nor $P/.claude-plugin/marketplace.json (the plugin's source.repo) names one on GitHub" <<<"$out" \
+  grep -qF "$P is no clone with an origin, and neither $P/.claude-plugin/plugin.json (repository) nor $P/.claude-plugin/marketplace.json (the plugin's source.url) names one on GitHub" <<<"$out" \
     || fail "the message did not say which sources were read: $out"
 }
 

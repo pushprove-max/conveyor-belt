@@ -151,6 +151,16 @@ The host file holds the machine's settings. Each is unset by default:
 None of these stops a card that already runs. While the host file is there and cannot be read, no new card starts.
 `conveyor.sh doctor` names a second loop that runs beside the machine's.
 
+## Troubleshooting
+
+`/plugin install conveyor-belt@conveyor-belt` fails with `git@github.com: Permission denied (publickey)`: release
+1.1.0 and older clone the plugin over SSH, and this machine has no GitHub SSH key. Run this command once, then install
+again. Git then fetches the plugin over HTTPS:
+
+```sh
+git config --global url."https://github.com/pushprove-max/conveyor-belt".insteadOf "git@github.com:pushprove-max/conveyor-belt"
+```
+
 ## Uninstall
 
 1. Stop the loop: `systemctl --user disable --now conveyor-machine.service` on Linux, or
