@@ -37,8 +37,12 @@
     "changed": ".conveyor/test-changed.sh",
     "slowIssues": false,
     "files": {
-      "conveyor/tools/closure.test.sh": { "cardMode": "CONVEYOR_CLOSURE_QUICK=1" },
-      "conveyor/conveyor.test.sh": { "wholeOnly": true }
+      "conveyor/tools/closure.test.sh": {
+        "cardMode": "CONVEYOR_CLOSURE_QUICK=1"
+      },
+      "conveyor/conveyor.test.sh": {
+        "wholeOnly": true
+      }
     }
   },
   "linkFromMain": [
@@ -73,5 +77,14 @@
   },
   "privacy": {
     "mode": "public"
+  },
+  "plugin": {
+    "follow": "releases"
+  },
+  "lanes": {
+    "research": {
+      "model": "claude-fable-5-2",
+      "effort": "medium"
+    }
   }
 }
