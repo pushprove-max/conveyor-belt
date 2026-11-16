@@ -133,6 +133,28 @@ approved() { # <open issues, a json list>
     | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
     | select((.reason | startswith($yes)) and (.kept // "") != "") | "\(.issue) \(.card) \(.kept)"' < <(turncards) 2>/dev/null)
 }
+# At a turn of the loop, outside the lock: an issue of the open list given whose newest card was blocked by a session
+# or review that never began its work (nostart(): its spent names the seat, CLI, model and account it ran on) is given
+# back with `retry` (under the lock) once a check session starts (startcheck()) on its seat's CLI and model as set now
+# (startnow(): a model changed since is the one checked), a login made since, say. Once
+# only (startonce()). The checks start API_PAUSE after the block at the soonest, and at most once every API_PAUSE
+# ($ST/startcheck holds when the last ones ran), one for each CLI, model and account.
+startagain() { # <open issues, a json list>
+  local n s last ok
+  declare -A tried=()
+  last=$(cat "$ST/startcheck" 2>/dev/null); [[ $last =~ ^[0-9]+$ ]] || last=0
+  jq -en --argjson l "$last" --argjson p "$API_PAUSE" '$l + $p <= now' >/dev/null 2>&1 || return 0
+  while IFS=$'\t' read -r n s; do
+    startonce "$n" && s=$(startnow "$s") || continue
+    [ -n "${tried[$s]+1}" ] || { echo "$EPOCHSECONDS" > "$ST/startcheck"; if startcheck "$s"; then tried[$s]=1; else tried[$s]=''; fi; }
+    ok=${tried[$s]}; [ -n "$ok" ] || continue
+    echo "conveyor: a check session on $(jq -r '"\(.cli) \(.model)"' <<<"$s") started: issue #$n, whose card was blocked before its session began its work, is put back"
+    { locked retry "$n"; stdbkeeps; } || true
+  done < <(jq -rs --argjson open "$1" --argjson p "$API_PAUSE" 'map(select(.step != "push")) | group_by(.issue)[]
+    | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and .step != "closed"))
+    | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
+    | select((.spent.start | type) == "object" and (try (.time | fromdate) catch now) + $p <= now) | "\(.issue)\t\(.spent.start | tojson)"' < <(turncards) 2>/dev/null)
+}
 # Under the lock: the lines the jq test picks (asked of each record, with the jq arguments given) move from the card
 # records to the retried file; MOVETAG, when set, is a jq filter each moved line goes through ($at: now).
 moveout() { # <jq test> <jq arguments>...

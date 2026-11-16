@@ -13,6 +13,16 @@ When the issue has a `## Done when` section, Conveyor checks the build or fix se
 reply needs a `D<n> met:` or `D<n> not met:` line for each item. It must also name each TODO or [VERIFY] marker that
 the change adds, on a line with its file.
 
+A build, fix or review session can end with no turn and no token. Its CLI then stopped before any work. The card's
+reason names the cause from the CLI's own error output: not logged in, a model the account does not have, a settings
+error, or a CLI that is not installed. The reason also says what to do. Under it are the last lines of that output,
+each cut short. Conveyor writes your home folder as `~`. It leaves out text that looks like a credential, and each
+line that the privacy check's patterns find. The loop then runs a short check session on the same account, with the
+CLI and model the builder or reviewer is set to at that time, at most once every `tunables.apiPause` seconds (the
+pack, `.conveyor/project.json`). When the check session starts, for example after you log in or set another model,
+the card goes back to the queue. This happens once for each issue. A card that
+stops again in the same way stays on Needs you until you retry it.
+
 ## Review and the judge
 
 A second model reviews each card, at most three times. Each finding has a level:

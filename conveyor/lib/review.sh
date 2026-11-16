@@ -103,7 +103,7 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   if [ $rc = 0 ] && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     [ -n "$f" ] && jq -e '.stats.turns > 0' <<<"$f" >/dev/null && printf '%s\n' "$f" && return 0
     s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
-  else s="review failed (exit $rc; 124 is the ${REVIEW_TIMEOUT}s timeout)"$'\n'"$(tail -n 60 "$1.err")"
+  else s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$(tail -n 60 "$1.err")"
     [ "$(verdict "$1.review.new" 2>/dev/null)" != none ] || no=2; fi
   # A review that failed still spent its tokens and seconds: block() records them. One whose usage cannot be read
   # is recorded all the same, with its model, effort, seconds and stats and unread (why), so it is counted
@@ -114,6 +114,9 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
        stats: {turns: ([$all[] | select(.type == "turn.completed")] | length),
          tools: ($it | map(select(IN("agent_message", "reasoning", "item") | not)) | group_by(.) | map({key: .[0], value: length}) | from_entries)}}' "$1.events" 2>/dev/null) \
     || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read"}')
+  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
+  [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" codex "$model" reviewer "" "$1" \
+    || { s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
   echo "$s"; return "${no:-1}"
@@ -168,10 +171,13 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
     s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
   else
     # Its error events say why it ended (a provider's refusal, a model it does not know); its stderr, what else it said.
-    s="review failed (exit $rc; 124 is the ${REVIEW_TIMEOUT}s timeout)"$'\n'"$( { jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "error")
+    s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$( { jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "error")
       | .error | (.data.message? // .message? // .name? // tostring) | strings] | .[-5:][]' "$1.events" 2>/dev/null; tail -n 60 "$1.err"; } )"
     jq -Rrn "$OPENCODEANSWER" "$1.events" > "$1.review.new" 2>/dev/null
     [ "$(verdict "$1.review.new")" != none ] || no=2; fi
+  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
+  [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" opencode "$4" reviewer "" "$1" \
+    || { s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
   echo "$s"; return "${no:-1}"
@@ -204,9 +210,12 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
     && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     jq -e 'has("tokens")' <<<"$f" >/dev/null && jq -c 'del(.ok)' <<<"$f" && return 0
     s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
-  else s="review failed (exit $rc; 124 is the ${REVIEW_TIMEOUT}s timeout)"$'\n'"$(tail -n 60 "$1.err")"
+  else s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$(tail -n 60 "$1.err")"
     jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null
     [ "$(verdict "$1.review.new")" != none ] || no=2; fi
+  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
+  [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" claude "$4" reviewer "${RACCT:-$ACCT}" "$1" \
+    || { s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
   jq -c '{step: "review"} + del(.ok)' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
   echo "$s"; return "${no:-1}"
@@ -324,7 +333,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   fi
   [ -n "$f" ] || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s}')
   [ $rc = 0 ] && [ -s "$1.judge" ] && { printf '%s\n' "$f"; return 0; }
-  jq -c --arg r "the judge call failed (exit $rc; 124 is the ${REVIEW_TIMEOUT}s timeout), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
+  jq -c --arg r "the judge call failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT")), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
 }
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.
 # It never fails: whatever goes wrong, the review stands as the reviewer wrote it.

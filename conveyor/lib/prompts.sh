@@ -86,7 +86,8 @@ names() {
 # limit reading is asked for again once the last asking is this old. LIMIT_OLD: a reading older than this is no reading.
 # REVIEW_PAUSE: a review that ended with no verdict, and a session or review ended for no progress, runs once more after this pause (reviewed(), session1()).
 # API_PAUSE: a session the model API refused runs again after 1, 2, 4 and 8 times this, and the loop picks no card
-# for 5 times this after such an error (session(), apifresh()).
+# for 5 times this after such an error (session(), apifresh()). A card blocked by a session that never began its work
+# gets a check session at most this often (startagain()).
 # TESTACTION_TIMEOUT (testActionTimeout): a test action's session (testaction()) is ended once it has run this long.
 TUNABLES='poll idle stuck sessionStuck caseStuck waitLimitMin sample live closeWait pushRetry pushTimeout buildTimeout reviewTimeout testTimeout limitTtl limitOld reviewPause apiPause testActionTimeout'
 tunables() {

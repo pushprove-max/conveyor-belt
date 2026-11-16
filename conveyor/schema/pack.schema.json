@@ -320,7 +320,7 @@
         "buildTimeout": { "type": "integer", "minimum": 1, "default": 3600 },
         "reviewTimeout": { "type": "integer", "minimum": 1, "default": 900 },
         "reviewPause": { "description": "A review that ended with no verdict, and a build, fix, rebase or review ended for no progress, runs once more after this pause.", "type": "integer", "minimum": 0, "default": 60 },
-        "apiPause": { "description": "A session the model API refused (403 Cloudflare, 429, 5xx, overloaded, connection reset) runs again after 1, 2, 4 and 8 times this, and no new card starts for 5 times this.", "type": "number", "minimum": 0, "default": 60 },
+        "apiPause": { "description": "A session the model API refused (403 Cloudflare, 429, 5xx, overloaded, connection reset) runs again after 1, 2, 4 and 8 times this, and no new card starts for 5 times this. A card blocked by a session that stopped before any work gets a check session at most this often.", "type": "number", "minimum": 0, "default": 60 },
         "testTimeout": { "type": "integer", "minimum": 1, "default": 3600 },
         "limitTtl": { "description": "The weekly limit reading is asked for again once the last asking is this old (0: at every asking).", "type": "integer", "minimum": 0, "default": 300 },
         "limitOld": { "description": "A weekly limit reading older than this is no reading.", "type": "integer", "minimum": 1, "default": 1800 },

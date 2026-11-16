@@ -367,6 +367,8 @@ apitries() { # <worktree> <step> <output file> <command ...>
       [ -n "$api" ] || [ $codex = false ] || { said=$wt.err; api=$(jq -rRn --argjson codex true --rawfile e "$wt.err" "$APIERROR" "$said" 2>/dev/null); }
     fi
     [ -n "$api" ] || { printf '%s\n' "$t"; return $rc; }
+    # The API refused it: not a CLI that stopped before any work (nostart()), so no check session puts the card back.
+    jq -c 'del(.start)' "$wt.spent" > "$wt.spent.new" 2>/dev/null && mv -f "$wt.spent.new" "$wt.spent" || rm -f "$wt.spent.new"
     s=$APIERR.$BASHPID; jq -n --argjson p "$API_PAUSE" 'now + 5 * $p' > "$s" 2>/dev/null && mv -f "$s" "$APIERR" || rm -f "$s"
     # A review that wrote its verdict and then failed (1, not 2) answered: its API error is marked as any is, so the
     # queue pauses, but it is never run again.
@@ -492,6 +494,96 @@ session1() {
   # A session that failed still spent its tokens and seconds: block() records them.
   jq -c --arg st "${3:-build}" '{step: $st} + del(.ok)' <<<"$f" > "$1.spent"
   [ -z "$x" ] || [ ! -e "$1.stalled" ] || { echo "stalled twice at ${3:-build}: no progress since $(<"$1.stalled")"; return 1; }
-  [ $rc = 0 ] || { printf 'session failed (exit %s; 124 is the %ss timeout)\n%s\n' "$rc" "$BUILD_TIMEOUT" "$(tail -n 60 "$1.err")"; return 1; }
+  if nostart "$rc" "$f" "$1.out" "$1.err" "$agent" "$model" builder "$([ "$agent" != claude ] || printf '%s' "$ACCT")" "$1"; then
+    jq -c --argjson s "$NOSTART_START" '. + {start: $s}' "$1.spent" > "$1.spent.new" && mv -f "$1.spent.new" "$1.spent"
+    printf '%s\n' "$NOSTART_WHY"; return 1
+  fi
+  [ $rc = 0 ] || { printf 'session failed (%s)\n%s\n' "$(exitsaid "$rc" "$BUILD_TIMEOUT")" "$(tail -n 60 "$1.err")"; return 1; }
   echo "session ended with an error result, or with no result"; return 1
+}
+# The exit of a session or review as its reason says it: the timeout is named only when the exit is the timeout's (124).
+exitsaid() { if [ "$1" = 124 ]; then echo "exit 124, the ${2}s timeout"; else echo "exit $1"; fi; } # <exit> <timeout in seconds>
+# A failed session's or review's own error words, whatever its CLI: its error results (Claude), its error and
+# turn.failed events (Codex, OpenCode) and the lines that are no JSON, the last 5 of them.
+NOSTARTSAID='[inputs | select(test("\\S")) | (fromjson? // {type: "plain", message: .}) | objects
+  | if .type == "result" then select(.is_error == true) | .result elif .type == "turn.failed" then .error.message?
+    elif .type == "error" then (.message? // .error.data.message? // .error.message? // .error.name?) elif .type == "plain" then .message else empty end
+  | strings] | .[-5:][]'
+# A session or review that failed (its exit not 0 and not the timeout's 124) with no turn past its first and no token
+# never began its work: its CLI stopped before it (not logged in, a model this account does not have, a settings
+# error). Sets NOSTART_WHY to its reason: the cause, named from the CLI's own words, its exit and what to do; under it
+# those words (NOSTARTSAID, then the last lines of its stderr), the last 12 lines, each cut at 300 characters, with
+# the user's home written ~, what looks like a credential (a value after key, token, secret, password or
+# authorization and a colon or =, quoted or not, one after Bearer, a run of 24 or more letters, digits, - and _) left
+# out, and every line the privacy check's patterns hit left out. Sets NOSTART_START to the seat (builder or reviewer),
+# CLI, model and account it ran on: a check session on that seat as it is set then runs before the card is put back
+# (startagain(), startnow()). Fails, setting neither, for any other session.
+nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer> <account, "" for the default login> <worktree>
+  local raw words hits cause todo n c=${9##*/}
+  [ "$1" != 0 ] && [ "$1" != 124 ] && [ ! -e "$9.stalled" ] || return 1
+  jq -e '([.tokens // {} | .[] | numbers] | add // 0) == 0 and (.stats.turns // 0) <= 1' <<<"$2" >/dev/null 2>&1 || return 1
+  raw=$( { jq -rRn "$NOSTARTSAID" "$3" 2>/dev/null; tail -n 20 "$4" 2>/dev/null; } | tr -d '\000')
+  # Cut after what is left out, so no part of a credential cut short is kept.
+  words=$(jq -rRs --arg h "${HOME:-}" '[splits("\n") | select(test("\\S"))] | .[-12:][]
+      | if $h != "" then split($h) | join("~") else . end
+      | gsub("(?<k>(key|token|secret|password|authorization)[\"'"'"']?\\s*[:=]\\s*(bearer\\s+)?)(\"([^\"\\\\]|\\\\.)*\"?|'"'"'[^'"'"']*'"'"'?|[^\\s\"'"'"',;\\[]+)"; "\(.k)[left out]"; "i")
+      | gsub("(?<k>bearer\\s+)[^\\s\"'"'"',;\\[]+"; "\(.k)[left out]"; "i")
+      | gsub("[A-Za-z0-9_-]{24,}"; "[left out]") | .[0:300]' <<<"$raw" 2>/dev/null) || words=''
+  if [ -n "$words" ]; then
+    hits=$(printf '%s\n' "$words" | "$HERE/privacy/check.sh" -)
+    if [ $? -gt 1 ]; then words='[left out: the privacy check could not be made]'
+    else words=$(printf '%s\n' "$words" | H=$hits awk 'BEGIN { n = split(ENVIRON["H"], l, "\n"); for (i = 1; i <= n; i++) if (split(l[i], p, ": ") >= 2) { sub(/^-:/, "", p[1]); bad[p[1] + 0] = p[2] } }
+        { if (NR in bad) print "[a line left out: " bad[NR] "]"; else print }'); fi
+  fi
+  if [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
+    cause="the $5 CLI is not installed"; todo="install it, or set the $7 to a CLI this host has (conveyor.sh control, or Rules on the Board)"
+  elif grep -Eqi 'not logged in|log in|/login|invalid api key|authenticat|unauthori[sz]ed|oauth token|credentials' <<<"$raw"; then
+    cause="the $5 CLI is not logged in"
+    case $5 in
+      codex) todo="log it in (codex login)" ;;
+      opencode) todo="log it in (opencode auth login)" ;;
+      *) todo="log it in (run claude, then /login)${8:+, on the account $8}" ;;
+    esac
+  elif grep -Eqi 'model' <<<"$raw" && grep -Eqi 'not found|not_found|not exist|unknown|invalid|not available|not supported|access' <<<"$raw"; then
+    cause="the $5 CLI cannot run the model $6 on this account"; todo="set the $7 to a model the account has (conveyor.sh control, or Rules on the Board)"
+  elif grep -Eqi 'setting|config' <<<"$raw"; then
+    cause="the $5 CLI stopped on a settings error"; todo="fix the setting its words below name"
+  else cause="the $5 CLI stopped before any work"; todo="fix what its words below say"; fi
+  # A card's worktree is named by its card id, c<time>-<project>-<issue> (pick()); a lane's preview is not a card.
+  n=${c##*-}; [[ $n =~ ^[1-9][0-9]*$ ]] || n=$c
+  if startonce "$n"; then todo+=". The card is put back once by itself when a check session on the $7's CLI and model starts"
+  elif [[ $c =~ ^c[0-9]{8}T[0-9]{6}- ]]; then todo+=", then retry the card (conveyor.sh retry $n, or Retry on the Board)"; fi
+  NOSTART_WHY="$cause ($(exitsaid "$1" 0)): $todo"$'\n'"${words:-(the $5 CLI wrote nothing)}"
+  NOSTART_START=$(jq -cn --arg s "$7" --arg c "$5" --arg m "$6" --arg a "$8" '{seat: $s, cli: $c, model: $m, account: $a}')
+}
+# Whether an issue's card blocked by a session that never began its work (nostart()) is still put back by itself
+# (startagain()): an issue, not a main-red fix card (issue 0), none of whose earlier cards was put back so.
+startonce() { # <issue>
+  [[ $1 =~ ^[1-9][0-9]*$ ]] || return 1
+  ! stdb ask issue retried "$1" 2>/dev/null | jq -e 'select(.step == "blocked" and (.spent.start | type) == "object")' >/dev/null 2>&1
+}
+# What a check session runs on (startcheck()) for a session that never began its work (nostart()): the CLI and model
+# its seat is set to now, so one the owner changed after the block is the one checked, on the account it ran on (none
+# for a CLI that is not claude). Fails when the seat is set to none.
+startnow() { # <{seat, cli, model, account}>
+  local r s m a
+  r=$(jq -r '.seat // empty' <<<"$1" 2>/dev/null); [ -n "$r" ] || return 1
+  s=$(seat "$r") && jqget "$s" model m agent a || return 1
+  [ "$a" != codex ] || m=$(codexmodel "$m") || return 1
+  jq -c --arg c "$a" --arg m "$m" '{cli: $c, model: $m, account: (if $c == "claude" then .account // "" else "" end)}' <<<"$1"
+}
+# A check session: the CLI, model and account startnow() gives, asked for one
+# word in an empty folder, under 120 s, with no project settings. Succeeds when it ends well (exit 0).
+startcheck() { # <{cli, model, account}>
+  local cli m a d rc
+  jqget "$1" cli cli model m account a || return 1
+  d=$(mktemp -d) || return 1
+  case $cli in
+    claude) (cd "$d" && a=$(acctenv "$a") && proxyenv && acctrun "$a" \
+      && exec timeout --kill-after=10 120 claude -p --model "$m" --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
+    codex) (cd "$d" && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only -m "$m" - <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
+    opencode) (cd "$d" && OPENCODE_DISABLE_PROJECT_CONFIG=1 exec timeout --kill-after=10 120 opencode run --model "${m#opencode:}" <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
+    *) false ;;
+  esac; rc=$?
+  rm -rf "$d"; return $rc
 }

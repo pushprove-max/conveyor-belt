@@ -92,7 +92,7 @@ t_claudefail() {
   # A review that fails is recorded with what it spent, under tokens.claude, never left out of the cost. It ended with
   # no verdict, so it ran once more before the card blocked; one that answered with a verdict and then failed did not.
   loop run --only 8 >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'run again after 0s: review failed (exit 1; ' \
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'run again after 0s: review failed (exit 1)' \
     || fail "a Claude review that failed with no verdict was not run once more before the card blocked: $(st 'select(.issue == 8)')"
   # Both attempts are priced: the blocked line's tokens and the usage the dashboard prices hold the first's beside the second's.
   [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, .spent.model, .spent.firstTry.spent.tokens.claude, .spent.tokens.claude, .tokens.claude,
@@ -103,7 +103,7 @@ t_claudeexit() {
   claude_reviewer "[$(issue 9 2026-01-03)]"
   echo "$NOGO" > "$STUB/review.1"; : > "$STUB/review-exit"
   loop run --only 9 >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 3; ' \
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 3)' \
     || fail "a Claude review that gave its NO-GO and then exited non-zero was run again: $(st 'select(.issue == 9)')"
 }
 t_claudebare() {

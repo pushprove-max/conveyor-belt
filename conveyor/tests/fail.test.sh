@@ -18,7 +18,10 @@ t_fail() {
   st 'select(.step == "blocked") | .tail' | grep -qx 'FAIL schema mismatch' || fail "a failed session's errors lost their failing line: $(st 'select(.step == "blocked") | .tail')"
   echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; echo 'exec sleep 30' > "$STUB/build"; start=$SECONDS # sleep: a build that hangs, cut by buildTimeout
   chmod a-w "$ST/kept"; tuned '.tunables.buildTimeout = 1' loop run >/dev/null; chmod u+w "$ST/kept"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'build: .*exit 124' || fail "hung session not blocked as timed out"
+  # Bug: every failed session's reason said "124 is the 3600s timeout", which misled on an exit 1. The timeout is
+  # named only on the timeout's exit.
+  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q timeout && fail "a failed session's reason names the timeout on exit 3: $(st 'select(.issue == 7 and .step == "blocked") | .reason')"
+  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^build: session failed (exit 124, the 1s timeout)' || fail "hung session not blocked as timed out: $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   # Bug: a kept folder that cannot be written loses the evidence, and the blocked line names a folder that holds none.
   [ "$(st 'select(.issue == 8 and .step == "blocked") | .kept + (.reason | sub(".*evidence not moved.*"; "left"; "s"))')" = left ] \
     && [ "$(ls "$T/$CASE/cards" | sed 's/.*\.//' | tr '\n' ' ')" = "err out " ] || fail "evidence deleted, or a folder named, when it could not be kept: $(ls "$T/$CASE/cards")"
@@ -60,7 +63,7 @@ t_reviewretry() {
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] && exit 3; seq 1 70 >&2; exit 4' > "$STUB/review-cmd"
   loop run >/dev/null
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' \
-    | grep -q '^review 1: review failed (exit 3; .*run again after 0s: review failed (exit 4; ' \
+    | grep -q '^review 1: the codex CLI stopped before any work (exit 3): .*run again after 0s: the codex CLI stopped before any work (exit 4): ' \
     && [ "$(st 'select(.issue == 8 and .step == "blocked") | .tail | split("\n") | last')" = 70 ] \
     || fail "two failed reviews did not block with both reasons and the second's output: $(st 'select(.issue == 8)')"
   [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] && loop check \
@@ -82,7 +85,7 @@ t_reviewretry() {
   # A review that wrote its NO-GO and then exited non-zero gave a verdict: it is not run again.
   echo "[$(issue 10 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo "$NOGO" > "$STUB/review.1"; echo 'cat "$STUB/review.1" > "$out"; exit 3' > "$STUB/review-cmd"
   loop run >/dev/null
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 3; ' \
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 3)' \
     || fail "a review that wrote a verdict and exited non-zero was run again: $(wc -l < "$STUB/reviews") reviews, $(st 'select(.issue == 10)')"
   # The reviewer's model changed between the attempts: one model cannot price both attempts' usage, so the step is
   # unpriced, never priced whole at the second's model.
@@ -362,7 +365,7 @@ t_apicodexrefused() {
   echo "[$(issue 9 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; printf '%s\n' "$NOGO" > "$STUB/review.1"; printf '%s\n' "$GO" > "$STUB/review.2"
   echo 'cat "$STUB/review.1" > "$out"; echo "{\"type\":\"error\",\"message\":\"API Error: 429 Too Many Requests\"}"; exit 1' > "$STUB/review-cmd"
   rm -f "$ST/apierror"; loop run >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 1; ' \
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 1)' \
     || fail "a Codex review that wrote a verdict and was then refused by the API was run again: $(wc -l < "$STUB/reviews") reviews, $(st 'select(.issue == 9) | [.step, .reason] | join(" ")' | tr '\n' ,)"
   # Bug: that review, kept as answered, marked no API error either, so the queue went on into the outage it met.
   jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex review refused by the API after its verdict did not mark the API error"
@@ -426,4 +429,70 @@ EOF
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^build: the model API refused (503) at each of 5 tries' \
     || fail "the card the API kept refusing on stderr is not blocked naming the error: $(st 'select(.issue == 8) | [.step, .reason] | join(" ")' | tr '\n' ,)"
   st 'select(.issue == 8 and .step == "blocked") | .tail' | grep -q 'API Error: 503 Service Unavailable' || fail "the blocked line lost the API's own words: $(st 'select(.issue == 8 and .step == "blocked") | .tail')"
+}
+
+# Bug: a session whose CLI was not logged in ended in 2 s with no token, and its card was blocked with "session failed
+# (exit 1; 124 is the 3600s timeout)": no cause, and a timeout that was not the cause. Its reason now names the cause
+# from the CLI's own words, with no credential and nothing the privacy check's patterns hit, and says what to do;
+# the card is put back once, when a check session starts (a login made since), and only once.
+t_nostart() {
+  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0'
+  # A credential and an address, made here so that this file holds neither.
+  printf 'sk-ant-oat01-%s\n' "$(printf 'Ab9x%.0s' {1..10})" > "$STUB/secret"; echo "contact: ops${AT}corp-mail.test" > "$STUB/mail"
+  # A session (bypass mode) fails as Claude Code does when not logged in, or on a bad settings file; a check session
+  # (no mode) fails while not logged in.
+  cat > "$STUB/build" <<'EOT'
+case "$*" in *bypassPermissions*) ;; *) echo x >> "$STUB/checks"; [ ! -e "$STUB/loggedout" ] || exit 1; exit 0 ;; esac
+if [ -e "$STUB/loggedout" ]; then
+  echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login","num_turns":1,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}'
+  { echo "Authorization: Bearer $(cat "$STUB/secret")"; cat "$STUB/mail"; } >&2; exit 1
+fi
+[ ! -e "$STUB/badsettings" ] || { { echo 'Settings error: {"password":"short-secret"}'; echo "Settings error in $HOME/.claude/settings.json: permissions.allow is not an array"; } >&2; exit 1; }
+echo two >> a.txt
+EOT
+  touch "$STUB/loggedout"; : > "$STUB/checks"
+  loop run >/dev/null 2>&1
+  b=$(st 'select(.issue == 7 and .step == "blocked")')
+  [ "$(jq -r .reason <<<"$b")" = 'build: the claude CLI is not logged in (exit 1): log it in (run claude, then /login). The card is put back once by itself when a check session on the builder'"'"'s CLI and model starts' ] \
+    || fail "a session that was not logged in is not blocked naming the cause: $(jq -r .reason <<<"$b")"
+  [ "$(jq -r .tail <<<"$b")" = $'Not logged in · Please run /login\nAuthorization: Bearer [left out]\n[a line left out: email]' ] \
+    || fail "the CLI's words are not kept, or kept with a credential or an address: $(jq -r .tail <<<"$b")"
+  ! grep -qF -e "$(cat "$STUB/secret")" -e "corp-mail" <<<"$b" || fail "the blocked line holds the credential or the address"
+  # Still not logged in: each check session fails, and the card stays blocked.
+  [ ! -s "$ST/retried.jsonl" ] || fail "the card was put back while its check session failed"
+  # Logged in, but the next session stops on a settings error: the check passes, the card is put back once, and
+  # blocked again it says to retry it, and is not put back again.
+  rm "$STUB/loggedout"; touch "$STUB/badsettings"; n=$(wc -l < "$STUB/checks")
+  loop run >/dev/null 2>&1
+  [ "$(jq -r 'select(.issue == 7 and .step == "blocked") | .spent.start | "\(.cli) \(.model)"' "$ST/retried.jsonl")" = "claude m" ] \
+    || fail "the card was not put back once its check session started: $(cat "$ST/retried.jsonl" 2>&1)"
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'build: the claude CLI stopped on a settings error (exit 1): fix the setting its words below name, then retry the card (conveyor.sh retry 7, or Retry on the Board)' ] \
+    || fail "the card put back and blocked again does not say to retry it: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")' | tr '\n' ,)"
+  st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error in ~/.claude/settings.json: permissions.allow is not an array' \
+    || fail "the settings error's words are not kept with the home written ~: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
+  # A quoted value (JSON) after password is a credential too: an opening quote does not let it through.
+  st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error: {"password":[left out]}' && ! st 'select(.issue == 7)' | grep -qF short-secret \
+    || fail "a quoted credential is kept in the reason: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
+  [ "$(wc -l < "$STUB/checks")" = $((n + 1)) ] && [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] \
+    || fail "the card was put back more than once: $((n)) checks before, $(wc -l < "$STUB/checks") after"
+}
+t_nostartmodel() {
+  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0 | .models.allowed.claude += ["m2"]'
+  # The account has no model m: a session and a check session on it fail; on m2 both run.
+  cat > "$STUB/build" <<'EOT'
+case " $* " in *" --model m "*) bad=1 ;; *) bad='' ;; esac
+case "$*" in *bypassPermissions*) ;; *) echo "$*" >> "$STUB/checks"; [ -z "$bad" ] || exit 1; exit 0 ;; esac
+[ -z "$bad" ] || { echo "API Error: model m is not available on this account" >&2; exit 1; }
+echo two >> a.txt
+EOT
+  : > "$STUB/checks"
+  loop run >/dev/null 2>&1
+  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q '^build: the claude CLI cannot run the model m on this account (exit 1): set the builder to a model' \
+    || fail "a session on a model the account lacks is not blocked naming it: $(st 'select(.issue == 7) | .reason')"
+  # The owner sets the builder to m2, as the reason says: the check runs on m2, not on the refused m, and the card is
+  # put back. Checking the saved model would keep the card blocked whatever the owner set.
+  seatset model m2; : > "$STUB/checks"
+  loop run >/dev/null 2>&1
+  grep -qE -- '--model m2( |$)' "$STUB/checks" && ! grep -qE -- '--model m( |$)' "$STUB/checks" && [ -s "$ST/retried.jsonl" ] \
+    || fail "the check session did not run on the model set now, or the card was not put back: $(cat "$STUB/checks")"
 }
