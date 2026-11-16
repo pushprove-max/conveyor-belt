@@ -3,7 +3,7 @@
 # timeout: 120
 # Engine cases: release-prep, Run full test suite and Push landed rerun only the files that failed or changed since the
 # whole-suite run on the nearest ancestor and reuse its passes (issue 43), and each counts the others' green run on the same commit
-# (issue 44). Their fixture is releaserun.test.sh's runsetup (release.test.sh's cutsetup); ftended is fulltest.test.sh's.
+# (issue 44). Their fixture is releaseboard.test.sh's runsetup (release.test.sh's cutsetup); ftended is fulltest.test.sh's.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
