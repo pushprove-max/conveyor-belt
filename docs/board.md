@@ -162,7 +162,9 @@ example **Release 1.0.0**) or **Run again on the new main**. Click it, then clic
 
 - **Draft notes**, **Run suite** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
-  of them and stops. Else it runs the whole suite on the head of `main`. These buttons do not release.
+  of them and stops. Else it runs the suite on the head of `main`: the whole suite, or only the files that failed or
+  changed since an earlier suite run ([Releases](releases.md)). Step 2 says which: "Reran 1 file, reused 2 passed
+  files from <commit>" or "Ran the whole suite". These buttons do not release.
 - **Release** with the version runs `conveyor.sh release-run <version>`. The second click is your yes to the release.
   When the suite of that version passed on the head of `main`, and `main` did not move after it, Conveyor uses that
   pass and runs `conveyor.sh release <version>` ([Releases](releases.md)). Else Conveyor runs

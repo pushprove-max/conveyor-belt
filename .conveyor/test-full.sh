@@ -16,13 +16,22 @@
 # conveyor/tools/testtime.sh does), which the engine keeps for the Board's Tests page (testrun.sh suiterec()); a file's
 # own `TESTRUN sec` lines, of the files it starts, are left out, so each line is of a file this suite ran.
 # A file named a case when a name was added, or written again (a case file runs cases the runner named already).
+# With CONVEYOR_SUITE_FILES, a file of paths one a line (release-prep's run that reuses the passes of an earlier run,
+# conveyor/commands/release-prep.sh), it runs only the test files of its list that git lists: a path in it that is no
+# test file of the checkout is left out. Its case total then counts the engine's cases of the case files it runs (all of
+# them when it runs conveyor/conveyor.test.sh).
 rc=0
 stamp=$(mktemp); tt=$(mktemp); trap 'rm -f "$stamp" "$tt"' EXIT
 marks() { find "$CONVEYOR_TEST_LOG/cases/ok" "$CONVEYOR_TEST_LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
 mapfile -t files < <(git ls-files '*.test.sh' '*.test.mjs' '*.test.py')
-engine=0 other=0
-for t in "${files[@]}"; do case $t in conveyor/conveyor.test.sh | conveyor/tests/*.test.sh) engine=1 ;; *) other=$((other + 1)) ;; esac; done
-[ $engine = 0 ] || engine=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh | sort -u | wc -l)
+if [ -n "${CONVEYOR_SUITE_FILES:-}" ]; then
+  mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -xFf <(grep . "$CONVEYOR_SUITE_FILES" 2>/dev/null || echo /))
+fi
+unset CONVEYOR_SUITE_FILES # the list is this run's: a test file that runs a suite of its own runs it whole
+engine=0 other=0 cf=()
+for t in "${files[@]}"; do case $t in conveyor/conveyor.test.sh) engine=1 ;; conveyor/tests/*.test.sh) cf+=("$t") ;; *) other=$((other + 1)) ;; esac; done
+[ $engine = 0 ] || cf=(conveyor/tests/*.test.sh)
+engine=0; [ ${#cf[@]} = 0 ] || engine=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "${cf[@]}" | sort -u | wc -l)
 echo "TESTRUN cases=$((engine + other))"
 echo "TESTRUN files=${#files[@]}"
 for t in "${files[@]}"; do

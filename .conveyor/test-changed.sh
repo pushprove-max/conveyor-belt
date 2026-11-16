@@ -1053,6 +1053,18 @@ if [ -s "$RERUN" ]; then
     if [ -n "$left" ]; then cases=$left; else unset "run[conveyor/conveyor.test.sh]"; fi
   fi
 fi
+# The list of the selection (issue 43: release-prep, which reruns only what changed since an earlier whole-suite run,
+# conveyor/commands/release-prep.sh): with CONVEYOR_TEST_LIST, it writes the test files it selected to that file, one
+# a line, and runs none: each file it selected whole or in parts (a whole-only one too), and of the engine's runner the
+# case files that hold its chosen cases, or with none chosen the runner and every case file.
+if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
+  for t in "${!run[@]}"; do
+    if [ "$t" != conveyor/conveyor.test.sh ]; then echo "$t"
+    elif [ -z "$cases" ]; then echo "$t"; printf '%s\n' conveyor/tests/*.test.sh
+    else grep -lE "^t_($(tr ' ' '\n' <<<"$cases" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; fi
+  done | LC_ALL=C sort -u > "$CONVEYOR_TEST_LIST" || exit 1
+  exit 0
+fi
 # The loop's test step reads which files ran and which failed from a log in the folder it names (conveyor.sh
 # testfails()), where no test's own output can pass for these lines.
 log=/dev/null; [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || log=$CONVEYOR_TEST_LOG/test-changed.log

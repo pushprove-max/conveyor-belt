@@ -137,6 +137,16 @@ test('#35: a passed release-prep on main\'s head: step 2 and Release\'s confirm 
   act(card(w), 'release').click();
   assert.match(act(card(w), 'release').textContent, /^Click again to release 1\.0\.0\. Uses the suite that passed at .+ on bbbbbbbbbbbb\.$/);
 });
+// Bug this guards (#43): a release-prep that reran only the failed and changed files and reused the files that passed
+// before looked like a whole suite run on the panel, so the owner could not tell what the green run covers.
+test('#43: a run that reused an earlier run says "Reran 1 file, reused 2 passed files from" its commit on step 2; a whole one says so', () => {
+  const w = boot();
+  const passed = { ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', failed: 0, cases: [] };
+  deliver(w, data({ ...passed, reused: { sha: NEW, ran: ['t/f1.test.sh'], kept: 2 } }));
+  assert.equal(stepOf(w, 'full-suite').querySelector('[data-figure="suite-scope"]').textContent, 'Reran 1 file, reused 2 passed files from cccccccccccc');
+  next(w, data({ ...passed, reused: null }));
+  assert.equal(stepOf(w, 'full-suite').querySelector('[data-figure="suite-scope"]').textContent, 'Ran the whole suite');
+});
 // Bug this guards (#35): a release refused after the green suite run is no green release-prep run, so release-run runs the suite first;
 // the panel must not say it reuses one.
 test('#35: a refused release on main\'s head: step 2 and Release\'s confirm say "Runs the suite first (about 25 min)"', async () => {

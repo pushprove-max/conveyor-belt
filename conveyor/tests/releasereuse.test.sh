@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 120
+# Engine cases: release-prep reruns only the files that failed or changed since the newest whole-suite run and reuses
+# its passes (issue 43). Their fixture is releaserun.test.sh's runsetup (release.test.sh's cutsetup).
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+
+# rrsetup: runsetup, with the pack's test.full the committed .conveyor/test-full.sh, which runs the tracked t/*.test.sh
+# (those CONVEYOR_SUITE_FILES lists, when set), notes each in $STUB/ran and prints its `-- ok|FAIL` line; t/f1 fails,
+# t/f2 and t/f3 pass, and the changed-tests command (test.command, $STUB/test-cmd) lists t/f3.test.sh for a change to
+# src/s3.sh. A whole release-prep runs on that commit (A), then t/f1 is made to pass, not yet committed.
+rrsetup() {
+  runsetup true
+  tune '.test.full = "bash .conveyor/test-full.sh"'
+  mkdir -p "$R/t" "$R/src" && printf '%s\n' 'fs=$(git ls-files "t/*.test.sh"); [ -z "${CONVEYOR_SUITE_FILES:-}" ] || fs=$(grep -xFf "$CONVEYOR_SUITE_FILES" <<<"$fs")' \
+    'echo "TESTRUN files=$(grep -c . <<<"$fs")"; rc=0' \
+    'for f in $fs; do echo "$f" >> "$STUB/ran"; if bash "$f"; then echo "-- ok $f"; else echo "-- FAIL $f"; rc=1; fi; done; exit $rc' > "$R/.conveyor/test-full.sh" \
+    && echo 'exit 1' > "$R/t/f1.test.sh" && echo 'exit 0' > "$R/t/f2.test.sh" && echo 'exit 0' > "$R/t/f3.test.sh" && echo one > "$R/src/s3.sh" \
+    && echo '[ -z "${CONVEYOR_TEST_LIST:-}" ] || git diff --name-only HEAD | sed -n "s|^src/s3[.]sh\$|t/f3.test.sh|p" > "$CONVEYOR_TEST_LIST"' > "$STUB/test-cmd" \
+    && git -C "$R" add -f .conveyor/test-full.sh t src && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
+  A=$(git -C "$R" rev-parse HEAD)
+  loop release-prep 1.1.0 > "$T/$CASE.a" 2>&1 && fail "release-prep passed with t/f1 failing: $(cat "$T/$CASE.a")"
+  [ "$(sort "$STUB/ran" 2>/dev/null | paste -sd' ' -)" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "the first release-prep did not run every file: $(cat "$STUB/ran" "$T/$CASE.a" 2>&1)"
+  rm -f "$STUB/ran"; echo 'exit 0' > "$R/t/f1.test.sh"
+}
+# rrprep: B, the commit of what the case changed, pushed; release-prep runs on it and passes. Sets B and got (the
+# files the suite ran, sorted, on one line).
+rrprep() {
+  git -C "$R" commit -qam 'fix: B' && git -C "$R" push -q origin main || fail "the fixture could not be made"
+  B=$(git -C "$R" rev-parse HEAD)
+  loop release-prep 1.1.0 > "$T/$CASE.b" 2>&1 || fail "release-prep failed on B: $(cat "$T/$CASE.b")"
+  got=$(sort "$STUB/ran" 2>/dev/null | paste -sd' ' -)
+}
+
+# Bug (#43): one failed file made release-prep rerun the whole suite (about 250 files, 43 min) on the fix, though every
+# other file passed on the commit before. Here B changes t/f1 alone: only t/f1 runs, a pass is posted on B, the record
+# names the run reused and the file rerun, and `release` takes the pass and releases B with no suite run.
+t_relreusefail() {
+  local A B RUN got
+  rrsetup
+  rrprep
+  [ "$got" = t/f1.test.sh ] || fail "release-prep on B ran '$got', not t/f1.test.sh alone: $(cat "$T/$CASE.b")"
+  grep -q "statuses/$B -f state=success -f context=conveyor/release-suite " "$STUB/gh-calls" || fail "no passing status was posted on B: $(cat "$STUB/gh-calls")"
+  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and .reused == {sha: $a, ran: ["t/f1.test.sh"], kept: 2}' "$RUN" > /dev/null \
+    || fail "the record does not name the run reused and the file rerun: $(cat "$RUN")"
+  rm -f "$STUB/ran"
+  loop release 1.1.0 > "$T/$CASE.r" 2>&1 || fail "release did not take the pass on B: $(cat "$T/$CASE.r")"
+  [ ! -e "$STUB/ran" ] && [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "release ran the suite again or released nothing: $(cat "$T/$CASE.r")"
+}
+# Bug (#43): a change to the suite's own command (.conveyor/test-full.sh) can change what every file's ok means, so
+# the passes of the run before it are no proof: release-prep runs every file.
+t_relreusecmd() {
+  local A B RUN got
+  rrsetup
+  echo '# changed' >> "$R/.conveyor/test-full.sh"
+  rrprep
+  [ "$got" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "a change to .conveyor/test-full.sh did not run every file: '$got'"
+  jq -e '.reused == null' "$RUN" > /dev/null || fail "a whole suite's record says it reused a run: $(cat "$RUN")"
+}
+# Bug (#43): reusing the passes of files whose code changed: B changes src/s3.sh, which the changed-tests command maps
+# to t/f3, so t/f3 runs beside the failed t/f1.
+t_relreusesel() {
+  local A B RUN got
+  rrsetup
+  echo two >> "$R/src/s3.sh"
+  rrprep
+  [ "$got" = "t/f1.test.sh t/f3.test.sh" ] || fail "a change to src/s3.sh did not run t/f3 beside t/f1: '$got'"
+}

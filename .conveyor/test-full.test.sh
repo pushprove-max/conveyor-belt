@@ -69,4 +69,16 @@ got=$(suiteprog "$T/wt" | jq -c .files)
 git -C "$R" rm -q lib/fx-fail.test.py && rm -f "$R/lib/fx-untracked.test.sh"
 (cd "$R" && bash -c "$full") > "$T/out" 2>&1 || no "the full suite failed with every test file passing: $(cat "$T/out")"
 
+# Bug (#43): release-prep reran every file though it names the few that failed or changed since the last suite run.
+# With CONVEYOR_SUITE_FILES it runs only the test files of its list, and its totals count only those; a listed path
+# that is no tracked test file (a source file, a deleted one) is not run.
+# Bug: the list reached the files it runs, so a test file that runs a suite of its own (this one) ran a part of it:
+# lib/fx-env fails when it sees the list.
+echo '[ -z "${CONVEYOR_SUITE_FILES:-}" ]' > "$R/lib/fx-env.test.sh" && git -C "$R" add lib/fx-env.test.sh && git -C "$R" commit -qm env
+printf '%s\n' lib/fx-pass.test.sh lib/fx-env.test.sh conveyor/tests/fx-a.test.sh lib/source.sh lib/gone.test.sh > "$T/list"
+(cd "$R" && CONVEYOR_SUITE_FILES=$T/list bash -c "$full") > "$T/out" 2>&1 || no "the listed files' run failed: $(cat "$T/out")"
+got=$(sed -n 's/^-- ok //p' "$T/out" | sort | tr '\n' ' ')
+[ "$got" = "conveyor/tests/fx-a.test.sh lib/fx-env.test.sh lib/fx-pass.test.sh " ] || no "the suite with a list did not run only its tracked test files: $got"
+grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a listed run are not of its files: $(grep TESTRUN "$T/out")"
+
 [ $fails = 0 ] && echo "ok - test-full" || exit 1

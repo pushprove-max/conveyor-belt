@@ -2,9 +2,10 @@
 // Release: one card for each project that releases with Conveyor (main holds docs/releases/: the snapshot's
 // release.releases); the others are left out. Its part: {records: [{repo, url, release, suites}]}, the snapshot's
 // release and suites of each record, url its repository's address. A card has a head row (the project, its newest tag,
-// the changes since it, one status chip), three numbered steps (the notes on main, the whole suite on main's head, the
-// release), the version (the snapshot's next filled in; a version typed is drawn at once, its notes as main's written
-// says) with one button whose label follows the state, and the changes since the tag, closed until opened. Each button
+// the changes since it, one status chip), three numbered steps (the notes on main, the whole suite on main's head,
+// which says whether its run reran some files and reused the files that passed in an earlier run, or ran the whole
+// suite, the release), the version (the snapshot's next filled in; a version typed is drawn at once, its notes as
+// main's written says) with one button whose label follows the state, and the changes since the tag, closed until opened. Each button
 // acts on a second click. Draft notes, Run suite and Run again on the new main send `conveyor.sh release-run prep
 // <version>`: release-prep alone, which writes a notes draft and stops when main has no notes, else runs the whole
 // suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite of that
@@ -194,7 +195,14 @@
       const c = s.cur, line = h('span', null, `${s.failed ? 'Failed' : 'Passed'} on ${short(c.sha)}`);
       if (typeof c.ended === 'string') line.append(' · ', ctx.since(c.ended, ' ago'));
       if (s.moved) line.append(' · main has moved since');
-      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, ...counts(h, c, false), reasonsList(h, why[1]));
+      // Whether the run reran some files and kept the files that passed in an earlier run (#43), or ran the whole suite.
+      const u = c.reused && typeof c.reused === 'object' && Array.isArray(c.reused.ran) && num(c.reused.kept) ? c.reused : null;
+      const files = (n) => `${n} ${n === 1 ? 'file' : 'files'}`;
+      const scope = h('p', 'row-meta', u
+        ? `Reran ${files(u.ran.length)}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`
+        : 'Ran the whole suite');
+      scope.dataset.figure = 'suite-scope';
+      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, ...counts(h, c, false), reasonsList(h, why[1]));
     } else {
       s2 = step(h, 'Full suite', why[1].length ? 'failed' : 'todo', `Not run on main's head (${short(m.head)})`, reasonsList(h, why[1]));
     }

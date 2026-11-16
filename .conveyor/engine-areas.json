@@ -545,6 +545,7 @@
 {"area": "cmd-release-prep", "file": "conveyor/commands/release-prep.sh"}
 {"area": "cmd-release-prep", "test": "release.test.sh"}
 {"area": "cmd-release-prep", "test": "releaserun.test.sh"}
+{"area": "cmd-release-prep", "test": "releasereuse.test.sh"}
 {"area": "cmd-release-prep", "file": "conveyor/tools/notes-check.sh"}
 {"area": "pick", "test": "release.test.sh"}
 {"area": "cmd-gh-write", "file": "conveyor/commands/gh-write.sh"}

@@ -26,6 +26,19 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    project's settings, `.conveyor/project.json`) on the head of `main` on GitHub, and posts the result on that commit
    as the commit status `conveyor/release-suite`. It does not run the suite when the notes break the style. Push
    nothing to `main` after this step and before the next.
+
+   When an earlier suite run of the release was on a commit that is an ancestor of the head of `main`, this step
+   runs again only some test files, and keeps the passes of the other files from that run:
+   - the files that failed in that run,
+   - the files that the commits since that run add or change,
+   - the files that the changed-tests command (`test.command` in the pack, as a card's Test step runs it) picks for
+     those changes.
+
+   It runs the whole suite when there is no earlier run, when the commit of that run is not an ancestor of the head,
+   or when the commits since change the `test` settings of the pack or a file that its test commands name (such as
+   `.conveyor/test-full.sh` or the engine's test runner). When the files pass, the status is a pass, and its text
+   says how many files ran and how many passes it kept, and from which commit. The Release panel says the same
+   in its step 2.
 5. Ask the owner for a yes in chat. After the yes, run `conveyor.sh release <version>` in the main checkout, on `main`.
    It stops, and changes nothing, when one of these is true:
    - the version is not higher than the newest tag, or its tag exists,
