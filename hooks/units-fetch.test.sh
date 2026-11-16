@@ -34,8 +34,8 @@ machine() { # <case>
     "awk -F'\\t' -v r=\"\${CONVEYOR_MAIN##*/}\" '\$1 == r { sub(/^[^\\t]*\\t/, \"\"); print }' '$T/two.txt'" > "$M/clone/conveyor/conveyor.sh"
 }
 hostfile() { jq -n "$@" > "$H/.config/conveyor/host.json"; }
-fetch() { # <checkout> [<arg>]: the fetch's output, the home folder shown as /r/home
-  (cd "$1" && HOME=$H XDG_CONFIG_HOME=$H/.config PATH=$M/bin:$PATH bash "$FETCH" "${@:2}") | sed "s|$H|/r/home|g"
+fetch() { # <checkout> [<arg>]: the fetch's output, the home folder shown as /r/HOME
+  (cd "$1" && HOME=$H XDG_CONFIG_HOME=$H/.config PATH=$M/bin:$PATH bash "$FETCH" "${@:2}") | sed "s|$H|/r/HOME|g"
 }
 
 # D2: a host file with two projects, neither the plugin's own, read in the first one's checkout.
@@ -52,8 +52,8 @@ same 'a session in the second project names that project its own' "$(sed '1s/\tb
 machine nofile
 rm -f "$H/.config/conveyor/host.json"
 same 'no host file: nofile with the paths looked at, and no record for the lanes' \
-  "$(printf 'paths\t\t/r/home\t\nfast\tnorecord\nhost\t\tnofile\t0\t/r/home/xdg/conveyor/host.json\t%s' "$M/bakery/conveyor/host.json")" \
-  "$(cd "$M/bakery" && HOME=$H XDG_CONFIG_HOME=$H/xdg PATH=$M/bin:$PATH bash "$FETCH" | sed "s|$H|/r/home|g")"
+  "$(printf 'paths\t\t/r/HOME\t\nfast\tnorecord\nhost\t\tnofile\t0\t/r/HOME/xdg/conveyor/host.json\t%s' "$M/bakery/conveyor/host.json")" \
+  "$(cd "$M/bakery" && HOME=$H XDG_CONFIG_HOME=$H/xdg PATH=$M/bin:$PATH bash "$FETCH" | sed "s|$H|/r/HOME|g")"
 
 # A checkout that is no record of the host file (the owner's own machine): the snapshots come over ssh to the host
 # file's target, here a stub that runs the command it is given.
@@ -71,7 +71,7 @@ same 'the ssh target is the host file'"'"'s' 'owner@lab' "$(cat "$M/bin/target" 
 machine nossh
 hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
 mkdir -p "$M/elsewhere"
-same 'no ssh target: nossh' $'paths\t\t/r/home\t\nfast\tnorecord\nhost\tlab\tnossh\t0' "$(fetch "$M/elsewhere")"
+same 'no ssh target: nossh' $'paths\t\t/r/HOME\t\nfast\tnorecord\nhost\tlab\tnossh\t0' "$(fetch "$M/elsewhere")"
 
 # The lanes are the worktrees this checkout's record names (~/ is the home folder): the Fast lane's branch, its
 # commits ahead of the pack's default branch (trunk here, not main) and its first subject; the Research lane's folder
@@ -84,7 +84,7 @@ g "$M/bakery" init -q -b trunk && g "$M/bakery" commit -q --allow-empty -m start
   && g "$M/bakery" worktree add -q -b lane-12 "$H/lane" && g "$H/lane" commit -q --allow-empty -m 'Bread oven timer'
 hostfile --arg c "$M/clone" --arg b "$M/bakery" \
   '{host: "lab", main: $c, records: [{repo: "bakery", main: $b, lanes: {fast: {worktree: "~/lane"}, research: {worktree: "~/research"}}}]}'
-RH=/r/home
+RH=/r/HOME
 same 'the lanes from the host file' "$(printf 'paths\t%s/research\t%s\tbakery\nfast\tok\tlane-12\t1\t0\tBread oven timer\nhost\t\tfeed\t0' "$RH" "$RH")" \
   "$(fetch "$M/bakery" feed)"
 

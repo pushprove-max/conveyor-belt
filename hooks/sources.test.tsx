@@ -555,7 +555,7 @@ test('a snapshot that cannot be read is one plain line saying why, in /units, th
 // Bug: the first record was the session's own whatever checkout the session was in: a session in gadgetlab showed
 // bakery's card as #12 and looked for its Fast lane's card among bakery's, so it read `not landed`.
 test('a session in the second project: its cards carry no name, the first\'s carry theirs, and its Fast lane finds its card', () => {
-  const text = TWO_PROJECTS.replace('\t/r/home\tbakery\n', '\t/r/home\tgadgetlab\n').replace('fast\tnone', 'fast\tok\tfix-7-gears\t1\t0\tGear ratio chart')
+  const text = TWO_PROJECTS.replace('\t/r/HOME\tbakery\n', '\t/r/HOME\tgadgetlab\n').replace('fast\tnone', 'fast\tok\tfix-7-gears\t1\t0\tGear ratio chart')
   const s = state(text)
   expect(tableText(s, 100)).toMatch(/\n bakery#12 Bread oven timer [^]*\n #7 Gear ratio chart /)
   expect(fastText(s)).toMatch(/ · card on the belt: review 1 of 3$/)
