@@ -195,12 +195,13 @@
       const c = s.cur, line = h('span', null, `${s.failed ? 'Failed' : 'Passed'} on ${short(c.sha)}`);
       if (typeof c.ended === 'string') line.append(' · ', ctx.since(c.ended, ' ago'));
       if (s.moved) line.append(' · main has moved since');
-      // Whether the run reran some files and kept the files that passed in an earlier run (#43), or ran the whole suite.
+      // Whether the run reused a green run and ran no test (#44), reran some files and kept the files that passed in an
+      // earlier run (#43), or ran the whole suite.
       const u = c.reused && typeof c.reused === 'object' && Array.isArray(c.reused.ran) && num(c.reused.kept) ? c.reused : null;
       const files = (n) => `${n} ${n === 1 ? 'file' : 'files'}`;
-      const scope = h('p', 'row-meta', u
-        ? `Reran ${files(u.ran.length)}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`
-        : 'Ran the whole suite');
+      const scope = h('p', 'row-meta', !u ? 'Ran the whole suite'
+        : !u.ran.length ? `Reused the green run of ${typeof u.time === 'string' ? ctx.clock(u.time) : 'an earlier time'} on ${short(u.sha)}`
+          : `Reran ${files(u.ran.length)}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`);
       scope.dataset.figure = 'suite-scope';
       s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, ...counts(h, c, false), reasonsList(h, why[1]));
     } else {

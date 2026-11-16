@@ -855,6 +855,20 @@ landing while it runs. One run at a time per project: a second press while one r
   push over a red suite, with the Board user who confirmed it. The Board sends the id of the red run the confirm named;
   when a later run has ended since, nothing is pushed.
 
+Run full test suite, Push landed and `release-prep` keep one record of results for each commit (`suites.jsonl` in the
+state folder): each test file's ok or fail, with the commit, the time and the run that made it. Each of them reads
+that record before it runs:
+
+- A run passed every file on the same commit: no test runs, and the result is green. Push landed pushes at once. The
+  Board says "Reused the green run of <time> on <commit>".
+- A run is on an ancestor of the commit (with more than one, the nearest ancestor): only the files that failed in it,
+  the files that the commits since add or change, and the files that the changed-tests command (`test.command`)
+  selects for those changes run. Each other file keeps its ok. The Board says how many files reran.
+- There is no such run, or the commits since change the pack's test settings (`test.*`) or a file that their commands
+  name (for example `.conveyor/test-full.sh`): the whole suite runs.
+
+Push anyway does not read the record: it pushes over the red run with no new run.
+
 A red run's failed cases are each run alone three times on the same commit (the command is told, in its
 `CONVEYOR_TEST_RERUN` list, that every other file passed and which case of the file to run: a command that ignores the
 list runs its whole selection) and judged as the nightly whole test judges them:

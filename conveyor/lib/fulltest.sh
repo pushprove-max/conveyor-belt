@@ -14,6 +14,11 @@
 # machine's test slots, as the whole test on main is (tests()). Cards go on landing meanwhile; the push sends the commit
 # the run tested, never a later one (push() given that commit: its checks and marks, under the card of the newest
 # landing that commit holds and origin lacks). A push with no landed commit to send is refused at the ask.
+# The run reuses the whole-suite results of $SUITES (suitereuse(), issue 44) as release-prep does: with a pass of every
+# file on the commit itself (a release-prep's, or an earlier run's), no test runs and the run passes; with results on
+# an ancestor, only the files that failed there, those the commits since change and those the changed-tests command
+# selects for them run (the command is told the list by the file CONVEYOR_SUITE_FILES names), and the other files keep
+# that run's ok; else the whole suite runs. Its results go to $SUITES (suitekeep()), for the next run of any of them.
 # A red run pushes nothing. Each case that failed (testfails(): "<file>: <case>", the file alone for a file that failed
 # naming no case or ran out of time) is run alone FULL_ALONE times on the same commit: the command is told, in its
 # CONVEYOR_TEST_RERUN list (README.md, The test step), that every other file of the run passed and, of the case's
@@ -33,7 +38,8 @@
 # push (asked to push), sha (the commit run or pushed), state (passed, failed or error, with reason), exit, cases (a red
 # run's: each {case, line, runs: each run alone, passed, failed, timeout or killed, verdict: flaky, fix or declined, why,
 # issue, reused}; an anyway line's: those of the red run it pushed over), pushed ({ok, reason}; null: nothing was to be
-# pushed) and by (who pushed anyway). $FULLTEST.running holds {since, sha, how} while the lock is held, and, once a red
+# pushed), by (who pushed anyway) and reused (a run's: null for a whole suite, else {sha, time, ran, kept}: the run
+# reused, the files rerun, none when nothing ran, and the passes kept). $FULLTEST.running holds {since, sha, how} while the lock is held, and, once a red
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
 # times, also go to $SUITERUNS (suiterec(), lib/testrun.sh) for the Tests page.
 FULLTEST=${STATE%/*}/fulltest.jsonl
@@ -57,6 +63,77 @@ suiteprog() { # <worktree>
     | jq -Rsc --arg ls "$ls" '($ls | [split("\n")[] | select(. != "") | split("\t")]) as $l | ($l | map(select(.[0] == "of" or .[0] == "fof") | {(.[0]): (.[1] | fromjson)}) | add) as $n
       | [split("\n")[] | select(. != "") | split("\t")] | {done: length, of: $n.of, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort,
         files: ($l | map(select(.[0] == "ok" or .[0] == "failed")) | {done: (map(.[1]) | unique | length), of: $n.fof, failed: [.[] | select(.[0] == "failed") | .[1]] | unique})}'
+}
+# The whole-suite results of each commit (issues 43 and 44), shared by every whole-suite run: Run full test suite and
+# Push landed (fullrun()), release-prep and release (relsuite(), commands/release-prep.sh). One line a commit, the
+# newest last: {sha, time, by (the run that made it: full test, push landed, release-prep or release), files: {<file>:
+# ok or fail}}, each test file of <sha> by its result, as of the run's `-- ok|FAIL <file>` lines; a run that reused one
+# has that run's results of the files it did not run. Only a run that named a result for every file it selected (its
+# `TESTRUN files=N` lines) is kept. The newest SUITES_KEEP commits are kept.
+SUITES=${STATE%/*}/suites.jsonl
+SUITES_KEEP=50
+# The line of $SUITES on <commit>, else on its nearest ancestor (the fewest commits between), the newest of a tie: a
+# later run on an older commit does not hide the result on <commit> or on a nearer one. Fails with none.
+suitebase() { # <commit>
+  local l s d best='' bd=''
+  while IFS= read -r l; do
+    s=$(jq -r .sha <<<"$l")
+    git merge-base --is-ancestor "$s" "$1" 2>/dev/null && d=$(git rev-list --count "$s..$1" 2>/dev/null) || continue
+    [ -n "$bd" ] && [ "$d" -ge "$bd" ] || { best=$l; bd=$d; }
+  done < <(jq -cR 'fromjson? | objects | select((.sha | type) == "string" and (.files | type) == "object")' "$SUITES" 2>/dev/null | jq -cs 'reverse[]')
+  [ -n "$best" ] && printf '%s\n' "$best"
+}
+# Whether the suite on <commit> reruns some files only (suitebase()'s line is on an ancestor of <commit>, or on it), and
+# the commits since change neither the pack's test settings (test.*) nor a file the pack's test commands name (a word
+# of test.full, test.command, test.changed or test.wholeCommands in the pack: .conveyor/test-full.sh, the engine's
+# runner). Then <worktree> (a worktree of <commit>) gets <worktree>.files, the files to run: those that did not pass in
+# that line, those the commits change or add, and those the changed-tests command (test.command, as a card's test step
+# runs it) selects for those changes, which it lists to the file CONVEYOR_TEST_LIST names, in <worktree> with its HEAD
+# at the line's commit. Prints the line. 1: the whole suite runs (no line, a test setting or command changed, or the
+# command wrote no list); 2: <worktree> could not be put back on <commit>; 3: the line is a pass of every file on
+# <commit> itself: nothing runs, and the pass counts.
+suitereuse() { # <worktree> <commit>
+  local wt=$1 sha=$2 l b pk=${PACK#"$MAIN"/} cmd ch=() f w=()
+  l=$(suitebase "$sha") || return 1
+  b=$(jq -r .sha <<<"$l")
+  [ "$b" != "$sha" ] || ! jq -e '.files | length > 0 and all(.[]; . == "ok")' <<<"$l" > /dev/null || { printf '%s\n' "$l"; return 3; }
+  [ "$(git show "$b:$pk" 2>/dev/null | jq -c .test 2>/dev/null)" = "$(git show "$sha:$pk" 2>/dev/null | jq -c .test 2>/dev/null)" ] || return 1
+  mapfile -t ch < <(git diff --name-only --no-renames "$b" "$sha") || return 1
+  while read -ra w; do
+    for f in "${w[@]}"; do printf '%s\n' "${ch[@]}" | grep -qxF -- "${f#./}" && return 1; done
+  done < <(jq -r '.test | [.full, .command, .changed, (.wholeCommands // [])[]] | .[] | strings' "$PACK" 2>/dev/null)
+  packget test.command cmd && [ -n "$cmd" ] || return 1
+  rm -f "$wt.sel"
+  git -C "$wt" reset -q "$b" 2>/dev/null && (cd "$wt" && CONVEYOR_TEST_LIST=$wt.sel timeout 300 bash -c "$cmd" > "$wt.sel.out" 2>&1 < /dev/null 8>&-)
+  git -C "$wt" reset -q "$sha" 2>/dev/null && [ -z "$(git -C "$wt" status --porcelain --untracked-files=no)" ] || return 2
+  [ -f "$wt.sel" ] || return 1
+  { jq -r '.files | to_entries[] | select(.value != "ok") | .key' <<<"$l"; printf '%s\n' "${ch[@]}"; cat "$wt.sel"; } | grep . | sort -u > "$wt.files" || return 1
+  printf '%s\n' "$l"
+}
+# The line of the suite run in <worktree> on <commit>, made by <by>, added to $SUITES in place of that commit's line,
+# with the files of the line it reused (<reused line>, suitereuse()) that it did not run, and only the files <commit>
+# holds. Prints, for the run's record, null for a whole suite, else {sha, time, ran, kept}: the reused line's commit and
+# time, the files rerun and the passes kept. A run that named no result for a file it selected, or that failed (<exit>
+# not 0) with no file failed, adds no line and fails.
+suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
+  local logs=() r of f
+  mapfile -t logs < <(testlogs "$1")
+  r=$(cat "${logs[@]}" "$1.test" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | jq -cRn 'reduce (inputs | capture("^-- (?<r>ok|FAIL) (?<f>.+)$")) as $x ({};
+    .[$x.f] |= (if . == "fail" or $x.r == "FAIL" then "fail" else "ok" end))') || return 1
+  of=$(suiteprog "$1"); of=$(jq -r '.files.of // null' <<<"$of" 2>/dev/null) || return 1
+  [ "$of" != null ] && [ "$(jq length <<<"$r")" -ge "$of" ] || return 1
+  [ "$3" = 0 ] || jq -e 'any(.[]; . == "fail")' <<<"$r" > /dev/null || return 1
+  jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --argjson r "$r" --argjson o "${5:-null}" --rawfile tr <(git ls-tree -r --name-only "$2") '
+    ($tr | split("\n") | map({(.): true}) | add) as $has
+    | (if $o == null then {} else $o.files | with_entries(select(.value == "ok" and $has[.key] and ($r[.key] | not))) end) as $k
+    | {sha: $s, time: $t, by: $by, files: ($k + $r | with_entries(select($has[.key])))},
+      (if $o == null then null else {sha: $o.sha, time: $o.time, ran: ($r | keys), kept: ($k | length)} end)' \
+    | { IFS= read -r f && suiteadd "$f" && IFS= read -r f && printf '%s\n' "$f"; }
+}
+# <line> added to $SUITES in place of its commit's line, under $SUITES.lock: two runs may end at once.
+suiteadd() { # <line>
+  ( flock 9 && { jq -cR --arg s "$(jq -r .sha <<<"$1")" 'fromjson? | objects | select(.sha != $s)' "$SUITES" 2>/dev/null; printf '%s\n' "$1"; } \
+      | tail -n "$SUITES_KEEP" > "$SUITES.new" && mv -f "$SUITES.new" "$SUITES" ) 9>>"$SUITES.lock"
 }
 FULL_OUTSIDE='ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|Could not resolve host|Network is unreachable|Temporary failure in name resolution|Connection (refused|reset|timed out)|No space left on device|Disk quota exceeded|Cannot allocate memory|out of memory'
 fulltest() { # [push | anyway <run id> [--by <who>]]
@@ -132,7 +209,7 @@ fullpush() { # <commit> <card> <issue>
   else stdb ask card "$2" | jq -cs --arg c "$2" '{ok: false, reason: (map(select(.step == "push" and .card == $c and .result == "fail")) | last | .reason // "the push did not reach origin")}'; fi
 }
 fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push under> <who> <the red run's line (anyway)>
-  local how=$1 sha=$2 wt=$CARDS/fulltest/wt rc f out cases='[]' pushed=null state=passed c n
+  local how=$1 sha=$2 wt=$CARDS/fulltest/wt rc f out cases='[]' pushed=null state=passed c n l reused=null
   read -r c n <<<"$4"
   if [ "$how" = anyway ]; then
     pushed=$(fullpush "$sha" "$c" "$n")
@@ -147,18 +224,39 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
       '{kind: "run", push: $p, sha: $s, state: "error", reason: $r, exit: null, cases: [], pushed: null}')"
     return
   }
-  tests "$wt" test.full; rc=$?; suiterec "$wt" full "$sha"
+  l=$(suitereuse "$wt" "$sha"); rc=$?
+  if [ $rc = 2 ]; then
+    git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
+    fullline "$(jq -cn --arg s "$sha" --argjson p "$([ "$how" = push ] && echo true || echo false)" --arg r "nothing was tested: the worktree of ${sha:0:12} could not be put back on it after the changed-tests selection" \
+      '{kind: "run", push: $p, sha: $s, state: "error", reason: $r, exit: null, cases: [], pushed: null}')"
+    return
+  elif [ $rc = 3 ]; then
+    # A pass of every file on this very commit (a release-prep's, or an earlier run's): nothing runs.
+    rc=0; reused=$(jq -c '{sha, time, ran: [], kept: (.files | length)}' <<<"$l")
+    echo "conveyor: full-test: reuses the green run of $(jq -r .time <<<"$l") on ${sha:0:12}; no test runs"
+  else
+    if [ $rc = 0 ]; then
+      echo "conveyor: full-test: reruns the files that failed or changed since the suite run on $(jq -r '.sha[0:12]' <<<"$l") ($(wc -l < "$wt.files") listed) and reuses its other passes"
+      CONVEYOR_SUITE_FILES=$wt.files tests "$wt" test.full; rc=$?
+    else l=''; tests "$wt" test.full; rc=$?; fi
+    suiterec "$wt" full "$sha"
+    reused=$(suitekeep "$wt" "$sha" "$rc" "$([ "$how" = push ] && echo 'push landed' || echo 'full test')" "$l") && [ -n "$reused" ] || reused=null
+    # A run of some files only whose results could not be kept proves nothing of the others: it is no pass.
+    [ -z "$l" ] || [ "$reused" != null ] || [ $rc != 0 ] || { rc=1; echo "conveyor: full-test: the rerun's results could not be read, so the passes of $(jq -r '.sha[0:12]' <<<"$l") are not reused"; }
+  fi
   if [ $rc = 0 ]; then
     [ "$how" != push ] || pushed=$(fullpush "$sha" "$c" "$n")
   else
     state=failed; f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
+    # A file kept from the reused run passed: each case run alone is told so, as of a file that passed in this run.
+    [ -z "$l" ] || f=$(jq -c --argjson l "$l" --rawfile run "$wt.files" '.passed = ((.passed // []) + ([$l.files | to_entries[] | select(.value == "ok") | .key] - ($run | split("\n"))))' <<<"$f")
     # Each case run alone below runs in this worktree and starts a new log folder: the suite's counts are kept first.
     jq -c --argjson p "$(suiteprog "$wt")" '. + {counts: $p}' "$FULLTEST.running" > "$FULLTEST.running.new" 2>/dev/null && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
     cases=$(fulljudge "$wt" "$sha" "$3" "$f") || cases='[]'
   fi
   git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
-  fullline "$(jq -cn --arg s "$sha" --argjson p "$([ "$how" = push ] && echo true || echo false)" --arg st "$state" --argjson rc "$rc" --argjson c "$cases" --argjson pu "$pushed" \
-    '{kind: "run", push: $p, sha: $s, state: $st, exit: $rc, cases: $c, pushed: $pu}')"
+  fullline "$(jq -cn --arg s "$sha" --argjson p "$([ "$how" = push ] && echo true || echo false)" --arg st "$state" --argjson rc "$rc" --argjson c "$cases" --argjson pu "$pushed" --argjson u "$reused" \
+    '{kind: "run", push: $p, sha: $s, state: $st, exit: $rc, cases: $c, pushed: $pu, reused: $u}')"
 }
 # One run of a unit ({file, case}) alone in <worktree>: every other file of the run (<testfails()>) listed as passed,
 # and the case, when there is one, as the one to run of its file. Prints passed, failed, timeout or killed.

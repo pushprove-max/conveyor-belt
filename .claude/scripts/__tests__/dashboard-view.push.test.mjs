@@ -155,6 +155,20 @@ test('Control: a red run lists each failed case and its outcome, and Push anyway
   assert.match(part(w, 'full-test').textContent, new RegExp(`Board user owner pushed over a red suite: pushed ${A.slice(0, 12)}`));
 });
 
+// Bug this guards (#44): a Push landed or Run full test suite that reused an earlier whole-suite run read as a whole
+// suite run, so the owner could not tell that no test ran, or that only some files reran.
+test('Control: a run that reused an earlier run says "Reused the green run of" its time and commit, or how many files reran', () => {
+  const w = boot({ tab: 'control' });
+  const green = { ...RED, state: 'passed', exit: 0, cases: [], pushed: { ok: true, reason: null } };
+  deliver(w, data({ fullTest: { command: true, why: null, running: null, last: { ...green, reused: { sha: A, time: '2026-11-14T07:40:00Z', ran: [], kept: 3 } } } }));
+  const scope = () => part(w, 'full-test').querySelector('[data-figure="suite-scope"]');
+  assert.match(scope().textContent, new RegExp(`^Reused the green run of \\d.* on ${A.slice(0, 12)}$`));
+  next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...green, reused: { sha: 'b'.repeat(40), time: '2026-11-14T07:40:00Z', ran: ['t/f1.test.sh'], kept: 2 } } } }));
+  assert.equal(scope().textContent, 'Reran 1 file, reused 2 passed files from bbbbbbbbbbbb');
+  next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...green, reused: null } } }));
+  assert.equal(scope(), null, 'a whole suite run names no reuse');
+});
+
 // Bugs this guards: a push that failed its check reached the owner only after a retry failed too, and Needs you then
 // said the loop pushes again by itself, which it does not until a fix lands on main. It is listed at its first failure
 // (the snapshot's push item with check) with the check's name, its failing lines, and what moves it on.

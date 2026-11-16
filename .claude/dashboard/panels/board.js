@@ -444,6 +444,16 @@
     else if (x.state === 'failed') head = `Failed on ${at}: ${cases.length} ${cases.length === 1 ? 'case' : 'cases'} failed, and Conveyor pushed nothing${x.push ? '. When main is green, press Push landed again.' : ''}`;
     else head = `Did not run on ${at}: ${x.reason || 'Conveyor recorded no reason'}`;
     box.append(S.ctx.chip(x.kind === 'anyway' ? 'pushed anyway' : String(x.state || ''), x.state === 'passed' && x.kind !== 'anyway' ? 'ok' : 'warn'), h('span', 'board-push-head', head));
+    // A run that reused the results of an earlier whole-suite run (a full test's, Push landed's or a release's): the
+    // green run it took with no test run, or how many files it reran.
+    const u = x.kind === 'run' && x.reused && typeof x.reused === 'object' && Array.isArray(x.reused.ran) && num(x.reused.kept) !== null ? x.reused : null;
+    if (u) {
+      const n = u.ran.length, scope = h('span', 'board-from', !n
+        ? `Reused the green run of ${typeof u.time === 'string' ? S.ctx.clock(u.time) : 'an earlier time'} on ${short(u.sha)}`
+        : `Reran ${n} ${n === 1 ? 'file' : 'files'}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`);
+      scope.dataset.figure = 'suite-scope';
+      box.append(scope);
+    }
     if (cases.length) { const ul = h('ul', 'board-push-cases'); cases.forEach((c) => ul.append(caseItem(c))); box.append(ul); }
     const f = fullOf(), un = unpushed();
     if (x.kind === 'run' && x.state === 'failed' && /^[0-9a-f]{12}$/.test(String(x.id || '')) && un && un.length && f && f.command === true && !f.running) {

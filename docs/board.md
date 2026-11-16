@@ -125,6 +125,11 @@ declined, with its reason. **Push anyway**, beside a red result, pushes those co
 suite** runs the suite and pushes nothing. A project with no `test.full` shows both buttons greyed
 (`conveyor/README.md`, The full test suite).
 
+Push landed, Run full test suite and Release share their results for each commit. When one of them passed on the
+commit, the next runs no test: Push landed pushes at once, and the result says "Reused the green run of <time> on
+<commit>". After a run on an earlier commit, only the files that failed or changed since then run again, and the
+result says "Reran 1 file, reused 2 passed files from <commit>". A change to the test commands runs the whole suite.
+
 **Push now**, beside Push landed, pushes the landed commits at once, with no full test run. Click it, then click again.
 It pushes main as Conveyor does after each card when the rule is On: through the project's pre-push hook only. If the
 hook fails, nothing is pushed and the card shows in Needs you with the failed check. It is greyed while a full test
@@ -163,8 +168,10 @@ example **Release 1.0.0**) or **Run again on the new main**. Click it, then clic
 - **Draft notes**, **Run suite** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
   of them and stops. Else it runs the suite on the head of `main`: the whole suite, or only the files that failed or
-  changed since an earlier suite run ([Releases](releases.md)). Step 2 says which: "Reran 1 file, reused 2 passed
-  files from <commit>" or "Ran the whole suite". These buttons do not release.
+  changed since an earlier suite run ([Releases](releases.md)). An earlier suite run is a release's, a Run full test
+  suite's or a Push landed's. When one of them passed on that same commit, no test runs. Step 2 says which: "Reused
+  the green run of <time> on <commit>", "Reran 1 file, reused 2 passed files from <commit>" or "Ran the whole suite".
+  These buttons do not release.
 - **Release** with the version runs `conveyor.sh release-run <version>`. The second click is your yes to the release.
   When the suite of that version passed on the head of `main`, and `main` did not move after it, Conveyor uses that
   pass and runs `conveyor.sh release <version>` ([Releases](releases.md)). Else Conveyor runs
