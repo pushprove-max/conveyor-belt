@@ -30,26 +30,39 @@ echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creati
 EOF
 }
 rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq filter>: of each of its review lines
+# One review judged as a card's is (judged()), with no card run, for a case that proves what the judge does with a
+# review: a card run pays for the loop, its sessions and waits around the one function.
+# The card c<issue>'s worktree holds main with the stub build's change staged (a.txt gains a line 2), the review
+# beside it is <review file>, and the engine shell is made as `conveyor.sh run` makes one. What judged() prints is
+# in <worktree>.fields and the review it leaves in <worktree>.review; the cases that need a whole card (its fix
+# brief, its landing, a control change between cards, the snapshot) still run one.
+judgeone() { # <issue> <review file>
+  local wt=$T/$CASE/cards/c$1
+  mkdir -p "$T/$CASE/cards" && git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && . "$STUB/build") && git -C "$wt" add -A \
+    && cp "$2" "$wt.review" || fail "the worktree of c$1 could not be made"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && judged "c$1" "$1" "$wt" "body of $1" '{}' > "$wt.fields" ) \
+    || fail "judged() on c$1 failed"
+}
+jf() { jq -r "$2" "$T/$CASE/cards/c$1.fields"; } # <issue> <jq filter>: of what judged() printed for c<issue> (judgeone)
+jr() { cat "$T/$CASE/cards/c$1.review"; }        # <issue>: the review judged() left for c<issue> (judgeone)
 
 # Bugs: a finding about a file the card did not change is dropped before the judge sees it, or reaches the judge not
-# marked as outside the card's diff; declined, it still costs a fix session; accepted (the change breaks that file),
-# the card lands without its fix.
+# marked as outside the card's diff; declined, it still leaves the review a NO-GO (a fix session); accepted (the
+# change breaks that file), it leaves the review, so the card lands without its fix.
 t_judgeoutside() {
   local f='[P1] b.txt:1 still reads the old first line of a.txt. Proof: b.txt:1'
   judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
-  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; cp "$STUB/review.1" "$STUB/review.2"; echo "$GO" > "$STUB/review.3"
+  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   echo "F1 DECLINE: not about this card's change" > "$STUB/judge.1"
   echo 'F1 ACCEPT: the change breaks the reader in b.txt. Cost to every card: none' > "$STUB/judge.2"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  judgeone 7 "$STUB/review"
   grep -qxF "F1 [outside the diff] $f" "$STUB/judge-asked" || fail "the finding outside the card's diff did not reach the judge marked as outside it: $(grep '^F1' "$STUB/judge-asked")"
-  [ "$(rev 7 .result)" = GO ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
-    || fail "a declined finding outside the diff did not leave the review a GO with no fix session: $(rev 7 .result), $(wc -l < "$STUB/sessions") sessions"
-  [ "$(rev 7 '.judge.declined[0].place')" = outside ] && [ ! -e "$STUB/filed" ] || fail "the declined finding is not recorded as outside the diff, or a follow-up was filed for it"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(rev 8 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] && grep -qxF "$f" "$STUB/brief" \
-    || fail "an accepted finding outside the diff did not send the card to its fix: $(rev 8 .result | tr '\n' ' '), $(wc -l < "$STUB/sessions") sessions"
-  [ "$(rev 8 '.judge.accepted[0] | [.place, .cost] | join(" ")' | head -n 1)" = "outside none" ] && [ -n "$(st 'select(.issue == 8 and .step == "landed") | .sha')" ] \
-    || fail "the accepted finding is not recorded as outside the diff with its cost, or #8 did not land after its fix"
+  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $f (judge: not about this card's change)|USER-VISIBLE: no|VERDICT: GO|" ] && [ "$(jf 7 '.judge.declined[0].place')" = outside ] \
+    || fail "a declined finding outside the diff did not leave the review a GO, or is not recorded as outside the diff: $(jr 7) $(jf 7 .judge)"
+  judgeone 8 "$STUB/review"
+  cmp -s "$STUB/review" "$T/$CASE/cards/c8.review" && [ "$(jf 8 '.judge.accepted[0] | [.place, .cost] | join(" ")')" = "outside none" ] \
+    || fail "an accepted finding outside the diff did not leave the review a NO-GO holding it, or is not recorded as outside the diff with its cost: $(jr 8) $(jf 8 .judge)"
 }
 
 # Bugs: a review whose only finding the judge declines still says NO-GO and costs a fix round; the declined finding or
@@ -91,17 +104,17 @@ t_judgedecline() {
 t_judgerare() {
   local f='[P2] a.txt:2 breaks when two cards land in the same second. Proof: start two cards at once on a slow disk' l
   judging "[$(issue 7 2026-01-01)]"
-  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   echo 'F1 DECLINE: rare case: the proof needs an unusual timing' > "$STUB/judge.1"
-  loop run >/dev/null || fail "run exited non-zero"
+  judgeone 7 "$STUB/review"
   for l in 'A P2 finding has a higher bar. Accept a P2 only when it is inside the diff, its proof uses what the project really' \
     'runs, and it would cause a wrong result that users or the next card meet. Decline with the reason `rare case` a P2' \
     'whose proof needs an unusual input, timing or setup. Decline with the reason `style` a P2 about wording, naming or' \
     'form that causes no wrong result.'; do
     grep -qxF -- "$l" "$STUB/judge-asked" || fail "the judge's prompt does not hold the P2 bar: no line '$l'"
   done
-  [ "$(rev 7 .result)" = GO ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
-    || fail "a P2 the judge declined as a rare case did not leave the review a GO with no fix round: $(rev 7 .result), $(wc -l < "$STUB/sessions") sessions"
+  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $f (judge: rare case: the proof needs an unusual timing)|USER-VISIBLE: no|VERDICT: GO|" ] \
+    || fail "a P2 the judge declined as a rare case did not leave the review a GO: $(jr 7)"
   [ "$(jq -c '[.finding, .by, .why]' "$ST/declined.jsonl")" = "$(jq -cn --arg f "$f" '[$f, "judge", "rare case: the proof needs an unusual timing"]')" ] \
     || fail "the rare-case P2 is not on the declined list, once, with the judge's reason: $(cat "$ST/declined.jsonl" 2>&1)"
 }
@@ -163,31 +176,25 @@ t_judgeforged() {
 t_judgemarks() {
   local f='[P2] a.txt:2 typo. Proof: section heading [security]'
   judging "[$(issue 7 2026-01-01)]" on security
-  # The stub reviewer runs in the card's worktree: its first finding names a.txt by that folder's path.
-  echo "[ -e \"\$STUB/review.1\" ] || printf '%s\\n' \"[P1] \$PWD/a.txt:2 wrong word\" '$f' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > \"\$STUB/review.1\"" > "$STUB/review-cmd"
+  # The first finding names a.txt by the path of the card's worktree (judgeone's), as a reviewer run there may.
+  printf '%s\n' "[P1] $T/$CASE/cards/c7/a.txt:2 wrong word" "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 DECLINE: no' 'F2 DECLINE: a matter of taste' > "$STUB/judge.1"
-  loop run >/dev/null || fail "run exited non-zero"
-  grep -qE '^F1 \[inside the diff\] \[P1\] /.+/a\.txt:2 wrong word$' "$STUB/judge-asked" || fail "a finding that names its file by the worktree's whole path was not marked as inside the diff: $(grep '^F1' "$STUB/judge-asked" 2>&1)"
+  judgeone 7 "$STUB/review"
+  grep -qxF "F1 [inside the diff] [P1] $T/$CASE/cards/c7/a.txt:2 wrong word" "$STUB/judge-asked" || fail "a finding that names its file by the worktree's whole path was not marked as inside the diff: $(grep '^F1' "$STUB/judge-asked" 2>&1)"
   grep -qxF "F2 [inside the diff] $f" "$STUB/judge-asked" || fail "a finding whose proof holds a kind's name in brackets was marked as of that kind: $(grep '^F2' "$STUB/judge-asked" 2>&1)"
-  [ "$(rev 7 '[.result, (.judge.declined | length)] | join(" ")')" = "GO 2" ] || fail "the two declined findings did not leave the review a GO: $(rev 7 '[.result, .judge] | tojson')"
+  [ "$(jr 7 | tail -n 1)" = 'VERDICT: GO' ] && [ "$(jf 7 '.judge.declined | length')" = 2 ] || fail "the two declined findings did not leave the review a GO: $(jr 7) $(jf 7 .judge)"
 }
 
-# Bugs: a judge call that fails, or an answer that cannot be read (no line for a finding), blocks the card or drops
-# its findings, instead of leaving every finding accepted.
+# Bug: a judge call that fails blocks the card or drops its findings, instead of leaving every finding accepted. An
+# answer that cannot be read is t_judgeunread's.
 t_judgefail() {
-  judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
-  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; echo "$NOGO3" > "$STUB/review.3"; echo "$GO" > "$STUB/review.4"
+  judging "[$(issue 7 2026-01-01)]"
+  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   echo 'exit 1' > "$STUB/judge-cmd"
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF '[P1] a.txt:1 wrong word' "$STUB/brief" \
     || fail "a failing judge call did not leave the finding accepted and the card going on to its fix: $(st 'select(.issue == 7) | "\(.step) \(.result)"' | tr '\n' ,)"
   [ -n "$(rev 7 '.judge.failed // empty')" ] && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] || fail "the review line does not say the judge failed, or #7 did not land: $(rev 7 '.judge | tojson')"
-  # An answer for two of three findings: none of it is taken.
-  rm "$STUB/judge-cmd"; printf '%s\n' 'F1 DECLINE: no' 'F3 DECLINE: no' > "$STUB/judge.2"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(rev 8 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 8 '.counts | add' | head -n 1)" = 3 ] && grep -qxF '[P0] a.txt:1 wrong word' "$STUB/brief" && grep -qxF '[P2] c.txt:3 a nit' "$STUB/brief" \
-    || fail "an answer that cannot be read did not leave every finding accepted: $(rev 8 '[.result, .counts] | tojson' | tr '\n' ' ')"
-  [ -n "$(rev 8 '.judge.failed // empty')" ] && [ -n "$(st 'select(.issue == 8 and .step == "landed") | .sha')" ] || fail "the review line does not say the judge's answer was not read, or #8 did not land"
 }
 
 # Bug: with the judge off, a review is judged all the same (a judge call, a finding declined, the reviewer
@@ -207,14 +214,12 @@ t_judgeoff() {
 # Bugs: the judge is switched on or off only by a commit to the pack, so the owner cannot switch it from the Board;
 # `control judge on` or `off` reaches a later card only, not the next review.
 t_judgeswitch() {
-  judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]" off
-  printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  cp "$STUB/review.1" "$STUB/review.3"; cp "$STUB/review.1" "$STUB/review.4"; echo "$GO" > "$STUB/review.5"
+  judging "[$(issue 8 2026-01-02),$(issue 9 2026-01-03)]" off
+  printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  cp "$STUB/review.1" "$STUB/review.2"; echo "$GO" > "$STUB/review.3"
   echo 'F1 DECLINE: a matter of taste' > "$STUB/judge.1"
-  # Off, as a record that never named the judge is: every finding counts, and no judge is asked.
+  # Off: no judge is asked (a card's review with the judge off is t_judgeoff's).
   [ "$(loop control | jq -c .judgeOn)" = false ] || fail "the control record does not say the judge is off: $(loop control)"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ ! -e "$STUB/judges" ] || fail "with the judge off, a review was judged: $(rev 7 '[.result, .judge] | tojson' | tr '\n' ' ')"
   [ "$(loop control judge on | jq -c .judgeOn)" = true ] || fail "control judge on did not switch the judge on in the control record"
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
   [ "$(rev 8 '[.result, (.judge.declined | length)] | join(" ")')" = "GO 1" ] && [ "$(wc -l < "$STUB/judges")" = 1 ] \
@@ -252,46 +257,46 @@ t_judgekinds() {
 }
 
 # Bugs: a finding of a kind the project always accepts is declined because the judge said so, inside the card's diff or
-# outside it, or is accepted with no cost to every card; the reviewer is not told to tag the kinds, so no finding can
-# be of one; an unchanged line beside the card's changed line (a.txt:1, in the hunk's context) is marked inside its diff.
+# outside it, or is accepted with no cost to every card; an unchanged line beside the card's changed line (a.txt:1, in
+# the hunk's context) is marked inside its diff. That the reviewer is told to tag the kinds, and the fix is told the
+# accepted findings, is t_judgekinds'.
 t_judgealways() {
   judging "[$(issue 7 2026-01-01)]" on security
-  printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P1][security] b.txt:1 a secret is kept here' '[P2] a.txt:1 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  echo "$GO" > "$STUB/review.2"
+  printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P1][security] b.txt:1 a secret is kept here' '[P2] a.txt:1 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 DECLINE: cannot happen. Cost to every card: none' "F2 DECLINE: not about this card's change. Cost to every card: one more scan" 'F3 DECLINE: a matter of taste' > "$STUB/judge.1"
-  loop run >/dev/null || fail "run exited non-zero"
-  grep -q 'always accepts a finding of one of these kinds: security\.' "$STUB/asked" || fail "the reviewer was not told the kinds that are always accepted"
+  judgeone 7 "$STUB/review"
   grep -qxF 'F1 [inside the diff; always accepted: security] [P1][security] a.txt:2 the token is logged' "$STUB/judge-asked" \
     && grep -qxF 'F2 [outside the diff; always accepted: security] [P1][security] b.txt:1 a secret is kept here' "$STUB/judge-asked" \
     || fail "the judge was not told which findings are always accepted: $(grep '^F[0-9]' "$STUB/judge-asked")"
   grep -qxF 'F3 [outside the diff] [P2] a.txt:1 a nit' "$STUB/judge-asked" || fail "a finding on an unchanged line beside the changed one was not marked as outside the diff: $(grep '^F3' "$STUB/judge-asked")"
-  [ "$(rev 7 '.judge // empty | [(.accepted | map(.place) | join(",")), (.declined | map(.finding) | join(","))] | join(" / ")' | head -n 1)" = "inside,outside / [P2] a.txt:1 a nit" ] \
-    || fail "a finding of an always-accepted kind was not accepted against the judge's decline, inside the diff and outside it: $(rev 7 '.judge | tojson' | head -n 1)"
-  [ "$(rev 7 '.judge // empty | .accepted | map(.cost) | join(" / ")' | head -n 1)" = "none / one more scan" ] && rev 7 '.judge // empty | .accepted[0].reason' | grep -qxF 'always accepted: a security finding (the judge declined it: cannot happen)' \
-    || fail "an always-accepted finding the judge declined is recorded without its cost to every card: $(rev 7 '.judge | tojson' | head -n 1)"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && grep -qxF '[P1][security] a.txt:2 the token is logged' "$STUB/brief" && grep -qxF '[P1][security] b.txt:1 a secret is kept here' "$STUB/brief" \
-    && ! grep -q 'a nit' "$STUB/brief" || fail "the always-accepted findings did not send the card to its fix, alone: $(rev 7 .result | tr '\n' ' ')"
+  [ "$(jf 7 '.judge // empty | [(.accepted | map(.place) | join(",")), (.declined | map(.finding) | join(","))] | join(" / ")')" = "inside,outside / [P2] a.txt:1 a nit" ] \
+    || fail "a finding of an always-accepted kind was not accepted against the judge's decline, inside the diff and outside it: $(jf 7 '.judge | tojson')"
+  [ "$(jf 7 '.judge // empty | .accepted | map(.cost) | join(" / ")')" = "none / one more scan" ] && jf 7 '.judge // empty | .accepted[0].reason' | grep -qxF 'always accepted: a security finding (the judge declined it: cannot happen)' \
+    || fail "an always-accepted finding the judge declined is recorded without its cost to every card: $(jf 7 '.judge | tojson')"
+  [ "$(jr 7 | tr '\n' '|')" = '[P1][security] a.txt:2 the token is logged|[P1][security] b.txt:1 a secret is kept here|DECLINED: [P2] a.txt:1 a nit (judge: a matter of taste)|USER-VISIBLE: no|VERDICT: NO-GO|' ] \
+    || fail "the review does not keep the always-accepted findings, alone, as findings of a NO-GO: $(jr 7)"
 }
 
 # Bugs: an answer that cannot be read is taken in part: one with a decision for a finding the review does not hold
 # makes the review a GO; an ACCEPT with no cost to every card, or a decline of an always-accepted finding with none,
-# is recorded as an accepted finding with no cost. Each leaves every finding accepted and says the judge failed.
+# is recorded as an accepted finding with no cost; one with no line for a finding is taken for the findings it has a
+# line for. Each leaves every finding accepted (the review as the reviewer wrote it) and says the judge failed.
 t_judgeunread() {
   local i
-  judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]" on security
-  for i in 1 3; do printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
-  printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.5"
-  for i in 2 4 6; do echo "$GO" > "$STUB/review.$i"; done
+  judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]" on security
+  printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.7"; cp "$STUB/review.7" "$STUB/review.8"
+  printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.9"
+  echo "$NOGO3" > "$STUB/review.10"
   printf '%s\n' 'F1 DECLINE: unrelated' 'F2 ACCEPT: broken. Cost to every card: none' > "$STUB/judge.1"
   echo 'F1 ACCEPT: the change breaks its caller' > "$STUB/judge.2"
   printf '%s\n' 'F1 DECLINE: cannot happen' 'F2 DECLINE: a matter of taste' > "$STUB/judge.3"
-  for i in 7 8 9; do
-    loop run --only $i >/dev/null || fail "run of #$i exited non-zero"
-    [ "$(rev $i .result | tr '\n' ' ')" = "NO-GO GO " ] && [ -n "$(rev $i '.judge.failed // empty')" ] && [ "$(rev $i '.judge // empty | has("accepted") or has("declined")')" = false ] \
-      || fail "#$i: a judge's answer that cannot be read (7: a decision too many; 8: an ACCEPT with no cost; 9: an always-accepted finding with no cost) was taken: $(rev $i '[.result, .judge] | tojson' | tr '\n' ' ')"
-    [ -n "$(st "select(.issue == $i and .step == \"landed\") | .sha")" ] || fail "#$i did not land after its fix"
+  printf '%s\n' 'F1 DECLINE: no' 'F3 DECLINE: no' > "$STUB/judge.4"
+  for i in 7 8 9 10; do
+    judgeone $i "$STUB/review.$i"
+    cmp -s "$STUB/review.$i" "$T/$CASE/cards/c$i.review" && [ -n "$(jf $i '.judge.failed // empty')" ] && [ "$(jf $i '.judge // empty | has("accepted") or has("declined")')" = false ] \
+      || fail "#$i: a judge's answer that cannot be read (7: a decision too many; 8: an ACCEPT with no cost; 9: an always-accepted finding with no cost; 10: no line for a finding) was taken: $(jr $i) $(jf $i .judge)"
   done
-  [ "$(rev 9 '.counts | add' | head -n 1)" = 2 ] && grep -qxF '[P2] a.txt:2 a nit' "$STUB/brief" || fail "#9: not every finding was left accepted: $(rev 9 '.counts | tojson' | head -n 1)"
+  [ "$(wc -l < "$STUB/judges")" = 4 ] && [ ! -s "$ST/declined.jsonl" ] || fail "a judge was not asked each review, or a finding of an answer not read went to the declined list: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
 # Bugs: the owner cannot name the judge's CLI and model, or only a model the pack lists; a judge set to the
@@ -442,15 +447,14 @@ t_minoron() {
 t_minordecline() {
   local l
   judging "[$(issue 7 2026-01-01 P1)]"
-  printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   echo 'F1 DECLINE: rare case' > "$STUB/judge.1"
-  loop run >/dev/null || fail "run exited non-zero"
+  judgeone 7 "$STUB/review"
   for l in 'Judge a P3 finding as a P2: accept it only when it is inside the diff, its proof uses what the project really runs,' \
     'case`. A P3 is minor by its level: do not decline it because it causes no wrong result, or as `style` when it is a'; do
     grep -qxF -- "$l" "$STUB/judge-asked" || fail "the judge's prompt does not hold the P3 bar: no line '$l'"
   done
-  [ "$(rev 7 .result | tr '\n' ' ')" = "GO " ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "a declined P3 did not leave the review a GO with no fix round: $(rev 7 .result | tr '\n' ' '), $(wc -l < "$STUB/sessions") sessions"
+  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $MINOR3 (judge: rare case)|USER-VISIBLE: no|VERDICT: GO|" ] || fail "a declined P3 did not leave the review a GO: $(jr 7)"
   [ "$(jq -r '"\(.by): \(.why): \(.finding)"' "$ST/declined.jsonl")" = "judge: rare case: $MINOR3" ] || fail "the declined P3 is not in the declined list with its reason: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
