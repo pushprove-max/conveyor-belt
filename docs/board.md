@@ -208,7 +208,10 @@ The Tests tab shows every test file of the project: each file's CPU seconds, its
 time of its newest run (Last run took; point at it to see when that run was) and its status (Over budget, Slower than
 usual, Waits, Flaky and others). The runs are those of card Test steps and of whole-suite runs (Run full test suite,
 Push landed, and the suite of a release). A file that no run ran yet shows "Never run" and dashes. A file that only
-whole-suite runs run (`wholeOnly` in the pack's `test.files`) shows "Whole suite only".
+whole-suite runs run (`wholeOnly` in the pack's `test.files`) shows "Whole suite only". Such a file starts other test
+files, and each of them has its own budget, so the file itself has no budget. It shows "Runs other test files" in
+place of a budget. It never shows Over budget, Slower than usual or Waits, and its row offers no "File an issue: speed
+up". When it is open, it has no field to set a budget or to mark it slow on purpose.
 
 Click a column heading to sort the table by that column. Click it again to reverse the order. An arrow shows the
 column and the direction. Until you pick a column, the files that need a look come first, then the highest CPU

@@ -554,7 +554,10 @@ and the test files of main's checkout, and holds:
   entries a runner names as its own among them), `issue` (the issue last
   filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
   `conveyor.sh testissue`, else null), `budget` and `budgetFrom` (`file`: its own; `project`: `test.fileBudget`), `slowOnPurpose`
-  (the reason of its mark, else null), `over` (`cpu` is over its budget; false with no `cpu`), `usual` and `slower` (below);
+  (the reason of its mark, else null), `over` (`cpu` is over its budget; false with no `cpu`), `usual` and `slower` (below).
+  A `wholeOnly` file starts other test files whole, so its CPU seconds are the sum of theirs, and each of them has its
+  own budget. It has no budget of its own: its `budget` and `budgetFrom` are null, and its `over` and `slower` are
+  false;
 - `slower`: the names of the files slower than their usual;
 - `totals`: `files` (those with CPU seconds on record), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
   test steps that ran in the 7 days to today, `{count, waitSec, runSec}`, with the seconds they waited for a test slot

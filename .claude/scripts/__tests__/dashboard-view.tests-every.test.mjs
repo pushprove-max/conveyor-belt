@@ -49,6 +49,34 @@ test('Tests: every test file has a row: the card run, the whole-only file with i
   assert.equal(more.querySelector('.tests-run a.issue'), null, 'a whole-suite run links no card');
 });
 
+// Bug: conveyor/conveyor.test.sh, a runner (wholeOnly) whose CPU is the sum of its case files', showed Over budget for
+// ever and offered "File an issue: speed up", an issue no change can meet. WHOLE here is as the engine now gives such
+// a file (testfiles.test.sh, tfwholeonly): not slow on purpose, 900 CPU s, no budget; its last run took 3 times its
+// CPU time on the clock, which the Board would show as Waits.
+test('Tests: a wholeOnly runner has "Runs other test files" in place of a budget, no Over budget or Waits, and no speed-up action', () => {
+  const part = clone(PART);
+  part.settings.files[WHOLE] = { wholeOnly: true };
+  Object.assign(part.files[0], { cpu: 900, median: 900, slowOnPurpose: null, budget: null, budgetFrom: null, over: false, slower: false,
+    lastRun: { ...part.files[0].lastRun, cpu: 900, sec: 2700, clockPerCpu: 3 } });
+  const w = boot({ tab: 'tests' }), d = full(); d.panels.tests.data.tests = part; deliver(w, d);
+  const chips = cells(rowOf(w, WHOLE))[8];
+  assert.match(chips, /Runs other test files/);
+  assert.doesNotMatch(chips, /Over budget|Slower than usual|Waits|Slow on purpose/);
+  assert.doesNotMatch(cells(rowOf(w, CARD))[8], /Runs other test files/);
+  act(rowOf(w, WHOLE), 'open').click();
+  const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
+  assert.match(more.textContent, /Budget: none, it runs other test files/);
+  assert.equal(act(more, 'issue-speed'), null, 'no speed-up issue for a runner');
+  // Bug: the budget editor saved a budget for the runner and said "budget of ... now 8 CPU s", which never applies.
+  assert.equal(act(more, 'file-budget-field'), null, 'no budget editor for a runner');
+  assert.equal(act(more, 'slow-mark'), null, 'no slow-on-purpose mark for a runner');
+  act(more, 'issue-split').click();
+  assert.match(tp(w).querySelector('.tests-body').value, /\n- Budget: none, it runs other test files\n/, 'the draft gives no budget');
+  act(rowOf(w, CARD), 'open').click();
+  const card = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === CARD);
+  assert.ok(act(card, 'issue-speed'), 'a file with a budget keeps its speed-up action');
+});
+
 // The clock time of the newest run, card or whole suite, and when it ran on hover.
 test('Tests: Last run took shows each file\'s newest run\'s clock time, with its date and time on hover', () => {
   const w = show();

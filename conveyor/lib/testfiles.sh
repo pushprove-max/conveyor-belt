@@ -21,7 +21,9 @@
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it),
 #   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), budget and budgetFrom (file: its own;
 #   project: test.fileBudget), slowOnPurpose (its reason, else null), over (cpu over its budget; false with no cpu), usual (the median of
-#   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower;
+#   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower; a wholeOnly
+#   file (a runner that starts other test files whole, each timed with its own budget) is held to no budget: budget and
+#   budgetFrom null, over and slower false;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
 # totals: files (those with CPU seconds on record), overBudget (over and not slow on purpose), slower, and steps: the card test steps that ran in
@@ -72,16 +74,17 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
        ($all[] | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
-        | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud
+        | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud | ($own.wholeOnly == true) as $wo
         | (if ($c | length) >= $mn and ($c | length) > $rn then $c[:-$rn] | median else null end) as $usual
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
            runs: ($r[-$keep:] | reverse | map(del(.file))),
            lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} end),
-           timedRuns: ($c | length), wholeOnly: ($own.wholeOnly == true), failedSteps: ($failed[$f] // 0),
+           timedRuns: ($c | length), wholeOnly: $wo, failedSteps: ($failed[$f] // 0),
            flaky: ($flaky[$f] // 0),
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
-           budget: $bud, budgetFrom: (if $own.budget != null then "file" else "project" end), slowOnPurpose: ($own.slowOnPurpose // null),
-           over: ($now != null and $now > $bud), usual: ($usual | r3), slower: ($usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)))})
+           budget: (if $wo then null else $bud end), budgetFrom: (if $wo then null elif $own.budget != null then "file" else "project" end),
+           slowOnPurpose: ($own.slowOnPurpose // null), over: ($wo | not) and $now != null and $now > $bud, usual: ($usual | r3),
+           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh))})
     | sort_by(-(.cpu // -1), .file)
     | [$ls[] | select(.reused != true and ((.time | fromdate? | strflocaltime("%Y-%m-%d")) // "") >= $since)] as $wk
     | {settings: {fileBudget: $b, slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},

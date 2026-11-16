@@ -100,6 +100,19 @@ t_tfeveryfile() {
 '{"file":"n.test.sh","cpu":null,"wholeOnly":false,"runs":[],"last":null}]' ] || fail "the three files: $got"
 }
 
+# A runner that starts other test files whole (wholeOnly in the pack) is held to no budget: its CPU is the sum of its
+# case files', each timed with its own budget. r.test (wholeOnly) and c.test ran at 10, 10, 900 and 900 CPU s, far
+# over the 8 CPU s budget and over their usual: c.test is over budget and slower, r.test neither, with no budget.
+# Bug caught: conveyor/conveyor.test.sh showed as over budget and slower than usual forever, as no change can pass.
+t_tfwholeonly() {
+  setup '[]'; tune '.test.slower = {share: 0.5, runs: 2, minRuns: 4} | .test.files = {"r.test": {wholeOnly: true}}'
+  tf_runs r.test 10 10 900 900; tf_runs c.test 10 10 900 900
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -cS '[.slower, .totals.overBudget, .totals.slower, (.files | map({key: .file, value: {budget, budgetFrom, over, slower}}) | from_entries)]' <<<"$got")" \
+    = '[["c.test"],1,1,{"c.test":{"budget":8,"budgetFrom":"project","over":true,"slower":true},"r.test":{"budget":null,"budgetFrom":null,"over":false,"slower":false}}]' ] \
+    || fail "the wholeOnly runner: $(jq -c '[.slower, .totals, .files]' <<<"$got")"
+}
+
 # A project with no recorded file time still has the part (the page shows its step totals, never an error): an empty
 # list and the steps of the 7 days, their slot wait and run seconds added up; a step before the 7 days, and one that
 # reused a pass (it ran nothing), are not counted. Bug caught: a project with no test line at all had no part (the

@@ -8,8 +8,10 @@
 // Then the table, one row a test file (every test file of main's checkout, run or not): file, CPU s now, median,
 // change against its own median, its last runs as bars (oldest first), clock against CPU, runs on record, the clock
 // time its newest run took (Last run took, with that run's date and time on hover), and its status chips (Over
-// budget, Slower than usual, Faster, Waits, Flaky, Fails often, Has an issue, Slow on purpose, Whole suite only, Never
-// run). A search box over it keeps the rows whose path holds its text (any case); filter chips, each with its count,
+// budget, Slower than usual, Faster, Waits, Flaky, Fails often, Has an issue, Slow on purpose, Runs other test files,
+// Whole suite only, Never run). A file the pack marks wholeOnly (a runner that starts other test files whole, each of
+// them with its own budget) is held to no budget: it has "Runs other test files" in place of a budget, is never Over
+// budget, Slower than usual or Waits, and has no "File an issue: speed up". A search box over it keeps the rows whose path holds its text (any case); filter chips, each with its count,
 // show one status alone; the two apply together. Each column heading sorts the table by that column (file names A to
 // Z, any other highest first; a second click reverses it, and an arrow shows which). With no sort picked, the rows
 // that need a look (over budget and not slow on purpose, slower than usual, waits, flaky or fails often) come first,
@@ -70,7 +72,7 @@
     ['over', 'Over budget', 'bad', true], ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
     ['waits', 'Waits', 'info', true], ['flaky', 'Flaky', 'warn', true], ['fails', 'Fails often', 'bad', true],
     ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false],
-    ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false]];
+    ['runner', 'Runs other test files', 'quiet', false], ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false]];
   const S = { el: null, ctx: null, d: null, read: null, repo: undefined, filter: 'all', open: new Set(), busy: false,
     sort: null,          // the column the table is sorted by, {key, dir: asc | desc}; null: rows that need a look first, then the highest CPU s
     query: '', search: null,  // the text of the search box, and the box: the same node from one draw to the next, so it keeps the caret
@@ -121,12 +123,12 @@
   // ---- a file's status ----
   function marks(f) {
     const share = num(obj(settings().slower) && settings().slower.share) === null ? 0.25 : settings().slower.share;
-    const last = obj(f.lastRun) || {};
+    const last = obj(f.lastRun) || {}, runner = f.wholeOnly === true;
     return MARKS.filter(([k]) => ({
       over: f.over === true && !f.slowOnPurpose, slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
-      waits: num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
+      waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
       fails: (num(f.failedSteps) || 0) >= FAILS, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
-      whole: f.wholeOnly === true, never: !list(f.runs).length,
+      runner, whole: runner, never: !list(f.runs).length,
     })[k]);
   }
   const look = (f) => marks(f).some((m) => m[3]);
@@ -346,7 +348,7 @@
     const lines = [ask, '', 'What the Board measured:',
       `- CPU s in its last run: ${one(f.cpu)}`,
       `- Median of its runs: ${one(f.median)} CPU s (${pct(f.change)} against its median)`,
-      `- Budget: ${one(f.budget)} CPU s`,
+      f.wholeOnly === true ? '- Budget: none, it runs other test files' : `- Budget: ${one(f.budget)} CPU s`,
       `- Clock / CPU in its last run: ${num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`}`,
       `- Runs on record: ${num(f.timedRuns) || 0}. Test steps that failed in it: ${num(f.failedSteps) || 0}. Flaky entries: ${num(f.flaky) || 0}.`,
       `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (card ${r.card})`).join(', ') || 'none'}`];
@@ -428,7 +430,8 @@
         S.keep = { act: 'close-comment', file }; draw();
       }));
     }
-    KINDS.forEach(([k, words]) => iss.append(marked(words, 'issue', `issue-${k}`, `${words}: ${file}`, () => { S.ask = draftIssue(f, k); S.keep = { act: 'issue-title', file }; draw(); })));
+    // A runner (wholeOnly) is held to no budget: its time is its files' time, so no issue asks to speed it up.
+    KINDS.filter(([k]) => !(k === 'speed' && f.wholeOnly === true)).forEach(([k, words]) => iss.append(marked(words, 'issue', `issue-${k}`, `${words}: ${file}`, () => { S.ask = draftIssue(f, k); S.keep = { act: 'issue-title', file }; draw(); })));
     el.append(h('p', 'board-head', 'Actions'), now, iss);
     const p = preview(f);
     if (p) el.append(p);
@@ -659,9 +662,12 @@
     if (f.wholeOnly === true) el.append(h('p', 'tests-fact', 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it.'));
     // As in force, or as saved here and not yet in a snapshot.
     const mine = shown(`budget:${file}`), all = shown('fileBudget'), reason = shown(`mark:${file}`) || 'none';
-    const budget = mine !== '' ? `${one(Number(mine))} CPU s, its own` : all !== '' ? `${one(Number(all))} CPU s, the project budget` : 'not known';
+    const budget = f.wholeOnly === true ? 'none, it runs other test files and each of them has its own'
+      : mine !== '' ? `${one(Number(mine))} CPU s, its own` : all !== '' ? `${one(Number(all))} CPU s, the project budget` : 'not known';
     el.append(h('p', 'board-head', 'Runs'), runs, h('p', 'tests-fact', `Budget: ${budget}.`), h('p', 'tests-fact', `Slow on purpose: ${reason}.`));
     const now = () => S.ctx.chip('now', 'info');
+    // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
+    if (f.wholeOnly === true) { el.append(rowActions(f)); return el; }
     el.append(row('budget', 'Set a budget for this file', 'CPU s in place of the project budget', PACK, now(), ...setting(`budget:${file}`, {
       act: 'file-budget', file, label: `Budget of ${file}`, type: 'number', placeholder: 'None', clear: 'Clear',
       check: budgetCheck, send: (v) => control(v === '' ? ['file-budget-clear', file] : ['file-budget', file, v]),
