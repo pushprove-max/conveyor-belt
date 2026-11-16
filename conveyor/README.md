@@ -758,7 +758,8 @@ the default branch, on the same test slots and beside the cards, so no card wait
 only when the branch has moved since its last run. When it fails, Conveyor files one issue of the pack's second
 priority that names the failing cases and the commits since the last pass, and the Board lists it under Needs you
 until a run passes. A later failure of the same cases adds a comment to that issue while it is open, and files no
-other.
+other. A run that names no failing case but prints under 90% of the `ok <case>` lines of the last run that passed does
+not pass: its issue says "ran N of about M cases" and shows the end of its output, and the last pass stays as it was.
 
 ## The test-speed survey
 

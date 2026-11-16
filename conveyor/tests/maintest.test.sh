@@ -176,6 +176,25 @@ t_maintestfile() {
     && [ "$(jq -cs 'map(.title)' "$STUB/filed")" = '["The whole test fails on main: a.test.sh: renders","The whole test fails on main: b.test.sh: renders"]' ] \
     || fail "the same case name failing in another file was taken for the first file's failure: $(runs) runs, $(rec .), $(jq -c '[.number, .title]' "$STUB/filed")"
 }
+# A run of <n> passing cases and no failure, after a first full run of 720 at A: main has moved to B, an hour on. Sets B.
+maintest_count() { # <n>
+  maintest_start; tune '.test.main = ". \"$STUB/main-cmd\""'
+  okcmd() { echo 'echo x >> "$STUB/mains"; for i in $(seq '"$1"'); do echo "ok case$i"; done' > "$STUB/main-cmd"; }
+  okcmd 720; mt $T0; [ "$(rec '[.pass, .full]')" = "[\"$A\",720]" ] || fail "the first full run is not kept with its case count: $(rec .)"
+  B=$(move "move b"); okcmd "$1"; mt $((T0 + 3600)); [ "$(runs)" = 2 ] || fail "the second whole test did not run: $(rec .)"
+}
+# Bug: a run of half the suite with no failure was green, and became the last pass later failures are measured from.
+t_maintestshort() {
+  maintest_count 300
+  [ "$(rec '[.pass, .full, .fail.to, .fail.exit]')" = "[\"$A\",720,\"$B\",0]" ] || fail "a run of 300 of 720 cases moved the last pass or was taken for a pass: $(rec .)"
+  jq -e '(.title | contains("ran 300 of about 720 cases")) and (.body | contains("ran 300 of about 720 cases") and contains("ok case300"))' "$STUB/filed" >/dev/null \
+    || fail "the short run's issue does not say how many cases ran with the end of its output: $(cat "$STUB/filed" 2>&1)"
+}
+# A run a little under the last full count (cases removed, a few skipped) is still a pass, and its count is kept.
+t_maintestnear() {
+  maintest_count 715
+  [ "$(rec '[.pass, .full, .fail]')" = "[\"$B\",715,null]" ] && [ ! -s "$STUB/filed" ] || fail "a run of 715 of 720 cases was not a pass: $(rec .), $(cat "$STUB/filed" 2>&1)"
+}
 t_maintestserve() {
   maintest_start; tune '.test.main = ". \"$STUB/main-cmd\""'
   # The loop runs it by itself, beside its cards: a card lands while the whole test is still running.

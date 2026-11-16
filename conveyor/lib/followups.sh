@@ -21,7 +21,11 @@
 # timeout, its output and logs), in a worktree of that commit alone, $CARDS/maintest/wt.
 # $MAINTEST keeps {sha: the commit of the last run that ended, at: when the last try began, pass: the last commit that
 # passed, fail: null, or {issue, cases, from: the last pass, to: the commit that failed, since, exit} of the failure
-# that stands, filed: [{issue, cases}], the issue last filed for each set of failing cases}; the snapshot gives fail
+# that stands, filed: [{issue, cases}], the issue last filed for each set of failing cases, full: the count of `ok <case>`
+# lines of the output of the last run that passed}. A run that exits 0 with under 90% of full such lines is a short
+# run, not a pass (a run that skipped half the suite would else be the last pass later failures are measured from): it
+# keeps pass and full, and fails as below with the one case "a short run: ...", its issue saying "ran N of about M
+# cases" with the end of its output. The snapshot gives fail
 # to the Board's Needs you (mainTest) until a run passes. The commit is kept only once its run has ended and, when it
 # failed, its issue was filed or added to: a try whose worktree or test slots could not be made, or that was killed,
 # tested nothing, and a failure GitHub did not take reached no one, so the same commit is tried again an hour on.
@@ -34,7 +38,7 @@
 MAIN_TEST_EVERY=3600
 mainput() { printf '%s\n' "$1" > "$MAINTEST.new" && mv -f "$MAINTEST.new" "$MAINTEST" || { rm -f "$MAINTEST.new"; return 1; }; } # <the record>
 maintest() {
-  local cmd sha was at wt=$CARDS/maintest/wt lock rc out f cases pass n state='' prio title body told=true
+  local cmd sha was at wt=$CARDS/maintest/wt lock rc out f cases pass n state='' prio title body told=true ran full short='' tail
   packget test.main cmd && [ -n "$cmd" ] || return 0
   mkdir -p "${wt%/*}" && { exec {lock}>>"$MAINTEST.lock"; } 2>/dev/null && flock -n "$lock" || return 0
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") && at=$(clock) || return 0
@@ -47,20 +51,41 @@ maintest() {
     || { echo "conveyor: the whole test on main did not run: its worktree could not be made: $out" >&2; return 1; }
   out=$(slot_pool 2>&1) || { echo "conveyor: the whole test on main did not run: $out" >&2; return 1; }
   tests "$wt" test.main; rc=$?
-  if [ $rc = 0 ]; then
+  ran=$(sed 's/\x1b\[[0-9;]*m//g' "$wt.test" 2>/dev/null | grep -c '^ok ') || ran=0
+  full=$(jq -r '.full | numbers' <<<"$was")
+  if [ $rc = 0 ] && [ -n "$full" ] && [ $((ran * 10)) -lt $((full * 9)) ]; then
+    short="ran $ran of about $full cases"
+  elif [ $rc = 0 ]; then
     git worktree remove --force "$wt" 2>/dev/null
-    mainput "$(jq -c --arg s "$sha" '. + {sha: $s, pass: $s, fail: null}' <<<"$was")"; return
+    mainput "$(jq -c --arg s "$sha" --argjson r "$ran" '. + {sha: $s, pass: $s, fail: null, full: $r}' <<<"$was")"; return
   fi
-  f=$(testfails "$wt.test" "$rc" test.main) || f='{"files":[]}'
-  git worktree remove --force "$wt" 2>/dev/null
-  cases=$(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end] | unique' <<<"$f") || cases='[]'
+  if [ -n "$short" ]; then
+    tail=$(sed 's/\x1b\[[0-9;]*m//g' "$wt.test" 2>/dev/null | tail -n 20); cases='["a short run: under 90% of the cases of its last full run"]'
+    git worktree remove --force "$wt" 2>/dev/null
+  else
+    f=$(testfails "$wt.test" "$rc" test.main) || f='{"files":[]}'
+    git worktree remove --force "$wt" 2>/dev/null
+    cases=$(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end] | unique' <<<"$f") || cases='[]'
+  fi
   pass=$(jq -r '.pass // ""' <<<"$was"); git rev-parse -q --verify "$pass^{commit}" >/dev/null 2>&1 || pass=''
   n=$(jq -r --argjson c "$cases" '[.filed | arrays | .[] | select(.cases == $c) | .issue][-1] // empty' <<<"$was")
   [ -z "$n" ] || state=$(timeout 20 gh issue view "$n" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''
-  body="The whole test on main (the pack's test.main) failed$([ "$state" != OPEN ] || echo " again, with the same cases,") at ${sha:0:12} (exit $rc; 124 is the ${TEST_TIMEOUT}s timeout).
+  if [ -n "$short" ]; then
+    body="The whole test on main (the pack's test.main) $short at ${sha:0:12}. It named no failing case, but it ran under 90% of the cases of its last full run, so it is not a pass.
+
+The end of its output:
+\`\`\`
+$tail
+\`\`\`
+"
+  else
+    body="The whole test on main (the pack's test.main) failed$([ "$state" != OPEN ] || echo " again, with the same cases,") at ${sha:0:12} (exit $rc; 124 is the ${TEST_TIMEOUT}s timeout).
 
 Failing cases:
 $(jq -r 'if . == [] then "the run named none" else .[] | "- " + . end' <<<"$cases")
+"
+  fi
+  body="$body
 
 $(if [ -n "$pass" ]; then echo "Commits since the last pass (${pass:0:12}..${sha:0:12}):"; git log --format='- %h %s' "$pass..$sha" | head -n 50
   else echo "No pass of it is recorded here yet: main is at ${sha:0:12}."; fi)"
@@ -68,8 +93,9 @@ $(if [ -n "$pass" ]; then echo "Commits since the last pass (${pass:0:12}..${sha
     gh_write issue comment "$n" --body "$body" >/dev/null 2>&1 || { told=false; echo "conveyor: the whole test on main failed again; no comment could be added to #$n" >&2; }
   elif [ -z "$n" ] || [ "$state" = CLOSED ]; then
     prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS")
-    title=$(jq -r --arg s "${sha:0:12}" '"The whole test fails on main" + (if . == [] then " at " + $s
-      else ": " + (.[:3] | join(", ")) + (if length > 3 then " and \(length - 3) more" else "" end) end) | .[0:200]' <<<"$cases")
+    title=$(jq -r --arg s "${sha:0:12}" --arg short "$short" 'if $short != "" then "The whole test on main " + $short + " at " + $s else
+      "The whole test fails on main" + (if . == [] then " at " + $s
+      else ": " + (.[:3] | join(", ")) + (if length > 3 then " and \(length - 3) more" else "" end) end) end | .[0:200]' <<<"$cases")
     n=$(gh_write issue create --title "$title" --label "$TYPE" --label "$prio" --body "$body" 2>&1 | grep -oE '/issues/[0-9]+' | tail -n 1); n=${n##*/}
     [ -n "$n" ] || { told=false; echo "conveyor: the whole test on main failed; its issue could not be filed" >&2; }
   else
