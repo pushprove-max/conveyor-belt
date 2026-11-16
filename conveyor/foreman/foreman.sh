@@ -25,7 +25,8 @@
 #   reply with the claim's first line. Any other prompt, or the words anywhere else, does nothing.
 # start (SessionStart): in the launcher's session (CONVEYOR_FOREMAN=1), at its first start, fresh or resumed, first
 #   marks it the Foreman. A resumed session given a new id whose transcript is the Foreman session's takes the mark
-#   over, unless it is a session that lost the role. Then, for the
+#   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
+#   Claude Code process (cleared_). Then, for the
 #   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md), then its saved state: the DONE items of state.md archived
 #   (archive.py), a live summary built fresh (never saved), then state.md, cut to its 5000-byte cap.
 #   A session that was the Foreman and no longer is gets one line saying so, once, shown to the owner (systemMessage).
@@ -192,6 +193,7 @@ start() {
   elif { [ "$src" = resume ] || [ "$src" = fork ]; } && [ -n "$SID" ]; then
     t=$(jq -r '.transcript_path // empty | strings' <<<"$IN" 2>/dev/null)
     locked adopt_ "$SID" "$t" || return 1
+  elif [ "$src" = clear ] && [ -n "$SID" ]; then locked cleared_ "$SID" || return 1
   fi
   if foreman "$SID"; then context; return 0; fi
   if [ -n "$SID" ] && grep -qxF -- "$SID" "$FD/former" 2>/dev/null; then
@@ -282,6 +284,17 @@ adopt_() {
   m=$(marked); [ -n "$m" ] && [ "$m" != "$1" ] && [ -f "$2" ] || return 0
   ! awk -v s="$1" '$1 == s { f = 1 } END { exit !f }' "$FD/former" 2>/dev/null || return 0
   jq -en --arg m "$m" 'first(inputs | select(.sessionId == $m or .forkedFrom.sessionId? == $m)) | true' "$2" >/dev/null 2>&1 || return 0
+  claim_ "$1"
+}
+# cleared_ <session id> (under claim.lock, as adopt_): a /clear (source clear) gives the session a new id in the same
+# Claude Code process; the new one takes the mark when the session it replaces, the one that process's
+# sessions/<pid>.json still names, is the marked Foreman. The process is the nearest of this hook's ancestors with a
+# sessions/<pid>.json. A /clear in any other session, or after off, changes nothing.
+cleared_() {
+  local m p=$PPID
+  m=$(marked); [ -n "$m" ] && [ "$m" != "$1" ] || return 0
+  while [ "${p:-0}" -gt 1 ] && [ ! -f "$CC/sessions/$p.json" ]; do p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); done
+  [ "${p:-0}" -gt 1 ] && jq -e --arg m "$m" --argjson p "$p" '.sessionId == $m and .pid == $p' "$CC/sessions/$p.json" >/dev/null 2>&1 || return 0
   claim_ "$1"
 }
 

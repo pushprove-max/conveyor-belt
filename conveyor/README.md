@@ -1148,7 +1148,7 @@ The Foreman is a Claude Code session in a project's main checkout that watches t
 the owner what needs them. Set it up once with `/conveyor-belt:setup --foreman`, then start it by typing
 `/conveyor-belt:foreman` in any session in the main checkout: that session becomes the Foreman at once, and its
 watchers start at the end of that turn. It stays the Foreman however it is continued or resumed (`claude --continue`,
-`claude --resume`, an IDE, a session manager); nothing needs to be set.
+`claude --resume`, an IDE, a session manager) and after `/clear` in it; nothing needs to be set.
 
 The role also starts by itself. The plugin's SessionStart hook, in a new session (not a resumed or continued one)
 opened in a project's main checkout, on the owner's machine or the host:

@@ -14,7 +14,8 @@ A new session in the main checkout takes the role when no session holds it, or w
 When a live session holds it, the new session asks you whether to take it over (`conveyor/README.md`, Foreman).
 The session that takes the role says so in one line: `This session is now the Foreman: …`. When the host file gives
 the Foreman a name in `foreman.name`, the line shows it in brackets: `This session is now the Foreman (Ada): …`.
-`/conveyor-belt:foreman off` ends the role.
+The session stays the Foreman when you continue or resume it, and after `/clear` in it. `/clear` in another session
+does not give it the role. `/conveyor-belt:foreman off` ends the role, and it stays off after `/clear`.
 
 ## Status and wakes
 

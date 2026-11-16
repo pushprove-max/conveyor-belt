@@ -1,5 +1,5 @@
 ---
-description: Foreman mode, make this session the Foreman of this project (one per project; it stays the Foreman when continued or resumed), or end the role with off
+description: Foreman mode, make this session the Foreman of this project (one per project; it stays the Foreman when continued, resumed or cleared with /clear), or end the role with off
 argument-hint: "[off]"
 allowed-tools: Bash
 ---
