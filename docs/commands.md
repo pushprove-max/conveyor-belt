@@ -33,7 +33,9 @@
   the same part of the same file. If they do, it adds `Depends on: #N` to the issue, with a comment. To remove a wrong
   dependency, use the Board's **Depends on…** ×, or `conveyor.sh control depends <issue> remove <N>`.
 - `conveyor.sh retry <issue>` gives a blocked card back: the loop picks its issue again and starts from the card's kept
-  work. An issue closed while its card was blocked is picked again on its own once it is opened again.
+  work. An issue closed while its card was blocked is picked again on its own once it is opened again. A card that
+  stopped for your yes to a visible change is the exception: if the issue's `## What customers or staff will see`
+  section changed after the card stopped, the issue asks for a different change, and the next card builds from nothing.
 - `conveyor.sh retry <issue> --fresh` gives a blocked card back without its kept work: the next card builds from
   nothing. The kept work moves to a dated folder under `kept-dropped/` in the state folder; it is not deleted.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
