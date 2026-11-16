@@ -1535,8 +1535,13 @@
       tr.append(td);
       return tr;
     }
-    const resetButton = (m, b) => button(`${m.endsWith(':fast') ? 'Reset :fast' : 'Reset'} to built-in (${['input', 'output', 'cacheRead'].map((k) => usd(b[k])).join(' / ')} / ${usd(writeOf(b))})`, 'btn-quiet', m.endsWith(':fast') ? 'price-fast-reset' : 'price-reset',
-      `Put ${m} back to its built-in price`, () => priceRun([['clear', m]], () => { if (S.priceEdit && S.priceEdit.model === m) S.priceEdit = null; }));
+    // Reset names the price that clearing m gives: the fast mode of a model with your price then costs twice that
+    // price, not its built-in price (use_prices in dashboard_limit.py).
+    const resetButton = (m, b) => {
+      const fast = m.endsWith(':fast'), base = fast && over[m.slice(0, -5)], mine = fast && priced(base), to = mine ? twiceOf(base) : b;
+      return button(`${fast ? 'Reset :fast' : 'Reset'} to ${mine ? 'twice your price' : 'built-in'} (${['input', 'output', 'cacheRead'].map((k) => usd(to[k])).join(' / ')} / ${usd(writeOf(to))})`, 'btn-quiet', fast ? 'price-fast-reset' : 'price-reset',
+        `Put ${m} back to ${mine ? `twice your price of ${m.slice(0, -5)}` : 'its built-in price'}`, () => priceRun([['clear', m]], () => { if (S.priceEdit && S.priceEdit.model === m) S.priceEdit = null; }));
+    };
     // from: the prices the fields start at, for a fast mode the pack does not price (its row's second line).
     const openEdit = (m, ratesOnly, from) => {
       const e = over[m] || {}, r = (ratesOnly ? (priced(e) ? e : from) : rateOf(m)) || {};
@@ -1554,7 +1559,7 @@
       const e = over[m] || {}, b = built.get(m), mine = priced(e), r = rateOf(m), added = !b && isModel(m);
       const fo = over[`${m}:fast`], fb = built.get(`${m}:fast`);
       // A fast mode the pack does not price, of a model it does, costs twice that price (use_prices in dashboard_limit.py).
-      const fast = priced(fo) ? [fo, 'Saved, from the pack'] : mine && fb ? [Object.fromEntries(PRICE_KEYS.map(([k]) => [k, 2 * writeOrRate(e, k)])), 'twice your price'] : fb ? [fb, 'built in'] : null;
+      const fast = priced(fo) ? [fo, 'Saved, from the pack'] : mine && fb ? [twiceOf(e), 'twice your price'] : fb ? [fb, 'built in'] : null;
       const two = (main, second) => { const td = h('td', null); td.append(h('div', null, main)); if (fast) td.append(h('div', 'rules-price-fastline', second)); return td; };
       const name = h('td', 'rules-price-name');
       name.append(h('strong', null, nameOf(m)), ...(added ? [S.ctx.chip('added', 'quiet')] : []), ...marks(m),
@@ -1578,6 +1583,7 @@
       return tr;
     }
     const writeOrRate = (r, k) => (k === 'cacheWrite' ? writeOf(r) : r[k]);
+    const twiceOf = (r) => Object.fromEntries(PRICE_KEYS.map(([k]) => [k, 2 * writeOrRate(r, k)]));
     // An OpenCode model: priced as OpenCode reports (the default), at your price, or as the model it is marked as.
     function ocRow(id) {
       const tr = h('tr', 'rules-price rules-price-oc');

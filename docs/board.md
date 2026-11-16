@@ -146,7 +146,8 @@ costs 1.25 times the input price. A 1-hour cache write costs twice the input pri
 **Cancel** drops them. A row with your price says "Saved, from the pack" and has **Reset to built-in**, which puts back
 the built-in price. Your price wins over the built-in price for every prompt size, in step costs and in the cost of
 the day. Fast mode then costs twice your price, until you give it a price of its own with **Edit :fast**.
-**Reset :fast to built-in** puts back its built-in price. A step priced from your price says "priced from your
+**Reset :fast** takes that price off: fast mode costs twice your price again, or the built-in price when the model
+has no price of yours. The button shows that price. A step priced from your price says "priced from your
 override" on its cost line.
 
 **+ Add model** adds a model that the Board does not know: its ID as sessions report it, a display name, a provider,

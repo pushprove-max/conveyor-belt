@@ -139,6 +139,9 @@ test('Rules: a fast mode price edits in its row and resets to built-in on its ow
   assert.deepEqual(posted(w), [['set', 'claude-opus-5-5:fast', '3', '10', '0.2']]);
   const r = rowOf(w, 'claude-opus-5-5');
   assert.deepEqual(fastLine(r).slice(1, 2), ['$3']);
+  // Bug: Reset :fast promised the built-in $8 input, but with Opus 5.5 at your $1 the cleared fast mode costs twice
+  // that, $2: the button names the price clearing gives.
+  assert.equal(act(r, 'price-fast-reset').textContent, 'Reset :fast to twice your price ($2 / $10 / $0.2 / $2.5)');
   act(r, 'price-fast-reset').click();
   await settle();
   assert.deepEqual(posted(w), [['clear', 'claude-opus-5-5:fast']]);
