@@ -3,7 +3,8 @@
 # timeout: 120
 # Engine cases: the Board's Release (`conveyor.sh release-run [prep] <version>`) runs release-prep, then on its pass
 # release, once; its Run suite releases nothing; a red suite is not released. Their fixture is runsetup, below
-# (release.test.sh's cutsetup); releasestop.test.sh, releaseagain.test.sh and releasereuse.test.sh use it too.
+# (release.test.sh's cutsetup); releasestop.test.sh, releaseagain.test.sh and releasereuse.test.sh (with fullreuse.test.sh and
+# crossreuse.test.sh) use it too.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \

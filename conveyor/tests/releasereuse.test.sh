@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: release-prep, Run full test suite and Push landed rerun only the files that failed or changed since the
-# whole-suite run on the nearest ancestor and reuse its passes (issue 43), and each counts the others' green run on the same commit
-# (issue 44). Their fixture is releaseboard.test.sh's runsetup (release.test.sh's cutsetup); ftended is fulltest.test.sh's.
+# Engine cases: release-prep reruns only the files that failed or changed since the whole-suite run on the nearest
+# ancestor and reuses its passes (issue 43), and suitebase() takes that ancestor's run (issue 44). Their fixture is
+# rrsetup, below, on releaseboard.test.sh's runsetup (release.test.sh's cutsetup); fullreuse.test.sh and
+# crossreuse.test.sh use it too.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -74,66 +75,6 @@ t_relreusesel() {
   echo two >> "$R/src/s3.sh"
   rrprep
   [ "$got" = "t/f1.test.sh t/f3.test.sh" ] || fail "a change to src/s3.sh did not run t/f3 beside t/f1: '$got'"
-}
-
-# rrfull: B, the commit of what the case changed (not pushed); Run full test suite runs on it and ends. Sets B and got.
-rrfull() {
-  git -C "$R" commit -qam 'fix: B' || fail "the fixture could not be made"
-  B=$(git -C "$R" rev-parse HEAD); rm -f "$STUB/ran"
-  loop full-test > "$T/$CASE.b" 2>&1 || fail "full-test did not start on B: $(cat "$T/$CASE.b")"
-  ftended 2; got=$(sort "$STUB/ran" 2>/dev/null | paste -sd' ' -)
-}
-# Bug (#44, D1): Run full test suite ran every file again after a red run and its fix, where release-prep reran the
-# failed file alone. Here B changes t/f1 alone: only t/f1 runs, and the run is green, naming the run it reused.
-t_fullreusefail() {
-  local A B got
-  rrsetup full
-  rrfull
-  [ "$got" = t/f1.test.sh ] || fail "full-test on B ran '$got', not t/f1.test.sh alone: $(cat "$ST/fulltest.jsonl.log")"
-  [ "$(ftl 'select(.sha == "'"$B"'") | [.state, .reused.sha, .reused.ran, .reused.kept]')" = "[\"passed\",\"$A\",[\"t/f1.test.sh\"],2]" ] \
-    || fail "full-test on B is not green, or does not name the run reused: $(cat "$ST/fulltest.jsonl")"
-}
-# Bug (#44, D4): a change to the suite's own command between two full test runs: the passes of the first are no proof,
-# so every file runs.
-t_fullreusecmd() {
-  local A B got
-  rrsetup full
-  echo '# changed' >> "$R/.conveyor/test-full.sh"
-  rrfull
-  [ "$got" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "a change to .conveyor/test-full.sh did not run every file: '$got'"
-  [ "$(ftl 'select(.sha == "'"$B"'") | [.state, .reused]')" = '["passed",null]' ] || fail "a whole suite's line says it reused a run: $(cat "$ST/fulltest.jsonl")"
-}
-# Bug (#44, D3): release-prep ran the whole suite on a commit a green full test run had just passed. It runs no test
-# and posts the pass, naming the run it took.
-t_relreusefull() {
-  local A B RUN got
-  rrsetup
-  git -C "$R" commit -qam 'fix: B' && git -C "$R" push -q origin main || fail "the fixture could not be made"
-  B=$(git -C "$R" rev-parse HEAD)
-  loop full-test > /dev/null 2>&1 || fail "full-test did not start on B"; ftended 1
-  [ "$(ftl .state)" = '"passed"' ] || fail "full-test on B did not pass: $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log")"
-  rm -f "$STUB/ran"
-  loop release-prep 1.1.0 > "$T/$CASE.b" 2>&1 || fail "release-prep failed on B: $(cat "$T/$CASE.b")"
-  [ ! -e "$STUB/ran" ] || fail "release-prep ran tests on a commit a green full test passed: $(cat "$STUB/ran")"
-  grep -q "statuses/$B -f state=success -f context=conveyor/release-suite -f description=.*reused the green run of " "$STUB/gh-calls" \
-    || fail "no passing status naming the reused run was posted on B: $(cat "$STUB/gh-calls")"
-  jq -e --arg b "$B" '.state == "passed" and .reused.sha == $b and .reused.ran == [] and .reused.kept == 3' "$RUN" > /dev/null \
-    || fail "the record does not name the green run it reused: $(cat "$RUN")"
-}
-# Bug (#44, D2): Push landed ran the whole suite on a commit release-prep had just passed. It runs no test and pushes.
-# B is made an unpushed landing: origin is put back on A and a card's landed line names B.
-t_fullreusepush() {
-  local A B RUN got
-  rrsetup
-  rrprep
-  git -C "$T/$CASE/origin" update-ref refs/heads/main "$A" && git -C "$R" update-ref "refs/remotes/origin/main" "$A" \
-    && rm -f "$ST/pushed" && landed 7 | jq -c --arg b "$B" '.sha = $b' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
-  rm -f "$STUB/ran"
-  loop full-test push > "$T/$CASE.p" 2>&1 || fail "push landed did not start: $(cat "$T/$CASE.p")"; ftended 1
-  [ ! -e "$STUB/ran" ] || fail "Push landed ran tests on a commit release-prep passed: $(cat "$STUB/ran")"
-  [ "$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)" = "$B" ] \
-    && [ "$(ftl '[.state, .pushed.ok, .reused.sha, .reused.ran]')" = "[\"passed\",true,\"$B\",[]]" ] \
-    || fail "Push landed did not push B on release-prep's pass: $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log")"
 }
 # Bug (#44 review): the record's newest line on an ancestor was taken, so a release-prep on origin's A after a green
 # full test on the unpushed B hid B's pass, and Push landed on B ran every file again. suitebase() takes the line on
