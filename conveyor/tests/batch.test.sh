@@ -82,6 +82,9 @@ if grep -q '^# The changed tests fail' "$STUB/brief"; then rm -f needs-b
 else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt; : > needs-b ;; *) echo eight >> a.txt; : > supplied-by-b ;; esac; fi
 EOF
   echo '[ ! -e needs-b ] || [ -e supplied-by-b ] || { echo "FAIL needs.test: needs-b without supplied-by-b"; exit 1; }' >> "$STUB/test-cmd"
+  # #7's tests after its fix end only once #8 has landed: #8, at its claim, looks again each `live` second, and #7's
+  # stubbed fix is faster than that, so without this wait #8 could land before those tests start or after they end.
+  echo 'case $PWD in *-7) [ -e needs-b ] || while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"landed\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
   st 'select(.issue == 7 and .step == "test" and .result == "fail") | .tail' | grep -q 'FAIL needs.test' || fail "#7's own tests did not fail: $(st 'select(.issue == 7) | "\(.step) \(.result)"' | tr '\n' ,)"
