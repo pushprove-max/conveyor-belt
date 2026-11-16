@@ -46,6 +46,14 @@ AT=@
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t${AT}example.com
 fail() { echo "FAIL [$CASE]: $*" >&2; exit 1; }
 st() { jq -r "$1" "$ST/cards.jsonl"; }
+# Fails naming each line of the records file the record check (jq/check.jq) refuses, with the field it refused. A case
+# that proves a writer's line checks calls this, not `loop check`: that sets a refused line aside and still exits 0.
+recok() { # <records file> <what wrote them>
+  local bad
+  bad=$(jq -Rrn -f "$SRC/jq/check.jq" < "$1") || fail "the record check did not run on the records of $2"
+  [ -z "$bad" ] || fail "$2 wrote a record the check refuses: $(while IFS=$'\t' read -r l f; do
+    printf '\nline %s: the field %s is not in check.jq or has a type it refuses: %s' "$l" "$f" "$(sed -n "${l}p" "$1" | cut -c1-400)"; done <<<"$bad")"
+}
 # A card's lines apart from the marks (deps, start, filed, pushed, issue): what a case reads when it lists the steps of the review rule.
 NOMARK='(.step | IN("deps", "start", "filed", "pushed", "issue") | not)'
 # The changed tests a card runs before it lands are $STUB/test-cmd, the test.command of main's pack (setup): it

@@ -12,13 +12,10 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Fails naming each line of the records file the check refuses, with the field it refused (check.jq says which).
-recok() { # <records file> <what wrote them>
-  local bad
-  bad=$(jq -Rrn -f "$SRC/jq/check.jq" < "$1") || fail "the record check did not run on the records of $2"
-  [ -z "$bad" ] || fail "$2 wrote a record the check refuses: $(while IFS=$'\t' read -r l f; do
-    printf '\nline %s: the field %s is not in check.jq or has a type it refuses: %s' "$l" "$f" "$(sed -n "${l}p" "$1" | cut -c1-400)"; done <<<"$bad")"
-}
+# recok (lib.sh) fails on each line the check refuses. The writers the cases here do not reach are checked by recok in
+# the cases that already make their lines: the rebase line (port.test.sh t_rebase), the filed line and a landed line
+# with leftover and followups (port.test.sh t_portfix, t_resume), a land-branch card's picked line with branch
+# (branch.test.sh t_branch) and a landed line with yesFrom (visible.test.sh t_inheritpart).
 # Fails unless the records hold a line of each step named.
 recsteps() { # <what wrote them> <step>...
   local s have; have=$(jq -r .step "$ST/cards.jsonl" | sort -u)

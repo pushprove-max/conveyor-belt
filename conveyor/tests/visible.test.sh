@@ -473,7 +473,7 @@ t_inheritpart() {
     && grep -q 'Conveyor stops the$' "$STUB/brief" || fail "the fix session's brief lacks the never-undo rule: $(head -c 2000 "$STUB/brief")"
   grep -q 'A missing approval line is not a finding: report a visible change on the USER-VISIBLE line only.' "$STUB/asked" \
     || fail "the review instructions do not say a missing approval line is not a finding"
-  loop check || fail "the record check refuses a landed line with yesFrom"
+  recok "$ST/cards.jsonl" "a follow-up that landed on its parent's yes (its landed line with yesFrom)"
 }
 # The follow-up of a follow-up, as it stops and is retried: from #100101 landed, as the case above leaves it (its
 # landed line; its change on main is not its to need). It keeps the name conveyor.slowest gives it, so the runner starts

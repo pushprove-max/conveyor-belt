@@ -42,7 +42,7 @@ t_rebase() {
   [ "$(st 'select(.step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(git -C "$R" log -1 --format=%s HEAD~1)" = other ] || fail "the card did not land on top of the other commit"
   [ "$(tr '\n' ' ' < "$R/a.txt")" = "ONE two " ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "the landed tree does not hold both changes, main is dirty, or the worktree is left"
   [ "$(st 'select(.step == "rebase") | [.result, .tokens.claude, (.reason | startswith("rebase onto main conflicts: "))] | tojson')" = '["ok",35,true]' ] || fail "rebase line: $(st 'select(.step == "rebase")')"
-  loop check || fail "the record check refuses a rebase line"
+  recok "$ST/cards.jsonl" "a card rebuilt after a landing conflict (its rebase line)"
   [ "$(loop cards | jq -c '.cards[0] | [.step, .reviews, (.steps | map(.step) | join(" "))]')" = '["landed",2,"build review test rebase review test"]' ] || fail "dashboard row: $(loop cards)"
 }
 
@@ -61,7 +61,8 @@ t_portfix() {
     && [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] \
     && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P0] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
     || fail "a test fix after the port's GO lost the earlier loop's findings: $(steps 8)"
-  loop check || fail "the records do not check"
+  [ "$(st 'select(.issue == 8 and .step == "filed") | .followups | length')" = 3 ] || fail "no filed line names the three follow-ups: $(steps 8)"
+  recok "$ST/cards.jsonl" "a card that landed on a NO-GO (its filed line, and its landed line with leftover and followups)"
 }
 
 # Bugs: the port's landing conflicts too (its session moves main again) and something lands, or a second port runs:
@@ -251,6 +252,7 @@ t_resume() {
   [ "$(st 'select(.issue == 7 and .step == "landed") | [.sha, .leftover, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",true,[100101]]" ] \
     && [ "$(jq -r .title "$STUB/filed")" = '[P1] a.txt:1 wrong word' ] && jq -r .body "$STUB/filed" | grep -q '^Follow-up to #7 (Conveyor card ' \
     || fail "a card landed by retry after a last review's NO-GO did not file its leftover finding: $(steps 7) $(cat "$STUB/filed" 2>&1)"
+  recok "$ST/cards.jsonl" "a card landed by retry on a NO-GO (its landed line with leftover and followups)"
 }
 
 # A failed step (here the review, tried twice) with a patch that still applies: one session that starts from the patch.
