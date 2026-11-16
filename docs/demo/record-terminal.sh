@@ -74,7 +74,9 @@ asked() { printf '? %s  %s\n' "$1" "$2"; }
   asked 'Where is the product code?' 'src/'
   asked 'The command that runs the tests?' 'npm test'
   asked 'Run a first test-speed survey now?' 'no'
-  conveyor.sh setup --owner "Dev" --product src/ --test "npm test" --survey no
+  asked 'Make a fast lane (your own worktree for changes made by hand)?' 'no'
+  asked 'Make a research lane (a read-only sandboxed worktree)?' 'no'
+  conveyor.sh setup --owner "Dev" --product src/ --test "npm test" --survey no --fast-lane no --research-lane no
   conveyor.sh doctor
 } > ~/session.txt 2>&1
 cat ~/session.txt

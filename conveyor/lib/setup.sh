@@ -17,12 +17,17 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
   linkFromMain: [], push: {env: {}}, remote: "origin",
   models: {allowed: {claude: ["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5"], codex: ["gpt-6.1-sol", "gpt-6-astra"],
     "claude-reviewer": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"]}},
+  lanes: {research: {model: "claude-fable-5-2", effort: "medium"}},
   privacy: {mode: "public"}}'
 # The question "Run a first test-speed survey now?" (conveyor/README.md, The first survey): answered by --survey yes|no,
 # and asked, as the pack's answers are (exit 2, nothing written), while the pack has no saved answer
 # (test.firstSurvey); a saved answer is not asked again unless --survey is given. Once the labels are there, yes files
 # one survey issue (firstsurvey(), lib/survey.sh) and no files none; then the answer is saved, so a filing that failed
 # leaves it unsaved and the question asked again.
+# The questions "Make a fast lane?" and "Make a research lane?" (docs/lanes.md): answered by --fast-lane yes|no and
+# --research-lane yes|no, and asked (exit 2, nothing written) on every run; yes makes the lane (setuplane()) once the
+# project is in the host file, where its create writes the lane's folder. PACK0's lanes.research is the research
+# lane's model and effort, which its create needs; yes writes it into a pack that has none.
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
 # Its last line says that landed cards wait for the Board's Push landed: the control record's push rule is off by
 # default (lib/control-defaults.json). A pack with no test.full (one setup did not write) has no Push landed: the line
@@ -32,19 +37,25 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # ~/.claude) has none, and doctor names them missing until it has.
 MPS=mattpocock-skills@claude-plugins-official
 mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length > 0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" >/dev/null 2>&1; }
-setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' first full
+setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' first full
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
     [ "$1" != --foreman ] || { fm=1; shift; continue; }
     [ "$1" != --pin ] || { pin=1; shift; continue; }
     case $1 in --owner) owner=${2-} ;; --product) prods+=("${2-}") ;; --test) test=${2-} ;;
-      --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;; *) set -- x; break ;; esac
+      --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
+      --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
+      --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;; *) set -- x; break ;; esac
     [ $# -ge 2 ] || { set -- x; break; }; shift 2
   done
-  [ $# = 0 ] || { echo "usage: conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]" >&2; return 2; }
+  [ $# = 0 ] || { echo "usage: conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]" >&2; return 2; }
+  # The two lanes are asked on every run, before anything is changed: there is no saved answer.
+  [ -n "$fl" ] || need+=("--fast-lane <yes or no: make a fast lane, your own worktree for changes made by hand?>")
+  [ -n "$rl" ] || need+=("--research-lane <yes or no: make a research lane, a read-only sandboxed worktree?>")
   if [ -e "$PACK" ]; then
-    [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || { echo "conveyor: setup needs: $ask" >&2; return 2; }; }
+    [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
+    [ ${#need[@]} = 0 ] || { printf 'conveyor: setup needs:%s\n' "$(printf ' %s;' "${need[@]}")" >&2; return 2; }
   else
     [ -n "$owner" ] || need+=("--owner <whose yes a visible change needs>")
     [ ${#prods[@]} -gt 0 ] || need+=("--product <a path prefix of product code> (one for each)")
@@ -96,9 +107,27 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
     && { grep -qxF /conveyor/state/ "$x" 2>/dev/null || { { [ ! -s "$x" ] || [ -z "$(tail -c 1 "$x")" ] || echo >> "$x"; } && echo /conveyor/state/ >> "$x" && echo "conveyor: wrote /conveyor/state/ in git's exclude file $x, so git leaves out the state folder"; }; } \
     || { echo "conveyor: the state folder conveyor/state/ could not be added to git's exclude file" >&2; return 1; }
   hostadd || return 1
+  [ "$fl" = no ] || setuplane fast || return 1
+  if [ "$rl" = yes ]; then
+    # A pack an earlier setup wrote has no lanes.research, which the lane's create needs: PACK0's is written in.
+    packget lanes.research x || return 1
+    [ -n "$x" ] || { jq ".lanes.research = ($PACK0).lanes.research" "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      && echo "conveyor: wrote the research lane's model and effort as the pack's lanes.research"; } \
+      || { rm -f "$PACK.new"; echo "conveyor: the research lane's model and effort could not be written in the pack" >&2; return 1; }
+    setuplane research || return 1
+  fi
   [ -z "$fm" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" setup || return 1
   packget test.full full || return 1
   echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
+}
+# setuplane fast|research: the lane made by its own create (`conveyor.sh lane <lane> create`, re-runnable: a lane
+# already there is left as it is), its output passed on, with its `made the` line, there only when the lane is new,
+# said as one `created:` line.
+setuplane() {
+  local out rc
+  out=$(cd "$MAIN" && bash "$HERE/conveyor.sh" lane "$1" create); rc=$?
+  [ -z "$out" ] || sed 's/^conveyor: made the /conveyor: created: the /' <<<"$out"
+  [ $rc = 0 ] || { echo "conveyor: the $1 lane could not be made (conveyor.sh lane $1 create)" >&2; return 1; }
 }
 # A test command that runs a shell script of the project (a word of it ending in .sh that is a file, from the
 # checkout's root) with no `TESTRUN sec` and no testtime.sh in it: its cards record no test times. Setup says how to

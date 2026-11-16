@@ -81,17 +81,18 @@ t_setup() {
   sample; local X=$D/conveyor/conveyor.sh out was
   out=$(cd "$S" && bash "$X" setup 2>&1); [ $? = 2 ] || fail "setup with no pack and no answers did not exit 2: $out"
   grep -q -- '--owner' <<<"$out" && grep -q -- '--product' <<<"$out" && grep -q -- '--test' <<<"$out" \
+    && grep -q -- '--fast-lane <yes or no' <<<"$out" && grep -q -- '--research-lane <yes or no' <<<"$out" \
     && grep -qF -- '--survey <yes or no: run a first test-speed survey now?>' <<<"$out" || fail "setup did not name each answer it needs: $out"
   ! grep -qE -- '--(remote|branch|label|model)' <<<"$out" || fail "setup asked for what has a safe default: $out"
-  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --survey no 2>&1); [ $? = 2 ] && grep -q -- '--test' <<<"$out" && ! grep -q -- '--owner' <<<"$out" \
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --survey no 2>&1); [ $? = 2 ] && grep -q -- '--test' <<<"$out" && ! grep -q -- '--owner' <<<"$out" \
     || fail "setup with the test command missing did not ask for it alone: $out"
   [ ! -e "$S/.conveyor" ] && [ ! -e "$V" ] && [ ! -e "$G/created" ] && [ ! -e "$G/pip" ] || fail "setup with an answer missing wrote something"
   # Origin's default branch is the landing and push target; when it cannot be read, the checked-out branch is no stand-in.
   git -C "$S" remote set-url origin "$T/$CASE/none.git"
-  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no 2>&1) && fail "setup went on with origin's default branch unread: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no 2>&1) && fail "setup went on with origin's default branch unread: $out"
   grep -q "origin's default branch could not be read" <<<"$out" && [ ! -e "$S/.conveyor" ] && [ ! -e "$V" ] || fail "setup with origin unread: $out"
   git -C "$S" remote set-url origin "$T/$CASE/origin.git"
-  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --product 'web app/' --test 'npm test' --survey no 2>&1) || fail "setup from nothing exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --product 'web app/' --test 'npm test' --survey no 2>&1) || fail "setup from nothing exited non-zero: $out"
   # Bug: a new install lands cards and pushes none (the push rule is off by default), and setup did not say so, so
   # the owner waited for pushes that never came. Its last line names Push landed and the Rules tab.
   [ "$(tail -n 1 <<<"$out")" = 'conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab' ] \
@@ -119,51 +120,51 @@ t_setup() {
   # Bug: Matt Pocock's skills, which /conveyor-belt:plan reads, were left uninstalled: setup installs them from the
   # official marketplace once, and a rerun, finding them installed, does not install them again.
   [ "$(cat "$G/claude-installs" 2>&1)" = mattpocock-skills@claude-plugins-official ] || fail "setup did not install mattpocock-skills: $(cat "$G/claude-installs" 2>&1)"
-  was=$(setupstate); out=$(cd "$S" && bash "$X" setup 2>&1) || fail "setup run again exited non-zero: $out"
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup run again exited non-zero: $out"
   [ "$(setupstate)" = "$was" ] && [ "$(wc -l < "$G/created")" = 5 ] && [ "$(wc -l < "$G/claude-installs")" = 1 ] || fail "setup run again changed something: $(diff <(echo "$was") <(setupstate)) $(cat "$G/claude-installs")"
   ! grep -qE 'wrote|pinned|follows|created' <<<"$out" || fail "setup run again says it changed something: $out"
 }
 # The cases below go on from a project setup made (setupdone): one after another, they and the case above made one case of 5 s.
-setupdone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no >/dev/null) || fail "setup from nothing exited non-zero"; }
+setupdone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no >/dev/null) || fail "setup from nothing exited non-zero"; }
 t_setuppin() {
   local X out; setupdone
   # With --pin, a pack naming no plugin pins the plugin copy's commit instead.
   # Bug: on a pack already there with no test.full, setup's last line sent the owner to a Push landed that is greyed
   # (fulltest() refuses with no test.full): it says the pack needs one.
   jq 'del(.plugin, .test.full)' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  out=$(cd "$S" && bash "$X" setup --pin 2>&1) || fail "setup --pin exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --pin 2>&1) || fail "setup --pin exited non-zero: $out"
   [ "$(jq -c .plugin "$S/.conveyor/project.json")" = "{\"commit\":\"$B\"}" ] && grep -q "pinned Conveyor commit $B" <<<"$out" || fail "setup --pin did not pin the plugin copy's commit: $out"
   [ "$(tail -n 1 <<<"$out")" = "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab; Push landed needs the pack's test.full, the full test suite: add it" ] \
     || fail "setup on a pack with no test.full did not say Push landed needs one: $out"
   # A pin already there is kept, and its commit installed.
   jq --arg a "$A" '.plugin = {commit: $a}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  (cd "$S" && bash "$X" setup >/dev/null) || fail "setup with a pin already there exited non-zero"
+  (cd "$S" && bash "$X" setup --fast-lane no --research-lane no >/dev/null) || fail "setup with a pin already there exited non-zero"
   [ "$(jq -r .plugin.commit "$S/.conveyor/project.json")" = "$A" ] && [ "$(git -C "$V/$A" rev-parse HEAD)" = "$A" ] || fail "setup replaced a pin, or did not install it"
   # Bug: setup moves a project that follows main (the owner's own, to run each change before it is released) to releases.
   jq '.plugin = {follow: "main"}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  out=$(cd "$S" && bash "$X" setup 2>&1) || fail "setup on a project that follows main exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup on a project that follows main exited non-zero: $out"
   [ "$(jq -c .plugin "$S/.conveyor/project.json")" = '{"follow":"main"}' ] || fail "setup changed a project that follows main: $(jq -c .plugin "$S/.conveyor/project.json")"
 }
 t_setuplabels() {
   local X out; setupdone
   # Two labels the pack names that differ only in case are one label on GitHub: created once.
   jq '.labels.built = "Shipped" | .labels.followup = "shipped"' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  out=$(cd "$S" && bash "$X" setup 2>&1) || fail "setup with labels that differ only in case exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup with labels that differ only in case exited non-zero: $out"
   [ "$(grep -ci '^shipped$' "$G/created")" = 1 ] || fail "a label was created once for each case: $(cat "$G/created")"
   # A label named like a flag is still the label's name: created, not read by gh as an option (--help exits 0 and creates nothing).
   jq '.labels.built = "--help"' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  out=$(cd "$S" && bash "$X" setup 2>&1) || fail "setup with a label named --help exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup with a label named --help exited non-zero: $out"
   grep -qxF -- --help "$G/created" || fail "setup said it created the label --help but did not: $out"
   # Nor does the privacy check read a name after -- as an option: --input=missing is a name, not a file to read.
   jq '.labels.built = "--input=missing"' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  out=$(cd "$S" && bash "$X" setup 2>&1) || fail "setup with a label named --input=missing exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup with a label named --input=missing exited non-zero: $out"
   grep -qxF -- --input=missing "$G/created" || fail "the label --input=missing was not created: $out"
 }
 t_setupbad() {
   local X was; setupdone
   # A pack that fails the check is not rewritten, and nothing is installed or created for it.
   jq '.owner.name = ""' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"; was=$(setupstate)
-  (cd "$S" && bash "$X" setup --owner Robin --product x/ --test t --survey no >/dev/null 2>&1) && fail "setup went on with a pack that fails the check"
+  (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Robin --product x/ --test t --survey no >/dev/null 2>&1) && fail "setup went on with a pack that fails the check"
   [ "$(setupstate)" = "$was" ] || fail "setup changed a project whose pack fails the check"
 }
 # Bug caught (#515): a project whose test command runs its own shell script, one test file after another, printing no
@@ -175,7 +176,7 @@ t_setuptiming() {
   local X out; sample; X=$D/conveyor/conveyor.sh
   mkdir -p "$S/scripts" && printf '#!/bin/sh\nfor f in tests/*.sh; do echo "== $f" >> "$CONVEYOR_TEST_LOG/run.log"; sh "$f"; done\n' > "$S/scripts/test.sh"
   cp "$S/scripts/test.sh" "$T/$CASE/script.was"
-  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --test 'bash scripts/test.sh; true' --survey no 2>&1) || fail "setup exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test 'bash scripts/test.sh; true' --survey no 2>&1) || fail "setup exited non-zero: $out"
   grep -qF 'conveyor: the test command runs scripts/test.sh, which prints no `TESTRUN sec` lines, so cards record no test times.' <<<"$out" \
     && grep -qF "copy $D/conveyor/tools/testtime.sh into the project" <<<"$out" && grep -qF './testtime.sh "$f" -- <the file'"'"'s command>' <<<"$out" \
     && grep -qF 'conveyor/README.md, The CPU budget of a test file' <<<"$out" || fail "setup did not say how to wrap each test file's run: $out"
@@ -185,7 +186,7 @@ t_setuptiming() {
   jq -e '(.test.rules.on // false) == false and ([.test.rules.list[]? | select(.on)] == [])' "$S/.conveyor/project.json" > /dev/null \
     || fail "setup's new pack has the test rules on: $(jq -c .test.rules "$S/.conveyor/project.json")"
   sed -i 's/sh "$f"/.\/testtime.sh "$f" -- sh "$f"/' "$S/scripts/test.sh"
-  out=$(cd "$S" && bash "$X" setup 2>&1) || fail "setup run again exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup run again exited non-zero: $out"
   ! grep -q 'TESTRUN sec' <<<"$out" || fail "setup said a script that uses testtime.sh records no times: $out"
 }
 # The first test-speed survey (lib/survey.sh, firstsurvey()). Bugs: yes files no survey issue, or two, or one of
@@ -194,7 +195,7 @@ t_setuptiming() {
 # files again; --survey cannot ask for another later.
 t_setupsurvey() {
   local X out; sample; X=$D/conveyor/conveyor.sh
-  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey yes 2>&1) || fail "setup --survey yes exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey yes 2>&1) || fail "setup --survey yes exited non-zero: $out"
   [ "$(jq -c '[.[1], .[3], .[5]]' "$G/filed")" = '["Test-speed survey, first","bug","P1"]' ] && grep -q '^conveyor: filed #101, Test-speed survey, first$' <<<"$out" \
     && jq -e '.test.firstSurvey == true' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --survey yes did not file exactly one first survey issue of the monthly kind, or did not save the answer: $(cat "$G/filed" 2>&1) $out"
@@ -202,8 +203,8 @@ t_setupsurvey() {
       and contains("over the CPU budget of 8 CPU s") and contains("each group of files over the budget")
       and contains("each shared helper the measurements point to") and contains("for the Foreman to file as cards")' "$G/filed" >/dev/null \
     || fail "the first survey's issue does not ask for each file alone, the groups over budget and the shared helpers: $(jq -r '.[7]' "$G/filed")"
-  out=$(cd "$S" && bash "$X" setup 2>&1) && [ "$(wc -l < "$G/filed")" = 1 ] || fail "setup run again asked again, or filed again: $out"
-  out=$(cd "$S" && bash "$X" setup --survey yes 2>&1) && [ "$(wc -l < "$G/filed")" = 2 ] && grep -q 'filed #102' <<<"$out" \
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) && [ "$(wc -l < "$G/filed")" = 1 ] || fail "setup run again asked again, or filed again: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey yes 2>&1) && [ "$(wc -l < "$G/filed")" = 2 ] && grep -q 'filed #102' <<<"$out" \
     || fail "setup --survey yes run again did not file another survey: $out"
 }
 # A project set up before the question (its pack has no answer) is asked it, with nothing changed until it answers;
@@ -211,11 +212,59 @@ t_setupsurvey() {
 t_setupasked() {
   local X out was; setupdone
   jq 'del(.test.firstSurvey)' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"; was=$(setupstate)
-  out=$(cd "$S" && bash "$X" setup 2>&1); [ $? = 2 ] && grep -qF 'setup needs: --survey <yes or no: run a first test-speed survey now?>' <<<"$out" \
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && grep -qF 'setup needs: --survey <yes or no: run a first test-speed survey now?>' <<<"$out" \
     && [ "$(setupstate)" = "$was" ] || fail "setup with no saved answer did not ask the question before changing anything: $out"
-  out=$(cd "$S" && bash "$X" setup --survey maybe 2>&1); [ $? = 2 ] && grep -q '^usage: .*--survey yes|no' <<<"$out" || fail "setup took --survey maybe: $out"
-  out=$(cd "$S" && bash "$X" setup --survey no 2>&1) && [ ! -e "$G/filed" ] && jq -e '.test.firstSurvey == false' "$S/.conveyor/project.json" >/dev/null \
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey maybe 2>&1); [ $? = 2 ] && grep -q '^usage: .*--survey yes|no' <<<"$out" || fail "setup took --survey maybe: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey no 2>&1) && [ ! -e "$G/filed" ] && jq -e '.test.firstSurvey == false' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --survey no filed a survey issue, or did not save the answer: $out $(cat "$G/filed" 2>&1)"
+}
+# Bug: setup made no lane, so the owner had to know to run `lane fast create` and `lane research create` by hand. It
+# asks for both on every run, before it changes anything, and no to both makes neither.
+t_setuplaneasked() {
+  local X out was; setupdone
+  [ "$(git -C "$S" worktree list | wc -l)" = 1 ] && [ ! -e "$S-fast-lane" ] && [ ! -e "$S-research" ] \
+    || fail "setup with no to both lanes made a lane: $(git -C "$S" worktree list)"
+  was=$(setupstate)
+  out=$(cd "$S" && bash "$X" setup --research-lane no 2>&1); [ $? = 2 ] && grep -qF -- '--fast-lane <yes or no' <<<"$out" && ! grep -q -- '--research-lane' <<<"$out" \
+    && [ "$(setupstate)" = "$was" ] || fail "setup with no --fast-lane did not ask for it alone before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no 2>&1); [ $? = 2 ] && grep -qF -- '--research-lane <yes or no' <<<"$out" && ! grep -q -- '--fast-lane' <<<"$out" \
+    && [ "$(setupstate)" = "$was" ] || fail "setup with no --research-lane did not ask for it alone before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane maybe --research-lane no 2>&1); [ $? = 2 ] && grep -q '^usage: .*--fast-lane yes|no' <<<"$out" || fail "setup took --fast-lane maybe: $out"
+}
+# Bug: yes to a lane left it unmade, or made it otherwise than its own create does; run again, setup failed on a lane
+# that is there, or changed it. The sandbox is stubbed (bwrap, sandbox-exec run the command they are given): the
+# lane's own tests (lanes/research.test.sh) prove the real one.
+lanestubs() {
+  printf '#!/usr/bin/env bash\nwhile [ "$1" != -- ]; do shift; done; shift; exec "$@"\n' > "$G/bwrap"
+  printf '#!/usr/bin/env bash\nwhile [ "$1" != -p ]; do shift; done; shift 2; exec "$@"\n' > "$G/sandbox-exec"
+  chmod +x "$G/bwrap" "$G/sandbox-exec" && git -C "$S" branch trunk feature || fail "the stubs or the default branch"
+}
+t_setuplanes() {
+  local X out f r; sample; X=$D/conveyor/conveyor.sh; lanestubs
+  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no --fast-lane yes --research-lane yes 2>&1) || fail "setup with yes to both lanes failed: $out"
+  [ "$(git -C "$S-fast-lane" symbolic-ref --short HEAD)" = fast-lane ] && [ "$(git -C "$S-fast-lane" rev-parse HEAD)" = "$(git -C "$S" rev-parse trunk)" ] \
+    || fail "setup did not make the fast lane on fast-lane at trunk: $(git -C "$S" worktree list)"
+  [ "$(git -C "$S-research" rev-parse HEAD)" = "$(git -C "$S" rev-parse trunk)" ] && jq -e '.model == "claude-fable-5-2"' "$S-research/.claude/settings.local.json" >/dev/null \
+    || fail "setup did not make the research lane with its settings: $(git -C "$S" worktree list)"
+  jq -e --arg f "$S-fast-lane" --arg r "$S-research" '.records[0].lanes == {fast: {worktree: $f}, research: {worktree: $r}}' "$XDG_CONFIG_HOME/conveyor/host.json" >/dev/null \
+    || fail "the host file does not name both lanes: $(cat "$XDG_CONFIG_HOME/conveyor/host.json")"
+  [ "$(grep -c '^conveyor: created: the fast lane ' <<<"$out")" = 1 ] && [ "$(grep -c "^conveyor: created: the research lane's worktree " <<<"$out")" = 1 ] \
+    || fail "setup did not print one created: line for each lane: $out"
+  # Run again with yes: both lanes are there, and stay as they were.
+  f=$(git -C "$S" worktree list --porcelain; cat "$S-research/.claude/settings.local.json"; find "$S-fast-lane" "$S-research" -printf '%p %m\n' | sort)
+  out=$(cd "$S" && bash "$X" setup --fast-lane yes --research-lane yes 2>&1) || fail "setup run again with yes to both lanes failed: $out"
+  r=$(git -C "$S" worktree list --porcelain; cat "$S-research/.claude/settings.local.json"; find "$S-fast-lane" "$S-research" -printf '%p %m\n' | sort)
+  [ "$r" = "$f" ] && ! grep -q 'created:' <<<"$out" || fail "setup run again changed a lane, or said it made one: $out $(diff <(echo "$f") <(echo "$r"))"
+}
+# Bug: a pack an earlier setup wrote has no lanes.research, so yes to the research lane failed in its create; setup
+# writes the default model and effort in, and makes the lane.
+t_setuplaneoldpack() {
+  local X out; sample; X=$D/conveyor/conveyor.sh; lanestubs
+  (cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no --fast-lane no --research-lane no >/dev/null) || fail "setup from nothing exited non-zero"
+  jq 'del(.lanes)' "$S/.conveyor/project.json" > "$G/pack" && mv "$G/pack" "$S/.conveyor/project.json" || fail "the old pack"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane yes 2>&1) || fail "setup with yes to the research lane failed on a pack with no lanes.research: $out"
+  jq -e '.lanes.research == {model: "claude-fable-5-2", effort: "medium"}' "$S/.conveyor/project.json" >/dev/null && [ -d "$S-research" ] \
+    && jq -e '.model == "claude-fable-5-2"' "$S-research/.claude/settings.local.json" >/dev/null || fail "setup did not write lanes.research and make the lane: $out"
 }
 # Bug (#630): a new user had to write the host file and a terms file by hand before setup, and doctor named a missing
 # terms file though it is optional. On a machine with no host file and no Conveyor but the plugin copy setup runs
@@ -225,7 +274,7 @@ t_setupfresh() {
   local X out; sample; X=$D/conveyor/conveyor.sh; rm "$XDG_CONFIG_HOME/conveyor/host.json" "$T/$CASE/terms"
   # A service whose conveyor.sh is there is no missing piece (as in t_doctor).
   mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
-  out=$(cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no 2>&1) || fail "setup on a machine with no host file exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no 2>&1) || fail "setup on a machine with no host file exited non-zero: $out"
   jq -e --arg m "$S" '.records == [{repo: "sample", main: $m}] and (has("terms") | not)' "$XDG_CONFIG_HOME/conveyor/host.json" >/dev/null && [ -s "$S/.conveyor/project.json" ] \
     || fail "setup did not write the host file with the project as its record, and the pack: $(cat "$XDG_CONFIG_HOME/conveyor/host.json" 2>&1)"
   out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
@@ -242,7 +291,7 @@ without() { local p=$T/$CASE/without-${*// /-} d f n fs=(); local -A seen; mkdir
   done; done; [ ${#fs[@]} = 0 ] || ln -s "${fs[@]}" "$p/"; echo "$p"; }
 # Each doctor case below is the sample, set up with its pin (doctordone), and the doctor runs it is about: one after
 # another, about 3 s a run, they made one case of 10 s.
-doctordone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no --pin >/dev/null) || fail "setup exited non-zero"; }
+doctordone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin >/dev/null) || fail "setup exited non-zero"; }
 # The pinned commit's install removed, as the fix of a damaged one leaves it.
 uninstalled() { chmod -R u+w "$V/$B" && rm -rf "$V/$B"; }
 
@@ -354,7 +403,7 @@ t_doctorvenvnopip() {
   echo pip > "$G/nopkg" # the virtualenv's python3 has no pip
   # python3 as on Debian with no python3-venv: venv records its arguments and fails.
   printf '#!/usr/bin/env bash\n[ "$1 $2" != "-m venv" ] || { echo "$*" >> "%s/venv"; exit 1; }\nexec "%s" "$@"\n' "$G" "$py" > "$G/python3" && chmod +x "$G/python3"
-  ! (cd "$S" && bash "$X" setup --owner Dana --product src/ --test t --survey no --pin >/dev/null 2>&1) || fail "setup passed with a virtualenv with no pip"
+  ! (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin >/dev/null 2>&1) || fail "setup passed with a virtualenv with no pip"
   grep -qxF -- "-m venv --clear $XDG_DATA_HOME/conveyor/board-venv" "$G/venv" || fail "setup did not make again a virtualenv with no pip: $(cat "$G/venv" 2>&1)"
   out=$(cd "$S" && bash "$X" doctor 2>&1) && fail "doctor passed with a virtualenv with no pip: $out"
   grep -qxF "missing: the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)" <<<"$out" \

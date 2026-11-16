@@ -3,7 +3,8 @@
 ## In Claude Code
 
 - `/conveyor-belt:setup` sets up the project and runs `conveyor.sh doctor`. `/conveyor-belt:setup --foreman` also sets up
-  the Foreman. `/conveyor-belt:setup --survey` asks for a test-speed survey.
+  the Foreman. `/conveyor-belt:setup --survey` asks for a test-speed survey. Setup asks if you want a fast lane and a
+  research lane.
 - `/conveyor-belt:foreman` makes this session the project's Foreman. `/conveyor-belt:foreman off` ends it.
 - `/conveyor-belt:away`, in the Foreman session: the owner is away. The Foreman works by the owner's own away rules,
   the file that the host file (this machine's settings, `~/.config/conveyor/host.json`) names as `foreman.away`.
@@ -99,8 +100,9 @@ Lanes and the Foreman:
 
 Setup and the engine:
 
-- `setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]` and
-  `doctor` ([Setup](setup.md)).
+- `setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no
+  --research-lane yes|no [--pin] [--foreman]` and `doctor` ([Setup](setup.md)). Yes to a lane makes that lane
+  ([Lanes](lanes.md)).
 - `install <commit>` installs that commit read-only.
 - `take`: a project that follows main takes main's newest commit when it passes its check.
 - `wording adversarial|review` prints the review wording.

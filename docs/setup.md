@@ -65,6 +65,9 @@ the project's settings file `.conveyor/project.json`, keeps the answer (`test.fi
 again. To ask for a survey later, run
 `/conveyor-belt:setup --survey`, or `setup --survey yes` from a shell.
 
+Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
+the lane, or keeps the lane that is already there.
+
 Then setup writes the pack, sets the project to follow the plugin's releases, installs the newest release, adds the
 project to the host file, adds `/conveyor/state/` to `.git/info/exclude` so that git does not list the state folder,
 creates the labels the pack names and runs `conveyor.sh doctor`. It gives the command that
@@ -76,7 +79,7 @@ yet.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

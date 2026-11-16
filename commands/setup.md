@@ -12,10 +12,13 @@ following the plugin's releases. When they hold `--survey`, ask the user "Run a 
 before step 1, and add `--survey yes` or `--survey no`, as answered, to every setup command below.
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
-   - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`), ask the user for exactly
-     those, and nothing else: whose yes a change customers or staff will see needs; the path prefixes of product code;
-     the command that runs a change's tests; "Run a first test-speed survey now?" (yes / no). Then run it again with
-     the answers, each `--product` once per path, `--survey yes` or `--survey no`, every value quoted for the shell.
+   - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--fast-lane`,
+     `--research-lane`), ask the user for exactly those, and nothing else: whose yes a change customers or staff will
+     see needs; the path prefixes of product code; the command that runs a change's tests; "Run a first test-speed
+     survey now?" (yes / no); "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
+     research lane (a read-only sandboxed worktree)?" (yes / no). Then run it again with the answers, each `--product`
+     once per path, `--survey yes` or `--survey no`, `--fast-lane yes` or `--fast-lane no`, `--research-lane yes` or
+     `--research-lane no`, every value quoted for the shell.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
 3. When `git status --porcelain -- .conveyor/project.json` prints a line (the pack is not committed, or setup changed
@@ -26,7 +29,8 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
    On yes, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" install-service` and show its output. On no, say that
    running `/conveyor-belt:setup` again in this checkout asks again and starts it on yes.
 5. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed) and each `missing:` line
-   doctor printed, with its fix. Make no change of your own to the pack, the pin or the labels. With `--foreman`, add
+   doctor printed, with its fix. List the lanes setup made (its `created: the fast lane` and `created: the research
+   lane's worktree` lines), with the command that starts the research lane when setup printed one. Make no change of your own to the pack, the pin or the labels. With `--foreman`, add
    that the Foreman is started by typing `/conveyor-belt:foreman` in a Claude Code session in this checkout (it stays
    the Foreman when continued or resumed; `/conveyor-belt:foreman off` ends it), that it is this project's Foreman
    only (another project gets its own by this same setup in its own checkout), and that the launcher
