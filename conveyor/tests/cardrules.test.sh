@@ -67,6 +67,10 @@ t_contextrules() {
   # Issue #543: long output of other commands is shortened, and the rules say where its middle is.
   grep -qF 'When the middle matters, read the saved file by line range or search it.' <<<"$s" \
     || fail "the core card rules do not tell a session to read a long output's saved file by part: $s"
+  # Issue #153: a session made one tool call per similar action (the same edit in ten files, many lookups), and each
+  # result stayed in every later turn; the rules tell it to batch them into one script and read its summary.
+  grep -qF 'When a step is many similar actions (the same change across files, many checks or lookups), write one script that does them all and run it once, then read its summary, not each result.' <<<"$s" \
+    || fail "the core card rules do not tell a session to batch many similar actions into one script: $s"
 }
 
 # Bug: the first rule forbade "error handling the issue does not ask for", so builders left out the handling the
