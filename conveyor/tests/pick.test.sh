@@ -130,8 +130,10 @@ t_pick() {
   echo 'exit 1' > "$STUB/build"; mkdir -p "$ST"
   echo '{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}' > "$ST/cards.jsonl"
   # Every card writes its lines under the records' lock, so a slow GitHub must never be waited for while it is held:
-  # the open issues are asked for with the lock free.
-  echo 'echo x >> "$STUB/list-asked"; flock -n "$ST/cards.jsonl" true || echo x >> "$STUB/list-locked"' > "$STUB/list-cmd"
+  # the open issues are never asked for under it. The asker is under it when it inherited the lock's descriptor (an open
+  # file of the records) and the lock is held: a lock held only by another process (the card writing its lines while a
+  # later turn or the sample asks, as under load) is not the asker's.
+  echo 'echo x >> "$STUB/list-asked"; for f in /dev/fd/*; do [ "$f" -ef "$ST/cards.jsonl" ] && ! flock -n "$ST/cards.jsonl" true && echo x >> "$STUB/list-locked"; done; true' > "$STUB/list-cmd"
   loop run 1 >/dev/null; [ "$(st 'select(.step == "picked") | .issue' | tail -1)" = 6 ] || fail "first pick was not the oldest P1 without a card"
   [ -s "$STUB/list-asked" ] || fail "the loop picked without asking for the open issues"
   [ ! -e "$STUB/list-locked" ] || fail "the open issues were asked for while the records' lock was held"
