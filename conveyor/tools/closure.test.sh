@@ -26,6 +26,8 @@ SET=$T/set; bash "$SRC/closure.sh" > "$SET" || { echo "FAIL: closure.sh exited n
 # copy the set only after every test had run from the copy, 20 to 30 minutes. Each such file is listed here in seconds,
 # and install() fails on it before it makes the copy.
 UNREACHED=$T/unreached; bash "$SRC/closure.sh" --unreached > "$UNREACHED" || { echo "FAIL: closure.sh --unreached exited non-zero" >&2; exit 1; }
+# The set's files copied into a folder, with their modes and times, by one tar each way, not a mkdir and a cp a file.
+copyset() { mkdir -p "$1" && tar -C "$TOP" -cf - -T "$SET" | tar -C "$1" -xpf -; }
 
 # Bugs: a dependency the plan names (section 11) is left out of the set; product code, or what section 11 keeps in
 # the host project (the pack and its hooks, the area rule files, the startup instructions), is pulled into a set that will be
@@ -46,7 +48,7 @@ t_set() {
   # The pack's hooks: a fixture checkout (the set, the test pack's hooks.json as its pack's, each hook it names beside
   # the release-1 hooks), never this repo's .conveyor/, whose pack may name no hooks.
   local d=$T/packhooks.d f
-  while IFS= read -r f; do mkdir -p "$d/$(dirname "$f")" && cp -p "$TOP/$f" "$d/$f" || fail "cannot copy $f"; done < "$SET"
+  copyset "$d" || fail "cannot copy the set"
   mkdir -p "$d/.conveyor" && cp "$TOP/conveyor/lib/test-hooks.json" "$d/.conveyor/hooks.json" || fail "cannot copy the test pack's hooks.json"
   sed -n 's|.*"\$CLAUDE_PROJECT_DIR\\*"*/\([^"\\]*\).*|\1|p' "$d/.conveyor/hooks.json" > "$T/packhooks"
   [ "$(wc -l < "$T/packhooks")" -ge 3 ] || fail "read no hooks from the pack's hooks.json"
@@ -60,8 +62,8 @@ t_set() {
 # Bug: a release-1 file that reads a file of the project pack folder (.conveyor/) by a literal path pulls it into the
 # set, so the import refuses the whole set.
 t_pack() {
-  local d=$T/pack f
-  while IFS= read -r f; do mkdir -p "$d/$(dirname "$f")" && cp -p "$TOP/$f" "$d/$f" || fail "cannot copy $f"; done < "$SET"
+  local d=$T/pack
+  copyset "$d" || fail "cannot copy the set"
   sed -i '1a HERE=$(dirname "$0"); cat "$HERE/../.conveyor/x" "$(git rev-parse --show-toplevel)/.conveyor/y"' "$d/conveyor/conveyor.sh"
   mkdir -p "$d/.conveyor" && echo x > "$d/.conveyor/x" && echo y > "$d/.conveyor/y"
   git -C "$d" init -q && git -C "$d" add -A || fail "cannot make the fixture a repository"
@@ -111,8 +113,8 @@ install() {
   local f p w nm bv hide=()
   [ ! -s "$UNREACHED" ] || fail "$(sed 's/$/: closure.sh does not reach it: add an anchored source, or a line to the left-out list/' "$UNREACHED")"
   [ "$(uname -s)" = Darwin ] || command -v bwrap >/dev/null || fail "bwrap is not installed: the install cannot run with the checkout out of reach"
-  I=$T/install.$CASE; rm -rf "$I"; mkdir -p "$I" "$T/tmp" "$T/out"
-  while IFS= read -r f; do mkdir -p "$I/$(dirname "$f")" && cp -p "$TOP/$f" "$I/$f" || fail "cannot copy $f"; done < "$SET"
+  I=$T/install.$CASE; rm -rf "$I"; mkdir -p "$T/tmp" "$T/out"
+  copyset "$I" || fail "cannot copy the set"
   path=''; IFS=: read -ra p <<<"$PATH"; for f in "${p[@]}"; do case $f/ in "$TOP"/*) ;; *) path=${path:+$path:}$f ;; esac; done
   # A checkout with no node_modules (a project with no npm dependencies) mounts none.
   nm=$(readlink -f "$TOP/node_modules") && [ -d "$nm" ] || nm=''
@@ -336,17 +338,25 @@ t_install() {
 # closure fails and names it (computed by the install's closure.sh, so removing closure.sh itself is named too).
 t_remove() {
   install
-  gone() { # <file>
-    local d=$T/rm/${1//\//_}
+  # Each worker takes its share of the set on one slot, with one copy of the install and one run(), in which each file
+  # of the share is moved out of the copy, the closure run, and the file put back: a copy and a run() a file were most
+  # of the case's time.
+  gone() { # <file...>
+    local d=$T/rm/$BASHPID f
     slot_take; slot_mine
-    # A hard-linked copy: closure.sh only reads it, and the removed file is unlinked from the copy alone.
-    mkdir -p "$d" && cp -al "$I/." "$d/" && rm -rf "$d/node_modules" && rm "$d/$1" || { echo "FAIL $1: cannot copy"; return; }
-    if (cd "$I" && run bash conveyor/tools/closure.sh "$d") > "$d.out" 2>&1; then echo "FAIL $1: the closure passed without it"
-    elif grep -qxF "closure: a file of the set is missing: $1" "$d.out"; then echo "ok $1"; else echo "FAIL $1: $(tail -1 "$d.out")"; fi
-    rm -rf "$d" "$d.out"
+    # A hard-linked copy: closure.sh only reads it, and a file is moved out of the copy alone.
+    mkdir -p "$d" && cp -al "$I/." "$d/" && rm -rf "$d/node_modules" || { for f; do echo "FAIL $f: cannot copy"; done; return; }
+    # A file not put back would be missing from the next file's closure too: the rest of the share is not run.
+    (cd "$I" && run bash -c 'd=$1; shift; for f; do
+      mv "$d/$f" "$d.gone" || { echo "FAIL $f: cannot move it out"; exit 1; }
+      if bash conveyor/tools/closure.sh "$d" > "$d.out" 2>&1; then echo "FAIL $f: the closure passed without it"
+      elif grep -qxF "closure: a file of the set is missing: $f" "$d.out"; then echo "ok $f"; else echo "FAIL $f: $(tail -1 "$d.out")"; fi
+      mv "$d.gone" "$d/$f" || { echo "FAIL $f: cannot put it back"; exit 1; }
+    done' _ "$d" "$@")
+    rm -rf "$d" "$d.out" "$d.gone"
   }
   export -f gone
-  xargs -P "$J" -I{} bash -c 'eval "$BW_DECL"; gone "$1"' _ {} < "$SET" > "$T/removed"
+  tr '\n' '\0' < "$SET" | xargs -0 -P "$J" -n $(( ($(wc -l < "$SET") + J - 1) / J )) bash -c 'eval "$BW_DECL"; gone "$@"' _ > "$T/removed"
   ! grep '^FAIL ' "$T/removed" || fail "removing a file of the set did not fail its closure"
   [ "$(grep -c '^ok ' "$T/removed")" = "$(wc -l < "$SET")" ] || fail "not every file was removed in turn"
 }

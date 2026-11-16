@@ -17,7 +17,7 @@ t_closuremiss() {
   slotpool 2; mkdir -p "$c"; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT
   ( cd "$SRC/.." && bash conveyor/tools/closure.sh | tar -cf - -T - ) | tar -C "$c" -xf - || fail "cannot copy the release set"
   t=$c/conveyor/tools/closure.test.sh
-  sed 's|fail "cannot copy \$f"; done < "\$SET"$|fail "cannot copy $f"; done < <(grep -vxF conveyor/jq/rows.jq "$SET")|' "$t" > "$d/t" \
+  sed 's#tar -C "\$TOP" -cf - -T "\$SET"#grep -vxF conveyor/jq/rows.jq "$SET" | tar -C "$TOP" -cf - -T -#' "$t" > "$d/t" \
     && cat "$d/t" > "$t" && grep -qF 'grep -vxF conveyor/jq/rows.jq' "$t" || fail "the checkout's copy step could not be made to leave a file out"
   git -C "$c" init -q && git -C "$c" add -A && git -C "$c" commit -qm set || fail "cannot make the checkout a repository"
   ! quickrun "$c/conveyor" || fail "the install case passed in quick mode with a file missing from the copy: $(tail -20 "$d/run.out")"
