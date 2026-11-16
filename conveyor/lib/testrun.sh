@@ -102,7 +102,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
 }
 
 # A test output that is no run's (the loop's own words for why nothing ran): the logs and times of the run before are not its.
-norun() { rm -rf "$1.testlog" "$1.first"; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; printf '%s\n' "$2" > "$1.test"; } # <worktree> <text>
+norun() { rm -rf "$1.testlog" "$1.first" "$1.testlist"; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; printf '%s\n' "$2" > "$1.test"; } # <worktree> <text>
 # A run's output and the logs it wrote, copied as one: what failed is read from both (testfails()); and its first
 # run's record when it went again (tests()).
 keeprun() { # <worktree> <output file to> <log folder to> <first run's record to>
@@ -119,8 +119,9 @@ keeprun() { # <worktree> <output file to> <log folder to> <first run's record to
 # why, why each file ran, {file: [reasons]}, from its log lines `TESTRUN why<TAB><file><TAB><reason>`, when it gives
 # any (a first run and a run again alike); wholeSuite (true), when a log says the runner ran every case file of the
 # engine (`TESTRUN whole-suite`); ranCases, the cases it selected of each file it ran only part of, {file: [cases]},
-# from its log lines `TESTRUN case<TAB><file><TAB><case>` (brokeby()); and refused, "refused full run: <why>", when
-# tests() refused the whole selection (TEST_REFUSED).
+# from its log lines `TESTRUN case<TAB><file><TAB><case>` (brokeby()); refused, "refused full run: <why>", when
+# tests() refused the whole selection (TEST_REFUSED); and list, the list of tests the command was given (listcmd():
+# {mode: "changed", files} or {mode: "whole", why}), when the pack sets test.list.
 testrec() { # <worktree> <exit> <seconds>
   local k l logs=()
   k=$(testcounts "$1.test"); mapfile -t logs < <(testlogs "$1")
@@ -140,7 +141,8 @@ testrec() { # <worktree> <exit> <seconds>
     + if $why == [] then {} else {why: ($why | group_by(.f) | map({key: .[0].f, value: (map(.w) | unique)}) | from_entries)} end
     + if any($in[]; . == "TESTRUN whole-suite") then {wholeSuite: true} else {} end
     + if $cs == [] then {} else {ranCases: ($cs | group_by(.f) | map({key: .[0].f, value: (map(.c) | unique)}) | from_entries)} end
-    + if $z == "" then {} else {refused: $z} end'
+    + if $z == "" then {} else {refused: $z} end
+    + if $tl[0] | type == "object" then {list: $tl[0]} else {} end' --slurpfile tl <(cat "$1.testlist" 2>/dev/null)
 }
 
 # The test files of a card's own run that used more than their budget (README.md, The test step): the file's own
@@ -371,9 +373,12 @@ cacheoff() { # <worktree>
 # runs), and TEST_REFUSED, "refused full run: <why>", goes on its test line as refused (testrec()), which health lists
 # for the Foreman's watcher (views.sh).
 # The field test.fileCommand runs one test file: the run (filecmd()) gives it each file its list names `fail`.
+# A card's run (test.command, not alone) with the pack's test.list set gives the command the tests its change touches
+# (testsel()), in the form test.list names (listcmd()), and <worktree>.testlist says which (the live record's and the
+# test line's list).
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw=''
-  TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''
+  TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.times"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
@@ -381,6 +386,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
+  if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then listcmd "$1" "$cmd" 2>"$1.test" || return 1; cmd=$LISTCMD; fi
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)
     b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); t=$(git -C "$1" write-tree 2>/dev/null)
@@ -438,6 +444,73 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # the cases of a run again that failed which passed in it (f: its failures).
   if [ -e "$1.first" ]; then if [ $rc = 0 ]; then flakyrun "$1"; else flakyrun "$1" "${f:-}"; fi; fi
   return $rc
+}
+# The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
+# card's run is given), in LISTCMD, in the form the pack's test.list names: args (each path added at the end, quoted
+# for the shell), placeholder (the paths in place of each `{files}` of test.command), env (CONVEYOR_TEST_FILES, one
+# path a line: TEST_FILES, which testonce() gives the command) or none (the command takes no list). A run of the whole
+# suite (none, testsel()'s whole, placeholder with no `{files}` in the command, or args with a command that already
+# names the test files its runner runs, testrunner(), which paths added at its end would not narrow) adds no path. <worktree>.testlist
+# says which: {mode: "changed", files: <count>} or {mode: "whole", why}. With no test.list, the command is as it is
+# and no file is written.
+listcmd() { # <worktree> <command>
+  local lm s why='' q='' fs=()
+  LISTCMD=$2; TEST_FILES=''
+  packget test.list lm || return 1
+  [ -n "$lm" ] || return 0
+  if [ "$lm" = none ]; then why='test.list is none: the test command takes no list'
+  elif [ "$lm" = placeholder ] && [[ $2 != *'{files}'* ]]; then why='test.list is placeholder, and test.command has no {files}'
+  elif [ "$lm" = args ] && s=$(testrunner "$2" "$1") && [[ $s == named* ]]; then
+    why="test.list is args, and test.command already names the tests it runs (${s##* }): use placeholder"
+  elif ! s=$(testsel "$1"); then why=$s
+  else mapfile -t fs <<<"$s"; fi
+  if [ -n "$why" ]; then jq -cn --arg w "$why" '{mode: "whole", why: $w}' > "$1.testlist"
+  else jq -cn --argjson n ${#fs[@]} '{mode: "changed", files: $n}' > "$1.testlist"; fi || return 1
+  [ ${#fs[@]} = 0 ] || q=$(printf '%q ' "${fs[@]}"); q=${q% }
+  case $lm in
+    args) [ -z "$q" ] || LISTCMD="$2 $q" ;;
+    placeholder) LISTCMD=${2//\{files\}/"$q"} ;;
+    env) [ ${#fs[@]} = 0 ] || TEST_FILES=$(printf '%s\n' "${fs[@]}") ;;
+  esac
+}
+# The tests a card's change touches (its staged change against HEAD), one path a line: of each changed file, a
+# document (.md, .txt, .rst) selects none; the test files .conveyor/test-links.json links to it (the project's own
+# map, those still there), and a test file (testpaths()) itself, while it is there; else, a test file that is gone
+# selects none, and one that is shared (shared(), below) selects the whole suite, as does any other file at the root,
+# shared or with a config extension; else the test files whose name holds its name (no extension) as a word, the
+# nearest by folder (those that share the most leading folders with it). A file of which none of these finds a test,
+# or a change that selects none, runs the whole suite: it fails then, and prints why in place of the list.
+testsel() { # <worktree>
+  local out
+  out=$(jq -rn "$RX"'def ls: split("\n") | map(select(. != ""));
+      def base: split("/")[-1]; def dir: split("/")[:-1];
+      def stem: base | sub("\\.[^.]*$"; "");
+      # A helper, setup, fixture or mock file (or one in a folder of such a name), that many tests may read.
+      def shared: test("(^|/)(__mocks__|__fixtures__|fixtures?|helpers?|support|testdata|mocks?)/"; "i")
+        or (base | test("^setup"; "i") or (sub("\\.[^.]*$"; "") | ascii_downcase | split("[._-]"; null)
+          | any(IN("helper", "helpers", "setup", "fixture", "fixtures", "mock", "mocks", "conftest", "globals"))));
+      def config: test("\\.(json|ya?ml|toml|ini|cfg|conf|lock)$"; "i") or (base | test("(^|[._-])config([._-]|$)"; "i"));
+      def common($a; $b): [range([$a, $b] | map(length) | min) | select($a[.] != $b[.])] | first // ([$a, $b] | map(length) | min);
+      ($ch | ls) as $ch | ($ct | ls | INDEX(.)) as $ct | ($all | ls) as $all | ($all | INDEX(.)) as $have
+      | ($map[0] // {} | if type == "object" then . else {} end) as $map
+      | [$ch[] | . as $p
+         | ([$map[$p] | arrays[] | strings | select($have[.])]) as $m
+         | if test("\\.(md|txt|rst)$"; "i") then []
+           elif $ct[$p] and $have[$p] and (shared | not) then [$p] + $m
+           elif $m != [] then $m
+           elif $ct[$p] and ($have[$p] | not) then []
+           elif $ct[$p] or (contains("/") | not) or shared or config then {whole: "\($p): shared setup or config"}
+           else (stem | rx) as $s | dir as $d
+             | [$all[] | select($s != "" and (base | test("(^|[._-])" + $s + "([._-]|[A-Z]|$)"))) | {t: ., n: common(dir; $d)}]
+             | if . == [] then {whole: "\($p): no test found for it"} else (map(.n) | max) as $n | map(select(.n == $n) | .t) end end]
+      | (map(objects) | first) as $w
+      | if $w then error($w.whole) else [.[][]] | unique | if . == [] then error("the change touches no test") else .[] end end' \
+    --rawfile ch <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null) \
+    --rawfile ct <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | testpaths) \
+    --rawfile all <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) \
+    --slurpfile map <(jq -c . "$1/.conveyor/test-links.json" 2>/dev/null || :) 2>&1) \
+    || { out=${out#jq: error (at <unknown>): }; printf '%s\n' "${out:-the list of tests could not be made}"; return 1; }
+  printf '%s\n' "$out"
 }
 # The part of a test line that says the run went again (tests()): {rerun: {exit, failures}} of the first run, else {};
 # on a pass line, with the reason "passed on re-run: " and what had not passed (each case as <file>: <case>), each
@@ -1000,7 +1073,7 @@ testonce() { # <worktree> <cmd>
   local pid clock rc r=''
   [ ! -s "$1.rerun" ] || r=$1.rerun
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_RERUN=$r exec timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+    CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" & clock=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock 2>/dev/null; wait $clock 2>/dev/null; rm -f "$1.turnwait"

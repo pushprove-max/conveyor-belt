@@ -31,6 +31,9 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # The question "Set the pack's tests.patterns?": answered by --test-patterns yes|no, and asked (exit 2, nothing written)
 # while the pack sets no tests.patterns and the default misses tracked files that read as tests (testoffer()), naming
 # the globs and how many tracked files they match; yes writes them as the pack's tests.patterns.
+# The question "Set the pack's test.list?": answered by --test-list yes|no, and asked (exit 2, nothing written) while
+# the pack sets no test.list and the test command runs a runner listguess() knows, naming it; yes writes what
+# listguess() offers (args, or none for a runner that takes no list of files) as the pack's test.list.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -58,9 +61,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no]--fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla=''
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -69,6 +72,7 @@ setup() { # as SETUP_USAGE
     case $1 in --owner) owner=${2-} ;; --product) prods+=("${2-}") ;; --test) test=${2-} ;;
       --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
       --test-patterns) tpa=${2-}; [[ $tpa == yes || $tpa == no ]] || { set -- x; break; } ;;
+      --test-list) tla=${2-}; [[ $tla == yes || $tla == no ]] || { set -- x; break; } ;;
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
       --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
@@ -112,6 +116,19 @@ setup() { # as SETUP_USAGE
       need+=("--test-patterns <yes or no: the default test-file patterns miss $((tn - n)) tracked files that read as tests; set the pack's tests.patterns to $(jq -r 'join(", ")' <<<"$tp"), which match $tn tracked files?>")
     fi
   fi
+  # How the test command takes the list of a card's tests, while the pack sets no test.list and the command runs a
+  # runner listguess() knows: asked, naming the runner; yes writes what it offers.
+  if [ "$tla" != no ] && ! jq -e '.test.list' "$PACK" >/dev/null 2>&1; then
+    x=$test; [ ! -e "$PACK" ] || packget test.command x 2>/dev/null || x=''
+    [ -z "$x" ] || tl=$(listguess "$x") || tl=''
+    if [ -n "$tl" ] && [ -z "$tla" ]; then
+      if [ "${tl%% *}" = args ]; then
+        need+=("--test-list <yes or no: the test command runs ${tl#* }, which takes test files as arguments; set the pack's test.list to args, so a card's test run is given only the tests its change touches?>")
+      else
+        need+=("--test-list <yes or no: the test command runs ${tl#* }, which cannot take a list of test files; set the pack's test.list to none, so a card's test run is the whole suite?>")
+      fi
+    fi
+  fi
   if [ -e "$PACK" ]; then
     [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
     [ ${#need[@]} = 0 ] || { printf 'conveyor: setup needs:%s\n' "$(printf ' %s;' "${need[@]}")" >&2; return 2; }
@@ -144,6 +161,11 @@ setup() { # as SETUP_USAGE
     jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's tests.patterns could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's tests.patterns: $(jq -r 'join(", ")' <<<"$tp") ($(testcount "$tp") tracked files)"
+  fi
+  if [ "$tla" = yes ] && [ -n "$tl" ]; then
+    jq --arg l "${tl%% *}" '.test.list = $l' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pack's test.list could not be written" >&2; return 1; }
+    echo "conveyor: wrote the pack's test.list: ${tl%% *} (the test command runs ${tl#* })"
   fi
   packget plugin.commit p plugin.follow f || return 1
   if [ -z "$p$f" ] && [ -n "$pin" ]; then
@@ -305,6 +327,14 @@ testoffer() { # <test command>
   local d g=()
   d=$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA") && mapfile -t g < <(testguess "$1" "$d") || return 1
   [ ${#g[@]} = 0 ] || jq -cn --argjson d "$d" '$d + $ARGS.positional' --args "${g[@]}"
+}
+# The test.list setup offers for a test command (setup()), and the runner it runs, as one line `<mode> <runner>`
+# (testrunner(), in main): nothing for a runner it does not know, or for a command that already names the test files
+# its runner runs, which paths added at its end would not narrow.
+listguess() { # <test command>
+  local g
+  g=$(testrunner "$1" "$MAIN") || return 0
+  [[ $g == named* ]] || printf '%s\n' "$g"
 }
 # What doctor says of the pack's tests.patterns: a `missing:` line when they match no tracked file, or miss a file the
 # test command names (cmdtests()); else an `ok:` line with the count. Fails with a `missing:` line.

@@ -549,11 +549,16 @@
   }
   // A running test run's progress, from its track: its cases ("142 of 205 tests · 2 failed") when its command gave a
   // count (tests), else its files ("3 of 6 test files"); null when the track has neither (no test run in progress).
+  // Before it, the list of tests the run was given (the track's list): "changed: 7 files · 3 test files" (3 of them
+  // ran), or "whole suite · ...".
   function testProgress(t) {
     const c = t && t.tests && typeof t.tests === 'object' ? t.tests : null, f = t && t.files && typeof t.files === 'object' ? t.files : null;
-    if (c && num(c.done) && num(c.of)) return `${c.done} of ${c.of} tests${num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : ''}`;
-    if (f && num(f.run)) return `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;
-    return null;
+    const l = t && t.list && typeof t.list === 'object' ? t.list : null;
+    const mode = l && l.mode === 'changed' && num(l.files) ? `changed: ${l.files} ${l.files === 1 ? 'file' : 'files'}` : l && l.mode === 'whole' ? 'whole suite' : null;
+    let prog = null;
+    if (c && num(c.done) && num(c.of)) prog = `${c.done} of ${c.of} tests${num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : ''}`;
+    else if (f && num(f.run)) prog = `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;
+    return mode && prog ? `${mode} · ${prog}` : mode || prog;
   }
   // was: the timeline this one replaces, if any: whether it and its set-up were open is kept. A timeline with a step in
   // progress has retime(), which sets that step's bar's width and the time texts again as its time grows (belt.js, each

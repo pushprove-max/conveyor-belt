@@ -308,6 +308,31 @@ testpaths() { # [-v] [-z]
   [ -n "${TESTRX:-}" ] || names || { cat > /dev/null; return 1; }
   grep -E "$@" -e "$TESTRX" || :
 }
+# The runner a test command starts, and how it takes a list of test files, as one line `<mode> <runner>`: args for a
+# runner that takes test files as arguments (node --test, vitest, jest, mocha, pytest, rspec), none for one that takes
+# packages or names, not files (go test, cargo test); `named <runner> <word>` when the command already names what an
+# args runner runs (<word>: a glob, a path with a /, or a file or folder in <folder>), as `node --test checks/*.js`
+# does, so paths added at its end would not narrow it. Nothing for a runner it does not know. A command that runs a
+# package.json script (npm, yarn, pnpm or bun: `npm test`, `npm run <name>`) is read as that script, in <folder>.
+testrunner() { # <test command> <folder>
+  local s=$1 r w ws=()
+  if [[ $1 =~ ^(npm|yarn|pnpm|bun)[[:space:]]+(run[[:space:]]+)?([A-Za-z0-9:_-]+)[[:space:]]*$ ]]; then
+    s=$(jq -r --arg n "${BASH_REMATCH[3]}" '.scripts[$n] | strings' "$2/package.json" 2>/dev/null) || return 0
+  fi
+  if [[ $s =~ (^|[;&|[:space:]])(node([[:space:]]+-[^[:space:]]+)*[[:space:]]+--test|vitest|jest|mocha|pytest|rspec)([[:space:]]|$) ]]; then
+    r=${BASH_REMATCH[2]}; s=${s#*"${BASH_REMATCH[0]}"}; [[ $r != node* ]] || r='node --test'
+    # The words after the runner, to the end of its command (; & | or a closing parenthesis): vitest's own commands
+    # (run, watch) and options aside, a word that names files.
+    read -ra ws <<<"${s%%[;&|)]*}"
+    for w in "${ws[@]}"; do
+      w=${w//[\"\']/}; [[ $w != -* && ! ( $r = vitest && $w =~ ^(run|watch|related)$ ) ]] || continue
+      if [[ $w == *[*?/]* ]] || [ -e "$2/$w" ]; then echo "named $r $w"; return 0; fi
+    done
+    echo "args $r"
+  elif [[ $s =~ (^|[;&|[:space:]])(go[[:space:]]+test|cargo[[:space:]]+test)([[:space:]]|$) ]]; then
+    echo "none ${BASH_REMATCH[2]}"
+  fi
+}
 # Product code: the one place that says which paths count. A file under one of the pack's productPaths
 # (PRODUCT, made by names()) is product code, its tests (testpaths()) aside. Both product() and the visible-change check
 # ask this of a list of paths (one per line, on stdin); every line is read, so a pipe into it never ends early.

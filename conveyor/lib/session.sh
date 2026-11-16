@@ -55,6 +55,9 @@ testdone() { # <worktree>; prints {done, failed}
 # `-- ok|FAIL <file>` lines and vitest's line a file. A runner that also prints its log's lines is counted once.
 # Its cases (tests: {done, of, failed}) are counted only when a line `TESTRUN cases=N` says how many were selected
 # (several add up), else tests is null: done and failed are the cases its runner named as ended (testdone()).
+# A test run's `progress` (which health reads beside `last`, so the Foreman calls no running test step stuck while it
+# moves) is when the run began, then when a case of its runner last began or ended (testcases(), testdone()); its
+# `list` is the list of tests the command was given (<worktree>.testlist, tests()).
 # A review's tokens are not in its stream before its turn ends: Codex writes the running total (`token_count`) to the
 # session file it keeps under its home, named after the thread the stream opens with. rollout() finds that file.
 rollout() { # <a review's events file>; prints the session file of that review, nothing when there is none yet
@@ -84,7 +87,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
-  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg w "$was" '{step: $s, at: (now | todate), last: null, turns: 0} + (if $s == "test" then {files: {run: 0, of: null}, tests: null} else {} end)
+  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) '{step: $s, at: (now | todate), last: null, turns: 0}
+      + (if $s == "test" then {progress: (now | todate), files: {run: 0, of: null}, tests: null} + (if $tl[0] | type == "object" then {list: $tl[0]} else {} end) else {} end)
       + (if $m == "" then {} else {model: $m} end) + (if $w == "" then {} else {stalled: $w} end)') \
     && printf '%s\n' "$st" > "$out"
   while :; do
@@ -104,6 +108,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       now=$(p_stat "$f" "${logs[@]}" | awk '{s = s "," $1; if ($2 > t) t = $2} END {if (NR) print s " " t}')
       cs=$(testcases "${f%.test}"); dn=$(testdone "${f%.test}")
       [ -n "$now" ] && [ "${now% *} $cs $dn" != "$size" ] || continue
+      # A case that began or ended (its runner's cases folder) is progress, though nothing was printed.
+      [ "$cs $dn" = "${size#* }" ] || st=$(jq -c '.progress = (now | todate)' <<<"$st")
       size="${now% *} $cs $dn"
       new=$(cat "$f" "${logs[@]}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk -v own="$(wc -l < "$f")" -v logs="${#logs[@]}" '
           /^test-changed: [0-9]+ web test file\(s\) selected/ { of += $2; seen = 1; next }

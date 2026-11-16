@@ -805,6 +805,25 @@ test('a card in its Test step draws its tests, or else its test files, in place 
   expect(lines).toEqual(['    3 of 5 tests · 1 failed · last output 23s ago', '    3 of 6 test files · last output 23s ago', '    4 turns · last output 23s ago'])
 })
 
+// Bug it catches (#147): /units did not say whether a card's test step ran the tests its change touched or the whole
+// suite. Its card's line names the list the run was given (the track's list) before how many files ran.
+test('a card in its Test step names the changed tests it was given, or the whole suite, in its line', async ($, on) => {
+  const track = (list: object) => ({
+    steps: ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'].map((name, i) => ({ name, state: i < 3 ? 'done' : i === 3 ? 'now' : 'todo', sec: i < 3 ? 30 : null })),
+    at: 3, label: 'tests', since: ago(1), reason: null, files: { run: 2, of: null }, list,
+  })
+  const live = { action: '', turns: 0, lastOutputAt: new Date(NOW - 23_000).toISOString() }
+  const belt = [
+    { ...BELT, live, track: track({ mode: 'changed', files: 7 }) },
+    { ...BELT, card: 'c4', issue: 3864, live, track: track({ mode: 'whole', why: 'package.json: shared setup or config' }) },
+  ]
+  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt })) })
+  await start($, 'main')
+  await w.clock.settle()
+  const lines = (await units($)).split('\n').filter(l => l.includes('last output'))
+  expect(lines).toEqual(['    changed: 7 files · 2 test files · last output 23s ago', '    whole suite · 2 test files · last output 23s ago'])
+})
+
 test('a quiet running step\'s seconds since its last output count on each second while the feed does not change', async ($, on) => {
   const live = { ...BELT, live: { action: 'Bash: npm test', turns: 3, lastOutputAt: new Date(NOW - 6000).toISOString() } }
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt: [live] })) })

@@ -57,11 +57,13 @@ export type Need = Card & Times & { yes: boolean; text: string; since: number | 
 // follow-ups filed). at is the step in progress (null on a card that has ended), label what it is doing, since when that
 // began, reason why Push failed. No time is estimated from past cards. A track of any other shape (an older loop's) is none.
 // files: the test files run of all in the Test step; tests: its tests done of all, and failed (none until it gives them).
+// list: the list of tests that step's run was given: the files its change touches (changed, files: how many) or the
+// whole suite (null when the pack sets no test.list).
 const STATES = ['done', 'now', 'skipped', 'failed', 'todo'] as const
 export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as const
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
 export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null }
-export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null } | null; tests: { done: number; of: number; failed: number } | null }
+export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null }
 // reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0.
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
 // live: the running step as it streams: what it is doing now, its turns so far and when it last printed.
@@ -169,6 +171,7 @@ const trackOf = (v: any): Track | null => {
     at: at !== null && v.steps[at] ? at : null, label: one(v.label), since: time(v.since), reason: one(v.reason) || null,
     files: v.files && typeof v.files === 'object' && num(v.files.run) !== null ? { run: v.files.run, of: num(v.files.of) } : null,
     tests: v.tests && typeof v.tests === 'object' && [v.tests.done, v.tests.of, v.tests.failed].every(x => num(x) !== null) ? { done: v.tests.done, of: v.tests.of, failed: v.tests.failed } : null,
+    list: v.list?.mode === 'changed' && num(v.list.files) !== null ? { mode: 'changed', files: v.list.files } : v.list?.mode === 'whole' ? { mode: 'whole' } : null,
   }
 }
 const timesOf = (x: any): Times => ({ start: time(x.start) ?? time(x.pickedAt), pickedAt: time(x.pickedAt), priorSec: num(x.priorSec) ?? 0, totalSec: num(x.totalSec) })
@@ -668,7 +671,9 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
   const progress = t?.at !== 3 ? (l.turns === null ? '' : count(l.turns, 'turn'))
     : tests ? `${tests.done} of ${tests.of} tests${tests.failed ? ` · ${tests.failed} failed` : ''}`
     : files ? `${files.run}${files.of === null ? '' : ` of ${files.of}`} test files` : ''
-  const parts = [l.action ? `now ${l.action}` : '', progress, ago ? `last output ${ago} ago` : ''].filter(Boolean)
+  // The Test step's list: the changed tests (how many files) or the whole suite.
+  const list = t?.at !== 3 || !t.list ? '' : t.list.mode === 'changed' ? `changed: ${count(t.list.files, 'file')}` : 'whole suite'
+  const parts = [l.action ? `now ${l.action}` : '', list, progress, ago ? `last output ${ago} ago` : ''].filter(Boolean)
   return [fitWidth([{ t: `    ${parts.join(' · ')}`, d: true }], w)]
 }
 

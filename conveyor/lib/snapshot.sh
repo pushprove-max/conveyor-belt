@@ -60,7 +60,8 @@
 #   conflict", and after the landing "pushing", "push failed; it is tried again", "waiting for GitHub to close the
 #   issue"; "Landed, waiting for Push landed", at null, while push is off and its commit is not pushed), since when that began, reason why Push failed (the push's error, or the issue left open), files a test
 #   run's {run, of}, tests its cases {done, of, failed} (null when its command said no count: a line
-#   `TESTRUN cases=N`; done and failed are the cases its runner named as ended, session.sh watch()). No time is estimated from past cards. detail is every recorded step, the 17 of before (queued,
+#   `TESTRUN cases=N`; done and failed are the cases its runner named as ended, session.sh watch()), list the list of
+#   tests it was given ({mode: "changed", files} or {mode: "whole", why}; null with no test.list: testrun.sh tests()). No time is estimated from past cards. detail is every recorded step, the 17 of before (queued,
 #   picked, worktree ready, dependencies linked, brief written, building, review 1, fix 1, review 2, fix 2, review 3,
 #   tests, rebuild, landing, pushed, issue closed, follow-ups filed), each {name, state, sec} (follow-ups filed also
 #   n), and detailAt the place in it of the step in progress.
@@ -367,7 +368,7 @@ snapshot() (
   # A main-red fix card is titled from its entry as it is now (redtitles()), so a case added while it runs shows.
   jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '{cards: (map($live[.card] as $v
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
-      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, turns, last, usage, files, tests, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end)
+      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, turns, last, usage, files, tests, list, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))}' "$d/rows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
   # has none. The models the steps of the last 30 days ran are counted from since (seen).

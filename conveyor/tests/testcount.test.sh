@@ -44,6 +44,27 @@ t_testcountcases() {
   : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches (#147): a test step that ran 20 minutes on a loaded machine was called stuck by the Foreman while its
+# cases still finished: a quiet runner's output, written long ago (here 2000), was all health read of it, and a run's
+# record started with no time at all until its first output. The run's start and each case that ends are its progress:
+# a case that ends (e, once $STUB/more is there) after the run's start, with no output, moves it on; and with the
+# card's lines and its output as old as 2000, health lists no stuck card.
+t_testcountprogress() {
+  local p0
+  countrun 'touch -t 200001010000 "${CONVEYOR_TEST_LOG%log}"
+( while [ -d "$STUB" ] && [ ! -e "$STUB/more" ]; do sleep 0.1; done; : > "$CONVEYOR_TEST_LOG/cases/ok/e" ) &' 'cases | length' 1
+  jq -c '.time = "2000-01-01T00:00:00Z"' "$ST/cards.jsonl" > "$ST/cards.new" && mv "$ST/cards.new" "$ST/cards.jsonl"
+  p0=$(jq -r .progress "$T/$CASE/cards/c7.live")
+  # The case ends in a later second than the start, so a progress the start alone set is told apart from it.
+  wait_until "[ \"\$(date -u +%FT%TZ)\" '>' '$p0' ]" || { : > "$STUB/go"; wait $run; fail "the clock did not pass $p0"; }
+  : > "$STUB/more"
+  wait_until "jq -e '.progress > \"$p0\"' '$T/$CASE/cards/c7.live'" "cat '$T/$CASE/cards/c7.live'" \
+    || { : > "$STUB/go"; wait $run; fail "a case that ended after the run's start did not move its progress on"; }
+  [ "$(loop health | jq -c '[.stuck[] | .card]')" = '[]' ] \
+    || { : > "$STUB/go"; wait $run; fail "health calls a test run whose cases finish stuck: $(loop health | jq -c .stuck)"; }
+  : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+
 # A command that gives no case count leaves tests null, its runner's case records or not, and its files as they were
 # counted before: of from `TESTRUN files=N`, run from its `-- ok` lines.
 t_testcountnone() {

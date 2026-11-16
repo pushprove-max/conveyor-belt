@@ -235,6 +235,7 @@
 {"area": "testrun", "test": "testcache.test.sh"}
 {"area": "testrun", "test": "mutidle.test.sh"}
 {"area": "testrun", "test": "testpaths.test.sh"}
+{"area": "testrun", "test": "testlist.test.sh"}
 {"area": "testrun", "file": "conveyor/lib/testrun.sh"}
 {"area": "fnclash", "test": "testcountrunner.test.sh"}
 {"area": "fnclash", "file": "conveyor/tools/fnclash.sh"}

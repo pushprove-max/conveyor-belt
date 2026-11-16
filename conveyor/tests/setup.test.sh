@@ -239,6 +239,19 @@ t_setuptestpatterns() {
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-patterns yes 2>&1) && jq -e '.tests.patterns[-1] == "test-*.js"' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --test-patterns yes did not write the patterns: $out"
 }
+# #147. Bug: a project whose test command is a plain `npm test` (here jest, by its package.json script) ran its whole
+# suite on every card, and setup did not say the command could take the list of a card's tests. It names the runner and
+# asks before changing anything; yes writes test.list args.
+t_setuptestlist() {
+  local X out was; setupdone
+  echo '{"scripts": {"test": "jest --ci"}}' > "$S/package.json"
+  jq '.test.command = "npm test"' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
+    && grep -qF -- "--test-list <yes or no: the test command runs jest, which takes test files as arguments; set the pack's test.list to args," <<<"$out" \
+    || fail "setup did not ask to set test.list for jest before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-list yes 2>&1) && jq -e '.test.list == "args"' "$S/.conveyor/project.json" >/dev/null \
+    || fail "setup --test-list yes did not write test.list args: $out"
+}
 # Bug: setup made no lane, so the owner had to know to run `lane fast create` and `lane research create` by hand. It
 # asks for both on every run, before it changes anything, and no to both makes neither.
 t_setuplaneasked() {

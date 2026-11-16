@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--pin] [--foreman]`:
+# `conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--pin] [--foreman]`:
 # the project set up for Conveyor (setup(), lib/setup.sh), from its checkout. Sourced by conveyor.sh.
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1

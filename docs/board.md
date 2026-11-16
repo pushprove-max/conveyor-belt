@@ -278,7 +278,8 @@ issue number, as a link, and the issue title.
 - A card in its Test step shows how many tests have run, "142 of 205 tests", and " · 2 failed" when any failed. A test
   command gives the count when it prints `TESTRUN cases=N`, and names each case as it ends with an empty file in
   `cases/ok` or `cases/failed` of its test log folder (`conveyor/README.md`, The test step). With no case count, the
-  card shows its test files, "3 of 6 test files".
+  card shows its test files, "3 of 6 test files". When the pack sets `test.list`, the text starts with the list that
+  the run got: "changed: 7 files", or "whole suite" ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
 - A passing Test step with test files over their CPU budget shows one chip, "3 slow files" or "1 slow file". It is a
   note, not a warning: the card still lands. Click the chip to open the list under the step. Each row shows the file
   name, its folder under it and its CPU seconds, "63.3 CPU s". The slowest file is first. When all the files went over one

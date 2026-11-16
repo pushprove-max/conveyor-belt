@@ -30,7 +30,7 @@ First install the requirements, then sign in, before step 1:
   which CLI is not signed in, and go on.
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
-   - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--test-patterns`, `--fast-lane`,
+   - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--test-patterns`, `--test-list`, `--fast-lane`,
      `--research-lane`, `--link`, `--builder-route`, `--reviewer-route`, `--fallback-route`, `--claude-proxy`,
      `--codex-proxy`, `--claude-key`, `--codex-key`, `--claude-proxy-key`, `--codex-proxy-key`), ask
      the user for exactly those, and nothing else: whose yes a change customers or staff will
@@ -52,7 +52,7 @@ First install the requirements, then sign in, before step 1:
      `anthropic.key` (or `openai.key`, `claude-proxy.key`, `codex-proxy.key`) in it with the Write tool, then run `chmod 600` on that file. Never put the key
      in a command, and never show it. Then run it again
      with the answers, each `--product` once per path, `--survey yes` or `--survey no`, `--test-patterns yes` or
-     `--test-patterns no`, `--fast-lane yes` or
+     `--test-patterns no`, `--test-list yes` or `--test-list no`, `--fast-lane yes` or
      `--fast-lane no`, `--research-lane yes` or `--research-lane no`, `--link yes`, `--link no` or
      `--worktree-setup <command>`, `--builder-route` and `--reviewer-route` each
      `fallback`, `proxy`, `api` or `subscription`, `--fallback-route proxy` or `--fallback-route api`,

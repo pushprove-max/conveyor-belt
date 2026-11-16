@@ -410,6 +410,17 @@ ignores the file runs its whole selection again; one that reads `pass` lines but
 may have broken. Files and cases are read from the logs the command writes to the folder `CONVEYOR_TEST_LOG` names:
 `== <file>` as a file begins, `-- ok|FAIL <file>` as it ends.
 
+### The list of tests a card's run is given
+
+With the pack's `test.list` set, each run of a card's `test.command` (not `test.full`, `test.main` or a run of
+named failed cases alone) is given the test files its change touches, as arguments (`args`), in place of `{files}`
+(`placeholder`) or in `CONVEYOR_TEST_FILES`, one path a line (`env`); [Which tests a card
+runs](../docs/configuration.md#which-tests-a-card-runs) says which files. A change that touches shared setup or
+config, or a file with no test found for it, `none`, and `args` with a command that already names the tests its runner
+runs (such as `node --test checks/*.js`), give no list: the command runs the whole suite. The live
+record and the test line hold `list`: `{"mode": "changed", "files": <count>}` or `{"mode": "whole", "why": "..."}`.
+The Board and `/units` show it with the test step (`changed: 7 files`, `whole suite`).
+
 ### When a full test run is allowed
 
 A full run, of the whole selection, is allowed in three cases only:

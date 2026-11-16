@@ -110,7 +110,8 @@ cards() {
 # blocked (card, issue, reason, since) and, apart from those, waiting: the cards blocked for the owner's yes to a visible
 # change; stuck (card, issue, step: the last one recorded or begun, since): every open card with neither a new line
 # nor, from the step it is running, any output (its live record's `last`, which a card waiting at its claim brings up
-# to date each poll, and a session its `progress`: a file or commit of its worktree, watch()) for STUCK seconds;
+# to date each poll, and a session its `progress`: a file or commit of its worktree, watch(); a test run's, its start and
+# its cases beginning or ending) for STUCK seconds;
 # every open card running a step again after the engine ended the step before it for no progress (since: when its
 # progress stopped; did: "ended and retried", on any stuck entry of such a card); and at once every open
 # card whose process (the pid and start its worktree line names) is gone, as nothing is left to write its line (but for

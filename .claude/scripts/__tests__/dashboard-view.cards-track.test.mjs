@@ -145,6 +145,25 @@ test('a card in its Test step shows its tests run of how many and those failed, 
   assert.deepEqual(detail(), [], 'a card in no test run says nothing of tests');
 });
 
+// Bug it catches (#147): a card's test step ran the whole suite or only the tests its change touched, and the Board
+// did not say which, so a 20-minute step read as stuck. The live line gives the list the run was given (track.list:
+// "changed: 7 files", "whole suite") and how many test files ran.
+test('a card in its Test step shows whether it runs the changed tests or the whole suite, and how many files ran', () => {
+  const w = boot();
+  const data = full(), c = data.panels.belt.data.cards[0];
+  Object.assign(c, { step: 'tests', model: null, live: { turns: 0, lastOutputAt: iso(T0 - 4000), action: null } });
+  c.track = trackOf('++-+..', 'tests', { at: 3, files: { run: 2, of: null }, tests: null, list: { mode: 'changed', files: 7 } });
+  c.track.steps[3].state = 'now';
+  deliver(w, data);
+  const live = () => panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] .track-now').textContent;
+  assert.match(live(), /changed: 7 files · 2 test files/, `the mode and the files run: ${live()}`);
+  const whole = clone(data);
+  whole.panels.belt.data.cards[0].track.list = { mode: 'whole', why: 'package.json: shared setup or config' };
+  next(w, whole);
+  assert.match(live(), /whole suite · 2 test files/, `the whole suite: ${live()}`);
+  assert.doesNotMatch(live(), /changed:/);
+});
+
 // Bug: the running card's "now:" text wrapped onto a second and third line as the action streamed, so the card, the
 // panel and the page grew and shrank under the reader. The line is one line high and cuts the text (app.css,
 // .track-now): the cut text must still be readable in full, on hover, and the rule that keeps it to one line must hold.

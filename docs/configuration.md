@@ -112,6 +112,40 @@ to its build. If they are still on the same line after the build, the card is bl
 `the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone`. Put the test on
 lines of its own, then retry the card.
 
+## Which tests a card runs
+
+A card's test run can get the list of the test files that its change touches. The pack's `test.list` tells how
+your test command (`test.command`) takes the list:
+
+- `args`: each path is added at the end of the command, for example `npm test` followed by the paths. If the command
+  already names its test files, for example `node --test checks/*.js`, it gets no list and runs the whole suite. Use
+  `placeholder` for such a command.
+- `placeholder`: the paths go where `{files}` is in the command, for example `"command": "npx jest {files} --ci"`.
+- `env`: an environment variable holds the paths, one on each line. [conveyor/README.md](../conveyor/README.md#the-list-of-tests-a-cards-run-is-given)
+  gives its name.
+- `none`: your command cannot take a list. Each card runs the whole suite.
+
+Without `test.list`, your command gets no list. Use this when your command selects the tests itself.
+
+The list holds:
+
+- each test file that the change adds or changes;
+- for each other changed file, the test files that `.conveyor/test-links.json` links to it, if your project has that
+  file (`{"<file>": ["<test file>", ...]}`);
+- else, the test files whose name holds the name of that file, from the nearest folders. For example, a change to
+  `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
+
+A change to a document (`.md`, `.txt`, `.rst`) adds no test. When the change touches one of the files below, the
+command gets no list and runs the whole suite:
+
+- a file at the root of the repository, such as `package.json`;
+- a config file (`.json`, `.yaml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.lock`, or a name with `config`);
+- a shared test file: a helper, setup, fixture or mock file, or a file in a folder of that name;
+- a file that has no test that Conveyor can find.
+
+A link in `.conveyor/test-links.json` wins over these rules. `test.full` is not changed: it always runs the whole
+suite. The Board and `/units` show the mode of a card's test run: `changed: 7 files` or `whole suite`.
+
 ## The host file
 
 The host file, `~/.config/conveyor/host.json`, holds this machine's settings: the terms file, the projects (`records`),
