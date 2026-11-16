@@ -48,7 +48,7 @@ brew install bash jq coreutils findutils gnu-sed grep flock
 opencode auth login
 opencode models
 codex debug models
-ssh -o BatchMode=yes localhost true
+ssh -o BatchMode=yes <target> true
 systemctl --user disable --now conveyor-machine.service
 launchctl bootout gui/$(id -u)/conveyor-machine
 systemctl --user disable --now dashboard.service

@@ -72,7 +72,7 @@
     projects: true,
     rows: 'all',  // every project's lanes, always all
     isEmpty: (d) => !Array.isArray(d.records) || d.records.length === 0,
-    empty(el, ctx) { el.append(ctx.state('empty', 'No lanes set up', `Nobody set up a project on the build machine yet. After you set one up, run ${MAKE} in its checkout to make its Fast lane.`)); },
+    empty(el, ctx) { el.append(ctx.state('empty', 'No lanes set up', `Nobody set up a project on ${ctx.machine} yet. After you set one up, run ${MAKE} in its checkout to make its Fast lane.`)); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the lanes', message)); },
     render(el, d, ctx) {
       const h = ctx.h, ul = h('ul', 'rows');

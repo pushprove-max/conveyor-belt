@@ -385,6 +385,7 @@
 {"area": "install", "test": "followreleases.test.sh"}
 {"area": "install", "file": "conveyor/lib/install.sh"}
 {"area": "setup", "test": "setup.test.sh"}
+{"area": "setup", "test": "boardone.test.sh"}
 {"area": "setup", "test": "models.test.sh"}
 {"area": "setup", "test": "serve.test.sh"}
 {"area": "setup", "test": "adopt.test.sh"}

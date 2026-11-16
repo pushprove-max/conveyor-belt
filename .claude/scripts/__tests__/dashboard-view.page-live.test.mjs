@@ -179,7 +179,8 @@ test('a first load that fails says so in every panel; a later one keeps the last
   pending(w, 'data.js').dispatchEvent(new w.Event('error'));
   assert.equal(w.document.getElementById('status').textContent, 'No data');
   assert.equal(w.document.getElementById('banner').hidden, false);
-  assert.match(w.document.getElementById('banner').textContent, /^No data: the Board cannot reach the build machine, so there is nothing to show\. Make sure that the machine is on\. Then press Restart/);
+  // #112: before any data the page does not know of a build machine, so it names none.
+  assert.match(w.document.getElementById('banner').textContent, /^No data: the page could not load the Board's data, so there is nothing to show\. Press Restart/);
   for (const id of OVERVIEW) {
     assert.equal(state(w, id), 'error', `${id} is not left as a skeleton`);
     assert.ok(panel(w, id).textContent.includes(SAYS[id].failed));

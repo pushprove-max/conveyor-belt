@@ -94,8 +94,8 @@
       // The project goes with the action: the host changes that project's record and no other.
       ctx.post('control', { action: act, args: [], repo: p.repo })
         .then((r) => (r.ok ? [`${act === 'pause' ? 'Paused' : 'Resumed'}. The page shows it in about a minute.`, back ? null : act === 'pause' ? 'resume' : 'pause']
-          : r.text().then((t) => [`Not changed: ${String(t).trim() || `the build machine answered ${r.status}`}`, null])),
-        () => ['Not changed: the build machine did not answer. Make sure that it is on. Then try again.', null])
+          : r.text().then((t) => [`Not changed: ${String(t).trim() || `${ctx.answerer} answered ${r.status}`}`, null])),
+        () => [`Not changed: ${ctx.answerer} did not answer. Make sure that it is on. Then try again.`, null])
         .then(([text, undo]) => { sent.set(p.repo, { text, mode: p.mode, undo }); redraw(); });
     };
     const now = sent.get(p.repo);
@@ -110,7 +110,7 @@
       b.addEventListener('click', () => { b.disabled = true; send(act); });
       // What it does, printed at phone width (app.css, .phone-note), where no hover text shows.
       acts.append(b, h('span', 'phone-note', b.title));
-    } else if (!(now && now.undo)) acts.append(h('span', 'unknown', 'Conveyor could not read its settings on the build machine. You cannot pause it from here, and it picks no new card. Run Conveyor\'s control command on the build machine: it says what is wrong.'));
+    } else if (!(now && now.undo)) acts.append(h('span', 'unknown', `Conveyor could not read its settings on ${ctx.machine}. You cannot pause it from here, and it picks no new card. Run Conveyor's control command on ${ctx.machine}: it says what is wrong.`));
     const open = (label, act, tab) => {
       const b = h('button', 'btn btn-quiet', label);
       b.type = 'button'; b.dataset.act = act;
@@ -161,7 +161,7 @@
       const mine = only && repos.includes(only) ? d.foremen.filter((f) => Array.isArray(f.projects) && f.projects.includes(only)) : d.foremen;
       const ul = h('ul', 'rows foremen');
       mine.forEach((f) => ul.append(foreman(f, ctx)));
-      out.push(mine.length ? ul : h('p', 'foot', 'Nobody set up a project on the build machine, so there is no Foreman to show.'));
+      out.push(mine.length ? ul : h('p', 'foot', `Nobody set up a project on ${ctx.machine}, so there is no Foreman to show.`));
     }
     el.replaceChildren(...out);
     if (held) { const again = el.querySelector(`.project[data-project="${String(held[0]).replace(/["\\]/g, '\\$&')}"] [data-act="${held[1]}"]`); if (again) again.focus({ preventScroll: true }); }
@@ -177,7 +177,7 @@
     projects: true,
     count: (d) => (Array.isArray(d.projects) ? d.projects.length : null),
     isEmpty: (d) => !Array.isArray(d.projects) || d.projects.length === 0,
-    empty(el, ctx) { el.append(ctx.state('empty', 'No project on the build machine', 'Nobody set up Conveyor for a project there yet: add one on the build machine, and it shows here.')); },
+    empty(el, ctx) { el.append(ctx.state('empty', `No project on ${ctx.machine}`, `Nobody set up Conveyor for a project there yet: add one on ${ctx.machine}, and it shows here.`)); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the projects', message)); },
     render,
   });

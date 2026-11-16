@@ -85,7 +85,7 @@
         ['Cards at once', (t) => (t && t.loop ? `${pct(t.loop.utilisation)} of the most on average, ${t.loop.slotsMax} at most` : NONE)],
         ['Idle, held back', (t) => (t && t.loop ? `${sec(t.loop.heldSec)} with room for a card while paused; ${sec(t.loop.idleSec)} with no card and issues queued` : NONE)],
         ['Pushes', (t) => (t && t.pushes ? `${t.pushes.ok} pushed (${spread(t.pushes.sec)}), ${t.pushes.failed} failed` : NONE)],
-        ['Build machine', (t) => (t && t.host ? `load ${num(t.host.loadMax) ? t.host.loadMax : NONE} at most, disk free ${num(t.host.diskFreeMinKb) ? `${Math.round(t.host.diskFreeMinKb / 1048576)} GB` : NONE} at least, memory used ${num(t.host.memUsedMaxKb) ? `${Math.round(t.host.memUsedMaxKb / 104857.6) / 10} GB` : NONE} at most` : NONE)],
+        [ctx.machine === 'the build machine' ? 'Build machine' : 'This machine', (t) => (t && t.host ? `load ${num(t.host.loadMax) ? t.host.loadMax : NONE} at most, disk free ${num(t.host.diskFreeMinKb) ? `${Math.round(t.host.diskFreeMinKb / 1048576)} GB` : NONE} at least, memory used ${num(t.host.memUsedMaxKb) ? `${Math.round(t.host.memUsedMaxKb / 104857.6) / 10} GB` : NONE} at most` : NONE)],
       ];
 
       // A 7-day sparkline: a line through the days that have a value, broken over those that do not; the last value dotted.
@@ -291,7 +291,7 @@
         rows.forEach((r) => {
           const tr = h('tr'), name = h('th');
           tr.dataset.project = r.project === null ? '' : String(r.project);
-          if (r.project === null) name.textContent = 'Build machine'; else name.append(ctx.tag(r.project));
+          if (r.project === null) name.textContent = ctx.machine === 'the build machine' ? 'Build machine' : 'This machine'; else name.append(ctx.tag(r.project));
           const cell = (v) => h('td', v === NONE ? 'unknown' : null, v);
           tr.append(name, cell(num(r.landed) ? String(r.landed) : NONE), cell(sec(r.leadSec)), cell(num(r.usd) ? `${money(r.usd)}${left(r.usdLeftOut)}` : NONE));
           body.append(tr);
@@ -337,7 +337,7 @@
         charts.append(perDay(rec), reasons(rec), histogram(mine || []), models(rec), slots(rec));
         out.push(tiles(rec), charts, table(rec));
       }
-      if (!mine) out.push(h('p', 'warn-note', 'The build machine did not give measurements per card.'));
+      if (!mine) out.push(h('p', 'warn-note', `${ctx.machine === 'the build machine' ? 'The build machine' : 'Conveyor'} did not give measurements per card.`));
       else if (mine.length) {
         const ul = h('ul', 'rows compact');
         const row = (c) => {

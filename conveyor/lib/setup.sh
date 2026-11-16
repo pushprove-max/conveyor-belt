@@ -310,6 +310,13 @@ doctor() {
     done < <(jq -r '.records | arrays | .[] | objects | .main | strings' "$HOST")
     [ -n "$e" ] || no "a record of the host file $HOST for this checkout $MAIN (the machine's Conveyor serves only the checkouts its records name)" \
       "run /conveyor-belt:setup; when it says another record has this checkout's name, add {\"repo\": \"<name>\", \"main\": \"$MAIN\"} to the host file's records by hand"
+    # The Board reads the project as the host file says, by its own reader (dashboard.sh --check): on this machine, or
+    # over ssh on a build machine the host file names. When it cannot, every Board panel says so: this names why.
+    f=${HERE%/*}/.claude/scripts/dashboard.sh
+    if [ ! -f "$f" ]; then echo "not checked: the Board reading the project: this copy of Conveyor has no $f"
+    elif t=$(CONVEYOR_MAIN=$MAIN bash "$f" --check 2>&1); then ok "the Board reads the project ${t##*$'\n'}"
+    else no "the Board reading the project (${t//$'\n'/; })" \
+      "correct the host file $HOST as that says; on one machine it needs no host, main or ssh, only its records"; fi
   fi
   # One Conveyor per machine: the machine's loop (`machine`), and no loop of a project beside it that it did not start
   # (a per-project service left from before, or a `serve` started by hand). Each loop alive names its pid.

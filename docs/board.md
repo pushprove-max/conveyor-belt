@@ -7,9 +7,17 @@ Foreman, and a filter and a sort by project on every list.
 
 ## Install the Board
 
-The Board reads the belt over ssh, from the `ssh` target of the host file, this machine's settings file. Set its
-`host`, `ssh` and `main` ([The host file](setup.md#the-host-file)). The `ssh` target must take a login by key from this
-machine: `ssh -o BatchMode=yes localhost true` must work.
+By default, Conveyor and the Board run on one machine. The Board reads the belt, the queue, the costs, the usage and
+the accounts on this machine, with no ssh. The host file that setup writes is all it needs. Health shows the
+machine as **This machine**.
+
+To read the belt from a separate build machine, set `host`, `ssh` and `main` in the host file on the Board's machine
+([The host file](setup.md#the-host-file)). The `ssh` target must take a login by key from the Board's machine:
+`ssh -o BatchMode=yes <target> true` must work. When the host file names no `ssh` target, or names this machine as
+its `host`, the Board reads this machine.
+
+When the Board cannot read the host file, each panel says that it could not read its part. Click its details to see
+which part of the host file to correct. `conveyor.sh doctor` names the same fault.
 
 `/conveyor-belt:setup` asks "Start the Board now?" when the Board is not running. Yes starts it. To start it
 yourself, run this in your project's checkout:

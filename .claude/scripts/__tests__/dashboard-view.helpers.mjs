@@ -643,14 +643,18 @@ export const panelState = {
     assert.equal(state(w, id), 'error');
     const text = panel(w, id).textContent;
     // Issue 415 (UX5): what is not seen and the one thing to try; the build machine's raw reply on tap only.
-    assert.ok(text.includes(SAYS[id].failed) && text.includes('The Board could not get this panel from the build machine, so it cannot show it. Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.'), text);
+    // The page names the build machine only when Health says one is set up (#112): with Health's own part failed it
+    // does not know, so it names Conveyor.
+    const said = id === 'health' ? 'The Board could not get this panel from Conveyor, so it cannot show it. Press Restart the Board\'s feed in Health. If this continues, the details say what to correct.'
+      : 'The Board could not get this panel from the build machine, so it cannot show it. Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.';
+    assert.ok(text.includes(SAYS[id].failed) && text.includes(said), text);
     assert.ok(!text.includes('did not answer'), `the raw reply is not in the text: ${text}`);
     assert.equal(panel(w, id).querySelector('.state-detail').dataset.tip, 'Details: buildhost did not answer: timed out');
     for (const other of LIST) if (other !== id && TAB(other) === TAB(id)) assert.equal(state(w, other), 'ready', `${other} still shows its own data`);
     delete data.panels[id];
     next(w, data);
     assert.equal(state(w, id), 'error');
-    assert.match(panel(w, id).textContent, /The build machine sent nothing for this panel, so the Board cannot show it\. If this continues, press Restart the Board's feed in Health\./);
+    assert.match(panel(w, id).textContent, new RegExp(`${id === 'health' ? 'Conveyor' : 'The build machine'} sent nothing for this panel, so the Board cannot show it\\. If this continues, press Restart the Board's feed in Health\\.`));
   },
   own(id) {
     const w = boot({ tab: TAB(id) });

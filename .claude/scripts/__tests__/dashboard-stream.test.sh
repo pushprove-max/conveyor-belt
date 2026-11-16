@@ -211,6 +211,40 @@ pass=$((pass + 3))
 echo "$pass" > "$T/pass"
 ) & started burst
 
+( fresh onemachine
+# Bug caught (#112): the feed followed only a host file that named a build machine, so on the host file setup writes
+# (records alone) it never started and the page said the live feed was not running. On one machine it runs
+# `conveyor.sh watch` of the Board's own copy of Conveyor here, never over ssh, and says it is local. A record whose
+# checkout has a space in its path (setup records it unchanged) is read too, and its path is quoted in the command.
+echo "{\"records\":[{\"repo\":\"sample\",\"main\":\"$MAIN\"},{\"repo\":\"spaced\",\"main\":\"/srv/my project\"}]}" > "$MAIN/conveyor/host.json"
+python3 - "$FEED" "$MAIN" "$T/home" "$SOURCE" <<'PY' || fail "the feed on one machine: see above"
+import importlib.util, os, sys
+os.environ['XDG_CONFIG_HOME'] = sys.argv[3]  # no host file of this machine: main's
+spec = importlib.util.spec_from_file_location('feed', sys.argv[1]); ds = importlib.util.module_from_spec(spec); spec.loader.exec_module(ds)
+main, engine = sys.argv[2], sys.argv[4]
+cfg, why = ds.config(main)
+assert why is None, why
+assert cfg == (ds.this_host(), main, [('sample', main), ('spaced', '/srv/my project')], None, engine), cfg
+class Stop(Exception):
+    pass
+calls = []
+def popen(argv, **kw):
+    calls.append(argv)
+    raise Stop
+ds.subprocess.Popen = popen
+f = ds.Feed('/nowhere', '/nowhere/dashboard.sh', main, *cfg)
+for r in f.recs:
+    try:
+        f.follow(r)
+    except Stop:
+        pass
+assert calls == [['bash', '-c', 'CONVEYOR_MAIN=%s exec bash %s/conveyor/conveyor.sh watch' % (main, engine)],
+                 ['bash', '-c', "CONVEYOR_MAIN='/srv/my project' exec bash %s/conveyor/conveyor.sh watch" % engine]], calls
+assert f.doc()['local'] is True
+PY
+echo 1 > "$T/pass"
+) & started onemachine
+
 ( fresh quiet
 # No line changes anything for 30 s (only beats): no build of data.js. With none for 45 s data.js is built once more,
 # so the page's Live (health.js STREAM_EXPIRE_MS) does not expire on a quiet feed. The feed's clock is a fake one, so

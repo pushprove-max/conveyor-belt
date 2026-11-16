@@ -143,7 +143,8 @@ test('Health: a row not read or not checked says it is tried again "in about a m
   hd.host.reachable = null;
   hd.accounts = { list: [], error: 'ssh: no answer' };
   deliver(w, data);
-  assert.match(dd(w, 'buildhost').textContent, /Next: The Board checks it again in about a minute\. Before that check, this project must name its build machine\./);
+  // #112: a host not checked says to correct the host file as its error says, never that a build machine is needed.
+  assert.match(dd(w, 'buildhost').textContent, /Next: The Board checks it again in about a minute\. Before that check, correct the host file as the error says\./);
   assert.match(dd(w, 'Host accounts').textContent, /Next: The Board reads them again in about a minute\./);
   assert.doesNotMatch(panel(w, 'health').textContent, /snapshot|next reading/i);
 });

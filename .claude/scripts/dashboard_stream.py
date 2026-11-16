@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """dashboard_stream.py <dashboard folder> <main checkout> -- the dashboard's live Conveyor feed.
 
-dashboard.sh --loop runs it beside the page server. For every record conveyor/host.json names it keeps one ssh open to
-the host (at host.json's `ssh` target) running `conveyor.sh watch` (conveyor/watch.py says what each line
-holds), and after each line it writes <dashboard folder>/stream.json, the same object dashboard.sh's conveyor() gives
-({host, reachable, error, records}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
+dashboard.sh --loop runs it beside the page server. For every record conveyor/host.json names it keeps one
+`conveyor.sh watch` running (conveyor/watch.py says what each line holds): over ssh to the build machine (at host.json's
+`ssh` target), or here on one machine (config()). After each line it writes <dashboard folder>/stream.json, the same
+object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
 the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
 is down), writtenAt (when this file was written: every TICK seconds at least)}. After a line that changed something it
 has `dashboard.sh --publish` build data.js again from that and the slower parts the last cycle read, so a card's step
@@ -29,6 +29,7 @@ import json
 import os
 import re
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -43,7 +44,7 @@ BACKOFF_MAX = 30.0
 GAP = 2.0    # s from the start of one build of data.js to the start of the next, at least
 KEEP = 45.0  # s with no change after which data.js is built again for its writtenAt: under health.js STREAM_EXPIRE_MS
 NAME = re.compile(r'^[A-Za-z0-9._-]+$')
-PATH = re.compile(r'^/[A-Za-z0-9._/-]+$')
+PATH = re.compile(r'/[^\x00-\x1f\x7f]*')  # an absolute path, spaces and all: each command quotes it
 SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
 OPEN = set()  # the ssh of every stream open now: each in a group of its own, so each is ended with this process
 
@@ -61,9 +62,16 @@ def iso(t):
     return None if t is None else datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+def this_host():
+    """This machine's short name, as dashboard.sh's thishost gives it."""
+    return re.sub(r'[^A-Za-z0-9._-]', '-', os.uname().nodename.split('.')[0]) or 'localhost'
+
+
 def config(main):
-    """(host, main on the host, [(repo, main)], ssh target), or (host or None, reason) when it cannot be read: the same
-    rules as dashboard.sh's conveyor(): this machine's host file when there is one, else main's conveyor/host.json."""
+    """(host, the steered record's main, [(repo, main)], ssh target or None, the checkout whose conveyor.sh runs), or
+    (host or None, reason naming the field that is wrong) when it cannot be read: the same rules as dashboard.sh's
+    hostof(): this machine's host file when there is one, else main's conveyor/host.json. One machine (no ssh target,
+    as setup writes it, or this machine named as the host): no target, the Board's own copy of Conveyor runs here."""
     path = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'conveyor', 'host.json')
     if not os.path.exists(path):
         path = os.path.join(main, 'conveyor', 'host.json')
@@ -73,25 +81,35 @@ def config(main):
     except OSError:
         return None, 'this checkout has no conveyor/host.json'
     except ValueError:
-        return None, 'conveyor/host.json is not understood'
-    host, hmain = cfg.get('host') if isinstance(cfg, dict) else None, cfg.get('main') if isinstance(cfg, dict) else None
-    if not (isinstance(host, str) and NAME.match(host) and isinstance(hmain, str) and PATH.match(hmain)):
-        return None, 'conveyor/host.json is not understood'
+        return None, 'conveyor/host.json is not a JSON object'
+    if not isinstance(cfg, dict):
+        return None, 'conveyor/host.json is not a JSON object'
+    host, hmain, target = cfg.get('host'), cfg.get('main'), cfg.get('ssh')
+    if target is None or host == this_host():
+        host = host if isinstance(host, str) and NAME.match(host) else this_host()
+        hmain = hmain if isinstance(hmain, str) and PATH.fullmatch(hmain) else main
+        target, engine = None, os.path.dirname(os.path.dirname(HERE))
+    else:
+        if not (isinstance(host, str) and NAME.match(host)):
+            return None, 'conveyor/host.json names an ssh target, but its host is not a machine name'
+        if not (isinstance(hmain, str) and PATH.fullmatch(hmain)):
+            return host, 'conveyor/host.json names no main: the path of the main checkout on %s' % host
+        # The ssh target: host.json's own `ssh` (the Board reads no host list of the project's own).
+        if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
+            return host, 'conveyor/host.json names no ssh target for %s that ssh can use' % host
+        engine = hmain
     recs = cfg.get('records', [{'repo': 'project', 'main': hmain}])
     if not (isinstance(recs, list) and recs and all(isinstance(r, dict) and isinstance(r.get('repo'), str) and NAME.match(r['repo'])
-                                                     and isinstance(r.get('main'), str) and PATH.match(r['main']) for r in recs)):
-        return host, 'conveyor/host.json records are not understood'
-    # The ssh target: host.json's own `ssh` (the Board reads no host list of the project's own).
-    target = cfg.get('ssh')
-    if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
-        return host, 'conveyor/host.json names no ssh target for %s' % host
-    return (host, hmain, [(r['repo'], r['main']) for r in recs], target), None
+                                                     and isinstance(r.get('main'), str) and PATH.fullmatch(r['main']) for r in recs)):
+        return host, 'conveyor/host.json records are not understood: each needs a repo name and the path of its main checkout'
+    return (host, hmain, [(r['repo'], r['main']) for r in recs], target, engine), None
 
 
 class Feed:
-    def __init__(self, out, dash, main, host, hmain, recs, target):
+    def __init__(self, out, dash, main, host, hmain, recs, target, engine=None):
         self.out, self.dash, self.main, self.host, self.hmain, self.target = out, dash, main, host, hmain, target
-        self.cfg = (host, hmain, recs, target)
+        self.engine = engine or hmain
+        self.cfg = (host, hmain, recs, target, engine)
         self.lock = threading.Lock()
         self.recs = [{'repo': repo, 'main': m, 'snap': None, 'overlay': None, 'repoUrl': None, 'lastPushAt': None, 'up': False,
                       'heardAt': None, 'downAt': time.time(), 'error': 'the stream has not opened yet', 'unreachable': False,
@@ -107,15 +125,16 @@ class Feed:
     def follow(self, rec):
         wait = BACKOFF
         while True:
-            cmd = 'CONVEYOR_MAIN=%s exec bash %s/conveyor/conveyor.sh watch' % (rec['main'], self.hmain)
+            cmd = 'CONVEYOR_MAIN=%s exec bash %s watch' % (shlex.quote(rec['main']), shlex.quote(self.engine + '/conveyor/conveyor.sh'))
+            # Over ssh to the build machine, or here on one machine (no target).
+            argv = ['bash', '-c', cmd] if self.target is None else [
+                'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4', self.target, cmd]
             try:
                 # A group of its own: closing a stream ends everything it started, so nothing holds its pipes open.
-                p = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15',
-                                      '-o', 'ServerAliveCountMax=4', self.target, cmd],
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
                                      start_new_session=True)
             except OSError as e:
-                self.down(rec, 'ssh could not start: %s' % e, False)
+                self.down(rec, '%s could not start: %s' % (argv[0], e), False)
                 time.sleep(wait)
                 wait = min(BACKOFF_MAX, wait * 2)
                 continue
@@ -134,7 +153,7 @@ class Feed:
             p.stdout.close()
             err = [x.decode('utf-8', 'replace').strip() for x in tail if x.strip()]
             why = 'no line in %g s' % DEAD if quiet else err[-1][:200] if err else 'the stream ended (exit %s)' % rc
-            self.down(rec, '%s: %s' % (self.host, why), rc == 255)
+            self.down(rec, '%s: %s' % (self.host, why), rc == 255 and self.target is not None)
             if got:
                 wait = BACKOFF  # it worked: the next try is soon
             time.sleep(wait)
@@ -228,7 +247,7 @@ class Feed:
             error = None
             if records is None:
                 error = down[0]['error'] if down else 'waiting for the first snapshot of every record'
-            return {'host': self.host, 'reachable': not any(r['unreachable'] for r in recs), 'error': error, 'records': records,
+            return {'host': self.host, 'local': self.target is None, 'reachable': not any(r['unreachable'] for r in recs), 'error': error, 'records': records,
                     'stream': {'live': live, 'heardAt': None if None in heard else iso(min(heard)),
                                'since': None if live else iso(min(r['downAt'] or time.time() for r in down)),
                                'error': None if live else '; '.join(sorted({r['error'] for r in down if r['error']})) or None,

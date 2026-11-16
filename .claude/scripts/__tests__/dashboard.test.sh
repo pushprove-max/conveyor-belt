@@ -137,7 +137,7 @@ q '.panels.machine.data | .host == "devbox" and .state == "running" and .cap == 
 q '.panels.landed.data.cards == [] and .panels.landed.data.day == "'"$(date +%F)"'"' "nothing landed is an empty list for today"
 q '.panels.cost.data.cards | .todayUsd == 0 and .weekUsd == 0 and .perLandedUsd == null and .perCard == [] and .unpricedSteps == 0' "no spend is a measured 0, and no landed card has no average"
 q '.panels.declined == {error: null, data: {lines: [], rest: []}}' "no declined finding (a snapshot from before it carried the list, too) is an empty list, not a failed part"
-q '.panels.health.data | .host == {name: "devbox", reachable: true, error: null} and (.records | length) == 2 and (has("cpuCap") | not)' "the host answered: reachable, both records, and no CPU cap (dropped)"
+q '.panels.health.data | .host == {name: "devbox", local: false, reachable: true, error: null} and (.records | length) == 2 and (has("cpuCap") | not)' "the host answered: reachable, both records, and no CPU cap (dropped)"
 q '.panels.health.data.records | .[0].lastPushAt == (1794000000 | todate) and .[1].lastPushAt == null and all(.[]; .loop == true and .gh == true)' "each record carries its last push; none recorded is null"
 q '.panels.board.data | .repo == "sample" and .control == null and .modelSettings == null and .held == null and .queue == null and (.issuesError | test("did not list"))
   and ([.building, .review, .waiting, .blocked, .landed] | all(. == []))' "a snapshot from before the control record: the Board says the queue was not listed, and its cards are measured empty lists"
@@ -145,8 +145,9 @@ q '.panels.rules.data | .repo == "sample" and .control == null and .queue == nul
 
 # --- the one ssh command: every record's snapshot, origin and last push, then the end marker ---
 [ "$(wc -l < "$T/ssh-calls")" -eq 1 ] || fail "a collect asks the host once: $(cat "$T/ssh-calls")"
-for want in 'user@devbox' 'BatchMode=yes' 'CONVEYOR_MAIN=/srv/main bash /srv/main/conveyor/conveyor.sh snapshot' 'CONVEYOR_MAIN=/srv/cd bash /srv/main/conveyor/conveyor.sh snapshot' \
-    'git -C /srv/cd remote get-url origin' 'stat -c %Y "$(CONVEYOR_MAIN=/srv/cd bash /srv/main/conveyor/conveyor.sh state-dir)"/pushed' 'echo @@end'; do
+# Each path is quoted, as a checkout's path may hold a space.
+for want in 'user@devbox' 'BatchMode=yes' "CONVEYOR_MAIN='/srv/main' bash '/srv/main/conveyor/conveyor.sh' snapshot" "CONVEYOR_MAIN='/srv/cd' bash '/srv/main/conveyor/conveyor.sh' snapshot" \
+    "git -C '/srv/cd' remote get-url origin" "stat -c %Y \"\$(CONVEYOR_MAIN='/srv/cd' bash '/srv/main/conveyor/conveyor.sh' state-dir)\"/pushed" 'echo @@end'; do
   grep -qF -- "$want" "$T/ssh-calls" || fail "the host command lacks '$want': $(cat "$T/ssh-calls")"
 done
 ! grep -qE 'cpu-cap|scaling_max_freq' "$T/ssh-calls" || fail "the host command still asks for the CPU cap: $(cat "$T/ssh-calls")"
@@ -213,7 +214,7 @@ q '[.panels.health.data.accounts.list[] | select(.machine == "devbox") | [.email
 q '.panels.health.data.accounts.list | ([.[] | select(.machine == "devbox") | .cards] == [false, true]) and all(.[] | select(.machine == null); .cards == false)' \
   "an account no card runs on, here or on the host, is marked so: Health gives it no next step about its work"
 mv "$T/ssh-accounts.kept" "$T/ssh-accounts"
-grep -qF 'user@devbox python3 /srv/main/.claude/scripts/dashboard_limit.py accounts' "$T/ssh-accounts-calls" || fail "the host's accounts are not read over ssh to its target: $(cat "$T/ssh-accounts-calls")"
+grep -qF "user@devbox python3 '/srv/main'/.claude/scripts/dashboard_limit.py accounts" "$T/ssh-accounts-calls" || fail "the host's accounts are not read over ssh to its target: $(cat "$T/ssh-accounts-calls")"
 : > "$T/ssh-accounts-calls"; quiet; run
 [ ! -s "$T/ssh-accounts-calls" ] || fail "the host's accounts were read again inside the TTL: $(cat "$T/ssh-accounts-calls")"
 # #623: the limit panel shows the account the cards run on, as the build machine's guard read it, never this machine's
@@ -297,7 +298,7 @@ hrun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONV
 h=$(hrun) || fail "--history exited non-zero"
 [ "$(jq -c '[(.panels | keys), (.panels.landed.data.cards | map(.card))]' <<<"$h")" = '[["cost","declined","landed","metrics"],["c-new","c-old"]]' ] \
   || fail "--history does not give the four parts with the older card of the day: $(jq -c '.panels.landed' <<<"$h" | cut -c1-600)"
-[ "$(grep -c 'conveyor.sh history' "$T/ssh-calls")" = 1 ] && [ "$(wc -l < "$T/ssh-calls")" = 1 ] || fail "--history asks the host for every record's history in one command: $(cat "$T/ssh-calls")"
+[ "$(grep -c "conveyor.sh' history" "$T/ssh-calls")" = 1 ] && [ "$(wc -l < "$T/ssh-calls")" = 1 ] || fail "--history asks the host for every record's history in one command: $(cat "$T/ssh-calls")"
 [ "$(hrun | jq -c '.panels.landed.data.cards | length')" = 2 ] && [ "$(wc -l < "$T/ssh-calls")" = 1 ] || fail "a second --history inside the minute asked the host again: $(cat "$T/ssh-calls")"
 rm "$OUT/cache/history.json"; echo 255 > "$T/ssh-rc"
 h=''; ! h=$(hrun 2>/dev/null) && [ -z "$h" ] || fail "a host that gave no history was passed off as one: $h"
@@ -668,7 +669,8 @@ jq --arg s "$T/fstate" --arg l "$T/away/sample-here/.claude/metrics/decisions.js
 run
 q '.panels.machine.data.foremen | map([.projects, .held, .since]) == [[["sample"], true, "2026-11-12T07:00:00Z"], [["widgetshop"], true, "2026-11-12T06:00:00Z"]]' "with ssh and a main not on this machine, the Foreman is read from the checkout here whose origin is that repository"
 # Without ssh the folder is read under main as before, even when a checkout here has the repository as its origin.
-# Conveyor is not read with no ssh target (the machine panel is null), so the cycle's kept Foremen part is read.
+# With no ssh target Conveyor is read on this machine, where /srv/main is no checkout, so it gives no snapshot (the
+# machine panel is null) and the cycle's kept Foremen part is read.
 mkdir -p "$T/wmain/conveyor/state/foreman"; echo 'sess-m 2026-11-12T04:00:00Z' > "$T/wmain/conveyor/state/foreman/session"
 jq --arg l "$T/away/sample-here/.claude/metrics/decisions.jsonl" --arg w "$T/wmain" 'del(.ssh) | .records[0].ledger = $l | .records[1].main = $w' "$T/host.before" > "$MAIN/conveyor/host.json"
 run
@@ -835,17 +837,21 @@ q '.panels.belt.data == null and .panels.health.data.host.reachable == true' "a 
 # --- a checkout that names no host, or one it cannot find ---
 mv "$MAIN/conveyor/host.json" "$T/host.json"; : > "$T/ssh-calls"
 run
-q '.panels.health.data.host == {name: null, reachable: null, error: "this checkout has no conveyor/host.json"} and (.panels.belt.error | test("no conveyor/host.json"))' "a checkout with no host file says so"
+q '.panels.health.data.host == {name: null, local: true, reachable: null, error: "this checkout has no conveyor/host.json"} and (.panels.belt.error | test("no conveyor/host.json"))' "a checkout with no host file says so, and names no build machine"
 [ ! -s "$T/ssh-calls" ] || fail "with no host file nothing is asked over ssh: $(cat "$T/ssh-calls")"
-echo '{"host":"dev box","main":"/srv/main"}' > "$MAIN/conveyor/host.json"
+# Each error names the field that is wrong (#112), and a host file that names a build machine is said to.
+echo '{"host":"dev box","ssh":"user@devbox","main":"/srv/main"}' > "$MAIN/conveyor/host.json"
 run
-q '.panels.belt.error == "conveyor/host.json is not understood"' "a host name that is not a plain name is refused, never passed to ssh"
-echo '{"host":"elsewhere","main":"/srv/main"}' > "$MAIN/conveyor/host.json"
+q '.panels.belt.error == "conveyor/host.json names an ssh target, but its host is not a machine name" and .panels.health.data.host.local == false' "a host name that is not a plain name is refused, never passed to ssh"
+echo '{"host":"elsewhere","ssh":"","main":"/srv/main"}' > "$MAIN/conveyor/host.json"
 run
-q '.panels.belt.error == "conveyor/host.json names no ssh target for elsewhere"' "a host file with no ssh target is not guessed from test-hosts.json"
+q '.panels.belt.error == "conveyor/host.json names no ssh target for elsewhere that ssh can use"' "an ssh target ssh cannot use is not guessed from test-hosts.json"
+echo '{"host":"devbox","ssh":"user@devbox","records":[{"repo":"sample","main":"/srv/main"}]}' > "$MAIN/conveyor/host.json"
+run
+q '.panels.belt.error == "conveyor/host.json names no main: the path of the main checkout on devbox"' "a build machine with no main is refused, naming the field"
 echo '{"host":"devbox","ssh":"user@devbox","main":"/srv/main","records":[{"repo":"sample","main":"relative/path"}]}' > "$MAIN/conveyor/host.json"
 run
-q '.panels.belt.error == "conveyor/host.json records are not understood"' "a record whose checkout is not an absolute path is refused"
+q '.panels.belt.error == "conveyor/host.json records are not understood: each needs a repo name and the path of its main checkout"' "a record whose checkout is not an absolute path is refused"
 [ ! -s "$T/ssh-calls" ] || fail "a host file that is not understood asks nothing over ssh: $(cat "$T/ssh-calls")"
 mv "$T/host.json" "$MAIN/conveyor/host.json"
 ) & started figures
@@ -934,7 +940,7 @@ env -u CONVEYOR_MAIN -u CONVEYOR_HOOK_FIRE_LOG -u CODEX_HOME HOME="$T/userhome" 
   CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" CONVEYOR_DASHBOARD_DIR="$OUT" timeout 120 bash "$MAIN/.claude/scripts/dashboard.sh" 2>"$T/hf.err" \
   || fail "a Board whose host file names a checkout on another machine must still collect: $(cat "$T/hf.err")"
 q '.panels.needs.data | .decisionsError == null and (.decisions | map(.id)) == ["q-ship"]' "the decisions come from the ledger the host file names, not the host file's main nor the Board's own checkout"
-grep -qF 'bash /srv/linux-only/conveyor/conveyor.sh snapshot' "$T/ssh-calls" || fail "the host file's main is the host's checkout, sent over ssh: $(cat "$T/ssh-calls")"
+grep -qF "bash '/srv/linux-only/conveyor/conveyor.sh' snapshot" "$T/ssh-calls" || fail "the host file's main is the host's checkout, sent over ssh: $(cat "$T/ssh-calls")"
 env -u CONVEYOR_MAIN HOME="$T/userhome" XDG_CONFIG_HOME="$HF" bash "$MAIN/.claude/scripts/decision.sh" list > "$T/hf.list" 2>&1 \
   && jq -e 'map(.id) | index("q-own") != null' "$T/hf.list" >/dev/null \
   || fail "decision.sh must read this machine's ledger, not the host file's main: $(cat "$T/hf.list")"
@@ -1162,7 +1168,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 RETIRED='\b([u]nits?|[s]eats?|[p]ass(es)?|[m]erge queue|[c]hain)\b'

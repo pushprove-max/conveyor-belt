@@ -60,10 +60,15 @@ The host file, `~/.config/conveyor/host.json`, holds this machine's settings
 ([Configuration](configuration.md#the-host-file)). Setup writes it and adds your project to it. Change it only to
 set one of these keys:
 
+By default, Conveyor and the Board run on one machine. The host file that setup writes holds only `records`, and the
+Board reads every project on this machine. To read the belt from a separate build machine instead, set `host`, `ssh`
+and `main` in the host file on the Board's machine.
+
 - `terms`: the terms file. It is optional ([Privacy](configuration.md#privacy)).
-- `host`: a name for the machine that runs the loop, for the Board to show.
-- `ssh`: the target the Board reads that machine through.
-- `main`: the folder of the Conveyor checkout the Board runs from ([The Board](board.md#install-the-board)).
+- `host`: the name of the build machine, for the Board to show. A `host` that is this machine's name means one
+  machine.
+- `ssh`: the target the Board reads the build machine through. With no `ssh`, the Board reads this machine.
+- `main`: the folder of the Conveyor checkout on the build machine ([The Board](board.md#install-the-board)).
 - `records`: each project the loop serves. A record's `ledger` is that project's decision ledger. The Board shows its
   open decisions and answers them. A record's `lanes` are the folders of its lanes, which `conveyor.sh lane ... create`
   writes.

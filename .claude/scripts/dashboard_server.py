@@ -9,7 +9,8 @@ behind a login (the owner's ruling): the only public routes are PUBLIC below.
 The page keeps its layout in the browser, so nothing in the served folder is writable. A logged-in caller can do three
 things and nothing else: answer one open decision through `POST /answer`, restart the collector through
 `POST /restart`, and steer the Conveyor loop from the Board through `POST /control`: one action of
-`conveyor.sh control`, or the yes, the no or the retry of a card, run on the host conveyor/host.json names, on the
+`conveyor.sh control`, or the yes, the no or the retry of a card, run on the host conveyor/host.json names (here on one
+machine: conveyor_host()), on the
 record of it the request names (`POST /machine` pauses or resumes the whole machine, or sets its load limit, instead,
 and names no record); and manage
 users (below). Every write is taken from the page's own address only (own_page), and each names the user who made it
@@ -199,7 +200,7 @@ LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
 RUN_ID = re.compile(r'[0-9a-f]{12}')  # a full test run's id, as conveyor.sh's full-test anyway takes it
 VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})')  # a release's, as conveyor.sh's release-run takes it
 HOST_NAME = re.compile(r'[A-Za-z0-9._-]+')
-HOST_MAIN = re.compile(r'/[A-Za-z0-9._/-]+')
+HOST_MAIN = re.compile(r'/[^\x00-\x1f\x7f]*')  # an absolute path, spaces and all: control_script quotes it
 SSH_TARGET = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]*')
 # every other action: 30 s. start outlasts conveyor.sh's 60 s `timeout 60 gh issue list` (control start), so the
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
@@ -461,24 +462,34 @@ def machine_ok(body):
     return set(body) == {'action'} and body['action'] in ('pause', 'resume')
 
 
+def board_main():
+    """This machine's checkout, by dashboard.sh's rule: CONVEYOR_MAIN, else git. ValueError when it cannot be found."""
+    main = os.environ.get('CONVEYOR_MAIN')
+    if main:
+        return main
+    try:
+        common = subprocess.run(['git', '-C', HERE, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ValueError('the main checkout could not be found') from e
+    return common[:-5] if common.endswith('/.git') else common
+
+
 def host_file():
     """conveyor/host.json as dashboard.sh reads it: this machine's host file when there is one, else the committed one
-    of this machine's checkout, found by dashboard.sh's rule: CONVEYOR_MAIN, else git. ValueError when it does not read."""
-    main = os.environ.get('CONVEYOR_MAIN')
+    of this machine's checkout (board_main()). ValueError when it does not read."""
     host_file = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'conveyor', 'host.json')
-    if not main and not os.path.exists(host_file):
-        try:
-            common = subprocess.run(['git', '-C', HERE, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-                                    capture_output=True, text=True, timeout=10, check=True).stdout.strip()
-        except (OSError, subprocess.SubprocessError) as e:
-            raise ValueError('the main checkout could not be found') from e
-        main = common[:-5] if common.endswith('/.git') else common
     try:
         # This machine's host file when there is one (dashboard.sh's conveyor() rule), else main's conveyor/host.json.
-        with open(host_file if os.path.exists(host_file) else os.path.join(main, 'conveyor', 'host.json')) as f:
+        with open(host_file if os.path.exists(host_file) else os.path.join(board_main(), 'conveyor', 'host.json')) as f:
             return json.load(f)
     except (OSError, ValueError) as e:
         raise ValueError('conveyor/host.json is missing or not understood') from e
+
+
+def this_host():
+    """This machine's short name, as dashboard.sh's thishost gives it."""
+    return re.sub(r'[^A-Za-z0-9._-]', '-', os.uname().nodename.split('.')[0]) or 'localhost'
 
 
 def record_ledger(repo):
@@ -493,25 +504,33 @@ def record_ledger(repo):
 
 
 def conveyor_host():
-    """(host, ssh target, the host's main checkout, {repo: checkout} of its records) from conveyor/host.json, as
-    dashboard.sh reads it (no records: the one record, "project", on main); ValueError with the reason when it does not
-    say."""
+    """(host, ssh target, the checkout whose conveyor.sh runs, {repo: checkout} of its records) from conveyor/host.json,
+    as dashboard.sh's hostof() reads it (no records: the one record, "project", on main). On one machine (no ssh
+    target, as setup writes it, or this machine named as the host) the target is None and the Board's own copy of
+    Conveyor runs here; with a build machine it is the host's main. ValueError naming the field that is wrong when it
+    does not say."""
     cfg = host_file()
-    try:
-        host, hmain = cfg['host'], cfg['main']
-    except (KeyError, TypeError) as e:
-        raise ValueError('conveyor/host.json is missing or not understood') from e
-    if not (isinstance(host, str) and HOST_NAME.fullmatch(host) and isinstance(hmain, str) and HOST_MAIN.fullmatch(hmain)):
-        raise ValueError('conveyor/host.json is not understood')
+    if not isinstance(cfg, dict):
+        raise ValueError('conveyor/host.json is not a JSON object')
+    host, hmain, target = cfg.get('host'), cfg.get('main'), cfg.get('ssh')
+    if target is None or host == this_host():
+        host = host if isinstance(host, str) and HOST_NAME.fullmatch(host) else this_host()
+        hmain = hmain if isinstance(hmain, str) and HOST_MAIN.fullmatch(hmain) else board_main()
+        target, engine = None, os.path.dirname(os.path.dirname(HERE))
+    else:
+        if not (isinstance(host, str) and HOST_NAME.fullmatch(host)):
+            raise ValueError('conveyor/host.json names an ssh target, but its host is not a machine name')
+        if not (isinstance(hmain, str) and HOST_MAIN.fullmatch(hmain)):
+            raise ValueError('conveyor/host.json names no main: the path of the main checkout on %s' % host)
+        if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
+            raise ValueError('conveyor/host.json names no ssh target for %s that ssh can use' % host)
+        engine = hmain
     recs = cfg.get('records', [{'repo': 'project', 'main': hmain}])
     if not (isinstance(recs, list) and recs and all(
             isinstance(r, dict) and isinstance(r.get('repo'), str) and REPO.fullmatch(r['repo'])
             and isinstance(r.get('main'), str) and HOST_MAIN.fullmatch(r['main']) for r in recs)):
-        raise ValueError('conveyor/host.json records are not understood')
-    target = cfg.get('ssh')
-    if not (isinstance(target, str) and SSH_TARGET.fullmatch(target)):
-        raise ValueError('conveyor/host.json names no ssh target for %s' % host)
-    return host, target, hmain, {r['repo']: r['main'] for r in recs}
+        raise ValueError('conveyor/host.json records are not understood: each needs a repo name and the path of its main checkout')
+    return host, target, engine, {r['repo']: r['main'] for r in recs}
 
 
 def control_script(action, args, main, today, record=None, user=None):
@@ -1453,7 +1472,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.reply(503, str(e))
         if machine:
             action, args = 'machine', [body['action']] + ([body['value']] if 'value' in body else [])
-            script = 'CONVEYOR_MAIN=%s bash %s machine %s' % (shlex.quote(main), shlex.quote(main + '/conveyor/conveyor.sh'), ' '.join(shlex.quote(a) for a in args))
+            # On one machine main is the Board's own copy of Conveyor: the machine is steered as this checkout's.
+            try:
+                at = main if target else board_main()
+            except ValueError as e:
+                return self.reply(503, str(e))
+            script = 'CONVEYOR_MAIN=%s bash %s machine %s' % (shlex.quote(at), shlex.quote(main + '/conveyor/conveyor.sh'), ' '.join(shlex.quote(a) for a in args))
         else:
             action, args = body['action'], body['args']
             record = records.get(body['repo'])  # every action names its record, never main's by default
@@ -1464,15 +1488,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         print('dashboard: control %s by %s from %s' % (' '.join([action] + args), user, self.client_address[0]), file=sys.stderr, flush=True)
 
         def on_host(script):
-            """The host's run of one script: (None, its run), or (the HTTP code and text of the answer, None)."""
+            """The host's run of one script, over ssh, or here on one machine (no target): (None, its run), or (the
+            HTTP code and text of the answer, None)."""
+            argv = ['bash', '-c', script] if target is None else ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', target, 'bash -c ' + shlex.quote(script)]
             try:
-                run = run_script(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', target, 'bash -c ' + shlex.quote(script)],
-                                 CONTROL_TIMEOUT.get(action, 30))
+                run = run_script(argv, CONTROL_TIMEOUT.get(action, 30))
             except subprocess.TimeoutExpired:
                 return (504, '%s did not finish in time; the change may or may not have been made' % host), None
             except OSError as e:
-                return (500, 'could not start ssh: %s' % e), None
-            if run.returncode == 255:
+                return (500, 'could not start %s: %s' % (argv[0], e)), None
+            if run.returncode == 255 and target is not None:
                 return (502, '%s did not answer' % host), None
             if run.returncode != 0:
                 return (409, (run.stderr.strip().splitlines() or ['%s refused it (exit %d)' % (host, run.returncode)])[-1]), None

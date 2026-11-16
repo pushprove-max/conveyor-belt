@@ -27,7 +27,8 @@
   const ALIVE_MS = 45000;   // the collector's heartbeat is written every 15 s; three misses is a stopped collector
   const STALE_MS = 300000;  // a collection runs every 60 s
   // What every panel says when the page has had no data at all: what is not seen, and the one thing to try.
-  const NOTHING = 'The Board cannot reach the build machine, so there is nothing to show yet. Make sure that the machine is on. Then press Restart the Board\'s feed, above.';
+  // No data has loaded, so the page does not know of a build machine (remote()): it names none.
+  const NOTHING = 'The page could not load the Board\'s data, so there is nothing to show yet. Press Restart the Board\'s feed, above.';
   const MOTION_MS = 260;    // every animation this script runs stays under 300 ms
   const FOLD_MS = 140;      // a collapsing panel's body fades out (app.css .folding), then the panels below close up
   const SVG = 'http://www.w3.org/2000/svg';
@@ -1397,10 +1398,20 @@
     el.append(h('span', 'bar w60'), h('span', 'bar w90'), h('span', 'bar w75'));
     return el;
   }
-  // A read that failed says what is not seen and the one thing to try (text: RETRY for what the build machine sends);
-  // the reader's own reason, which names files and internal parts, only on tap. A note in the panel, or a state's
-  // detail (draw()).
-  const RETRY = 'Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.';
+  // Where Conveyor runs, as the page says it (#112): "the build machine" only when the host file sets one up (Health's
+  // host.local is not true). On one machine, and before any data has loaded, the page names no build machine.
+  function remote() {
+    const host = last && last.panels && last.panels.health && last.panels.health.data && last.panels.health.data.host;
+    return !!(host && typeof host === 'object' && host.local !== true);
+  }
+  const machineWord = () => (remote() ? 'the build machine' : 'this machine');
+  // Who answers a press: the build machine, where the action runs over SSH, or on one machine the Board itself.
+  const answerer = () => (remote() ? 'the build machine' : 'the Board');
+  // A read that failed says what is not seen and the one thing to try (text: retryText() for what Conveyor sends);
+  // the reader's own reason, which names files and internal parts, only on tap: on one machine, that reason is what
+  // to correct. A note in the panel, or a state's detail (draw()).
+  const retryText = () => (remote() ? 'Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.'
+    : 'Press Restart the Board\'s feed in Health. If this continues, the details say what to correct.');
   const details = (raw) => (raw ? `Details: ${raw}` : '');
   function unread(text, raw) { return tip(h('p', 'warn-note', text), details(raw)); }
   function stateBlock(kind, title, detail) {
@@ -1492,7 +1503,7 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, retry: RETRY, details, since, clock, when, dur, took, money, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
@@ -1537,9 +1548,10 @@
     p.el.dataset.renders = String(p.renders);
     const mod = p.mod;
     let state = 'ready', message = null, raw = '';
-    if (!part || typeof part !== 'object') { state = 'error'; message = 'The build machine sent nothing for this panel, so the Board cannot show it. If this continues, press Restart the Board\'s feed in Health.'; }
-    else if (typeof part.error === 'string' && part.error) { state = 'error'; message = `The Board could not get this panel from the build machine, so it cannot show it. ${RETRY}`; raw = part.error; }
-    else if (!part.data || typeof part.data !== 'object') { state = 'error'; message = 'The build machine sent no data for this panel, so the Board cannot show it. If this continues, press Restart the Board\'s feed in Health.'; }
+    const from = remote() ? 'the build machine' : 'Conveyor', From = remote() ? 'The build machine' : 'Conveyor';
+    if (!part || typeof part !== 'object') { state = 'error'; message = `${From} sent nothing for this panel, so the Board cannot show it. If this continues, press Restart the Board's feed in Health.`; }
+    else if (typeof part.error === 'string' && part.error) { state = 'error'; message = `The Board could not get this panel from ${from}, so it cannot show it. ${retryText()}`; raw = part.error; }
+    else if (!part.data || typeof part.data !== 'object') { state = 'error'; message = `${From} sent no data for this panel, so the Board cannot show it. If this continues, press Restart the Board's feed in Health.`; }
     // A panel that shows data keeps it through a failed read, with a short note above it. Emptied, it moved all below
     // it up, and its next good read built it anew: each open "Every step", output and inner scroll was closed or reset.
     if (p.note) { p.note.remove(); p.note = null; }
@@ -1727,7 +1739,7 @@
     if (!d) return;
     try {
       mod.draw(el, d, { h, chip, money, post, undoLine, pausedSaid, project: projectOnly, sorted: projectSort, setProject, setProjectSort,
-        updatedAt: () => updatedAt });
+        updatedAt: () => updatedAt, get answerer() { return answerer(); } });
     } catch (e) { el.hidden = true; }
   }
   // When the bar is too narrow for every tile, tiles go by their drop, lowest first; one with none always shows, and
@@ -1765,10 +1777,11 @@
   const FEED_FAULTS = ['Stale', 'No data', 'Feed stopped'];
   const RESTART = 'press Restart the Board\'s feed, beside the mark above (in Menu on a phone)';
   function faultSaid(word, age) {
-    if (word === 'No data') return `No data: the Board cannot reach the build machine, so there is nothing to show. Make sure that the machine is on. Then ${RESTART}.`;
-    if (word === 'Feed stopped') return `Feed stopped: the build machine stopped sending new data to this page. ${RESTART.charAt(0).toUpperCase()}${RESTART.slice(1)}.`;
+    // No data has loaded yet, so the page does not know of a build machine (remote()): it names none.
+    if (word === 'No data') return `No data: the page could not load the Board's data, so there is nothing to show. ${RESTART.charAt(0).toUpperCase()}${RESTART.slice(1)}.`;
+    if (word === 'Feed stopped') return `Feed stopped: ${remote() ? 'the build machine' : 'the Board\'s feed'} stopped sending new data to this page. ${RESTART.charAt(0).toUpperCase()}${RESTART.slice(1)}.`;
     if (word !== 'Stale') return '';
-    if (failedLoads > 1) return `Stale: the last refreshes could not reach the build machine. This is the last data that loaded. If this continues, ${RESTART}.`;
+    if (failedLoads > 1) return `Stale: the last refreshes could not reach ${remote() ? 'the build machine' : 'the Board'}. This is the last data that loaded. If this continues, ${RESTART}.`;
     return `Stale: the newest data is ${age === null ? 'of unknown age' : `${ago(age)} old`}, so what you see can be out of date. If it stays old, ${RESTART}.`;
   }
   function status() {
@@ -1918,8 +1931,9 @@
   // answered goes under the head, and to the promise returned (the panel shows it beside its button).
   function restart() {
     const note = byId('restart-note');
-    note.textContent = 'Asking the build machine to restart the Board\'s feed…';
-    return post('restart', {}).then((r) => r.text().then((t) => (r.ok ? 'Restarting. The page catches up in about a minute.' : `Not restarted: ${String(t).trim() || `the build machine answered ${r.status}`}`)), () => 'The build machine did not answer. Make sure that it is on. Then press Restart again.')
+    const who = remote() ? 'the build machine' : 'the Board', Who = remote() ? 'The build machine' : 'The Board';
+    note.textContent = `Asking ${who} to restart the Board's feed…`;
+    return post('restart', {}).then((r) => r.text().then((t) => (r.ok ? 'Restarting. The page catches up in about a minute.' : `Not restarted: ${String(t).trim() || `${who} answered ${r.status}`}`)), () => `${Who} did not answer. Make sure that it is on. Then press Restart again.`)
       .then((text) => { note.textContent = text; return text; });
   }
   function watchMotion() {

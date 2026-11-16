@@ -67,10 +67,15 @@ window.DASH_APP.panel({
       if (why) row.append(h('p', 'detail', why));
       return row;
     };
-    const name = d.host.name || 'Build machine';
-    if (d.host.reachable === true) check(name, ctx.chip('Reachable', 'ok'), error(d.host.error));
-    else if (d.host.reachable === false) check(name, ctx.chip('Unreachable', 'bad'), error(d.host.error)).next = 'Check the build machine is on and this computer reaches it over SSH.';
-    else check(name, ctx.chip('Not checked', 'warn'), error(d.host.error)).next = 'The Board checks it again in about a minute. Before that check, this project must name its build machine.';
+    // On one machine (host.local, #112) Conveyor runs here: the row is this machine's, read with no SSH. A host file
+    // that does not read says why in its error, which names the field to correct.
+    const here = d.host.local === true;
+    const name = here ? `This machine${d.host.name ? ` (${d.host.name})` : ''}` : d.host.name || 'Build machine';
+    if (d.host.reachable === true) check(name, ctx.chip(here ? 'Conveyor read' : 'Reachable', 'ok'), error(d.host.error));
+    else if (d.host.reachable === false) check(name, ctx.chip(here ? 'No answer' : 'Unreachable', 'bad'), error(d.host.error)).next = here
+      ? 'Conveyor on this machine did not answer in time. The Board asks again in about a minute.'
+      : 'Check the build machine is on and this computer reaches it over SSH.';
+    else check(name, ctx.chip('Not checked', 'warn'), error(d.host.error)).next = 'The Board checks it again in about a minute. Before that check, correct the host file as the error says.';
     // How old what the page shows is: dataRow below (it draws its own next step).
     const s = d.stream;
     if (s && typeof s === 'object') dataRow(check('Data', h('span')).dd, s, ctx);
@@ -93,7 +98,7 @@ window.DASH_APP.panel({
       const off = !r.loop && r.state === 'stopped';
       const loop = check(`Conveyor${of}`, r.loop ? ctx.chip('Running', 'ok') : off ? ctx.chip('Off', 'quiet') : ctx.chip('Stopped', 'bad'), off ? 'not meant to run' : null,
         r.newest ? 'last step recorded' : 'no step recorded', r.newest ? ctx.since(r.newest, ' ago') : null);
-      if (!r.loop && !off) loop.next = 'Start Conveyor again on the build machine: its machine command starts every project.';
+      if (!r.loop && !off) loop.next = `Start Conveyor again on ${ctx.machine}: its machine command starts every project.`;
       // A failing push: one line of how long and which check, its output under "Show output".
       if (r.pushFailingSince) {
         const e = r.pushError || {}, line = h('span', 'detail');
@@ -167,12 +172,12 @@ window.DASH_APP.panel({
         const bad = covered ? 'warn' : 'bad';
         const subRow = route('subscription login', sub, { works: 'ok', expired: bad, 'not set': bad });
         if (subRow) subRow.next = px.state === 'not set'
-          ? 'Sign in again on the build machine: run claude, then /login. Or run /conveyor-belt:setup to set a local API proxy as the fallback.'
-          : 'Sign in again on the build machine: run claude, then /login.';
+          ? `Sign in again on ${ctx.machine}: run claude, then /login. Or run /conveyor-belt:setup to set a local API proxy as the fallback.`
+          : `Sign in again on ${ctx.machine}: run claude, then /login.`;
         const pxRow = route('API proxy', px, { works: 'ok', fails: 'bad' });
-        if (pxRow) pxRow.next = "Start the proxy on the build machine, or set the host file's claudeProxy to a proxy that runs. The blocked card shows its error.";
+        if (pxRow) pxRow.next = `Start the proxy on ${ctx.machine}, or set the host file's claudeProxy to a proxy that runs. The blocked card shows its error.`;
       }
-      if (!r.gh) check(`GitHub${of}`, ctx.chip('Not signed in', 'bad'), 'gh cannot read or close issues').next = 'Run gh auth login on the build machine.';
+      if (!r.gh) check(`GitHub${of}`, ctx.chip('Not signed in', 'bad'), 'gh cannot read or close issues').next = `Run gh auth login on ${ctx.machine}.`;
       if (typeof r.diskFreeKb === 'number' && r.diskFreeKb < 10485760) check(`Disk${of}`, ctx.chip('Low', 'warn'), `${(r.diskFreeKb / 1048576).toFixed(1)} GB free for cards`).next =
         'Free space on the disk that holds the cards folder.';
     });
@@ -270,9 +275,9 @@ window.DASH_APP.panel({
       row.next = !used ? 'The Board reads it again in about a minute. If an account has no login, sign in to it again on its machine.'
         : a.usedPct < 90 && age ? OLD_NEXT
         : a.others === true ? `Move this account's work to another on the Rules tab, or wait for its reset${reset}.`
-        : [`Wait for its reset${reset}. To move its work to another account, add one to `, h('code', null, 'accounts'), " in the build machine's host file (", doc, ').'];
+        : [`Wait for its reset${reset}. To move its work to another account, add one to `, h('code', null, 'accounts'), ` in ${ctx.machine === 'the build machine' ? "the build machine's" : 'the'} host file (`, doc, ').'];
     });
-    if (acc && acc.error) check('Host accounts', ctx.chip('Not read', 'warn'), error(acc.error)).next = 'The Board reads them again in about a minute.';
+    if (acc && acc.error) check(d.host.local === true ? 'Accounts' : 'Host accounts', ctx.chip('Not read', 'warn'), error(acc.error)).next = 'The Board reads them again in about a minute.';
     // A checkout that could not be brought forward says why; the last move says whether the dashboard restarted on it.
     const u = d.update;
     if (u && typeof u === 'object') {
@@ -381,9 +386,12 @@ function dataRow(dd, s, ctx) {
   if (typeof from === 'string') c.lastChild.dataset.ageFrom = from;
   // The stream's own error is one line from the host: its sentence, and the raw line under "Raw error" (healthError).
   const e = live || s.live ? null : healthError(s.error, ctx);
-  const why = live ? 'this page asks the build machine for news every 15 s'
+  // The build machine is named only when one is set up (ctx.machine, #112).
+  const remote = ctx.machine === 'the build machine';
+  const why = live ? `this page asks ${remote ? 'the build machine' : 'the Board'} for news every 15 s`
     : s.live ? 'the live feed stopped' : e ? e.line : 'the live stream is down';
-  const next = live ? 'Reload the page to open its live feed again.' : 'Reload the page. If the data stays old, make sure that the build machine is on. Then press Restart the Board\'s feed.';
+  const next = live ? 'Reload the page to open its live feed again.'
+    : `Reload the page. If the data stays old, ${remote ? 'make sure that the build machine is on. Then press' : 'press'} Restart the Board's feed.`;
   const raw = e ? ctx.output(e.raw, null, 'Raw error', dd.querySelector(':scope > details.output')) : null;
   dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`), ...(raw ? [raw] : []));
 }

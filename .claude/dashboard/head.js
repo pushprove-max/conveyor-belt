@@ -40,13 +40,15 @@
   function machine(el, d, ctx) {
     const h = ctx.h, repos = Array.isArray(d.repos) ? d.repos.filter((r) => typeof r === 'string') : [];
     if (sent && sent.state !== d.state) sent = null;
-    const key = JSON.stringify([d.host, d.state, d.cap, d.used, d.todayUsd, d.todayLeftOut, repos, ctx.project(), ctx.sorted(), sent && sent.text]);
+    // "Build machine" only when one is set up; on one machine Conveyor runs on this one (#112).
+    const where = ctx.answerer === 'the build machine' ? 'Build machine' : 'This machine';
+    const key = JSON.stringify([d.host, where, d.state, d.cap, d.used, d.todayUsd, d.todayLeftOut, repos, ctx.project(), ctx.sorted(), sent && sent.text]);
     if (el.dataset.key === key) return;
     const held = el.contains(el.ownerDocument.activeElement) ? el.ownerDocument.activeElement.dataset.act : null;
     el.dataset.key = key;
     el.dataset.state = String(d.state);
     const [word, tone] = STATE[d.state] || ['State not read', 'warn'];
-    const name = h('span', 'machine-name', d.host ? `Build machine ${d.host}` : 'Build machine');
+    const name = h('span', 'machine-name', d.host ? `${where} ${d.host}` : where);
     const slots = h('span', 'machine-slots'), cost = h('span', 'machine-cost');
     slots.append(h('strong', null, n(d.used) === null ? '—' : n(d.cap) !== null ? `${d.used} of ${d.cap}` : String(d.used)),
       h('span', null, n(d.cap) !== null ? ' cards at once' : ' cards at once, no limit for the machine'));
@@ -55,7 +57,7 @@
     // On a phone (app.css) the head is this one line until a tap opens the rest; wider, the line is not shown.
     const fold = h('button', 'machine-fold'), act = h('span', 'machine-fold-act');
     fold.type = 'button'; fold.dataset.act = 'machine-fold';
-    fold.append(h('span', null, [d.host || 'Build machine', word, `${slots.firstChild.textContent} cards`, `${cost.firstChild.textContent} today`].join(' · ')), act);
+    fold.append(h('span', null, [d.host || where, word, `${slots.firstChild.textContent} cards`, `${cost.firstChild.textContent} today`].join(' · ')), act);
     const unfold = (on) => { folded = !on; el.classList.toggle('open', on); fold.setAttribute('aria-expanded', String(on)); act.textContent = on ? 'Hide' : 'Show'; };
     unfold(!folded);
     fold.addEventListener('click', () => unfold(folded));
@@ -67,8 +69,8 @@
       const say = (text, undo) => { sent = { text, state: d.state, undo }; el.dataset.key = ''; machine(el, d, ctx); };
       ctx.post('machine', { action: act }).then((r) => r.text().then((t) => (r.ok
         ? [`${act === 'pause' ? 'Paused' : 'Resumed'} every project. The head shows it in about a minute.`, back ? null : act === 'pause' ? 'resume' : 'pause']
-        : [`Not changed: ${String(t).trim() || `the build machine answered ${r.status}`}`, null])),
-      () => ['Not changed: the build machine did not answer. Check it is on, then try again.', null]).then(([text, undo]) => say(text, undo));
+        : [`Not changed: ${String(t).trim() || `${ctx.answerer} answered ${r.status}`}`, null])),
+      () => [`Not changed: ${ctx.answerer} did not answer. Check it is on, then try again.`, null]).then(([text, undo]) => say(text, undo));
     };
     if ((d.state === 'paused' || d.state === 'running' || d.state === 'stopped') && !(sent && sent.undo)) {
       const act = d.state === 'paused' ? 'resume' : 'pause';

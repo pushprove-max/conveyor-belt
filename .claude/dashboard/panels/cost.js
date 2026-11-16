@@ -68,7 +68,7 @@ window.DASH_APP.panel({
         });
         out.push(ul);
       } else if (c.unpricedSteps) out.push(h('p', 'warn-note', `${c.unpricedSteps} ${c.unpricedSteps === 1 ? 'step has' : 'steps have'} no price, so the Board does not show a total that includes one.`));
-      if (!c.perCard) out.push(h('p', 'warn-note', 'The build machine did not give costs per card.'));
+      if (!c.perCard) out.push(h('p', 'warn-note', `${ctx.machine === 'the build machine' ? 'The build machine' : 'Conveyor'} did not give costs per card.`));
       else if (c.perCard.length) {
         const ul = h('ul', 'rows compact');
         const chips = { 'on the belt': ['On the belt', 'info'], landed: ['Landed', 'quiet'], closed: ['Already fixed', 'quiet'], blocked: ['Blocked', 'warn'], retried: ['Retried', 'quiet'] };
