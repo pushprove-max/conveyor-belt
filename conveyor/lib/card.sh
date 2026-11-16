@@ -462,6 +462,10 @@ card() { # <card> <issue> [<branch> <tip>]
         rm -f "$wt.lent" # its worktree holds its own change again (batch())
       fi
       if [ $rc != 0 ]; then
+        # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's
+        # setup, not the change, and no run on main or fix session mends it. The card is blocked saying so, with no
+        # test failures.
+        t=$(depsmissing "$wt"); [ -z "$t" ] || { block "$c" "$n" "$wt" "$(depsreason "$t")"; return; }
         out=$(testfails "$wt.test" "$rc")
         # What still did not pass runs on main first (verdicts()): each failure's verdict goes on the test line.
         t=$(verdicts "$c" "$wt" "${out:-null}") || t='{"verdicts":[]}'

@@ -119,9 +119,16 @@
       }
     },
     "linkFromMain": {
-      "description": "Worktree-relative paths linked from the main checkout into each card's worktree.",
+      "description": "Worktree-relative paths linked from the main checkout into each card's worktree: the dependency folders its tests need, such as node_modules. Setup proposes the ignored dependency folders it finds in the main checkout while this is empty and worktree.setup is unset.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "worktree": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "setup": { "description": "A command run once in each new worktree of the project, from its top, after the links of linkFromMain and before its build and tests: the install of its dependencies, such as npm ci, for a project whose dependency folders are not linked (for example when a card may change the lockfile). When it fails, the card is blocked with its last lines. None: nothing runs.", "type": "string", "minLength": 1 }
+      }
     },
     "push": {
       "type": "object",

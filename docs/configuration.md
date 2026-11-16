@@ -21,6 +21,12 @@ Some pack settings that this site names:
 - `auto.reserved`: what `/conveyor-belt:auto` never decides ([Foreman](foreman.md)).
 - `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.mainAt`: a time of day, `"HH:MM"` in the machine's local time, after which the whole test on main runs once a day; unset, it runs at most once an hour. `test.survey`: the monthly test-speed survey.
   `test.firstSurvey`: the answer to setup's survey question.
+- `linkFromMain`: the folders, as paths from the top of your checkout, that each card's worktree links from your
+  checkout, such as `node_modules`. These are the dependencies its build and tests need. Setup fills it from the
+  ignored dependency folders it finds, when you answer yes ([Setup](setup.md#setup)).
+- `worktree.setup`: a command that each new worktree runs once, from its top, before the build and the tests, for
+  example `npm ci`. Use it in place of `linkFromMain` when a card can change a lockfile. When it fails, the card is
+  blocked with the end of its output.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
 - `prices`: your model prices, by model name, each `{"input": 3, "output": 15, "cacheRead": 0.3}` in dollars per
   million tokens. Each one wins over the Board's built-in price of that model. Set them on the Board's Rules tab

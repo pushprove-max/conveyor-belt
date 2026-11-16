@@ -47,8 +47,15 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # Claude's as claudeProxy, Codex's as codexProxy, which a Codex session is given as its own provider settings.
 MPS=mattpocock-skills@claude-plugins-official
 mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length > 0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" >/dev/null 2>&1; }
-setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' px='' cx='' w first full
+# The question "Link the dependency folders?" (docs/setup.md): asked (exit 2, nothing written) on every run while the
+# main checkout has dependency folders (depdirs(), lib/push.sh) and the pack has neither a linkFromMain nor a
+# worktree.setup, naming the folders and the project's tracked lockfiles. --link yes writes the folders as
+# linkFromMain; --worktree-setup <command> writes worktree.setup, the install run in each card worktree, which a
+# project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
+# question is not asked and a rerun changes neither.
+LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
+setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' px='' cx='' w first full lk='' ws='' lf='' wsx='' dds=() lks
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
     [ "$1" != --foreman ] || { fm=1; shift; continue; }
@@ -57,11 +64,13 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
       --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
+      --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
+      --worktree-setup) ws=${2-}; [ -n "$ws" ] || { set -- x; break; } ;;
       --builder-route) br=${2-}; [[ $br == subscription || $br == fallback || $br == proxy ]] || { set -- x; break; } ;;
       --reviewer-route) rr=${2-}; [[ $rr == subscription || $rr == fallback || $rr == proxy ]] || { set -- x; break; } ;; *) set -- x; break ;; esac
     [ $# -ge 2 ] || { set -- x; break; }; shift 2
   done
-  [ $# = 0 ] || { echo "usage: conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]" >&2; return 2; }
+  [ $# = 0 ] || { echo "usage: conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]" >&2; return 2; }
   # The two lanes are asked on every run, before anything is changed: there is no saved answer.
   [ -n "$fl" ] || need+=("--fast-lane <yes or no: make a fast lane, your own worktree for changes made by hand?>")
   [ -n "$rl" ] || need+=("--research-lane <yes or no: make a research lane, a read-only sandboxed worktree?>")
@@ -73,6 +82,18 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
     w+=" fallback: on the subscription login, and through the proxy when that login fails. proxy: always through the proxy. subscription: never through it"
     [ -n "$br" ] || need+=("--builder-route <fallback, proxy or subscription, for builds, fixes and rebases: $w>")
     [ -n "$rr" ] || need+=("--reviewer-route <fallback, proxy or subscription, for reviews: $w>")
+  fi
+  # The dependency folders, while the pack neither links nor installs them.
+  [ ! -e "$PACK" ] || packget linkFromMain lf worktree.setup wsx || return 1
+  if [ -z "$wsx" ] && [ "$(jq 'length' <<<"${lf:-[]}")" = 0 ]; then
+    mapfile -t dds < <(depdirs "$MAIN")
+    if [ ${#dds[@]} -gt 0 ] && [ -z "$lk$ws" ]; then
+      lks=$(git -C "$MAIN" ls-files -z | tr '\0' '\n' | grep -xE "(.*/)?($(IFS='|'; echo "${LOCKFILES[*]//./\\.}"))" | head -n 5 | paste -sd, - | sed 's/,/, /g')
+      w="link the dependency folders of the main checkout ($(printf '%s, ' "${dds[@]}" | sed 's/, $//')) into each card's worktree (the pack's linkFromMain)?"
+      w+=" Linking is not safe when a card may change $([ -n "$lks" ] && echo "a lockfile ($lks)" || echo "what they hold"): its tests would run on main's packages."
+      w+=" Then pass --worktree-setup with the command that installs them in each card's worktree, such as npm ci, in place of --link"
+      need+=("--link <yes or no: $w>")
+    fi
   fi
   if [ -e "$PACK" ]; then
     [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
@@ -90,6 +111,17 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
         test: {command: $t, full: $t, slowIssues: false}, defaultBranch: $b}' --args "${prods[@]}" > "$PACK.new" \
       && "$HERE/lib/pack.sh" check "$PACK.new" && mv "$PACK.new" "$PACK" || { rm -f "$PACK.new"; return 1; }
     echo "conveyor: wrote the pack $PACK"
+  fi
+  # dds is read only while the pack has neither: what the owner wrote in either is kept.
+  if [ "$lk" = yes ] && [ ${#dds[@]} -gt 0 ]; then
+    jq '.linkFromMain = $ARGS.positional' "$PACK" --args "${dds[@]}" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the dependency folders could not be written as the pack's linkFromMain" >&2; return 1; }
+    echo "conveyor: wrote the pack's linkFromMain: $(printf '%s, ' "${dds[@]}" | sed 's/, $//'), linked from the main checkout into each card's worktree"
+  fi
+  if [ -n "$ws" ] && [ -z "$wsx" ]; then
+    jq --arg s "$ws" '.worktree.setup = $s' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: worktree.setup could not be written in the pack" >&2; return 1; }
+    echo "conveyor: wrote the pack's worktree.setup: $ws, run in each card's worktree before its build and tests"
   fi
   packget plugin.commit p plugin.follow f || return 1
   if [ -z "$p$f" ] && [ -n "$pin" ]; then
@@ -286,6 +318,21 @@ hostproxy() { # <claudeProxy|codexProxy> <base URL> <key variable> <builder's ro
     || { rm -f "$t"; echo "conveyor: $1 could not be written in the host file $HOST" >&2; return 1; }
   echo "conveyor: wrote $1 in the host file $HOST: $2, the builder's route $4 and the reviewer's $5; a key it needs is read from $3 in the environment Conveyor runs in"
 }
+# doctor's line on a dependency folder of the main checkout that a new card worktree lacks (depsmissing(),
+# lib/push.sh): a test worktree at main's HEAD, linked as a card's is (deps()), then removed. Returns 1 when one is
+# missing. With worktree.setup its install fills them, which doctor does not run; with no readable pack, nothing.
+doctordeps() {
+  local s t c
+  packget worktree.setup s 2>/dev/null || return 0
+  if [ -n "$s" ]; then echo "ok: the dependencies of each card's worktree: worktree.setup ($s) installs them"
+  elif t=$(mktemp -d) && git -C "$MAIN" worktree add -q --detach "$t/w" HEAD >/dev/null 2>&1; then
+    deps "$t/w" >/dev/null 2>&1; c=$(depsmissing "$t/w")
+    rm -rf "$t"; git -C "$MAIN" worktree prune 2>/dev/null
+    [ -n "$c" ] || { echo "ok: a new card worktree has the dependency folders of the main checkout"; return 0; }
+    echo "missing: $c in a new card worktree (the main checkout has it, ignored by git, and the tests may need it); fix: add $c to the pack's linkFromMain, or set the pack's worktree.setup to the command that installs it, such as npm ci (/conveyor-belt:setup asks which)"
+    return 1
+  else [ -z "$t" ] || rm -rf "$t"; echo "not checked: the dependencies of a card's worktree: a test worktree of $MAIN could not be made"; fi
+}
 # conveyor.sh doctor: each thing Conveyor needs on this machine for the project it is called in, one line each, "ok: ..."
 # or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code or a Board not running. Exit 1 when anything is missing,
 # but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
@@ -449,5 +496,6 @@ doctor() {
     elif termsnamed; then no "a readable terms file (the host file $HOST names one, or does not read, and the pack's privacy.mode is public)" "make the file it names readable, or take \"terms\" out of $HOST"
     else ok "no terms file (it is optional): the privacy check runs with no word list"; fi
   fi
+  ! command -v jq >/dev/null || doctordeps || bad=1
   return $bad
 }

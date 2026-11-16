@@ -117,7 +117,8 @@ Setup and the engine:
 
 - `setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no
   --research-lane yes|no [--pin] [--foreman]` and `doctor` ([Setup](setup.md)). Yes to a lane makes that lane
-  ([Lanes](lanes.md)).
+  ([Lanes](lanes.md)). `--link yes|no` answers if each card's worktree links the dependency folders that setup found,
+  and `--worktree-setup <command>` installs them in each card's worktree instead.
 - `install <commit>` installs that commit read-only.
 - `take`: a project that follows main takes main's newest commit when it passes its check.
 - `wording adversarial|review` prints the review wording.

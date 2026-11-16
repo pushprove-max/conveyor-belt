@@ -3,16 +3,43 @@
 # its parent folders made first when the worktree has none.
 # A link is not a folder, so an ignore rule with a trailing slash lets `git add -A` stage it: the exclude file (git
 # keeps one for the repository, read by every worktree of it) names each path outright, from the worktree's top.
+# Then the pack's worktree.setup, when it has one, runs once in the worktree (from its top, its output kept back):
+# the install command of a project whose dependencies are not linked. When it fails, its last lines are the reason.
 NODEPS="worktree: the engine could not link the dependencies of the main checkout" # how the blocked reason starts: block() reads it
 deps() { # <worktree>; prints why when it fails
-  local d p ps l
+  local d p ps l s o
   local -A ex=()
   # The exclude file's lines are read once, not grepped for each path (#532); a line added here is added to them too.
-  { packget linkFromMain ps && d=$(git -C "$1" rev-parse --path-format=absolute --git-path info/exclude) && mkdir -p "${d%/*}" \
+  { packget linkFromMain ps worktree.setup s && d=$(git -C "$1" rev-parse --path-format=absolute --git-path info/exclude) && mkdir -p "${d%/*}" \
     && { [ ! -f "$d" ] || while IFS= read -r l || [ -n "$l" ]; do ex[x$l]=1; done < "$d"; } \
     && while IFS= read -r -d '' p; do
          { [ -n "${ex[x/$p]:-}" ] || { echo "/$p" >> "$d" && ex[x/$p]=1; }; } && { [ ! -d "$MAIN/$p" ] || { mkdir -p "$(dirname "$1/$p")" && ln -sfn "$MAIN/$p" "$1/$p"; }; } || return 1
-       done < <(jq -j '.[] | "\(.)\u0000"' <<<"$ps"); } 2>&1
+       done < <(jq -j '.[] | "\(.)\u0000"' <<<"$ps"); } 2>&1 || return 1
+  [ -z "$s" ] || o=$(cd "$1" && bash -c "$s" 2>&1 < /dev/null) || { echo "worktree.setup ($s) failed (exit $?): $(tail -n 20 <<<"$o")"; return 1; }
+}
+# The dependency folders of a checkout, one path a line from its top: each folder git ignores and does not track
+# (none inside another ignored folder) whose name is one a package manager or build tool fills, at any depth, so the
+# node_modules of each package of a workspace too. A link is no folder of the checkout: main's own links are left out.
+DEPNAMES=' node_modules .venv venv vendor target .gradle Pods bower_components .bundle .dart_tool elm-stuff '
+depdirs() { # <checkout>
+  local p
+  while IFS= read -r -d '' p; do
+    p=${p%/}; [[ $DEPNAMES == *" ${p##*/} "* ]] && [ -d "$1/$p" ] && [ ! -L "$1/$p" ] && printf '%s\n' "$p"
+  done < <(git -C "$1" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null)
+  return 0
+}
+# The dependency folders of the main checkout that a worktree lacks, joined by ", ": each one whose parent folder the
+# worktree has (a folder the worktree has no package for is not one its tests need). Empty: none missing.
+depsmissing() { # <worktree>
+  local p m=''
+  while IFS= read -r p; do
+    [ -n "$p" ] && [ ! -e "$1/$p" ] && { [[ $p != */* ]] || [ -d "$1/${p%/*}" ]; } && m+="${m:+, }$p"
+  done < <(depdirs "$MAIN")
+  [ -z "$m" ] || printf '%s\n' "$m"
+}
+# The blocked reason of a card whose tests failed in a worktree that lacks some of main's dependency folders.
+depsreason() { # <the folders, from depsmissing>
+  echo "tests: $1 $([[ $1 == *", "* ]] && echo are || echo is) missing in the card's worktree; add $([[ $1 == *", "* ]] && echo them || echo it) to linkFromMain or set worktree.setup"
 }
 
 # One push of main to origin, for the loop (the reasons are in README.md): the commit main is at, checked out

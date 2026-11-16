@@ -92,6 +92,16 @@ again. To ask for a survey later, run
 Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
 the lane, or keeps the lane that is already there.
 
+Each card works in a worktree of its own, and a new worktree has no installed dependencies. Setup looks in your
+checkout for the dependency folders that git ignores, such as `node_modules` (also in each package of a workspace),
+`.venv`, `venv`, `vendor`, `target`, `.gradle` and `Pods`. It shows the list and asks if each card's worktree links
+them from your checkout (`--link yes` or `--link no`). On yes, it writes the list as the pack's `linkFromMain`. A
+link is not safe when a card can change a lockfile, because the card's tests then run on your checkout's packages.
+The question names the lockfiles it finds. In that case, give the install command instead, for example
+`--worktree-setup "npm ci"`. Setup writes it as the pack's `worktree.setup`, and each card's worktree runs it before
+the build and the tests. Setup asks again on each run until the pack has `linkFromMain` or `worktree.setup`. It never
+changes them after that, so your own edits stay.
+
 Setup also looks for a local API proxy. This is a proxy that listens on this machine, for example on port 4141. For
 Claude, it must answer the Anthropic Messages API, and setup looks only when no `claudeProxy` is set. For Codex, it
 must answer the OpenAI Responses API, and setup looks only when Codex is installed and no `codexProxy` is set. When it
@@ -131,7 +141,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit
@@ -207,6 +217,11 @@ None of these stops a card that already runs. While the host file is there and c
 `conveyor.sh doctor` names a second loop that runs beside the machine's.
 
 ## Troubleshooting
+
+A card is blocked with `tests: node_modules is missing in the card's worktree; add it to linkFromMain or set
+worktree.setup`: your checkout has that dependency folder, and the card's worktree does not. Add the folder to the
+pack's `linkFromMain`, or set `worktree.setup` to the command that installs it ([Configuration](configuration.md#the-pack)).
+`conveyor.sh doctor` makes a test worktree and names each folder that is missing there, with the same fix.
 
 `/plugin install conveyor-belt@conveyor-belt` fails with `git@github.com: Permission denied (publickey)`: release
 1.1.0 and older clone the plugin over SSH, and this machine has no GitHub SSH key. Run this command once, then install
