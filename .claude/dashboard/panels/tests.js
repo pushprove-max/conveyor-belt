@@ -28,7 +28,8 @@
 // send one POST for all of them (control {action: testaction, args: [judge | run, file...]}); Optimize opens one
 // preview, an issue a file (title and body editable), and its "File N issues" sends one test-issue with them all.
 // The bar shows the answer for each file, and each file left out with why: the runner for Optimize, every file for
-// Judge with no Tests model.
+// Judge with no Tests model. From the click it shows a bar while the POST waits; then each action started shows its
+// state there (queued, running with its time, then its result and its text to open), and each Mutation check its file's.
 // A row opens to show its runs, each with a link to its card's issue or marked "whole suite" with its result, its
 // budget and its mark, its Optimize issues, and three actions: Judge, Optimize and Run. Its Optimize issues (#74): each
 // issue the Board filed for it (the snapshot's optimize: Optimize, and older speed-up, issues), newest first, with the
@@ -71,14 +72,17 @@
 // before and after numbers as its comment. Optimize shows a preview first (title "Optimize the test file <file>" and
 // body, with the measured numbers, the file's hollow cases and the judge's kept verdict with the end of its text, both editable; no Done-when
 // line), and files (POST control {action: test-issue, args: [file, title, body]}: `conveyor.sh testissue`, which keeps
-// it as the file's issue) only on its second button; Cancel files nothing. With no Tests model, Judge and Explain are
-// disabled and say "Set the Tests model first."
+// it as the file's issue) only on its second button; Cancel files nothing. With no Tests model, Judge and Explain say
+// "Set the Tests model first." beside them, and a click on one says it again in its box, sending nothing.
 // "Model for Tests actions": CLI, model (with Other… for a typed name) and effort, as the Rules tab's roles; a pick
 // says Unsaved, Save sends POST control {action: tests, args: [cli, model, effort] or [default]}, Cancel puts back the
 // one in force.
-// An opened row shows its newest action (#74). While it runs, a bar and the time used against the action's limit, and
-// a box with its text as the snapshot brings it (kept here, so a text the snapshot cut to its end loses nothing seen
-// before), with Stop (testaction stop <id>, that action alone) and Copy. Queued, "Queued, N ahead" and Stop. Ended, its
+// An opened row shows its newest action (#74) in a box under its buttons. From the click the box says it is sent, with a
+// bar, while the POST waits for the build machine (which answers once the action has started or is queued); refused, why.
+// An Optimize filed or a Mutation check asked from the row shows on a line beside it the same way (S.notes). While it
+// runs, a bar and the time used against the action's limit, and its text as the snapshot brings it (kept here, so a
+// text the snapshot cut to its end loses nothing seen before), with Stop (testaction stop <id>, that action alone) and
+// Copy. Queued, a bar, "Queued, N ahead" and Stop. Ended, its
 // result with its time, CLI, model and effort; a judge's starts with "Verdict: <word>" and its chip, and, for speed
 // up, split, merge or delete, "Optimize with this verdict", which opens the Optimize preview with that verdict and its
 // text. The text of a judge or explain is formatted (md(): paragraphs, bold, lists, inline code and code blocks; any
@@ -121,13 +125,17 @@
     keep: null,          // the control to focus after the next draw: {act, file}
     tmodel: new Map(),   // the Tests model picked and not yet saved, by project: {cli, model, effort, other}
     seatSaved: null,     // the Tests model saved here, until a snapshot names it: {repo, value, was, at, read}
-    started: new Map(),  // the action asked for here, by dk(file), until the snapshot lists it: {id, action, file, at}
+    // The action asked for here, by dk(file): {id, action, file, start, state}. State sending from the click until
+    // the answer, then running until the snapshot lists its id; refused (with reason) until the next action asked of the file.
+    started: new Map(),
+    notes: new Map(),    // the row's line of an Optimize or a Mutation check asked here, by dk(file): {what, state: sending | asked | done | refused, text}
+    barText: new Set(),  // the ids of the actions whose text is open in the bar
     texts: new Map(),    // each action's text as seen here, by id: the snapshot holds the end of a long one only
     recentOpen: false,   // the Recent actions section is open
     ask: null,           // a preview open: {kind: issue | close | keep | on | many, file, title, body, case, why; many: items [{file, title, body}]}
     stopping: new Set(),    // the ids of the actions a Stop was sent for
     sel: new Set(),      // the files selected, for the bar's actions
-    answers: null,       // the bar's last action: {what, lines: [{file, ok, text}], note}
+    answers: null,       // the bar's last action: {what, kind: act | mutate | issue, pending (sent, no answer yet), lines: [{file, ok, text}], left, note}
     menu: null,          // the file whose More menu is open
     edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|budget` or `${dk(file)}|mark`
     mutAsked: new Map(), // the files a Mutation check was asked for here, by dk(file): the time asked, until the snapshot names them
@@ -280,6 +288,8 @@
   const ID = /^[0-9a-f]{12}$/;  // an action's id, as `conveyor.sh testaction` prints it
   const SAID_MAX = 300, TITLE_MAX = 200, BODY_MAX = 2500;  // as dashboard_server.py's said_ok and test-issue (TEST_ISSUE_BODY) take them
   const NO_SEAT = 'Set the Tests model first.';
+  const WAIT = 'Wait: the build machine did not answer the last change yet.';
+  const SENDING = 'sent to the build machine, waiting for its answer.';
   // The engine's runner runs each of its case files and names their cases as its own: a flaky entry and the `off` line
   // a card's run reads (.conveyor/test-changed.sh, lib/flaky.sh flakyoff()) name the runner, not the case file.
   const RUNNER = 'conveyor/conveyor.test.sh', CASE_FILE = /^conveyor\/tests\/[^/]+\.test\.sh$/;
@@ -327,7 +337,7 @@
     const m = mutOf(f), q = mutQueued(f), of = m ? num(m.of) || 0 : 0, tried = m ? num(m.tried) || 0 : 0;
     const why = m && typeof m.reason === 'string' ? m.reason : '';
     if (m && m.state === 'running') return of ? `Running: mutant ${Math.min(tried + 1, of)} of ${of}.` : 'Running: it makes its mutants.';
-    if (q !== null) return `Queued${q ? `: place ${q} in the idle queue` : ''}. ${MUT_WHY}`;
+    if (q !== null) return `Queued${q ? `: place ${q} in the idle queue, ${q - 1} ahead` : ''}. ${MUT_WHY}`;
     if (!m) return 'No check yet. Mutation check, in More, puts it at the front of the idle queue.';
     if (m.state === 'stopped') return `Paused${/\bcard\b|test slot/.test(why) ? ' for a card' : ''}: ${why || 'no reason recorded'}. It goes on from mutant ${Math.min(tried + 1, of)} of ${of} later.`;
     if (m.state === 'failed') return `Failed: ${why || 'no reason recorded'}.`;
@@ -343,20 +353,46 @@
   const survivorSaid = (x) => `${x.source}:${x.line}${typeof x.kind === 'string' ? ` (${x.kind})` : ''}: \`${trimmed(x.before)}\` → \`${trimmed(x.after)}\``;
   // A Mutation check asked for files: one POST, `conveyor.sh mutate ask`, which puts them at the front of the idle
   // queue; their rows show them queued. inBar: the bar's action, whose answer shows in the bar.
+  // Not inBar: the row's (one file), whose state shows on its row's line (S.notes).
   function mutAsk(files, inBar) {
-    if (files.length > FILES_MAX) { S.answers = { what: 'Mutation check', lines: [], left: [], note: `At most ${FILES_MAX} files at a time: ${files.length} are selected. Select fewer.` }; draw(); return; }
+    const what = 'Mutation check', kind = 'mutate';
+    const note = (state, text = '') => { if (!inBar) S.notes.set(dk(files[0]), { what, state, text }); };
+    if (files.length > FILES_MAX) { S.answers = { what, kind, lines: [], left: [], note: `At most ${FILES_MAX} files at a time: ${files.length} are selected. Select fewer.` }; draw(); return; }
+    if (S.busy) { if (inBar) S.answers = { what, kind, lines: [], left: [], note: WAIT }; else note('refused', WAIT); draw(); return; }
     const at = S.ctx.now();
+    if (inBar) S.answers = { what, kind, pending: true, lines: [], left: [], note: null }; else note('sending');
     send('mutate', files, () => `Mutation check queued: ${files.length} ${files.length === 1 ? 'file' : 'files'} at the front of the idle queue. ${MUT_WHY}`, (text) => {
       files.forEach((file) => S.mutAsked.set(dk(file), at));
-      if (inBar) S.answers = { what: 'Mutation check', lines: files.map((file) => ({ file, ok: true, text: 'queued' })), left: [], note: null, said: text.replace(/^conveyor: /, '') };
-    }, (why) => { if (inBar) S.answers = { what: 'Mutation check', lines: files.map((file) => ({ file, ok: false, text: why })), left: [], note: null }; });
+      if (inBar) S.answers = { what, kind, lines: files.map((file) => ({ file, ok: true, text: 'queued' })), left: [], note: null, said: text.replace(/^conveyor: /, '') };
+      else note('asked');
+    }, (why) => { if (inBar) S.answers = { what, kind, lines: files.map((file) => ({ file, ok: false, text: why })), left: [], note: null }; else note('refused', why); });
+  }
+  // A bar of progress: value of max, or with no max one that shows only that it goes on.
+  function progress(label, value, max) {
+    const b = S.ctx.h('progress', 'tests-progress');
+    if (max) { b.max = max; b.value = Math.min(value, max); }
+    b.setAttribute('aria-label', label);
+    return b;
+  }
+  // A file's mutation check now, as a bar and words: running, its mutants tried of all and the time since it began;
+  // queued, a bar that goes on; else its state alone.
+  function mutNow(f) {
+    const h = S.ctx.h, m = mutOf(f), q = mutQueued(f), out = [];
+    let text = mutState(f);
+    if (m && m.state === 'running') {
+      out.push(progress(`Mutation check: ${f.file}`, num(m.tried) || 0, num(m.of) || 0));
+      const t0 = Date.parse(m.at || '');
+      if (!Number.isNaN(t0)) text += ` ${mmss((S.ctx.now() - t0) / 1000)} so far.`;
+    } else if (q !== null) out.push(progress(`Mutation check: ${f.file}`));
+    out.push(h('span', null, text));
+    return out;
   }
 
   const actBtn = (text, act, label, fn) => button(text, 'btn-quiet tests-act', act, label, fn);
   // One action sent: POST control {action, args, repo}; then(text, at) on a yes, no(refusal) on a no, and the answer or
   // the refusal said.
   function send(action, args, said, then, no) {
-    if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return; }
+    if (S.busy) { say(WAIT); return; }
     const repo = S.d.repo;
     S.busy = true; draw(); say('Sending…');
     S.ctx.post('control', { action, args, repo }).then((r) => r.text().then((t) => {
@@ -384,12 +420,18 @@
     (clip && clip.writeText ? clip.writeText(text) : Promise.reject(new Error('no clipboard')))
       .then(() => say('Copied.'), () => say('Not copied: the browser gave no clipboard.'));
   }
+  // An action of a row: its box shows at once, beside its buttons: sending until the build machine answers, then
+  // running (or why it was refused); one that cannot be sent says why there.
   function start(how, file) {
+    const k = dk(file), now = () => new Date(S.ctx.now()).toISOString();
+    const why = how !== 'run' && !tmodel() ? NO_SEAT : S.busy ? WAIT : null;
+    S.open.add(file);
+    if (why) { S.started.set(k, { id: '', action: how, file, state: 'refused', reason: why }); draw(); say(`Not started: ${why}`); return; }
+    S.started.set(k, { id: '', action: how, file, start: now(), state: 'sending' });
     send('testaction', [how, file], () => `Started: ${ACTS[how]}, ${file}.`, (text) => {
       const id = text.split('\n').pop().trim();
-      S.started.set(dk(file), { id: ID.test(id) ? id : '', action: how, file, start: new Date(S.ctx.now()).toISOString(), state: 'running' });
-      S.open.add(file);
-    });
+      S.started.set(k, { id: ID.test(id) ? id : '', action: how, file, start: now(), state: 'running' });
+    }, (reason) => S.started.set(k, { id: '', action: how, file, state: 'refused', reason }));
   }
   const stop = (a) => send('testaction', ['stop', a.id], (t) => `Stop sent: ${ACTS[a.action] || a.action}, ${a.file}. ${t}`, () => S.stopping.add(a.id));
   const verdictChip = (v) => S.ctx.chip(v, v === 'keep' ? 'ok' : v === 'no verdict' ? 'quiet' : 'warn');
@@ -413,6 +455,15 @@
   // A queued action waits for a free place; the engine starts them in the order asked.
   const ahead = (a) => actions().filter((x) => queued(x) && x.id !== a.id && String(x.asked || '') < String(a.asked || '')).length;
   const queuedSaid = (a) => `Queued, ${ahead(a)} ahead`;
+  // An action now, as a bar and words: queued, how many wait before it; running, the time used (against its limit);
+  // ended, its result.
+  function actNow(a, chip = true) {
+    const h = S.ctx.h, name = ACTS[a.action] || String(a.action);
+    if (queued(a)) return [progress(`Waiting: ${name}`), h('span', 'board-from', queuedSaid(a))];
+    if (!running(a)) return result(a, chip);
+    const lim = limitOf(a), u = used(a);
+    return [progress(`Time used: ${name}`, u, lim), h('span', 'board-from', lim ? `Running: ${mmss(u)} of the ${mmss(lim)} time limit` : `Running: ${mmss(u)} used`)];
+  }
   // The text of a judge or explain action as formatted text (#74): paragraphs, **bold**, `code`, lists ("- ", "* ",
   // "1. ") and ``` code blocks. It builds nodes and never sets HTML from the text: any other markup shows as typed.
   function inline(s) {
@@ -468,19 +519,16 @@
     const h = S.ctx.h, el = h('div', 'tests-box'), head = h('div', 'tests-box-head'), name = ACTS[a.action] || String(a.action);
     el.dataset.id = a.id;
     head.append(h('span', 'board-label', name));
+    if (a.state === 'sending') head.append(progress(`Sending: ${name}`), h('span', 'board-from', `Starting: ${SENDING}`));
+    if (a.state === 'refused') head.append(h('span', 'tests-refused', `Not started: ${a.reason}`));
+    if (a.state === 'sending' || a.state === 'refused') { el.append(head); return el; }
     const text = S.texts.get(a.id) || '', btns = h('div', 'tests-box-btns'), parts = [head];
     if (live(a) && ID.test(a.id)) btns.append(button(S.stopping.has(a.id) ? 'Stopping…' : 'Stop', 'btn-quiet', 'stop', `Stop: ${name}, ${a.file}`, () => stop(a)));
+    head.append(...actNow(a, false));
     if (queued(a)) {
-      head.append(h('span', 'board-from', queuedSaid(a)));
       el.append(head, btns);
       return el;
     }
-    if (running(a)) {
-      const lim = limitOf(a), u = used(a), bar = h('progress', 'tests-progress');
-      if (lim) { bar.max = lim; bar.value = Math.min(u, lim); }
-      bar.setAttribute('aria-label', `Time used: ${name}`);
-      head.append(bar, h('span', 'board-from', lim ? `${mmss(u)} of the ${mmss(lim)} time limit` : `${mmss(u)} used`));
-    } else head.append(...result(a, false));
     if (!running(a) && a.action === 'judge' && typeof a.verdict === 'string') {
       const line = h('p', 'tests-verdict', 'Verdict: ');
       line.append(verdictChip(a.verdict));
@@ -555,10 +603,11 @@
         field('issue-title', 'Title of the issue', a.title, (v) => { a.title = v; }, { max: TITLE_MAX }),
         field('issue-body', 'Text of the issue', a.body, (v) => { a.body = v; }, { area: true, max: BODY_MAX }),
         button('File this issue', 'btn-primary', 'issue-file', `File this issue about ${file}`, () => {
-          const t = a.title.trim(), b = a.body.trim();
-          if (!t || /[\r\n]/.test(t)) { say('Type a title of one line first.'); return; }
-          if (!b) { say('Type the text of the issue first.'); return; }
-          send('test-issue', [file, t, b], (url) => `Filed: ${url}`, () => { S.ask = null; });
+          const t = a.title.trim(), b = a.body.trim(), k = dk(file), note = (state, text = '') => S.notes.set(k, { what: 'Optimize', state, text });
+          const why = !t || /[\r\n]/.test(t) ? 'Type a title of one line first.' : !b ? 'Type the text of the issue first.' : S.busy ? WAIT : null;
+          if (why) { note('refused', why); draw(); say(why); return; }
+          note('sending');
+          send('test-issue', [file, t, b], (url) => `Filed: ${url}`, (url) => { S.ask = null; note('done', `Filed: ${url}`); }, (no) => note('refused', no));
         }), cancel('issue-cancel'));
     } else if (a.kind === 'close') {
       el.append(h('p', 'board-head', `Close #${f.issue} as done, with this comment.`),
@@ -590,7 +639,7 @@
       S.keep = { act, file }; draw();
     };
     return [
-      ['explain', ACTS.explain, tmodel() ? null : NO_SEAT, () => start('explain', file)],
+      ['explain', ACTS.explain, null, () => start('explain', file)],  // with no Tests model, its box says so
       ['mutate', 'Mutation check', null, () => mutAsk([file], false)],
       ['flaky-off', 'Keep a case off', null, () => { S.ask = { kind: 'keep', repo: S.d.repo, file, case: '', why: '' }; S.keep = { act: 'keep-case', file }; draw(); }],
       ['close-done', 'Close its issue as done', num(f.issue) === null ? 'It has no issue to close.' : null, () => {
@@ -630,18 +679,38 @@
     wrap.append(m);
     return wrap;
   }
-  // The actions of an opened row (Judge, Optimize, Run and More), the preview open on it, and the box of its action.
+  // The line of an Optimize or a Mutation check asked on a row, beside its buttons: sending, refused with why, the
+  // issue filed, or the check's state now (queued, running, ended).
+  function noteLine(f) {
+    const h = S.ctx.h, n = S.notes.get(dk(f.file));
+    if (!n) return null;
+    const el = h('p', 'tests-fact tests-note-line');
+    el.append(h('span', 'board-label', `${n.what}: `));
+    if (n.state === 'sending') el.append(progress(`Sending: ${n.what}`), h('span', 'board-from', SENDING));
+    else if (n.state === 'refused') el.append(h('span', 'tests-refused', `Not done: ${n.text}`));
+    else if (n.state === 'asked') el.append(...mutNow(f));
+    else el.append(h('span', null, n.text));
+    return el;
+  }
+  // The actions of an opened row (Judge, Optimize, Run and More), beside them the box of its action and the line of
+  // its Optimize or Mutation check, then the preview open on it. One that cannot start says why in its box or line.
   function rowActions(f) {
     const h = S.ctx.h, file = f.file, el = h('div', 'tests-acts'), noSeat = !tmodel();
     const now = h('div', 'tests-act-row');
     const judge = actBtn('Judge', 'judge', `${ACTS.judge}: ${file}`, () => start('judge', file));
-    if (noSeat) { judge.disabled = true; judge.title = NO_SEAT; }
+    if (noSeat) judge.title = NO_SEAT;
     // A runner (wholeOnly) is held to no budget: its time is its files' time, so no issue asks to optimize it.
-    const opt = actBtn('Optimize', 'optimize', `Optimize: preview an issue about ${file}`, () => { S.ask = draftIssue(f); S.keep = { act: 'issue-title', file }; draw(); });
-    if (f.wholeOnly === true) { opt.disabled = true; opt.title = RUNNER_WHY; }
+    const opt = actBtn('Optimize', 'optimize', `Optimize: preview an issue about ${file}`, () => {
+      if (f.wholeOnly === true) { S.notes.set(dk(file), { what: 'Optimize', state: 'refused', text: RUNNER_WHY }); draw(); return; }
+      S.notes.delete(dk(file)); S.ask = draftIssue(f); S.keep = { act: 'issue-title', file }; draw();
+    });
+    if (f.wholeOnly === true) opt.title = RUNNER_WHY;
     now.append(judge, opt, actBtn('Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
     if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
     el.append(h('p', 'board-head', 'Actions'), now);
+    const a = rowAction(file), n = noteLine(f);
+    if (a) el.append(box(a, f));
+    if (n) el.append(n);
     // A flaky case is kept off until its flaky issue closes: Put back closes it. A case shows on each file it counts for
     // (the snapshot's files: a runner's case on its case file too).
     list(S.d.flaky).filter((c) => obj(c) && typeof c.case === 'string' && c.case.includes(': ') && list(c.files).includes(file)).forEach((c) => {
@@ -654,8 +723,6 @@
     });
     const p = preview(f);
     if (p) el.append(p);
-    const a = rowAction(file);
-    if (a) el.append(box(a, f));
     return el;
   }
 
@@ -742,18 +809,42 @@
     return files.map((file) => ({ file, ok: true, text: last }));
   }
   // An action of the bar on its files: Judge or Run (testaction, then each action started shows on its row as one
-  // started there does) or the issues of Optimize (test-issue). Each file's answer, and those left out, show in the bar.
+  // started there does) or the issues of Optimize (test-issue). The bar says it is sent at once; then each file's
+  // answer (an action started shows its state there until it ends, then its result), and those left out, show in it.
   function bulk(what, action, args, files, left, done) {
-    if (files.length > FILES_MAX) { S.answers = { what, lines: [], left, note: `At most ${FILES_MAX} files at a time: ${files.length} are selected. Select fewer.` }; draw(); return; }
+    const kind = action === 'testaction' ? 'act' : 'issue';
+    if (files.length > FILES_MAX) { S.answers = { what, kind, lines: [], left, note: `At most ${FILES_MAX} files at a time: ${files.length} are selected. Select fewer.` }; draw(); return; }
+    if (S.busy) { S.answers = { what, kind, lines: [], left, note: WAIT }; draw(); return; }
+    S.answers = { what, kind, pending: true, lines: [], left, note: null };
     send(action, args, (t) => { const a = answersOf(files, t); return `${what}: ${a.filter((x) => x.ok).length} of ${a.length} taken.`; }, (t) => {
       const lines = answersOf(files, t);
-      S.answers = { what, lines, left, note: null };
+      S.answers = { what, kind, lines, left, note: null };
       if (done) done(lines);
-    }, (why) => { S.answers = { what, lines: files.map((file) => ({ file, ok: false, text: why })), left, note: null }; });
+    }, (why) => { S.answers = { what, kind, lines: files.map((file) => ({ file, ok: false, text: why })), left, note: null }; });
+  }
+  // A line of the bar's answer: an action started, its state now (its record, else as started here) and, once it
+  // ended, its text to open; a Mutation check, its file's check now; else what the build machine answered.
+  function answerLine(a, l, files) {
+    const h = S.ctx.h, li = h('li', l.ok ? null : 'tests-refused'), f = files.find((x) => x.file === l.file);
+    li.dataset.file = l.file;
+    const s = S.started.get(dk(l.file)), x = a.kind === 'act' && l.ok ? actions().find((y) => y.id === l.text) || (s && s.id === l.text ? s : null) : null;
+    if (x) {
+      li.append(`${l.file}: ${a.what}: `, ...actNow(x));
+      const text = S.texts.get(x.id) || '';
+      if (!live(x) && text) {
+        const d = h('details', 'tests-bar-text');
+        d.open = S.barText.has(x.id);
+        d.addEventListener('toggle', () => { if (d.open) S.barText.add(x.id); else S.barText.delete(x.id); });
+        d.append(h('summary', null, 'Its text'), x.action === 'run' ? h('pre', 'tests-out', text) : md(text));
+        li.append(d);
+      }
+    } else if (a.kind === 'mutate' && l.ok && f) li.append(`${l.file}: ${a.what}: `, ...mutNow(f));
+    else li.textContent = `${l.file}: ${l.ok ? `${a.what}, taken: ${l.text}` : `${a.what}, refused: ${l.text}`}`;
+    return li;
   }
   function startMany(how, files) {
     const { files: fs, left } = chosen(files, how), names = fs.map((f) => f.file);
-    if (!names.length) { S.answers = { what: ACTS[how], lines: [], left, note: 'No file to act on.' }; draw(); return; }
+    if (!names.length) { S.answers = { what: ACTS[how], kind: 'act', lines: [], left, note: 'No file to act on.' }; draw(); return; }
     bulk(ACTS[how], 'testaction', [how, ...names], names, left, (lines) => lines.forEach((l) => {
       if (!l.ok || !ID.test(l.text)) return;
       S.started.set(dk(l.file), { id: l.text, action: how, file: l.file, start: new Date(S.ctx.now()).toISOString(), state: 'running' });
@@ -766,8 +857,9 @@
     status.setAttribute('aria-live', 'polite');
     status.append(h('p', 'board-label tests-selbar-count', `${n} selected`));
     const btns = h('div', 'tests-act-row');
+    // With no Tests model (or every file a runner, for Optimize) a click says why in the bar: each file left out.
     const judge = actBtn('Judge', 'bulk-judge', `Judge the ${n} selected files`, () => startMany('judge', files));
-    if (!tmodel()) { judge.disabled = true; judge.title = NO_SEAT; }
+    if (!tmodel()) judge.title = NO_SEAT;
     const opt = actBtn('Optimize', 'bulk-optimize', `Optimize: preview an issue for each of the ${n} selected files`, () => {
       const { files: fs, left } = chosen(files, 'optimize');
       S.answers = null;  // the preview names the files left out
@@ -776,7 +868,7 @@
       S.ask = { kind: 'many', repo: S.d.repo, items: fs.map((f) => { const d = draftIssue(f); return { file: f.file, title: d.title, body: d.body }; }), left };
       S.keep = { act: 'many-title', file: fs[0].file }; draw();
     });
-    if (!chosen(files, 'optimize').files.length) { opt.disabled = true; opt.title = RUNNER_WHY; }
+    if (!chosen(files, 'optimize').files.length) opt.title = RUNNER_WHY;
     const mut = actBtn('Mutation check', 'bulk-mutate', `Mutation check of the ${n} selected files: at the front of the idle queue. ${MUT_WHY}`,
       () => mutAsk(files.filter((f) => S.sel.has(f.file)).map((f) => f.file), true));
     mut.title = MUT_WHY;
@@ -788,7 +880,8 @@
     const a = S.answers;
     if (a) {
       const ul = h('ul', 'tests-selbar-answers');
-      a.lines.forEach((l) => { const li = h('li', l.ok ? null : 'tests-refused', `${l.file}: ${l.ok ? `${a.what}, taken: ${l.text}` : `${a.what}, refused: ${l.text}`}`); li.dataset.file = l.file; ul.append(li); });
+      if (a.pending) { const li = h('li', 'tests-sending'); li.append(progress(`Sending: ${a.what}`), `${a.what}: ${SENDING}`); ul.append(li); }
+      a.lines.forEach((l) => ul.append(answerLine(a, l, files)));
       a.left.forEach((l) => { const li = h('li', 'tests-why', `${l.file}: left out of ${a.what}: ${l.why}`); li.dataset.file = l.file; ul.append(li); });
       if (a.note) ul.append(h('li', 'tests-refused', a.note));
       if (a.said) ul.append(h('li', 'tests-why tests-said', a.said));
@@ -1433,7 +1526,12 @@
       if (ss && ss.repo === view.repo && (sameSeat(ctlTests(), ss.value) || (after(ss) && !sameSeat(ctlTests(), ss.was)))) S.seatSaved = null;
       // Each action's text joined to what was seen of it; an action asked for here leaves its place once listed.
       actions().forEach((a) => { if (typeof a.text === 'string') S.texts.set(a.id, a.textCut === true ? merge(S.texts.get(a.id) || '', a.text) : a.text); });
-      S.started.forEach((s, k) => { if (!s.id || actions().some((a) => a.id === s.id)) S.started.delete(k); });
+      // One refused stays until the next action asked of its file; one sending with no POST in flight lost its answer
+      // (another project was shown when it came).
+      S.started.forEach((s, k) => {
+        if ((s.state === 'sending' && !S.busy) || (s.state === 'running' && (!s.id || actions().some((a) => a.id === s.id)))) S.started.delete(k);
+      });
+      S.notes.forEach((n, k) => { if (n.state === 'sending' && !S.busy) S.notes.delete(k); });
       S.stopping.forEach((id) => { if (!actions().some((a) => a.id === id && live(a))) S.stopping.delete(id); });
     }
     if (S.held) { S.late = true; return; }

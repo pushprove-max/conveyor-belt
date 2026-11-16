@@ -70,16 +70,21 @@ test('Tests: a wholeOnly runner has "Runs other test files" in place of a budget
   act(rowOf(w, WHOLE), 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.match(more.textContent, /Budget: none, it runs other test files/);
-  assert.equal(act(more, 'optimize').disabled, true, 'no Optimize issue for a runner');
+  // No Optimize issue for a runner (#100: a click says why on its row, rather than a disabled button that does nothing).
+  act(more, 'optimize').click();
+  const shut = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
+  assert.equal(act(shut, 'issue-title'), null, 'no Optimize issue for a runner');
+  assert.match(shut.querySelector('.tests-note-line').textContent, /^Optimize: Not done: It runs other test files, and each of them has its own budget\.$/);
   // Bug: the budget editor saved a budget for the runner and said "budget of ... now 8 CPU s", which never applies.
-  assert.equal(act(more, 'file-budget-field'), null, 'no budget editor for a runner');
-  assert.equal(act(more, 'slow-mark-field'), null, 'no slow-on-purpose mark for a runner');
-  act(more, 'more').click();
+  assert.equal(act(shut, 'file-budget-field'), null, 'no budget editor for a runner');
+  assert.equal(act(shut, 'slow-mark-field'), null, 'no slow-on-purpose mark for a runner');
+  act(shut, 'more').click();
   const menu = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.deepEqual(['menu-budget', 'menu-mark'].map((a) => act(menu, a).disabled), [true, true], 'nor from its More menu');
   act(rowOf(w, CARD), 'open').click();
   const card = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === CARD);
-  assert.equal(act(card, 'optimize').disabled, false, 'a file with a budget keeps its Optimize');
+  act(card, 'optimize').click();
+  assert.ok(act(tp(w), 'issue-title'), 'a file with a budget keeps its Optimize');
 });
 
 // The clock time of the newest run, card or whole suite, and when it ran on hover.

@@ -9,16 +9,20 @@ const test = cases(import.meta.url);
 const { MERGE, X, NO_RULES, rec, snap, opened, open, type, said, auto, reply } = TA;
 
 // Bug it guards: a judge asked for with no Tests model, which the engine refuses, or a run of the file kept back
-// though it needs no model.
-test('Tests actions: with no Tests model, Judge and Explain are disabled with the reason; Run this file now is not', () => {
-  const w = boot({ tab: 'tests' });
-  deliver(w, snap({ model: null }));
-  act(open(w, MERGE), 'more').click();
-  const more = opened(w, MERGE);
-  for (const a of ['judge', 'explain']) assert.deepEqual([act(more, a).disabled, act(more, a).title], [true, 'Set the Tests model first.'], a);
-  assert.match(more.querySelector('.tests-why').textContent, /Set the Tests model first\./);
-  assert.equal(act(more, 'run').disabled, false);
-});
+// though it needs no model; (#100) a disabled Judge or Explain whose click did nothing: a click says why in its box.
+for (const [a, words] of [['judge', 'Judge this test'], ['explain', 'Explain the slowdown']]) {
+  test(`Tests actions: with no Tests model, ${words} says why in its box on a click and sends nothing; Run this file now is not held back`, () => {
+    const w = boot({ tab: 'tests' });
+    deliver(w, snap({ model: null }));
+    act(open(w, MERGE), 'more').click();
+    const more = opened(w, MERGE);
+    assert.match(more.querySelector('.tests-why').textContent, /Set the Tests model first\./);
+    assert.equal(act(more, 'run').disabled, false);
+    act(more, a).click();
+    assert.equal(opened(w, MERGE).querySelector('.tests-box').textContent, `${words}Not started: Set the Tests model first.`);
+    assert.deepEqual(w.posts, []);
+  });
+}
 
 // Bug it guards: an issue filed on one click, with no look at its text; a Cancel that filed; a preview with a run
 // count or time target as its Done-when; an Optimize issue the engine does not know as one (its title), or with no

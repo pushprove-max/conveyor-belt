@@ -4,10 +4,10 @@
 // that filter; the column hints; and the Settings section. Shared setup: dashboard-view.helpers.mjs (TA.snap(): the
 // three files of TESTS, with the Tests model and the actions).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, act, cases, clone, css, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, clone, css, iso, T0, TA } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
-const { MERGE, X, ID1, snap, tp, rowOf, type, reply } = TA;
+const { MERGE, X, ID1, rec, snap, tp, rowOf, type, reply } = TA;
 const E2E = 'conveyor/tests/e2e.test.sh', BIG = 'conveyor/tests/big.test.sh';
 // Four files: MERGE and BIG over budget, E2E over its budget but slow on purpose (so not "Over budget"), X under it.
 // X is the runner (wholeOnly) when `runner` is set.
@@ -45,25 +45,39 @@ test('Tests select: with the Over budget filter, the header checkbox selects onl
 });
 
 // Bug it guards (D2): one POST a file (Judge on 20 files, 20 asks), an answer for the selection as a whole that hid the
-// file refused, or a started judge its row did not show.
-test('Tests select: Judge in the bar posts one testaction with the files selected; the bar shows the answer for each', async () => {
+// file refused, or a started judge its row did not show; (#100) a bar that said nothing while the POST waited, then
+// only "taken" and an id: never that the judge ran, nor its verdict and text.
+test('Tests select: Judge in the bar posts one testaction with the files selected; the bar shows each file from sent to its verdict', async () => {
   const w = show();
   pick(w, X); pick(w, MERGE);
-  w.reply = results([{ file: MERGE, id: ID1 }, { file: X, refused: `conveyor: testaction: ${X} is not a test file of main` }]);
+  let go;
+  w.reply = new Promise((r) => { go = r; });
   act(bar(w), 'bulk-judge').click();
+  assert.deepEqual(answers(w), ['Judge this test: sent to the build machine, waiting for its answer.'], 'at the click');
+  go(results([{ file: MERGE, id: ID1 }, { file: X, refused: `conveyor: testaction: ${X} is not a test file of main` }]));
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testaction', args: ['judge', MERGE, X], repo: 'sample' } }]);
-  assert.deepEqual(answers(w), [`${MERGE}: Judge this test, taken: ${ID1}`, `${X}: Judge this test, refused: conveyor: testaction: ${X} is not a test file of main`]);
+  assert.deepEqual(answers(w), [`${MERGE}: Judge this test: Running: 0:00 of the 15:00 time limit`, `${X}: Judge this test, refused: conveyor: testaction: ${X} is not a test file of main`]);
+  const done = rec({ state: 'done', start: iso(T0 - 65000), end: iso(T0), verdict: 'split', text: 'Split **it**.\nVERDICT: split\n' }), d = four();
+  d.panels.tests.data.testActions.actions = [done];
+  next(w, d);
+  const line = bar(w).querySelector('.tests-selbar-answers li');
+  assert.match(line.textContent, /^conveyor\/tests\/merge\.test\.sh: Judge this test: Done in 1:05 · .+ · claude · claude-sonnet-5-5 · medium/);
+  assert.equal(line.querySelector('.chip-warn').textContent, 'split', 'its verdict');
+  assert.equal(line.querySelector('details .tests-md strong').textContent, 'it', 'its text, formatted, to open');
   act(rowOf(w, MERGE), 'open').click();
   assert.equal(tp(w).querySelector('.tests-open .tests-box').dataset.id, ID1, 'its row shows the judge it started');
 });
 
-// Bug it guards: a judge asked for with no Tests model, which the engine refuses for each file; Run needs none.
-test('Tests select: with no Tests model, Judge in the bar is disabled and says why; Run posts one testaction run', async () => {
+// Bug it guards: a judge asked for with no Tests model, which the engine refuses for each file; Run needs none; (#100)
+// a disabled Judge whose click did nothing: a click says why for each file in the bar, and sends nothing.
+test('Tests select: with no Tests model, Judge in the bar says why on a click and sends nothing; Run posts one testaction run', async () => {
   const w = show({ model: null });
   pick(w, MERGE); pick(w, BIG);
-  assert.deepEqual([act(bar(w), 'bulk-judge').disabled, act(bar(w), 'bulk-judge').title], [true, 'Set the Tests model first.']);
   assert.match(bar(w).textContent, /Judge: Set the Tests model first\./);
+  act(bar(w), 'bulk-judge').click();
+  assert.deepEqual(answers(w), [`${MERGE}: left out of Judge this test: Set the Tests model first.`, `${BIG}: left out of Judge this test: Set the Tests model first.`, 'No file to act on.']);
+  assert.deepEqual(w.posts, []);
   w.reply = reply(ID1);
   act(bar(w), 'bulk-run').click();
   await settle();
@@ -100,8 +114,11 @@ test('Tests select: Optimize previews one issue a file and leaves the runner out
   act(bar(w), 'bulk-optimize').click();
   type(act(items()[1], 'many-body'), 'Split it in two.');
   const first = act(items()[0], 'many-body').value;
-  w.reply = results([{ file: MERGE, id: 'https://github.com/example/sample/issues/601' }, { file: BIG, id: 'https://github.com/example/sample/issues/602' }]);
+  let go;
+  w.reply = new Promise((r) => { go = r; });
   act(bar(w), 'bulk-file').click();
+  assert.equal(answers(w)[0], 'Optimize: sent to the build machine, waiting for its answer.', '#100: the bar says it is sent at the click');
+  go(results([{ file: MERGE, id: 'https://github.com/example/sample/issues/601' }, { file: BIG, id: 'https://github.com/example/sample/issues/602' }]));
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'test-issue', repo: 'sample',
     args: [MERGE, `Optimize the test file ${MERGE}`, first.trim(), BIG, `Optimize the test file ${BIG}`, 'Split it in two.'] } }]);

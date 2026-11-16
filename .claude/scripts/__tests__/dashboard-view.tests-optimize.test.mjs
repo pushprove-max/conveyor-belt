@@ -70,7 +70,8 @@ test('Tests results: an opened row with a queued action shows "Queued, 1 ahead" 
   assert.equal(box.dataset.id, 'fedcba987654', 'the newest action of the file');
   assert.match(box.textContent, /Queued, 1 ahead/);
   assert.ok(act(box, 'stop'), 'Stop');
-  assert.equal(box.querySelector('progress'), null, 'no bar before it runs');
+  // #100: queued shows a bar too, one with no value (it goes on), not the time used.
+  assert.equal(box.querySelector('progress').hasAttribute('value'), false, 'no time bar before it runs');
 });
 
 // Bug it guards (D4): the results sat open under all the rows, far from their files, with no count of what runs.

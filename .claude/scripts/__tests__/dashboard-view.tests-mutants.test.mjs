@@ -78,7 +78,7 @@ test('Tests mutants: Mutation check on 3 selected files posts one ask with those
   d2.panels.tests.data.tests.files.forEach((f, i) => { f.mutationPlace = i + 1; if (f.file === E2E) f.mutation = null; });
   next(w, d2);
   const at = d2.panels.tests.data.tests.files.findIndex((f) => f.file === X) + 1;
-  assert.equal(stateOf(w, X), `Queued: place ${at} in the idle queue. A check starts only when no card needs a test slot.`);
+  assert.equal(stateOf(w, X), `Queued: place ${at} in the idle queue, ${at - 1} ahead. A check starts only when no card needs a test slot.`);
 });
 
 // Bug it guards (D3): an Optimize issue whose body did not name the mutants its tests did not catch, so its card could not

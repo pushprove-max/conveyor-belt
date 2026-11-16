@@ -271,8 +271,15 @@ asks for a test slot, the check pauses, and it goes on from its next mutant late
 queue holds the files that the page flags (Never caught anything, or Hollow), then the files checked longest ago
 (`conveyor/README.md`, Mutation checks).
 
-An open row also shows its newest action. While it runs, you see its time bar, its text as it comes, Stop and Copy. A
-queued action shows "Queued, N ahead" and Stop. When it ends, you see its result. The text of Judge and Explain the
+An open row also shows its newest action, in a box under its buttons. When you click Judge, Run or Explain the
+slowdown, the box shows at once, with a bar and "Starting", until the build machine answers. A queued action shows a
+bar, "Queued, N ahead" and Stop. While it runs, you see its time bar, the time it used, its text as it comes, Stop and
+Copy. When it ends, you see its result in the same box. When the build machine refuses the action, the box shows "Not
+started" and the reason. With no model for the test actions, Judge and Explain the slowdown send nothing, and the box
+says "Set the Tests model first.". Optimize and Mutation check show on a line under the buttons in the same way: sent,
+the reason when they are refused, the issue filed, or the state of the check (queued with the files before it, running
+with its mutants and its time, then its result). Optimize on a file that runs other test files tells you why it files
+no issue. The text of Judge and Explain the
 slowdown shows as formatted text: paragraphs, bold, lists and code. Copy copies the text as the model wrote it. A
 Judge result starts with "Verdict:" and the verdict. When the verdict is speed up, split, merge or delete, click
 "Optimize with this verdict" to open the Optimize issue with that verdict and its text.
@@ -306,9 +313,12 @@ Each row has a checkbox. The checkbox in the heading selects every file that the
 file or more selected, a bar at the bottom of the screen shows how many, with Judge, Optimize, Run, Mutation check and
 Clear. Judge, Run and Mutation check ask for all the selected files at once. After Mutation check, the rows show
 "queued", and the bar says that a check starts only when no card needs a test slot. Optimize shows one issue for each file, each with a title and a text that
-you can edit, and "File N issues" files them. Cancel files nothing. The bar shows the answer for each file, and each
-file that it left out, with the reason: Optimize leaves out a file that runs other test files, and Judge needs a model
-for the test actions. One action takes at most 20 files.
+you can edit, and "File N issues" files them. Cancel files nothing. When you click an action, the bar shows a bar and
+"sent to the build machine" until the build machine answers. Then it shows the answer for each file, and each file
+that it left out, with the reason: Optimize leaves out a file that runs other test files, and Judge needs a model for
+the test actions. For each Judge and Run that started, the bar shows its state: queued with how many are before it,
+running with its time bar, and then its result (the verdict, or passed or failed). Open "Its text" to read the text.
+For each Mutation check, the bar shows the state of the check of that file. One action takes at most 20 files.
 
 An Optimize card picks the fix: speed the file up, split it, merge it into another test file, or delete it. It does
 not need a test that fails on main. A file it keeps must pass in fewer CPU seconds than its median, else the card is
