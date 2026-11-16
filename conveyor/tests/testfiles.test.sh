@@ -227,3 +227,24 @@ t_tfoptimize() {
     = '[[true,"deleted","2026-11-06T01:00:00Z",["b.test","c.test"]],1]' ] \
     || fail "gone.test, deleted: $(jq -c '[(.files[] | select(.file == "gone.test")), .totals]' <<<"$got")"
 }
+
+# The Tests page's Caught column (#75): a test file that failed on a card whose landed commit left it as it was caught
+# a bug (the fix went into the code); one whose landed commit changed it was changed to pass. f.test failed on c-1
+# (landed: it changed code.sh alone), on c-2 (landed: it changed f.test), on c-3 (blocked, never landed) and on c-4
+# (its landed commit is not in main's checkout); it ran on two cards that passed too: 6 runs on record. Bug caught: a
+# page that showed no test file catching anything, or counted a test edited to pass, or an unlanded card, as a catch.
+t_tfcaught() {
+  setup '[]'
+  touch "$R/f.test" "$R/code.sh" && git -C "$R" add f.test code.sh && git -C "$R" commit -qm base || fail "main's files"
+  echo fix > "$R/code.sh" && git -C "$R" commit -qam "fix the code" && s1=$(git -C "$R" rev-parse HEAD) || fail "the code fix"
+  echo edit > "$R/f.test" && git -C "$R" commit -qam "edit the test" && s2=$(git -C "$R" rev-parse HEAD) || fail "the test edit"
+  tf_runs f.test 1 1
+  jq -cn --arg s1 "$s1" --arg s2 "$s2" '["c-1", "c-2", "c-3", "c-4"] | to_entries[] | .value as $c
+      | {card: $c, issue: (.key + 1), step: "test", time: "2026-11-11T1\(.key):00:00Z", result: "fail", times: {"f.test": 1},
+         failures: {of: 1, files: [{file: "f.test", cases: []}], timeout: null}},
+        ({card: $c, issue: (.key + 1), time: "2026-11-11T1\(.key):30:00Z"} + ({"c-1": {step: "landed", result: "ok", sha: $s1},
+          "c-2": {step: "landed", result: "ok", sha: $s2}, "c-3": {step: "blocked", reason: "no"},
+          "c-4": {step: "landed", result: "ok", sha: ("0" * 40)}}[$c]))' >> "$ST/cards.jsonl"
+  got=$(tf_file f.test | jq -c '{caught, changedToPass, runsOnRecord, failedSteps}')
+  [ "$got" = '{"caught":1,"changedToPass":1,"runsOnRecord":6,"failedSteps":4}' ] || fail "f.test's catches: $got"
+}

@@ -128,7 +128,7 @@ test('Tests select: a figure that counts files is a button that shows them alone
 test('Tests select: each column heading has a hint, tied to its button', () => {
   const w = show();
   const hint = (k) => { const b = act(tp(w), `sort-${k}`); return w.document.getElementById(b.getAttribute('aria-describedby')); };
-  for (const k of ['file', 'cpu', 'median', 'change', 'runs', 'clock', 'count', 'took', 'status']) assert.ok(hint(k) && hint(k).textContent.length > 10, k);
+  for (const k of ['file', 'cpu', 'median', 'change', 'runs', 'clock', 'count', 'took', 'caught', 'status']) assert.ok(hint(k) && hint(k).textContent.length > 10, k);
   assert.equal(hint('clock').textContent, 'Wall time divided by CPU time. Above 2× the file waits more than it works.');
   // jsdom lays nothing out, so the stylesheet is read: the hint shows on hover and on keyboard focus of its heading.
   assert.match(css, /\.tests-table th:hover \.tests-hint, \.tests-table th:focus-within \.tests-hint \{ display: block; \}/);

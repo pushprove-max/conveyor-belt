@@ -546,11 +546,15 @@ and the test files of main's checkout, and holds:
   or null), `runs` (its last 5 runs, newest first, empty for a file never run: `cpu`, `sec`, the clock seconds, null
   on a line written before the test line held `clocks`; `card`, null for a whole-suite run; `time`; `whole`, true for
   a whole-suite run; and a whole-suite run's `result`, `ok` or `fail`), `lastRun` (`sec`, `cpu`, `clockPerCpu`, `time`
-  and `whole` of its newest run; null with none), `timedRuns` (its runs with CPU seconds), `wholeOnly` (its
+  and `whole` of its newest run; null with none), `timedRuns` (its runs with CPU seconds), `runsOnRecord` (all its
+  runs on record), `wholeOnly` (its
   `test.files` entry has `wholeOnly: true`), `failedSteps` (the card test steps that failed in it: it was a failed file, a runner such as
   `conveyor/conveyor.test.sh` named a failed case that the file defines (`t_<case>()` or `<case>()` in main's
   checkout) and the file names that runner, or the run timed
-  out in it; a case the named file defines itself is that file's alone), `flaky` (its entries in the flaky-test record, its cases' entries too, the
+  out in it; a case the named file defines itself is that file's alone), `caught` and `changedToPass` (those of
+  its failed steps whose card landed: `caught` when the landed commit did not change the file, so the fix went into
+  the code; `changedToPass` when it changed the file; a landed commit that main's checkout does not have counts
+  neither way), `flaky` (its entries in the flaky-test record, its cases' entries too, the
   entries a runner names as its own among them), `issue` (the issue last
   filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
   `conveyor.sh testissue`, else null), `budget` and `budgetFrom` (`file`: its own; `project`: `test.fileBudget`), `slowOnPurpose`

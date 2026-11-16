@@ -221,6 +221,13 @@ them has its own budget, so the file itself has no budget. It shows "Runs other 
 never shows Over budget, Slower than usual or Waits, and you cannot optimize it, set its budget or mark it slow on
 purpose.
 
+The Caught column shows how often a test file caught a real bug. Conveyor counts it from the card records: a card
+Test step failed in the file, the card landed, and its landed change did not change the file. So the fix went into
+the code. When the landed change did change the file, the file was changed to pass. Point at the count to see how
+often that happened. A step of a card that did not land counts neither way. A file with 20 runs on record or more
+and no catch shows "Never caught anything" in grey text, which is not a status chip. A file that never fails may
+check nothing.
+
 Point at a column heading, or move the keyboard focus to it, to see what the column shows. Click a column heading to
 sort the table by that column. Click it again to reverse the order. An arrow shows the column and the direction. Until
 you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path in

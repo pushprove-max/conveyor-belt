@@ -29,10 +29,10 @@ test('Tests: a snapshot with 3 files gives 3 rows with now, median and change; t
     ['conveyor/tests/e2e.test.sh', '40.0', '39.0', '+3%'],
     ['.claude/scripts/__tests__/x.test.mjs', '2.0', '4.0', '-50%']], 'merge needs a look: first; then the highest CPU s');
   assert.deepEqual(cells(rowOf(w, MERGE)).slice(5, 7), ['2.5×', '7']);
-  assert.match(cells(rowOf(w, MERGE))[8], /Over budget.*Slower than usual.*Waits.*Flaky.*Fails often.*#480$/);
-  assert.doesNotMatch(cells(rowOf(w, 'conveyor/tests/e2e.test.sh'))[8], /Slower than usual|Over budget/, 'over its budget but slow on purpose: not "Over budget"');
-  assert.match(cells(rowOf(w, 'conveyor/tests/e2e.test.sh'))[8], /Slow on purpose/);
-  assert.match(cells(rows(w)[2])[8], /Faster/);
+  assert.match(cells(rowOf(w, MERGE))[9], /Over budget.*Slower than usual.*Waits.*Flaky.*Fails often.*#480$/);
+  assert.doesNotMatch(cells(rowOf(w, 'conveyor/tests/e2e.test.sh'))[9], /Slower than usual|Over budget/, 'over its budget but slow on purpose: not "Over budget"');
+  assert.match(cells(rowOf(w, 'conveyor/tests/e2e.test.sh'))[9], /Slow on purpose/);
+  assert.match(cells(rows(w)[2])[9], /Faster/);
   assert.equal(rowOf(w, MERGE).querySelector('.tests-bars').getAttribute('aria-label'), 'Last runs, oldest first: 11.0, 11.5, 12.0 CPU s');
   assert.deepEqual(['files', 'over', 'slower', 'waits', 'wait', 'run'].map((k) => figure(w, k)), ['3', '1', '1', '1', '2 min', '1 h 00 min']);
 });

@@ -11,8 +11,10 @@
 // its filter chip does.
 // The table, one row a test file (every test file of main's checkout, run or not): a checkbox and the file, CPU s now,
 // median, change against its own median, its last runs as bars (oldest first), clock against CPU, runs on record,
-// the clock time its newest run took (Last run took, with that run's date and time on hover), and its status (chips;
-// its issue as a link, "#NN"; Runs other test files and Whole suite only as grey text). A file with no CPU time on
+// the clock time its newest run took (Last run took, with that run's date and time on hover), Caught (#75: the card test
+// steps it failed whose landed change left it as it was; the times it was changed to pass on hover), and its status
+// (chips; its issue as a link, "#NN"; Runs other test files, Whole suite only and, for a file with NEVER runs on
+// record or more and no catch, Never caught anything as grey text). A file with no CPU time on
 // record shows "Not timed yet" in place of its figures and comes after the timed files (by name, it sorts as any
 // other). Each column heading has a hint on hover and on focus. A file the pack marks wholeOnly (a runner that starts
 // other test files whole, each of them with its own budget) is held to no budget: it has "Runs other test files" in
@@ -86,6 +88,7 @@
   const REASON_MAX = 300;  // a reason, as dashboard_server.py's said_ok takes it
   const WAITS = 2;         // a file waits more than it works when its last run took more than this times its CPU time
   const FAILS = 2;         // a file fails often when this many test steps or more failed in it
+  const NEVER = 20;        // a file with this many runs on record or more and no catch shows "Never caught anything"
   const HOST = 'Host file: this machine, all projects';
   const PACK = 'Pack file: this project';
   // The status chips, in the order of the filters: key, words, tone, whether a row with it needs a look.
@@ -174,6 +177,7 @@
     ['clock', 'Clock / CPU', (f) => num((obj(f.lastRun) || {}).clockPerCpu), 'Wall time divided by CPU time. Above 2× the file waits more than it works.'],
     ['count', 'Runs', (f) => (list(f.runs).length ? num(f.timedRuns) || 0 : null), 'The runs on record that have a CPU time.'],
     ['took', 'Last run took', (f) => num((obj(f.lastRun) || {}).sec), 'The clock time of its newest run. Point at a time to see when it ran.'],
+    ['caught', 'Caught', (f) => num(f.caught), 'The card test steps it failed whose landed change left it as it was: the fix went into the code. Point at a count to see how often it was changed to pass.'],
     ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length, 'What needs a look first, then the other marks of the file.']];
 
   function say(text) { const n = S.el && S.el.querySelector('.tests-note'); if (n) n.textContent = text; }
@@ -1104,6 +1108,8 @@
       // The status: chips; its issue as a link; Runs other test files and Whole suite only as grey text.
       const chips = h('span', 'rules-marks');
       marks(f).forEach(([k, words, tone]) => chips.append(k === 'issue' ? issueOf(f, any) : k === 'runner' || k === 'whole' ? h('span', 'tests-quiet', words) : S.ctx.chip(words, tone)));
+      // A grey fact, not a problem chip: a file that never fails may check nothing.
+      if ((num(f.runsOnRecord) || 0) >= NEVER && num(f.caught) === 0) chips.append(h('span', 'tests-quiet tests-never', 'Never caught anything'));
       const fileCell = cell(check, 'tests-file');
       fileCell.append(name);
       if (!timed(f)) {
@@ -1118,8 +1124,10 @@
           took.title = `${new Date(last.time).toLocaleString()}, ${last.whole === true ? 'whole suite' : 'card'}`;
         }
         const count = COLS.find((c) => c[0] === 'count')[2](f);
+        const caught = cell(num(f.caught) === null ? '—' : String(f.caught), 'tests-num tests-caught');
+        if (num(f.caught) !== null) caught.title = `Changed to pass: ${num(f.changedToPass) || 0}`;
         tr.append(fileCell, cell(one(f.cpu), 'tests-num'), cell(one(f.median), 'tests-num'), cell(pct(f.change), 'tests-num'),
-          cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, cell(chips));
+          cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, caught, cell(chips));
       }
       body.append(tr);
       if (open) { const more2 = h('tr', 'tests-open'), td = h('td'); td.colSpan = COLS.length; td.append(more(f)); more2.dataset.file = f.file; more2.append(td); body.append(more2); }
