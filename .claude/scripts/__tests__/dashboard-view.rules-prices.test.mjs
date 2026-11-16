@@ -207,6 +207,17 @@ test('Board: a card running on an alias ID, and the cost by model, show the mode
   assert.ok(models.includes('Sonnet (proxy)') && !models.includes('claude-sonnet-5-5'), models);
 });
 
+// Bug: a finished step on an alias is recorded as the model it means (pricedAs), and Metrics showed that model's raw ID
+// when the pack gives aliases but no name: proxy/sonnet's cost read claude-sonnet-5-5, not Sonnet 5.5.
+test('Board: the cost by model shows the display name of a model the pack gives aliases but no name', () => {
+  const w = boot();
+  const d = full();
+  d.panels.rules.data.prices = { builtIn: PRICES.builtIn, overrides: { 'claude-sonnet-5-5': { aliases: ['proxy/sonnet'] } }, names: PRICES.names, seen: [] };
+  deliver(w, d);
+  const models = panel(w, 'metrics').querySelector('[data-chart="models"]').textContent;
+  assert.ok(models.includes('Sonnet 5.5') && !models.includes('claude-sonnet-5-5'), models);
+});
+
 // Bug: an OpenCode model could only keep OpenCode's cost. Each OpenCode model says where its price is from; Set my
 // price sends a price of its own; one not in use and not priced is folded.
 test('Rules: an OpenCode model keeps OpenCode\'s cost until Set my price sends one', async () => {

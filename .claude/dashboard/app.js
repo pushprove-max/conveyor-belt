@@ -108,7 +108,7 @@
     return `$${v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
   }
   // A model ID as the Board shows it: an alias in a project's pack (Rules, Model prices) is the display name of the
-  // model it means, and a model the pack gives a display name has that name; ":fast" stays on. Any other ID is shown
+  // model it means, and a model the pack gives a display name, or names aliases of, has that name; ":fast" stays on. Any other ID is shown
   // as it is. Read from the Rules part's prices, the project steered first, then each other project's.
   function allPrices() {
     const r = last && last.panels && last.panels.rules && last.panels.rules.data;
@@ -125,7 +125,10 @@
       const named = (m) => (over[m] && typeof over[m].name === 'string' && over[m].name ? over[m].name : null);
       const to = Object.keys(over).find((m) => over[m] && Array.isArray(over[m].aliases) && over[m].aliases.includes(base));
       if (to) return `${named(to) || (typeof names[to] === 'string' ? names[to] : to)}${tail}`;
-      if (named(base)) return `${named(base)}${tail}`;
+      // A model other IDs are aliases of: a finished step on an alias is recorded as this ID (pricedAs), so it has the
+      // display name a running step on the alias shows.
+      const target = over[base] && Array.isArray(over[base].aliases) && over[base].aliases.length > 0 && typeof names[base] === 'string' ? names[base] : null;
+      if (named(base) || target) return `${named(base) || target}${tail}`;
     }
     return id;
   }
