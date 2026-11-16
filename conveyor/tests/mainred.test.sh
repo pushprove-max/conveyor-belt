@@ -255,13 +255,29 @@ t_mainredretry() {
   # A case found on that commit while the card runs is in its title on the Board, not only in its record (its picked
   # line's title names the cases it was picked with).
   eng 'mainred c2 "b.test: flaky" b.test '"$s" || fail "the third case was not taken"
-  [ "$(loop snapshot | jq -c --arg c "$c" '.belt[] | select(.card == $c) | [.issue, .title]')" = '[0,"Main is red: a.test: one, c.test, b.test: flaky"]' ] \
-    || fail "the snapshot does not show the fix card on the belt with no issue number and every case: $(loop snapshot | jq -c .belt)"
-  [ "$(loop cards | jq -c --arg c "$c" '.cards[] | select(.card == $c) | .title')" = '"Main is red: a.test: one, c.test, b.test: flaky"' ] \
-    || fail "\`cards\` does not title the fix card with every case: $(loop cards | jq -c .cards)"
+  [ "$(loop snapshot | jq -c --arg c "$c" '.belt[] | select(.card == $c) | [.issue, .name, .title]')" = '[0,"Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
+    || fail "the snapshot does not show the fix card on the belt with no issue number, its name and every case: $(loop snapshot | jq -c .belt)"
+  [ "$(loop cards | jq -c --arg c "$c" '.cards[] | select(.card == $c) | [.name, .title]')" = '["Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
+    || fail "\`cards\` does not name and title the fix card with every case: $(loop cards | jq -c .cards)"
   eng 'append "$(line '"$c"' 0 blocked ok "{\"reason\":\"build: it failed\"}")"' || fail "the blocked line was not written"
-  [ "$(loop snapshot | jq -c --arg c "$c" '.needsYou.blocked[] | select(.card == $c) | [.issue, .title]')" = '[0,"Main is red: a.test: one, c.test, b.test: flaky"]' ] \
-    || fail "Needs you does not show the blocked fix card: $(loop snapshot | jq -c .needsYou)"
+  eng 'declined '"$c"' 0 judge "out of scope" "[P2] a.txt:1 a nit"' || fail "the declined line was not written"
+  out=$(loop snapshot) || fail "no snapshot"
+  [ "$(jq -c --arg c "$c" '.needsYou.blocked[] | select(.card == $c) | [.issue, .name, .title]' <<<"$out")" = '[0,"Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
+    || fail "Needs you does not show the blocked fix card by its name: $(jq -c .needsYou <<<"$out")"
+  # Issue 141: its declined line (issue 0) carries its name too, or the Board's Declined panel calls it "#0".
+  [ "$(jq -c --arg c "$c" '.declined[] | select(.card == $c) | [.issue, .name]' <<<"$out")" = '[0,"Main is red ('"${s:0:12}"')"]' ] \
+    || fail "the declined line of the fix card does not carry its name: $(jq -c .declined <<<"$out")"
+  # Issue 141: health, which the Foreman's wakes and live summary read, names it too (they called it "#0"); `retry 0`
+  # gave back every blocked fix card at once, and `control hold 0` said only its usage: each now says how to act on it.
+  [ "$(loop health | jq -c --arg c "$c" '.blocked[] | select(.card == $c) | .name')" = '"Main is red ('"${s:0:12}"')"' ] \
+    || fail "health does not name the blocked fix card: $(loop health | jq -c .blocked)"
+  out=$(loop retry 0 2>&1) && fail "retry 0 exited 0: $out"
+  grep -qF "retry <card id>" <<<"$out" && grep -qF "$c (Main is red (${s:0:12}))" <<<"$out" && [ -n "$(st "select(.card == \"$c\")")" ] \
+    || fail "retry 0 did not say how to retry the blocked fix card, or gave it back: $out"
+  for a in "hold 0" "release $c"; do
+    out=$(loop control $a 2>&1) && fail "control $a exited 0: $out"
+    grep -qF 'conveyor.sh retry <card id>' <<<"$out" || fail "control $a does not say how to act on a main-red fix card: $out"
+  done
   out=$(loop retry "$c" 2>&1) && [ -z "$(st "select(.card == \"$c\")")" ] || fail "retry did not take the blocked fix card by its card id: $out"
   c2=$(eng 'locked redpick') && c2=${c2%% *} && [ -n "$c2" ] && [ "$c2" != "$c" ] && [ "$(st "select(.card == \"$c2\") | .mainRed")" = "$s" ] \
     || fail "the retried fix card was not picked again for main's commit: $c2: $(cat "$ST/mainred.json")"

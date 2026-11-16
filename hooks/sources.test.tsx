@@ -499,6 +499,17 @@ test('a lane with no worktree on this machine is drawn nowhere; a lane that has 
   expect(band).not.toMatch(/research/i)
 })
 
+// Issue 141: a main-red fix card has no issue (issue 0): /units named it by its title alone, the Foreman's views "#0".
+// It is named as the snapshot names it, "Main is red (<commit>)", on the belt and in Needs you.
+test('a main-red fix card is named "Main is red (<commit>)" on the belt and in Needs you, never #0', () => {
+  const red = { issue: 0, name: 'Main is red (0123456789ab)', title: 'Main is red: a.test' }
+  const text = tableText(board({ needsYou: { waiting: [], blocked: [{ ...BLOCKED, ...red, card: 'c20261110T040000-bookstore-0' }] },
+    belt: [{ ...BELT[0], ...red, card: 'c20261110T041000-bookstore-0', name: 'Main is red (fedcba987654)' }] }), 100)
+  expect(section(text, 'NEEDS YOU')).toMatch(/Main is red \(0123456789ab\) Main is red: a\.test/)
+  expect(section(text, 'ON THE BELT')).toMatch(/Main is red \(fedcba987654\) Main is red: a\.test/)
+  expect(text).not.toMatch(/#0\b/)
+})
+
 test('the Fast lane line names its card: on the belt with its step, needing you, or landed', () => {
   const card = { card: 'c9-0', issue: 0, title: 'Tidy the logo copy' }
   const fast = 'fast\tok\tfast-lane\t1\t0\tTidy the logo copy'

@@ -697,14 +697,14 @@ PANELS_JQ='
        # A card that landed on an earlier day and is still on the belt (its push or the close of its issue has not
        # gone through) is in Building with its Push step: Landed today holds only the cards of this day.
        building: [$s.belt[] | select((.landed != true and .step != "review") or (.landed == true and (.card as $c | $today | index($c) | not)))
-         | {card, issue, title, step, waitsOn: (.waitsOn // null), gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, pickedAt: (.pickedAt // null), usd, reading, reason: (.track.reason // null), stays: stays, doneWhen: (.doneWhen // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
-       review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, reading, stays: stays, doneWhen: (.doneWhen // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
-       waiting: [$s.needsYou.waiting[] | {card, issue, title, sentence, since, doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
+         | {card, issue, name: (.name // null), title, step, waitsOn: (.waitsOn // null), gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, pickedAt: (.pickedAt // null), usd, reading, reason: (.track.reason // null), stays: stays, doneWhen: (.doneWhen // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
+       review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, name: (.name // null), title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, reading, stays: stays, doneWhen: (.doneWhen // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
+       waiting: [$s.needsYou.waiting[] | {card, issue, name: (.name // null), title, sentence, since, doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
        # Its track and reviews too: the card leads with why it failed (the tests that failed, the NO-GO reviews), as in Needs you.
-       blocked: [$s.needsYou.blocked[] | {card, issue, title, reason, tail, since, track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
-       landed: [$s.landed[] | {card, issue, title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
+       blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, reason, tail, since, track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
+       landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
        today: {landed: $s.landedCount, usd: $s.landedUsd},
-       unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, since}) | few($r) end), fullTest: ($s.fullTest // null),
+       unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, name: (.name // null), since}) | few($r) end), fullTest: ($s.fullTest // null),
        open: openOf($r)};
   # The Rules of one record: its rules and what they produce: the queue, the held and the skipped, the cards on the
   # belt (building, how many; onBelt, their issues) and the cards blocked, and the snapshot'"'"'s forecast. The page
@@ -719,7 +719,7 @@ PANELS_JQ='
        issuesError: (if $s.queue.order == null then "GitHub did not list the open issues on \($conv.host)." else null end),
        building: [$s.belt[] | select(.landed != true)] | length, onBelt: [$s.belt[] | select(.landed != true) | .issue],
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],
-       blocked: [$s.needsYou.blocked[] | {card, issue, title, since}] | few($r), forecast: ($s.forecast // null),
+       blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, since}] | few($r), forecast: ($s.forecast // null),
        prices: ($s.prices // null), open: openOf($r)};
   # From the first pick-up of the work of the card to its landing: totalSec of the snapshot, else the time in its card id.
   def took: (.totalSec | numbers) // (try ((.card | capture("^c(?<d>[0-9]{8}T[0-9]{6})-").d | strptime("%Y%m%dT%H%M%S") | mktime) as $s
@@ -766,7 +766,7 @@ PANELS_JQ='
   # in retrying and stays on the belt.
   def pushFailed: .landed == true and ((.track.steps // [])[5].state? == "failed")
     and ((.track.reason // "") | startswith("GitHub did not close the issue") | not);
-  [$belt[] | select(pushFailed) | . as $c | {repo, card, issue, title, url,
+  [$belt[] | select(pushFailed) | . as $c | {repo, card, issue, name: (.name // null), title, url,
        fix: ([$belt[] | select(.repo == $c.repo and .landed != true and .parent == $c.issue and $c.issue > 0) | .issue][0] // null)}] as $retrying
   | {needs: (if $R == null and $dec.decisions == null then {error: "Nothing could be read. Cards: \($cerr). Decisions: \($dec.error).", data: null}
       else {error: null, data: {cards: (if $R == null then null else {waiting: $waiting, blocked: $blocked, before: $before, pipeline: $pipeline, farDeps: $farDeps} end), cardsError: $cerr, tests: $tests, engines: $engines, testRules: $testRules,
@@ -774,7 +774,7 @@ PANELS_JQ='
         # the entries of each, read from the snapshot field the list names: a kind the page has no row of its own for
         # shows these.
         kinds: $kinds, entries: ($kinds | map(.from as $f | {key: .kind, value: ($R // [] | map(. as $r | .snap | (try getpath($f) catch null)
-          | (if type == "array" then .[] else . end) | objects | tag($r) | {repo, url, card, issue, title, reason, since}))}) | from_entries),
+          | (if type == "array" then .[] else . end) | objects | tag($r) | {repo, url, card, issue, name: (.name // null), title, reason, since}))}) | from_entries),
         decisions: $dec.decisions, decisionsError: $dec.error, retrying: $retrying}} end),
    belt: (if $R == null then {error: $cerr, data: null} else {error: null, data: {cards: [$belt[] | select((pushFailed and (. as $c | any($landed[]; .repo == $c.repo and .card == $c.card))) | not)],
         cap: ($R | slots),
@@ -802,7 +802,7 @@ PANELS_JQ='
    # a snapshot from before it carried them), newest first.
    declined: (if $R == null then {error: $cerr, data: null} else {error: null, data: ({lines: "declined", rest: "declinedRest"} | map_values(. as $k
         | $R | map(. as $r | .snap[$k] | arrays | .[] | objects | tag($r)
-        | {repo, id, time, card, issue, url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))} end),
+        | {repo, id, time, card, issue, name: (.name // null), url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))} end),
    # Belt 3D: the belt, Needs you, the queue (next, held, waiting) and Landed today as above, each card with what its
    # lane, bay and details show.
    belt3d: (if $R == null then {error: $cerr, data: null} else
@@ -820,15 +820,15 @@ PANELS_JQ='
         # The track of a belt card has its records too, each step it took and when (name and at alone), so its lane
         # shows when it went back a step; a fix the Done-when check on a reply started is marked (replyCheck), as it is
         # part of the step of the session it checks, not a step back from Fix (track.jq).
-        belt: [$belt[] | {repo, card, issue, title, url, step, stepAt, landed: (.landed == true), waitsOn: (.waitsOn // null), usd,
+        belt: [$belt[] | {repo, card, issue, name: (.name // null), title, url, step, stepAt, landed: (.landed == true), waitsOn: (.waitsOn // null), usd,
           turns: (.live.turns? // null), reviews: (.reviews | rounds),
           track: (.track | if type == "object" then track3 + {records: [.records | arrays | .[] | objects | {name, at: (.at // null)}
             + (if (.reason | type) == "string" and (.reason | startswith("the Done-when check failed")) then {replyCheck: true} else {} end)]} else null end)}],
         queue: (if any($R[]; .snap.queue.next == null) then null
           else $R | map(. as $r | .snap | queue3($r)) | {next: map(.next[]), held: map(.held[]), waiting: map(.waiting[])} end),
         needs: ([$waiting[] | . + {kind: "waiting", reason: "Visible change: \(.sentence // "no sentence")"}] + [$blocked[] | . + {kind: "blocked"}]
-          | map({repo, card, issue, title, url, kind, reason, since, reviews: (.reviews | rounds), usd: (.metrics.usd // null), track: (.track | track3)})),
-        landed: [$landed[] | {repo, card, issue, title, url, time, usd, reviews: (.rounds | rounds), track: (.track | track3)}],
+          | map({repo, card, issue, name: (.name // null), title, url, kind, reason, since, reviews: (.reviews | rounds), usd: (.metrics.usd // null), track: (.track | track3)})),
+        landed: [$landed[] | {repo, card, issue, name: (.name // null), title, url, time, usd, reviews: (.rounds | rounds), track: (.track | track3)}],
         # What the deck behind the floor reads out: the host, its machine state (as the machine part has it) and the
         # slots as the "On the belt" tile of the head has them: the cards holding one (a card landed and waiting for its
         # push holds none) and the slots in force, as the Belt part and the machine bar have them.
@@ -862,11 +862,11 @@ PANELS_JQ='
            byRepo: ($R | map({key: .repo, value: (.snap.cost | {todayUsd: .today, weekUsd: .week, perLandedUsd: .perLanded, landedAfter, unpricedSteps,
              todayLeftOut: (.todayLeftOut | numbers // 0), weekLeftOut: (.weekLeftOut | numbers // 0), perLandedLeftOut: (.perLandedLeftOut | numbers // 0)})}) | from_entries),
            unpriced: (if any($R[]; .snap.cost.unpriced | type != "array") then null
-             else [$R[] as $r | $r.snap.cost.unpriced[] | tag($r) | {repo, card, issue, url, step, time, why}] end),
+             else [$R[] as $r | $r.snap.cost.unpriced[] | tag($r) | {repo, card, issue, url, step, time, why} + (if .name then {name} else {} end)] end),
            # Every card with a step in the 7 days, the rows of each record in its own order (the one worked on last
            # first); null when the snapshot of a record is from before it carried the rows.
            perCard: (if any($R[]; .snap.cost.cards | type != "array") then null
-             else [$R[] as $r | $r.snap.cost.cards[] | tag($r) | {repo, card, issue, title, url, state, runs, todayUsd: .today, weekUsd: .week}] end)} end),
+             else [$R[] as $r | $r.snap.cost.cards[] | tag($r) | {repo, card, issue, title, url, state, runs, todayUsd: .today, weekUsd: .week} + (if .name then {name} else {} end)] end)} end),
         cardsError: $cerr,
         sessions: (if $lim.limit == null then null else {todayUsd: $lim.limit.today.spentUsd, todayComplete: ($lim.limit.today.complete // false), weekUsd: ($lim.limit.cost.week // null)} end),
         sessionsError: $lim.error}} end),
@@ -909,7 +909,7 @@ PANELS_JQ='
         records: [$R[] | {repo, today: (.snap.metrics.today // null), week: (.snap.metrics.week // null), prev: (.snap.metrics.prev // null),
           days: (.snap.metrics.days // null), slots: (.snap.metrics.slots // null)}],
         cards: (if any($R[]; .snap.metrics.cards | type != "array") then null
-          else [$R[] as $r | $r.snap.metrics.cards[] | tag($r) | {repo, card, issue, title, url, state, at, metrics}] end),
+          else [$R[] as $r | $r.snap.metrics.cards[] | tag($r) | {repo, card, issue, title, url, state, at, metrics} + (if .name then {name} else {} end)] end),
         # The 7 days side by side: each project (projects, each naming its repo) and the machine. The time to land of the machine is
         # the median over the landed cards of every project (an issue already fixed, closed, is landed too, as in the
         # median of each project; one closed while blocked has no time to land), never a mean of their medians; null when
@@ -934,9 +934,9 @@ PANELS_JQ='
         todayLeftOut: ([$R[].snap.cost.todayLeftOut | numbers] | add // 0), repos: [$R[].repo],
         projects: [$R[] | . as $r | .snap as $s | {repo, state: ($s.health.state // null), reason: ($s.health.reason // null), loop: $s.health.loop,
           mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null), used: used,
-          needs: (([$s.needsYou.waiting[], $s.needsYou.blocked[], ($s.needsYou.before | arrays | .[]), ($s.needsYou.pipeline | arrays | .[]), ($s.needsYou.farDeps | arrays | .[]) | {card, issue, title}] | few($r))
+          needs: (([$s.needsYou.waiting[], $s.needsYou.blocked[], ($s.needsYou.before | arrays | .[]), ($s.needsYou.pipeline | arrays | .[]), ($s.needsYou.farDeps | arrays | .[]) | {card, issue, name: (.name // null), title}] | few($r))
             + [$dec.decisions | arrays | .[] | select(.repo == $r.repo) | {repo, decision: .id, title: .question}]),
-          belt: ([$s.belt[] | select(.landed != true) | {card, issue, title, step}] | few($r)),
+          belt: ([$s.belt[] | select(.landed != true) | {card, issue, name: (.name // null), title, step}] | few($r)),
           queue: ($s.queue.order | if . == null then null else map({issue, title}) | few($r) end),
           held: ($s.queue.holding | if . == null then null else map({issue, title}) | few($r) end),
           waiting: ($s.queue.waiting | if . == null then null else map({issue, title}) | few($r) end),

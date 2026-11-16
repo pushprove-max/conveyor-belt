@@ -131,7 +131,9 @@ cards() {
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
 # untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; routes: each
-# Claude route, subscription and proxy, with its state (routesnow()). Records that do not check give no record: the reason and exit 1.
+# Claude route, subscription and proxy, with its state (routesnow()). Every object of it that names a main-red fix card
+# (card) also has name, "Main is red (<commit>)", as rows.jq names it: the card has no issue (issue 0) to be shown by.
+# Records that do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
 # the weekly limit reading is at or over the guard, or "control record unreadable"; a loop that is not running picks
 # nothing, whatever `loop` says of there being one; the running loop's own "control record unreadable" stands over
@@ -228,6 +230,7 @@ health() {
     --slurpfile old "$READ_OLD" --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
+    | ([.[], $old[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
     | [.[] | select(.step == "landed" and $ahead[.sha]) | {card, issue, sha, since: .time}] as $un
     | [.[] | select(.step == "push" and .result == "fail" and $un[0] and .time >= $un[0].since)] as $fail
     | [map(select(.step != "push")) | group_by(.card)[]
@@ -287,5 +290,6 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, diskFreeKb: $free, builderCap: $cap, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed, routes: $routes}' "$READ"
+       untimed: untimed, routes: $routes}
+    | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"
 }

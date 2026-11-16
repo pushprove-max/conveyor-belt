@@ -92,14 +92,15 @@
     const add = (c) => { const k = keyOf(c); if (seen.has(k)) return; seen.add(k); cards.push(Object.assign(c, { key: k, from: c.card && num(c.issue) && c.issue > 0 ? `${c.repo}#${c.issue}` : null })); };
     const landed = arr(d.landed), landedKeys = new Set(landed.map((c) => `${c.repo}:${c.card}`));
     const reviews = (v) => arr(v).map((r, i) => ({ round: num(r.round) ? r.round : i + 1, verdict: str(r.verdict), counts: r.counts && typeof r.counts === 'object' ? r.counts : null }));
-    const base = (x, kind) => ({ repo: str(x.repo), card: str(x.card), issue: x.issue, title: str(x.title), url: x.url, kind, reviews: reviews(x.reviews), usd: num(x.usd) ? x.usd : null });
+    const base = (x, kind) => ({ repo: str(x.repo), card: str(x.card), issue: x.issue, name: str(x.name), title: str(x.title), url: x.url, kind, reviews: reviews(x.reviews), usd: num(x.usd) ? x.usd : null });
     arr(d.belt).forEach((x) => {
       // A card landed today is in the Just-landed bay; one landed on an earlier day, its push or the close of its issue
       // still to go through, keeps its lane.
       if (x.landed === true && landedKeys.has(`${x.repo}:${x.card}`)) return;
       const t = x.track && typeof x.track === 'object' ? x.track : null;
       const at = t && num(t.at) && t.at >= 0 && t.at < 6 ? t.at : Object.hasOwn(AT, x.step) ? AT[x.step] : x.landed === true ? 5 : 0;
-      const w = x.waitsOn && typeof x.waitsOn === 'object' && num(x.waitsOn.issue) ? x.waitsOn.issue : null;
+      // The card it waits on by its issue, or a main-red fix card (issue 0) by its name (a string, said as it is).
+      const w = x.waitsOn && typeof x.waitsOn === 'object' && num(x.waitsOn.issue) ? str(x.waitsOn.name) || x.waitsOn.issue : null;
       const steps = sixOf(t, at, 'run'), seq = trail(t, at);
       add(Object.assign(base(x, 'run'), { at, steps, since: Date.parse((t && t.since) || x.stepAt), tests: counted(t && t.tests, 'done', 'of'), files: counted(t && t.files, 'run', 'of'),
         waitsOn: x.step === 'waiting' ? w : null, turns: num(x.turns) ? x.turns : null, back: backOf(seq, at), round: roundOf(seq, at, steps) }));
@@ -144,7 +145,7 @@
     if (c.kind === 'run') {
       const p = progress(c);
       if (p) return p.text;
-      if (c.waitsOn !== null && c.waitsOn !== undefined) return `Waits on #${c.waitsOn} to land`;
+      if (c.waitsOn !== null && c.waitsOn !== undefined) return `Waits on ${ref(c.waitsOn)} to land`;
       return `${stepName(c)}${time(c) ? ` · ${time(c)}` : ''}`;
     }
     if (c.kind === 'blocked') return c.yes ? 'Waiting for your yes' : `Stuck at ${NAMES[c.at]}`;
@@ -161,7 +162,9 @@
   const HM = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', hour: '2-digit', minute: '2-digit' });
   const backLine = (b) => (b ? `← went back from ${NAMES[b.from]}${Number.isNaN(b.time) ? '' : ` at ${HM.format(b.time)} ET`}` : '');
   const roundShown = (c) => (c.kind === 'run' && num(c.round) && c.round > 1 ? c.round : null);
-  const named = (c) => (view.multi ? `${c.repo} #${c.issue}` : `#${c.issue}`);
+  // A card's number, or a main-red fix card's name (it has no issue): "Main is red (<commit>)".
+  const no = (c) => c.name || `#${c.issue}`;
+  const named = (c) => (view.multi ? `${c.repo} ${no(c)}` : no(c));
   // What a card waits on: the first card of that issue (on the belt, stuck, queued, then landed).
   const find = (c, n) => view.byIssue.get(`${c.repo}#${n}`) || null;
   const where = (d) => (d.kind === 'run' ? `now in ${NAMES[d.at]}` : KIND[d.kind].toLowerCase());
@@ -233,7 +236,7 @@
       const r = view.rows[i], stuck = c.kind === 'blocked', hot = c.key === view.hover || c.key === view.pin;
       cls(r.name, `b3-lb b3-nm${stuck ? ' bad' : ''}${hot ? ' hot' : ''}`);
       attr(r.name, 'data-issue', String(c.issue));
-      txt(r.name.firstChild, `#${c.issue}`);
+      txt(r.name.firstChild, no(c));
       txt(r.name.lastChild, c.title || 'untitled');
       const p = progress(c);
       cls(r.now, `b3-lb b3-st${stuck ? ' bad' : ''}${p ? ' tests' : ''}${p && p.failed ? ' fail' : ''}`);
@@ -306,7 +309,7 @@
       const t = bayTag(c), b = inBay.get(c.key), hot = c.key === view.hover || c.key === view.pin;
       cls(t.el, `b3-lb b3-bc${b ? '' : ' off'}${b && hot ? ' hot' : ''}`);
       attr(t.el, 'data-issue', String(c.issue));
-      txt(t.no, `#${c.issue}`);
+      txt(t.no, no(c));
       txt(t.title, c.title || 'untitled');
       txt(t.sub, b ? b.line : '');
     });
@@ -434,7 +437,7 @@
       });
     }
     if (c.kind === 'blocked') parts.push(h('h3', null, c.yes ? 'Waiting for your yes' : 'Stuck because'), h('p', 'why', c.reason), h('p', null, Number.isNaN(c.since) ? '' : `${c.yes ? 'Waiting' : 'Stuck'} for ${time(c)}.`));
-    if (c.kind === 'run' && c.waitsOn !== null && c.waitsOn !== undefined) { const d = find(c, c.waitsOn); parts.push(h('h3', null, 'Waiting on'), h('p', null, `#${c.waitsOn}${d ? ` ${d.title} (${status(d)})` : ''}, to land first`)); }
+    if (c.kind === 'run' && c.waitsOn !== null && c.waitsOn !== undefined) { const d = find(c, c.waitsOn); parts.push(h('h3', null, 'Waiting on'), h('p', null, `${ref(c.waitsOn)}${d ? ` ${d.title} (${status(d)})` : ''}, to land first`)); }
     if (c.kind === 'waiting') parts.push(h('h3', null, 'Waiting on'), ...c.waitsFor.map((n) => { const d = find(c, n); return h('p', null, `${ref(n)}${d ? ` ${d.title} (${status(d)})` : ''}`); }));
     // Releasing it is needed, not enough: an open issue it depends on, or a rule that skips it, still keeps it back.
     if (c.kind === 'held') parts.push(h('h3', null, 'Held'), h('p', null, 'Held on the Board. Conveyor does not pick it until someone releases it.'),

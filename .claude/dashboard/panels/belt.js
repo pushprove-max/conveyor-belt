@@ -19,7 +19,7 @@
     // A card waiting on a same-file card runs no step: its track still names the landing it waits to begin.
     if (c.step === 'waiting') {
       const w = c.waitsOn && typeof c.waitsOn === 'object' ? c.waitsOn : {};
-      return `Waiting on ${num(w.issue) ? `#${w.issue}` : 'a card'}${w.state ? ` (${w.state})` : ''}`;
+      return `Waiting on ${typeof w.name === 'string' && w.name ? w.name : num(w.issue) ? `#${w.issue}` : 'a card'}${w.state ? ` (${w.state})` : ''}`;
     }
     // A fix is named by what started it (ctx.fixNow), never by the review it follows; its reason is the pill's hover.
     if (c.track && typeof c.track.label === 'string' && /^fix\b/.test(c.track.label)) { const f = ctx.fixNow(c.track); return f ? [f.name, f.why] : 'Fix'; }

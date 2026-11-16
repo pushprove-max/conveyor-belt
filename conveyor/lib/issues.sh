@@ -22,6 +22,15 @@ strays() {
 retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a p f
   check || return 1
+  # No issue is #0: every main-red fix card is of issue 0, so a retry of it would give back each of them. Said: how to
+  # name one, and the blocked ones by card id beside the name they are shown by.
+  if [[ $1 =~ ^0+$ ]]; then
+    l=$(stdb ask issue cards 0) || return 1
+    l=$(jq -rs 'map(select(.step != "push")) | [group_by(.card)[] | select(any(.step == "picked" and (.mainRed | type) == "string") and last.step == "blocked")
+      | "\(.[0].card) (Main is red (\(map(.mainRed | strings) | first | .[0:12])))"] | if . == [] then "none is blocked now" else "blocked now: " + join(", ") end' <<<"$l") || return 1
+    echo "conveyor: no issue is #0. A main-red fix card, shown as \"Main is red (<commit>)\", has no issue: retry it by its card id, \`conveyor.sh retry <card id>\` ($l); nothing changed" >&2
+    return 1
+  fi
   if [[ $1 =~ ^[0-9]+$ ]]; then
     what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1") || return 1
   else

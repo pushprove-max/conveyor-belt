@@ -289,8 +289,9 @@
   }
   // An issue a Depends on: line names: #N in this project, or "owner/repo#N" (a string) in another repository.
   function depRef(n) { return typeof n === 'string' ? n : `#${n}`; }
+  // A card by its issue; a main-red fix card (issue 0) by the name the snapshot gives it, "Main is red (<commit>)".
   function issueLink(item) {
-    const n = item && item.issue, label = typeof n === 'number' && n > 0 ? `#${n}` : 'branch';
+    const n = item && item.issue, label = item && typeof item.name === 'string' && item.name ? item.name : typeof n === 'number' && n > 0 ? `#${n}` : 'branch';
     if (item && typeof item.url === 'string' && /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+$/.test(item.url)) {
       const a = h('a', 'issue', label);
       a.href = item.url; a.target = '_blank'; a.rel = 'noopener noreferrer';

@@ -63,11 +63,14 @@ SUITE='def took: if . < 3600 then "\(. / 60 | floor)m" else "\(. / 3600 | floor)
 PUSHED='def pushed($hist): [.health.unpushed | arrays | .[] | objects | .card] as $unpushed
   | [(., ($hist | objects)) | (.metrics.cards | arrays | .[] | objects | select(.state == "landed" and (.card | IN($unpushed[]) | not)) | .issue | numbers),
      (.pushedCards | arrays | .[] | objects | .issue | numbers)];'
+# A card by its issue, "#n"; a main-red fix card, which has no issue (issue 0), by its name, "Main is red (<commit>)"
+# (health and the snapshot give it: rows.jq).
+REF='def ref: (.name | strings) // "#\(.issue)";'
 # A snapshot's problems, one per line: <key> TAB <kind> TAB <issue numbers, "#n" by spaces> TAB <text>. Fails for
 # anything but a snapshot holding a health record. idle is a candidate here: record() reports it on its second poll.
 # An awaited issue that landed names its commit (the snapshot's or the history's landed line of it); a whole-suite run
 # that ended (snapshot suites) is one item, its line as the status command prints it, the failed cases named.
-PROBLEMS=$SUITE$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
+PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   (type == "object" and .belt == [] and (.queue.next // null) == []) as $idle
   | pushed($hist[0]) as $pushed
   | . as $snap
@@ -77,13 +80,13 @@ PROBLEMS=$SUITE$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | if type == "object" and ([.loop, .gh] | all(type == "boolean")) and ([.blocked, .waiting, .stuck] | all(type == "array" and all(type == "object")))
     and (.time | fromdate | type == "number") and (.pushFailingSince | type == "null" or (fromdate | type == "number"))
   then . else error("not a health record") end
-  | (.waiting[] | ["waiting:\(.card)", "needs the owner'"'"'s yes", "#\(.issue)", "#\(.issue) needs the owner'"'"'s yes since \(.since): \(.reason | one)"]),
+  | (.waiting[] | ["waiting:\(.card)", "needs the owner'"'"'s yes", ref, "\(ref) needs the owner'"'"'s yes since \(.since): \(.reason | one)"]),
     (.before | arrays | .[] | objects | select(.issue | numbers)
       | ["before:\(.issue)", "needs the owner'"'"'s yes", "#\(.issue)", "#\(.issue) needs the owner'"'"'s yes before its build since \(.since): \(.title | one)"]),
-    (.blocked[] | ["blocked:\(.card)", "blocked", "#\(.issue)", "#\(.issue) is blocked since \(.since): \(.reason | one)"]),
-    (.stuck[] | if .did then ["stuck:\(.card):\(.did)", "stuck", "#\(.issue)", "#\(.issue) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
-      else ["stuck:\(.card)", "stuck", "#\(.issue)", "#\(.issue) is stuck: " + (
-      if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | "#\(.issue)"] | join(", ")))"
+    (.blocked[] | ["blocked:\(.card)", "blocked", ref, "\(ref) is blocked since \(.since): \(.reason | one)"]),
+    (.stuck[] | if .did then ["stuck:\(.card):\(.did)", "stuck", ref, "\(ref) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
+      else ["stuck:\(.card)", "stuck", ref, "\(ref) is stuck: " + (
+      if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | ref] | join(", ")))"
       elif (.cases | type) == "array" then "its test step has had \(.cases | map(tostring) | join(", ") | one) running since \(.since)"
       else "no new step and no output since \(.since) (last step: \(.step))" end)] end),
     ($await[] | select(.[0] | IN($pushed[])) | .[0] as $i
@@ -94,12 +97,12 @@ PROBLEMS=$SUITE$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (select(.loop | not) | ["noloop", "no loop", "", "no loop is running"]),
     (select(.pushFailingSince != null) | .pushError as $e
       | if ($e | type) == "object" and $e.kind == "check" then
-          ["push:\($e.sha)", "push blocked", ($e.issue | numbers | select(. > 0) | "#\(.)") // "",
-           "push blocked: \($e.check // "a check" | one) failed after \(($e.issue | numbers | select(. > 0) | "#\(.)") // ($e.card // "the last landing" | one)); it will not pass on a retry"]
+          ["push:\($e.sha)", "push blocked", ($e.name | strings) // ($e.issue | numbers | select(. > 0) | "#\(.)") // "",
+           "push blocked: \($e.check // "a check" | one) failed after \(($e.name | strings) // ($e.issue | numbers | select(. > 0) | "#\(.)") // ($e.card // "the last landing" | one)); it will not pass on a retry"]
         elif $pushheld or (.time | fromdate) - (.pushFailingSince | fromdate) > $push then
           ["push", "push failing", "", "the push has failed since \(.pushFailingSince): \(.pushError.reason // "" | one)"]
         else empty end),
-    (.refused | arrays | .[] | objects | ["refused:\(.card):\(.since)", "full test run refused", "#\(.issue)", "#\(.issue): the test step \(.reason | one)"]),
+    (.refused | arrays | .[] | objects | ["refused:\(.card):\(.since)", "full test run refused", ref, "\(ref): the test step \(.reason | one)"]),
     (select(.gh | not) | ["gh", "gh signed out", "", "gh is signed out"]),
     (select(.state == "control record unreadable") | ["control", "picks nothing", "", "the loop picks nothing: \(.reason // "the control record does not read" | one)"]),
     (.cycles | arrays | .[] | arrays | map(tostring) | ["cycle:\(join("-"))", "dependency cycle", (map("#" + .) | join(" ")),
@@ -124,13 +127,13 @@ PROBLEMS=$SUITE$PUSHED'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | join("\t")'
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
-# snapshot, with no wake put and nothing marked reported: the belt (a card a line: issue, step, time in step, title cut to 60 characters), the
+# snapshot, with no wake put and nothing marked reported: the belt (a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
 # above), each "needs you: <text>". <project> names one record of mine; with none, every one of them.
-STATUS=$SUITE'def num: if type == "number" then "#\(.)" else tostring end;
+STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt",
-  (.belt | arrays | .[] | objects | "  #\(.issue) \(.step)\((.waitsOn.issue | numbers | " on #\(.)") // "")"
+  (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),
   (.open.held | arrays | select(length > 0) | "held: " + (map(objects | .issue | num) | join(" "))),

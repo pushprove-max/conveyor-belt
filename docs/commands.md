@@ -67,7 +67,8 @@ Cards:
 
 - `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
-  card has no issue: use `retry <card id>` and `shut <card id>`.
+  card has no issue. It shows as "Main is red (<commit>)". Use `retry <card id>` and `shut <card id>`. `retry 0`
+  lists the blocked ones by card id.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.
 

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # The snapshot (the strip-down to Conveyor): one JSON object holding everything the Conveyor
-# views show, so the dashboard and /units read one record and cannot disagree. It holds:
+# views show, so the dashboard and /units read one record and cannot disagree. Every object in it that names a
+# main-red fix card (card), which has no issue (issue 0), also has name: "Main is red (<commit>)" (rows.jq). It holds:
 # needsYou: waiting (the cards blocked for the owner's yes to a visible change: card, issue, title, sentence: the
 #   reviewer's, since, files: {count, paths: the first 200 its blocked line names, or null}) and blocked
 #   (every other blocked card: card, issue, title, reason: the sentence, tail: the end of the output that failed, with its
@@ -113,7 +114,8 @@
 #   landedCount: how many there are, and landedUsd their usd added up (null when one has none); landed holds the
 #   newest SNAPKEEP of them (below), and any older one still on the belt.
 # declined: the lines of the declined list (DECLINED) the Board's Declined panel shows: not dismissed, not built and at
-#   most 7 days old; newest first, each as its line is: id, time, card, issue, finding, by, why, repo; one the judge
+#   most 7 days old; newest first, each as its line is: id, time, card, issue, finding, by, why, repo (and name, a
+#   main-red fix card's, from its records: it has issue 0); one the judge
 #   declined with round and findings too (the review of its card it was declined in, and that review's findings as
 #   the judge numbered them, [{n, finding}]; both null when they are not found in the card's records).
 # declinedRest: every other line of the list, newest first, as its line is, with built (the issue filed for it) or
@@ -701,7 +703,10 @@ snapshot() (
            | map({hour: .[0].hour, slots: ([.[].slots] | add / length | r3), cap: ([.[].cap | numbers] | max)})),
          cards: ([$all[0][] | select((.x.endAt // .stepAt | day) >= $since)
            | {card, issue, title, state: (if .x.retried then "retried" elif .result == "" then "on the belt" else .step end), at: (.x.endAt // .stepAt), metrics}]
-           | sort_by(.at) | reverse)}, cols: $cols} + $cr' > "$d/out" || exit 1
+           | sort_by(.at) | reverse)}, cols: $cols} + $cr
+    # Every object naming a main-red fix card (card) carries its name (rows.jq), as in health: it has no issue.
+    | ([$all[0][] | select(.name) | {key: .card, value: .name}] | from_entries) as $nm
+    | walk(if type == "object" and (.card | type) == "string" and $nm[.card] then .name = $nm[.card] else . end)' > "$d/out" || exit 1
   # Each issue in Held or Queue gets since from moved.json as this snapshot leaves it; none when the issues were not
   # listed, and moved.json is then left as it was.
   cols=$(jq -c '.cols as $c | if $c == null then null else [.open.held[] | select(any(.reasons[]; .kind | IN("you", "rule") | not)) | .issue | tostring] as $o
@@ -719,9 +724,12 @@ snapshot() (
     # Each card whose judge declined a finding: its reviews, each with its round and judge.
     ([$old[], $rec[] | objects | select(.step == "review")] | group_by(.card)
       | map(select(any(.[]; (.judge.declined // []) | length > 0)) | {key: .[0].card, value: to_entries}) | from_entries) as $rv
+    # Each main-red fix card (issue 0) by its name, as rows.jq names it: its declined lines carry it (name), not #0.
+    | ([$old[], $rec[] | objects | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}]
+      | from_entries) as $mr
     | def numbered: [((.judge.accepted | arrays) // []) + ((.judge.declined | arrays) // []) | .[] | {n: ((.n | numbers) // null), finding}]
         | if any(.[]; .n == null) then null else sort_by(.n) end;
-    map(objects | if .by == "judge" then (.finding | one) as $f
+    map(objects | (if (.card | type) == "string" and $mr[.card] then .name = $mr[.card] else . end) | if .by == "judge" then (.finding | one) as $f
         | ([$rv[.card] // [] | .[] | select(any(.value.judge.declined[]?; (.finding | strings | one) == $f))] | first) as $r
         | (if $r == null then null else $r.value | numbered end) as $n | . + {round: (if $n == null then null else $r.key + 1 end), findings: $n} else . end)
     | sort_by(.time) | reverse

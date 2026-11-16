@@ -353,7 +353,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
 C=$(snap '{"belt": [{"card": "c4-5", "issue": 5, "title": "Plugin thing", "step": "build", "review": null, "of": 3, "stepAt": "'"$(ago 60)"'", "model": "claude-x", "tokens": {"claude": 1, "codex": 0}, "usd": 0.25}],
   "queue": {"next": [{"issue": 9, "title": "CD next", "priority": "P3", "followup": false, "retried": true}]},
   "open": {"count": 3, "split": {"queued": 1, "you": 1, "labelOrRule": 0, "belt": 1}, "held": [{"issue": 10, "title": "CD held", "priority": "P3", "followup": false, "labels": [], "created": null, "parent": null, "reasons": [{"kind": "you"}]}]},
-  "declined": [{"id": "d00000000000c", "time": "'"$TODAY_ISO"'T08:00:00Z", "card": "c4-5", "issue": 5, "finding": "[P2] c.txt:3 a nit", "by": "owner", "why": "not worth a card", "repo": "widgetshop"}],
+  "declined": [{"id": "d00000000000c", "time": "'"$TODAY_ISO"'T08:00:00Z", "card": "c4-red", "issue": 0, "name": "Main is red (0123456789ab)", "finding": "[P2] c.txt:3 a nit", "by": "owner", "why": "not worth a card", "repo": "widgetshop"}],
   "landedCount": 1,
   "landed": [{"card": "c'"$TODAY"'T090000-4", "issue": 4, "title": "CD fixed already", "step": "closed", "time": "'"$TODAY_ISO"'T09:10:00Z", "usd": 0.5, "reviews": 1, "followups": [], "sha": "", "pushed": null}],
   "health": {"loop": false, "builderCap": 2, "unpushed": [{"card": "c9-2", "issue": 2, "sha": "def", "since": "'"$(ago 3600)"'"}]},
@@ -399,8 +399,9 @@ q '[.panels.health.data.records[] | .slowOff] == [[{file: "s.test", issue: 17, c
 q '.panels.landed.data.cards | map([.repo, .issue, .step, .tookSec, .reviews, .usd, .pushed]) == [["widgetshop", 4, "closed", 600, 1, 0.5, null], ["sample", 7, "landed", 2400, 2, 2.5, true]]' "landed cards, newest first, each with its reviews, cost and the seconds from the first pick-up of its work to its landing (the snapshot's totalSec, else its card id's time)"
 # Bug: the Declined panel lists one record's lines after another's, not the newest first, or loses who declined a finding and why;
 # a built or dismissed line is in the panel's lines, or lost from the rest ("Show every line"), or loses who dismissed it.
-q '.panels.declined.data.lines | map([.repo, .id, .issue, .url, .finding, .by, .why, .built, .dismissed]) == [["sample", "d0123456789ab", 801, "'"$PU"'/801", "[P1] b.txt:2 no mark here", "judge", "its proof needs a stub built to misbehave", null, null],
-  ["widgetshop", "d00000000000c", 5, "'"$CU"'/5", "[P2] c.txt:3 a nit", "owner", "not worth a card", null, null]]' \
+# Issue 141: a main-red fix card's line (issue 0) keeps its name, or the panel can only call it "#0".
+q '.panels.declined.data.lines | map([.repo, .id, .issue, .name, .url, .finding, .by, .why, .built, .dismissed]) == [["sample", "d0123456789ab", 801, null, "'"$PU"'/801", "[P1] b.txt:2 no mark here", "judge", "its proof needs a stub built to misbehave", null, null],
+  ["widgetshop", "d00000000000c", 0, "Main is red (0123456789ab)", null, "[P2] c.txt:3 a nit", "owner", "not worth a card", null, null]]' \
   "the declined findings the panel shows, of every record, newest first, each with who declined it and why"
 q '.panels.declined.data.rest | map([.repo, .id, .url, .built, .dismissed]) == [["sample", "d0000000000dd", "'"$PU"'/801", null, {time: "'"$TODAY_ISO"'T09:00:00Z", by: "Board user owner"}],
   ["sample", "dba9876543210", "'"$PU"'/6", 90, null]]' "the rest, newest first: the dismissed line with who dismissed it and when, and the built line with its issue"

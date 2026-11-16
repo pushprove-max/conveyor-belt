@@ -14,7 +14,9 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
          elif $l.step == "test" then (if $l.result == "fail" then "fix" else "landing" end)
          elif $l.step != "review" then "picked" elif $l.result == "GO" then "landing"
          elif $l.result != "NO-GO" then "review" elif $r < $max and (any(.step == "rebase" or (.step == "test" and .result == "fail")) | not) then "fix" else "landing" end) as $at
-      | {card: .[0].card, issue: .[0].issue, title: (.[0].title // ""), step: ($end.step // $at),
+      # name: what a main-red fix card (issue 0, its picked line naming main's commit: redpick()) is shown as, in place
+      # of an issue number, "Main is red (<commit>)"; null for any other card, which is shown by its issue.
+      | {card: .[0].card, issue: .[0].issue, name: (.[0].mainRed | strings | "Main is red (\(.[0:12]))") // null, title: (.[0].title // ""), step: ($end.step // $at),
          stage: ({picked: 0, build: 1, fix: 3, landing: 5}[$at] // (if $r + (if $l.step == "review" then 0 else 1 end) > 1 then 4 else 2 end)),
          reviews: $r, startedAt: .[0].time, stepAt: last.time,
          steps: [range(1; length) as $i | .[$i] | select(.step | IN("build", "review", "test", "fix", "rebase"))

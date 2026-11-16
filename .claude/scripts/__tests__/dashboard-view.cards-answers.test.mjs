@@ -273,6 +273,31 @@ test('Needs you: a blocked main-red fix card is retried and closed by its card i
   assert.deepEqual(c.posts.splice(0), [{ url: 'control', body: { action: 'close', args: [card], repo: 'sample' } }]);
 });
 
+// Issue 141: a main-red fix card has no issue (issue 0); the snapshot names it "Main is red (<commit>)". Bug: the Board
+// showed it as "branch", and the Foreman's views as "#0". Its name is on its card in Needs you and On the belt and in
+// what Retry asks; Retry still sends its card id.
+test('a main-red fix card shows its name, not #0, in Needs you and On the belt, and is retried by its card id', async () => {
+  const w = boot();
+  const data = full();
+  const card = 'c20261115T120000-sample-0', name = 'Main is red (0123456789ab)';
+  data.panels.needs.data.cards.blocked.push({ repo: 'sample', card, issue: 0, name, title: 'Main is red: a.test', reason: 'build: it failed', since: iso(T0), url: null });
+  const belt = data.panels.belt.data.cards;
+  belt.push({ ...clone(belt[1]), repo: 'sample', card: 'c20261115T130000-sample-0', issue: 0, name: 'Main is red (fedcba987654)', title: 'Main is red: b.test' });
+  deliver(w, data);
+  const row = panel(w, 'needs').querySelector(`li[data-key="blocked:${card}"]`);
+  assert.equal(row.querySelector('.issue').textContent, name);
+  const on = Array.from(panel(w, 'belt').querySelectorAll('.issue'), (e) => e.textContent);
+  assert.ok(on.includes('Main is red (fedcba987654)'), `On the belt: ${on.join(', ')}`);
+  assert.ok(!/#0\b/.test(panel(w, 'needs').textContent + panel(w, 'belt').textContent), 'no card is called #0');
+  const btn = () => row.querySelector('button[data-act="retry"]');
+  btn().click();
+  await settle();
+  assert.equal(btn().textContent, `Click again to retry ${name}`);
+  btn().click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'retry', args: [card], repo: 'sample' } }]);
+});
+
 // Hold on a blocked card (issue 96). Bugs: there is no way to take a blocked card off the belt and keep its issue open;
 // Hold posts another action or issue, asks a second time, or leaves the card in Needs you with its buttons; Undo does
 // not release the issue; a main-red fix card, which has no issue to hold, offers Hold.

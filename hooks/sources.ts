@@ -16,7 +16,8 @@ export const seatFromGit = (stdout: string): { seat: 'main' | 'worker'; main: st
 
 // A card or an issue of one record. `repo` is '' for the record whose main is this checkout (the session's own
 // project), else the record's name, so another project's #12 is never read as this one's.
-type Ref = { repo: string; issue: number; title: string }
+// name: what a main-red fix card (issue 0) is shown as, "Main is red (<commit>)", as the snapshot gives it; else ''.
+type Ref = { repo: string; issue: number; title: string; name?: string }
 type Card = Ref & { card: string }
 // One finished review: counts is null for a review recorded before findings were counted (never zeros). judge is what
 // the review's judge made of it: how many findings it accepted and declined, and go when the review's GO came
@@ -182,7 +183,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   if (typeof json === 'string') try { j = JSON.parse(json) } catch { return null }
   const lists = [j?.needsYou?.waiting, j?.needsYou?.blocked, j?.belt, j?.landed]
   if (!lists.every(l => Array.isArray(l) && l.every((x: unknown) => x && typeof x === 'object')) || typeof j.queue !== 'object' || !j.queue || typeof j.cost !== 'object' || !j.cost) return null
-  const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title) })
+  const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
     loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null },
@@ -309,8 +310,10 @@ export const parseLimit = (text: string): Limit | null => {
 
 // ---- what the views say ----
 
-const ref = (c: Ref) => (c.issue ? `${c.repo}#${c.issue}` : c.title || 'a branch')
-export const nameOf = (c: Ref) => (c.issue ? `${c.repo}#${c.issue}${c.title ? ` ${c.title}` : ''}` : c.title || 'a branch with no issue')
+// A card by its issue; a main-red fix card by its name (repo before it, as before an issue number); a branch by its title.
+const named = (c: Ref) => (c.name ? `${c.repo ? `${c.repo} ` : ''}${c.name}` : '')
+const ref = (c: Ref) => (c.issue ? `${c.repo}#${c.issue}` : named(c) || c.title || 'a branch')
+export const nameOf = (c: Ref) => (c.issue || c.name ? `${ref(c)}${c.title ? ` ${c.title}` : ''}` : c.title || 'a branch with no issue')
 // The round in progress, as the track names it ("review 2 of 3", "fix after review 1", "tests", "landing"). A review
 // past the rule's count (after a landing conflict or a test fix) is named by its number alone.
 export const stepOf = (b: Belt) => b.track?.label || (b.step === 'review' && b.review ? `review ${b.review}${b.of && b.review <= b.of ? ` of ${b.of}` : ''}` : b.step || 'step unknown')
@@ -640,7 +643,7 @@ export const needsModel = (s: State, snap: Snap, w: number, short: boolean): Lin
 // A card's issue and short title in bold with what it came from ("↳ #12"), the figures on the right whole: the
 // title is what gives way.
 const titled = (c: Ref & { parent: number | null }, lead: Seg[], right: Seg[], w: number, bold = true): Line => {
-  const ref: Seg = { t: c.issue ? `${c.repo}#${c.issue} ` : '', c: C.name, b: bold }
+  const ref: Seg = { t: c.issue ? `${c.repo}#${c.issue} ` : c.name ? `${named(c)} ` : '', c: C.name, b: bold }
   const parent: Seg[] = c.parent ? [{ t: ` ↳ #${c.parent}`, d: true }] : []
   const fixed = cols(plain(lead)) + cols(ref.t) + cols(plain(parent)) + (right.length ? cols(plain(right)) + 2 : 0)
   const title = fitWidth([{ t: shortTitle(c.title) || (c.issue ? '' : 'a branch with no issue'), c: C.name, b: bold }], Math.max(6, w - fixed))

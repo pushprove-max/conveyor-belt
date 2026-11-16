@@ -164,9 +164,9 @@ window.DASH_APP.panel({
     };
     // A blocked card is retried (conveyor.sh retry: it costs a new build) or its issue closed (for good), here, through
     // POST /control with the card's repository, each on a second click. A main-red fix card has no issue (issue 0): it
-    // is named, retried and shut by its card id.
+    // is retried and shut by its card id, and named as the snapshot names it, "Main is red (<commit>)".
     const target = (c) => (c.issue === 0 && typeof c.card === 'string' && c.card ? c.card : String(c.issue));
-    const named = (c) => (c.issue === 0 ? target(c) : `#${c.issue}`);
+    const named = (c) => (c.issue === 0 ? (typeof c.name === 'string' && c.name ? c.name : target(c)) : `#${c.issue}`);
     // A blocked card of an issue also has Fix, when its reason has one (fixOf: retry with the fix's arguments, on a
     // second click, as it costs a build), and Hold (unblock: its issue held, its card off the belt and its kept work
     // kept), one click with Undo (control release). A main-red fix card has no issue to hold.

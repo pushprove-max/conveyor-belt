@@ -613,6 +613,9 @@ control() { # [action [arguments]]
   [ $# = 0 ] || shift
   bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
+  # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
+  case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
+    echo "conveyor: a main-red fix card, shown as \"Main is red (<commit>)\", has no issue to $a ($x). Give back a blocked one with \`conveyor.sh retry <card id>\`, or close it with \`conveyor.sh shut <card id>\`; nothing changed" >&2; return 2; }; done ;; esac
   case $a in
     '') [ $# = 0 ] || { bad; return; } ;;
     pause | resume | stop) [ $# = 0 ] || { bad; return; }; f='.mode = {pause: "pause", resume: "run", stop: "stop"}[$a] | if $a == "resume" then .signin = null else . end' ;;

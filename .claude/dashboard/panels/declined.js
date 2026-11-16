@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Declined: the review findings that were not built, newest first, each with who declined it (code, the judge or
 // the owner) and why. Its part: {lines, rest}; lines are the ones the panel shows (not dismissed, not built, at most 7
-// days old), rest every other (the newest the snapshot keeps, and the older ones from the history); a line is {repo, id, time, card, issue, url, finding, by, why, built, dismissed}, as
+// days old), rest every other (the newest the snapshot keeps, and the older ones from the history); a line is {repo, id, time, card, issue, name (a main-red fix card's, which has issue 0, or null), url, finding, by, why, built, dismissed}, as
 // the project's declined list holds it (conveyor.sh declined()), with round and findings (the review the judge
 // declined it in and that review's findings as the judge numbered them), which turn each F<n> of the judge's reason
 // into the finding it means (why, below). "File as issue" (confirmed by a second click: it costs a build) files the
@@ -186,7 +186,7 @@
       const said0 = h('span', 'answer-note');
       said0.setAttribute('aria-live', 'polite');
       if (view === 'all') bar.append(h('span', null, 'Every line: dismissed, filed and older ones too. '));
-      else if (view) bar.append(h('span', null, lines.length ? `Showing the ${lines.length === 1 ? 'line' : `${lines.length} lines`} of #${lines[0].issue} only. ` : 'No line of that card is in the list. '));
+      else if (view) bar.append(h('span', null, lines.length ? `Showing the ${lines.length === 1 ? 'line' : `${lines.length} lines`} of ${typeof lines[0].name === 'string' && lines[0].name ? lines[0].name : `#${lines[0].issue}`} only. ` : 'No line of that card is in the list. '));
       else if (!lines.length) bar.append(h('span', null, 'Nothing to look at: you dismissed or filed each line, or the line is more than 7 days old. '));
       // "Dismiss all shown (n)", in the panel's heading and coloured as a warning, unlike the harmless buttons below:
       // the first click asks, the second sends the n open lines drawn, and only while those same lines are drawn. It

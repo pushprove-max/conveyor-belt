@@ -348,7 +348,8 @@ failure gets a verdict:
   `<case>()` or the name quoted, when the failure names a runner such as the engine's `conveyor/conveyor.test.sh`),
   and asks for the cases to pass on main; it is labelled as a P0 bug and builds, is reviewed, tested, landed and
   pushed like any card. The Board shows it titled "Main is red: <cases>"; its commit names the cases and main's
-  commit. A case found failing on the same commit, while its card runs too, is added to that card (its title on the
+  commit. In place of an issue number, the Board, `foreman status` and the Foreman's wakes name it
+  "Main is red (<commit>)". A case found failing on the same commit, while its card runs too, is added to that card (its title on the
   Board, and the reviews and fix sessions after it, name the case); a case an open fix card of an earlier commit
   holds starts nothing more. `retry <card id>` gives the card back when it blocks (built again from nothing), and
   `shut <card id>` shuts it; the Board's Retry and Close in Needs you send its card id. `mainred.json` in the state folder keeps the commits,

@@ -124,16 +124,18 @@ why() {
   [ "$1" = 124 ] && echo "no answer in time" || echo "exit $1"
 }
 BELT='def one: tostring | gsub("\\s+"; " ") | .[0:160];
+  # A card by its issue, a main-red fix card (issue 0) by its name, "Main is red (<commit>)".
+  def ref: (.name | strings) // "#\(.issue)";
   if length == 2 and (.[0] | type == "object" and (.loop | type == "boolean") and ([.blocked, .waiting] | all(type == "array")))
     and (.[1].cards | type == "array")
   then . else error("not a health and a cards record") end
   | .[0] as $h | .[1] as $c
   | "Conveyor \($repo) (\($h.time)): loop \(if $h.loop then "running" else "not running" end), state \($h.state // "unknown")\(if $h.reason then ": " + ($h.reason | one) else "" end)",
-    "\($repo) in flight: \([$c.cards[] | select(.result == "") | "#\(.issue) \(.step)"] | if length == 0 then "none" else join(", ") end)",
-    (if ($h.blocked | length) == 0 then "\($repo) blocked: none" else $h.blocked[] | "\($repo) blocked: #\(.issue) since \(.since): \(.reason | one)" end),
+    "\($repo) in flight: \([$c.cards[] | select(.result == "") | "\(ref) \(.step)"] | if length == 0 then "none" else join(", ") end)",
+    (if ($h.blocked | length) == 0 then "\($repo) blocked: none" else $h.blocked[] | "\($repo) blocked: \(ref) since \(.since): \(.reason | one)" end),
     (($h.before | arrays | map(objects)) // []) as $before
     | (if ($h.waiting | length) + ($before | length) == 0 then "\($repo) waiting on the owner'"'"'s yes: none"
-       else ($h.waiting[] | "\($repo) waiting on the owner'"'"'s yes: #\(.issue) since \(.since)"),
+       else ($h.waiting[] | "\($repo) waiting on the owner'"'"'s yes: \(ref) since \(.since)"),
          ($before[] | "\($repo) waiting on the owner'"'"'s yes before its build: #\(.issue) since \(.since): \(.title | one)") end),
     (if $h.pushError then "\($repo) push failing since \($h.pushFailingSince): \($h.pushError.reason | one)" else "\($repo) push errors: none" end)'
 OPEN='def one: tostring | gsub("\\s+"; " ") | .[0:160];

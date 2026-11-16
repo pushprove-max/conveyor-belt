@@ -127,3 +127,16 @@ test('Declined: "Dismiss all shown (n)" sits in the heading as a warning, asks o
   assert.deepEqual(w.posts.splice(0).flatMap((p) => p.body.args).sort(), ['d00000000002a', 'd0123456789ab']);
   assert.equal(all(), null, 'nothing left to dismiss: no button in the heading');
 });
+
+// Issue 141. Bug: a main-red fix card has no issue (issue 0), so its declined lines, opened from its declined count,
+// said "Showing the line of #0 only"; the note and the line's head show the card's name.
+test('Declined: a main-red fix card\'s lines are shown by its name, never as "#0"', () => {
+  const w = boot({ query: '?declined=c9-mainred' });
+  const data = full();
+  data.panels.declined.data.lines = [line({ card: 'c9-mainred', issue: 0, name: 'Main is red (0123456789ab)', url: null })];
+  deliver(w, data);
+  const text = panel(w, 'declined').textContent;
+  assert.match(text, /Showing the line of Main is red \(0123456789ab\) only/);
+  assert.doesNotMatch(text, /#0\b/);
+  assert.equal(rowOf(w, '[P1] a.txt:2 the old word again').querySelector('.issue').textContent, 'Main is red (0123456789ab)');
+});

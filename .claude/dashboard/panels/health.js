@@ -86,9 +86,11 @@ window.DASH_APP.panel({
     if (s && typeof s === 'object') dataRow(data.dd, s, ctx);
     else data.dd.append(data.dd.restart);
     // A stuck card; one waiting on a same-file card names that card's issue and where it is (blocked, queued).
+    // A main-red fix card (issue 0) by its name, "Main is red (<commit>)", as health gives it.
+    const ref = (x) => (typeof x.name === 'string' && x.name ? x.name : `#${x.issue}`);
     const stuck = (s) => (s.step === 'waiting' && s.waitsOn && typeof s.waitsOn === 'object'
-      ? `#${s.issue} waiting on ${typeof s.waitsOn.issue === 'number' ? `#${s.waitsOn.issue}` : 'a card'}${s.waitsOn.state ? ` (${s.waitsOn.state})` : ''}`
-      : `#${s.issue} in ${s.step}`);
+      ? `${ref(s)} waiting on ${typeof s.waitsOn.issue === 'number' ? ref(s.waitsOn) : 'a card'}${s.waitsOn.state ? ` (${s.waitsOn.state})` : ''}`
+      : `${ref(s)} in ${s.step}`);
     (d.records || []).forEach((r) => {
       const of = d.records.length > 1 ? ` (${r.repo})` : '';
       // A loop its control record stops is not meant to run: it is off, not a fault. One meant to run with no

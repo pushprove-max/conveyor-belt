@@ -89,7 +89,27 @@ grep -qxF 'alpha: release 1.2.0 failed on abcdef012345 at 2026-11-15T11:59:00Z; 
   || fail "the wake does not name the result and the failed cases: $w"
 }
 
-cases=(status wake suite)
+# Bug (#141): a main-red fix card is of issue 0, so the status, the wake and the Foreman's questions called it "#0".
+# They name it as health and the snapshot do (name: "Main is red (<commit>)"), and a card waiting on it the same way.
+t_mainred() {
+CASE=mainred; fixture mainred
+red='{card: "c20261115T110000-alpha-0", issue: 0, name: "Main is red (0123456789ab)"}'
+snap ".belt = [$red + {title: \"Main is red: stall\", step: \"build\", stepAt: \"2026-11-15T11:48:00Z\"},
+    $(card 3 One build) + {step: \"waiting\", waitsOn: ($red + {state: \"build\"})}]"
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+for l in '  Main is red (0123456789ab) build 12m Main is red: stall' '  #3 waiting on Main is red (0123456789ab) 12m One'; do
+  grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
+done
+grep -qF '#0' <<<"$out" && fail "the status calls the main-red card #0: $out"
+snap ".health.blocked = [$red + {since: \"2026-11-15T11:58:00Z\", reason: \"tests failed twice\"}]"
+poll || fail "a blocked main-red card woke nothing: $(cat "$T/err")"
+w=$(cat "$FD"/pending/*.wake)
+grep -qxF 'Conveyor: alpha: blocked: Main is red (0123456789ab)' <<<"$w" || fail "the wake's first line does not name the card: $w"
+grep -qxF 'alpha: Main is red (0123456789ab) is blocked since 2026-11-15T11:58:00Z: tests failed twice' <<<"$w" || fail "the wake does not name the card: $w"
+! grep -qF '#0' <<<"$w" || fail "the wake calls the main-red card #0: $w"
+}
+
+cases=(status wake suite mainred)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

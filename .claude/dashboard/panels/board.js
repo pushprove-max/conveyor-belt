@@ -70,7 +70,7 @@
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   // A card waiting on a same-file card: that card's issue and where it is (blocked, queued, its step on the belt).
-  const waitsOn = (w) => (w && typeof w === 'object' ? `waiting on ${num(w.issue) !== null ? `#${w.issue}` : 'a card'}${w.state ? ` (${w.state})` : ''}` : 'waiting');
+  const waitsOn = (w) => (w && typeof w === 'object' ? `waiting on ${typeof w.name === 'string' && w.name ? w.name : num(w.issue) !== null ? `#${w.issue}` : 'a card'}${w.state ? ` (${w.state})` : ''}` : 'waiting');
   const issues = (list) => (Array.isArray(list) ? list : []);
 
   // The control record in force here: the one the host last answered with, else the snapshot's.
@@ -472,7 +472,7 @@
     const landed = h('div', 'board-ctl');
     landed.dataset.push = 'landed';
     const cards = h('span', 'board-push-list');
-    (un || []).forEach((x) => { const item = h('span', 'board-push-item', `#${x.issue}`); item.dataset.issue = String(x.issue); item.title = String(x.card || ''); cards.append(item); });
+    (un || []).forEach((x) => { const item = h('span', 'board-push-item', typeof x.name === 'string' && x.name ? x.name : `#${x.issue}`); item.dataset.issue = String(x.issue); item.title = String(x.card || ''); cards.append(item); });
     const push = guarded('push-landed', 'spend', 'Push landed', 'Click again to run the full suite, then push', 'push-landed','Run the full test suite on main. When it is green, Conveyor pushes what landed', () => send('full-test', ['push']));
     const nothing = un === null ? 'the Board does not know which landed cards wait for a push' : !un.length ? 'nothing that landed waits for a push' : null;
     push.disabled = !!(off || nothing);
