@@ -87,7 +87,7 @@ test('Tests actions: Judge this test posts the engine action with the file; the 
 });
 
 // Bug it guards (#571): Run this file showed the session time limit (testActionTimeout, 15:00) in its box and in
-// Results of actions; a run is cut at the test run's limit (testTimeout), which its record carries, else none shows.
+// Recent actions; a run is cut at the test run's limit (testTimeout), which its record carries, else none shows.
 test('Tests actions: a running Run this file shows its own record\'s limit, never the session limit', () => {
   const w = boot({ tab: 'tests' });
   const run = { action: 'run', cli: undefined, model: undefined, effort: undefined };
@@ -129,7 +129,7 @@ test('Tests actions: Stop posts the stop of that action alone; Copy puts the box
 });
 
 // Bug it guards: a result shown with no time, CLI, model or effort, a verdict lost, or a result gone at the next render.
-test('Tests actions: an ended judge shows its result with time, CLI, model, effort and verdict chip, and stays in Results of actions', () => {
+test('Tests actions: an ended judge shows its result with time, CLI, model, effort and verdict chip, and stays in Recent actions', () => {
   const w = boot({ tab: 'tests' });
   const end = Date.now(), done = rec({ state: 'done', start: iso(end - 125000), end: iso(end), verdict: 'split', text: 'Split it.\nVERDICT: split\n' });
   deliver(w, snap({ acts: [done] }));
@@ -140,11 +140,9 @@ test('Tests actions: an ended judge shows its result with time, CLI, model, effo
   for (const at of [T0 + 60000, T0 + 120000]) {
     next(w, snap({ acts: [done], at }));
     const r = resultRow(w, ID1);
-    assert.ok(r, 'kept in Results of actions');
-    assert.match(r.textContent, /Judge this test.*merge\.test\.sh.*Done in 2:05 · .+ · claude · claude-sonnet-5-5 · medium.*split.*View.*Copy/);
+    assert.ok(r, 'kept in Recent actions');
+    assert.match(r.textContent, /Judge this test.*merge\.test\.sh.*Done in 2:05 · .+ · claude · claude-sonnet-5-5 · medium.*split.*Copy/);
   }
-  act(resultRow(w, ID1), 'view').click();
-  assert.equal(resultRow(w, ID1).querySelector('.tests-out').textContent, 'Split it.\nVERDICT: split\n', 'View shows its text');
 });
 
 // Bug it guards: a model typed under Other… that was never sent, or a Cancel that kept the pick.

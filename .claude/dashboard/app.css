@@ -700,6 +700,17 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tests-progress { width: 12ch; }
 .tests-out { max-height: 24em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-xs); margin: 0; }
 .tests-body { width: 100%; font-family: inherit; }
+/* A judge's or explain's text, formatted (#74): the page's own font, at most about 80 characters a line. */
+.tests-md { max-width: 80ch; font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.tests-md p, .tests-md ul, .tests-md ol, .tests-md pre { margin: 0 0 var(--sp-2); }
+.tests-md ul, .tests-md ol { padding-left: 1.5em; }
+.tests-md code { font-size: 0.95em; }
+.tests-md-code { overflow-x: auto; padding: var(--sp-1) var(--sp-2); background: var(--surface-2); border-radius: var(--radius-sm); }
+.tests-verdict { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.tests-results > summary { cursor: pointer; }
+/* The run where a landed Optimize took effect (#74). */
+.tests-bar-opt { background: var(--warn); box-shadow: 0 -3px 0 var(--text); }
+.tests-run-mark { font-weight: 600; }
 .tests-results-list, .tests-auto-log { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); list-style: none; font-size: var(--fs-sm); }
 .rules-skipped { display: grid; gap: var(--sp-1); margin-top: var(--sp-1); list-style: none; }
 .rules-skip { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }

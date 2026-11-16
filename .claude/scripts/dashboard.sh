@@ -132,7 +132,8 @@
 #           from a snapshot without them) and open (as the Board's: every held issue with its labels and reasons, and
 #           every open issue).
 #   tests   the Tests page, of the same record (repo null when none is; repos and others as the Board's): tests (the
-#           snapshot's: each test file's figures, each of its runs with its card's issue and url, the pack's test
+#           snapshot's: each test file's figures, each of its runs with its card's issue and url, each issue the Board
+#           filed for it ($TAFILED) with its url, state (closed for an open one the snapshot's open issues lack), landed commit, fix and the proof's before and after CPU s, the pack's test
 #           settings and the test steps' totals; null from a snapshot without it), machine (the machine's, the same in every project's: maxLoad, unread, cores,
 #           load; mload), for Load limit, and, for the page's actions, testActions (the snapshot's limit,
 #           actions, each with its text, and allowed, the pack's models by CLI), control (the snapshot's control record: its tests is the Tests model), clis
@@ -816,11 +817,17 @@ PANELS_JQ='
    # The Tests page, of the same records (repo null when none is steered; repos and others as the Board'"'"'s): each
    # record'"'"'s tests (its snapshot'"'"'s, testspart() of conveyor/lib/testfiles.sh; null from a snapshot without it or
    # whose pack does not read) and the machine'"'"'s Load limit (mload), the same in every record'"'"'s. Each run of a
-   # file is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link.
+   # file is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link,
+   # and so is each of its Optimize issues (optimize: the Board'"'"'s filings, their state and proof numbers).
    tests: (if $R == null then {error: $cerr, data: null} else ($R | mload) as $ml
       | def runsOf($r): if type == "array" then map(. + {issue: ([.card | strings | capture("-(?<n>[1-9][0-9]{0,8})$").n | tonumber][0] // null)} | tag($r)) else . end;
-      def testsOf: . as $r | {repo, machine: $ml, tests: (.snap.tests | if type != "object" then null
-        elif (.files | type) == "array" then .files |= map(if type == "object" then .runs |= runsOf($r) else . end) else . end),
+      # An Optimize issue no card took (open) that is not among the snapshot'"'"'s open issues was closed on GitHub (the
+      # Board'"'"'s Close its issue as done, or by hand): it is closed. With no list of open issues it stays as it is.
+      def shut($o): if $o != null and .state == "open" and (.issue | IN($o[]) | not) then .state = "closed" else . end;
+      def testsOf: . as $r | (.snap.open.issues | if type == "array" then [.[].issue] else null end) as $oi
+        | {repo, machine: $ml, tests: (.snap.tests | if type != "object" then null
+        elif (.files | type) == "array" then .files |= map(if type == "object" then (.runs |= runsOf($r))
+          | if (.optimize | type) == "array" then .optimize |= map(if type == "object" then tag($r) | shut($oi) else . end) else . end else . end) else . end),
         testActions: ((.snap.testActions | objects | {limit, actions, allowed}) // null), control: (.snap.control | objects // null), clis: ((.snap.modelSettings | objects | (.judge.clis // .reviewer.clis) | objects) // null),
         flaky: (.snap.flaky | arrays // null)};
       {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null, machine: $ml} else testsOf end)

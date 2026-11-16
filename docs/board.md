@@ -204,7 +204,8 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows, from top to bottom: the figures, the table of test files, Results of actions, and Settings.
+The Tests tab shows, from top to bottom: the figures, the table of test files, Removed by Optimize, Recent actions,
+and Settings.
 
 The figures count the timed files, the files over budget, the files slower than usual and the files that wait more
 than they work, and give the slot wait and run time of the card Test steps of 7 days. Click the figure of files over
@@ -231,6 +232,27 @@ Optimize shows the issue first, with the title "Optimize the test file <file>", 
 verdict of Judge, with the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds
 Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
+
+An open row also shows its newest action. While it runs, you see its time bar, its text as it comes, Stop and Copy. A
+queued action shows "Queued, N ahead" and Stop. When it ends, you see its result. The text of Judge and Explain the
+slowdown shows as formatted text: paragraphs, bold, lists and code. Copy copies the text as the model wrote it. A
+Judge result starts with "Verdict:" and the verdict. When the verdict is speed up, split, merge or delete, click
+"Optimize with this verdict" to open the Optimize issue with that verdict and its text.
+
+An open row lists each Optimize issue filed for the file, and each older "Speed up the test file" issue, newest first.
+Each shows the date it was filed, its link and its state: open, building, blocked (with the reason), landed (with the
+commit), or closed without landing. A landed issue also shows the fix of its card (sped up, split, merged into a file,
+or deleted) and the CPU seconds of the file before and after the fix. Next to "before", it shows the median CPU
+seconds of the file's runs since the fix landed, when the file ran since then. The first run after the fix has a mark
+in the row's Last runs and in its list of runs, while the row still shows that run.
+
+A file that an Optimize deleted, or merged into another file, is not in the table. "Removed by Optimize", below the
+table, shows it with its last numbers, its issue and the test files that now have its cases. For a deleted file,
+these are the test files that the review of its card named.
+
+Recent actions is closed until you open it. Its heading shows how many actions run and how many are queued. It lists
+the test actions and the Optimize issues, newest first, each with its state. Click a file name in it to open the row
+of that file.
 
 Each row has a checkbox. The checkbox in the heading selects every file that the search and the filter show. With one
 file or more selected, a bar at the bottom of the screen shows how many, with Judge, Optimize, Run and Clear. Judge and

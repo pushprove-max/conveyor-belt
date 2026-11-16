@@ -10,9 +10,12 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
         and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
         and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
         # A bugproof line: the bug-card check was skipped (bugproof()), its reason saying why; or a speed-up card's check
-        # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof(), optproof()).
+        # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof(), optproof()), and the fix
+        # it made with the test files it added or changed (a line written before the fix was recorded has neither).
         and (.step != "bugproof" or (.result == "skipped" and .speed == null) or ((.result | IN("ok", "fail"))
-          and (.speed | type == "object" and keys == ["after", "before", "file"] and (.file | type == "string") and ([.before, .after] | all(. == null or type == "number")))))
+          and (.speed | type == "object" and (.file | type == "string") and ([.before, .after] | all(. == null or type == "number"))
+            and (keys == ["after", "before", "file"] or (keys == ["after", "before", "file", "fix", "into"]
+              and (.fix | IN("sped up", "split", "merged", "deleted")) and (.into | type == "array" and all(.[]; type == "string")))))))
         and (.speed == null or .step == "bugproof")
         and (.step != "start" or (.of | IN("build", "review", "fix", "test", "file", "land", "rebase")))
         and (.counts // {P0: 0, P1: 0, P2: 0, P3: 0} | type == "object" and keys == ["P0", "P1", "P2", "P3"] and all(type == "number"))

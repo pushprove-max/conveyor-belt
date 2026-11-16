@@ -23,7 +23,15 @@
 #   project: test.fileBudget), slowOnPurpose (its reason, else null), over (cpu over its budget; false with no cpu), usual (the median of
 #   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower; a wholeOnly
 #   file (a runner that starts other test files whole, each timed with its own budget) is held to no budget: budget and
-#   budgetFrom null, over and slower false;
+#   budgetFrom null, over and slower false; optimize: each issue the Board filed for it ($TAFILED: Optimize, and older
+#   speed-up, issues), newest first: {issue, time (filed), state (open: no card took it; building; blocked, with reason;
+#   landed, with sha and landed, the time; closed: its card closed it without landing), fix, into, before and after
+#   (from the bugproof line's speed of its landed card, else of its newest: fix is sped up, split, merged or deleted,
+#   into the test files a split added or a merge changed, or, for a delete, those the last review of its landed card
+#   named on its COVERED-BY lines; null and [] with none), since (the median CPU seconds of the
+#   file's runs after it landed; null with none or before it lands) and sinceRuns (their count)}; removed: true for a
+#   file main's checkout no longer tracks whose landed Optimize deleted or merged it (the totals leave it out);
+#   a file that only a Board filing names is listed too;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
 # totals: files (those with CPU seconds on record), overBudget (over and not slow on purpose), slower, and steps: the card test steps that ran in
@@ -55,23 +63,40 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
   ru=$(testrulesettings) || ru=null
   testowners
-  # A project with no test line has its part all the same: grep finding none is no failure.
-  { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" \
+  # A project with no test line has its part all the same: grep finding none is no failure. The steps other than test
+  # are those that give a Board filing's state (optimize, below).
+  { olds; recs; } 2>/dev/null | { grep -E '"step":"(test|picked|bugproof|blocked|closed|landed|review)"' || :; } | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" \
     --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
     --argjson ru "$ru" --argjson all "$all" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
-    --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) "$OWNERS"'
+    --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
+    --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) "$OWNERS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
-    [inputs | fromjson? | objects | select(.step == "test")] | sort_by(.time) as $ls
-    | (reduce ($ls[] | select(.result == "fail") | failedfiles[]) as $f ({}; .[$f] += 1)) as $failed
+    [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
+    # A Board filing ($TAFILED) as its cards left it, given the runs of its file ($r, oldest first).
+    | def optimize($r): . as $o | [$cr[] | select(.issue == $o.issue)] as $c
+        | (first($c[] | select(.step == "landed")) // null) as $l
+        | ([$c[] | select(.step == "bugproof" and (.speed | type == "object") and ($l == null or .card == $l.card))] | last | .speed // {}) as $p
+        # A delete changes no other test file: the files that cover its cases are those its card'"'"'s last review named
+        # on its COVERED-BY lines (optproof()).
+        | ([$c[] | select(.step == "review" and $l != null and .card == $l.card)] | last | (.reason | strings) // ""
+           | [split("\n")[] | capture("^COVERED-BY: (?<f>[^\\s:]+): ").f] | unique) as $cov
+        | ([$c[] | select(.step != "closed" and .step != "landed" and .step != "review")] | last) as $n
+        | (if $l == null then null else [$r[] | select(.time > $l.time) | .cpu | numbers] end) as $since
+        | (if $l != null then "landed" elif any($c[]; .step == "closed") then "closed" elif $n == null then "open"
+           elif $n.step == "blocked" then "blocked" else "building" end) as $st
+        | {issue, time, state: $st, reason: (if $st == "blocked" then $n.reason else null end),
+           sha: ($l.sha // null), landed: ($l.time // null), fix: ($p.fix // null), into: (if $p.fix == "deleted" then $cov else $p.into // [] end),
+           before: ($p.before // null), after: ($p.after // null), since: ($since | if . == null then null else median | r3 end), sinceRuns: ($since | length)};
+    (reduce ($ls[] | select(.result == "fail") | failedfiles[]) as $f ({}; .[$f] += 1)) as $failed
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
     | [($ls[] | . as $l | .times | objects | to_entries[] | select(.value | type == "number") | .key as $f
         | {file: $f, cpu: .value, sec: (($l.clocks | objects | .[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
        ($su[] | . as $w | .files | objects | to_entries[] | select(.value | type == "object")
         | {file: .key, cpu: ((.value.cpu | numbers) // null), sec: ((.value.sec | numbers) // null), card: null, time: $w.time, whole: true,
            result: ((.value.result | strings) // null)}),
-       ($all[] | {file: ., none: true})]
+       ($all[], $ta[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud | ($own.wholeOnly == true) as $wo
@@ -84,13 +109,15 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
            budget: (if $wo then null else $bud end), budgetFrom: (if $wo then null elif $own.budget != null then "file" else "project" end),
            slowOnPurpose: ($own.slowOnPurpose // null), over: ($wo | not) and $now != null and $now > $bud, usual: ($usual | r3),
-           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh))})
+           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh))}
+        | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
+        | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
     | sort_by(-(.cpu // -1), .file)
     | [$ls[] | select(.reused != true and ((.time | fromdate? | strflocaltime("%Y-%m-%d")) // "") >= $since)] as $wk
     | {settings: {fileBudget: $b, slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
        rules: (if $ru == null then null else $ru + {last: $last[0], log: ($lg[0] // [])} end),
        files: ., slower: map(select(.slower) | .file),
-       totals: {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length),
+       totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}'
 }
 

@@ -2,9 +2,9 @@
 // The Tests page (#520; the owner chose mockup A, with mockup B's column "against its own median"): a tab of its own,
 // after Belt 3D. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
 // on the Rules tab, and the heading names it ("Tests: sample").
-// The page, top to bottom (#73): the figures, the table with its search and filters, the bar of the files selected,
-// Results of actions, and one section "Settings", collapsed until opened, with the Tests model, Test limits and
-// Auto-file.
+// The page, top to bottom (#73, #74): the figures, the table with its search and filters, Removed by Optimize, the bar
+// of the files selected, Recent actions, and one section "Settings", collapsed until opened, with the Tests model, Test
+// limits and Auto-file.
 // The figures: Timed files, files over budget, files slower than usual, files that wait more than they work (their
 // last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the 7 days: their slot
 // wait and their run time. A figure that counts the files of a status is a button that shows that status alone, as
@@ -28,8 +28,14 @@
 // The bar shows the answer for each file, and each file left out with why: the runner for Optimize, every file for
 // Judge with no Tests model.
 // A row opens to show its runs, each with a link to its card's issue or marked "whole suite" with its result, its
-// budget and its mark, and three actions: Judge, Optimize and Run. Its More menu holds Explain the slowdown, Keep a
-// case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
+// budget and its mark, its Optimize issues, and three actions: Judge, Optimize and Run. Its Optimize issues (#74): each
+// issue the Board filed for it (the snapshot's optimize: Optimize, and older speed-up, issues), newest first, with the
+// date filed, its "#NN" link and its state (open, building, blocked with the reason, landed with the commit, closed
+// without landing); landed, the fix its card made (sped up, split, merged into <file>, deleted) and its proof's CPU s
+// before and after, with the median of the runs since it landed beside before. The run where one landed (the first
+// after it) is marked in its Last runs bars and in its runs. A file a landed Optimize deleted or merged (removed) is not
+// in the table: Removed by Optimize, after it, shows its last numbers, the issue and the files that took its cases.
+// Its More menu holds Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
 // Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
 // project): CPU budget for a test file (test.fileBudget), the budgets of single files and the files slow on purpose
@@ -56,16 +62,21 @@
 // "Model for Tests actions": CLI, model (with Other… for a typed name) and effort, as the Rules tab's roles; a pick
 // says Unsaved, Save sends POST control {action: tests, args: [cli, model, effort] or [default]}, Cancel puts back the
 // one in force.
-// While an action runs, its row shows a bar and the time used against the action's limit, and a box with its text
-// as the snapshot brings it (kept here, so a text the snapshot cut to its end loses nothing seen before), with Stop
-// (testaction stop <id>, that action alone) and Copy. Ended, the box shows its result with its time, CLI, model and
-// effort, and a judge's verdict word as a chip. Results of actions lists each kept action, newest first, with View
-// and Copy, and Stop on a running one.
+// An opened row shows its newest action (#74). While it runs, a bar and the time used against the action's limit, and
+// a box with its text as the snapshot brings it (kept here, so a text the snapshot cut to its end loses nothing seen
+// before), with Stop (testaction stop <id>, that action alone) and Copy. Queued, "Queued, N ahead" and Stop. Ended, its
+// result with its time, CLI, model and effort; a judge's starts with "Verdict: <word>" and its chip, and, for speed
+// up, split, merge or delete, "Optimize with this verdict", which opens the Optimize preview with that verdict and its
+// text. The text of a judge or explain is formatted (md(): paragraphs, bold, lists, inline code and code blocks; any
+// other markup as typed), a run's output as typed; Copy copies the raw text. Recent actions, collapsed until opened,
+// counts the running and queued actions in its heading and lists each kept action and each Optimize issue, newest
+// first, each with its file (a click opens its row), and Stop on a running or queued action, else Copy.
 // Auto-file: the one switch (Off by default; "Turn on" shows the preview, the matches of the rules' last run, each
 // with its guard's result, and asks for a second click), the guards and each rule's fields (each Unsaved until Save posts
 // `conveyor.sh testrules guard|set`), and the log of what the rules filed and stopped.
-// Its part (dashboard.sh, tests): {repo (null: none is steered), tests (the snapshot's: settings, rules, files, slower,
-// totals; null from a snapshot without it), machine ({maxLoad, unread, cores, load}), testActions ({limit, actions, allowed:
+// Its part (dashboard.sh, tests): {repo (null: none is steered), tests (the snapshot's: settings, rules, files (each
+// with its optimize issues, each with its url, and removed), slower, totals; null from a snapshot without it),
+// machine ({maxLoad, unread, cores, load}), testActions ({limit, actions, allowed:
 // the pack's models by CLI, offered for a CLI that lists none}), control (the control record: its tests, the Tests model),
 // clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), repos, others}.
 (function () {
@@ -95,8 +106,7 @@
     seatSaved: null,     // the Tests model saved here, until a snapshot names it: {repo, value, was, at, read}
     started: new Map(),  // the action asked for here, by dk(file), until the snapshot lists it: {id, action, file, at}
     texts: new Map(),    // each action's text as seen here, by id: the snapshot holds the end of a long one only
-    shown: new Map(),    // the action a row's box shows, by dk(file): its id
-    viewed: null,        // the result opened under Results of actions: its id
+    recentOpen: false,   // the Recent actions section is open
     ask: null,           // a preview open: {kind: issue | close | keep | on | many, file, title, body, case, why; many: items [{file, title, body}]}
     stopping: new Set(),    // the ids of the actions a Stop was sent for
     sel: new Set(),      // the files selected, for the bar's actions
@@ -303,17 +313,18 @@
     send('testaction', [how, file], () => `Started: ${ACTS[how]}, ${file}.`, (text) => {
       const id = text.split('\n').pop().trim();
       S.started.set(dk(file), { id: ID.test(id) ? id : '', action: how, file, start: new Date(S.ctx.now()).toISOString(), state: 'running' });
-      if (ID.test(id)) S.shown.set(dk(file), id);
       S.open.add(file);
     });
   }
   const stop = (a) => send('testaction', ['stop', a.id], (t) => `Stop sent: ${ACTS[a.action] || a.action}, ${a.file}. ${t}`, () => S.stopping.add(a.id));
-  // How an action ended: its state and time, when, its CLI, model and effort (a run has none), and its verdict or result.
-  function result(a) {
+  const verdictChip = (v) => S.ctx.chip(v, v === 'keep' ? 'ok' : v === 'no verdict' ? 'quiet' : 'warn');
+  // How an action ended: its state and time, when, its CLI, model and effort (a run has none), and its verdict (unless
+  // its box shows it on the verdict line: chip false) or result.
+  function result(a, chip = true) {
     const h = S.ctx.h, t0 = Date.parse(a.start || ''), t1 = Date.parse(a.end || '');
     const took = Number.isNaN(t0) || Number.isNaN(t1) ? '' : ` in ${mmss((t1 - t0) / 1000)}`;
     const out = [h('span', 'tests-result', `${ENDED[a.state] || String(a.state)}${took} · ${S.ctx.when(a.end || a.start)} · ${a.action === 'run' ? 'engine command, no session' : `${a.cli} · ${a.model} · ${a.effort}`}`)];
-    if (a.action === 'judge' && typeof a.verdict === 'string') out.push(S.ctx.chip(a.verdict, a.verdict === 'keep' ? 'ok' : a.verdict === 'no verdict' ? 'quiet' : 'warn'));
+    if (chip && a.action === 'judge' && typeof a.verdict === 'string') out.push(verdictChip(a.verdict));
     if (a.action === 'run' && typeof a.result === 'string') {  // the run's result: fail, or its other value
       const bad = a.result === 'fail';
       out.push(S.ctx.chip(`${bad ? 'Failed' : 'Passed'}${num(a.cpu) !== null ? `, ${one(a.cpu)} CPU s` : ''}`, bad ? 'bad' : 'ok'));
@@ -322,42 +333,108 @@
     return out;
   }
   const running = (a) => a.state === 'running';
-  // The box of one action: running, a bar and the time used against its limit, its text so far, Stop and Copy; ended,
-  // its result, its text and Copy.
-  function box(a) {
+  const queued = (a) => a.state === 'queued';
+  const live = (a) => running(a) || queued(a);
+  // A queued action waits for a free place; the engine starts them in the order asked.
+  const ahead = (a) => actions().filter((x) => queued(x) && x.id !== a.id && String(x.asked || '') < String(a.asked || '')).length;
+  const queuedSaid = (a) => `Queued, ${ahead(a)} ahead`;
+  // The text of a judge or explain action as formatted text (#74): paragraphs, **bold**, `code`, lists ("- ", "* ",
+  // "1. ") and ``` code blocks. It builds nodes and never sets HTML from the text: any other markup shows as typed.
+  function inline(s) {
+    const h = S.ctx.h, out = [], re = /\*\*(\S(?:[^*\n]*?\S)?)\*\*|`([^`\n]+)`/g;
+    let at = 0, m;
+    while ((m = re.exec(s))) {
+      if (m.index > at) out.push(document.createTextNode(s.slice(at, m.index)));
+      if (m[1] !== undefined) { const b = h('strong'); b.append(...inline(m[1])); out.push(b); } else out.push(h('code', null, m[2]));
+      at = re.lastIndex;
+    }
+    if (at < s.length) out.push(document.createTextNode(s.slice(at)));
+    return out;
+  }
+  function md(text) {
+    const h = S.ctx.h, el = h('div', 'tests-md'), lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    let para = [], ul = null;
+    const flush = () => {
+      if (!para.length) return;
+      const p = h('p');
+      para.forEach((l, i) => { if (i) p.append(h('br')); p.append(...inline(l)); });
+      el.append(p); para = [];
+    };
+    for (let i = 0; i < lines.length; i += 1) {
+      const l = lines[i], item = /^\s*([-*]|(\d{1,4})[.)])\s+(.*)$/.exec(l);
+      if (/^\s*```/.test(l)) {
+        flush(); ul = null;
+        const code = [];
+        for (i += 1; i < lines.length && !/^\s*```/.test(lines[i]); i += 1) code.push(lines[i]);
+        const pre = h('pre', 'tests-md-code');
+        pre.append(h('code', null, code.join('\n')));
+        el.append(pre);
+      } else if (item) {
+        flush();
+        const kind = item[2] === undefined ? 'ul' : 'ol';
+        if (!ul || ul.tagName.toLowerCase() !== kind) {
+          ul = h(kind); el.append(ul);
+          if (kind === 'ol' && Number(item[2]) !== 1) ul.start = Number(item[2]);
+        }
+        const li = h('li'); li.append(...inline(item[3])); ul.append(li);
+      } else if (!l.trim()) { flush(); ul = null; } else if (ul && /^\s+\S/.test(l)) {
+        ul.lastChild.append(document.createTextNode(' '), ...inline(l.trim()));  // a list item's next line
+      } else { ul = null; para.push(l.trim()); }
+    }
+    flush();
+    return el;
+  }
+  // The verdicts that Optimize acts on: each is one of the fixes an Optimize card picks.
+  const ACTIONABLE = ['speed up', 'split', 'merge', 'delete'];
+  // The box of one action: running, a bar and the time used against its limit, its text so far, Stop and Copy;
+  // queued, how many wait before it, and Stop; ended, its result (a judge's verdict line first, with Optimize with this
+  // verdict when Optimize acts on it), its text (formatted, but a run's output) and Copy.
+  function box(a, f) {
     const h = S.ctx.h, el = h('div', 'tests-box'), head = h('div', 'tests-box-head'), name = ACTS[a.action] || String(a.action);
     el.dataset.id = a.id;
     head.append(h('span', 'board-label', name));
+    const text = S.texts.get(a.id) || '', btns = h('div', 'tests-box-btns'), parts = [head];
+    if (live(a) && ID.test(a.id)) btns.append(button(S.stopping.has(a.id) ? 'Stopping…' : 'Stop', 'btn-quiet', 'stop', `Stop: ${name}, ${a.file}`, () => stop(a)));
+    if (queued(a)) {
+      head.append(h('span', 'board-from', queuedSaid(a)));
+      el.append(head, btns);
+      return el;
+    }
     if (running(a)) {
       const lim = limitOf(a), u = used(a), bar = h('progress', 'tests-progress');
       if (lim) { bar.max = lim; bar.value = Math.min(u, lim); }
       bar.setAttribute('aria-label', `Time used: ${name}`);
       head.append(bar, h('span', 'board-from', lim ? `${mmss(u)} of the ${mmss(lim)} time limit` : `${mmss(u)} used`));
-    } else head.append(...result(a));
-    const text = S.texts.get(a.id) || '';
-    const out = h('pre', 'tests-out', text || (running(a) ? 'Started. Its text shows here as it comes.' : 'No text.'));
-    out.setAttribute('aria-live', 'polite');
-    const btns = h('div', 'tests-box-btns');
-    if (running(a) && ID.test(a.id)) {
-      const b = button(S.stopping.has(a.id) ? 'Stopping…' : 'Stop', 'btn-quiet', 'stop', `Stop: ${name}, ${a.file}`, () => stop(a));
-      btns.append(b);
+    } else head.append(...result(a, false));
+    if (!running(a) && a.action === 'judge' && typeof a.verdict === 'string') {
+      const line = h('p', 'tests-verdict', 'Verdict: ');
+      line.append(verdictChip(a.verdict));
+      if (ACTIONABLE.includes(a.verdict)) {
+        const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `Optimize ${a.file}: preview an issue with this verdict`, () => {
+          S.ask = draftIssue(f, a); S.keep = { act: 'issue-title', file: f.file }; draw();
+        });
+        if (f.wholeOnly === true) { b.disabled = true; b.title = RUNNER_WHY; }
+        line.append(' ', b);
+      }
+      parts.push(line);
     }
+    let out;
+    if (running(a) || a.action === 'run') {
+      out = h('pre', 'tests-out', text || (running(a) ? 'Started. Its text shows here as it comes.' : 'No text.'));
+      out.setAttribute('aria-live', 'polite');
+    } else out = text ? md(text) : h('p', 'board-from', 'No text.');
     btns.append(button('Copy', 'btn-quiet', 'copy', `Copy the text: ${name}, ${a.file}`, () => copy(text)));
-    el.append(head, out, btns);
+    el.append(...parts, out, btns);
     if (a.textCut === true && !text) el.append(h('p', 'board-from', 'The text is long: the build machine sends its end only.'));
     return el;
   }
-  // The action a row's box shows: the one started here, else one of the file's that runs, else its newest.
-  function rowAction(file) {
-    const all = actions().filter((a) => a.file === file), want = S.shown.get(dk(file));
-    const st = S.started.get(dk(file));
-    return (want && all.find((a) => a.id === want)) || st || all.find(running) || all[0] || null;
-  }
+  // The action a row's box shows: the one started here until the snapshot lists it, else the file's newest.
+  const rowAction = (file) => S.started.get(dk(file)) || actions().find((a) => a.file === file) || null;
   // An Optimize issue's draft: the title the engine knows it by (OPTIMIZE, lib/testrun.sh), the measured numbers, and
-  // the judge's newest kept verdict with as much of the end of its text as the body holds. Each line is printable (the
-  // server refuses a body with a tab or another control character in a line).
-  function draftIssue(f) {
-    const file = f.file, v = verdictOf(file), runs = list(f.runs).filter(obj), last = obj(f.lastRun) || {};
+  // a judge's verdict (the one given, else the file's newest kept) with as much of the end of its text as the body
+  // holds. Each line is printable (the server refuses a body with a tab or another control character in a line).
+  function draftIssue(f, given) {
+    const file = f.file, v = given || verdictOf(file), runs = list(f.runs).filter(obj), last = obj(f.lastRun) || {};
     const lines = ['Optimize this test file: speed it up, split it, merge it into another test file, or delete it. Keep what it tests.', '', 'What the Board measured:',
       `- CPU s in its last run: ${one(f.cpu)}`,
       `- Median of its runs: ${one(f.median)} CPU s (${pct(f.change)} against its median)`,
@@ -492,7 +569,7 @@
     const p = preview(f);
     if (p) el.append(p);
     const a = rowAction(file);
-    if (a) el.append(box(a));
+    if (a) el.append(box(a, f));
     return el;
   }
 
@@ -594,7 +671,6 @@
     bulk(ACTS[how], 'testaction', [how, ...names], names, left, (lines) => lines.forEach((l) => {
       if (!l.ok || !ID.test(l.text)) return;
       S.started.set(dk(l.file), { id: l.text, action: how, file: l.file, start: new Date(S.ctx.now()).toISOString(), state: 'running' });
-      S.shown.set(dk(l.file), l.text);
     }));
   }
   function selBar(files) {
@@ -653,25 +729,96 @@
     }), button('Cancel', 'btn-quiet', 'bulk-cancel', 'Cancel: file nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was filed.'); }));
     return el;
   }
-  // ---- Results of actions: each kept action, newest first ----
-  function results() {
-    const h = S.ctx.h, el = h('section', 'tests-results'), all = actions();
-    el.append(h('h3', 'board-head', 'Results of actions'));
-    if (!all.length) { el.append(h('p', 'board-from', 'No action ran yet. An action that you start on a row shows here, and stays here.')); return el; }
+  // ---- Optimize: each issue the Board filed for a file, as its cards left it (the snapshot's optimize) ----
+  const optsOf = (f) => list(f.optimize).filter((o) => obj(o) && num(o.issue) !== null)
+    .sort((x, y) => (Date.parse(y.time) || 0) - (Date.parse(x.time) || 0));
+  function stateSaid(o) {
+    if (o.state === 'blocked') return `blocked: ${typeof o.reason === 'string' && o.reason ? o.reason : 'no reason recorded'}`;
+    if (o.state === 'landed') return `landed${typeof o.sha === 'string' && o.sha ? ` as ${o.sha.slice(0, 7)}` : ''}`;
+    return o.state === 'closed' ? 'closed without landing' : String(o.state || 'open');
+  }
+  const intoSaid = (o) => list(o.into).filter((x) => typeof x === 'string').join(', ');
+  // The fix its card made: sped up, split into <files>, merged into <files> or deleted.
+  const fixSaid = (o) => ((o.fix === 'split' || o.fix === 'merged') && intoSaid(o) ? `${o.fix} into ${intoSaid(o)}` : typeof o.fix === 'string' ? o.fix : null);
+  // Its proof's CPU s before and after, and, beside before, the median of the file's runs since it landed.
+  function numbersSaid(o) {
+    if (num(o.before) === null && num(o.after) === null) return null;
+    const n = num(o.sinceRuns) || 0, since = num(o.since) === null ? '' : ` (since it landed: ${one(o.since)} CPU s, the median of ${n} ${n === 1 ? 'run' : 'runs'})`;
+    return `CPU s before: ${one(o.before)}${since}${num(o.after) === null ? '' : `, after: ${one(o.after)}`}`;
+  }
+  // One Optimize issue of a row: when it was filed, its link, its state and, landed, its fix and numbers.
+  function optLine(o) {
+    const h = S.ctx.h, li = h('li', 'tests-opt');
+    li.dataset.issue = String(o.issue);
+    li.append(h('span', 'board-from', `Filed ${S.ctx.when(o.time)} · `), S.ctx.issueLink(o),
+      h('span', null, ` · ${[stateSaid(o)].concat(o.state === 'landed' ? [fixSaid(o), numbersSaid(o)] : []).filter(Boolean).join(' · ')}`));
+    return li;
+  }
+  // The runs where a landed Optimize took effect: the first timed run of the file after it landed, to its issue. The
+  // row keeps only the last runs: when fewer of them come after it than its sinceRuns (all the timed runs since it
+  // landed), that first run is no longer kept and no run is marked.
+  function optRuns(f) {
+    const out = new Map(), runs = list(f.runs).filter((r) => obj(r) && !Number.isNaN(Date.parse(r.time))).sort((x, y) => Date.parse(x.time) - Date.parse(y.time));
+    optsOf(f).filter((o) => o.state === 'landed' && !Number.isNaN(Date.parse(o.landed))).forEach((o) => {
+      const after = runs.filter((x) => Date.parse(x.time) > Date.parse(o.landed) && num(x.cpu) !== null), r = after[0];
+      if (r && after.length >= (num(o.sinceRuns) ?? Infinity) && !out.has(r)) out.set(r, o);
+    });
+    return out;
+  }
+  const optRunSaid = (o) => `first run after Optimize #${o.issue} landed`;
+
+  // ---- Recent actions: each kept action and each Optimize issue, newest first, collapsed until opened ----
+  // A file named there opens its row: the search and the filter let it show.
+  function goto(file) {
+    const f = list(tests() && tests().files).find((x) => obj(x) && x.file === file), q = S.query.trim().toLowerCase();
+    if (f && ((S.filter !== 'all' && !marks(f).some((m) => m[0] === S.filter)) || (q && !file.toLowerCase().includes(q)))) { S.filter = 'all'; S.query = ''; }
+    S.open.add(file); S.keep = { act: 'open', file }; draw();
+    const tr = Array.from(S.el.querySelectorAll('.tests-row')).find((r) => r.dataset.file === file);
+    if (tr && typeof tr.scrollIntoView === 'function') tr.scrollIntoView({ block: 'nearest' });
+    say(`Opened: ${file}`);
+  }
+  function recent(files, gone) {
+    const h = S.ctx.h, el = h('details', 'tests-results'), all = actions(), rows = new Set(files.map((f) => f.file));
+    el.open = S.recentOpen;
+    el.addEventListener('toggle', () => { S.recentOpen = el.open; });
+    el.append(h('summary', 'board-head', `Recent actions: ${all.filter(running).length} running, ${all.filter(queued).length} queued`));
+    const items = all.map((a) => ({ t: a.start || a.asked, a, file: String(a.file) }))
+      .concat(files.concat(gone).flatMap((f) => optsOf(f).map((o) => ({ t: o.time, o, file: f.file }))))
+      .sort((x, y) => (Date.parse(y.t) || 0) - (Date.parse(x.t) || 0));
+    if (!items.length) { el.append(h('p', 'board-from', 'No action ran yet. An action that you start on a row shows here.')); return el; }
     const ul = h('ul', 'tests-results-list');
-    all.forEach((a) => {
-      const li = h('li', 'tests-result-row'), line = h('div', 'tests-result-line'), name = ACTS[a.action] || String(a.action);
-      li.dataset.id = a.id;
-      line.append(h('span', 'board-from', S.ctx.when(a.start)), h('span', 'board-label', name), h('span', 'tests-result-file', String(a.file)));
-      if (running(a)) {
-        const lim = limitOf(a);
-        line.append(h('span', 'board-from', `${a.action === 'run' ? 'engine command, no session' : `${a.cli} · ${a.model} · ${a.effort}`} · Runs: ${mmss(used(a))}${lim ? ` of ${mmss(lim)}` : ''}`));
-      } else line.append(...result(a));
-      line.append(button(S.viewed === a.id ? 'Hide' : 'View', 'btn-quiet', 'view', `${S.viewed === a.id ? 'Hide' : 'View'}: ${name}, ${a.file}`, () => { S.viewed = S.viewed === a.id ? null : a.id; draw(); }));
-      if (running(a) && ID.test(a.id)) line.append(button(S.stopping.has(a.id) ? 'Stopping…' : 'Stop', 'btn-quiet', 'stop', `Stop: ${name}, ${a.file}`, () => stop(a)));
-      else line.append(button('Copy', 'btn-quiet', 'copy', `Copy the text: ${name}, ${a.file}`, () => copy(S.texts.get(a.id) || '')));
+    items.forEach(({ t, a, o, file }) => {
+      const li = h('li', 'tests-result-row'), line = h('div', 'tests-result-line'), name = a ? ACTS[a.action] || String(a.action) : 'Optimize';
+      const ref = rows.has(file) ? button(file, 'btn-quiet tests-result-file', 'goto', `Open the row of ${file}`, () => goto(file)) : h('span', 'tests-result-file', file);
+      line.append(h('span', 'board-from', S.ctx.when(t)), h('span', 'board-label', name), ref);
+      if (o) {
+        li.dataset.issue = String(o.issue);
+        line.append(S.ctx.issueLink(o), h('span', null, [stateSaid(o), o.state === 'landed' ? fixSaid(o) : null, numbersSaid(o)].filter(Boolean).join(' · ')));
+      } else {
+        li.dataset.id = a.id;
+        if (running(a)) {
+          const lim = limitOf(a);
+          line.append(h('span', 'board-from', `${a.action === 'run' ? 'engine command, no session' : `${a.cli} · ${a.model} · ${a.effort}`} · Runs: ${mmss(used(a))}${lim ? ` of ${mmss(lim)}` : ''}`));
+        } else if (queued(a)) line.append(h('span', 'board-from', queuedSaid(a)));
+        else line.append(...result(a));
+        if (live(a) && ID.test(a.id)) line.append(button(S.stopping.has(a.id) ? 'Stopping…' : 'Stop', 'btn-quiet', 'stop', `Stop: ${name}, ${a.file}`, () => stop(a)));
+        else line.append(button('Copy', 'btn-quiet', 'copy', `Copy the text: ${name}, ${a.file}`, () => copy(S.texts.get(a.id) || '')));
+      }
       li.append(line);
-      if (S.viewed === a.id) li.append(box(a));
+      ul.append(li);
+    });
+    el.append(ul);
+    return el;
+  }
+  // ---- Removed by Optimize: each file a landed Optimize deleted or merged, with its last numbers ----
+  function removed(gone) {
+    const h = S.ctx.h, el = h('section', 'tests-removed'), ul = h('ul', 'tests-list');
+    el.append(h('h3', 'board-head', 'Removed by Optimize'));
+    gone.forEach((f) => {
+      const o = optsOf(f).find((x) => x.state === 'landed' && (x.fix === 'deleted' || x.fix === 'merged')) || {}, li = h('li', 'tests-gone');
+      li.dataset.file = f.file;
+      li.append(h('span', 'board-label', f.file), h('span', null, ` · its last run ${one(f.cpu)} CPU s, its median ${one(f.median)} CPU s · `), num(o.issue) === null ? '' : S.ctx.issueLink(o),
+        h('span', null, ` · ${o.fix || 'removed'}${o.landed ? ` ${S.ctx.when(o.landed)}` : ''} · ${intoSaid(o) ? `its cases are now in ${intoSaid(o)}` : 'no test file is on record for its cases'}`));
       ul.append(li);
     });
     el.append(ul);
@@ -803,23 +950,31 @@
   // ---- the table of test files ----
   function bars(f) {
     const h = S.ctx.h, runs = list(f.runs).filter((r) => obj(r) && num(r.cpu) !== null).slice().reverse(), el = h('span', 'tests-bars');
-    const top = Math.max(...runs.map((r) => r.cpu), 0);
-    runs.forEach((r) => { const b = h('span', 'tests-bar'); b.style.transform = `scaleY(${top > 0 ? Math.max(0.04, r.cpu / top) : 0})`; el.append(b); });
+    const top = Math.max(...runs.map((r) => r.cpu), 0), opt = optRuns(f);
+    // The run where a landed Optimize took effect has a mark (app.css) and says so on hover.
+    runs.forEach((r) => {
+      const b = h('span', opt.has(r) ? 'tests-bar tests-bar-opt' : 'tests-bar');
+      b.style.transform = `scaleY(${top > 0 ? Math.max(0.04, r.cpu / top) : 0})`;
+      if (opt.has(r)) b.title = `${one(r.cpu)} CPU s: the ${optRunSaid(opt.get(r))}`;
+      el.append(b);
+    });
     el.setAttribute('role', 'img');
-    el.setAttribute('aria-label', runs.length ? `Last runs, oldest first: ${runs.map((r) => one(r.cpu)).join(', ')} CPU s` : 'No runs');
+    el.setAttribute('aria-label', runs.length ? `Last runs, oldest first: ${runs.map((r) => `${one(r.cpu)}${opt.has(r) ? ` (the ${optRunSaid(opt.get(r))})` : ''}`).join(', ')} CPU s` : 'No runs');
     return el;
   }
   function more(f) {
     const h = S.ctx.h, el = h('div', 'tests-more'), file = f.file;
     const runs = h('ul', 'tests-runs');
     runs.setAttribute('aria-label', `Runs of ${file}`);
+    const opt = optRuns(f);
     list(f.runs).filter(obj).forEach((r) => {
-      const li = h('li', 'tests-run');
+      const li = h('li', opt.has(r) ? 'tests-run tests-run-opt' : 'tests-run');
       const cpu = num(r.cpu) === null ? 'CPU not recorded' : `${one(r.cpu)} CPU s`;
       li.append(h('span', null, `${cpu} · ${num(r.sec) === null ? 'clock not recorded' : `${one(r.sec)} s on the clock`} · `));
       if (r.whole === true) li.append(h('span', null, `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`));
       else li.append(h('span', null, 'card '), r.issue ? S.ctx.issueLink(r) : h('span', 'issue', String(r.card || 'a card')));
       li.append(h('span', 'board-from', ` · ${S.ctx.when(r.time)}`));
+      if (opt.has(r)) li.append(h('span', 'tests-run-mark', ` · the ${optRunSaid(opt.get(r))}`));
       runs.append(li);
     });
     if (!runs.children.length) runs.append(h('li', 'board-from', 'No run on record.'));
@@ -829,6 +984,14 @@
     const budget = f.wholeOnly === true ? 'none, it runs other test files and each of them has its own'
       : mine !== '' ? `${one(Number(mine))} CPU s, its own` : all !== '' ? `${one(Number(all))} CPU s, the project budget` : 'not known';
     el.append(h('p', 'board-head', 'Runs'), runs, h('p', 'tests-fact', `Budget: ${budget}.`), h('p', 'tests-fact', `Slow on purpose: ${reason}.`));
+    // Every Optimize (and older speed-up) issue filed for it, newest first.
+    const opts = optsOf(f);
+    if (opts.length) {
+      const ul = h('ul', 'tests-runs tests-opts');
+      ul.setAttribute('aria-label', `Optimize issues of ${file}`);
+      opts.forEach((o) => ul.append(optLine(o)));
+      el.append(h('p', 'board-head', 'Optimize issues'), ul);
+    }
     el.append(rowActions(f));
     // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
     if (f.wholeOnly === true) return el;
@@ -1016,7 +1179,9 @@
     const a = document.activeElement && el.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement : null;
     const keep = S.keep || (a && a.dataset.act ? { act: a.dataset.act, file: (a.closest('[data-file]') || { dataset: {} }).dataset.file } : null);
     S.keep = null;
-    const t = tests(), files = list(t && t.files).filter((f) => obj(f) && typeof f.file === 'string');
+    const t = tests(), every = list(t && t.files).filter((f) => obj(f) && typeof f.file === 'string');
+    // A file a landed Optimize deleted or merged (removed) is not in the table: it shows under Removed by Optimize.
+    const files = every.filter((f) => f.removed !== true), gone = every.filter((f) => f.removed === true);
     // A file selected that the snapshot no longer lists is no longer selected; with none selected, the bar's answers go.
     S.sel.forEach((x) => { if (!files.some((f) => f.file === x)) S.sel.delete(x); });
     if (!S.sel.size) { S.answers = null; if (asking('many')) S.ask = null; }
@@ -1025,6 +1190,8 @@
     // the next.
     const wasSet = el.querySelector('.tests-settings');
     if (wasSet) S.settingsOpen = wasSet.open;
+    const wasRecent = el.querySelector('.tests-results');
+    if (wasRecent) S.recentOpen = wasRecent.open;
     const set = h('details', 'tests-settings');
     set.open = S.settingsOpen;
     set.addEventListener('toggle', () => { S.settingsOpen = set.open; });
@@ -1038,8 +1205,9 @@
       parts.push(figures(files, counts));
       parts.push(files.length ? table(files, counts) : S.ctx.state('empty', 'No file times for this project',
         'Conveyor records the CPU time of each test file when the test command prints a "TESTRUN sec" line for it. The helper conveyor/tools/testtime.sh prints this line. The table starts when the first card with file times runs its tests.'));
+      if (gone.length) parts.push(removed(gone));
       if (S.sel.size) parts.push(selBar(files));
-      parts.push(results());
+      parts.push(recent(files, gone));
       set.append(actionsHead(), limits(), autofile());
     }
     parts.push(set);
@@ -1056,7 +1224,7 @@
     if (wide) wide.scrollLeft = left;
     if (S.busy) {
       root.querySelectorAll('button, input, select, textarea').forEach((b) => {
-        if (!['filter', 'open', 'view', 'copy', 'search', 'select', 'select-all', 'more'].includes(b.dataset.act) && !/^(sort|figure)-/.test(b.dataset.act || '')) b.disabled = true;
+        if (!['filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more'].includes(b.dataset.act) && !/^(sort|figure)-/.test(b.dataset.act || '')) b.disabled = true;
       });
     }
     if (keep) {
@@ -1074,7 +1242,7 @@
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Tests: ${view.repo}` : null);
     if (S.repo !== undefined && view.repo !== S.repo) {
-      S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null; S.viewed = null;
+      S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null;
       S.sel.clear(); S.answers = null; S.menu = null; S.edit.clear();
     }
     Object.assign(S, { el, ctx, d: view, read, repo: view.repo });
@@ -1090,7 +1258,7 @@
       // Each action's text joined to what was seen of it; an action asked for here leaves its place once listed.
       actions().forEach((a) => { if (typeof a.text === 'string') S.texts.set(a.id, a.textCut === true ? merge(S.texts.get(a.id) || '', a.text) : a.text); });
       S.started.forEach((s, k) => { if (!s.id || actions().some((a) => a.id === s.id)) S.started.delete(k); });
-      S.stopping.forEach((id) => { if (!actions().some((a) => a.id === id && running(a))) S.stopping.delete(id); });
+      S.stopping.forEach((id) => { if (!actions().some((a) => a.id === id && live(a))) S.stopping.delete(id); });
     }
     if (S.held) { S.late = true; return; }
     draw();

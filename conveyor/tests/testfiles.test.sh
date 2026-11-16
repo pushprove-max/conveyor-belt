@@ -195,3 +195,35 @@ t_tfrefuse() {
   loop test-settings slow-mark a.test > /dev/null 2>&1; [ $? = 2 ] || fail "a mark with no reason given was not a usage error"
   [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "a refused value changed the pack"
 }
+
+# The Tests page shows what each Optimize did (#74). The Board filed #70, #71 and #72 for a.test (main has it) and #73
+# for gone.test (main no longer has it). a.test ran at 10, 9, 4 and 3 CPU s; #70's card proved it faster (10 to 4) and
+# landed between the 9 and the 4, so its median since is 3.5 over 2 runs; #71 has no card; #72's card is blocked; #73's
+# card deleted gone.test and landed, its last review naming b.test and c.test on its COVERED-BY lines, and #74's was
+# closed without landing. Bug caught: the part named one issue a file and no state, so the page could not show what an
+# Optimize did, nor a file it removed; and a deleted file lost the tests that cover its cases.
+t_tfoptimize() {
+  setup '[]'
+  touch "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm tests || fail "main's tests"
+  tf_runs a.test 10 9 4 3
+  mkdir -p "$ST/testactions" && jq -cn '[70, 71, 72, 74] | to_entries[] | {time: "2026-11-0\(.key + 1)T00:00:00Z", event: "filed", file: "a.test", issue: .value},
+    {time: "2026-11-05T00:00:00Z", event: "filed", file: "gone.test", issue: 73}' > "$ST/testactions/filed.jsonl"
+  jq -cn '{card: "c-70", issue: 70, step: "picked", time: "2026-11-10T11:00:00Z"},
+    {card: "c-70", issue: 70, step: "bugproof", result: "ok", time: "2026-11-10T11:30:00Z", speed: {file: "a.test", before: 10, after: 4, fix: "sped up", into: []}},
+    {card: "c-70", issue: 70, step: "landed", result: "ok", sha: "abc1234", time: "2026-11-10T12:01:30Z"},
+    {card: "c-72", issue: 72, step: "picked", time: "2026-11-10T13:00:00Z"},
+    {card: "c-72", issue: 72, step: "blocked", reason: "build: the file is not faster", time: "2026-11-10T13:30:00Z"},
+    {card: "c-73", issue: 73, step: "bugproof", result: "ok", time: "2026-11-06T00:00:00Z", speed: {file: "gone.test", before: 6, after: null, fix: "deleted", into: []}},
+    {card: "c-73", issue: 73, step: "review", result: "NO-GO", time: "2026-11-06T00:20:00Z", reason: "COVERED-BY: old.test: t_one\n[P1] x:1 no"},
+    {card: "c-73", issue: 73, step: "review", result: "GO", time: "2026-11-06T00:30:00Z", reason: "COVERED-BY: b.test: t_one\nCOVERED-BY: c.test: t_two\nCOVERED-BY: b.test: t_three\nVERDICT: GO"},
+    {card: "c-73", issue: 73, step: "landed", result: "ok", sha: "def5678", time: "2026-11-06T01:00:00Z"},
+    {card: "c-74", issue: 74, step: "picked", time: "2026-11-10T14:00:00Z"},
+    {card: "c-74", issue: 74, step: "closed", reason: "already done", time: "2026-11-10T14:10:00Z"}' >> "$ST/cards.jsonl"
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '.files[] | select(.file == "a.test") | [.removed, (.optimize[] | [.issue, .state, .reason, .sha, .fix, .before, .after, .since, .sinceRuns])]' <<<"$got")" \
+    = '[false,[74,"closed",null,null,null,null,null,null,0],[72,"blocked","build: the file is not faster",null,null,null,null,null,0],[71,"open",null,null,null,null,null,null,0],[70,"landed",null,"abc1234","sped up",10,4,3.5,2]]' ] \
+    || fail "a.test's Optimize issues: $(jq -c '.files[] | select(.file == "a.test") | .optimize' <<<"$got")"
+  [ "$(jq -c '[(.files[] | select(.file == "gone.test") | [.removed, .optimize[0].fix, .optimize[0].landed, .optimize[0].into]), .totals.files]' <<<"$got")" \
+    = '[[true,"deleted","2026-11-06T01:00:00Z",["b.test","c.test"]],1]' ] \
+    || fail "gone.test, deleted: $(jq -c '[(.files[] | select(.file == "gone.test")), .totals]' <<<"$got")"
+}

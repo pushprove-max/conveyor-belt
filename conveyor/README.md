@@ -557,7 +557,15 @@ and the test files of main's checkout, and holds:
   (the reason of its mark, else null), `over` (`cpu` is over its budget; false with no `cpu`), `usual` and `slower` (below).
   A `wholeOnly` file starts other test files whole, so its CPU seconds are the sum of theirs, and each of them has its
   own budget. It has no budget of its own: its `budget` and `budgetFrom` are null, and its `over` and `slower` are
-  false;
+  false. Each file also has `optimize`: each issue the Board filed for it (`testactions/filed.jsonl`: the Optimize
+  issues, and the older speed-up issues), newest first. Each has `issue`, `time` (when it was filed), `state` (`open`:
+  no card took it; `building`; `blocked`, with `reason`; `landed`, with `sha` and `landed`, the time; `closed`: its card
+  closed it with no landing), `fix`, `into`, `before` and `after` (from the `speed` of the `bugproof` line of its
+  landed card, else of its newest; null and empty with none; for a delete, `into` lists the test files that the last
+  review of its landed card named on its `COVERED-BY` lines), `since` (the median CPU seconds of the file's runs after
+  it landed; null before it lands or with no run since) and `sinceRuns` (how many runs that median has). A file that
+  only a Board filing names is listed too. `removed` is true for a file that main's checkout no longer has, when a
+  landed Optimize deleted it or merged it. The totals leave such a file out;
 - `slower`: the names of the files slower than their usual;
 - `totals`: `files` (those with CPU seconds on record), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
   test steps that ran in the 7 days to today, `{count, waitSec, runSec}`, with the seconds they waited for a test slot
@@ -745,10 +753,14 @@ another test file, or deletes it. No test must fail on main's code. The check de
   file's median. Else the card is blocked with the reason, with no review.
 - The change removes the file and adds no test file (a delete, or a merge into another file): it is not run with the
   change. The file runs alone on main's code, and the review gets the cases that its runner named. The review must
-  name, for each case, the test that still covers it. A case with no test named is a finding.
+  name, for each case, the test that still covers it, one line each: `COVERED-BY: <test file>: <case>`. Such a line is
+  not a finding, and it stays in the review's record. A case with no test named is a finding.
 
 The card's `bugproof` line names the file and both numbers, as for a speed-up: `after` is the CPU seconds summed of a
-split, and null for a delete or a merge.
+split, and null for a delete or a merge. It also names the fix: `fix` is `sped up`, `split`, `merged` or `deleted`,
+and `into` lists the test files that a split adds or that a merge changes (empty for the others). A change that
+removes the file and changes another test file is a merge into that file; one that changes no other test file is a
+delete.
 
 ## The whole test on main
 

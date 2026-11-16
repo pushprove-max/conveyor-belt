@@ -617,7 +617,7 @@ speedfile() { # <issue json> [title start: SPEEDUP]
 # timed()) must be lower than its median on record (the Tests page's, testspart()). Writes the result in
 # <worktree>.unfixed, which the review is shown, its first line the reason when the check does not hold, and records a
 # bugproof line (result ok or fail) with speed: {file, before: the median, after: the CPU seconds now; each null when
-# not known}. Fails when the check does not hold: no median on record, a run that could not be made, failed or gave no
+# not known; fix: sped up, or split, with into: the test files the split adds}. Fails when the check does not hold: no median on record, a run that could not be made, failed or gave no
 # CPU seconds, or CPU seconds not lower than the median. Given the test files a split adds (optproof()), it runs them
 # too, with the file when the change keeps it: they must all pass, and their CPU seconds summed (after) must be lower
 # than the file's median.
@@ -650,7 +650,8 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
     else printf 'This change splits the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, %s passed in %s CPU s summed, lower than the median on record of %s, %s CPU s.\n' "$f" "$l" "$after" "$f" "$before"; fi
     [ -z "$rc" ] || { echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; }; } > "$2.unfixed"
   record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof "$(if [ -z "$why" ]; then echo ok; else echo fail; fi)" \
-    "$(jq -cn --arg r "$why" --arg f "$f" --arg b "$before" --arg a "$after" '{reason: $r, speed: {file: $f, before: ($b | tonumber? // null), after: ($a | tonumber? // null)}}')"
+    "$(jq -cn --arg r "$why" --arg f "$f" --arg b "$before" --arg a "$after" '{reason: $r, speed: {file: $f, before: ($b | tonumber? // null), after: ($a | tonumber? // null),
+      fix: (if $ARGS.positional == [] then "sped up" else "split" end), into: $ARGS.positional}}' --args "${@:5}")"
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -z "$why" ]
 }
@@ -660,16 +661,19 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
 # is checked as a speed-up (speedproof(), given the test files it adds). A change that removes the file and adds no
 # test file (a delete, or a merge into a file main has) is not run: the file runs alone on the commit the card was built
 # on, as it is there, and the review is told the cases its runner named (testfails()) and asked to name, for each, the
-# test that still covers it. Its bugproof line is ok, with speed: {file, before: the median or null, after: null}.
+# test that still covers it, on a COVERED-BY line (the Tests page's, testspart(), for a delete). Its bugproof line is ok, with speed: {file, before: the median or null, after: null, fix:
+# merged, into: the test files the change modifies, or, when it modifies none, deleted, into: []}.
 # Returns as speedproof() does; a delete or merge never fails it.
 optproof() { # <card> <worktree> <issue json> <test file>
-  local mwt=$CARDS/mainrun/$1.speed f=$4 sha='' out='' rc='' before cs='' add=()
+  local mwt=$CARDS/mainrun/$1.speed f=$4 sha='' out='' rc='' before cs='' add=() into=()
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || { rm -f "$2.unfixed"; return 0; }
   mapfile -t add < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null \
     | while IFS= read -r x; do [[ $x != "$f" && ${x##*/} =~ \.(test|spec)\. ]] && printf '%s\n' "$x"; done)
   if [ -e "$2/$f" ] || [ ${#add[@]} != 0 ]; then speedproof "$@" "${add[@]}"; return; fi
   rm -f "$2.unfixed"
+  mapfile -t into < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=M HEAD 2>/dev/null \
+    | while IFS= read -r x; do [[ ${x##*/} =~ \.(test|spec)\. ]] && printf '%s\n' "$x"; done)
   before=$(testspart "$(date +%F)" 2>/dev/null | jq -r --arg f "$f" 'first(.files[]? | select(.file == $f) | .median | numbers) // empty' 2>/dev/null)
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -682,8 +686,9 @@ optproof() { # <card> <worktree> <issue json> <test file>
     if [ -n "$cs" ]; then printf 'The cases %s held, as its runner named them in a run of it alone on main'"'"'s code at %s:\n' "$f" "$sha"; sed 's/^/- /' <<<"$cs"
     elif [ -n "$rc" ]; then printf 'Its runner named no case of it in a run of it alone on main'"'"'s code at %s (exit %s): read the file there for its cases.\n' "$sha" "$rc"
     else printf 'It could not be run alone on main'"'"'s code (%s): read the file there for its cases.\n' "${out:0:300}"; fi
-    echo 'Name, for each of its cases, the test that still covers it after the change (its file and case). A case with no test named is a finding.'; } > "$2.unfixed"
-  record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof ok "$(jq -cn --arg f "$f" --arg b "$before" '{reason: "", speed: {file: $f, before: ($b | tonumber? // null), after: null}}')"
+    echo 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`. A case with no test named is a finding.'; } > "$2.unfixed"
+  record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof ok "$(jq -cn --arg f "$f" --arg b "$before" '{reason: "", speed: {file: $f, before: ($b | tonumber? // null), after: null,
+    fix: (if $ARGS.positional == [] then "deleted" else "merged" end), into: $ARGS.positional}}' --args "${into[@]}")"
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   return 0
 }

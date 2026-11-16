@@ -356,15 +356,17 @@ the change itself, whatever it touches.'
 # carried, and is not counted. A `DONE-WHEN: D<n> holds` line is the reviewer's word that a Done-when line's evidence
 # holds (DONEWHENREVIEW); one that does not hold is a finding, so no other DONE-WHEN line is let through.
 # An `EARLIER: E<n> holds` line is the reviewer's word that the fix of an earlier finding holds (REREVIEW).
-NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^[[:space:]]*$'
+# A `COVERED-BY: <test file>: <case>` line names the test that covers a case of a file an Optimize deletes (optproof()).
+NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^[[:space:]]*$'
 # A `DECLINED:` line is a finding the judge declined (judged()), with the judge's reason: it holds no verdict, causes
 # no fix round and is never filed. A `MINOR:` line is an accepted P3 finding while the control record's rule P3 is
 # off (minor()): it is listed only, holds no verdict, causes no fix round and is never filed, but it is counted
 # (counts()). Only the engine writes either: a line the reviewer starts so is a finding (review()).
 # The lines a review's record line (reason) and a blocked card's comment leave out: the NEW CARD, UNPROVEN,
-# DECLINED and MINOR lines stay there, so the dashboard's review text shows them.
+# DECLINED, MINOR and COVERED-BY lines stay there, so the dashboard's review text shows them, and the Tests page the
+# test files that cover the cases of a file an Optimize deleted (testspart()).
 # shellcheck disable=SC2034 # used in lib/card.sh, lib/followups.sh and lib/push.sh
-UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|/}
+UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|/}
 # What the fix session after a NO-GO is told, after the brief; the review follows it.
 FIX='# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else
 An `UNPROVEN:` line is not a finding: change nothing for it.'

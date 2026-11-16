@@ -57,9 +57,9 @@ const HOLDS = {
   '.tests-box': 'the progress output, <pre class="tests-out">',
   '.tests-preview': 'the text fields of an issue, a close or a case kept off',
   '.tests-rule': 'the fields of one auto-file rule',
-  '.tests-results-list': 'a result viewed, with its .tests-box',
 };
 const TEXT_ONLY = {
+  '.tests-results-list': 'one line of text an action or an Optimize issue',
   '.tests-runs': 'one line of text a run',
   '.tests-list': 'one line of text a file',
   '.tests-auto-log': 'one line of text an event',
@@ -70,4 +70,11 @@ test('Tests on a phone: each grid on the Tests page that holds a table, a <pre> 
     assert.ok(shrinks(sel), `${sel} (${HOLDS[sel]}) has one column of minmax(0, …)`);
   }
   assert.deepEqual(grids(), [...Object.keys(HOLDS), ...Object.keys(TEXT_ONLY)].sort(), 'every grid of the Tests page is in HOLDS or TEXT_ONLY');
+});
+
+// Bug (issue 74): a judge's text ran the page's width in a monospace box. jsdom lays nothing out, so this reads the
+// rule: the formatted text (.tests-md) is at most 80ch wide and keeps the page's font.
+test('Tests results: a judge\'s formatted text is at most 80ch wide, in the page\'s font', () => {
+  assert.equal(decls('.tests-md')['max-width'], '80ch');
+  assert.equal(decls('.tests-md')['font-family'], undefined, 'no font of its own');
 });

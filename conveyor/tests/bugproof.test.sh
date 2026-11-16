@@ -216,7 +216,7 @@ speedline() { st 'select(.step == "bugproof") | "\(.result) \(.speed | tojson)"'
 # one build session, the review shown the numbers, both numbers on its record, and it lands.
 t_speedfaster() {
   speedcard 4
-  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   [[ $(head -1 "$STUB/mainran") == */cards/mainrun/* ]] && [ "$(sed -n 2p "$STUB/mainran")" = fast ] && grep -qx $'fail\tf.test.sh' "$STUB/mainran" \
     || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -qx '# The speed-up check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
@@ -231,7 +231,7 @@ t_speedslow() {
   speedcard 10
   [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
     || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
-  [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+  [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
 }
 
 # Bug it catches: a speed-up card whose file fails with the change is let through because it ran fast.
@@ -241,14 +241,15 @@ t_speedfails() {
     || fail "a speed-up card whose file fails was not blocked: $(st 'select(.step | IN("review", "blocked"))')"
 }
 
-# One card of #7, an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`), whose median on
+# One card of #7, an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`, with g.test.sh,
+# `echo other`), whose median on
 # record is 10 CPU s (three whole-suite runs: 9, 10, 11). Its build runs <build>. Each run under cards/mainrun/ runs
 # the files of its list: it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each
 # as passed, and times each at the CPU seconds $STUB/cpu-<file> holds. The reviewer's prompt is kept in $STUB/asked.
 optcard() { # <build> <cpu of f> [<cpu of f1> <cpu of f2>]
   setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"
-  echo 'echo slow' > "$R/f.test.sh"
-  git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
+  echo 'echo slow' > "$R/f.test.sh"; echo 'echo other' > "$R/g.test.sh"
+  git -C "$R" add f.test.sh g.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
   echo "$1" > "$STUB/build"
@@ -270,7 +271,7 @@ EOF
 # its median: its record holds both numbers, the review is shown the Optimize check, and it lands.
 t_optkeep() {
   optcard 'echo fast > f.test.sh' 4
-  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   [ "$(cat "$STUB/mainran")" = 'f.test.sh: fast' ] || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
   grep -qx '# The Optimize check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
     || fail "the review was not shown the Optimize check"
@@ -288,7 +289,7 @@ t_optslow() {
 # new files run alone with the change, and their CPU seconds summed (2 + 3) are lower than f's median.
 t_optsplit() {
   optcard 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 2 3
-  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":5}' ] || fail "the split's record does not hold its summed CPU seconds: $(st 'select(.step == "bugproof")')"
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":5,"fix":"split","into":["f1.test.sh","f2.test.sh"]}' ] || fail "the split's record does not hold its summed CPU seconds: $(st 'select(.step == "bugproof")')"
   [ "$(sort "$STUB/mainran" | tr '\n' '|')" = 'f1.test.sh: one|f2.test.sh: two|' ] || fail "the split's new files did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
   grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed, lower than the median on record of f.test.sh, 10 CPU s' "$STUB/asked" \
     || fail "the review was not shown the split's numbers"
@@ -298,12 +299,23 @@ t_optsplit() {
 # D3. Bug it catches: a delete is blocked for having no test that fails on main, or for having no file to time, or the
 # review is never told what the file tested. The file runs alone on main's code as main has it, and the review is
 # given its cases and asked for the test that covers each.
+# The review names the covering tests on COVERED-BY lines (#74): they are no finding, so its GO holds, and they stay in
+# its record, where the Tests page reads them.
 t_optdelete() {
+  local GO=$'COVERED-BY: g.test.sh: one\nCOVERED-BY: g.test.sh: two\n'"$GO"
   optcard 'rm f.test.sh' 4
-  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null}' ] || fail "a delete's record: $(st 'select(.step == "bugproof")')"
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null,"fix":"deleted","into":[]}' ] || fail "a delete's record: $(st 'select(.step == "bugproof")')"
   [ "$(cat "$STUB/mainran")" = 'f.test.sh: echo slow' ] || fail "the file did not run alone as main has it: $(cat "$STUB/mainran" 2>&1)"
   grep -qx '# The Optimize check' "$STUB/asked" && grep -qx -- '- one' "$STUB/asked" && grep -qx -- '- two' "$STUB/asked" \
-    && grep -qF 'Name, for each of its cases, the test that still covers it after the change' "$STUB/asked" \
+    && grep -qF 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`' "$STUB/asked" \
     || fail "the review was not given the file's cases and asked for the test that covers each"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a delete did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a delete did not land: $(st 'select(.step | IN("blocked", "landed", "review"))')"
+  [ "$(st 'select(.step == "review") | .reason' | grep -c '^COVERED-BY: g\.test\.sh: ')" = 2 ] || fail "the review's record lost its COVERED-BY lines: $(st 'select(.step == "review")')"
+}
+
+# Bug it catches (#74): a merge recorded as a delete, so the Tests page could not name the file that took the cases of
+# the file it removed. A change that removes the file and changes another test file is a merge into that file.
+t_optmerge() {
+  optcard 'rm f.test.sh; echo "echo slow" >> g.test.sh' 4
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null,"fix":"merged","into":["g.test.sh"]}' ] || fail "a merge's record: $(st 'select(.step == "bugproof")')"
 }
