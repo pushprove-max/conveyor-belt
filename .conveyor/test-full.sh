@@ -32,10 +32,13 @@ unset CONVEYOR_SUITE_FILES # the list is this run's: a test file that runs a sui
 # list as `fail<TAB><file>[<TAB><case>]`: it runs only the files of its `fail` lines, so a run alone is not the whole
 # suite again. Of the engine's runner (a case of it or of an engine case file, which the runner runs) only those cases,
 # and of a node test file those cases alone; a Python or other shell test file has no case filter and runs whole. A
-# list with no `fail` line (files kept off as passed before) is not read: the suite runs whole.
+# list with no `fail` line (files kept off as passed before) is not read: the suite runs whole. Nor is a list with a
+# `fail` line that names no test file of the run (a run with no per-file logs names its failure by the command, as
+# testrun.sh testfails() does): selecting by it would run nothing and pass, so the suite runs whole.
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
 again=()
-if [ -s "$RERUN" ] && grep -q $'^fail\t' "$RERUN"; then
+if [ -s "$RERUN" ] && grep -q $'^fail\t' "$RERUN" \
+  && ! awk -F'\t' '$1 == "fail" { print $2 }' "$RERUN" | grep -vxFf <(printf '%s\n' "${files[@]}") | grep -q .; then
   mapfile -t again < <(awk -F'\t' '$1 == "fail" && $3 != "" && ($2 == "conveyor/conveyor.test.sh" || $2 ~ /^conveyor\/tests\/[^\/]+[.]test[.]sh$/) { print $3 }' "$RERUN" | sort -u)
   # A `fail` line naming the runner with no case runs it whole.
   ! grep -qxF $'fail\tconveyor/conveyor.test.sh' "$RERUN" || again=()

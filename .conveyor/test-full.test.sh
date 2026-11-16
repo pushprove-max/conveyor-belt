@@ -101,5 +101,11 @@ rm -f "$R/ran"; printf 'pass\tlib/fx-pass.test.sh\noff\tlib/fx-pass.test.sh\n' >
 (cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1
 got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
 [ "$got" = "node a node c pass " ] || no "a list with no failed case did not run the whole suite: $got"
+# Bug (#88): a run with no per-file logs names its failed case's file by the pack's command (testrun.sh testfails()).
+# Its `fail` line selected no file, so each run alone ran nothing and passed, and the failure was taken as flaky.
+rm -f "$R/ran"; printf 'pass\tlib/fx-pass.test.sh\nfail\t%s\tc\n' "$full" > "$T/rerun"
+(cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1
+got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
+[ "$got" = "node a node c pass " ] || no "a failed case named by the command, not a test file, ran no test file: $got"
 
 [ $fails = 0 ] && echo "ok - test-full" || exit 1
