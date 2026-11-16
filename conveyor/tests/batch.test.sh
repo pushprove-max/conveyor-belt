@@ -17,8 +17,11 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # together, so they would not wait on #7: each other card takes away the patch #7's claim keeps once #7 holds a.txt,
 # and waits on it as on a card whose change cannot be read (together()), so #7 is among the cards of the batch it
 # makes. With $STUB/overlap the patch stays: the cards that wait on #7 are those whose change does not apply with its.
+# A live record every second (the pack's default), not the test pack's 0.2 s: a card waiting at its claim, or on the
+# card whose batch took it, looks again each `live` seconds, and these cases' cards wait a lot; at 0.2 s those looks
+# were 10 to 17% of each case's instructions. The cases wait on what the cards do, not on those seconds.
 batchsetup() { # <issues json>
-  setup "$1"; tune '.landBatch = 8'; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
+  setup "$1"; tune '.landBatch = 8 | .tunables.live = 1'; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   cat > "$STUB/review-cmd" <<'EOF'
 n=${PWD##*-}
