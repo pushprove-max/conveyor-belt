@@ -131,9 +131,9 @@ The list holds:
 
 - each test file that the change adds or changes;
 - for each other changed file, the test files that `.conveyor/test-links.json` links to it, if your project has that
-  file (`{"<file>": ["<test file>", ...]}`);
-- else, the test files that the [test map](#the-test-map) says cover that file;
-- else, the test files whose name holds the name of that file, from the nearest folders. For example, a change to
+  file (`{"<file>": ["<test file>", ...]}`), and the test files that the [test map](#the-test-map) says cover that
+  file;
+- if neither gives a test, the test files whose name holds the name of that file, from the nearest folders. For example, a change to
   `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
 
 A change to a document (`.md`, `.txt`, `.rst`) adds no test. When the change touches one of the files below, the
@@ -146,7 +146,7 @@ command gets no list and runs the whole suite:
 - a shared test file: a helper, setup, fixture or mock file, or a file in a folder of that name;
 - a file that has no test that Conveyor can find.
 
-A link in `.conveyor/test-links.json` wins over these rules. `test.full` is not changed: it always runs the whole
+A link in `.conveyor/test-links.json` wins over these rules, but not over a file that the test map marks as shared. `test.full` is not changed: it always runs the whole
 suite. The Board shows the mode of a card's test run and how its tests were found: `changed: 7 files (map)`,
 `changed: 7 files (by name)` or `whole suite: <why>`. With a made test map, it adds the age of the map, for example
 `map 12 commits old`. `/units` shows `changed: 7 files` or `whole suite`.

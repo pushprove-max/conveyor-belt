@@ -480,13 +480,13 @@ listcmd() { # <worktree> <command>
 }
 # The tests a card's change touches (its staged change against HEAD), one path a line after a first line that says how
 # they were found, {by: "map" or "name", age} (age: the commits the made test map is behind, lib/testmap.sh mapread(),
-# with one; else null): of each changed file, a document (.md, .txt, .rst) selects none; the test files
-# .conveyor/test-links.json links to it (the project's own links, those still there), and a test file (testpaths())
-# itself, while it is there; else, a test file that is gone selects none; a source the test map marks as shared by
-# most tests selects the whole suite, and the tests the map says cover it (those still there) are its tests (by map);
-# else a test file that is shared (shared(), below) selects the whole suite, as does any other file at the root,
-# shared or with a config extension; else the test files whose name holds its name (no extension) as a word, the
-# nearest by folder (those that share the most leading folders with it). A file of which none of these finds a test,
+# with one; else null): of each changed file, a document (.md, .txt, .rst) selects none; a test file (testpaths())
+# selects itself, while it is there, and the test files .conveyor/test-links.json links to it (the project's own
+# links, those still there); else a source the test map marks as shared by most tests selects the whole suite, links
+# or not; else the tests the map says cover it and those its links name (those still there) are its tests (by map,
+# when the map names one); else, a test file that is gone selects none; else a test file that is shared (shared(),
+# below) selects the whole suite, as does any other file at the root, shared or with a config extension; else the
+# test files whose name holds its name (no extension) as a word, the nearest by folder (those that share the most leading folders with it). A file of which none of these finds a test,
 # a change that selects none, or a test map that cannot be read, runs the whole suite: it fails then, and prints why
 # in place of the list.
 testsel() { # <worktree>
@@ -506,12 +506,13 @@ testsel() { # <worktree>
       | ($tm.shared // [] | INDEX(.)) as $sh
       | [$ch[] | . as $p
          | ([$map[$p] | arrays[] | strings | select($have[.])]) as $m
+         | ([$tm.sources[$p] // [] | .[] | select($have[.])]) as $c
          | if test("\\.(md|txt|rst)$"; "i") then []
            elif $ct[$p] and $have[$p] and (shared | not) then [$p] + $m
+           elif $sh[$p] then {whole: "\($p): shared by most tests (map)"}
+           elif $c != [] then {map: ($m + $c)}
            elif $m != [] then $m
            elif $ct[$p] and ($have[$p] | not) then []
-           elif $sh[$p] then {whole: "\($p): shared by most tests (map)"}
-           elif [$tm.sources[$p] // [] | .[] | select($have[.])] != [] then {map: [$tm.sources[$p][] | select($have[.])]}
            elif $ct[$p] or (contains("/") | not) or shared or config then {whole: "\($p): shared setup or config"}
            else (stem | rx) as $s | dir as $d
              | [$all[] | select($s != "" and (base | test("(^|[._-])" + $s + "([._-]|[A-Z]|$)"))) | {t: ., n: common(dir; $d)}]

@@ -74,6 +74,27 @@ t_testmapshared() {
   [ "$(cat "$T/$CASE/list")" = '{"mode":"whole","why":"src/util.js: shared by most tests (map)"}' ] || fail "the whole suite's why is not the map's: $(cat "$T/$CASE/list")"
 }
 
+# Main as nodemain with the map, and .conveyor/test-links.json linking src/util.js and src/a.js to test/c.test.js.
+linkmain() {
+  nodemain; nodemap
+  echo '{"src/util.js": ["test/c.test.js"], "src/a.js": ["test/c.test.js"]}' > "$R/.conveyor/test-links.json" \
+    && git -C "$R" add -f .conveyor/test-links.json && git -C "$R" commit -qm links || fail "the links could not be committed"
+}
+# Bug it catches: a link to the shared helper returned its one linked test before the map's shared check, so a break
+# in most tests landed unseen. The map's shared check holds, links or not: the whole suite runs.
+t_testmaplinkshared() {
+  linkmain
+  maprun 'echo "// more" >> src/util.js'
+  [ "$(cat "$T/$CASE/list")" = '{"mode":"whole","why":"src/util.js: shared by most tests (map)"}' ] || fail "a link to the shared helper ran only its linked test: $(cat "$T/$CASE/list") $(cat "$STUB/got")"
+}
+# Bug it catches: a link to src/a.js replaced the tests the map says cover it, so test/a.test.js did not run. Both run.
+t_testmaplinkcover() {
+  linkmain
+  maprun 'echo "// more" >> src/a.js'
+  [ "$(cat "$STUB/got")" = 'test/a.test.js test/c.test.js' ] || fail "the linked and the covering tests did not both run: $(cat "$STUB/got")"
+  jq -e '.by == "map"' "$T/$CASE/list" >/dev/null || fail "the list does not say the map found its tests: $(cat "$T/$CASE/list")"
+}
+
 # Bug it catches: a test file a card adds stayed out of the map, so a later change to what it covers did not run it.
 # The card's run that passes maps it (alone, under coverage): src/b.js now lists it beside test/b.test.js.
 t_testmapnew() {
