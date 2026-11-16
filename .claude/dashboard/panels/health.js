@@ -145,6 +145,33 @@ window.DASH_APP.panel({
       if (typeof r.untimed === 'number' && r.untimed > 0) check(`Test times${of}`, ctx.chip('Not recorded', 'warn'),
         `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times`).next =
         'Add them to the test command: the section "The CPU budget of a test file" in conveyor/README.md tells how.';
+      // Each Claude route (routes; conveyor/lib/control.sh routesnow()): the subscription login and the API proxy, each
+      // in the state the last session on it found. A failed login is a warning while a fallback proxy works.
+      const routes = r.routes && typeof r.routes === 'object' ? r.routes : null;
+      if (routes) {
+        const sub = routes.subscription && typeof routes.subscription === 'object' ? routes.subscription : {};
+        const px = routes.proxy && typeof routes.proxy === 'object' ? routes.proxy : {};
+        const covered = px.route === 'fallback' && px.state === 'works';
+        // When each role uses the proxy, as its route (roles) sets it.
+        const when = { fallback: 'when its subscription login fails', proxy: 'always', subscription: 'never' };
+        const roles = px.roles && typeof px.roles === 'object' ? px.roles : {};
+        const uses = ['builder', 'reviewer'].filter((r) => when[roles[r]]).map((r) => `the ${r} ${when[roles[r]]}`).join(', ');
+        const route = (name, s, tones) => {
+          const state = typeof s.state === 'string' && s.state ? s.state : 'not checked';
+          const tone = tones[state] || 'quiet';
+          const where = typeof s.baseUrl === 'string' ? (uses ? `${s.baseUrl}, ${uses}` : s.baseUrl) : null;
+          const row = check(`Claude route: ${name}${of}`, ctx.chip(state.charAt(0).toUpperCase() + state.slice(1), tone), where,
+            typeof s.at === 'string' ? ctx.since(s.at, ' ago') : null);
+          return tone === 'quiet' || tone === 'ok' ? null : row;
+        };
+        const bad = covered ? 'warn' : 'bad';
+        const subRow = route('subscription login', sub, { works: 'ok', expired: bad, 'not set': bad });
+        if (subRow) subRow.next = px.state === 'not set'
+          ? 'Sign in again on the build machine: run claude, then /login. Or run /conveyor-belt:setup to set a local API proxy as the fallback.'
+          : 'Sign in again on the build machine: run claude, then /login.';
+        const pxRow = route('API proxy', px, { works: 'ok', fails: 'bad' });
+        if (pxRow) pxRow.next = "Start the proxy on the build machine, or set the host file's claudeProxy to a proxy that runs. The blocked card shows its error.";
+      }
       if (!r.gh) check(`GitHub${of}`, ctx.chip('Not signed in', 'bad'), 'gh cannot read or close issues').next = 'Run gh auth login on the build machine.';
       if (typeof r.diskFreeKb === 'number' && r.diskFreeKb < 10485760) check(`Disk${of}`, ctx.chip('Low', 'warn'), `${(r.diskFreeKb / 1048576).toFixed(1)} GB free for cards`).next =
         'Free space on the disk that holds the cards folder.';

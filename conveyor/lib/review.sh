@@ -68,7 +68,7 @@ reviewed() { # <worktree> <brief> [instructions]: prints and fails as review() d
   r=$(jq -r .reason <<<"$x"); printf '%s\n' "${r%%$'\n'*}; run again after ${REVIEW_PAUSE}s: $u"; return 1
 }
 review() { # <worktree> <brief> [instructions, in place of REVIEW]
-  local model effort agent s rc ins=${3:-$REVIEW}
+  local model effort agent s rc ins=${3:-$REVIEW} PROXY_ROLE=reviewer # the reviewer's route (proxyroute())
   s=$(seat reviewer) && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no reviewer model"; return 1; }
   rc=$(seatready reviewer "$s") || { echo "$rc"; return 1; } # the CLI the seat names, never another
   rm -f "$1.review.new" "$1.spent"
@@ -91,7 +91,7 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
   local model=$4 effort=$5 rc roll s sec f run='' no=''
   rm -f "$1.review.new"; sec=$SECONDS
-  (cd "$1" && exec timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only -m "$model" \
+  (cd "$1" && codexargs && exec timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
     -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$model"; rc=$?; sec=$((SECONDS - sec))
   # The running total its session file holds: the tokens of a review that ended before its turn did.
@@ -101,7 +101,7 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.events" 2>/dev/null | tail -n 1) \
     && [ -n "$f" ] || f=''
   if [ $rc = 0 ] && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
-    [ -n "$f" ] && jq -e '.stats.turns > 0' <<<"$f" >/dev/null && printf '%s\n' "$f" && return 0
+    [ -n "$f" ] && jq -e '.stats.turns > 0' <<<"$f" >/dev/null && routed "$f" codex && return 0
     s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
   else s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$(tail -n 60 "$1.err")"
     [ "$(verdict "$1.review.new" 2>/dev/null)" != none ] || no=2; fi
@@ -114,9 +114,17 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
        stats: {turns: ([$all[] | select(.type == "turn.completed")] | length),
          tools: ($it | map(select(IN("agent_message", "reasoning", "item") | not)) | group_by(.) | map({key: .[0], value: length}) | from_entries)}}' "$1.events" 2>/dev/null) \
     || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read"}')
-  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
-  [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" codex "$model" reviewer "" "$1" \
-    || { s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
+  f=$(routed "$f" codex)
+  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()). One whose own login failed,
+  # with the proxy as the reviewer's fallback, runs again at once through the proxy (proxyfallback()).
+  if [ "$no" = 2 ] && nostart "$rc" "$f" "$1.events" "$1.err" codex "$model" reviewer "" "$1"; then
+    if proxyfallback codex; then
+      s=$NOSTART_WHY; f=$(PROXY_NOW=1 codexreview "$@"); no=$?
+      [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
+      bothsaid "$s" "$f"; return $no
+    fi
+    s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+  fi
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
   echo "$s"; return "${no:-1}"
@@ -204,18 +212,28 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   f=$(jq -cRn --arg m "$4" --arg e "$5" --argjson s "$sec" "$SESSIONREAD" "$1.events" 2>/dev/null | tail -n 1)
   jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
     || f=$(jq -cn --arg m "$4" --arg e "$5" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read", ok: false}')
+  f=$(routed "$f")
   # The answer is the text of its last result, ending in one newline (verdict() reads the last line).
   if [ $rc = 0 ] && [ "$(jq -r .ok <<<"$f")" = true ] \
     && jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null \
     && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
+    routedone 1
     jq -e 'has("tokens")' <<<"$f" >/dev/null && jq -c 'del(.ok)' <<<"$f" && return 0
     s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
   else s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$(tail -n 60 "$1.err")"
     jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null
     [ "$(verdict "$1.review.new")" != none ] || no=2; fi
-  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
-  [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" claude "$4" reviewer "${RACCT:-$ACCT}" "$1" \
-    || { s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
+  # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()). One whose subscription
+  # login failed, with the proxy as its fallback, runs again at once through the proxy (proxyfallback()).
+  if [ "$no" = 2 ] && nostart "$rc" "$f" "$1.events" "$1.err" claude "$4" reviewer "${RACCT:-$ACCT}" "$1"; then
+    routedone 0
+    if proxyfallback; then
+      s=$NOSTART_WHY; f=$(PROXY_NOW=1 claudereview "$@"); no=$?
+      [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
+      bothsaid "$s" "$f"; return $no
+    fi
+    s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+  else routedone 1; fi
   jq -c '{step: "review"} + del(.ok)' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
   echo "$s"; return "${no:-1}"
@@ -294,7 +312,8 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
 # <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens and
 # usage (an OpenCode judge's holding its cost, usage.cost, when it reports one); one that fails prints them with failed (why) and fails.
 judgecall() { # <worktree> <instructions> <the brief and the findings>
-  local s model effort agent d p rc sec f='' roll run=''
+  # shellcheck disable=SC2034 # PROXY_ROLE is read by proxyroute() in lib/control.sh
+  local s model effort agent d p rc sec f='' roll run='' PROXY_ROLE=reviewer # the review's route (proxyroute())
   s=$(judgeseat) || { jq -cn '{failed: "the control record names no judge, and the pack allows the review no model of another family than the reviewer runs on"}'; return 1; }
   jqget "$s" model model effort effort agent agent || model='' effort='' agent=''
   d=$(seatready judge "$s") || { jq -cn --arg m "$model" --arg r "$d" '{model: $m, failed: $r}'; return 1; } # the CLI the seat names, never another
@@ -326,7 +345,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$OCREVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage} | del(.[] | nulls)' 2>/dev/null)
   else
     model=$(codexmodel "$model") || { jq -cn --arg r "$model" '{failed: $r}'; return 1; }
-    (cd "$1" && exec timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only -m "$model" \
+    (cd "$1" && codexargs && exec timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" -o "$1.judge" - <<<"$2"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec))
     roll=$(rollout "$1.judge.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage}' 2>/dev/null)

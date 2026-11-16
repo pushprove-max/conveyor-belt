@@ -130,7 +130,8 @@ cards() {
 # {since, sha}, while the loop's push job runs, else null; a landing during it waits for the next push); gh (signed in); diskFreeKb (free space
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
-# untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did. Records that do not check give no record: the reason and exit 1.
+# untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; routes: each
+# Claude route, subscription and proxy, with its state (routesnow()). Records that do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
 # the weekly limit reading is at or over the guard, or "control record unreadable"; a loop that is not running picks
 # nothing, whatever `loop` says of there being one; the running loop's own "control record unreadable" stands over
@@ -220,7 +221,7 @@ health() {
   done
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
-    --argjson cap "$cap" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" \
+    --argjson cap "$cap" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" \
     --slurpfile old "$READ_OLD" --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
@@ -283,5 +284,5 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, diskFreeKb: $free, builderCap: $cap, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed}' "$READ"
+       untimed: untimed, routes: $routes}' "$READ"
 }

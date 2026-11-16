@@ -30,6 +30,9 @@ export CONVEYOR_LIMIT_CMD=false
 # The same-file check before a pick (overlap(), lib/pick.sh) is never a model call here: it fails, so each issue is
 # picked as it is. A case of that check sets its own (deps.test.sh).
 export CONVEYOR_OVERLAP_CMD=false
+# setup looks for a local API proxy on no port of this machine's (findproxy(), lib/setup.sh): a proxy running here
+# would make every setup case ask for --builder-route and --reviewer-route. A case of that search names its stub proxy's port.
+export CONVEYOR_PROXY_PORTS=
 # The host file (the state folder, the terms file) is never this machine's own; a case writes its own, in a folder of
 # its own (case_keep).
 export XDG_CONFIG_HOME=$T/config

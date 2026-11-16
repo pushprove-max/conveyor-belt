@@ -233,26 +233,76 @@ clis() {
 # Models through an API proxy. Claude's: card sessions run with --setting-sources "", so a base URL in the user's
 # settings.json never reaches them; the host file's claudeProxy, else the pack's models.claudeProxy, names it and the
 # NAME of the variable that holds its key (never the key). Prints that object as JSON; nothing when neither names one.
+# Its roles, {builder, reviewer}, set each role's route (proxyrole()): "subscription", never through it; "fallback",
+# on the subscription login, and a build, fix, rebase or review runs again through the proxy when that login fails
+# before any turn; "proxy", always through it. A role it does not name, or no roles at all, is "proxy".
 claudeproxy() {
   local p; p=$(jq -ce '.claudeProxy | objects' "$HOST" 2>/dev/null) || packget models.claudeProxy p 2>/dev/null || :
   [ "$p" = null ] || printf '%s' "$p"
 }
+# Codex's, as setup writes it in the host file: codexProxy, {baseUrl, keyEnv, roles} as claudeProxy's. A Codex session
+# whose role's route takes it through the proxy is given it as its own provider settings (codexargs()).
+codexproxyset() { local p; p=$(jq -ce '.codexProxy | objects' "$HOST" 2>/dev/null) && printf '%s' "$p"; }
+# The route set for the role a session started now runs as (PROXY_ROLE: builder, the default, or reviewer) on <cli>
+# (claude, the default, or codex): subscription, fallback or proxy; nothing when no proxy is set for that CLI.
+proxyrole() { # [claude|codex]
+  local p; if [ "${1:-claude}" = codex ]; then p=$(codexproxyset); else p=$(claudeproxy); fi; [ -n "$p" ] || return 0
+  jq -r --arg r "${PROXY_ROLE:-builder}" '(.roles // {})[$r] | if IN("subscription", "fallback") then . else "proxy" end' <<<"$p"
+}
+# The route a session started now takes: proxy, subscription (a fallback proxy not in use yet, or a role set to the
+# subscription), or nothing when no proxy is set. PROXY_NOW set: this try is the one through the fallback proxy.
+proxyroute() { # [claude|codex]
+  local r; r=$(proxyrole "${1:-claude}"); [ -n "$r" ] || return 0
+  if [ "$r" = proxy ] || { [ "$r" = fallback ] && [ -n "${PROXY_NOW:-}" ]; }; then echo proxy; else echo subscription; fi
+}
+# Each Claude route's state as the last session on it found it (routeset(), session.sh); health() reads it (routesnow()).
+ROUTES=${STATE%/*}/routes.json
+# For health: {subscription, proxy}, each {state, at} as ROUTES has it, else {state: "not checked"}; the proxy's
+# {state: "not set"} when no proxy is set, else with its baseUrl, its roles (each role's route) and route: "fallback"
+# when a role uses it as the fallback, else "proxy"; the subscription's {state: "not used"} when every role runs
+# through the proxy.
+routesnow() {
+  local p; p=$(claudeproxy); [ -n "$p" ] || p=null
+  { cat "$ROUTES" 2>/dev/null || echo null; } | jq -c --argjson p "$p" 'if type == "object" then . else {} end
+    | ($p | if . == null then null else [.roles // {} | (.builder, .reviewer) | if IN("subscription", "fallback") then . else "proxy" end] end) as $r
+    | {subscription: (if $r != null and ($r | all(. == "proxy")) then {state: "not used"} else .subscription // {state: "not checked"} end),
+       proxy: (if $p == null then {state: "not set"} else (.proxy // {state: "not checked"})
+         + {baseUrl: $p.baseUrl, roles: {builder: $r[0], reviewer: $r[1]}, route: (if $r | any(. == "fallback") then "fallback" else "proxy" end)} end)}' 2>/dev/null || echo null
+}
 # Run in a card session's subshell before claude starts: the proxy's base URL, its key from the variable it names,
 # and with a base URL that is not api.anthropic.com, ENABLE_TOOL_SEARCH (true unless toolSearch names otherwise).
 # Any other Anthropic key in the environment is dropped first, so the proxy is never sent a key it was not named.
+# A session on the subscription (proxyroute subscription) is given none of it. Through a fallback proxy with no key, a
+# stand-in token is set, as the subscription's login is the one that failed.
 proxyenv() {
-  local p b k t v=''; p=$(claudeproxy); [ -n "$p" ] || return 0
-  b=$(jq -r .baseUrl <<<"$p"); k=$(jq -r '.keyEnv // ""' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
+  local p b k t v='' r; r=$(proxyroute); [ "$r" = proxy ] || return 0
+  p=$(claudeproxy); b=$(jq -r .baseUrl <<<"$p"); k=$(jq -r '.keyEnv // ""' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
   [[ ! $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || v=$(envof "$k")
+  [ -n "$v" ] || [ -z "${PROXY_NOW:-}" ] || v=no-key
   unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
   export ANTHROPIC_BASE_URL=$b
   [ -z "$v" ] || export ANTHROPIC_AUTH_TOKEN="$v"
   [[ $b =~ ^https?://api\.anthropic\.com(:[0-9]+)?(/|$) ]] || export ENABLE_TOOL_SEARCH=$t
 }
+# A Codex session's provider settings, in the array CODEX_PX: none on the subscription; through the proxy
+# (proxyroute codex), Codex's -c settings of a provider, conveyor-proxy, at codexProxy's baseUrl on the Responses API,
+# with its key read from the variable keyEnv names when that variable is set.
+CODEXPROV=conveyor-proxy
+codexargs() {
+  local p b k
+  CODEX_PX=(); [ "$(proxyroute codex)" = proxy ] || return 0
+  p=$(codexproxyset); b=$(jq -r '.baseUrl | strings' <<<"$p"); k=$(jq -r '.keyEnv | strings' <<<"$p")
+  [ -n "$b" ] || return 0
+  [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ -n "$(envof "$k")" ] || k=''
+  # shellcheck disable=SC2034 # read by lib/pick.sh, lib/review.sh, lib/session.sh and lib/testaction.sh
+  CODEX_PX=(-c "model_provider=\"$CODEXPROV\"" -c "model_providers.$CODEXPROV={name = \"$CODEXPROV\", base_url = $(jq -rn --arg b "$b" '$b | @json')$([ -z "$k" ] || printf ', env_key = "%s"' "$k"), wire_api = \"responses\"}")
+}
 # Codex's: the top-level model_provider of Codex's config.toml and that provider's base_url and env_key, as
 # "<name>\037<base_url>\037<env_key>"; nothing when the file names no provider. A provider with no base_url is direct.
+# A session the host file's codexProxy routes (proxyroute codex) is given that one instead (codexargs()).
 codexproxy() {
   local f=${CODEX_HOME:-$HOME/.codex}/config.toml
+  [ "$(proxyroute codex)" != proxy ] || { jq -j --arg n "$CODEXPROV" '"\($n)\u001f\(.baseUrl // "")\u001f\(.keyEnv // "")\n"' <<<"$(codexproxyset)"; return 0; }
   [ -r "$f" ] || return 0
   # Each line as tokens: a quoted string (s), a bare word (b) or one of {}[]=,. ; a key is dotted and quoted or not, a
   # value an inline table (read into its keys, at any depth), an array (skipped) or a scalar.
@@ -342,13 +392,15 @@ codexready() {
 }
 # For doctor: each role's model and its route, direct or through which proxy. The builder's seat runs build, fix and rebase.
 routes() {
-  local r s m a p name base env rc=0
+  local r s m a p name base env rc=0 PROXY_ROLE w
   for r in builder reviewer; do
+    PROXY_ROLE=$r
     s=$(seat "$r") || { echo "$r: the pack's models.allowed lists no $r model"; rc=1; continue; }
     jqget "$s" model m agent a || m='' a=''
     if [ "$a" = claude ]; then
-      p=$(claudeproxy)
-      if [ -n "$p" ]; then echo "$r: $m (claude) through $(jq -r '"\(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$p")"
+      p=$(claudeproxy); w=$(proxyrole)
+      if [ "$w" = subscription ]; then echo "$r: $m (claude) on the subscription login"
+      elif [ -n "$p" ]; then echo "$r: $m (claude) $([ "$w" != fallback ] || echo "on the subscription login, then when its login fails ")$(jq -r '"through \(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$p")"
       # None named: a card session inherits the engine's own environment, base URL and all.
       elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then echo "$r: $m (claude) through $ANTHROPIC_BASE_URL, from the environment Conveyor runs in"
       else echo "$r: $m (claude) direct"; fi
@@ -356,7 +408,8 @@ routes() {
     else
       name='' base='' env=''; IFS=$'\037' read -r name base env < <(codexproxy)
       m=$(codexmodel "$m") || { echo "$r: $m"; rc=1; continue; }
-      if [ -n "$base" ]; then echo "$r: $m (codex) through $base, Codex's model_provider $name, key in ${env:-no variable}"
+      if [ "$(proxyrole codex)" = fallback ]; then echo "$r: $m (codex) on its own login, then when its login fails through $(jq -r '"\(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$(codexproxyset)")"
+      elif [ -n "$base" ]; then echo "$r: $m (codex) through $base, Codex's model_provider $name, key in ${env:-no variable}"
       else echo "$r: $m (codex) direct"; fi
     fi
   done

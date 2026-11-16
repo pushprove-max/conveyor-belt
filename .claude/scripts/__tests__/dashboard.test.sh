@@ -328,6 +328,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
   "areaPrefix": "team/",
   "health": {"state": "paused", "reason": "the loop says why", "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
+    "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
     "unpushed": [{"card": "c5-7", "issue": 7, "sha": "abc", "since": "2026-11-05T00:00:00Z"}]},
   "forecast": {"cards": 1, "usd": 0.95, "perCard": {"usd": 0.95, "pct": 0.5}, "guard": 90, "reading": 42, "pausesAt": null},
   "fullTest": {"command": true, "why": null, "running": null, "last": {"time": "2026-11-05T01:00:00Z", "kind": "run", "push": true, "sha": "abc", "state": "failed", "exit": 1, "cases": [], "pushed": null}},
@@ -388,6 +389,8 @@ q '.panels.queue.data.awaitingDeploy | map([.repo, .issue, .title, .since, .url]
 q '.panels.queue.data.waiting | map([.repo, .issue, .waitsFor, .url]) == [["sample", 32, [20], "'"$PU"'/32"]]' "the queue lists each record's waiting issues with what each waits for"
 q '.panels.board.data.waits | map([.issue, .waitsFor]) == [[32, [20]]]' "the Board has the waiting issues with what each waits for"
 q '[.panels.health.data.records[] | .cycles] == [[[40, 41]], null]' "a dependency cycle reaches the health part; a record without the key has none"
+# The Claude routes' states (the health record's routes): without them Health cannot show an expired login or the proxy.
+q '[.panels.health.data.records[] | .routes | if . == null then null else [.subscription.state, .proxy.state, .proxy.baseUrl] end] == [["expired", "works", "http://127.0.0.1:4141"], null]' "each record's Claude routes reach the health part; a record without the key has none"
 # The flaky cases of each record (the snapshot's flaky): without them the Health panel has no Flaky tests line.
 q '[.panels.health.data.records[] | .flaky] == [[{case: "b.test: flaky", count: 3, issue: 16, url: "'"$PU"'/16"}, {case: "c.test: other", count: 1, issue: null, url: null}], null]' "each record's flaky cases reach the health part, an issue filed with its link; a record without the key has none"
 # Issue 457: the test files kept off card test steps (the snapshot's slowOff), with why: without them Health cannot list them.

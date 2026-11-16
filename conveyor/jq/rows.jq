@@ -19,12 +19,12 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
          reviews: $r, startedAt: .[0].time, stepAt: last.time,
          steps: [range(1; length) as $i | .[$i] | select(.step | IN("build", "review", "test", "fix", "rebase"))
            | {step, time, sec: ((.time | fromdate) - ($g[$i - 1].time | fromdate)), tokens, usage} + (if .model then {model} else {} end)
-             + ({result, effort, counts, tests, stats, unread, ran: .sec} | with_entries(select(.value != null)))]
+             + ({result, effort, counts, tests, stats, unread, ran: .sec, route} | with_entries(select(.value != null)))]
            # The session or review a blocked line says failed (spent): a step like the others, result fail.
            + [range(1; length) as $i | .[$i] | select(.step == "blocked" and (.spent | type) == "object") | .spent as $sp
              | {step: $sp.step, time, sec: ((.time | fromdate) - ($g[$i - 1].time | fromdate)), tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)},
                 usage: $sp.usage} + (if $sp.model then {model: $sp.model} else {} end)
-             + ({result: "fail", effort: $sp.effort, stats: $sp.stats, unread: $sp.unread, ran: $sp.sec} | with_entries(select(.value != null)))],
+             + ({result: "fail", effort: $sp.effort, stats: $sp.stats, unread: $sp.unread, ran: $sp.sec, route: $sp.route} | with_entries(select(.value != null)))],
          result: ($end.result // ""), sha: ($end.sha // ""), reason: ($end.reason // ""), tail: ($end.tail // ""), kept: ($end.kept // ""),
          x: {at: (if $at == "picked" then "brief" elif $at == "landing" and $l.step != "test" then "tests" else $at end),
              review: (if $at == "review" then $r + 1 else null end),

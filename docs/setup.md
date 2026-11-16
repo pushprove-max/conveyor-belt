@@ -67,6 +67,8 @@ set one of these keys:
 - `records`: each project the loop serves. A record's `ledger` is that project's decision ledger. The Board shows its
   open decisions and answers them. A record's `lanes` are the folders of its lanes, which `conveyor.sh lane ... create`
   writes.
+- `claudeProxy`: the API proxy for Claude's sessions, and when they use it
+  ([Configuration](configuration.md#the-control-record)). Setup writes it when it finds a local proxy (below).
 
 ## Setup
 
@@ -84,6 +86,24 @@ again. To ask for a survey later, run
 
 Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
 the lane, or keeps the lane that is already there.
+
+Setup also looks for a local API proxy. This is a proxy that listens on this machine, for example on port 4141. For
+Claude, it must answer the Anthropic Messages API, and setup looks only when no `claudeProxy` is set. For Codex, it
+must answer the OpenAI Responses API, and setup looks only when Codex is installed and no `codexProxy` is set. When it
+finds a proxy, setup checks the CLI's own login and asks which route each role uses, the builder (`--builder-route`)
+and the reviewer (`--reviewer-route`):
+
+- `fallback`: the role's sessions run on the CLI's own login. When that login fails before the session starts its
+  work, the same step runs again at once through the proxy.
+- `proxy`: the role's sessions always run through the proxy.
+- `subscription`: the role's sessions never run through the proxy.
+
+If both roles are `subscription`, setup writes nothing, and asks again on its next run. Otherwise it writes each proxy
+it found in the host file, with each role's route: `claudeProxy` for Claude, and `codexProxy` for Codex. Each has the
+proxy's base URL and the name of the variable that holds the proxy's key: `CLAUDE_PROXY_KEY` or `CODEX_PROXY_KEY`.
+Setup never writes the key. If the proxy needs a key, set that variable in the environment that Conveyor runs in.
+Conveyor gives `codexProxy` to each Codex session as Codex's own provider settings, and does not change Codex's
+`config.toml`.
 
 Then setup writes the pack, sets the project to follow the plugin's releases, installs the newest release, adds the
 project to the host file, adds `/conveyor/state/` to `.git/info/exclude` so that git does not list the state folder,
@@ -106,7 +126,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

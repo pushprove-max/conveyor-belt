@@ -412,7 +412,8 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
         '"[{matcher = \"*\", hooks = [{type = \"command\", command = \($c | @json), timeout = 600}]}]"') || exit 1
       # A pool that cannot be made is left out: a test run then says why it takes no slot.
       ! slot_pool >/dev/null 2>&1 || a=(--add-dir "$SLOT_DIR")
-      exec timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json -s workspace-write -C "$1" "${a[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \
+      codexargs # its provider, when its route is the proxy
+      exec timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json -s workspace-write -C "$1" "${a[@]}" "${CODEX_PX[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \
         -c 'web_search="disabled"' \
         --enable hooks --dangerously-bypass-hook-trust --disable unified_exec_tty -c "hooks.PreToolUse=$h" - <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     opencode) export CLAUDE_PROJECT_DIR=$1 CONVEYOR_GUARD_SETTINGS=$1.settings OPENCODE_CONFIG=$1.opencode.json OPENCODE_DISABLE_PROJECT_CONFIG=1
@@ -489,20 +490,60 @@ session1() {
     sleep "$REVIEW_PAUSE"
   done
   [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f")
+  [ "$agent" = opencode ] || f=$(routed "$f" "$agent")
   # A session whose last result says it succeeded goes on, its usage or stats read or not (unread says why not).
-  if [ $rc = 0 ] && [ "$(jq -r .ok <<<"$f")" = true ]; then jq -c 'del(.ok)' <<<"$f"; return 0; fi
+  if [ $rc = 0 ] && [ "$(jq -r .ok <<<"$f")" = true ]; then [ "$agent" != claude ] || routedone 1; jq -c 'del(.ok)' <<<"$f"; return 0; fi
   # A session that failed still spent its tokens and seconds: block() records them.
   jq -c --arg st "${3:-build}" '{step: $st} + del(.ok)' <<<"$f" > "$1.spent"
   [ -z "$x" ] || [ ! -e "$1.stalled" ] || { echo "stalled twice at ${3:-build}: no progress since $(<"$1.stalled")"; return 1; }
   if nostart "$rc" "$f" "$1.out" "$1.err" "$agent" "$model" builder "$([ "$agent" != claude ] || printf '%s' "$ACCT")" "$1"; then
     jq -c --argjson s "$NOSTART_START" '. + {start: $s}' "$1.spent" > "$1.spent.new" && mv -f "$1.spent.new" "$1.spent"
+    [ "$agent" != claude ] || routedone 0
+    # Its subscription login failed and the proxy is its role's fallback: the same step at once through the proxy.
+    if [ "$agent" != opencode ] && proxyfallback "$agent"; then
+      s=$NOSTART_WHY; f=$(PROXY_NOW=1 session1 "$@") && { printf '%s\n' "$f"; return 0; }
+      bothsaid "$s" "$f"; return 1
+    fi
     printf '%s\n' "$NOSTART_WHY"; return 1
   fi
+  [ "$agent" != claude ] || routedone 1
   [ $rc = 0 ] || { printf 'session failed (%s)\n%s\n' "$(exitsaid "$rc" "$BUILD_TIMEOUT")" "$(tail -n 60 "$1.err")"; return 1; }
   echo "session ended with an error result, or with no result"; return 1
 }
 # The exit of a session or review as its reason says it: the timeout is named only when the exit is the timeout's (124).
 exitsaid() { if [ "$1" = 124 ]; then echo "exit 124, the ${2}s timeout"; else echo "exit $1"; fi; } # <exit> <timeout in seconds>
+# The routes of a Claude or Codex session (claudeProxy, codexProxy, proxyroute()): a step's fields with the route it
+# took (subscription or proxy) when a proxy is set for its CLI; as they are when none is.
+routed() { jq -c --arg r "$(proxyroute "${2:-claude}")" 'if $r == "" then . else . + {route: $r} end' <<<"$1"; } # <the step's fields> [claude|codex]
+# The state of each route as the last Claude session or review on it found it, for the Board's Health (health()):
+# {subscription: {state, at}, proxy: {state, at}}, state works, expired, not set (its login failed: nostart()'s
+# NOSTART_LOGIN) or fails (the proxy's), in ROUTES (control.sh). Written whole beside its place and moved in.
+routeset() { # <subscription|proxy> <state>
+  local t=$ROUTES.$BASHPID
+  { cat "$ROUTES" 2>/dev/null || echo null; } | jq -c --arg r "$1" --arg s "$2" 'if type == "object" then . else {} end | .[$r] = {state: $s, at: (now | todate)}' > "$t" 2>/dev/null \
+    && mv -f "$t" "$ROUTES" || rm -f "$t"
+}
+# After a Claude session or review: <0> when nostart() named why it never began its work, else <1>. The route it took
+# works, or it failed: through the proxy, for any cause (a proxy that is stopped refuses the connection, which is no
+# login cause); on the subscription, only when its login failed (NOSTART_LOGIN), as another cause says nothing of it.
+routedone() { # <0|1>
+  local r; r=$(proxyroute); r=${r:-subscription}
+  if [ "$1" != 0 ]; then routeset "$r" works
+  elif [ "$r" = proxy ]; then routeset proxy fails
+  elif [ -n "$NOSTART_LOGIN" ]; then routeset subscription "$NOSTART_LOGIN"; fi
+}
+# Whether a Claude or Codex session or review whose start failed (nostart()) runs again at once through the proxy: its
+# login failed on the subscription, and the proxy set for its CLI is its role's fallback (proxyrole()).
+proxyfallback() { # [claude|codex]
+  [ -n "$NOSTART_LOGIN" ] && [ -z "${PROXY_NOW:-}" ] && [ "$(proxyrole "${1:-claude}")" = fallback ]
+}
+# The reason of a step that failed on its subscription login and again through the fallback proxy: both causes on its
+# first line, then each one's words below it.
+bothsaid() { # <the subscription try's reason> <the proxy try's reason>
+  printf 'on the subscription login, %s; through the proxy, %s\n' "${1%%$'\n'*}" "${2%%$'\n'*}"
+  [[ $1 != *$'\n'* ]] || printf '%s\n' "${1#*$'\n'}"
+  [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"
+}
 # A failed session's or review's own error words, whatever its CLI: its error results (Claude), its error and
 # turn.failed events (Codex, OpenCode) and the lines that are no JSON, the last 5 of them.
 NOSTARTSAID='[inputs | select(test("\\S")) | (fromjson? // {type: "plain", message: .}) | objects
@@ -517,9 +558,11 @@ NOSTARTSAID='[inputs | select(test("\\S")) | (fromjson? // {type: "plain", messa
 # authorization and a colon or =, quoted or not, one after Bearer, a run of 24 or more letters, digits, - and _) left
 # out, and every line the privacy check's patterns hit left out. Sets NOSTART_START to the seat (builder or reviewer),
 # CLI, model and account it ran on: a check session on that seat as it is set then runs before the card is put back
-# (startagain(), startnow()). Fails, setting neither, for any other session.
+# (startagain(), startnow()). Fails, setting neither, for any other session. NOSTART_LOGIN: the login's state when
+# the cause is the login (expired: its words say expired, refresh, revoked or refused; else not set), else empty.
 nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer> <account, "" for the default login> <worktree>
   local raw words hits cause todo n c=${9##*/}
+  NOSTART_LOGIN=''
   [ "$1" != 0 ] && [ "$1" != 124 ] && [ ! -e "$9.stalled" ] || return 1
   jq -e '([.tokens // {} | .[] | numbers] | add // 0) == 0 and (.stats.turns // 0) <= 1' <<<"$2" >/dev/null 2>&1 || return 1
   raw=$( { jq -rRn "$NOSTARTSAID" "$3" 2>/dev/null; tail -n 20 "$4" 2>/dev/null; } | tr -d '\000')
@@ -537,8 +580,9 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
   fi
   if [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
     cause="the $5 CLI is not installed"; todo="install it, or set the $7 to a CLI this host has (conveyor.sh control, or Rules on the Board)"
-  elif grep -Eqi 'not logged in|log in|/login|invalid api key|authenticat|unauthori[sz]ed|oauth token|credentials' <<<"$raw"; then
+  elif grep -Eqi 'not logged in|log ?in|invalid api key|authenticat|unauthori[sz]ed|oauth|credentials' <<<"$raw"; then
     cause="the $5 CLI is not logged in"
+    NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
     case $5 in
       codex) todo="log it in (codex login)" ;;
       opencode) todo="log it in (opencode auth login)" ;;
@@ -569,19 +613,21 @@ startnow() { # <{seat, cli, model, account}>
   local r s m a
   r=$(jq -r '.seat // empty' <<<"$1" 2>/dev/null); [ -n "$r" ] || return 1
   s=$(seat "$r") && jqget "$s" model m agent a || return 1
-  [ "$a" != codex ] || m=$(codexmodel "$m") || return 1
-  jq -c --arg c "$a" --arg m "$m" '{cli: $c, model: $m, account: (if $c == "claude" then .account // "" else "" end)}' <<<"$1"
+  [ "$a" != codex ] || m=$(PROXY_ROLE=$r codexmodel "$m") || return 1
+  jq -c --arg c "$a" --arg m "$m" '{seat, cli: $c, model: $m, account: (if $c == "claude" then .account // "" else "" end)}' <<<"$1"
 }
 # A check session: the CLI, model and account startnow() gives, asked for one
-# word in an empty folder, under 120 s, with no project settings. Succeeds when it ends well (exit 0).
-startcheck() { # <{cli, model, account}>
+# word in an empty folder, under 120 s, with no project settings, on its seat's route. Succeeds when it ends well (exit 0).
+startcheck() { # <{seat, cli, model, account}>
   local cli m a d rc
   jqget "$1" cli cli model m account a || return 1
   d=$(mktemp -d) || return 1
+  # On the route its seat's role takes (proxyroute()).
+  local PROXY_ROLE; PROXY_ROLE=$(jq -r '.seat // "builder"' <<<"$1"); [ "$PROXY_ROLE" = reviewer ] || PROXY_ROLE=builder
   case $cli in
     claude) (cd "$d" && a=$(acctenv "$a") && proxyenv && acctrun "$a" \
       && exec timeout --kill-after=10 120 claude -p --model "$m" --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
-    codex) (cd "$d" && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only -m "$m" - <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
+    codex) (cd "$d" && codexargs && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$m" - <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
     opencode) (cd "$d" && OPENCODE_DISABLE_PROJECT_CONFIG=1 exec timeout --kill-after=10 120 opencode run --model "${m#opencode:}" <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
     *) false ;;
   esac; rc=$?

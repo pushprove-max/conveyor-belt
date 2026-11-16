@@ -158,14 +158,23 @@
           }
         },
         "claudeProxy": {
-          "description": "The API proxy every Claude card session runs through: its base URL and the NAME of the environment variable that holds its key (never the key). toolSearch is ENABLE_TOOL_SEARCH for a base URL that is not api.anthropic.com (true when left out). The host file's claudeProxy, when it names one, is used instead.",
+          "description": "The API proxy Claude card sessions run through, as its roles set: its base URL and the NAME of the environment variable that holds its key (never the key). toolSearch is ENABLE_TOOL_SEARCH for a base URL that is not api.anthropic.com (true when left out). The host file's claudeProxy, when it names one, is used instead.",
           "type": "object",
           "required": ["baseUrl"],
           "additionalProperties": false,
           "properties": {
             "baseUrl": { "type": "string", "minLength": 1 },
             "keyEnv": { "type": "string", "minLength": 1 },
-            "toolSearch": { "type": "string", "minLength": 1 }
+            "toolSearch": { "type": "string", "minLength": 1 },
+            "roles": {
+              "description": "Each role's route: proxy (the default for a role not named): its Claude sessions run through it. fallback: they run on the subscription login, and one whose login fails before any turn runs again through the proxy. subscription: they never run through it.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "builder": { "enum": ["proxy", "fallback", "subscription"] },
+                "reviewer": { "enum": ["proxy", "fallback", "subscription"] }
+              }
+            }
           }
         }
       }

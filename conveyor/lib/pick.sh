@@ -245,7 +245,7 @@ askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
       (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \
         --setting-sources "" --strict-mcp-config --no-session-persistence --output-format text <<<"$p" > "$d/answer" 2>/dev/null 8>&- 9>&-); rc=$? ;;
     codex) model=$(codexmodel "$model") || { echo "$model"; return 1; }
-      (cd "$d" && exec timeout --kill-after=10 "$2" codex exec --skip-git-repo-check -s read-only -m "$model" -c "model_reasoning_effort=\"$3\"" \
+      (cd "$d" && codexargs && exec timeout --kill-after=10 "$2" codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$model" -c "model_reasoning_effort=\"$3\"" \
         -o "$d/answer" - <<<"$p" > /dev/null 2>&1 8>&- 9>&-); rc=$? ;;
     opencode) (REVIEW_TIMEOUT=$2 ocrun "$d" "$model" "$3" <<<"$p" > "$d/events" 2>/dev/null 8>&- 9>&-); rc=$?
       [ $rc != 0 ] || jq -Rrn "$OPENCODEANSWER" "$d/events" > "$d/answer" 2>/dev/null || rc=1 ;;

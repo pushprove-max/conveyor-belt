@@ -174,7 +174,7 @@ tarun() { # <the record> <worktree> <prompt>
       claude) d=$(acctenv "$acct") || { echo "$d" >&2; exit 1; }
         cd "$wt" && proxyenv && acctrun "$d" && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default \
           --tools Read,Grep,Glob --setting-sources "" --strict-mcp-config --no-session-persistence --output-format stream-json --verbose ;;
-      codex) cd "$wt" && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" codex exec --json -s read-only -m "$model" -c "model_reasoning_effort=\"$effort\"" - ;;
+      codex) cd "$wt" && codexargs && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" -c "model_reasoning_effort=\"$effort\"" - ;;
       opencode) REVIEW_TIMEOUT=$TESTACTION_TIMEOUT ocrun "$wt" "$model" "$effort" ;;
     esac ) <<<"$3" >&"$tx" 2>> "$f.err" & tp=$!
   [ -n "$stopped" ] || { wait "$tp"; rc=$?; }

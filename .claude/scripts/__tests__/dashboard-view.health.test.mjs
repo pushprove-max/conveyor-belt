@@ -255,6 +255,51 @@ test('Health: a used account at 92% with no other account listed is told to wait
 test('Health: a used account at 92% with another account to move to names the Rules tab', () => {
   assert.match(account({ others: true }).querySelector('.check-next').textContent, /^Next: Move this account's work to another on the Rules tab, or wait for its reset at /);
 });
+// Bug: on a machine whose Claude subscription login had expired, Health showed nothing of it, nor of the API proxy that
+// could carry the sessions, so every card was blocked with no row saying why. Each route is a row with its state: a
+// failed login is a fault with no proxy to fall back on, and a warning while a fallback proxy works.
+const routes = (r) => {
+  const data = full();
+  data.panels.health.data.records[0].routes = r;
+  const w = boot();
+  deliver(w, data);
+  return w;
+};
+test('Health: an expired subscription login with no proxy set is a fault that says to sign in or set a proxy', () => {
+  const w = routes({ subscription: { state: 'expired', at: iso(T0 - 60000) }, proxy: { state: 'not set' } });
+  const sub = dd(w, 'Claude route: subscription login');
+  assert.equal(sub.querySelector(':scope > .chip.chip-bad').textContent, 'Expired');
+  assert.match(sub.querySelector('.check-next').textContent, /run claude, then \/login.*\/conveyor-belt:setup/);
+  assert.equal(dd(w, 'Claude route: API proxy').querySelector(':scope > .chip').textContent, 'Not set');
+});
+// Each role has its own route, so the proxy row says when each one uses it.
+test('Health: an expired subscription login while the fallback proxy works is a warning; the proxy row names its URL and each role\'s route', () => {
+  const w = routes({ subscription: { state: 'expired', at: iso(T0 - 60000) },
+    proxy: { state: 'works', at: iso(T0 - 30000), baseUrl: 'http://127.0.0.1:4141', route: 'fallback', roles: { builder: 'fallback', reviewer: 'proxy' } } });
+  assert.equal(dd(w, 'Claude route: subscription login').querySelector(':scope > .chip.chip-warn').textContent, 'Expired');
+  const px = dd(w, 'Claude route: API proxy');
+  assert.equal(px.querySelector(':scope > .chip.chip-ok').textContent, 'Works');
+  assert.match(px.textContent, /http:\/\/127\.0\.0\.1:4141, the builder when its subscription login fails, the reviewer always/);
+});
+// A card's timeline says which route each Claude step took, so a build that ran through the proxy is told from one on
+// the subscription login.
+test('Metrics: a step that ran through the API proxy says so in the card timeline, and one on the subscription login says that', () => {
+  const data = full(), card = data.panels.metrics.data.cards.find((c) => c.title === 'Landed one');
+  card.metrics = { ...card.metrics, timeline: card.metrics.timeline.map((s, i) => (i === 0 ? { ...s, route: 'proxy' } : i === 1 ? { ...s, route: 'subscription' } : s)) };
+  const w = boot();
+  deliver(w, data);
+  const det = Array.from(panel(w, 'metrics').querySelectorAll('details.card-detail')).find((d) => d.querySelector('.title').textContent === 'Landed one');
+  det.querySelector('summary').click();
+  const lines = Array.from(det.querySelectorAll('.timeline li'), (li) => li.textContent);
+  assert.match(lines[0], /^build · .* · claude-sonnet-5-5 medium · through the API proxy · /);
+  assert.match(lines[1], / · on the subscription login( · |$)/);
+  assert.doesNotMatch(lines[2], /API proxy|subscription/, 'a step with no route names none');
+});
+test('Health: a proxy that fails is a fault with a next step', () => {
+  const w = routes({ subscription: { state: 'expired' }, proxy: { state: 'fails', baseUrl: 'http://127.0.0.1:4141', route: 'fallback' } });
+  assert.equal(dd(w, 'Claude route: subscription login').querySelector(':scope > .chip.chip-bad').textContent, 'Expired');
+  assert.match(dd(w, 'Claude route: API proxy').querySelector('.check-next').textContent, /Start the proxy on the build machine/);
+});
 test('Health: a read refused with HTTP 401 says the login has expired and where to sign in again', () => {
   const row = account({ usedPct: null, readAt: null, error: 'HTTP 401' });
   assert.match(row.textContent, /this login has expired: sign in again on devbox/);

@@ -373,6 +373,9 @@
             const result = st.step === 'review' && /^(NO-)?GO$/.test(st.result) ? `: ${ctx.verdictSaid(st.result)}` : st.result && st.result !== 'ok' ? ` ${st.result}` : '';
             const parts = [st.step + result, sec(st.sec), `${tokens(st.tokens)} tokens`, num(st.usd) ? `${ctx.money(st.usd)}${st.override === true ? ' (priced from your override)' : ''}` : `not priced: ${st.unpriced || 'no reason given'}`];
             if (st.model) parts.push(st.model + (st.effort ? ` ${st.effort}` : ''));
+            // The route of a Claude session when a proxy is set (route): through the proxy, or on the subscription login.
+            if (st.route === 'proxy') parts.push('through the API proxy');
+            else if (st.route === 'subscription') parts.push('on the subscription login');
             if (st.counts) parts.push(`findings: ${ctx.findings(st) || 'none'}`);
             if (st.tests) parts.push(`tests: ${num(st.tests.passed) ? st.tests.passed : NONE} passed, ${num(st.tests.failed) ? st.tests.failed : NONE} failed, ${num(st.tests.skipped) ? st.tests.skipped : NONE} skipped of ${num(st.tests.total) ? st.tests.total : NONE} (${num(st.tests.files) ? st.tests.files : NONE} files)`);
             // The session's own account: a reading it did not give is "—"; a review has no API seconds,

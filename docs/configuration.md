@@ -62,9 +62,24 @@ A model set with its CLI runs as set, whether the pack's `models.allowed` lists 
 must be one that `models.allowed` lists for the seat; if it is not, the seat runs on its default. A seat whose
 CLI is not installed does not start, and `conveyor.sh doctor` names it.
 
-Models can run through an API proxy. `claudeProxy` in the host file, or the pack's `models.claudeProxy`, names its base
-URL and the name of the variable that holds its key. It never holds the key. Codex uses the provider that its own
-`config.toml` names.
+Models can run through an API proxy. `claudeProxy` in the host file, or the pack's `models.claudeProxy`, names the
+proxy for Claude: its base URL and the name of the variable that holds its key. It never holds the key. `codexProxy`
+in the host file names the proxy for Codex in the same way. Conveyor gives it to each Codex session as Codex's own
+provider settings, so Codex's `config.toml` does not change. With no `codexProxy`, Codex uses the provider that its
+own `config.toml` names.
+
+The `roles` of each proxy set the route of each role, `builder` (build, fix and rebase) and `reviewer` (review):
+
+- `proxy`, or a role that `roles` does not name: the role's sessions always run through the proxy.
+- `fallback`: the role's sessions run on the CLI's own login first. When that login fails before the session starts
+  its work (an expired login, no login, or a refused login), the same step runs again at once through the proxy, and
+  the card goes on. If the Claude proxy has no key variable, the session gets a stand-in key, so it does not try the
+  failed login again. A step that fails on both routes is blocked, and its reason names both causes.
+- `subscription`: the role's sessions never run through the proxy.
+
+The card's record and its timeline on the Board say which route each step used. The Board's Health shows each Claude
+route, the subscription login and the proxy, with its state: works, expired, not set, fails, or not checked.
+[Setup](setup.md#setup) finds a local proxy and writes `claudeProxy` and `codexProxy` for you.
 
 ## Models
 

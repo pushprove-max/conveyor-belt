@@ -49,7 +49,9 @@
          unpriced: ([$c.steps[] | select(.usd == null)] | length),
          timeline: [$c.steps[] | {step, result, time, sec: (.ran // .sec),
            tokens: (if .unread != null then null else (.tokens.claude // 0) + (.tokens.codex // 0) end), usd,
-           model: (.pricedAs // .model), effort, counts, tests, stats, unpriced: (.unpriced // null)} + (if .override == true then {override: true} else {} end)]};
+           model: (.pricedAs // .model), effort, counts, tests, stats, unpriced: (.unpriced // null)} + (if .override == true then {override: true} else {} end)
+           # The route a Claude or Codex session took (session1(), claudereview(), codexreview()): subscription or proxy, when a proxy is set.
+           + (if .route then {route} else {} end)]};
     # The totals of the cards that ended in a window, with the loop and host samples and the pushes of that window.
     # waitMaxSec of a window is every stretch waiting on the owner ($waits: {from, to} in epoch seconds, from a blocked card
     # ending to its issue next being picked, or to now) clipped to the window, $t0 to $t1: a card blocked yesterday

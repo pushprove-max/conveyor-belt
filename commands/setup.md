@@ -31,12 +31,15 @@ First install the requirements, then sign in, before step 1:
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
    - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--fast-lane`,
-     `--research-lane`), ask the user for exactly those, and nothing else: whose yes a change customers or staff will
+     `--research-lane`, `--builder-route`, `--reviewer-route`), ask the user for exactly those, and nothing else: whose yes a change customers or staff will
      see needs; the path prefixes of product code; the command that runs a change's tests; "Run a first test-speed
      survey now?" (yes / no); "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
-     research lane (a read-only sandboxed worktree)?" (yes / no). Then run it again with the answers, each `--product`
-     once per path, `--survey yes` or `--survey no`, `--fast-lane yes` or `--fast-lane no`, `--research-lane yes` or
-     `--research-lane no`, every value quoted for the shell.
+     research lane (a read-only sandboxed worktree)?" (yes / no); "Which route does the builder use?" and "Which route
+     does the reviewer use?", each with the proxies and the logins' states that setup named (fallback: the subscription
+     login first, the proxy when it fails / proxy: always the proxy / subscription: never the proxy). Then run it again
+     with the answers, each `--product` once per path, `--survey yes` or `--survey no`, `--fast-lane yes` or
+     `--fast-lane no`, `--research-lane yes` or `--research-lane no`, `--builder-route` and `--reviewer-route` each
+     `fallback`, `proxy` or `subscription`, every value quoted for the shell.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
 3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json`

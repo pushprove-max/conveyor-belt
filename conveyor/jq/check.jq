@@ -5,7 +5,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 [inputs] | to_entries[] | select(.value | (try (fromjson
       | (keys - ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
           "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-          "wait", "run", "slotsFree", "selected", "ended", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
+          "wait", "run", "slotsFree", "selected", "ended", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
         and ([.card, .result, .sha, .reason] | all(type == "string")) and (.issue | type == "number")
         and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
         and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
@@ -25,6 +25,8 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
         and (.visible // "" | type == "string") and (.branch // "" | type == "string") and (.mainRed // "" | type == "string")
         and (.model // "" | type == "string") and (.effort // "" | type == "string") and (.head // "" | type == "string") and (.unread // "" | type == "string")
         and (.patch // "" | type == "string") and (.main // "" | type == "string") and (.seen // "" | type == "string")
+        # route: the route a Claude or Codex session took when a proxy is set (session1(), claudereview(), codexreview()).
+        and (.route // "proxy" | IN("proxy", "subscription"))
         # reused: a test line's says it reused a pass (true); a review line's is the time of the review it reuses.
         and (if .step == "test" then (.reused // false | type == "boolean") else (.reused // "2000-01-01T00:00:00Z" | fromdate | type == "number") end)
         and (.retriedAt // "2000-01-01T00:00:00Z" | fromdate | type == "number")
