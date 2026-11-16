@@ -9,7 +9,7 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# A sample project with no Conveyor in it, $S, on a feature branch, whose origin's default branch is trunk (with no
+# A sample project with no Conveyor in it, $S, with a CLAUDE.md and an AGENTS.md, on a feature branch, whose origin's default branch is trunk (with no
 # refs/remotes/origin/HEAD to say so), beside the code repo ($D, the plugin copy at commit $B), and a gh,
 # claude and codex stubbed in $G: gh's labels are $G/labels, those it created $G/created; it is signed out while
 # $G/out is there. Like GitHub, it lists every label (no first page only) and refuses to create one the repo has
@@ -33,7 +33,8 @@ samplemake() { # <folder>: what sample copies, in <folder>: sample, origin.git, 
   local S=$1/sample G=$1/gh
   mkdir -p "$S" "$G" "$1/board-venv/bin" && git -C "$S" init -q -b feature \
     && git init -q --bare -b trunk "$1/origin.git" && git -C "$S" remote add origin "$1/origin.git" \
-    && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -q --allow-empty -m one && git -C "$S" push -q origin feature:trunk \
+    && echo '# Sample' > "$S/CLAUDE.md" && echo 'Read CLAUDE.md.' > "$S/AGENTS.md" && git -C "$S" add CLAUDE.md AGENTS.md \
+    && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -q -m one && git -C "$S" push -q origin feature:trunk \
     || return 1
   printf '%s\n' Bug Feature > "$G/labels"
   cat > "$G/gh" <<'EOF'
@@ -281,6 +282,35 @@ t_setupfresh() {
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:), which is information, not a check.
   ! grep -qvE '^(ok|builder|reviewer): ' <<<"$out" && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
     || fail "doctor after setup printed a line that is not ok:, or did not say the terms file is optional: $out"
+}
+
+# Bug (#91): setup and doctor said nothing of the project's CLAUDE.md and AGENTS.md, so a project without them gave
+# every card's sessions no project context and no one was told. Each case runs setup, then doctor, which must print
+# the same line for each file; setup must write and change neither file.
+agentlines() { grep -E '^(ok|missing): (CLAUDE|AGENTS)\.md' <<<"$1"; }
+agentsetup() { # <case's word>: $X, $out (setup's output) and $doc (doctor's, which exits 0)
+  X=$D/conveyor/conveyor.sh
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin 2>&1) || fail "setup exited non-zero ($1): $out"
+  # A service whose conveyor.sh is there is no missing piece (as in t_doctor).
+  mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
+  doc=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed ($1), when only the instruction files may be missing, and they are not a fault: $doc"
+  [ "$(agentlines "$out")" = "$(agentlines "$doc")" ] || fail "doctor did not print setup's lines for CLAUDE.md and AGENTS.md ($1): setup: $out; doctor: $doc"
+}
+t_agentfilesmissing() {
+  local X out doc; sample; git -C "$S" rm -q CLAUDE.md AGENTS.md || fail "the sample's files were not removed"
+  agentsetup missing
+  grep -q "^missing: CLAUDE.md at the root of $S, .*; fix: run /conveyor-belt:setup" <<<"$out" && grep -q "^missing: AGENTS.md at the root of $S, .*; fix: " <<<"$out" \
+    && [ "$(agentlines "$out" | wc -l)" = 2 ] || fail "setup did not print one missing: line for each of CLAUDE.md and AGENTS.md: $out"
+  # The only missing lines doctor prints are those two: the rest of the sample is in place.
+  [ "$(grep -c '^missing:' <<<"$doc")" = 2 ] || fail "doctor printed other missing lines: $doc"
+  [ ! -e "$S/CLAUDE.md" ] && [ ! -e "$S/AGENTS.md" ] || fail "setup wrote an instruction file"
+}
+t_agentfilesok() {
+  local X out doc; sample; agentsetup present
+  [ "$(agentlines "$out")" = "ok: CLAUDE.md, the project's instructions for Conveyor's Claude sessions (builder, fixer, Foreman, lanes)
+ok: AGENTS.md, the project's instructions for the Codex reviewer" ] || fail "setup did not print an ok: line for each of CLAUDE.md and AGENTS.md: $out"
+  [ "$(cat "$S/CLAUDE.md")" = '# Sample' ] && [ "$(cat "$S/AGENTS.md")" = 'Read CLAUDE.md.' ] && [ -z "$(git -C "$S" status --porcelain -- CLAUDE.md AGENTS.md)" ] \
+    || fail "setup or doctor changed CLAUDE.md or AGENTS.md"
 }
 
 # A PATH holding every program this one does but <name>...: a folder of links, so the machine's own copy is gone too.

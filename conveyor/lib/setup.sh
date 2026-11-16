@@ -29,6 +29,7 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # project is in the host file, where its create writes the lane's folder. PACK0's lanes.research is the research
 # lane's model and effort, which its create needs; yes writes it into a pack that has none.
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
+# Then it says which of the project's instruction files, CLAUDE.md and AGENTS.md, are there (agentfiles()).
 # Its last line says that landed cards wait for the Board's Push landed: the control record's push rule is off by
 # default (lib/control-defaults.json). A pack with no test.full (one setup did not write) has no Push landed: the line
 # says to add one.
@@ -117,8 +118,22 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
     setuplane research || return 1
   fi
   [ -z "$fm" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" setup || return 1
+  agentfiles
   packget test.full full || return 1
   echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
+}
+# The project's instruction files that Conveyor's sessions read, at the root of the main checkout: CLAUDE.md (the
+# builder, the fixer, the Foreman and the lanes) and AGENTS.md (the Codex reviewer). One `ok:` or `missing:` line for
+# each, printed by setup and by doctor. Only read: /conveyor-belt:setup asks the user whether to write a missing one,
+# and an existing one is never changed. A missing one is not counted as a fault: sessions run without it, with no
+# project context beyond the card rules.
+agentfiles() {
+  local f w
+  for f in CLAUDE.md AGENTS.md; do
+    [ "$f" = CLAUDE.md ] && w="Conveyor's Claude sessions (builder, fixer, Foreman, lanes)" || w="the Codex reviewer"
+    if [ -f "$MAIN/$f" ]; then echo "ok: $f, the project's instructions for $w"
+    else echo "missing: $f at the root of $MAIN, the project's instructions for $w; fix: run /conveyor-belt:setup and answer yes when it asks to write it, or write it yourself"; fi
+  done
 }
 # setuplane fast|research: the lane made by its own create (`conveyor.sh lane <lane> create`, re-runnable: a lane
 # already there is left as it is), its output passed on, with its `made the` line, there only when the lane is new,
@@ -176,7 +191,8 @@ hostput() { # [checkout]
   echo "conveyor: added $n to the machine's Conveyor (a record of $HOST$([ -z "$e" ] || echo ", run from its own checkout"))"
 }
 # conveyor.sh doctor: each thing Conveyor needs on this machine for the project it is called in, one line each, "ok: ..."
-# or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code. Exit 1 when anything is missing. bash older than 5.1 stops at require_bash, above,
+# or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code. Exit 1 when anything is missing,
+# but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
 # which says how to get a newer one. The project's checks need jq and git; without either they are named as not checked.
 doctor() {
   local bad=0 p e t c h f
@@ -250,6 +266,7 @@ doctor() {
     if "$BOARD_VENV/bin/python3" -c "import $p" 2>/dev/null; then ok "$p, in the Board's virtualenv $BOARD_VENV"
     else no "$p, for the Board, in its virtualenv $BOARD_VENV" "run /conveyor-belt:setup, which installs it there"; fi
   done; fi
+  agentfiles
   if ! command -v jq >/dev/null || ! type -P git >/dev/null; then
     echo "not checked: the pack, its models' programs, the pin and the terms file: they are read with jq and git"; return 1
   fi

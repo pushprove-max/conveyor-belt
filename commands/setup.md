@@ -1,7 +1,7 @@
 ---
-description: Set up Conveyor Belt in this project (the pack, the plugin releases or main it follows or the commit it pins, its install, the Board's virtualenv, the labels, a first test-speed survey if wanted, the host file's record), then check this machine with conveyor doctor and start Conveyor as its service if wanted; with --foreman, also set up Foreman mode; with --survey, ask again whether to run a test-speed survey
+description: Set up Conveyor Belt in this project (the pack, the plugin releases or main it follows or the commit it pins, its install, the Board's virtualenv, the labels, a first test-speed survey if wanted, the host file's record), then check this machine with conveyor doctor, offer to write a missing CLAUDE.md or AGENTS.md, and start Conveyor as its service if wanted; with --foreman, also set up Foreman mode; with --survey, ask again whether to run a test-speed survey
 argument-hint: "[--foreman] [--pin] [--survey]"
-allowed-tools: Bash, AskUserQuestion
+allowed-tools: Bash, AskUserQuestion, Read, Glob, Grep, Write
 ---
 
 Set up Conveyor Belt in the project checkout this session runs in. Run every command from that checkout.
@@ -25,11 +25,23 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
    it since its commit), give the user the
    one command that commits it, on the default branch: `git add .conveyor/project.json && git commit -m "Add the
    Conveyor pack"`. Do not run it yourself.
-4. When doctor printed no `missing:` line, ask the user "Start Conveyor now as this machine's service?" (yes / no).
+4. For each `missing: CLAUDE.md` or `missing: AGENTS.md` line doctor printed, ask the user "Write an optimized
+   CLAUDE.md (or AGENTS.md) for this project?" (yes / no). On no, write nothing. On yes, write that file at the root of
+   this checkout, and only when no file or link of that name is there; never overwrite or edit a file that is there.
+   Write it from the project itself, reading its code, its README and docs, and the pack `.conveyor/project.json`:
+   what the project is, its layout, its languages, how and where its tests run (the pack's `test.command` and
+   `test.full`), its conventions, and where its deeper docs live. Keep only what a session cannot learn from the code,
+   give each rule its reason, use plain statements, and copy no other file's text: name the file instead.
+   `CLAUDE.md` is read by the builder, the fixer, the Foreman and the lanes; `AGENTS.md` is read by the Codex reviewer
+   and names `CLAUDE.md` for the project's content (read it first) rather than repeating it, adding only what a
+   reviewer needs beyond it. Show each file you wrote, and give the user the one command that commits it, on the
+   default branch: `git add CLAUDE.md AGENTS.md && git commit -m "Add the agent instruction files"` (naming only
+   the files you wrote). Do not run it yourself.
+5. When doctor printed no `missing:` line other than the `CLAUDE.md` and `AGENTS.md` ones, ask the user "Start Conveyor now as this machine's service?" (yes / no).
    On yes, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" install-service` and show its output. On no, say that
    running `/conveyor-belt:setup` again in this checkout asks again and starts it on yes.
-5. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed) and each `missing:` line
-   doctor printed, with its fix. List the lanes setup made (its `created: the fast lane` and `created: the research
+6. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed) and each `missing:` line
+   doctor printed, with its fix, and each instruction file you wrote. List the lanes setup made (its `created: the fast lane` and `created: the research
    lane's worktree` lines), with the command that starts the research lane when setup printed one. Make no change of your own to the pack, the pin or the labels. With `--foreman`, add
    that the Foreman is started by typing `/conveyor-belt:foreman` in a Claude Code session in this checkout (it stays
    the Foreman when continued, resumed or cleared with `/clear`; `/conveyor-belt:foreman off` ends it), that it is this project's Foreman
