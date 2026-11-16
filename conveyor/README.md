@@ -1030,7 +1030,10 @@ card. The check then stops. It resumes later from its next mutant, on the same c
 the same mutants.
 
 `conveyor.sh serve` keeps an idle queue of test files to check, and looks at it once a minute when no mutant is held
-back. A check that stopped resumes first. Then the queue goes in this order: the files the Tests page flags (Never
+back. A check that stopped resumes first. Then come the files asked for with `conveyor.sh mutate ask <test file>...`
+(the Board's Mutation check), the newest ask first: an ask starts no check, and a path that is not a test file of main
+is refused (exit 2), with nothing asked. A file leaves that list when its check starts. Then the queue goes in this
+order: the files the Tests page flags (Never
 caught anything, or hollow cases), then the files checked longest ago. A file never checked comes before a checked
 one. A file leaves the queue when it is checked, and comes back when the test file or one of its sources changes on
 main. When the queue has nothing left, the loop does nothing more until main moves.
@@ -1041,7 +1044,9 @@ failed), `reason` (why it stopped or failed), `base` (the run with no mutant: pa
 (the next mutant to run), `mutants` (each `{source, line, kind, before, after}`), `tried`, `killed`, `survived` (each
 mutant that survived, as `{source, line, kind, before, after}`), `noresult`, `notMutated` (the sources of a kind the
 rules do not read), `blobs` (the test file's and its sources' blobs at `sha`), `pid` while it runs, and `end`. The
-snapshot's tests part, and so the Board's, carries each file's newest check as `mutation`.
+snapshot's tests part, and so the Board's, carries each file's newest check as `mutation`, its place in the asked
+list (`testactions/mutations/asked`, 1 first) as `mutationPlace`, and, for each landed Optimize issue of the file, the
+newest check that ended done before it landed and after (`mutantsBefore`, `mutantsAfter`: `{at, killed, of}`).
 
 ## Same-file cards
 

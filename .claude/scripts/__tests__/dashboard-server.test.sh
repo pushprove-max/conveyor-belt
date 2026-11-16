@@ -934,6 +934,19 @@ for body in "$(act testaction judge t/a.test.sh -x.test.sh)" "$(act test-issue t
 done
 [ -z "$(calls)" ] || fail "test_list_takes_only_its_shapes: ran '$(calls)'"
 pass=$((pass + 4))
+# The Tests page's Mutation check (#79): the files selected are one ask, `mutate ask` with them all, which puts them at
+# the front of the idle queue. Bug: one call a file (each would go before the last, so the order turned round), a
+# command that ran a check now, or a file of a bad shape or a list over TEST_FILES_MAX that ran anything.
+fresh_control
+[ "$(ctl "$(act mutate t/a.test.sh t/b.test.sh t/c.test.sh)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM mutate ask t/a.test.sh t/b.test.sh t/c.test.sh" ] \
+  || fail "mutate_one_ask: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control
+# shellcheck disable=SC2046 # each file an argument
+for body in "$(act mutate)" "$(act mutate t/a.test.sh -x.test.sh)" "$(act mutate $(seq -f 't/%g.test.sh' 21))"; do
+  [ "$(ctl "$body")" = 400 ] || fail "mutate_takes_only_its_shapes: '$body' answered '$(cat "$M/ctl.out")'"
+done
+[ -z "$(calls)" ] || fail "mutate_takes_only_its_shapes: ran '$(calls)'"
+pass=$((pass + 2))
 # Yes on a visible change: the approval line, naming the Board user who said yes, is added to the issue's body,
 # then the card is retried.
 fresh_control; echo 12 > "$F/waiting"

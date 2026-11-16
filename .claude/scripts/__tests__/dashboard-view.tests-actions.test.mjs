@@ -11,9 +11,9 @@ const test = cases(import.meta.url);
 const { MERGE, X, ID1, ID2, rec, snap, tp, rowOf, opened, open, type, pick, said, model, resultRow, reply } = TA;
 
 // Bug it guards (issue 73): a row crowded with ten marked buttons, four of them "File an issue" kinds the owner had to
-// choose between. An opened row has Judge, Optimize and Run, and More with its five items; no mark, no legend, and no
+// choose between. An opened row has Judge, Optimize and Run, and More with its six items; no mark, no legend, and no
 // File an issue kind. The menu works with the keyboard: arrows move between its items, Escape closes it.
-test('Tests actions: an opened row has Judge, Optimize, Run and More with its five items, and no File an issue kind', () => {
+test('Tests actions: an opened row has Judge, Optimize, Run and More with its six items, and no File an issue kind', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, snap({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'keep' })] }));
   const more = open(w, MERGE), words = (els) => Array.from(els, (b) => b.textContent);
@@ -23,10 +23,10 @@ test('Tests actions: an opened row has Judge, Optimize, Run and More with its fi
   act(more, 'more').click();
   const menu = opened(w, MERGE).querySelector('[role="menu"]');
   assert.deepEqual(words(menu.querySelectorAll('[role="menuitem"]')),
-    ['Explain the slowdown', 'Keep a case off', 'Close its issue as done', 'Set a budget for this file', 'Mark as slow on purpose']);
+    ['Explain the slowdown', 'Mutation check', 'Keep a case off', 'Close its issue as done', 'Set a budget for this file', 'Mark as slow on purpose']);
   assert.equal(w.document.activeElement, act(menu, 'explain'), 'opened, the focus is on its first item');
   key(w, w.document.activeElement, 'ArrowDown');
-  assert.equal(w.document.activeElement, act(menu, 'flaky-off'));
+  assert.equal(w.document.activeElement, act(menu, 'mutate'));
   key(w, w.document.activeElement, 'ArrowUp');
   key(w, w.document.activeElement, 'ArrowUp');
   assert.equal(w.document.activeElement, act(menu, 'menu-mark'), 'up from the first item: the last');

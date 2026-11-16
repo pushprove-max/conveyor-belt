@@ -46,8 +46,9 @@ EOF
 }
 muone() { jq -c "${@:2}" "$1" "$ST"/testactions/mutations/*.json; } # <jq filter> [jq options]: of the one check's record
 mufree() { flock -n "$T/$CASE/slots/1" true; } # the pool's one slot is free
-# The engine's functions as `serve` loads them, in a shell of the case's main: <function> run there.
-mu_in() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+# The engine's functions as `serve` loads them, in a shell of the case's main: <function> run there. The runner's own
+# pool (SLOT_DIR, where the runner's test run asks for a slot) is dropped, so the shell reads the case's pool.
+mu_in() { ( unset SLOT_DIR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
   && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && "$@" ); }
 
 # D1. Bugs this guards: a check that found no source the test file sources by a $(dirname "$0") path, changed main's
@@ -108,6 +109,23 @@ t_mutyield() {
   [ "$(muone '[.state, .tried, .killed, .mutants == $ms]' --argjson ms "$ms")" = '["done",3,3,true]' ] || fail "the check did not resume and end with its own mutants: $(muone .)"
   [ "$(sed -n "$((i + 1))p" "$STUB/mut-runs")" = "$(jq -r '.[1].after' <<<"$ms")" ] && [ "$(wc -l < "$STUB/mut-runs")" = $((i + 2)) ] \
     || fail "the check did not resume from its next mutant: $(cat "$STUB/mut-runs")"
+}
+
+# The Board's Mutation check (#79): `mutate ask` puts files at the front of the idle queue, the newest ask first, and
+# the idle job checks them even when it found its queue empty on main's commit. Bugs this guards: an ask that took a
+# file that is not a test file of main, put a file behind those asked before, started a check itself, or that the idle
+# job never read; an asked file left on the list after its check.
+t_mutask() {
+  musetup; local out
+  out=$(loop mutate ask k.test.sh src.sh 2>&1); [ $? = 2 ] && [ ! -s "$ST/testactions/mutations/asked" ] || fail "an ask with a file that is not a test file was taken: $out"
+  out=$(loop mutate ask s.test.sh 2>&1) && out=$(loop mutate ask k.test.sh 2>&1) || fail "an ask was refused: $out"
+  [[ $out == *"front of the idle queue. A check starts only when no card needs a test slot."* ]] || fail "the ask's answer: $out"
+  [ "$(mu_in testspart 2026-11-09 | jq -c '[.files[] | [.file, .mutationPlace]] | sort')" = '[["k.test.sh",1],["s.test.sh",2]]' ] && [ ! -e "$STUB/mut-runs" ] \
+    || fail "the asked files' places, or the ask started a check: $(mu_in testspart 2026-11-09 | jq -c '[.files[] | [.file, .mutationPlace]]')"
+  git -C "$R" rev-parse HEAD > "$ST/testactions/mutations/idle"
+  mu_in eval 'names && mutnext' > /dev/null 2>&1
+  [ "$(jq -cs 'map([.file, .state]) | sort' "$ST"/testactions/mutations/*.json)" = '[["k.test.sh","done"],["s.test.sh","done"]]' ] && [ ! -s "$ST/testactions/mutations/asked" ] \
+    || fail "the idle job did not check the asked files, or left them asked: $(cat "$ST"/testactions/mutations/*.json "$ST/testactions/mutations/asked")"
 }
 
 # D3. Bug this guards: a queue that did not put first the files the Tests page flags. On main, n.test.sh has 20 runs

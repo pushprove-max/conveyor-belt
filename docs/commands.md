@@ -80,6 +80,7 @@ Tests:
 - `mutate <test file>` runs a mutation check of one test file now: it changes a line of the code the file tests, up
   to 20 times, and records which changes the file caught. `serve` runs these checks by itself when no card is in
   its build or test step and no test of another project runs on the machine (`conveyor/README.md`, Mutation checks).
+  `mutate ask <test file>...` puts files at the front of that queue and starts no check (the Board's Mutation check).
 - `test-settings` saves a test setting in the pack: the budget of all files or of one, a "slow on purpose" mark, and
   whether slow files file issues (`conveyor/README.md`, The test files in the snapshot).
 - `prices set <model> <input> <output> <cache read>` saves your price of one model in the pack, and

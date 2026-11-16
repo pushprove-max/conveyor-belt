@@ -243,6 +243,14 @@ call, and a case whose only assertions are `toBeDefined` or `toBeTruthy`. When J
 replace these. Click the "Hollow N" filter chip to see only these files. An open row lists its hollow cases, each
 with its kind and the reason.
 
+The Mutants caught column shows the newest mutation check of a file, as "14 / 20": the check made 20 small changes
+(mutants) to the code that the file tests, and the file failed on 14 of them. The column is empty until a check of
+the file ends. Point at the count to see when the check ran and on which commit. A check that runs, waits in the
+queue or is paused also shows "running", "queued" or "paused". An open row shows the state of its check: queued, with
+its place in the idle queue; running, with the mutant it runs ("mutant 4 of 20"); paused for a card; or done. It
+lists each mutant that survived: the source file and line, the line before and after the change, and "tests still
+passed". A surviving mutant shows a change that the tests do not see.
+
 Point at a column heading, or move the keyboard focus to it, to see what the column shows. Click a column heading to
 sort the table by that column. Click it again to reverse the order. An arrow shows the column and the direction. Until
 you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path in
@@ -250,10 +258,17 @@ the search box to see only the files that match it. The search and a filter chip
 
 Click a file's name to open its row. The row shows its runs, each marked with its card or "whole suite", its budget,
 and three actions: Judge, Optimize and Run. Judge (Judge this test) and Run (Run this file now) start at once.
-Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers, its hollow cases
-and the newest verdict of Judge, with the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds
-Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose
+Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers, its hollow cases,
+its surviving mutants (so that the card adds the assertions that catch them) and the newest verdict of Judge, with
+the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds Explain the slowdown,
+Mutation check, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
+
+Mutation check puts the file at the front of the idle queue (`conveyor.sh mutate ask`). It does not start a check.
+`conveyor.sh serve` runs the checks of the queue one at a time, and only while no card needs a test slot. When a card
+asks for a test slot, the check pauses, and it goes on from its next mutant later. After the files you asked for, the
+queue holds the files that the page flags (Never caught anything, or Hollow), then the files checked longest ago
+(`conveyor/README.md`, Mutation checks).
 
 An open row also shows its newest action. While it runs, you see its time bar, its text as it comes, Stop and Copy. A
 queued action shows "Queued, N ahead" and Stop. When it ends, you see its result. The text of Judge and Explain the
@@ -266,7 +281,9 @@ Each shows the date it was filed, its link and its state: open, building, blocke
 commit), or closed without landing. A landed issue also shows the fix of its card (sped up, split, merged into a file,
 or deleted) and the CPU seconds of the file before and after the fix. Next to "before", it shows the median CPU
 seconds of the file's runs since the fix landed, when the file ran since then. The first run after the fix has a mark
-in the row's Last runs and in its list of runs, while the row still shows that run.
+in the row's Last runs and in its list of runs, while the row still shows that run. When a mutation check of the file
+ended before the fix landed and another ended after it, a landed issue also shows the mutants caught before and after
+("Mutants caught before: 9 / 20, after: 14 / 20").
 
 Test edits by cards shows what each landed card did to a test file that the project already had, newest first. A
 new test file is not in it. Each entry shows the issue and the card, the file, when the card landed and the counts:
@@ -285,8 +302,9 @@ the test actions and the Optimize issues, newest first, each with its state. Cli
 of that file.
 
 Each row has a checkbox. The checkbox in the heading selects every file that the search and the filter show. With one
-file or more selected, a bar at the bottom of the screen shows how many, with Judge, Optimize, Run and Clear. Judge and
-Run ask for all the selected files at once. Optimize shows one issue for each file, each with a title and a text that
+file or more selected, a bar at the bottom of the screen shows how many, with Judge, Optimize, Run, Mutation check and
+Clear. Judge, Run and Mutation check ask for all the selected files at once. After Mutation check, the rows show
+"queued", and the bar says that a check starts only when no card needs a test slot. Optimize shows one issue for each file, each with a title and a text that
 you can edit, and "File N issues" files them. Cancel files nothing. The bar shows the answer for each file, and each
 file that it left out, with the reason: Optimize leaves out a file that runs other test files, and Judge needs a model
 for the test actions. One action takes at most 20 files.

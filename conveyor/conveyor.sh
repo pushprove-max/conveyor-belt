@@ -88,7 +88,7 @@ cmd release release-prep.sh 'release <version>'
 cmd release-run release-prep.sh 'release-run [prep] <version> | release-run stop'
 cmd testaction testaction.sh 'testaction <judge | explain | run> <test file> | testaction stop <id>'
 cmd testissue testaction.sh 'testissue <test file> <title> <body>'
-cmd mutate testaction.sh 'mutate <test file>'
+cmd mutate testaction.sh 'mutate <test file> | mutate ask <test file>...'
 cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'
 cmd prices prices.sh 'prices set <model> <input> <output> <cache read> | prices clear <model>'
 cmd testrules testrules.sh -

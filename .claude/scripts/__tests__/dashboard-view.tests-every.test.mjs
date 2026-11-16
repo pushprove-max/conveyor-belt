@@ -39,8 +39,8 @@ const search = (w, v) => { const s = act(tp(w), 'search'); s.value = v; s.dispat
 test('Tests: every test file has a row: the card run, the whole-only file with its chip and whole-suite run, the never-run file', () => {
   const w = show();
   assert.deepEqual(names(w), [CARD, WHOLE, NEVER], 'with no sort: the file that needs a look first, then the snapshot\'s order; the file never timed last');
-  assert.match(cells(rowOf(w, WHOLE))[9], /Whole suite only/);
-  assert.doesNotMatch(cells(rowOf(w, CARD))[9], /Whole suite only|Never run/);
+  assert.match(cells(rowOf(w, WHOLE)).at(-1), /Whole suite only/);
+  assert.doesNotMatch(cells(rowOf(w, CARD)).at(-1), /Whole suite only|Never run/);
   // Bug (issue 73): a file never timed showed 0.0, dashes and 0 s, as if it had a time of none.
   assert.deepEqual(cells(rowOf(w, NEVER)).slice(1), ['Not timed yet', 'Flaky#77Never run'], 'one cell in place of its figures');
   // Bug (issue 73): "Has an issue" was a chip with no way to the issue.
@@ -63,10 +63,10 @@ test('Tests: a wholeOnly runner has "Runs other test files" in place of a budget
   Object.assign(part.files[0], { cpu: 900, median: 900, slowOnPurpose: null, budget: null, budgetFrom: null, over: false, slower: false,
     lastRun: { ...part.files[0].lastRun, cpu: 900, sec: 2700, clockPerCpu: 3 } });
   const w = boot({ tab: 'tests' }), d = full(); d.panels.tests.data.tests = part; deliver(w, d);
-  const chips = cells(rowOf(w, WHOLE))[9];
+  const chips = cells(rowOf(w, WHOLE)).at(-1);
   assert.match(chips, /Runs other test files/);
   assert.doesNotMatch(chips, /Over budget|Slower than usual|Waits|Slow on purpose/);
-  assert.doesNotMatch(cells(rowOf(w, CARD))[9], /Runs other test files/);
+  assert.doesNotMatch(cells(rowOf(w, CARD)).at(-1), /Runs other test files/);
   act(rowOf(w, WHOLE), 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.match(more.textContent, /Budget: none, it runs other test files/);

@@ -169,7 +169,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
 # or prices (the Rules tab's Model prices: one model's price override set or cleared: `conveyor.sh prices`),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
-# (its seat), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
+# (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
 # such as an Optimize issue, "Optimize the test file <file>"); testaction judge, explain or run and test-issue also take a list of
 # files (test-issue: a file, title and body each), one action or issue a file, and answer JSON {results: [{file, id} or
@@ -377,6 +377,8 @@ def control_ok(body):
     if a == 'testaction':  # the Tests page: judge, explain or run one test file or a list of them, or stop one action by its id
         return (2 <= n <= 1 + TEST_FILES_MAX and v[0] in ('judge', 'explain', 'run') and all(TEST_FILE.fullmatch(x) for x in v[1:])) \
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
+    if a == 'mutate':  # the Tests page's Mutation check: one test file or a list of them, to the front of the idle queue
+        return 1 <= n <= TEST_FILES_MAX and all(TEST_FILE.fullmatch(x) for x in v)
     if a == 'testrules':  # the Tests page's Auto-file: the switch, a guard, or one setting of a rule
         return (v in (['on'], ['off']) or (n == 3 and v[0] == 'guard' and v[1] in RULE_GUARDS and RULE_VALUE.fullmatch(v[2]) is not None)
                 or (n == 4 and v[0] == 'set' and said_ok(v[1]) and v[2] in RULE_KEYS and RULE_VALUE.fullmatch(v[3]) is not None))
@@ -560,6 +562,9 @@ def control_script(action, args, main, today, record=None, user=None):
     if action in ('testaction', 'testrules'):
         # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))
+    if action == 'mutate':
+        # One ask for all the files (conveyor.sh mutate ask): it starts no check; the idle job does, when no card needs a slot.
+        return '%s mutate ask %s' % (conv, ' '.join(q(x) for x in args))
     if action == 'flaky-off':
         # An entry of the flaky-test record keeps the case off card test steps; its source names the Board user. flaky
         # off, not add: the action is marked "now" and files no issue, though the entry is a case's third source.

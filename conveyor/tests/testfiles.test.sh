@@ -219,7 +219,18 @@ t_tfoptimize() {
     {card: "c-73", issue: 73, step: "landed", result: "ok", sha: "def5678", time: "2026-11-06T01:00:00Z"},
     {card: "c-74", issue: 74, step: "picked", time: "2026-11-10T14:00:00Z"},
     {card: "c-74", issue: 74, step: "closed", reason: "already done", time: "2026-11-10T14:10:00Z"}' >> "$ST/cards.jsonl"
+  # a.test's mutation checks (#79): two done before #70 landed (12:01:30), one done after it and a failed one after
+  # that; and the asked list, where a.test is second.
+  mkdir -p "$ST/testactions/mutations" && printf '%s\n' s.test a.test > "$ST/testactions/mutations/asked"
+  jq -cn '["09T00:00", "done", 1], ["10T12:00", "done", 2], ["10T12:30", "done", 4], ["10T13:00", "failed", 0] | {id: .[0], file: "a.test",
+      at: "2026-11-\(.[0]):00Z", state: .[1], killed: .[2], mutants: [range(4)], survived: [], tried: 4}' \
+    | while read -r l; do printf '%s\n' "$l" > "$ST/testactions/mutations/$(jq -r '.id | gsub(":"; "")' <<<"$l").json"; done
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  # Bug caught: an Optimize history that could not show the mutants caught before and after it landed, or a row that
+  # could not show its place in the queue the Board's Mutation check puts it in.
+  [ "$(jq -c '.files[] | select(.file == "a.test") | [.mutationPlace, (.optimize[] | select(.issue == 70 or .issue == 71) | [.issue, .mutantsBefore, .mutantsAfter])]' <<<"$got")" \
+    = '[2,[71,null,null],[70,{"at":"2026-11-10T12:00:00Z","killed":2,"of":4},{"at":"2026-11-10T12:30:00Z","killed":4,"of":4}]]' ] \
+    || fail "a.test's place in the asked list, or its mutants before and after #70: $(jq -c '.files[] | select(.file == "a.test") | [.mutationPlace, .optimize]' <<<"$got")"
   [ "$(jq -c '.files[] | select(.file == "a.test") | [.removed, (.optimize[] | [.issue, .state, .reason, .sha, .fix, .before, .after, .since, .sinceRuns])]' <<<"$got")" \
     = '[false,[74,"closed",null,null,null,null,null,null,0],[72,"blocked","build: the file is not faster",null,null,null,null,null,0],[71,"open",null,null,null,null,null,null,0],[70,"landed",null,"abc1234","sped up",10,4,3.5,2]]' ] \
     || fail "a.test's Optimize issues: $(jq -c '.files[] | select(.file == "a.test") | .optimize' <<<"$got")"

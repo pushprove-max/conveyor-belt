@@ -108,14 +108,20 @@ mutrecs() { # every check's record, a JSON list
   [ -e "${fs[0]:-}" ] || { echo '[]'; return; }
   jq -cs 'map(objects)' "${fs[@]}" 2>/dev/null || echo '[]'
 }
+# 0 when <file> is a test file of main's <commit>: a tracked file whose own name has .test. or .spec. in it.
+mutfile() { # <file> <main's commit>
+  local f=$1
+  [[ -n $2 && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* && ${f##*/} =~ \.(test|spec)\. ]] \
+    && [ "$(git -C "$MAIN" cat-file -t "$2:$f" 2>/dev/null)" = blob ]
+}
 # `conveyor.sh mutate <test file>`: one check of a test file of main, now, in this process; a check of it that
 # stopped resumes. Refused (exit 2) for a path that is not a test file of main, or while another check runs.
-mutate() { # <test file>
+# `conveyor.sh mutate ask <test file>...` (mutask()) puts files at the front of the idle queue.
+mutate() { # <test file> | ask <test file>...
+  [ "${1:-}" != ask ] || { shift; mutask "$@"; return; }
   local f=${1:-} sha rc
   sha=$(git -C "$MAIN" rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  [[ -n $sha && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* && ${f##*/} =~ \.(test|spec)\. ]] \
-    && [ "$(git -C "$MAIN" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] \
-    || { echo "conveyor: $f is not a test file of $BRANCH; nothing checked" >&2; return 2; }
+  mutfile "$f" "$sha" || { echo "conveyor: $f is not a test file of $BRANCH; nothing checked" >&2; return 2; }
   mkdir -p "$MUTS" && { exec {MUTLOCK}>>"$MUTS/lock"; } 2>/dev/null || { echo "conveyor: the mutation checks' folder could not be made; nothing checked" >&2; return 1; }
   flock -n "$MUTLOCK" || { exec {MUTLOCK}>&-; echo "conveyor: a mutation check already runs; nothing checked" >&2; return 2; }
   mutrun "$f" "$sha"; rc=$?; exec {MUTLOCK}>&-
@@ -134,6 +140,7 @@ mutrun() { # <file> <main's commit>
       seed: null, state: "running", base: null, next: 0, mutants: [], tried: 0, killed: 0, survived: [], noresult: 0, notMutated: [], blobs: {}, end: null}')
   fi
   wt=$CARDS/mutate/$id
+  mutunask "$f"
   r=$(jq -c --argjson p "$BASHPID" '.state = "running" | .pid = $p | del(.reason)' <<<"$r")
   taput "$MUTS/$id.json" "$r" || { echo "conveyor: the record of the mutation check could not be written; nothing checked" >&2; return 1; }
   if out=$({ tadrop "$wt"; rm -rf "$wt".*; mkdir -p "${wt%/*}" && git -C "$MAIN" worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null); then
@@ -200,9 +207,33 @@ mutorder() { # <the checks' records> <the snapshot's tests part, or null> <the t
        | {file: $f, at: ($r.at // ""), flag: IN($flag[]; $f)}]
     | sort_by([(if .flag then 0 else 1 end), .at, .file]) | .[].file'
 }
+# The files asked for (the Board's Mutation check), in $MUTS/asked, one a line, first to last: the front of the idle
+# queue. `conveyor.sh mutate ask <test file>...` puts them before those asked earlier, in the order given (a file
+# asked again moves there); refused (exit 2), with nothing asked, when one is not a test file of main. A file leaves
+# the list when its check starts (mutrun()). An ask starts no check: the idle job (mutnext()) does, when no card needs
+# a test slot; the answer says what holds it back now.
+mutask() { # <test file>...
+  local sha f why
+  [ $# -gt 0 ] || { echo "usage: conveyor.sh mutate ask <test file>..." >&2; return 2; }
+  sha=$(git -C "$MAIN" rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
+  for f in "$@"; do mutfile "$f" "$sha" || { echo "conveyor: $f is not a test file of $BRANCH; nothing asked" >&2; return 2; }; done
+  mkdir -p "$MUTS" && { exec {MUTASK}>>"$MUTS/asked.lock"; } 2>/dev/null || { echo "conveyor: the mutation checks' folder could not be made; nothing asked" >&2; return 1; }
+  flock "$MUTASK"
+  { printf '%s\n' "$@"; cat "$MUTS/asked" 2>/dev/null || :; } | awk '!seen[$0]++' > "$MUTS/asked.new" && mv -f "$MUTS/asked.new" "$MUTS/asked" \
+    || { rm -f "$MUTS/asked.new"; exec {MUTASK}>&-; echo "conveyor: the idle queue could not be written; nothing asked" >&2; return 1; }
+  exec {MUTASK}>&-
+  why=$(mutheld test) || why=''
+  echo "conveyor: mutation check asked of $# file(s), at the front of the idle queue. A check starts only when no card needs a test slot${why:+; now $why}."
+}
+mutunask() { # <test file>: off the asked list
+  [ -e "$MUTS/asked" ] && { exec {MUTASK}>>"$MUTS/asked.lock"; } 2>/dev/null || return 0
+  flock "$MUTASK"
+  grep -vxF -- "$1" "$MUTS/asked" > "$MUTS/asked.new"; mv -f "$MUTS/asked.new" "$MUTS/asked" || rm -f "$MUTS/asked.new"
+  exec {MUTASK}>&-
+}
 # The loop's idle job (`serve`, once a minute; never a card's): when no mutant may start (mutheld()) or a check runs,
-# nothing. Else, while no mutant is held back: a check that stopped resumes, or the first file of the queue is
-# checked, until a check stops or the queue is empty. A queue found empty is not looked at again until main moves
+# nothing. Else, while no mutant is held back: a check that stopped resumes, or the first file asked for (mutask()),
+# or the first file of the queue, is checked, until a check stops or the queue is empty. A queue found empty is not looked at again until main moves
 # ($MUTS/idle holds the commit it was empty on).
 mutnext() {
   local f sha
@@ -211,6 +242,8 @@ mutnext() {
   flock -n "$MUTLOCK" || { exec {MUTLOCK}>&-; return 0; }
   while ! mutheld > /dev/null && sha=$(git -C "$MAIN" rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null); do
     f=$(mutrecs | jq -r 'map(select(.state == "stopped" or .state == "running")) | min_by(.at) | .file // empty')
+    # An asked file that is no longer a test file of main leaves the list unchecked.
+    while [ -z "$f" ] && IFS= read -r f 2>/dev/null < "$MUTS/asked" &&[ -n "$f" ]; do mutfile "$f" "$sha" || { mutunask "$f"; f=''; }; done
     if [ -z "$f" ]; then
       [ "$(cat "$MUTS/idle" 2>/dev/null)" != "$sha" ] || break
       f=$(mutqueue "$sha" | head -n 1)

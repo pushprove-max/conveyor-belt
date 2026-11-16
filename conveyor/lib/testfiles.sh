@@ -31,12 +31,15 @@
 #   (from the bugproof line's speed of its landed card, else of its newest: fix is sped up, split, merged or deleted,
 #   into the test files a split added or a merge changed, or, for a delete, those the last review of its landed card
 #   named on its COVERED-BY lines; null and [] with none), since (the median CPU seconds of the
-#   file's runs after it landed; null with none or before it lands) and sinceRuns (their count)}; removed: true for a
+#   file's runs after it landed; null with none or before it lands), sinceRuns (their count), and mutantsBefore and
+#   mutantsAfter (the file's newest mutation check that ended done before it landed, and after: {at, killed, of};
+#   null with none or before it lands)}; removed: true for a
 #   file main's checkout no longer tracks whose landed Optimize deleted or merged it (the totals leave it out);
 #   hollow: the cheap check's hollow cases of a JavaScript or TypeScript file (testhollow(), below), [{case, kind,
 #   reason}], [] with none; null for a file of another kind or not in main's checkout;
 #   mutation: its newest mutation check (lib/mutate.sh), {file, at, sha, seed, state, reason, of (its mutants), tried,
 #   killed, survived ([{source, line, kind, before, after}]), noresult, notMutated, end}; null when none was made;
+#   mutationPlace: its place in the mutation checks' asked list ($MUTS/asked, mutask()), 1 first; null when not asked;
 #   a file that only a Board filing names is listed too;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
@@ -222,15 +225,17 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   printf '%s\n' "$ln" | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
-    --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
     --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) "$OWNERS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
+    # A check that ended done, as the Optimize history counts it: {at, killed, of}; null for none.
+    | def mutsaid: if . == null then null else {at, killed, of: (.mutants | length)} end;
     # A Board filing ($TAFILED) as its cards left it, given the runs of its file ($r, oldest first).
-    | def optimize($r): . as $o | [$cr[] | select(.issue == $o.issue)] as $c
+    def optimize($r): . as $o | [$cr[] | select(.issue == $o.issue)] as $c
         | (first($c[] | select(.step == "landed")) // null) as $l
         | ([$c[] | select(.step == "bugproof" and (.speed | type == "object") and ($l == null or .card == $l.card))] | last | .speed // {}) as $p
         # A delete changes no other test file: the files that cover its cases are those its card'"'"'s last review named
@@ -243,8 +248,12 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            elif $n.step == "blocked" then "blocked" else "building" end) as $st
         | {issue, time, state: $st, reason: (if $st == "blocked" then $n.reason else null end),
            sha: ($l.sha // null), landed: ($l.time // null), fix: ($p.fix // null), into: (if $p.fix == "deleted" then $cov else $p.into // [] end),
-           before: ($p.before // null), after: ($p.after // null), since: ($since | if . == null then null else median | r3 end), sinceRuns: ($since | length)};
-    (reduce ($ls[] | select(.result == "fail") | failedfiles[]) as $f ({}; .[$f] += 1)) as $failed
+           before: ($p.before // null), after: ($p.after // null), since: ($since | if . == null then null else median | r3 end), sinceRuns: ($since | length),
+           mutantsBefore: (if $l == null then null else [$mu[] | select(.file == $o.file and .state == "done" and .at < $l.time)] | max_by(.at) | mutsaid end),
+           mutantsAfter: (if $l == null then null else [$mu[] | select(.file == $o.file and .state == "done" and .at > $l.time)] | max_by(.at) | mutsaid end)};
+    # The asked list of the mutation checks (lib/mutate.sh mutask()): each file to its place, 1 first.
+    ($mq | split("\n") | map(select(. != "")) | to_entries | map({key: .value, value: (.key + 1)}) | from_entries) as $place
+    | (reduce ($ls[] | select(.result == "fail") | failedfiles[]) as $f ({}; .[$f] += 1)) as $failed
     # Each failed test step of a card that landed, for each file it failed in: caught when the landed commit left the
     # file as it was (the fix went into the code), changed to pass when it changed the file.
     | (reduce ($cr[] | select(.step == "landed" and (.card | type == "string"))) as $l ({}; .[$l.card] = $l.sha)) as $land
@@ -272,7 +281,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            slowOnPurpose: ($own.slowOnPurpose // null), over: ($wo | not) and $now != null and $now > $bud, usual: ($usual | r3),
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
-             else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end)}
+             else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
+           mutationPlace: ($place[$f] // null)}
         | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
     | sort_by(-(.cpu // -1), .file)

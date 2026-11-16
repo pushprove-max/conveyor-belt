@@ -43,7 +43,13 @@
 // not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row lists its own edits.
 // Hollow (#77): a file with hollow cases (hollowOf(): its newest ended judge's, else the engine's cheap check's) has the
 // status Hollow, so its filter chip "Hollow N"; an opened row lists them with their kind and reason.
-// Its More menu holds Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
+// Mutation checks (#79): the column Mutants caught ("14 / 20": its newest done check, empty before one; when it ran and
+// on which commit on hover; "queued", "running" or "paused" beside it); an opened row's check state (queued with its
+// place, running with mutant n of m, paused, failed or done) and surviving mutants (source and line, before and after,
+// "tests still passed"). Mutation check, in More and in the bar, is one POST control {action: mutate, args: [file...]}
+// (`conveyor.sh mutate ask`: the front of the idle queue; no check starts while a card needs a test slot, and the bar
+// says so). Optimize's preview lists the survivors; a landed Optimize shows the mutants caught before and after.
+// Its More menu holds Explain the slowdown, Mutation check, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
 // Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
 // project): CPU budget for a test file (test.fileBudget), the budgets of single files and the files slow on purpose
@@ -124,6 +130,7 @@
     answers: null,       // the bar's last action: {what, lines: [{file, ok, text}], note}
     menu: null,          // the file whose More menu is open
     edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|budget` or `${dk(file)}|mark`
+    mutAsked: new Map(), // the files a Mutation check was asked for here, by dk(file): the time asked, until the snapshot names them
     settingsOpen: false };  // the Settings section is open
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -186,6 +193,8 @@
     ['count', 'Runs', (f) => (list(f.runs).length ? num(f.timedRuns) || 0 : null), 'The runs on record that have a CPU time.'],
     ['took', 'Last run took', (f) => num((obj(f.lastRun) || {}).sec), 'The clock time of its newest run. Point at a time to see when it ran.'],
     ['caught', 'Caught', (f) => num(f.caught), 'The card test steps it failed whose landed change left it as it was: the fix went into the code. Point at a count to see how often it was changed to pass.'],
+    ['mutants', 'Mutants caught', (f) => { const m = mutDone(f); return m ? m.killed / m.of : null; },
+      'Its newest mutation check: the mutants (small changes to the code it tests) it caught, of those made. Point at a count to see when the check ran and on which commit.'],
     ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length, 'What needs a look first, then the other marks of the file.']];
 
   function say(text) { const n = S.el && S.el.querySelector('.tests-note'); if (n) n.textContent = text; }
@@ -295,6 +304,53 @@
   const hollowSaid = (x) => `${x.case} (${x.kind})${typeof x.reason === 'string' && x.reason ? `: ${x.reason}` : ''}`;
   // The judge's newest verdict for a file, when one is kept.
   const verdictOf = (file) => actions().find((a) => a.file === file && a.action === 'judge' && a.state === 'done' && typeof a.verdict === 'string' && a.verdict !== 'no verdict') || null;
+
+  // ---- mutation checks (#79): the snapshot's mutation (a file's newest check) and mutationPlace (its place in the asked list) ----
+  const MUT_WHY = 'A check starts only when no card needs a test slot.';
+  const mutOf = (f) => obj(f.mutation);
+  // Its newest check, when it ended done with a mutant or more.
+  const mutDone = (f) => { const m = mutOf(f); return m && m.state === 'done' && num(m.killed) !== null && num(m.of) ? m : null; };
+  // The mutants of its newest check that its tests did not catch.
+  const survivors = (f) => list((mutOf(f) || {}).survived).filter((x) => obj(x) && typeof x.source === 'string' && num(x.line) !== null);
+  const trimmed = (s) => String(typeof s === 'string' ? s : '').replace(/\p{C}/gu, ' ').trim();
+  // Its place in the asked list (1 first); 0 when it was asked here and the snapshot does not name it yet; null when
+  // not queued. A file asked here leaves that state when the snapshot names its place, or a check of it began after.
+  function mutQueued(f) {
+    const k = dk(f.file), t = S.mutAsked.get(k), m = mutOf(f);
+    if (num(f.mutationPlace) !== null) { S.mutAsked.delete(k); return f.mutationPlace; }
+    if (t === undefined) return null;
+    if (m && Date.parse(m.at) >= t) { S.mutAsked.delete(k); return null; }
+    return 0;
+  }
+  // The state of its check, in words: running (mutant n of m), queued (its place), paused, failed, done, or none.
+  function mutState(f) {
+    const m = mutOf(f), q = mutQueued(f), of = m ? num(m.of) || 0 : 0, tried = m ? num(m.tried) || 0 : 0;
+    const why = m && typeof m.reason === 'string' ? m.reason : '';
+    if (m && m.state === 'running') return of ? `Running: mutant ${Math.min(tried + 1, of)} of ${of}.` : 'Running: it makes its mutants.';
+    if (q !== null) return `Queued${q ? `: place ${q} in the idle queue` : ''}. ${MUT_WHY}`;
+    if (!m) return 'No check yet. Mutation check, in More, puts it at the front of the idle queue.';
+    if (m.state === 'stopped') return `Paused${/\bcard\b|test slot/.test(why) ? ' for a card' : ''}: ${why || 'no reason recorded'}. It goes on from mutant ${Math.min(tried + 1, of)} of ${of} later.`;
+    if (m.state === 'failed') return `Failed: ${why || 'no reason recorded'}.`;
+    return `Done ${S.ctx.when(m.end || m.at)}: ${num(m.killed) || 0} of ${of} mutants caught.`;
+  }
+  // The column's text: its newest done check's "caught / made", and what its check does now.
+  function mutCell(f) {
+    const d = mutDone(f), m = mutOf(f), q = mutQueued(f);
+    const now = m && m.state === 'running' ? 'running' : q !== null ? 'queued' : m && m.state === 'stopped' ? 'paused' : '';
+    return [d ? `${d.killed} / ${d.of}` : '', now].filter(Boolean).join(' · ');
+  }
+  // A survivor in a line of text: its source and line, its kind and its change.
+  const survivorSaid = (x) => `${x.source}:${x.line}${typeof x.kind === 'string' ? ` (${x.kind})` : ''}: \`${trimmed(x.before)}\` → \`${trimmed(x.after)}\``;
+  // A Mutation check asked for files: one POST, `conveyor.sh mutate ask`, which puts them at the front of the idle
+  // queue; their rows show them queued. inBar: the bar's action, whose answer shows in the bar.
+  function mutAsk(files, inBar) {
+    if (files.length > FILES_MAX) { S.answers = { what: 'Mutation check', lines: [], left: [], note: `At most ${FILES_MAX} files at a time: ${files.length} are selected. Select fewer.` }; draw(); return; }
+    const at = S.ctx.now();
+    send('mutate', files, () => `Mutation check queued: ${files.length} ${files.length === 1 ? 'file' : 'files'} at the front of the idle queue. ${MUT_WHY}`, (text) => {
+      files.forEach((file) => S.mutAsked.set(dk(file), at));
+      if (inBar) S.answers = { what: 'Mutation check', lines: files.map((file) => ({ file, ok: true, text: 'queued' })), left: [], note: null, said: text.replace(/^conveyor: /, '') };
+    }, (why) => { if (inBar) S.answers = { what: 'Mutation check', lines: files.map((file) => ({ file, ok: false, text: why })), left: [], note: null }; });
+  }
 
   const actBtn = (text, act, label, fn) => button(text, 'btn-quiet tests-act', act, label, fn);
   // One action sent: POST control {action, args, repo}; then(text, at) on a yes, no(refusal) on a no, and the answer or
@@ -461,13 +517,16 @@
       `- Clock / CPU in its last run: ${num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`}`,
       `- Runs on record: ${num(f.timedRuns) || 0}. Test steps that failed in it: ${num(f.failedSteps) || 0}. Flaky entries: ${num(f.flaky) || 0}.`,
       `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (card ${r.card})`).join(', ') || 'none'}`];
-    // Its hollow cases, so the card fixes them too: as many as the body holds with room for a line that counts the rest.
-    const hollow = hollowOf(f);
-    if (hollow.length) {
-      lines.push('', 'Hollow cases (they pass without proving anything): fix each one or delete it.');
-      const at = hollow.findIndex((x) => { const l = `- ${hollowSaid(x)}`.replace(/\p{C}/gu, ' '); if (lines.join('\n').length + l.length + 40 > BODY_MAX) return true; lines.push(l); return false; });
-      if (at >= 0) lines.push(`- and ${hollow.length - at} more`);
-    }
+    // A list of items under its heading: as many as the body holds with room for a line that counts the rest.
+    const add = (head, items, said) => {
+      if (!items.length) return;
+      lines.push('', head);
+      const at = items.findIndex((x) => { const l = `- ${said(x)}`.replace(/\p{C}/gu, ' '); if (lines.join('\n').length + l.length + 40 > BODY_MAX) return true; lines.push(l); return false; });
+      if (at >= 0) lines.push(`- and ${items.length - at} more`);
+    };
+    // Its hollow cases, and the mutants its tests did not catch (#79), so the card fixes them too.
+    add('Hollow cases (they pass without proving anything): fix each one or delete it.', hollowOf(f), hollowSaid);
+    add('Surviving mutants (the code it tests was changed, and its tests still passed): add the assertions that catch each one.', survivors(f), survivorSaid);
     if (v) {
       lines.push('', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`);
       const text = (S.texts.get(v.id) || '').split('\n').map((l) => l.replace(/[\p{C}\p{Z}]/gu, ' ').trimEnd()).join('\n').trim();
@@ -532,6 +591,7 @@
     };
     return [
       ['explain', ACTS.explain, tmodel() ? null : NO_SEAT, () => start('explain', file)],
+      ['mutate', 'Mutation check', null, () => mutAsk([file], false)],
       ['flaky-off', 'Keep a case off', null, () => { S.ask = { kind: 'keep', repo: S.d.repo, file, case: '', why: '' }; S.keep = { act: 'keep-case', file }; draw(); }],
       ['close-done', 'Close its issue as done', num(f.issue) === null ? 'It has no issue to close.' : null, () => {
         const before = num(f.usual) === null ? f.median : f.usual;
@@ -717,7 +777,10 @@
       S.keep = { act: 'many-title', file: fs[0].file }; draw();
     });
     if (!chosen(files, 'optimize').files.length) { opt.disabled = true; opt.title = RUNNER_WHY; }
-    btns.append(judge, opt, actBtn('Run', 'bulk-run', `Run the ${n} selected files now`, () => startMany('run', files)),
+    const mut = actBtn('Mutation check', 'bulk-mutate', `Mutation check of the ${n} selected files: at the front of the idle queue. ${MUT_WHY}`,
+      () => mutAsk(files.filter((f) => S.sel.has(f.file)).map((f) => f.file), true));
+    mut.title = MUT_WHY;
+    btns.append(judge, opt, actBtn('Run', 'bulk-run', `Run the ${n} selected files now`, () => startMany('run', files)), mut,
       actBtn('Clear', 'bulk-clear', 'Clear the selection', () => {
         S.sel.clear(); S.answers = null; if (asking('many')) S.ask = null; draw(); say('Selection cleared.');
       }));
@@ -728,6 +791,7 @@
       a.lines.forEach((l) => { const li = h('li', l.ok ? null : 'tests-refused', `${l.file}: ${l.ok ? `${a.what}, taken: ${l.text}` : `${a.what}, refused: ${l.text}`}`); li.dataset.file = l.file; ul.append(li); });
       a.left.forEach((l) => { const li = h('li', 'tests-why', `${l.file}: left out of ${a.what}: ${l.why}`); li.dataset.file = l.file; ul.append(li); });
       if (a.note) ul.append(h('li', 'tests-refused', a.note));
+      if (a.said) ul.append(h('li', 'tests-why tests-said', a.said));
       status.append(ul);
     }
     el.append(status, btns);
@@ -772,12 +836,18 @@
     const n = num(o.sinceRuns) || 0, since = num(o.since) === null ? '' : ` (since it landed: ${one(o.since)} CPU s, the median of ${n} ${n === 1 ? 'run' : 'runs'})`;
     return `CPU s before: ${one(o.before)}${since}${num(o.after) === null ? '' : `, after: ${one(o.after)}`}`;
   }
-  // One Optimize issue of a row: when it was filed, its link, its state and, landed, its fix and numbers.
+  // The mutants its file's tests caught before it landed and after (#79): the newest done mutation check of each, when
+  // both are on record.
+  function mutantsSaid(o) {
+    const b = obj(o.mutantsBefore), a = obj(o.mutantsAfter), ok = (m) => m && num(m.killed) !== null && num(m.of) !== null;
+    return ok(b) && ok(a) ? `Mutants caught before: ${b.killed} / ${b.of}, after: ${a.killed} / ${a.of}` : null;
+  }
+  // One Optimize issue of a row: when it was filed, its link, its state and, landed, its fix, numbers and mutants.
   function optLine(o) {
     const h = S.ctx.h, li = h('li', 'tests-opt');
     li.dataset.issue = String(o.issue);
     li.append(h('span', 'board-from', `Filed ${S.ctx.when(o.time)} · `), S.ctx.issueLink(o),
-      h('span', null, ` · ${[stateSaid(o)].concat(o.state === 'landed' ? [fixSaid(o), numbersSaid(o)] : []).filter(Boolean).join(' · ')}`));
+      h('span', null, ` · ${[stateSaid(o)].concat(o.state === 'landed' ? [fixSaid(o), numbersSaid(o), mutantsSaid(o)] : []).filter(Boolean).join(' · ')}`));
     return li;
   }
   // The runs where a landed Optimize took effect: the first timed run of the file after it landed, to its issue. The
@@ -1072,6 +1142,23 @@
       hollow.forEach((x) => ul.append(h('li', 'tests-hollow-case', hollowSaid(x))));
       el.append(h('p', 'board-head', 'Hollow cases'), ul);
     }
+    // Its mutation check: its state, and each mutant its tests did not catch, with its line and change.
+    const mut = h('div', 'tests-mutation');
+    mut.append(h('p', 'board-head', 'Mutation check'), h('p', 'tests-fact tests-mut-state', mutState(f)));
+    const surv = survivors(f);
+    if (surv.length) {
+      const ul = h('ul', 'tests-runs tests-survivors');
+      ul.setAttribute('aria-label', `Surviving mutants of ${file}`);
+      surv.forEach((x) => {
+        const li = h('li', 'tests-survivor');
+        li.append(h('span', 'board-label', `${x.source}:${x.line}`), h('span', 'board-from', typeof x.kind === 'string' ? ` (${x.kind}) ` : ' '),
+          h('code', 'tests-mut-before', trimmed(x.before)), h('span', null, ' → '), h('code', 'tests-mut-after', trimmed(x.after)),
+          h('span', 'board-from', ' · tests still passed'));
+        ul.append(li);
+      });
+      mut.append(ul);
+    }
+    el.append(mut);
     if (edits.length) el.append(h('p', 'board-head', 'Test edits by cards'), editsList(edits, `Test edits of ${file}`, false, anyIssueUrl([f])));
     el.append(rowActions(f));
     // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
@@ -1203,8 +1290,11 @@
         const count = COLS.find((c) => c[0] === 'count')[2](f);
         const caught = cell(num(f.caught) === null ? '—' : String(f.caught), 'tests-num tests-caught');
         if (num(f.caught) !== null) caught.title = `Changed to pass: ${num(f.changedToPass) || 0}`;
+        // Mutants caught: empty before a check; when and on which commit its newest done check ran, on hover.
+        const mut = cell(mutCell(f), 'tests-num tests-mutants'), md = mutDone(f);
+        if (md) mut.title = `Checked ${S.ctx.when(md.at)} on commit ${String(md.sha || 'not recorded').slice(0, 7)}`;
         tr.append(fileCell, cell(one(f.cpu), 'tests-num'), cell(one(f.median), 'tests-num'), cell(pct(f.change), 'tests-num'),
-          cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, caught, cell(chips));
+          cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, caught, mut, cell(chips));
       }
       body.append(tr);
       if (open) { const more2 = h('tr', 'tests-open'), td = h('td'); td.colSpan = COLS.length; td.append(more(f)); more2.dataset.file = f.file; more2.append(td); body.append(more2); }
