@@ -293,7 +293,9 @@ t_proxy() {
     && [ "$(cat "$STUB/auth")" = "Bearer $PROXY_KEY"$'\n-' ] || fail "the key followed a redirect to another origin: $(cat "$STUB/auth")"
   cp "$T/$CASE/config.toml" "$CODEX_HOME/config.toml"
   out=$(routes)
-  [ "$out" = "builder: m (claude) through $base, key in PROXY_KEY
+  # The key is only in this shell's environment, which the machine's service does not have: doctor says so, and
+  # calls through the proxy as the service does.
+  [ "$out" = "builder: m (claude) through $base, key in PROXY_KEY; the service finds no key: no PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and no key file named (keyFile), and one call through it works
 reviewer: gpt-6.10-sol (codex) through $base/v1, Codex's model_provider proxy, key in PROXY_KEY" ] || fail "doctor's routes: $out"
 }
 

@@ -72,8 +72,8 @@ and `main` in the host file on the Board's machine.
 - `records`: each project the loop serves. A record's `ledger` is that project's decision ledger. The Board shows its
   open decisions and answers them. A record's `lanes` are the folders of its lanes, which `conveyor.sh lane ... create`
   writes.
-- `claudeProxy`: the API proxy for Claude's sessions, and when they use it
-  ([Configuration](configuration.md#the-control-record)). Setup writes it when it finds a local proxy (below).
+- `claudeProxy` and `codexProxy`: the route of Claude's and Codex's sessions, and when they use it
+  ([Configuration](configuration.md#the-control-record)). Setup writes them when it finds a second route (below).
 
 ## Setup
 
@@ -102,23 +102,54 @@ The question names the lockfiles it finds. In that case, give the install comman
 the build and the tests. Setup asks again on each run until the pack has `linkFromMain` or `worktree.setup`. It never
 changes them after that, so your own edits stay.
 
-Setup also looks for a local API proxy. This is a proxy that listens on this machine, for example on port 4141. For
-Claude, it must answer the Anthropic Messages API, and setup looks only when no `claudeProxy` is set. For Codex, it
-must answer the OpenAI Responses API, and setup looks only when Codex is installed and no `codexProxy` is set. When it
-finds a proxy, setup checks the CLI's own login and asks which route each role uses, the builder (`--builder-route`)
-and the reviewer (`--reviewer-route`):
+Setup also looks for a second route for the CLI of each role, the builder and the reviewer, when that CLI has no route
+in the host file. For Codex, it looks only when Codex is installed. A second route is one of these:
+
+- A local API proxy. This is a proxy that listens on this machine, for example on port 4141. For Claude, it must
+  answer the Anthropic Messages API. For Codex, it must answer the OpenAI Responses API. Setup looks at each proxy
+  that it finds.
+- The provider's own API with your own key: for Claude, the Anthropic API with `ANTHROPIC_API_KEY`; for Codex, the
+  OpenAI API with `OPENAI_API_KEY`. Setup finds the key in the `env` of Claude Code's settings file
+  (`~/.claude/settings.json`), in the environment that setup runs in, or in the key file that you give it.
+
+When setup finds no key for a CLI, it first asks where you keep one (`--claude-key`, `--codex-key`): `none` when you
+use no API key, `settings`, or the path of a key file (below).
+
+Setup checks each route with one real call before it offers it: the CLI's own login, each proxy through the CLI, and
+the API with your key. It shows each route that it checked. A route that fails is shown with the reason, and is not
+offered. Each role is offered only the routes of its own CLI. When a role has more than its CLI's own login, setup
+asks which route it uses, the builder (`--builder-route`) and the reviewer (`--reviewer-route`):
 
 - `fallback`: the role's sessions run on the CLI's own login. When that login fails before the session starts its
-  work, the same step runs again at once through the proxy.
-- `proxy`: the role's sessions always run through the proxy.
-- `subscription`: the role's sessions never run through the proxy.
+  work, the same step runs again at once on the second route. When a CLI has both a proxy and the API, setup also
+  asks which of the two is the second route (`--fallback-route proxy` or `--fallback-route api`).
+- `proxy`: the role's sessions always run through the proxy. When more than one proxy works for the CLI, setup asks
+  which one (`--claude-proxy`, `--codex-proxy`, with the proxy's base URL as setup shows it).
+- `api`: the role's sessions always run on the provider's API with your key.
+- `subscription`: the role's sessions run on the CLI's own login only.
 
-If both roles are `subscription`, setup writes nothing, and asks again on its next run. Otherwise it writes each proxy
-it found in the host file, with each role's route: `claudeProxy` for Claude, and `codexProxy` for Codex. Each has the
-proxy's base URL and the name of the variable that holds the proxy's key: `CLAUDE_PROXY_KEY` or `CODEX_PROXY_KEY`.
-Setup never writes the key. If the proxy needs a key, set that variable in the environment that Conveyor runs in.
+For a CLI that takes the API, setup asks where the key is kept (`--claude-key`, `--codex-key`), when you did not
+answer it before:
+
+- `settings`: in the `env` of Claude Code's settings file, `~/.claude/settings.json`.
+- The path of a key file. The file holds the key as its first line. It must be yours, and only you may read or
+  write it (mode 600). Setup refuses a file with a looser mode. `/conveyor-belt:setup` can make the file for you: it
+  asks for the key and writes it.
+
+Do not keep the key only in your shell's environment. The machine's service starts with a bare environment, so its
+cards do not get a key from there.
+
+Setup then writes the route of each CLI in the host file: `claudeProxy` for Claude, and `codexProxy` for Codex. Its
+`kind` is `subscription`, `proxy` or `api` ([Configuration](configuration.md#the-control-record)). A `proxy` route
+has the proxy's base URL and the name of the variable that holds the proxy's key: `CLAUDE_PROXY_KEY` or
+`CODEX_PROXY_KEY`. An `api` route has the API's base URL, the name of the key's variable and, when you gave one, the
+key file's path. Setup never writes a key. Setup does not ask again for a CLI whose route is in the host file.
 Conveyor gives `codexProxy` to each Codex session as Codex's own provider settings, and does not change Codex's
 `config.toml`.
+
+`conveyor.sh doctor` shows each role's route, and checks it as the machine's service runs it: it reads the key from
+the places that the service reads, not from your shell. Then it makes one real call on each part of the route that
+the role uses: the CLI's own login, the proxy through the CLI, or the API with the key.
 
 Then setup writes the pack, sets the project to follow the plugin's releases, installs the newest release, adds the
 project to the host file, adds `/conveyor/state/` to `.git/info/exclude` so that git does not list the state folder,
@@ -141,7 +172,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

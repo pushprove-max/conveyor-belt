@@ -27,7 +27,10 @@ sample() {
   git -C "$D" tag v1.0.0 "$B" && git -C "$D" push -q origin v1.0.0 && echo '[{"tagName":"v1.0.0","isDraft":false,"isPrerelease":false}]' > "$G/releases" \
     || fail "the plugin's release was not made"
   PATH=$G:$PATH
-  echo 'case:Zed' > "$T/$CASE/terms"; jq -n --arg t "$T/$CASE/terms" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  # The machine's host file, with each CLI's route already set to its own login, as an earlier setup writes it: a case
+  # of the route questions (t_setupproxy, t_apisetup) takes them out.
+  echo 'case:Zed' > "$T/$CASE/terms"
+  jq -n --arg t "$T/$CASE/terms" '{terms: $t, claudeProxy: {kind: "subscription"}, codexProxy: {kind: "subscription"}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
 }
 samplemake() { # <folder>: what sample copies, in <folder>: sample, origin.git, gh (G) and board-venv
   local S=$1/sample G=$1/gh
@@ -272,48 +275,6 @@ t_setuplaneoldpack() {
   jq -e '.lanes.research == {model: "claude-fable-5-2", effort: "medium"}' "$S/.conveyor/project.json" >/dev/null && [ -d "$S-research" ] \
     && jq -e '.model == "claude-fable-5-2"' "$S-research/.claude/settings.local.json" >/dev/null || fail "setup did not write lanes.research and make the lane: $out"
 }
-# Bug: on a fresh machine whose Claude login had expired, a local API proxy ran on a port and setup neither found nor
-# offered it, so every card was blocked. setup finds a proxy that answers the Messages API and the Responses API (here a
-# stub, after a port that answers something else), asks each role's route before it changes anything, naming each
-# proxy and each CLI's login, and writes the host file's claudeProxy and codexProxy with each role's route and the NAME
-# of the key variable, never its value; run again, it does not ask.
-t_setupproxy() {
-  local X out was h; setupdone; h=$XDG_CONFIG_HOME/conveyor/host.json
-  cat > "$T/$CASE/proxy.py" <<'PY'
-import http.server, json, os, sys, threading
-class Other(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        self.send_response(404); self.end_headers(); self.wfile.write(b"<html>no</html>")
-    def log_message(self, *a): pass
-class Messages(Other):
-    def do_POST(self):
-        if self.path == "/v1/responses": said = {"error": {"type": "invalid_request_error", "message": "Missing required parameter: model"}}
-        else: said = {"type": "error", "error": {"type": "invalid_request_error", "message": "messages: Field required"}}
-        body = json.dumps(said).encode()
-        self.send_response(400); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(body)
-o = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Other); m = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Messages)
-threading.Thread(target=o.serve_forever, daemon=True).start()
-open(sys.argv[1] + ".new", "w").write("%d %d" % (o.server_address[1], m.server_address[1])); os.rename(sys.argv[1] + ".new", sys.argv[1])
-m.serve_forever()
-PY
-  python3 -I "$T/$CASE/proxy.py" "$T/$CASE/ports" & PXSRV=$!; trap 'kill $PXSRV 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT
-  until [ -s "$T/$CASE/ports" ] || ! kill -0 $PXSRV 2>/dev/null; do sleep 0.1; done
-  export CONVEYOR_PROXY_PORTS; CONVEYOR_PROXY_PORTS=$(cat "$T/$CASE/ports") || fail "the stub proxy did not start"
-  # Claude's subscription login has expired; the proxy's key is in the variable setup names.
-  sed -i '2i [ "$1" != -p ] || { echo "OAuth session expired and could not be refreshed"; exit 1; }' "$G/claude"
-  export CLAUDE_PROXY_KEY=px-$RANDOM$RANDOM-secret CODEX_PROXY_KEY=cx-$RANDOM$RANDOM-secret; was=$(cat "$h")
-  local b=http://127.0.0.1:${CONVEYOR_PROXY_PORTS#* }
-  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] \
-    && grep -qF -- "a local API proxy answers for Claude at $b (Claude's subscription login fails (OAuth session expired and could not be refreshed)), for Codex at $b/v1 (Codex's login works)." <<<"$out" \
-    && grep -qF -- "--builder-route <fallback, proxy or subscription" <<<"$out" && grep -qF -- "--reviewer-route <fallback, proxy or subscription" <<<"$out" \
-    && [ "$(cat "$h")" = "$was" ] || fail "setup did not ask each role's route, naming each proxy and login, before changing anything: $out"
-  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --builder-route fallback --reviewer-route proxy 2>&1) || fail "setup with the two routes failed: $out"
-  jq -e --arg b "$b" '.claudeProxy == {baseUrl: $b, keyEnv: "CLAUDE_PROXY_KEY", roles: {builder: "fallback", reviewer: "proxy"}}
-      and .codexProxy == {baseUrl: "\($b)/v1", keyEnv: "CODEX_PROXY_KEY", roles: {builder: "fallback", reviewer: "proxy"}}' "$h" >/dev/null \
-    || fail "setup did not write claudeProxy and codexProxy with the base URL, the key's variable and each role's route: $(cat "$h")"
-  ! grep -qF -e "$CLAUDE_PROXY_KEY" -e "$CODEX_PROXY_KEY" "$h" || fail "the host file holds a proxy's key"
-  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup run again with both proxies set asked again, or failed: $out"
-}
 # Bug (#630): a new user had to write the host file and a terms file by hand before setup, and doctor named a missing
 # terms file though it is optional. On a machine with no host file and no Conveyor but the plugin copy setup runs
 # from ($D, as the plugin's own folder), setup with its answers writes the host file with the project as a record and
@@ -322,7 +283,8 @@ t_setupfresh() {
   local X out; sample; X=$D/conveyor/conveyor.sh; rm "$XDG_CONFIG_HOME/conveyor/host.json" "$T/$CASE/terms"
   # A service whose conveyor.sh is there is no missing piece (as in t_doctor).
   mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
-  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no 2>&1) || fail "setup on a machine with no host file exited non-zero: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --claude-key none --codex-key none 2>&1) \
+    || fail "setup on a machine with no host file exited non-zero: $out"
   jq -e --arg m "$S" '.records == [{repo: "sample", main: $m}] and (has("terms") | not)' "$XDG_CONFIG_HOME/conveyor/host.json" >/dev/null && [ -s "$S/.conveyor/project.json" ] \
     || fail "setup did not write the host file with the project as its record, and the pack: $(cat "$XDG_CONFIG_HOME/conveyor/host.json" 2>&1)"
   # The Board started after setup (as setup asks the owner to), so doctor has no warning that it is not running.

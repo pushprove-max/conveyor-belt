@@ -39,11 +39,12 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # setup installs them for the user when Claude Code's record of installed plugins (in CLAUDE_CONFIG_DIR, default
 # ~/.claude) has none, and doctor names them missing until it has.
 # The questions "Which route does the builder use?" and "Which route does the reviewer use?" (docs/setup.md): asked
-# (exit 2, nothing written) on every run while findproxy() finds a local API proxy for a CLI that has none set (Claude:
-# claudeproxy(); Codex: codexproxyset()), naming each proxy found and its CLI's login (claudelogin(), codexlogin()).
-# --builder-route and --reviewer-route are each fallback (the subscription login, and through the proxy when that
-# login fails), proxy (always through the proxy) or subscription (never through it). Unless both are subscription,
-# each proxy found is written in the host file with the two roles' routes (hostproxy()) once the project is in it:
+# (exit 2, nothing written) on every run while the role's CLI has no route set in the host file and has a second
+# route: a local API proxy (findproxy()) or the provider's own API with a key (routeask()); before them, where that
+# key is kept (--claude-key, --codex-key), while none is found. Each route is checked with one real call first, and
+# one that fails is named with why and not offered. --builder-route and --reviewer-route are each fallback (the CLI's
+# own login, and the second route when that login fails), proxy or api (always that route) or subscription (the CLI's
+# own login only). Once the project is in the host file, each such CLI's route is written there (routewrite()):
 # Claude's as claudeProxy, Codex's as codexProxy, which a Codex session is given as its own provider settings.
 MPS=mattpocock-skills@claude-plugins-official
 mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length > 0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" >/dev/null 2>&1; }
@@ -54,8 +55,10 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' px='' cx='' w first full lk='' ws='' lf='' wsx='' dds=() lks
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--pin] [--foreman]'
+setup() { # as SETUP_USAGE
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks
+  local -A keyarg=() pxarg=() rcli=() lg=() pxu=() ak=() akf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
     [ "$1" != --foreman ] || { fm=1; shift; continue; }
@@ -66,23 +69,21 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
       --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
       --worktree-setup) ws=${2-}; [ -n "$ws" ] || { set -- x; break; } ;;
-      --builder-route) br=${2-}; [[ $br == subscription || $br == fallback || $br == proxy ]] || { set -- x; break; } ;;
-      --reviewer-route) rr=${2-}; [[ $rr == subscription || $rr == fallback || $rr == proxy ]] || { set -- x; break; } ;; *) set -- x; break ;; esac
+      --builder-route) br=${2-}; [[ $br =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
+      --reviewer-route) rr=${2-}; [[ $rr =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
+      --fallback-route) fr=${2-}; [[ $fr == proxy || $fr == api ]] || { set -- x; break; } ;;
+      --claude-key) keyarg[claude]=${2-}; [ -n "${keyarg[claude]}" ] || { set -- x; break; } ;;
+      --codex-key) keyarg[codex]=${2-}; [ -n "${keyarg[codex]}" ] || { set -- x; break; } ;;
+      --claude-proxy) pxarg[claude]=${2-}; [ -n "${pxarg[claude]}" ] || { set -- x; break; } ;;
+      --codex-proxy) pxarg[codex]=${2-}; [ -n "${pxarg[codex]}" ] || { set -- x; break; } ;; *) set -- x; break ;; esac
     [ $# -ge 2 ] || { set -- x; break; }; shift 2
   done
-  [ $# = 0 ] || { echo "usage: conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy] [--reviewer-route subscription|fallback|proxy] [--pin] [--foreman]" >&2; return 2; }
+  [ $# = 0 ] || { echo "usage: conveyor.sh $SETUP_USAGE" >&2; return 2; }
   # The two lanes are asked on every run, before anything is changed: there is no saved answer.
   [ -n "$fl" ] || need+=("--fast-lane <yes or no: make a fast lane, your own worktree for changes made by hand?>")
   [ -n "$rl" ] || need+=("--research-lane <yes or no: make a research lane, a read-only sandboxed worktree?>")
-  # So are the two roles' routes, while a local API proxy answers for a CLI that has none set.
-  [ -n "$(claudeproxy)" ] || px=$(findproxy messages)
-  ! command -v codex >/dev/null || [ -n "$(codexproxyset)" ] || cx=$(findproxy responses)
-  if [ -n "$px$cx" ]; then
-    w="a local API proxy answers$([ -z "$px" ] || echo " for Claude at $px (Claude's subscription login $(claudelogin))")$([ -z "$px" ] || [ -z "$cx" ] || echo ",")$([ -z "$cx" ] || echo " for Codex at $cx (Codex's login $(codexlogin))")."
-    w+=" fallback: on the subscription login, and through the proxy when that login fails. proxy: always through the proxy. subscription: never through it"
-    [ -n "$br" ] || need+=("--builder-route <fallback, proxy or subscription, for builds, fixes and rebases: $w>")
-    [ -n "$rr" ] || need+=("--reviewer-route <fallback, proxy or subscription, for reviews: $w>")
-  fi
+  # So are the two roles' routes, while a CLI with none set has a second route.
+  routeask || return
   # The dependency folders, while the pack neither links nor installs them.
   [ ! -e "$PACK" ] || packget linkFromMain lf worktree.setup wsx || return 1
   if [ -z "$wsx" ] && [ "$(jq 'length' <<<"${lf:-[]}")" = 0 ]; then
@@ -163,10 +164,7 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
   # Before hostadd: once the host file names the project, a machine's service already running serves it.
   heldstart || return 1
   hostadd || return 1
-  if [ -n "$px$cx" ] && [ "$br$rr" != subscriptionsubscription ]; then
-    [ -z "$px" ] || mlocked hostproxy claudeProxy "$px" CLAUDE_PROXY_KEY "$br" "$rr" || return 1
-    [ -z "$cx" ] || mlocked hostproxy codexProxy "$cx" CODEX_PROXY_KEY "$br" "$rr" || return 1
-  fi
+  for c in "${clis[@]}"; do mlocked routewrite "$c" || return 1; done
   [ "$fl" = no ] || setuplane fast || return 1
   if [ "$rl" = yes ]; then
     # A pack an earlier setup wrote has no lanes.research, which the lane's create needs: PACK0's is written in.
@@ -274,7 +272,8 @@ hostput() { # [checkout]
 # Anthropic Messages API, /v1/messages gives a Messages API body back (type error or message); its base URL is
 # http://127.0.0.1:<port>. responses, Codex's: the OpenAI Responses API, /v1/responses gives a response object or an
 # OpenAI error ({error: {...}}, with no type of its own, as an Anthropic error has) back; its base URL ends in /v1, as
-# Codex's base_url does. Prints the first one's base URL; nothing for none.
+# Codex's base_url does. Prints each one's base URL, one a line; nothing for none. An answer is only how a proxy is
+# found: routeask() checks each one found with one real call through it before it is offered.
 PROXY_PORTS=${CONVEYOR_PROXY_PORTS-4141 3456 4000 8082}
 findproxy() { # <messages|responses>
   local ps; read -ra ps <<<"$PROXY_PORTS"; [ ${#ps[@]} -gt 0 ] || return 0
@@ -294,29 +293,138 @@ for port in sys.argv[2:]:
     except ValueError: continue
     if not isinstance(said, dict): continue
     if api == "messages" and said.get("type") in ("error", "message"):
-        print(base); break
+        print(base)
     if api == "responses" and (said.get("object") == "response" or (isinstance(said.get("error"), dict) and "type" not in said)):
-        print(base + "/v1"); break' "$1" "${ps[@]}" 2>/dev/null
+        print(base + "/v1")' "$1" "${ps[@]}" 2>/dev/null
 }
-# Claude's subscription login, as a check session in an empty folder finds it, given no proxy and no key from the
-# environment: "works", else "fails" and the first line it wrote, with what looks like a credential left out.
-claudelogin() {
-  local d o
-  d=$(mktemp -d) || { echo "was not checked"; return 0; }
-  if o=$(cd "$d" && env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY timeout 120 claude -p --setting-sources "" --strict-mcp-config \
-    --no-session-persistence <<<"Reply with the one word OK." 2>&1); then echo works
-  else echo "fails ($(grep -m 1 '[^[:space:]]' <<<"$o" | sed -E 's/[A-Za-z0-9_-]{24,}/[left out]/g; s/;/,/g' | cut -c 1-200))"; fi
-  rm -rf "$d"
+# The provider's own API, as setup checks it and writes its base URL (CONVEYOR_ANTHROPIC_API and CONVEYOR_OPENAI_API
+# when set, else the providers' own), and the variable each one's key is named by.
+ANTHROPIC_API=${CONVEYOR_ANTHROPIC_API:-https://api.anthropic.com}
+OPENAI_API=${CONVEYOR_OPENAI_API:-https://api.openai.com/v1}
+declare -A APIKEY=([claude]=ANTHROPIC_API_KEY [codex]=OPENAI_API_KEY) APINAME=([claude]=Anthropic [codex]=OpenAI) PROXYKEY=([claude]=CLAUDE_PROXY_KEY [codex]=CODEX_PROXY_KEY)
+# setup()'s route questions, in its own variables (its locals, read and set here). Each role's CLI now, in rcli: the
+# pack's seat, or with no pack yet the seat PACK0's models give. Each of those CLIs, Claude or Codex, with no route set
+# (Claude: no claudeProxy in the host file or the pack; Codex: installed, no codexProxy in the host file) is checked:
+# first where its provider's API key is kept (ak, the key; akf, where: settings, a key file's path or none, as
+# --claude-key or --codex-key answers it, empty while a key is found and not answered). With no key found and no
+# answer, that question is asked and no route is checked yet. Then each route it can take, each with one real call:
+# its own login (routecall()), in lg; each local API proxy found (findproxy()), through the CLI with the key of its
+# proxy variable, the ones that work in pxok; the provider's own API with the key (apicheck()), in as. Each check, a
+# failing one with why, is printed, and named in the CLI's text (desc). Each role is offered the routes of its own CLI that work
+# (off); its route is asked when that is more than the CLI's own login, and an answer naming a route not offered is
+# refused (exit 2). Adds to need each question still unanswered: the roles' routes; --fallback-route, when a role takes
+# the fallback and its CLI has both a proxy and the API; --claude-proxy or --codex-proxy, when more than one proxy
+# works for the CLI a role goes through; --claude-key or --codex-key, where the key of a CLI going to its API is kept.
+# Sets clis, the CLIs with a route that works, whose route setup writes (routewrite()), and kd, each one's second route
+# (proxy, api, or empty for its own login only), with its proxy in pxu. A key file that is not there, not the user's
+# own or readable by others, or an answer of settings with no key there, stops setup (exit 1).
+routeask() {
+  local c a r o t u k s cs=() asked=''
+  local -A off=() pxok=() desc=()
+  for r in builder reviewer; do
+    if [ -e "$PACK" ]; then s=$(seat "$r" 2>/dev/null) || s=''
+    else s=$(jq -cn "$PACK0 | .models.allowed" | jq -c --arg r "$r" --argjson c null "$SEATNOW"'[try seatnow($r; $c)] | first // empty' 2>/dev/null) || s=''; fi
+    rcli[$r]=$(jq -r '.agent // empty' <<<"$s" 2>/dev/null)
+  done
+  for c in claude codex; do
+    [ "${rcli[builder]}" = $c ] || [ "${rcli[reviewer]}" = $c ] || continue
+    if [ $c = claude ]; then ! jq -e '.claudeProxy | objects' "$HOST" >/dev/null 2>&1 && [ -z "$(claudeproxy)" ] || continue
+    else command -v codex >/dev/null && ! jq -e '.codexProxy | objects' "$HOST" >/dev/null 2>&1 || continue; fi
+    k=${APIKEY[$c]}; a=${keyarg[$c]:-}
+    if [ -z "$a" ]; then routekey "{\"keyEnv\": \"$k\"}"; akf[$c]=''
+      [ -n "$KEY_V" ] || { asked=1; need+=("--$c-key <none, settings or the path of a key file that only you can read (mode 600): where your ${APINAME[$c]} API key is kept, for a route through the ${APINAME[$c]} API (none: you use no API key; settings: the $k in the env of $CLAUDE_SETTINGS); now $KEY_FROM, and none is in this shell>"); continue; }
+    elif [ "$a" = none ]; then KEY_V=''; akf[$c]=none
+    elif [ "$a" = settings ]; then routekey "{\"keyEnv\": \"$k\"}" service
+      [ -n "$KEY_V" ] || { echo "conveyor: --$c-key settings: $KEY_FROM; add it there, or answer the path of a key file" >&2; return 1; }
+      akf[$c]=settings
+    else a=$(cd "$(dirname -- "$a")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename -- "$a")") || a=${keyarg[$c]}
+      keyfile "$a" || { echo "conveyor: --$c-key: $KEY_FROM" >&2; return 1; }
+      akf[$c]=$a
+    fi
+    ak[$c]=$KEY_V; cs+=("$c")
+  done
+  # A key question unanswered: the routes are checked once it is.
+  [ -z "$asked" ] || return 0
+  for c in "${cs[@]}"; do
+    t=$([ $c = claude ] && echo Claude || echo Codex)
+    lg[$c]=$(routecall $c ""); s="$t: its own login ${lg[$c]}"; pxok[$c]=''
+    while IFS= read -r u; do
+      [ -n "$u" ] || continue
+      routekey "{\"keyEnv\": \"${PROXYKEY[$c]}\"}"
+      o=$(routecall $c "" "$(jq -cn --arg b "$u" --arg k "${PROXYKEY[$c]}" '{kind: "proxy", baseUrl: $b, keyEnv: $k}')" "$KEY_V")
+      s+=", a local API proxy at $u $o"; [ "$o" != works ] || pxok[$c]+="$u "
+    done < <(findproxy "$([ $c = claude ] && echo messages || echo responses)")
+    as[$c]=''
+    [ -z "${ak[$c]}" ] || { as[$c]=$(apicheck "$([ $c = claude ] && echo anthropic || echo openai)" "$([ $c = claude ] && echo "$ANTHROPIC_API" || echo "$OPENAI_API")" "${ak[$c]}")
+      s+=", the ${APINAME[$c]} API with the key in ${APIKEY[$c]} ${as[$c]}"; }
+    echo "conveyor: the routes checked for $s." >&2
+    desc[$c]="$s. fallback: $t's own login, and its second route (the proxy or the API) when that login fails. proxy: always through the local proxy. api: always through the ${APINAME[$c]} API with your key. subscription: $t's own login only"
+    # The answers offered, once each, in this order.
+    o=''; [ "${lg[$c]}" = works ] && { [ -n "${pxok[$c]}" ] || [ "${as[$c]}" = works ]; } && o+=', fallback'
+    [ -z "${pxok[$c]}" ] || o+=', proxy'; [ "${as[$c]}" != works ] || o+=', api'; [ "${lg[$c]}" != works ] || o+=', subscription'
+    off[$c]=${o#, }
+    if [ -n "${off[$c]}" ]; then clis+=("$c")
+    else echo "conveyor: no route $t can take works now, so none is written and setup asks again on its next run: $s" >&2; fi
+  done
+  for r in builder reviewer; do
+    c=${rcli[$r]}; [ -n "$c" ] && [[ -v off[$c] ]] && [ -n "${off[$c]}" ] || continue
+    u=$([ $r = builder ] && echo "$br" || echo "$rr")
+    # The CLI's own login is its only route: nothing to ask.
+    [ -n "$u" ] || [ "${off[$c]}" != subscription ] || { u=subscription; if [ $r = builder ]; then br=$u; else rr=$u; fi; }
+    if [ -z "$u" ]; then asked=1; need+=("--$r-route <${off[$c]}, for $([ $r = builder ] && echo "builds, fixes and rebases" || echo reviews), which run on $c: ${desc[$c]}>")
+    elif [[ ", ${off[$c]}, " != *", $u, "* ]]; then echo "conveyor: --$r-route $u is not offered for the $r, which runs on $c (the routes offered: ${off[$c]}): ${desc[$c]}" >&2; return 2; fi
+  done
+  [ -z "$asked" ] || return 0
+  for c in "${clis[@]}"; do
+    # The second routes this CLI can take, those its roles name, and whether one of them takes the fallback.
+    u=''; [ -z "${pxok[$c]}" ] || u+=' proxy'; [ "${as[$c]}" != works ] || u+=' api'
+    a='' o=''
+    for r in builder reviewer; do
+      [ "${rcli[$r]}" = $c ] || continue; k=$([ $r = builder ] && echo "$br" || echo "$rr")
+      [ "$k" != fallback ] || o=1
+      if [[ $k == proxy || $k == api ]] && [[ "$a " != *" $k "* ]]; then a+=" $k"; fi
+    done
+    if [ "$a" = " proxy api" ] || [ "$a" = " api proxy" ]; then
+      echo "conveyor: each CLI takes one second route: the builder and the reviewer cannot take the proxy and the API both on $c; answer the same of the two" >&2; return 2
+    elif [ -n "$a" ]; then kd[$c]=${a# }
+    elif [ -n "$o" ]; then
+      if [ "$u" = ' proxy api' ]; then
+        [ -n "$fr" ] && kd[$c]=$fr || need+=("--fallback-route <proxy or api: the second route a role that takes the fallback goes to when its login fails, for $c: ${desc[$c]}>")
+      else kd[$c]=${u# }; fi
+    else kd[$c]=''; fi
+    # Which proxy, when more than one works.
+    if [ "${kd[$c]:-}" = proxy ]; then
+      read -ra s <<<"${pxok[$c]}"
+      if [ ${#s[@]} = 1 ]; then pxu[$c]=${s[0]}
+      elif [ -z "${pxarg[$c]:-}" ]; then need+=("--$c-proxy <$(printf '%s or ' "${s[@]}" | sed 's/ or $//'): the local API proxy $c goes through: ${desc[$c]}>")
+      elif [[ " ${pxok[$c]}" == *" ${pxarg[$c]} "* ]]; then pxu[$c]=${pxarg[$c]}
+      else echo "conveyor: --$c-proxy ${pxarg[$c]} is not a local API proxy that works for $c (those that do: ${pxok[$c]% })" >&2; return 2; fi
+    fi
+    [ "${kd[$c]:-}" != api ] || [ -n "${akf[$c]}" ] \
+      || need+=("--$c-key <settings, the ${APIKEY[$c]} in the env of $CLAUDE_SETTINGS ($( [ -n "$(jq -r --arg k "${APIKEY[$c]}" '.env[$k] // empty' "$CLAUDE_SETTINGS" 2>/dev/null)" ] && echo "it is there" || echo "it is not there now")), or the path of a key file that only you can read (mode 600): where the ${APINAME[$c]} API key is kept, so the service's sessions can read it>")
+  done
+  return 0
 }
-# Codex's own login, as codex login status finds it: "works", else "fails (codex login)".
-codexlogin() { if timeout 60 codex login status >/dev/null 2>&1; then echo works; else echo "fails (codex login)"; fi; }
-# A proxy in the host file, claudeProxy or codexProxy (under the machine's lock, mlocked, as hostput writes the host
-# file): the base URL found, the NAME of the variable its key is read from (never the key) and each role's route.
-hostproxy() { # <claudeProxy|codexProxy> <base URL> <key variable> <builder's route> <reviewer's route>
-  local t; t=$(mktemp "$HOST.XXXXXX") || return 1
-  jq --arg n "$1" --arg b "$2" --arg k "$3" --arg br "$4" --arg rr "$5" '.[$n] = {baseUrl: $b, keyEnv: $k, roles: {builder: $br, reviewer: $rr}}' "$HOST" > "$t" && mv "$t" "$HOST" \
-    || { rm -f "$t"; echo "conveyor: $1 could not be written in the host file $HOST" >&2; return 1; }
-  echo "conveyor: wrote $1 in the host file $HOST: $2, the builder's route $4 and the reviewer's $5; a key it needs is read from $3 in the environment Conveyor runs in"
+# A CLI's route in the host file, claudeProxy or codexProxy (under the machine's lock, mlocked, as hostput writes the
+# host file), from setup()'s answers (routeask()): {kind: "subscription"} when the CLI takes no second route or both
+# roles answered subscription; else its kind (proxy or api), base URL, the NAME of the variable its key is read by
+# (never the key), the key file's path when the key is kept in one, and each role's route. A role that names a route
+# this CLI cannot take runs on its own login.
+routewrite() { # <claude|codex>
+  local n t k r b o
+  n=$([ "$1" = claude ] && echo claudeProxy || echo codexProxy); k=${kd[$1]:-}
+  r=$(jq -cn --arg k "$k" --arg b "$br" --arg r "$rr" '[$b, $r] | map(if . == "subscription" or $k == "" then "subscription" elif . == "fallback" or . == $k then . else "subscription" end) | {builder: .[0], reviewer: .[1]}')
+  if [ -z "$k" ] || [ "$r" = '{"builder":"subscription","reviewer":"subscription"}' ]; then o='{"kind":"subscription"}'
+  else
+    if [ "$k" = proxy ]; then b=${pxu[$1]}; else b=$([ "$1" = claude ] && echo "$ANTHROPIC_API" || echo "$OPENAI_API"); fi
+    o=$(jq -cn --arg k "$k" --arg b "$b" --arg e "$([ "$k" = proxy ] && echo "${PROXYKEY[$1]}" || echo "${APIKEY[$1]}")" --arg f "$([ "$k" = api ] && [ "${akf[$1]}" != settings ] && echo "${akf[$1]}")" --argjson r "$r" \
+      '{kind: $k, baseUrl: $b, keyEnv: $e} + (if $f == "" then {} else {keyFile: $f} end) + {roles: $r}')
+  fi
+  t=$(mktemp "$HOST.XXXXXX") || return 1
+  jq --arg n "$n" --argjson o "$o" '.[$n] = $o' "$HOST" > "$t" && mv "$t" "$HOST" \
+    || { rm -f "$t"; echo "conveyor: $n could not be written in the host file $HOST" >&2; return 1; }
+  if [[ $o == '{"kind":"subscription"}' ]]; then echo "conveyor: wrote $n in the host file $HOST: $1 runs on its own login only"
+  else jq -r --arg n "$n" --arg h "$HOST" --arg s "$CLAUDE_SETTINGS" '"conveyor: wrote \($n) in the host file \($h): through \(if .kind == "api" then "the API at " else "the proxy at " end)\(.baseUrl), the builder'"'"'s route \(.roles.builder) and the reviewer'"'"'s \(.roles.reviewer); its key is read from \(.keyEnv) in the env of \($s)\(if .keyFile then ", else from the key file \(.keyFile)" else "" end)"' <<<"$o"; fi
 }
 # doctor's line on a dependency folder of the main checkout that a new card worktree lacks (depsmissing(),
 # lib/push.sh): a test worktree at main's HEAD, linked as a card's is (deps()), then removed. Returns 1 when one is

@@ -63,6 +63,9 @@ t_shimmarket() {
   done
   # The plugin copy has no commit to pin and no origin to clone: each says so, naming its folder, with no git error.
   tune 'del(.plugin)'; x=$(cd "$p/conveyor" && pwd -P) # the engine's folder as it names itself, its links followed
+  # The machine's routes are set already (setup asks them while none is), so setup goes on to the pin.
+  local h=$XDG_CONFIG_HOME/conveyor/host.json; mkdir -p "${h%/*}" && { [ -s "$h" ] || echo '{}' > "$h"; } \
+    && jq '. + {claudeProxy: {kind: "subscription"}, codexProxy: {kind: "subscription"}}' "$h" > "$h.new" && mv "$h.new" "$h" || fail "the host file"
   run "$R" "$p/conveyor/conveyor.sh" setup --fast-lane no --research-lane no --survey no --pin >/dev/null && fail "setup --pin from the plugin copy did not fail"
   [ "$(cat "$err")" = "conveyor: the pin could not be written: $x is in no git checkout, so its commit cannot be read" ] \
     || fail "setup --pin from the plugin copy did not say why it wrote no pin: $(cat "$err")"

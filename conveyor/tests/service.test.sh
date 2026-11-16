@@ -79,7 +79,10 @@ t_serviceunits() {
     && [ -e "$XDG_CONFIG_HOME/systemd/user/conveyor-main-1.service" ] && grep -q "could not be started" <<<"$o2" \
     || fail "a per-project unit stopped for a machine's service that did not start was not started again, or was removed: $o2 $(cat "$STUB/svc")"
   rm "$STUB/nomachine"
-  (cd "$R/sub" && PATH=$PATH:$P bash "$SRC/conveyor.sh" install-service >/dev/null 2>&1) || fail "install-service exited non-zero with no per-project loop left"
+  # Run from a shell that holds API keys: the unit names none of them (a route's key is read at session start, never
+  # from the service's file).
+  (cd "$R/sub" && PATH=$PATH:$P ANTHROPIC_API_KEY=sk-ant-unit-secret OPENAI_API_KEY=sk-openai-unit-secret bash "$SRC/conveyor.sh" install-service >/dev/null 2>&1) || fail "install-service exited non-zero with no per-project loop left"
+  ! grep -qF -e sk-ant-unit-secret -e sk-openai-unit-secret "$u" || fail "the unit holds an API key of the shell it was installed from: $(cat "$u")"
   grep -qE "^ExecStart=\"[^\"]*bash\" \"$V/$A/conveyor/conveyor.sh\" machine$" "$u" && grep -qxF "Environment=\"PATH=$PATH:/tmp/a\\\"b\\\\c/bin\"" "$u" \
     && ! grep -q CONVEYOR_MAIN "$u" && grep -qxF "WorkingDirectory=$R" "$u" \
     && grep -qxF "Environment=\"XDG_DATA_HOME=$XDG_DATA_HOME\"" "$u" && grep -qxF "Environment=\"XDG_CONFIG_HOME=$XDG_CONFIG_HOME\"" "$u" || fail "the unit: $(cat "$u")"

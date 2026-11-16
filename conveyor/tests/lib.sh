@@ -33,6 +33,11 @@ export CONVEYOR_OVERLAP_CMD=false
 # setup looks for a local API proxy on no port of this machine's (findproxy(), lib/setup.sh): a proxy running here
 # would make every setup case ask for --builder-route and --reviewer-route. A case of that search names its stub proxy's port.
 export CONVEYOR_PROXY_PORTS=
+# Nor does it find this machine's own API keys, in the environment or in the env of Claude Code's settings file
+# (routekey(), lib/control.sh): one found would make every setup case ask the routes, and check the key with a real
+# call. A case of the API route names its own settings file and stub API.
+unset ANTHROPIC_API_KEY OPENAI_API_KEY
+export CONVEYOR_CLAUDE_SETTINGS=$T/no-claude-settings.json
 # The host file (the state folder, the terms file) is never this machine's own; a case writes its own, in a folder of
 # its own (case_keep).
 export XDG_CONFIG_HOME=$T/config

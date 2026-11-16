@@ -237,19 +237,75 @@ clis() {
 # NAME of the variable that holds its key (never the key). Prints that object as JSON; nothing when neither names one.
 # Its roles, {builder, reviewer}, set each role's route (proxyrole()): "subscription", never through it; "fallback",
 # on the subscription login, and a build, fix, rebase or review runs again through the proxy when that login fails
-# before any turn; "proxy", always through it. A role it does not name, or no roles at all, is "proxy".
+# before any turn; "proxy" (or "api"), always through it. A role it does not name, or no roles at all, is "proxy".
+# Its kind is the route's: "proxy" (the default), a proxy sent its key as a Bearer token; "api", the provider's own
+# API sent its key as the API expects it (Anthropic's x-api-key); "subscription", the host file's word that the CLI runs
+# on its own login only, which prints nothing, as no route is set.
 claudeproxy() {
   local p; p=$(jq -ce '.claudeProxy | objects' "$HOST" 2>/dev/null) || packget models.claudeProxy p 2>/dev/null || :
-  [ "$p" = null ] || printf '%s' "$p"
+  [ "$p" = null ] || [[ $p == *'"kind":"subscription"'* ]] || printf '%s' "$p"
 }
 # claudeproxy() runs in a subshell ($(claudeproxy), and $(proxyrole) and $(proxyroute) around it), which keeps no check
 # of the pack (packok, lib/prompts.sh). Called in the shell that starts those subshells, it checks the pack's text there
 # once, so each read after it takes that check and does not check the same text again. A pack that fails is left for
 # the read to fail.
 proxypack() { packok 2>/dev/null || :; }
-# Codex's, as setup writes it in the host file: codexProxy, {baseUrl, keyEnv, roles} as claudeProxy's. A Codex session
-# whose role's route takes it through the proxy is given it as its own provider settings (codexargs()).
-codexproxyset() { local p; p=$(jq -ce '.codexProxy | objects' "$HOST" 2>/dev/null) && printf '%s' "$p"; }
+# Codex's, as setup writes it in the host file: codexProxy, {kind, baseUrl, keyEnv, keyFile, roles} as claudeProxy's.
+# A Codex session whose role's route takes it through the proxy, or the OpenAI API (kind api), is given it as its own
+# provider settings (codexargs()).
+codexproxyset() { local p; p=$(jq -ce '.codexProxy | objects | select(.kind != "subscription")' "$HOST" 2>/dev/null) && printf '%s' "$p"; }
+# A route's key, read at session start from where the owner keeps it, in this order: the env of Claude Code's settings
+# file (CLAUDE_SETTINGS) under the route's keyEnv; the key file its keyFile names (keyfile()); and, unless <service> is
+# given, the environment Conveyor runs in (envof), which the machine's service starts bare. Sets KEY_V to the key and
+# KEY_FROM to where it was found; with none, KEY_V is empty and KEY_FROM says why. The key is never printed.
+CLAUDE_SETTINGS=${CONVEYOR_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}
+routekey() { # <route JSON> [service]
+  local k f why=''
+  KEY_V='' KEY_FROM=''
+  k=$(jq -r '.keyEnv | strings' <<<"$1"); f=$(jq -r '.keyFile | strings' <<<"$1")
+  [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || k=''
+  if [ -n "$k" ] && KEY_V=$(jq -er --arg k "$k" '.env[$k] | strings | select(. != "")' "$CLAUDE_SETTINGS" 2>/dev/null); then KEY_FROM="$k in the env of $CLAUDE_SETTINGS"; return 0; fi
+  KEY_V=''
+  if [ -n "$f" ]; then keyfile "$f" && return 0; why=$KEY_FROM; fi
+  if [ -n "$k" ] && [ -z "${2:-}" ] && KEY_V=$(envof "$k") && [ -n "$KEY_V" ]; then KEY_FROM="$k in the environment Conveyor runs in"; return 0; fi
+  KEY_V=''
+  KEY_FROM=${why:-no ${k:-key variable} in the env of $CLAUDE_SETTINGS$([ -n "$f" ] || echo ", and no key file named (keyFile)")}
+}
+# A key file's key, in KEY_V: its first line, when it is a file of this user's that no one else may read or write
+# (mode 600 or tighter); else KEY_V is empty and KEY_FROM says why, and the key is not read. KEY_FROM names the file.
+keyfile() { # <path>
+  local m
+  KEY_V='' KEY_FROM="the key file $1"
+  m=$(stat -L -c '%a %u' -- "$1" 2>/dev/null) && [ -f "$1" ] || { KEY_FROM="the key file $1 is not there"; return 1; }
+  [ "${m#* }" = "$(id -u)" ] || { KEY_FROM="the key file $1 is not yours"; return 1; }
+  (( (8#${m%% *} & 8#077) == 0 )) || { KEY_FROM="the key file $1 has mode ${m%% *}, which lets others read or write it: run chmod 600 on it"; return 1; }
+  IFS= read -r KEY_V < "$1"; KEY_V=${KEY_V%$'\r'}
+  [ -n "$KEY_V" ] || { KEY_FROM="the key file $1 is empty"; return 1; }
+}
+# One real call to a provider's own API with a key, as a session makes it: anthropic, GET <base>/v1/models with the key
+# as x-api-key; openai, GET <base>/models with it as a Bearer token. The key goes to the call in its environment, never
+# on a command line, and is not sent on to a redirect. Prints "works", else "fails (<why>)", with what looks like a
+# credential in the API's words left out.
+apicheck() { # <anthropic|openai> <base URL> <key>
+  CONVEYOR_APIKEY=$3 timeout 40 python3 -I -c 'import json, os, re, sys, urllib.error, urllib.request
+api, base = sys.argv[1], sys.argv[2].rstrip("/")
+key = os.environ.pop("CONVEYOR_APIKEY")
+def plain(w):
+    w = str(w).replace(key, "[left out]") if key else str(w)
+    return re.sub(r"[A-Za-z0-9_*-]{20,}", "[left out]", w).replace(";", ",")[:200]
+if api == "anthropic": url, head = base + "/v1/models", {"x-api-key": key, "anthropic-version": "2023-06-01"}
+else: url, head = base + "/models", {"Authorization": "Bearer " + key}
+class Stay(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a): return None
+try:
+    with urllib.request.build_opener(Stay).open(urllib.request.Request(url, headers=head), timeout=30) as r: print("works")
+except urllib.error.HTTPError as e:
+    try: said = json.loads(e.read()).get("error") or {}
+    except Exception: said = {}
+    msg = said.get("message") if isinstance(said, dict) else None
+    print("fails (HTTP %d%s)" % (e.code, ": " + plain(msg) if msg else ""))
+except Exception as e: print("fails (%s)" % plain(getattr(e, "reason", e)))' "$1" "$2" 2>/dev/null || echo "fails (no answer)"
+}
 # The route set for the role a session started now runs as (PROXY_ROLE: builder, the default, or reviewer) on <cli>
 # (claude, the default, or codex): subscription, fallback or proxy; nothing when no proxy is set for that CLI.
 proxyrole() { # [claude|codex]
@@ -276,33 +332,71 @@ routesnow() {
        proxy: (if $p == null then {state: "not set"} else (.proxy // {state: "not checked"})
          + {baseUrl: $p.baseUrl, roles: {builder: $r[0], reviewer: $r[1]}, route: (if $r | any(. == "fallback") then "fallback" else "proxy" end)} end)}' 2>/dev/null || echo null
 }
-# Run in a card session's subshell before claude starts: the proxy's base URL, its key from the variable it names,
-# and with a base URL that is not api.anthropic.com, ENABLE_TOOL_SEARCH (true unless toolSearch names otherwise).
-# Any other Anthropic key in the environment is dropped first, so the proxy is never sent a key it was not named.
-# A session on the subscription (proxyroute subscription) is given none of it. Through a fallback proxy with no key, a
-# stand-in token is set, as the subscription's login is the one that failed.
+# Run in a card session's subshell before claude starts: the route's base URL, its key (routekey()), and with a base
+# URL that is not api.anthropic.com, ENABLE_TOOL_SEARCH (true unless toolSearch names otherwise). A proxy (kind proxy)
+# is sent the key as a Bearer token (ANTHROPIC_AUTH_TOKEN); the Anthropic API (kind api) as its own API key
+# (ANTHROPIC_API_KEY, sent as x-api-key), never as a Bearer token. Any other Anthropic key in the environment is
+# dropped first, so the route is never sent a key it was not named. A session on the subscription (proxyroute
+# subscription) is given none of it. Through a fallback route with no key, a stand-in key is set, as the
+# subscription's login is the one that failed.
 proxyenv() {
-  local p b k t v='' r; proxypack; r=$(proxyroute); [ "$r" = proxy ] || return 0
-  p=$(claudeproxy); b=$(jq -r .baseUrl <<<"$p"); k=$(jq -r '.keyEnv // ""' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
-  [[ ! $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || v=$(envof "$k")
+  local p b t v r; proxypack; r=$(proxyroute); [ "$r" = proxy ] || return 0
+  p=$(claudeproxy); b=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
+  routekey "$p"; v=$KEY_V
   [ -n "$v" ] || [ -z "${PROXY_NOW:-}" ] || v=no-key
   unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
   export ANTHROPIC_BASE_URL=$b
-  [ -z "$v" ] || export ANTHROPIC_AUTH_TOKEN="$v"
+  if [ -z "$v" ]; then :
+  elif [ "$(jq -r .kind <<<"$p")" = api ]; then export ANTHROPIC_API_KEY="$v"
+  else export ANTHROPIC_AUTH_TOKEN="$v"; fi
   [[ $b =~ ^https?://api\.anthropic\.com(:[0-9]+)?(/|$) ]] || export ENABLE_TOOL_SEARCH=$t
 }
-# A Codex session's provider settings, in the array CODEX_PX: none on the subscription; through the proxy
-# (proxyroute codex), Codex's -c settings of a provider, conveyor-proxy, at codexProxy's baseUrl on the Responses API,
-# with its key read from the variable keyEnv names when that variable is set.
+# A Codex session's provider settings, in the array CODEX_PX: none on the subscription; through the proxy or the OpenAI
+# API (proxyroute codex), Codex's -c settings of a provider, conveyor-proxy, at codexProxy's baseUrl on the Responses
+# API, its env_key the variable keyEnv names when its key is found (routekey()), exported in the session's subshell
+# this is called in, so a key the service's bare environment lacks still reaches Codex.
 CODEXPROV=conveyor-proxy
 codexargs() {
   local p b k
   CODEX_PX=(); [ "$(proxyroute codex)" = proxy ] || return 0
   p=$(codexproxyset); b=$(jq -r '.baseUrl | strings' <<<"$p"); k=$(jq -r '.keyEnv | strings' <<<"$p")
   [ -n "$b" ] || return 0
-  [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ -n "$(envof "$k")" ] || k=''
+  routekey "$p"
+  if [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ -n "$KEY_V" ]; then declare -gx "$k=$KEY_V"; else k=''; fi
+  codexpx "$b" "$k"
+}
+# Codex's -c settings of the provider conveyor-proxy at <base URL> on the Responses API, in CODEX_PX, its env_key the
+# variable named when one is.
+codexpx() { # <base URL> [key variable]
   # shellcheck disable=SC2034 # read by lib/pick.sh, lib/review.sh, lib/session.sh and lib/testaction.sh
-  CODEX_PX=(-c "model_provider=\"$CODEXPROV\"" -c "model_providers.$CODEXPROV={name = \"$CODEXPROV\", base_url = $(jq -rn --arg b "$b" '$b | @json')$([ -z "$k" ] || printf ', env_key = "%s"' "$k"), wire_api = \"responses\"}")
+  CODEX_PX=(-c "model_provider=\"$CODEXPROV\"" -c "model_providers.$CODEXPROV={name = \"$CODEXPROV\", base_url = $(jq -rn --arg b "$1" '$b | @json')$([ -z "${2:-}" ] || printf ', env_key = "%s"' "$2"), wire_api = \"responses\"}")
+}
+# One real call on <cli> (claude or codex), as a check session makes it: in an empty folder, under 120 s, with no
+# project settings, Claude on the account folder in CALL_ACCT (acctrun(); none: the default login), and with none of
+# the environment's Anthropic or OpenAI keys and base URLs, which the machine's service does not have. With a route (its JSON), through it, sent <key> as a
+# session is: Claude's proxy as a Bearer token (ANTHROPIC_AUTH_TOKEN), its API (kind api) as ANTHROPIC_API_KEY;
+# Codex's in the variable keyEnv names, through its provider settings (codexpx()). The key goes in the call's
+# environment, never on a command line. Prints "works", else "fails (<the first line it wrote>)", with the key and what
+# looks like a credential left out, and fails.
+routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route JSON> <key>]
+  local d o rc k=''
+  d=$(mktemp -d) || { echo "fails (no folder for the call)"; return 1; }
+  [ -z "${3:-}" ] || { k=$(jq -r '.keyEnv | strings' <<<"$3"); [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || k=''; }
+  o=$(cd "$d" && unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY ENABLE_TOOL_SEARCH CLAUDE_CONFIG_DIR ${k:+"$k"}
+    if [ "$1" = claude ]; then acctrun "${CALL_ACCT:-}"
+      if [ -n "${3:-}" ]; then export ANTHROPIC_BASE_URL; ANTHROPIC_BASE_URL=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$3")
+        if [ -z "${4:-}" ]; then :; elif [ "$(jq -r .kind <<<"$3")" = api ]; then export ANTHROPIC_API_KEY="$4"; else export ANTHROPIC_AUTH_TOKEN="$4"; fi
+      fi
+      exec timeout --kill-after=10 120 claude -p ${2:+--model "$2"} --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." 2>&1
+    fi
+    CODEX_PX=()
+    if [ -n "${3:-}" ]; then { [ -n "$k" ] && [ -n "${4:-}" ] && export "$k=$4"; } || k=''; codexpx "$(jq -r '.baseUrl | strings' <<<"$3")" "$k"; fi
+    exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" ${2:+-m "$2"} - <<<"Reply with the one word OK." 2>&1); rc=$?
+  rm -rf "$d"
+  [ $rc != 0 ] || { echo works; return 0; }
+  [ -z "${4:-}" ] || o=${o//"$4"/[left out]}
+  o=$(grep -m 1 '[^[:space:]]' <<<"$o" | sed -E 's/[A-Za-z0-9_-]{24,}/[left out]/g; s/;/,/g' | cut -c 1-200)
+  echo "fails (${o:-exit $rc})"; return 1
 }
 # Codex's: the top-level model_provider of Codex's config.toml and that provider's base_url and env_key, as
 # "<name>\037<base_url>\037<env_key>"; nothing when the file names no provider. A provider with no base_url is direct.
@@ -397,18 +491,47 @@ codexready() {
   [ "$a" = codex ] || return 0
   m=$(codexmodel "$m") || { echo "$m"; return 1; }
 }
-# For doctor: each role's model and its route, direct or through which proxy. The builder's seat runs build, fix and rebase.
+# For doctor, a part of a role's route line: what one real call on <cli> gives, as the machine's service makes it.
+# login: on the CLI's own login (routecall()). route: through the route set for the CLI (its JSON), with its key as the
+# service finds it (routekey() with no environment of the caller's): the provider's own API (kind api) called with that
+# key (apicheck()), a proxy through the CLI (routecall()). Fails when the call fails, or for the API when the service
+# finds no key (a proxy may need none).
+routecheck() { # <claude|codex> <model> <login|route> [<route JSON>]
+  local s
+  if [ "$3" = login ]; then s=$(routecall "$1" "$2"); printf '; its login %s' "$s"; [ "$s" = works ]; return; fi
+  routekey "$4" service
+  if [ -n "$KEY_V" ]; then printf '; the service reads the key from %s' "$KEY_FROM"
+  else printf '; the service finds no key: %s' "$KEY_FROM"; [ "$(jq -r .kind <<<"$4")" != api ] || return 1; fi
+  if [ "$(jq -r .kind <<<"$4")" = api ]; then s=$(apicheck "$([ "$1" = claude ] && echo anthropic || echo openai)" "$(jq -r .baseUrl <<<"$4")" "$KEY_V"); printf ', and the API %s' "$s"
+  else s=$(routecall "$1" "$2" "$4" "$KEY_V"); printf ', and one call through it %s' "$s"; fi
+  [ "$s" = works ]
+}
+# Whether the host file sets <cli>'s route to its own login only ({kind: "subscription"}, as setup writes it).
+routesub() { # <claude|codex>
+  jq -e --arg n "$([ "$1" = claude ] && echo claudeProxy || echo codexProxy)" '.[$n].kind? == "subscription"' "$HOST" >/dev/null 2>&1
+}
+# For doctor: each role's model and its route, direct or through which proxy or API; a route the host file or the pack
+# sets, its own login only included, is checked as the service runs it (routecheck()). The builder's seat runs build,
+# fix and rebase. A Claude role is checked on the account its cards run on (cardaccts()): the builder's the control
+# record's account, the reviewer's its reviewAccount, else that account.
 routes() {
-  local r s m a p name base env rc=0 PROXY_ROLE w
-  proxypack
+  local r s m a p name base env rc=0 PROXY_ROLE w c l k CALL_ACCT
+  proxypack; k=$(ctl 2>/dev/null) || k=null
   for r in builder reviewer; do
     PROXY_ROLE=$r
     s=$(seat "$r") || { echo "$r: the pack's models.allowed lists no $r model"; rc=1; continue; }
     jqget "$s" model m agent a || m='' a=''
     if [ "$a" = claude ]; then
-      p=$(claudeproxy); w=$(proxyrole)
-      if [ "$w" = subscription ]; then echo "$r: $m (claude) on the subscription login"
-      elif [ -n "$p" ]; then echo "$r: $m (claude) $([ "$w" != fallback ] || echo "on the subscription login, then when its login fails ")$(jq -r '"through \(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$p")"
+      CALL_ACCT=$(acctenv "$(jq -r --arg r "$r" 'if $r == "reviewer" then .reviewAccount // .account else .account end // ""' <<<"$k")") \
+        || { echo "$r: $m (claude): $CALL_ACCT"; rc=1; continue; }
+      p=$(claudeproxy); w=$(proxyrole); c=''
+      # A route setup set: each part the role takes checked with one real call, as the service makes it; a fallback
+      # works when either of its two parts does.
+      if [ -n "$p" ] && [ "$w" != subscription ]; then
+        l=0; [ "$w" != fallback ] || { c=$(routecheck claude "$m" login) && l=1; }
+        c+=$(routecheck claude "$m" route "$p") && l=1; [ $l = 1 ] || rc=1
+        echo "$r: $m (claude) $([ "$w" != fallback ] || echo "on the subscription login, then when its login fails ")$(jq -r '"through \(if .kind == "api" then "the Anthropic API at " else "" end)\(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$p")$c"
+      elif [ -n "$p" ] || routesub claude; then c=$(routecheck claude "$m" login) || rc=1; echo "$r: $m (claude) on the subscription login$c"
       # None named: a card session inherits the engine's own environment, base URL and all.
       elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then echo "$r: $m (claude) through $ANTHROPIC_BASE_URL, from the environment Conveyor runs in"
       else echo "$r: $m (claude) direct"; fi
@@ -416,9 +539,17 @@ routes() {
     else
       name='' base='' env=''; IFS=$'\037' read -r name base env < <(codexproxy)
       m=$(codexmodel "$m") || { echo "$r: $m"; rc=1; continue; }
-      if [ "$(proxyrole codex)" = fallback ]; then echo "$r: $m (codex) on its own login, then when its login fails through $(jq -r '"\(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$(codexproxyset)")"
-      elif [ -n "$base" ]; then echo "$r: $m (codex) through $base, Codex's model_provider $name, key in ${env:-no variable}"
-      else echo "$r: $m (codex) direct"; fi
+      p=$(codexproxyset); w=$(proxyrole codex); c=''
+      if [ "$w" = fallback ]; then
+        l=0; c=$(routecheck codex "$m" login) && l=1; c+=$(routecheck codex "$m" route "$p") && l=1; [ $l = 1 ] || rc=1
+        echo "$r: $m (codex) on its own login, then when its login fails through $(jq -r '"\(if .kind == "api" then "the OpenAI API at " else "" end)\(.baseUrl), key in \(.keyEnv // "no variable")"' <<<"$p")$c"
+      else
+        if [ -n "$p" ] && [ "$w" != subscription ]; then c=$(routecheck codex "$m" route "$p") || rc=1
+        elif [ -n "$p" ] || routesub codex; then c=$(routecheck codex "$m" login) || rc=1; fi
+        if [ -n "$base" ]; then echo "$r: $m (codex) through $base, Codex's model_provider $name, key in ${env:-no variable}$c"
+        elif [ -n "$c" ]; then echo "$r: $m (codex) on its own login$c"
+        else echo "$r: $m (codex) direct"; fi
+      fi
     fi
   done
   return $rc
