@@ -10,7 +10,7 @@ const test = cases(import.meta.url);
 const { MERGE, X, rec, snap, tp, rowOf, open } = TA;
 const E2E = 'conveyor/tests/e2e.test.sh';
 
-// Bug it catches: a test that passes without proving anything looked like any other on the Tests page, and the
+// Bug it catches: a test that proves nothing looked like any other on the Tests page, and the
 // Optimize issue did not name it, so its card left it as it was; the cheap check's guess still showed after a judge
 // had read the file; or a file with many hollow cases made a body longer than the server takes.
 test('Tests hollow: the Hollow chip counts the files with hollow cases, a row lists them (the judge\'s over the cheap check\'s), and Optimize names them', () => {
@@ -32,7 +32,7 @@ test('Tests hollow: the Hollow chip counts the files with hollow cases, a row li
   assert.deepEqual(cases(MERGE), ['merges two cards (mock-echo): it checks the stub returns what the stub was given'], 'the judge\'s hollow cases replace the cheap check\'s');
   act(open(w, X), 'optimize').click();
   const body = act(open(w, X), 'issue-body').value;
-  assert.ok(body.includes('Hollow cases (they pass without proving anything)') && body.includes('- loads (no-assert): no expect or assert call')
+  assert.ok(body.includes('Hollow cases (they prove nothing)') && body.includes('- loads (no-assert): no expect or assert call')
     && body.includes('- has a value (defined-only): its only assertions are toBeDefined or toBeTruthy'), body);
   act(open(w, E2E), 'optimize').click();
   const long = act(open(w, E2E), 'issue-body').value, listed = long.split('\n').filter((l) => l.startsWith('- case number ')).length;

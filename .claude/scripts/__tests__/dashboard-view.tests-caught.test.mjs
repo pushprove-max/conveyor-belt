@@ -8,7 +8,7 @@ import { TESTS, clone, boot, deliver, full, act, panel, cases } from './dashboar
 const test = cases(import.meta.url);
 const tp = (w) => panel(w, 'tests');
 const E2E = 'conveyor/tests/e2e.test.sh', MERGE = 'conveyor/tests/merge.test.sh', X = '.claude/scripts/__tests__/x.test.mjs';
-// e2e: 30 runs, none caught (the fact); merge: 3 caught, 2 changed to pass; x: 19 runs, none caught (too few runs for the fact).
+// e2e: 30 runs, none caught (the fact); merge: 3 caught, 2 edited until they passed; x: 19 runs, none caught (too few runs for the fact).
 const COUNTS = { [E2E]: { runsOnRecord: 30, caught: 0, changedToPass: 1 }, [MERGE]: { runsOnRecord: 40, caught: 3, changedToPass: 2 }, [X]: { runsOnRecord: 19, caught: 0, changedToPass: 0 } };
 const rows = (w) => Array.from(tp(w).querySelectorAll('.tests-row'));
 const rowOf = (w, f) => rows(w).find((r) => r.dataset.file === f);
@@ -16,13 +16,13 @@ const caughtCell = (w, f) => rowOf(w, f).querySelector('.tests-caught');
 
 // Bug it catches: a page that could not show which test files ever caught a bug, so a file that never fails, and may
 // check nothing, looked like any other; or a quiet file shown as a problem chip.
-test('Tests caught: the Caught column sorts, shows changed to pass on hover, and a file with 20 runs or more and no catch says "Never caught anything"', () => {
+test('Tests caught: the Caught column sorts, shows the edits until it passed on hover, and a file with 20 runs or more and no catch says "Never caught anything"', () => {
   const w = boot({ tab: 'tests' });
   const d = full(), part = clone(TESTS);
   part.files = part.files.map((f) => ({ ...f, ...COUNTS[f.file] }));
   d.panels.tests.data.tests = part;
   deliver(w, d);
-  assert.deepEqual([caughtCell(w, MERGE).textContent, caughtCell(w, MERGE).title], ['3', 'Changed to pass: 2']);
+  assert.deepEqual([caughtCell(w, MERGE).textContent, caughtCell(w, MERGE).title], ['3', 'Edited until it passed: 2']);
   act(tp(w), 'sort-caught').click();
   assert.deepEqual(rows(w).map((r) => r.dataset.file), [MERGE, E2E, X], 'highest first; equal counts keep their order');
   act(tp(w), 'sort-caught').click();

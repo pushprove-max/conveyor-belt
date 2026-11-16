@@ -19,6 +19,7 @@ const ACTION = {
   'panels/metrics.js': ['again'],
   'panels/needs.js': ['acts[k].field'],
   'panels/rules.js': ['again'],
+  'panels/tests.js': ['items[(at + step + items.length) % items.length]'],
 };
 
 function files(dir) {

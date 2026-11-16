@@ -12,7 +12,7 @@
 // The table, one row a test file (every test file of main's checkout, run or not): a checkbox and the file, CPU s now,
 // median, change against its own median, its last runs as bars (oldest first), clock against CPU, runs on record,
 // the clock time its newest run took (Last run took, with that run's date and time on hover), Caught (#75: the card test
-// steps it failed whose landed change left it as it was; the times it was changed to pass on hover), and its status
+// steps it failed whose landed change left it as it was; the times it was edited until it passed, on hover), and its status
 // (chips; its issue as a link, "#NN"; Runs other test files, Whole suite only and, for a file with NEVER runs on
 // record or more and no catch, Never caught anything as grey text). A file with no CPU time on
 // record shows "Not timed yet" in place of its figures and comes after the timed files (by name, it sorts as any
@@ -192,7 +192,7 @@
     ['clock', 'Clock / CPU', (f) => num((obj(f.lastRun) || {}).clockPerCpu), 'Wall time divided by CPU time. Above 2× the file waits more than it works.'],
     ['count', 'Runs', (f) => (list(f.runs).length ? num(f.timedRuns) || 0 : null), 'The runs on record that have a CPU time.'],
     ['took', 'Last run took', (f) => num((obj(f.lastRun) || {}).sec), 'The clock time of its newest run. Point at a time to see when it ran.'],
-    ['caught', 'Caught', (f) => num(f.caught), 'The card test steps it failed whose landed change left it as it was: the fix went into the code. Point at a count to see how often it was changed to pass.'],
+    ['caught', 'Caught', (f) => num(f.caught), 'The card test steps it failed whose landed change left it as it was: the fix went into the code. Point at a count to see how often it was edited until it passed.'],
     ['mutants', 'Mutants caught', (f) => { const m = mutDone(f); return m ? m.killed / m.of : null; },
       'Its newest mutation check: the mutants (small changes to the code it tests) it caught, of those made. Point at a count to see when the check ran and on which commit.'],
     ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length, 'What needs a look first, then the other marks of the file.']];
@@ -525,7 +525,7 @@
       if (at >= 0) lines.push(`- and ${items.length - at} more`);
     };
     // Its hollow cases, and the mutants its tests did not catch (#79), so the card fixes them too.
-    add('Hollow cases (they pass without proving anything): fix each one or delete it.', hollowOf(f), hollowSaid);
+    add('Hollow cases (they prove nothing): fix each one or delete it.', hollowOf(f), hollowSaid);
     add('Surviving mutants (the code it tests was changed, and its tests still passed): add the assertions that catch each one.', survivors(f), survivorSaid);
     if (v) {
       lines.push('', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`);
@@ -1289,7 +1289,7 @@
         }
         const count = COLS.find((c) => c[0] === 'count')[2](f);
         const caught = cell(num(f.caught) === null ? '—' : String(f.caught), 'tests-num tests-caught');
-        if (num(f.caught) !== null) caught.title = `Changed to pass: ${num(f.changedToPass) || 0}`;
+        if (num(f.caught) !== null) caught.title = `Edited until it passed: ${num(f.changedToPass) || 0}`;
         // Mutants caught: empty before a check; when and on which commit its newest done check ran, on hover.
         const mut = cell(mutCell(f), 'tests-num tests-mutants'), md = mutDone(f);
         if (md) mut.title = `Checked ${S.ctx.when(md.at)} on commit ${String(md.sha || 'not recorded').slice(0, 7)}`;

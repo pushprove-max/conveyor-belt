@@ -503,7 +503,7 @@ export const SAYS = {
     'Test 142/205', 'Stuck at Test', 'tests failed twice', 'Waiting for your yes', 'Visible change: Staff see a new button.', 'Next up', 'next up', 'Second half', 'waits on #20, queued',
     'Split the PROD stack', 'held on the Board', 'Landed one', 'Landed 1 h 00 min ago'],
     empty: 'The floor is empty', failed: 'The Board could not read Belt 3D' },
-  tests: { title: 'Tests', count: '', data: ['Files with a CPU time', 'conveyor/tests/merge.test.sh', 'Slower than usual', 'Test limits', 'Load limit'],
+  tests: { title: 'Tests', count: '', data: ['Timed files', 'conveyor/tests/merge.test.sh', 'Slower than usual', 'Test limits', 'Load limit'],
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
   queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2):', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
   landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },

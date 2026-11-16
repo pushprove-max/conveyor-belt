@@ -147,7 +147,7 @@ test('#43: a run that reused an earlier run says "Reran 1 file, reused 2 passed 
   next(w, data({ ...passed, reused: null }));
   assert.equal(stepOf(w, 'full-suite').querySelector('[data-figure="suite-scope"]').textContent, 'Ran the whole suite');
   // Bug this guards (#44): a release-prep that ran no test, taking a green full test run on the same commit, read as
-  // "Reran 0 files", which does not say whose pass it took or when.
+  // "Reran 0 files", which does not say whose run it took or when.
   next(w, data({ ...passed, reused: { sha: HEAD, time: '2026-11-14T07:40:00Z', ran: [], kept: 3 } }));
   assert.match(stepOf(w, 'full-suite').querySelector('[data-figure="suite-scope"]').textContent, /^Reused the green run of \d.* on bbbbbbbbbbbb$/);
 });
