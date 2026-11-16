@@ -81,4 +81,25 @@ got=$(sed -n 's/^-- ok //p' "$T/out" | sort | tr '\n' ' ')
 [ "$got" = "conveyor/tests/fx-a.test.sh lib/fx-env.test.sh lib/fx-pass.test.sh " ] || no "the suite with a list did not run only its tracked test files: $got"
 grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a listed run are not of its files: $(grep TESTRUN "$T/out")"
 
+# Bug: the whole test on main runs each failed case alone 3 times through this suite (fulltest.sh fullalone()), which
+# read no CONVEYOR_TEST_RERUN list, so each run alone was the whole suite again. With `fail` lines it runs only those
+# files: of the engine's runner the cases named (of it or of an engine case file), of a node file the case named.
+echo 'echo "runner ${CONVEYOR_SHELL_TEST_CASE:-all}" >> "$(dirname "$0")/../ran"' > "$R/conveyor/conveyor.test.sh"
+printf '%s\n' "import { test } from 'node:test'; import { appendFileSync } from 'node:fs';" "const ran = new URL('../ran', import.meta.url);" \
+  "test('a (b)', () => appendFileSync(ran, 'node a\\n'));" "test('c', () => appendFileSync(ran, 'node c\\n'));" > "$R/lib/fx-node.test.mjs"
+git -C "$R" add -A && git -C "$R" commit -qm runner && rm -f "$R/ran"
+printf '%s\t%s\t%s\n' pass lib/fx-env.test.sh '' fail lib/fx-pass.test.sh '' fail conveyor/conveyor.test.sh one \
+  fail conveyor/tests/fx-b.test.sh two fail lib/fx-node.test.mjs 'a (b)' | sed 's/\t$//' > "$T/rerun"
+(cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1 || no "the run of failed cases alone failed: $(cat "$T/out")"
+got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
+[ "$got" = "node a pass runner one,two " ] || no "a list's failed cases were not run alone: $got"
+grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a run alone are not of its cases: $(grep TESTRUN "$T/out")"
+# A list with no `fail` line (files kept off as passed before) leaves the suite whole. The fixture runner goes first:
+# started whole, the test step's hook would take it for a test file this one runs.
+git -C "$R" rm -q conveyor/conveyor.test.sh && git -C "$R" commit -qm 'no runner'
+rm -f "$R/ran"; printf 'pass\tlib/fx-pass.test.sh\noff\tlib/fx-pass.test.sh\n' > "$T/rerun"
+(cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1
+got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
+[ "$got" = "node a node c pass " ] || no "a list with no failed case did not run the whole suite: $got"
+
 [ $fails = 0 ] && echo "ok - test-full" || exit 1

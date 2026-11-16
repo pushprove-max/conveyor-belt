@@ -777,11 +777,18 @@ delete.
 A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs
 only for a project whose pack names it, as `test.main`; a pack that names none has none. The loop (`serve`) runs it on
 the default branch, on the same test slots and beside the cards, so no card waits on it: at most once an hour, and
-only when the branch has moved since its last run. When it fails, Conveyor files one issue of the pack's second
-priority that names the failing cases and the commits since the last pass, and the Board lists it under Needs you
-until a run passes. A later failure of the same cases adds a comment to that issue while it is open, and files no
-other. A run that names no failing case but prints under 90% of the `ok <case>` lines of the last run that passed does
-not pass: its issue says "ran N of about M cases" and shows the end of its output, and the last pass stays as it was.
+only when the branch has moved since its last run. With `test.mainAt` set in the pack (a time of day, `"HH:MM"`, in
+the machine's local time), it runs once a day instead: the first time the loop looks after that time, when the branch
+has moved since its last run.
+
+When it fails, Conveyor runs each failed case again alone, 3 times, on the same commit. A case that passes all 3
+times goes to the flaky-test record (Flaky tests, above) and files nothing. For the cases that fail alone, Conveyor
+files one issue of the pack's second priority that names them, their failure lines and the commits since the last
+pass, and the Board lists it under Needs you until a run passes. A later failure of the same cases adds a comment to
+that issue while it is open, and files no other. A run whose failed cases all pass alone counts as a pass.
+
+A run that names no failing case but prints under 90% of the `ok <case>` lines of the last run that passed does not
+pass: its issue says "ran N of about M cases" and shows the end of its output, and the last pass stays as it was.
 
 ## The test-speed survey
 

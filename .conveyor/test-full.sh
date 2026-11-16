@@ -28,16 +28,41 @@ if [ -n "${CONVEYOR_SUITE_FILES:-}" ]; then
   mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -xFf <(grep . "$CONVEYOR_SUITE_FILES" 2>/dev/null || echo /))
 fi
 unset CONVEYOR_SUITE_FILES # the list is this run's: a test file that runs a suite of its own runs it whole
+# The engine's run of one failed case alone (conveyor/lib/fulltest.sh fullalone()) names it in the CONVEYOR_TEST_RERUN
+# list as `fail<TAB><file>[<TAB><case>]`: it runs only the files of its `fail` lines, so a run alone is not the whole
+# suite again. Of the engine's runner (a case of it or of an engine case file, which the runner runs) only those cases,
+# and of a node test file those cases alone; a Python or other shell test file has no case filter and runs whole. A
+# list with no `fail` line (files kept off as passed before) is not read: the suite runs whole.
+RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
+again=()
+if [ -s "$RERUN" ] && grep -q $'^fail\t' "$RERUN"; then
+  mapfile -t again < <(awk -F'\t' '$1 == "fail" && $3 != "" && ($2 == "conveyor/conveyor.test.sh" || $2 ~ /^conveyor\/tests\/[^\/]+[.]test[.]sh$/) { print $3 }' "$RERUN" | sort -u)
+  # A `fail` line naming the runner with no case runs it whole.
+  ! grep -qxF $'fail\tconveyor/conveyor.test.sh' "$RERUN" || again=()
+  mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -xFf <({ awk -F'\t' '$1 == "fail" && !($3 != "" && $2 ~ /^conveyor\/tests\//) { print $2 }' "$RERUN"
+    [ ${#again[@]} = 0 ] || echo conveyor/conveyor.test.sh; } | grep .))
+fi
 engine=0 other=0 cf=()
 for t in "${files[@]}"; do case $t in conveyor/conveyor.test.sh) engine=1 ;; conveyor/tests/*.test.sh) cf+=("$t") ;; *) other=$((other + 1)) ;; esac; done
 [ $engine = 0 ] || cf=(conveyor/tests/*.test.sh)
 engine=0; [ ${#cf[@]} = 0 ] || engine=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "${cf[@]}" | sort -u | wc -l)
+[ ${#again[@]} = 0 ] || engine=${#again[@]}
+# The cases of a node test file's `fail` lines, each matched whole by name (as the test step's runner does).
+nodecases() { # <node test file>
+  local k f c
+  [ -s "$RERUN" ] || return 0
+  while IFS=$'\t' read -r k f c; do
+    [ "$k" = fail ] && [ "$f" = "$1" ] && [ -n "$c" ] || continue
+    echo "--test-name-pattern=^$(sed 's/[][\\.*+?^${}()|/]/\\&/g' <<<"$c")\$"
+  done < "$RERUN"
+}
 echo "TESTRUN cases=$((engine + other))"
 echo "TESTRUN files=${#files[@]}"
 for t in "${files[@]}"; do
   case $t in
-    *.mjs) c=(node --max-old-space-size=4096 --test "$t") ;;
+    *.mjs) mapfile -t c < <(nodecases "$t"); c=(node --max-old-space-size=4096 --test "${c[@]}" "$t") ;;
     *.py) c=(python3 "$t") ;;
+    conveyor/conveyor.test.sh) c=(bash "$t"); [ ${#again[@]} = 0 ] || c=(env "CONVEYOR_SHELL_TEST_CASE=$(IFS=,; echo "${again[*]}")" bash "$t") ;;
     *) c=(bash "$t") ;;
   esac
   n=$(marks); touch "$stamp"

@@ -18,13 +18,13 @@ maintest_start() {
   setup "[]"
   mt() { CONVEYOR_NOW=$1 loop main-test; }                  # <the time, in seconds>: the whole test, when one is due then
   rec() { jq -c "$1" "$ST/maintest.json" 2>/dev/null; }      # <jq filter>: of the kept record
-  runs() { cat "$STUB/mains" 2>/dev/null | wc -l | tr -d ' '; }
+  runs() { cat "$STUB/mains" 2>/dev/null | grep -cx x; }   # the whole runs (a run of a case alone is told its list)
   move() { echo "$1" >> "$R/a.txt"; git -C "$R" commit -qam "$1"; git -C "$R" rev-parse HEAD; } # <subject>: main moves on
   T0=1800000000; A=$(git -C "$R" rev-parse HEAD)
 }
 # The pack's whole test, passing, and a first run of it at <time>: main's commit is the last pass.
 maintest_pass() { # <time>
-  tune '.test.main = ". \"$STUB/main-cmd\""'; echo 'echo x >> "$STUB/mains"' > "$STUB/main-cmd"
+  tune '.test.main = ". \"$STUB/main-cmd\""'; echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"' > "$STUB/main-cmd"
   mt "$1" && [ "$(rec '[.sha, .pass]')" = "[\"$(git -C "$R" rev-parse HEAD)\",\"$(git -C "$R" rev-parse HEAD)\"]" ] || fail "the first whole test did not pass: $(rec .)"
 }
 t_maintest() {
@@ -33,7 +33,7 @@ t_maintest() {
   mt $T0 || fail "main-test failed with no test.main"
   [ ! -e "$ST/maintest.json" ] || fail "a pack with no test.main ran a whole test: $(rec .)"
   tune '.test.main = ". \"$STUB/main-cmd\""'
-  echo 'echo x >> "$STUB/mains"; pwd > "$STUB/where"; git rev-parse HEAD > "$STUB/at"' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; pwd > "$STUB/where"; git rev-parse HEAD > "$STUB/at"' > "$STUB/main-cmd"
   mt $T0 || fail "the first whole test failed: $(cat "$T/$CASE/cards/maintest/wt.test" 2>&1)"
   [ "$(runs)" = 1 ] && [ "$(rec '[.sha, .pass, .fail]')" = "[\"$A\",\"$A\",null]" ] || fail "the first run is not recorded as a pass of main's commit: $(runs) runs, $(rec .)"
   [ "$(cat "$STUB/where")" = "$T/$CASE/cards/maintest/wt" ] && [ "$(cat "$STUB/at")" = "$A" ] && [ ! -e "$T/$CASE/cards/maintest/wt" ] \
@@ -44,7 +44,7 @@ t_maintest() {
   # Main moved, the last run under an hour ago: not yet.
   B=$(move "move b"); mt $((T0 + 3599)); [ "$(runs)" = 1 ] || fail "the whole test ran twice within the hour"
   # An hour on, it runs, and fails: one issue of the second priority names the cases and the commits since the pass.
-  echo 'echo x >> "$STUB/mains"; echo "FAIL [beta]: expected 2, got 3"; echo "FAIL [alpha]: no word"; echo "ok gamma"; exit 1' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; echo "FAIL [beta]: expected 2, got 3"; echo "FAIL [alpha]: no word"; echo "ok gamma"; exit 1' > "$STUB/main-cmd"
   mt $((T0 + 3600)); [ "$(runs)" = 2 ] || fail "the whole test did not run an hour on, with main moved: $(rec .)"
   [ "$(jq -cs 'map([.number, .title, (.labels | map(.name))])' "$STUB/filed")" = '[[100101,"The whole test fails on main: alpha, beta",["bug","P1"]]]' ] \
     || fail "a failed whole test did not file one P1 issue naming the cases: $(cat "$STUB/filed" 2>&1)"
@@ -56,7 +56,7 @@ t_maintest() {
 # The pass at A and the failure t_maintest ends on: #100101 filed for alpha and beta at B, an hour on. Sets B.
 maintest_failed() {
   maintest_pass $T0
-  echo 'echo x >> "$STUB/mains"; echo "FAIL [beta]: expected 2, got 3"; echo "FAIL [alpha]: no word"; echo "ok gamma"; exit 1' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; echo "FAIL [beta]: expected 2, got 3"; echo "FAIL [alpha]: no word"; echo "ok gamma"; exit 1' > "$STUB/main-cmd"
   B=$(move "move b"); mt $((T0 + 3600)); [ "$(rec '[.fail.issue, .fail.cases]')" = '[100101,["alpha","beta"]]' ] || fail "the first failure was not filed: $(rec .)"
 }
 t_maintestneeds() {
@@ -88,13 +88,13 @@ t_maintestother() {
   maintest_start; local B D F
   maintest_failed; echo OPEN > "$STUB/state.100101"
   # Other cases fail: another issue, of those cases.
-  echo 'echo x >> "$STUB/mains"; echo "FAIL [delta]: wrong"; exit 1' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; echo "FAIL [delta]: wrong"; exit 1' > "$STUB/main-cmd"
   D=$(move "move d"); mt $((T0 + 10800))
   [ "$(jq -cs 'map([.number, .title])' "$STUB/filed")" = '[[100101,"The whole test fails on main: alpha, beta"],[100102,"The whole test fails on main: delta"]]' ] \
     || fail "a failure of other cases did not file its own issue: $(jq -c '[.number, .title]' "$STUB/filed")"
   # The first cases fail again, their issue still open and another failure since: it is added to, not filed again
   # (an owner with one open issue a set of cases is not sent a new one each time the failures alternate).
-  echo 'echo x >> "$STUB/mains"; echo "FAIL [beta]: expected 2, got 3"; echo "FAIL [alpha]: no word"; exit 1' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; echo "FAIL [beta]: expected 2, got 3"; echo "FAIL [alpha]: no word"; exit 1' > "$STUB/main-cmd"
   F=$(move "move f"); mt $((T0 + 14400)); [ "$(runs)" = 4 ] || fail "the whole test did not run a fourth time: $(rec .)"
   [ "$(wc -l < "$STUB/filed")" = 2 ] || fail "cases whose issue is open were filed again after another failure: $(jq -c '[.number, .title]' "$STUB/filed")"
   grep -q "^100101 --body .*failed again, with the same cases, at ${F:0:12}" "$STUB/comments" && [ "$(rec .fail.issue)" = 100101 ] \
@@ -104,7 +104,7 @@ t_maintestclear() {
   maintest_start; local B E
   maintest_failed
   # A pass clears it: Needs you no longer lists it, and the next failure's commits are counted from here.
-  echo 'echo x >> "$STUB/mains"' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"' > "$STUB/main-cmd"
   E=$(move "move e"); mt $((T0 + 18000))
   [ "$(rec '[.pass, .fail]')" = "[\"$E\",null]" ] && [ "$(loop snapshot | jq -c .mainTest)" = null ] || fail "a pass did not clear the failure: $(rec .)"
 }
@@ -130,7 +130,7 @@ t_maintestgh() {
   G=$(move "move g"); maintest_pass $((T0 + 25200))
   # A failure GitHub did not take reached no one: its commit is not taken for tested, and an hour on, main where it
   # was, the test runs again and the issue is filed (else the break stays on main with no issue until a landing).
-  echo 'echo x >> "$STUB/mains"; echo "FAIL [eps]: off"; exit 1' > "$STUB/main-cmd"; echo 'exit 1' > "$STUB/create-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; echo "FAIL [eps]: off"; exit 1' > "$STUB/main-cmd"; echo 'exit 1' > "$STUB/create-cmd"
   H=$(move "move h"); mt $((T0 + 28800)) 2> "$STUB/main.err"
   grep -q 'its issue could not be filed' "$STUB/main.err" && [ "$(runs)" = 2 ] && [ "$(rec '[.sha, .fail.issue, .fail.to]')" = "[\"$G\",null,\"$H\"]" ] \
     || fail "a failure whose issue could not be filed is kept as told: $(runs) runs, $(rec .), $(cat "$STUB/main.err")"
@@ -154,7 +154,7 @@ t_maintestslots() {
   maintest_start; local I J host
   I=$(move "move i"); maintest_pass $((T0 + 43200))
   # A try whose test slots could not be made tested nothing either.
-  echo 'echo x >> "$STUB/mains"' > "$STUB/main-cmd"; host=$XDG_CONFIG_HOME/conveyor/host.json
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"' > "$STUB/main-cmd"; host=$XDG_CONFIG_HOME/conveyor/host.json
   mkdir -p "${host%/*}"; echo '{"testSlotsDir": "/dev/null/slots"}' > "$host"
   J=$(move "move j"); mt $((T0 + 46800)) 2> "$STUB/main.err" && fail "a whole test whose slots could not be made did not say so"
   grep -q 'did not run' "$STUB/main.err" && grep -q 'the test slots folder .* cannot be made' "$STUB/main.err" && [ "$(runs)" = 1 ] && [ "$(rec .sha)" = "\"$I\"" ] \
@@ -168,7 +168,7 @@ t_maintestfile() {
   J=$(move "move j"); maintest_pass $((T0 + 50400))
   # A case is of its file: the same case name failing in another file is another failure, with its own issue, and
   # is never added to the first file's issue (its owner would read b's break as a's, already known).
-  filecmd() { echo 'echo x >> "$STUB/mains"; echo "== '"$1"'" | tee -a "$CONVEYOR_TEST_LOG/run.log"; echo "FAIL [renders]: off"; echo "-- FAIL '"$1"'" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/main-cmd"; }
+  filecmd() { echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; echo "== '"$1"'" | tee -a "$CONVEYOR_TEST_LOG/run.log"; echo "FAIL [renders]: off"; echo "-- FAIL '"$1"'" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/main-cmd"; }
   filecmd a.test.sh; move "move k" > /dev/null; mt $((T0 + 54000))
   [ "$(runs)" = 2 ] && [ "$(rec '[.fail.issue, .fail.cases]')" = '[100101,["a.test.sh: renders"]]' ] || fail "a failing case is not named with its file: $(runs) runs, $(rec .)"
   echo OPEN > "$STUB/state.100101"; filecmd b.test.sh; move "move l" > /dev/null; mt $((T0 + 57600))
@@ -199,7 +199,7 @@ t_maintestserve() {
   maintest_start; tune '.test.main = ". \"$STUB/main-cmd\""'
   # The loop runs it by itself, beside its cards: a card lands while the whole test is still running.
   echo "$GO" > "$STUB/review.1"
-  echo 'echo x >> "$STUB/mains"; while [ -d "$STUB" ]; do [ -e "$STUB/go" ] && break; sleep 0.1; done' > "$STUB/main-cmd"
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; while [ -d "$STUB" ]; do [ -e "$STUB/go" ] && break; sleep 0.1; done' > "$STUB/main-cmd"
   tune '.tunables.idle = 1 | .tunables.poll = 1'
   issue 7 2026-01-01 | jq -cs . > "$STUB/issues.json"
   loop serve > "$STUB/serve.out" 2>&1 & pid=$!; trap 'kill $pid 2>/dev/null; : > "$STUB/go"' EXIT
@@ -208,5 +208,46 @@ t_maintestserve() {
   : > "$STUB/go"
   wait_until '[ "$(rec ".pass != null")" = true ]' 'cat "$STUB/serve.out"' || fail "the loop's whole test did not end with a pass: $(rec .)"
   kill $pid; wait $pid 2>/dev/null; return 0
+}
+# A pack with test.mainAt runs the whole test once a day at that time, in place of hourly runs that cost too much: it
+# must not run before the time, nor a second time the same day when main moves again.
+t_maintestdaily() {
+  maintest_start; local D; export TZ=UTC
+  tune '.test.main = ". \"$STUB/main-cmd\"" | .test.mainAt = "01:00"'; echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"' > "$STUB/main-cmd"
+  D=$((T0 / 86400 * 86400)) # 00:00 of T0's day
+  mt $((D + 3599)); [ "$(runs)" = 0 ] || fail "the daily whole test ran before its time"
+  mt $((D + 3600)); [ "$(runs)" = 1 ] && [ "$(rec .pass)" = "\"$A\"" ] || fail "the daily whole test did not run at its time: $(runs) runs, $(rec .)"
+  move "move b" > /dev/null; mt $((D + 7200)); mt $((D + 82800))
+  [ "$(runs)" = 1 ] || fail "the daily whole test ran again the same day: $(runs) runs"
+  mt $((D + 86400 + 3599)); [ "$(runs)" = 1 ] || fail "the daily whole test ran before its time the next day"
+  mt $((D + 86400 + 3600)); [ "$(runs)" = 2 ] || fail "the daily whole test did not run the next day: $(runs) runs, $(rec .)"
+}
+# Each failed case is run alone 3 times: a case that fails alone is a break in the code and files one issue with its
+# failure line and the commits; one that passes every time alone is flaky, goes to the flaky-test record, and files
+# nothing (else a flaky case would send the owner a break to chase each night).
+t_maintestalone() {
+  maintest_start; local B
+  maintest_pass $T0
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; if [ -n "$CONVEYOR_TEST_RERUN" ] && grep -q shaky "$CONVEYOR_TEST_RERUN"; then exit 0; fi
+    echo "FAIL [solid]: expected 1, got 2"; [ -n "$CONVEYOR_TEST_RERUN" ] || echo "FAIL [shaky]: too slow"; exit 1' > "$STUB/main-cmd"
+  B=$(move "move b"); mt $((T0 + 3600))
+  [ "$(runs)" = 2 ] && [ "$(grep -cv '^x$' "$STUB/mains")" = 6 ] || fail "each failed case was not run alone 3 times: $(cat "$STUB/mains")"
+  [ "$(jq -cs 'map([.number, .title, (.labels | map(.name))])' "$STUB/filed")" = '[[100101,"The whole test fails on main: solid",["bug","P1"]]]' ] \
+    || fail "the case that failed alone did not file one P1 issue of its own: $(cat "$STUB/filed" 2>&1)"
+  jq -e --arg r "${A:0:12}..${B:0:12}" --arg c "- $(git -C "$R" log -1 --format=%h "$B") move b" \
+      '.body | (contains("- solid: FAIL [solid]: expected 1, got 2 (passed alone 0 of 3)") and contains($r) and contains($c) and (contains("shaky") | not))' "$STUB/filed" >/dev/null \
+    || fail "the issue does not name the case, its failure line and the commits, or names the flaky case: $(jq -r .body "$STUB/filed")"
+  [ "$(jq -c '[.entries[]| [.case, .source]]' "$ST/flaky.json" 2>&1)" = "[[\"shaky\",\"main test ${B:0:12}\"]]" ] \
+    || fail "the case that passed alone was not added to the flaky-test record: $(cat "$ST/flaky.json" 2>&1)"
+  [ "$(rec '[.pass, .fail.cases]')" = "[\"$A\",[\"solid\"]]" ] || fail "the failure kept is not of the case that failed alone: $(rec .)"
+}
+# A run whose every failed case passes alone is a pass: no issue, and main's commit is the last pass.
+t_maintestflaky() {
+  maintest_start; local B
+  maintest_pass $T0
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; [ -n "$CONVEYOR_TEST_RERUN" ] && exit 0; echo "FAIL [shaky]: too slow"; exit 1' > "$STUB/main-cmd"
+  B=$(move "move b"); mt $((T0 + 3600))
+  [ ! -e "$STUB/filed" ] && [ "$(rec '[.pass, .fail]')" = "[\"$B\",null]" ] && [ "$(jq -c '[.entries[].case]' "$ST/flaky.json" 2>&1)" = '["shaky"]' ] \
+    || fail "a run whose only failure passed alone was not a pass with a flaky entry: $(rec .), $(cat "$STUB/filed" 2>&1)"
 }
 

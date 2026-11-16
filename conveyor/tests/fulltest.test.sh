@@ -242,3 +242,15 @@ t_pushnowbusy() {
   : > "$STUB/go"; ftended 1
   [ "$(ftorigin)" = "$O0" ] && [ "$(ftpushes)" = 0 ] && [ ! -e "$STUB/hookruns" ] || fail "push-now during a full test run pushed: origin $(ftorigin), $(cat "$STUB/hookruns" 2>&1)"
 }
+
+# Bug this guards: a failed file that named no case (it failed, or ran out of time, naming none) was run "alone" with a
+# list naming every other file as passed and no `fail` line, so a command that runs only the list's failed cases (the
+# whole test on main's, .conveyor/test-full.sh) ran nothing, passed, and the file was judged flaky.
+t_fullalonefile() {
+  local w=$T/$CASE/wt got
+  mkdir -p "$T/$CASE"; got=$( eval "$(sed -n '/^fullalone() {/,/^}/p' "$SRC/lib/fulltest.sh")"
+    tests() { cp "$1.rerun" "$1.seen"; echo "$2" >> "$1.seen"; return 1; }
+    fullalone "$w" '{"files":[{"file":"a.test"},{"file":"b.test"}],"passed":["c.test"]}' '{"file":"a.test","case":null}' test.main
+    cat "$w.seen" )
+  [ "$got" = $'failed\npass\tb.test\npass\tc.test\nfail\ta.test\ntest.main' ] || fail "the file with no case was not named alone as a failed file: $got"
+}

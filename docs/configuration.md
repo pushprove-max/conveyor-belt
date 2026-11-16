@@ -19,7 +19,7 @@ Some pack settings that this site names:
 - `pipelineFiles`: the files that change how cards are built, reviewed, fixed, tested, landed or pushed. A follow-up
   that changes one is filed held.
 - `auto.reserved`: what `/conveyor-belt:auto` never decides ([Foreman](foreman.md)).
-- `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.survey`: the monthly test-speed survey.
+- `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.mainAt`: a time of day, `"HH:MM"` in the machine's local time, after which the whole test on main runs once a day; unset, it runs at most once an hour. `test.survey`: the monthly test-speed survey.
   `test.firstSurvey`: the answer to setup's survey question.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
 - `prices`: your model prices, by model name, each `{"input": 3, "output": 15, "cacheRead": 0.3}` in dollars per

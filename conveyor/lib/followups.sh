@@ -16,8 +16,10 @@
 # The whole test on main (the pack's test.main; a pack that names none has none): a card's test step runs only the
 # tests of what the card touched, so the whole test is run here instead, by `serve` beside its cards and never by a
 # card: no card waits on it. A run is due when main is at another commit than the last run's and the last try began
-# MAIN_TEST_EVERY seconds ago or more; one runs at a time (a lock: a loop that restarts on new code leaves the run of
-# the loop before it going). It runs as a card's test step does (tests(): one of the machine's test slots, the
+# MAIN_TEST_EVERY seconds ago or more. With the pack's test.mainAt (HH:MM, the host's local time) it is due once a
+# day instead: when main is at another commit than the last run's, it is that time of the day or later, and the last
+# try began before that time of the same day. One runs at a time (a lock: a loop that restarts on new code leaves the
+# run of the loop before it going). It runs as a card's test step does (tests(): one of the machine's test slots, the
 # timeout, its output and logs), in a worktree of that commit alone, $CARDS/maintest/wt.
 # $MAINTEST keeps {sha: the commit of the last run that ended, at: when the last try began, pass: the last commit that
 # passed, fail: null, or {issue, cases, from: the last pass, to: the commit that failed, since, exit} of the failure
@@ -28,25 +30,36 @@
 # cases" with the end of its output. The snapshot gives fail
 # to the Board's Needs you (mainTest) until a run passes. The commit is kept only once its run has ended and, when it
 # failed, its issue was filed or added to: a try whose worktree or test slots could not be made, or that was killed,
-# tested nothing, and a failure GitHub did not take reached no one, so the same commit is tried again an hour on.
-# A failure files one issue of the pack's second priority (its last, when it has one) that names the failing cases
-# (testfails(); "<file>: <case>", or the case alone when the run's logs name no file: a case of the same name in
-# another file is another case, with its own issue) and the commits since the last pass. A failure
+# tested nothing, and a failure GitHub did not take reached no one, so the same commit is tried again when the next run
+# is due (an hour on; with test.mainAt, the next day).
+# Each failed case of a red run (testfails(); "<file>: <case>", or the case alone when the run's logs name no file: a
+# case of the same name in another file is another case, with its own issue) is run alone MAIN_ALONE times on the
+# same commit (fullalone(), lib/fulltest.sh). A case that passes every time alone is flaky: an entry of the flaky-test
+# record (flaky()), its source "main test <commit>", and it files nothing. A red run whose failed cases were all
+# flaky, with no file that failed naming no case and no timeout, counts as a pass. The cases that failed alone file
+# one issue of the pack's second priority (its last, when it has one) that names them, their failure lines and the
+# commits since the last pass. A failure
 # of the same cases while the issue filed for them is open adds a comment to it, with the commits up to the new one,
 # and files none, whatever failed in the runs between; one whose issue GitHub says nothing of writes nothing, and
 # keeps the issue (and, as any failure not written, is tried again).
-MAIN_TEST_EVERY=3600
+MAIN_TEST_EVERY=3600 MAIN_ALONE=3
 mainput() { printf '%s\n' "$1" > "$MAINTEST.new" && mv -f "$MAINTEST.new" "$MAINTEST" || { rm -f "$MAINTEST.new"; return 1; }; } # <the record>
 maintest() {
-  local cmd sha was at wt=$CARDS/maintest/wt lock rc out f cases pass n state='' prio title body told=true ran full short='' tail
-  packget test.main cmd && [ -n "$cmd" ] || return 0
+  local cmd daily due=null sha was at wt=$CARDS/maintest/wt lock rc out f cases='[]' lines='[]' u r x ok pass n state='' prio title body told=true ran full short='' tail
+  packget test.main cmd test.mainAt daily && [ -n "$cmd" ] || return 0
   mkdir -p "${wt%/*}" && { exec {lock}>>"$MAINTEST.lock"; } 2>/dev/null && flock -n "$lock" || return 0
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") && at=$(clock) || return 0
+  if [ -n "$daily" ]; then
+    [[ $daily =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] \
+      || { echo "conveyor: the whole test on main did not run: the pack's test.mainAt, \"$daily\", is not a time of day as HH:MM" >&2; return 1; }
+    x=$(jq -rn --arg at "$at" '$at | fromdate') && due=$(p_date "$(p_date "@$x" +%F) $daily" +%s) || return 1
+  fi
   was=$(jq -ce 'objects' "$MAINTEST" 2>/dev/null) || was='{}'
-  jq -e --arg s "$sha" --arg at "$at" --argjson e "$MAIN_TEST_EVERY" \
-    '.sha != $s and ((.at | type) != "string" or ($at | fromdate) - (.at | fromdate) >= $e)' <<<"$was" >/dev/null || return 0
+  jq -e --arg s "$sha" --arg at "$at" --argjson e "$MAIN_TEST_EVERY" --argjson due "$due" \
+    '.sha != $s and if $due == null then (.at | type) != "string" or ($at | fromdate) - (.at | fromdate) >= $e
+      else ($at | fromdate) >= $due and ((.at | type) != "string" or (.at | fromdate) < $due) end' <<<"$was" >/dev/null || return 0
   was=$(jq -c --arg at "$at" '. + {at: $at}' <<<"$was") && mainput "$was" || return 1
-  out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt.test" "$wt.testlog"; git worktree prune
+  out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) \
     || { echo "conveyor: the whole test on main did not run: its worktree could not be made: $out" >&2; return 1; }
   out=$(slot_pool 2>&1) || { echo "conveyor: the whole test on main did not run: $out" >&2; return 1; }
@@ -55,18 +68,31 @@ maintest() {
   full=$(jq -r '.full | numbers' <<<"$was")
   if [ $rc = 0 ] && [ -n "$full" ] && [ $((ran * 10)) -lt $((full * 9)) ]; then
     short="ran $ran of about $full cases"
-  elif [ $rc = 0 ]; then
-    git worktree remove --force "$wt" 2>/dev/null
-    mainput "$(jq -c --arg s "$sha" --argjson r "$ran" '. + {sha: $s, pass: $s, fail: null, full: $r}' <<<"$was")"; return
-  fi
-  if [ -n "$short" ]; then
     tail=$(sed 's/\x1b\[[0-9;]*m//g' "$wt.test" 2>/dev/null | tail -n 20); cases='["a short run: under 90% of the cases of its last full run"]'
-    git worktree remove --force "$wt" 2>/dev/null
+  elif [ $rc = 0 ]; then
+    git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
+    mainput "$(jq -c --arg s "$sha" --argjson r "$ran" '. + {sha: $s, pass: $s, fail: null, full: $r}' <<<"$was")"; return
   else
     f=$(testfails "$wt.test" "$rc" test.main) || f='{"files":[]}'
-    git worktree remove --force "$wt" 2>/dev/null
-    cases=$(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end] | unique' <<<"$f") || cases='[]'
+    # Each named case alone, MAIN_ALONE times: one that passes every time is flaky; the others are the failure.
+    while IFS= read -r u; do
+      ok=0; for ((x = 0; x < MAIN_ALONE; x++)); do r=$(fullalone "$wt" "$f" "$u" test.main) && [ "$r" = passed ] && ok=$((ok + 1)); done
+      if [ "$ok" = "$MAIN_ALONE" ]; then
+        flaky "main test ${sha:0:12}" "$(jq -c --arg n "failed in the whole test on main, passed alone $MAIN_ALONE of $MAIN_ALONE" '[{case: .name, note: $n}]' <<<"$u")" >/dev/null \
+          || echo "conveyor: the whole test on main: $(jq -r .name <<<"$u") passed alone; the flaky-test record could not be written" >&2
+      else
+        cases=$(jq -c --argjson u "$u" '. + [$u.name]' <<<"$cases")
+        lines=$(jq -c --argjson u "$u" --arg r "passed alone $ok of $MAIN_ALONE" '. + ["\($u.name): \($u.line // "failed") (\($r))"]' <<<"$lines")
+      fi
+    done < <(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | .cases[] | {file: $f, case: .name, line,
+      name: (if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end)}] | unique_by(.name)[]' <<<"$f")
+    # Every failure named a case, and each passed alone every time: a pass.
+    if [ "$cases" = '[]' ] && jq -e '(.files | length) > 0 and all(.files[]; .cases != []) and .timeout == null' <<<"$f" >/dev/null; then
+      git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
+      mainput "$(jq -c --arg s "$sha" '. + {sha: $s, pass: $s, fail: null}' <<<"$was")"; return
+    fi
   fi
+  git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
   pass=$(jq -r '.pass // ""' <<<"$was"); git rev-parse -q --verify "$pass^{commit}" >/dev/null 2>&1 || pass=''
   n=$(jq -r --argjson c "$cases" '[.filed | arrays | .[] | select(.cases == $c) | .issue][-1] // empty' <<<"$was")
   [ -z "$n" ] || state=$(timeout 20 gh issue view "$n" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''
@@ -83,6 +109,7 @@ $tail
 
 Failing cases:
 $(jq -r 'if . == [] then "the run named none" else .[] | "- " + . end' <<<"$cases")
+$([ "$lines" = '[]' ] || jq -r '"\nTheir failure lines, each case run alone '"$MAIN_ALONE"' times:", (.[] | "- " + .)' <<<"$lines")
 "
   fi
   body="$body

@@ -259,12 +259,14 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
     '{kind: "run", push: $p, sha: $s, state: $st, exit: $rc, cases: $c, pushed: $pu, reused: $u}')"
 }
 # One run of a unit ({file, case}) alone in <worktree>: every other file of the run (<testfails()>) listed as passed,
-# and the case, when there is one, as the one to run of its file. Prints passed, failed, timeout or killed.
-fullalone() { # <worktree> <testfails() of the run> <unit>
+# and the case as the one to run of its file (a `fail` line; a unit with no case, its file whole), so a command that
+# reads the list runs that alone. Prints passed, failed, timeout or killed. The command is the pack's test.full, or
+# <field> (the whole test on main's: test.main).
+fullalone() { # <worktree> <testfails() of the run> <unit> [field]
   local rc
   jq -r --argjson u "$3" '([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty)] | unique - [$u.file] | .[] | "pass\t\(.)"),
-    ($u | select(.case != null) | "fail\t\(.file)\t\(.case)")' <<<"$2" > "$1.rerun" || return 1
-  tests "$1" test.full alone; rc=$?
+    ($u | if .case != null then "fail\t\(.file)\t\(.case)" elif .file != null then "fail\t\(.file)" else empty end)' <<<"$2" > "$1.rerun" || return 1
+  tests "$1" "${4:-test.full}" alone; rc=$?
   case $rc in 0) echo passed ;; 124) echo timeout ;; *) if [ "$rc" -gt 128 ]; then echo killed; else echo failed; fi ;; esac
 }
 # Each failed case of a red run, judged (above): prints them as a JSON array.
