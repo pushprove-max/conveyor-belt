@@ -29,8 +29,10 @@ sessions in Claude Code, Codex or OpenCode.
 
 ## Install
 
-In Claude Code, run `/plugin marketplace add pushprove-max/conveyor-belt`, then
-`/plugin install conveyor-belt@conveyor-belt`. To get a later release, run `/plugin marketplace update conveyor-belt`.
+In Claude Code, run 
+`/plugin marketplace add pushprove-max/conveyor-belt`
+`/plugin install pushprove-max@conveyor-belt`
+To get a later release, run `/plugin marketplace update conveyor-belt`.
 
 ## Set up
 
