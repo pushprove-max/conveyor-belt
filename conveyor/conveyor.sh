@@ -42,7 +42,7 @@ git() { command git "$@" 8>&-; }
 # host file, the state and cards folders, the accounts (paths.sh); the state folder made, the move into the main
 # checkout, the record lines (records.sh). The command's script (commands/, below) then sources the other engine files
 # it uses, each in this order, into this one shell: slots, prompts, control, views, snapshot, issues, pick, session,
-# review, testrun, claim, push, followups, flaky, fulltest, testaction, testfiles, testrules, survey, card, lane, run,
+# review, testrun, claim, push, followups, flaky, fulltest, testaction, testfiles, mutate, testrules, survey, card, lane, run,
 # machine, install, setup.
 . "$HERE/lib/paths.sh" || exit 1
 . "$HERE/lib/records.sh" || exit 1
@@ -88,6 +88,7 @@ cmd release release-prep.sh 'release <version>'
 cmd release-run release-prep.sh 'release-run [prep] <version> | release-run stop'
 cmd testaction testaction.sh 'testaction <judge | explain | run> <test file> | testaction stop <id>'
 cmd testissue testaction.sh 'testissue <test file> <title> <body>'
+cmd mutate testaction.sh 'mutate <test file>'
 cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'
 cmd prices prices.sh 'prices set <model> <input> <output> <cache read> | prices clear <model>'
 cmd testrules testrules.sh -

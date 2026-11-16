@@ -400,6 +400,9 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     # test suite, which runs whole.
     [ "${2:-}" = test.full ] || { cw=$(cacheoff "$1"); [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; }
   fi
+  # Its ask (slot_ask), held until it ends, so no mutation check of any project runs beside it; a mutation check's own
+  # run (MUT_RUN, lib/mutate.sh mutone()) makes none.
+  [ -n "${MUT_RUN:-}" ] || slot_ask || :
   if [ -z "$SLOT_HOME" ]; then
     at=$(date -u +%FT%TZ)
     until slot_try || slot_wait; do
@@ -428,6 +431,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     { f=$(testfails "$1.test" 0) && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   elif [ $rc = 0 ]; then rm -f "$1.rerun"; fi
   [ -n "$SLOT_HOME" ] || slot_free
+  slot_unask
   # A pass on re-run goes to the flaky-test record now, before a later run (a batch's) clears <worktree>.first; so do
   # the cases of a run again that failed which passed in it (f: its failures).
   if [ -e "$1.first" ]; then if [ $rc = 0 ]; then flakyrun "$1"; else flakyrun "$1" "${f:-}"; fi; fi

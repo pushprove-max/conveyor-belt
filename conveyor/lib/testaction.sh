@@ -21,6 +21,8 @@
 # queued one off, unstarted.
 # `conveyor.sh testaction run <test file>` is no session: it runs the file alone, now, on a test slot (tafile()).
 TESTACTS=${STATE%/*}/testactions
+# shellcheck disable=SC2034 # used in lib/mutate.sh and lib/testfiles.sh
+MUTS=$TESTACTS/mutations # the mutation checks' records (lib/mutate.sh)
 TAVERDICTS='keep|speed up|split|merge|delete'
 # The text of a session's output line: Claude's assistant text (stream-json), Codex's agent message (exec --json),
 # OpenCode's text part (run --format json); each ended by a newline.

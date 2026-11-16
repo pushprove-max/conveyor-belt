@@ -16,6 +16,7 @@
 . "$HERE/lib/fulltest.sh" || exit 1
 . "$HERE/lib/testaction.sh" || exit 1
 . "$HERE/lib/testfiles.sh" || exit 1
+. "$HERE/lib/mutate.sh" || exit 1
 . "$HERE/lib/testrules.sh" || exit 1
 . "$HERE/lib/survey.sh" || exit 1
 . "$HERE/lib/card.sh" || exit 1

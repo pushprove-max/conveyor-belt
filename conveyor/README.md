@@ -996,6 +996,53 @@ records stay in the state folder. Each also has `text`, the last 16,000 characte
 snapshot (null when there is none), and `textCut`, true when that left the start out. So the Board's Tests page shows
 the text as it comes, and each result it lists has its text after the action ends and after a reload.
 
+## Mutation checks
+
+A mutation check asks: does a test file fail when the code it tests is wrong? It makes small changes (mutants) to
+the source files the test file covers, runs the test file on each one, and records which mutants the test file
+caught. Mutation checks never run in a card's steps, and never slow a card's test step.
+
+`conveyor.sh mutate <test file>` checks one test file of main now. A path that is not a test file of main (a file
+whose own name has `.test.` or `.spec.` in it) is refused (exit 2), and so is a second check while one runs. One
+check:
+
+- It finds the source files the test file covers: the files it imports (JavaScript or TypeScript: `from`, `import`
+  or `require` of a path that starts with `./` or `../`) or sources (shell: `. <path>` or `source <path>`). When it
+  finds none, it takes the files whose name is the test file's name up to `.test.` or `.spec.`. A test file is never
+  a source.
+- It makes up to 20 mutants, one line each, chosen at random with a seed that it records. The kinds are `flip` (a
+  comparison flipped: `<` and `>=`, `>` and `<=`, `==` and `!=`, `===` and `!==`, `-lt` and `-ge`, `-gt` and `-le`,
+  `-eq` and `-ne`), `negate` (an `if` condition negated), `number` (a number constant made one more), `andor` (`&&`
+  and `||` swapped) and `delete` (a call statement deleted). The rules are plain text rules for shell, JavaScript and
+  TypeScript, with no parser and no added dependency. A source of another kind is recorded as not mutated.
+- It runs in a copy of main's commit (a worktree under the cards folder, removed when the check stops or ends). It
+  first runs the test file with no mutant. A test file that fails then says nothing about its mutants: the check
+  ends failed. Then, for each mutant, it changes that one line, runs the test file alone with the pack's
+  `test.command` on a test slot, and puts the line back. No other test file runs with it, so only that file can
+  catch the mutant. The result is killed (the test file failed), survived (it passed) or no result (it timed out, or
+  did not run).
+
+A mutant starts only when no card of the project is in its build or test step, no test run of any project on the
+machine asks for a test slot or holds one, and the machine's 1-minute load is below its Load limit (the host file's
+`maxLoad`, set by `conveyor.sh machine load`). When a card of any project goes into its test step, which asks for a
+test slot, the mutant that runs is stopped at once, with every process it started, and its slot is free for the
+card. The check then stops. It resumes later from its next mutant, on the same commit and with
+the same mutants.
+
+`conveyor.sh serve` keeps an idle queue of test files to check, and looks at it once a minute when no mutant is held
+back. A check that stopped resumes first. Then the queue goes in this order: the files the Tests page flags (Never
+caught anything, or hollow cases), then the files checked longest ago. A file never checked comes before a checked
+one. A file leaves the queue when it is checked, and comes back when the test file or one of its sources changes on
+main. When the queue has nothing left, the loop does nothing more until main moves.
+
+Each check keeps its record in `testactions/mutations/<id>.json` of the state folder: `id`, `action` (mutate),
+`file`, `project`, `at` (its start), `sha` (the commit of main it checks), `seed`, `state` (running, stopped, done or
+failed), `reason` (why it stopped or failed), `base` (the run with no mutant: pass or fail; null before it), `next`
+(the next mutant to run), `mutants` (each `{source, line, kind, before, after}`), `tried`, `killed`, `survived` (each
+mutant that survived, as `{source, line, kind, before, after}`), `noresult`, `notMutated` (the sources of a kind the
+rules do not read), `blobs` (the test file's and its sources' blobs at `sha`), `pid` while it runs, and `end`. The
+snapshot's tests part, and so the Board's, carries each file's newest check as `mutation`.
+
 ## Same-file cards
 
 Cards that share a file are reviewed in parallel; they line up only to land. After its review, before it lands, a card

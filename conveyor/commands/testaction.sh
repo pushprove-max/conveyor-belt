@@ -2,7 +2,8 @@
 # `conveyor.sh testaction <judge | explain | run> <test file> | testaction stop <id>`: a session of the Tests seat about
 # one test file, a run of one test file, or the stop of one (testaction(), lib/testaction.sh); and `conveyor.sh
 # testissue <test file> <title> <body>`, an issue about one test file filed from the Board's Tests page (testissue(),
-# the same file). Each runs the function of its name. Sourced by conveyor.sh.
+# the same file); and `conveyor.sh mutate <test file>`, a mutation check of one test file (mutate(), lib/mutate.sh).
+# Each runs the function of its name. Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1
@@ -18,6 +19,7 @@
 . "$HERE/lib/flaky.sh" || exit 1
 . "$HERE/lib/testaction.sh" || exit 1
 . "$HERE/lib/testfiles.sh" || exit 1
+. "$HERE/lib/mutate.sh" || exit 1
 . "$HERE/lib/testrules.sh" || exit 1
 . "$HERE/lib/survey.sh" || exit 1
 . "$HERE/lib/card.sh" || exit 1
@@ -26,4 +28,4 @@
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
 names || exit 1
-case $1 in testaction) shift; testaction "$@" ;; testissue) shift; testissue "$@" ;; esac
+case $1 in testaction) shift; testaction "$@" ;; testissue) shift; testissue "$@" ;; mutate) shift; mutate "$@" ;; esac

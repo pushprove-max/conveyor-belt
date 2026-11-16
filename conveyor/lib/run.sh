@@ -143,7 +143,7 @@ revive() { # <the loop's own cards, one a line>
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f
+  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
   # kids: an adopted card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
   # before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's first turn still
@@ -248,12 +248,17 @@ run() { # [max-cards] [serve]
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - mtried)) -ge 60 ] && { [ -z "$tester" ] || ! jobs -rp | grep -qx "$tester"; }; then
       mtried=$SECONDS; ( maintest ) 8>&- < /dev/null & tester=$!
     fi
+    # The idle mutation checks (mutnext(), lib/mutate.sh), looked at once a minute: a job beside the cards, never
+    # counted as one, and given no run lock. No card's step runs one.
+    if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - utried)) -ge 60 ] && { [ -z "$muter" ] || ! jobs -rp | grep -qx "$muter"; }; then
+      utried=$SECONDS; ( mutnext ) 8>&- < /dev/null & muter=$!
+    fi
     # The monthly test-speed survey's issue (survey(), lib/survey.sh), looked at once a minute, in the loop itself: a
     # look is a date and a pack read, and files at most one issue a month.
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
       stried=$SECONDS; survey 8>&- < /dev/null
     fi
-    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}") + ${#took[@]})); waits=''
+    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}") + ${#took[@]})); waits=''
     if [ -z "$old" ] && stale; then
       old=1; enginepin p f 2>/dev/null || f=''
       if [ -n "$FOLLOW" ]; then echo "conveyor: the checkout has moved on from this loop's $RAN; nothing new is picked, and the loop restarts on the checkout's new code once its push is done"

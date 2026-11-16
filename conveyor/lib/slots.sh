@@ -108,6 +108,27 @@ slot_first() {
   rm -f "$d/$BASHPID"; exec {cfd}>&-
 }
 
+# A test run's ask, which the mutation checks of every project on the machine give way to (lib/mutate.sh mutheld()):
+# a file of $SLOT_DIR/asks that the run (tests()) holds an flock on from before it waits for its slot until it ends.
+# It is made as a push's claim is (slot_first): under a hidden name, locked, then given its number, so no one sees it
+# unlocked. An ask no process holds (its run was killed) counts for nothing, and the next ask drops it. SLOT_ASK is
+# the descriptor that holds it, empty when none was made.
+slot_ask() {
+  local d=$SLOT_DIR/asks f
+  SLOT_ASK=''
+  { mkdir -p "$d" && exec {SLOT_ASK}>>"$d/.$BASHPID" && flock "$SLOT_ASK" && mv -f "$d/.$BASHPID" "$d/$BASHPID"; } 2>/dev/null \
+    || { [ -z "$SLOT_ASK" ] || exec {SLOT_ASK}>&-; SLOT_ASK=''; rm -f "$d/.$BASHPID"; return 1; }
+  SLOT_ASKF=$d/$BASHPID
+  for f in "$d"/[0-9]*; do [ "$f" = "$SLOT_ASKF" ] || ! flock -n "$f" true 2>/dev/null || rm -f "$f"; done
+}
+slot_unask() { [ -z "${SLOT_ASK:-}" ] || { rm -f "$SLOT_ASKF"; exec {SLOT_ASK}>&-; SLOT_ASK=''; }; }
+# How many test runs of the machine ask now (slot_ask); 1 when none does.
+slot_asked() {
+  local f n=0
+  for f in "$SLOT_DIR"/asks/[0-9]*; do [ -e "$f" ] && ! flock -n "$f" true 2>/dev/null && n=$((n + 1)); done
+  [ "$n" -gt 0 ] && echo "$n"
+}
+
 # A runner's slot for its next worker, waited for: the run's home slot when no other worker of the run is on it
 # (asked five times a second, so the next worker starts as the one before it ends), else a slot of the pool.
 slot_take() {
