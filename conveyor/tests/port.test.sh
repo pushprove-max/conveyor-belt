@@ -383,10 +383,13 @@ t_keptbuild() {
 # NO-GO with more findings than a brief may hold, its fix, then a review that fails: the NO-GO's findings are kept.
 t_keptlong() {
   setup "[$(issue 9 2026-01-01)]"
-  { for i in $(seq 1 1200); do echo "[P1] a.txt:$i finding number $i of a very long review, padded out"; done; echo 'USER-VISIBLE: no'; echo 'VERDICT: NO-GO'; } > "$STUB/review.1"
+  # 100 findings of 700 bytes: past the brief's 60000 in as few lines as that takes (each line costs the engine more
+  # than its bytes do).
+  local pad; pad=$(printf '%650s' '' | tr ' ' x)
+  { for i in $(seq 1 100); do echo "[P1] a.txt:$i finding number $i of a very long review, $pad"; done; echo 'USER-VISIBLE: no'; echo 'VERDICT: NO-GO'; } > "$STUB/review.1"
   echo '[ "$(wc -l < "$STUB/reviews")" -lt 2 ] || exit 3' > "$STUB/review-cmd"
   loop run >/dev/null; k=$(st 'select(.issue == 9 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 9 and .step == "blocked") | .card')
-  st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 2: ' && grep -q 'finding number 1200 ' "$k/$old.review" && grep -q 'finding number 1 ' "$STUB/comments" \
+  st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 2: ' && grep -q 'finding number 100 ' "$k/$old.review" && grep -q 'finding number 1 ' "$STUB/comments" \
     || fail "a review that failed after a NO-GO and its fix lost that NO-GO's findings: $(ls "$k" 2>&1)"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a blocked card left files beside its worktree: $(ls "$T/$CASE/cards")"
   # Retried, and that card blocked before it took up the patch (its line keeps nothing); retried again: the card
@@ -399,8 +402,8 @@ t_keptlong() {
   st 'select(.issue == 9 and .step == "worktree") | .reason' | grep -q "^resumed from the kept patch of card $old:" && [ "$(cat "$STUB/resumed-with" 2>&1)" = a.txt ] \
     && [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] \
     || fail "a retry after a card that blocked before taking up the patch forgot the earlier kept patch: $(st 'select(.issue == 9) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  grep -q 'finding number 1 ' "$STUB/brief.build" && ! grep -q 'finding number 1200 ' "$STUB/brief.build" && [ "$(wc -c < "$STUB/brief.build")" -lt 100000 ] \
-    && [ "$(grep -c 'finding number' "$STUB/carried" 2>&1)" = 1200 ] && grep -q "All of it, .* lines, is in the file .*\.carried" "$STUB/brief.build" \
+  grep -q 'finding number 1 ' "$STUB/brief.build" && ! grep -q 'finding number 100 ' "$STUB/brief.build" && [ "$(wc -c < "$STUB/brief.build")" -lt 100000 ] \
+    && [ "$(grep -c 'finding number' "$STUB/carried" 2>&1)" = 100 ] && grep -q "All of it, .* lines, is in the file .*\.carried" "$STUB/brief.build" \
     || fail "carried findings were cut from the rebuild's brief with no file holding them all: $(tail -n 4 "$STUB/brief.build" | cut -c1-300)"
   [ -z "$(ls "$T/$CASE/cards")" ] && loop check || fail "the landed card left files behind, or the records do not check: $(ls "$T/$CASE/cards")"
 }
