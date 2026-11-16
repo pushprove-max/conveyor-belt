@@ -18,6 +18,13 @@ t_bash() {
   out=$(p require_bash "${BASH_VERSINFO[0]}.$((BASH_VERSINFO[1] + 1))" 2>&1) && fail "a newer minor of this major was not refused"
   p require_bash "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" || fail "this bash's own version was refused"
   p require_bash 4.4 || fail "an older major was refused"
+  # Bug caught (#110): `/usr/bin/env bash` found macOS's /bin/bash 3.2 ahead of the bash setup installed, and the engine
+  # stopped. A bash too old runs the script again in the bash first on PATH, with its arguments; when that bash is this
+  # one, it is refused as before, not run again.
+  mkdir -p "$T/newbash" && printf '#!/bin/sh\necho "again: $*"\n' > "$T/newbash/bash" && chmod +x "$T/newbash/bash"
+  out=$(PATH=$T/newbash:$PATH "$BASH" -c '. "$0/portable.sh" && "$@"' "$SRC" p_bash 99.0 /x/conveyor.sh doctor 'a b' 2>&1); [ "$out" = 'again: /x/conveyor.sh doctor a b' ] || fail "an old bash did not run the script in PATH's bash: $out"
+  out=$(PATH=$(dirname "$BASH"):$PATH p p_bash 99.0 /x/conveyor.sh 2>&1) && fail "p_bash ran on with this bash first on PATH: $out"
+  grep -q "needs bash 99.0 or newer" <<<"$out" || fail "p_bash with this bash first on PATH did not refuse it: $out"
 }
 
 # Bug: on macOS the BSD tools answer GNU calls wrongly (or not at all), or a missing GNU tool or flock goes unsaid.
@@ -30,9 +37,12 @@ t_darwin() {
     mkdir -p "$B/opt/${g%%:*}/libexec/gnubin"; printf '#!/bin/sh\necho brew-%s\n' "${g#*:}" > "$B/opt/${g%%:*}/libexec/gnubin/${g#*:}"
   done
   printf '#!/bin/sh\n' > "$B/bin/gtimeout"; chmod +x "$B/bin/gtimeout" "$B"/opt/*/libexec/gnubin/*
-  out=$(PATH=$B/bin:$B/os:$PATH bash -c '. "$0/portable.sh" && p_tools && for t in timeout date stat find sed grep; do "$t"; done' "$SRC" 2>&1) \
+  # Bug caught (#110): Apple's jq 1.7.1 in /usr/bin, ahead of Homebrew's bin on PATH, ran in place of Homebrew's jq 1.8,
+  # and the engine's code failed. Here the system's folder is first: Homebrew's jq is the one run.
+  printf '#!/bin/sh\necho apple-jq\n' > "$B/os/jq"; printf '#!/bin/sh\necho brew-jq\n' > "$B/bin/jq"; chmod +x "$B/os/jq" "$B/bin/jq"
+  out=$(PATH=$B/os:$B/bin:$PATH bash -c '. "$0/portable.sh" && p_tools && for t in timeout date stat find sed grep jq; do "$t"; done' "$SRC" 2>&1) \
     || fail "p_tools refused a complete Homebrew: $out"
-  [ "$(tr '\n' ' ' <<<"$out")" = "brew-timeout brew-date brew-stat brew-find brew-sed brew-grep " ] || fail "a call did not reach Homebrew's GNU tool: $out"
+  [ "$(tr '\n' ' ' <<<"$out")" = "brew-timeout brew-date brew-stat brew-find brew-sed brew-grep brew-jq " ] || fail "a call did not reach Homebrew's tool: $out"
   # This host's own flock is not on that PATH: only what p_tools runs besides the stubs.
   rm "$B/opt/gnu-sed/libexec/gnubin/sed" "$B/os/flock"; ln -s "$(command -v dirname)" "$B/os/dirname"
   out=$(PATH=$B/bin:$B/os "$BASH" -c '. "$0/portable.sh" && p_tools && echo went on' "$SRC" 2>&1) && fail "a missing gsed and flock were not refused: $out"

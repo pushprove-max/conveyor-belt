@@ -20,12 +20,13 @@ cards go on.
 
 ## Requirements
 
-A default setup needs macOS or Linux, bash 5.1 or newer, jq, git, `flock`, Python 3, the GitHub CLI (`gh`, signed
+A default setup needs macOS or Linux, bash 5.1 or newer, jq 1.8 or newer, git, `flock`, Python 3, the GitHub CLI (`gh`, signed
 in), the Claude Code CLI and the Codex CLI. On Debian or Ubuntu, Python 3 also needs `python3-venv`. The Codex CLI
 runs the default reviewer. Without it, set the reviewer to Claude on the Board's Rules tab. Also remove the `codex`
 models from `models.allowed` in `.conveyor/project.json`, then run `/conveyor-belt:setup` again. Conveyor runs its
 sessions in Claude Code, Codex or OpenCode.
-[Setup](docs/setup.md#requirements) lists each requirement with its version and how to install it.
+`/conveyor-belt:setup` installs each one that is missing or too old. [Setup](docs/setup.md#requirements) lists each
+requirement with its minimum version.
 
 ## Install
 

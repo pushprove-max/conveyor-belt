@@ -222,10 +222,10 @@ hostput() { # [checkout]
 doctor() {
   local bad=0 p e t c h f
   ok() { echo "ok: $1"; }; no() { echo "missing: $1; fix: $2"; bad=1; }
-  ok "bash $BASH_VERSION"
-  for p in jq git; do type -P "$p" >/dev/null && ok "$p" || no "$p" "install $p (macOS: brew install $p; Debian or Ubuntu: sudo apt install $p)"; done
-  if ! command -v gh >/dev/null; then no "gh, the GitHub CLI" "install it: https://cli.github.com"
-  elif timeout 20 gh auth status >/dev/null 2>&1; then ok "gh, signed in"; else no "gh signed in" "run gh auth login"; fi
+  # Each requirement at its minimum version, as the engine runs it: the version found, and where (lib/requires.sh).
+  req_report || bad=1
+  if ! command -v gh >/dev/null; then : # named by req_report
+  elif timeout 20 gh auth status >/dev/null 2>&1; then ok "gh, signed in"; else no "gh signed in" "run /conveyor-belt:setup, which starts gh auth login"; fi
   if mpsinstalled; then ok "the plugin $MPS, for /conveyor-belt:plan"
   else no "the plugin $MPS, for /conveyor-belt:plan" "run claude plugin install $MPS"; fi
   if [ ! -e "$HOST" ]; then no "the host file $HOST" "run /conveyor-belt:setup, which writes it"

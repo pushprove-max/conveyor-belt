@@ -1,36 +1,68 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The portability helpers (plan docs/plans/conveyor-plugin-2026-11-10.md, section 4). Sourced, never run.
-# Conveyor runs on macOS, Linux and WSL. Its timeout, date, stat, find, sed and grep calls are GNU calls: p_tools puts
+# Conveyor runs on macOS, Linux and WSL. Its timeout, date, stat, find, sed and grep calls are GNU calls: p_path puts
 # Homebrew's gnubin folders (coreutils, findutils, gnu-sed, grep: the g-prefixed tools under their plain names) first
-# on PATH on macOS, so every call, a child's or an exec'd one included, runs the GNU tool. Every reading of the host
-# that differs by system is a helper here; nothing else in conveyor/ reads /proc or /sys, or uses `date -d`, `stat -c`
-# or `find -newermt` directly.
+# on PATH on macOS, then its keg-only openssl@3 and its bin folder, so every call, a child's or an exec'd one included,
+# runs the GNU tool and Homebrew's copy of each requirement (jq 1.8, not Apple's /usr/bin/jq; lib/requires.sh). Every
+# reading of the host that differs by system is a helper here; nothing else in conveyor/ reads /proc or /sys, or uses
+# `date -d`, `stat -c` or `find -newermt` directly.
 # This file must parse in macOS's bash 3.2, so that require_bash can say what is wrong.
 
+# 0 when this bash is <major>.<minor> or newer.
+p_bashok() { # <major.minor>
+  local maj=${1%%.*} min=${1#*.}
+  [ "${BASH_VERSINFO[0]}" -gt "$maj" ] || { [ "${BASH_VERSINFO[0]}" -eq "$maj" ] && [ "${BASH_VERSINFO[1]}" -ge "$min" ]; }
+}
 # Exits with the reason when this bash is older than <major>.<minor>.
 require_bash() { # <major.minor>
-  local maj=${1%%.*} min=${1#*.}
-  [ "${BASH_VERSINFO[0]}" -gt "$maj" ] || { [ "${BASH_VERSINFO[0]}" -eq "$maj" ] && [ "${BASH_VERSINFO[1]}" -ge "$min" ]; } && return 0
-  echo "conveyor: needs bash $1 or newer; this is $BASH $BASH_VERSION (macOS: brew install bash)" >&2
+  p_bashok "$1" && return 0
+  echo "conveyor: needs bash $1 or newer; this is $BASH $BASH_VERSION (/conveyor-belt:setup installs it)" >&2
   exit 1
 }
+# Runs <script> with its <args> again in the bash first on PATH (after p_path: on macOS, Homebrew's) when this bash is
+# older than <major>.<minor> and that bash is another file: `/usr/bin/env bash` can find macOS's /bin/bash 3.2 ahead of
+# it. Else as require_bash: that bash is this one, so it runs once at most.
+p_bash() { # <major.minor> <script> [args]
+  local b
+  if ! p_bashok "$1" && b=$(command -v bash) && [ ! "$b" -ef "$BASH" ]; then shift; exec "$b" "$@"; fi
+  require_bash "$1"
+}
 
-# flock everywhere; on macOS the GNU tools first on PATH. Exits with what is missing.
+# Homebrew's prefix on macOS: the one its gtimeout or brew is in (on PATH, or in either default place), else
+# /opt/homebrew.
+p_brewprefix() {
+  local b
+  for b in "$(command -v gtimeout 2>/dev/null)" "$(command -v brew 2>/dev/null)" /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -n "$b" ] && [ -x "$b" ] && { dirname "$(dirname "$b")"; return 0; }
+  done
+  echo /opt/homebrew
+}
+# On macOS, Homebrew's gnubin folders, its openssl@3 and its bin folder first on PATH, each that is there, and
+# exported; once only, so a nested call leaves PATH as it is. Elsewhere, nothing.
+p_path() {
+  local pre d dirs=''
+  [ "$(uname -s)" = Darwin ] || return 0
+  pre=$(p_brewprefix)
+  for d in coreutils findutils gnu-sed grep; do [ ! -d "$pre/opt/$d/libexec/gnubin" ] || dirs=$dirs:$pre/opt/$d/libexec/gnubin; done
+  [ ! -d "$pre/opt/openssl@3/bin" ] || dirs=$dirs:$pre/opt/openssl@3/bin
+  dirs=${dirs#:}${dirs:+:}$pre/bin
+  case $PATH in "$dirs:"*) ;; *) PATH=$dirs:$PATH ;; esac
+  export PATH
+}
+
+# flock everywhere; on macOS the GNU tools first on PATH (p_path). Exits with what is missing.
 p_tools() {
-  local miss='' pre pkg t d dirs=''
+  local miss='' pre pkg
   if [ "$(uname -s)" = Darwin ]; then
-    pre=$(command -v gtimeout 2>/dev/null) && pre=$(dirname "$(dirname "$pre")")
+    p_path; pre=$(p_brewprefix)
     for pkg in coreutils:timeout coreutils:date coreutils:stat findutils:find gnu-sed:sed grep:grep; do
-      d=${pre:-/opt/homebrew}/opt/${pkg%%:*}/libexec/gnubin; t=${pkg#*:}
-      if [ -x "$d/$t" ]; then case ":$dirs:" in *":$d:"*) ;; *) dirs=${dirs:+$dirs:}$d ;; esac; else miss="$miss g$t"; fi
+      [ -x "$pre/opt/${pkg%%:*}/libexec/gnubin/${pkg#*:}" ] || miss="$miss g${pkg#*:}"
     done
-    [ -z "$dirs" ] || PATH=$dirs:$PATH
-    export PATH
   fi
   command -v flock >/dev/null 2>&1 || miss="$miss flock"
   [ -z "$miss" ] && return 0
-  echo "conveyor: missing:$miss (macOS: brew install coreutils findutils gnu-sed grep flock)" >&2
+  echo "conveyor: missing:$miss (/conveyor-belt:setup installs them)" >&2
   exit 1
 }
 

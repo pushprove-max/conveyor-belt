@@ -11,6 +11,24 @@ The arguments given were: `$ARGUMENTS`. When they hold `--foreman`, add `--forem
 following the plugin's releases. When they hold `--survey`, ask the user "Run a first test-speed survey now?" (yes / no)
 before step 1, and add `--survey yes` or `--survey no`, as answered, to every setup command below.
 
+First install the requirements, then sign in, before step 1:
+
+- Run `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" install` and show its output. It installs each requirement
+  that is missing or below its minimum version (docs/setup.md, Requirements), with Homebrew on macOS and the system's
+  package manager on Linux. When it exits 3, sudo needs this user's password: ask the user for it with
+  AskUserQuestion (they type it as their own answer). Make a private folder with `mktemp -d`, write the password as the
+  one line of a file `pw` in it with the Write tool, run the same command with `--password-file <that folder>/pw`
+  (it deletes the file), then remove the folder. When it exits 3 again (sudo refused the password), ask again. Never
+  put the password in a command, and never show it. On any other failure, show its message (it names the requirement
+  and why) and stop: setup does not go on without its requirements. Never give the user commands to run instead.
+- Sign in where a CLI is not signed in, each by the CLI's own login, run in the background with its output shown to
+  the user as it comes (the address and code to open), waiting for it to end. Run each of these commands as
+  `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run <command>`, so it finds a CLI the install put in
+  Homebrew's folder: when `gh auth status` fails, run
+  `gh auth login --hostname github.com --git-protocol https --web`; when `claude auth status` fails, run
+  `claude auth login`; when `codex login status` fails, run `codex login`. When a login fails, show its output, say
+  which CLI is not signed in, and go on.
+
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
    - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--fast-lane`,
      `--research-lane`), ask the user for exactly those, and nothing else: whose yes a change customers or staff will
@@ -21,7 +39,8 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
      `--research-lane no`, every value quoted for the shell.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
-3. When `git status --porcelain -- .conveyor/project.json` prints a line (the pack is not committed, or setup changed
+3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json`
+   prints a line (the pack is not committed, or setup changed
    it since its commit), give the user the
    one command that commits it, on the default branch: `git add .conveyor/project.json && git commit -m "Add the
    Conveyor pack"`. Do not run it yourself.

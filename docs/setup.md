@@ -5,18 +5,35 @@ This page lists what Conveyor needs, and how to install, set up, run and remove 
 
 ## Requirements
 
-- bash 5.1 or newer, jq, git, `flock` (on Linux, from util-linux) and Python 3. On Debian or Ubuntu, Python 3 also
-  needs `python3-venv` (`sudo apt install python3-venv`) for the Board's virtualenv.
-- The GitHub CLI, `gh`, signed in (`gh auth login`).
-- The Claude Code CLI, 2.1.322 or newer (`npm install -g @anthropic-ai/claude-code`).
+`/conveyor-belt:setup` checks each requirement below at its minimum version. It installs each one that is missing or
+too old, with Homebrew on macOS and with the system's package manager (`apt-get` or `dnf`) on Linux. It installs the
+Claude Code CLI and the Codex CLI with `npm`. When the package manager needs `sudo` and `sudo` asks for a password,
+setup asks you for it in Claude Code. On macOS, setup needs Homebrew.
+
+Setup checks the copy of each program that Conveyor runs: the first one on Conveyor's PATH. On macOS, Conveyor, its
+service and the Board put Homebrew's folders first on their PATH, before `/usr/bin`. A newer copy in another folder
+does not count. When an install fails, or leaves a program below its minimum version, setup stops and names the
+requirement and the reason. `conveyor.sh doctor` names each requirement below its minimum version, with the version it
+found and where.
+
+- bash 5.1 or newer.
+- jq 1.8 or newer. Apple's `/usr/bin/jq` 1.7.1 is too old.
+- git.
+- `flock` (on Linux, from util-linux).
+- Python 3 with its `venv` module (on Debian or Ubuntu, the `python3-venv` package), for the Board's virtualenv.
+- The GitHub CLI, `gh`, signed in. When it is not signed in, setup starts `gh auth login`.
+- The Claude Code CLI, 2.1.322 or newer, signed in (`npm install -g @anthropic-ai/claude-code`). When it is not
+  signed in, setup starts `claude auth login`.
+- The Codex CLI, signed in, for the Codex reviewer and the Codex builder models (`npm install -g @openai/codex`). When
+  it is not signed in, setup starts `codex login`.
+- For the Board, an `openssl` whose `req` takes `-addext` (OpenSSL 1.1.1 or newer). It makes the Board's certificate.
+- On macOS, Homebrew's coreutils, findutils, gnu-sed and grep. To install the Homebrew requirements by hand:
+  `brew install bash jq coreutils findutils gnu-sed grep flock`.
 - Matt Pocock's skills, the plugin `mattpocock-skills` of the official marketplace. `/conveyor-belt:plan` reads it.
   Setup installs it (`claude plugin install mattpocock-skills@claude-plugins-official`), and `conveyor.sh doctor` names
   it when it is missing.
-- The Codex CLI, for the Codex reviewer and the Codex builder models (`npm install -g @openai/codex`).
-- OpenCode 1.x, only for OpenCode models (`npm install -g opencode-ai`). See [Models](configuration.md#models).
-- For the Board, an `openssl` whose `req` takes `-addext` (OpenSSL 1.1.1 or newer). It makes the Board's certificate.
-- On macOS, Homebrew's bash, flock, coreutils and findutils, and the GNU sed and grep:
-  `brew install bash jq coreutils findutils gnu-sed grep flock`.
+- OpenCode 1.x, only for OpenCode models (`npm install -g opencode-ai`). Setup does not install it. See
+  [Models](configuration.md#models).
 
 Conveyor runs on macOS and Linux.
 

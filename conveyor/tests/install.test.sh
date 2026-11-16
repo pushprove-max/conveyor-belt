@@ -322,7 +322,8 @@ t_servicesecond() {
 t_servicemac() {
   service_start
   tune --arg c "$A" '.plugin.commit = $c'; K=$T/$CASE/stuck; mkdir -p "$K"
-  # macOS, with Homebrew's GNU tools as p_tools finds them: the agent's PATH puts them first.
+  # macOS, with Homebrew's GNU tools as p_tools finds them: the agent's PATH puts them first, then Homebrew's bin
+  # folder, so the agent runs Homebrew's jq 1.8 ahead of Apple's /usr/bin/jq (#110).
   H=$T/$CASE/home; b=$STUB/brew; mkdir -p "$STUB/mac" "$b/bin" "$H"; printf '#!/bin/sh\necho Darwin\n' > "$STUB/mac/uname"; chmod +x "$STUB/mac/uname"
   ln -s "$(command -v timeout)" "$b/bin/gtimeout"
   for k in coreutils:timeout coreutils:date coreutils:stat findutils:find gnu-sed:sed grep:grep; do
@@ -352,7 +353,7 @@ t_servicemac() {
     || fail "the per-project agent of before was left, or its project not made a record: $(cat "$STUB/svc") $(cat "$XDG_CONFIG_HOME/conveyor/host.json")"
   a=$H/Library/LaunchAgents/conveyor-machine.plist
   grep -qF "<string>$V/$A/conveyor/conveyor.sh</string><string>machine</string>" "$a" \
-    && grep -qF "<key>PATH</key><string>$b/opt/coreutils/libexec/gnubin:$b/opt/findutils/libexec/gnubin:$b/opt/gnu-sed/libexec/gnubin:$b/opt/grep/libexec/gnubin:$STUB/mac:$b/bin:$PATH</string>" "$a" \
+    && grep -qF "<key>PATH</key><string>$b/opt/coreutils/libexec/gnubin:$b/opt/findutils/libexec/gnubin:$b/opt/gnu-sed/libexec/gnubin:$b/opt/grep/libexec/gnubin:$b/bin:$STUB/mac:$b/bin:$PATH</string>" "$a" \
     && ! grep -q CONVEYOR_MAIN "$a" && grep -qF "<key>XDG_DATA_HOME</key><string>$XDG_DATA_HOME</string>" "$a" \
     && grep -qF "<key>XDG_CONFIG_HOME</key><string>$XDG_CONFIG_HOME</string>" "$a" || fail "the agent: $(cat "$a")"
   grep -qx "launchctl bootstrap gui/$(id -u) $a" "$STUB/svc" || fail "the agent was not loaded: $(cat "$STUB/svc")"

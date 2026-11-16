@@ -160,8 +160,10 @@ case $2 in
     echo "https://github.com/o/r/issues/$n" ;;
 esac
 EOF
+  # `--version` (doctor's requirement check, lib/requires.sh) is no session: the stubs answer it as the CLIs do.
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
+[ "${1:-}" != --version ] || { echo '2.1.322 (Claude Code)'; exit 0; }
 cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
 EOF
@@ -169,6 +171,7 @@ EOF
   cat > "$STUB/codex" <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" != debug ] || exit 1
+[ "${1:-}" != --version ] || { echo 'codex-cli 0.130.0'; exit 0; }
 while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
 cat > /dev/null; echo x >> "$STUB/reviews"; [ ! -f "$STUB/review-cmd" ] || . "$STUB/review-cmd"; cat "$STUB/review.$(wc -l < "$STUB/reviews")" > "$out" || exit 1
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'

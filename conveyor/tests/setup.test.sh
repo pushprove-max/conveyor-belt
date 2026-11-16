@@ -56,9 +56,10 @@ case "$1 $2" in
 esac
 EOF
   # claude: `plugin install <plugin>` records it in $G/claude-installs and, as Claude Code does, in its record of
-  # installed plugins in CLAUDE_CONFIG_DIR; anything else does nothing.
+  # installed plugins in CLAUDE_CONFIG_DIR; --version is a version doctor takes (2.1.322 or newer); anything else does nothing.
   cat > "$G/claude" <<'EOF'
 #!/usr/bin/env bash
+[ "$1" != --version ] || { echo '2.1.400 (Claude Code)'; exit 0; }
 [ "$1 $2" = "plugin install" ] || exit 0
 mkdir -p "$CLAUDE_CONFIG_DIR/plugins" && echo "$3" >> "$G/claude-installs" \
   && jq -n --arg p "$3" '{version: 2, plugins: {($p): [{scope: "user"}]}}' > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
@@ -516,7 +517,18 @@ t_doctornopack() {
 t_doctortools() {
   local X out; doctordone; rm -r "$S/.conveyor"
   echo '{}' > "$XDG_CONFIG_HOME/conveyor/host.json"; out=$(cd "$S" && CONVEYOR_MAIN=$S PATH=$(without jq git gh) bash "$X" doctor 2>&1) && fail "doctor passed with no jq, git or gh: $out"
-  grep -q '^missing: jq; fix: install jq' <<<"$out" && grep -q '^missing: git; fix: install git' <<<"$out" && grep -q '^missing: gh, the GitHub CLI; fix: install it' <<<"$out" \
+  grep -q '^missing: jq 1.8 or newer (none on PATH); fix: run /conveyor-belt:setup, which installs it' <<<"$out" \
+    && grep -q '^missing: git (none on PATH); fix: run /conveyor-belt:setup' <<<"$out" && grep -q '^missing: gh, the GitHub CLI (none on PATH); fix: run /conveyor-belt:setup' <<<"$out" \
     && grep -q '^not checked: the pack' <<<"$out" && grep -q '^not checked: the host file' <<<"$out" && ! grep -q 'host file.*fix' <<<"$out" \
     || fail "doctor with no jq, git or gh: $out"
+}
+# Bug caught (#110): a Mac ran Apple's jq 1.7.1, first on PATH, which rejects the engine's code, and doctor said only
+# "ok: jq". It names jq below its minimum, with the version found and where. The stub answers --version as Apple's
+# does and passes the rest to this host's jq, so the engine's own jq calls still run.
+t_doctorold() {
+  local X out d=$T/$CASE/oldjq; doctordone
+  mkdir -p "$d" && printf '#!/bin/sh\n[ "$1" != --version ] || { echo jq-1.7.1-apple; exit 0; }\nexec %s "$@"\n' "$(type -P jq)" > "$d/jq" && chmod +x "$d/jq" || fail "the jq stub was not made"
+  out=$(cd "$S" && PATH=$d:$PATH bash "$X" doctor 2>&1) && fail "doctor passed with jq 1.7.1 first on PATH: $out"
+  grep -qxF "missing: jq 1.8 or newer (found 1.7.1 at $d/jq); fix: run /conveyor-belt:setup, which installs it" <<<"$out" \
+    || fail "doctor did not name jq 1.7.1, and where it is: $out"
 }

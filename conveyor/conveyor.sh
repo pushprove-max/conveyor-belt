@@ -32,8 +32,10 @@ envof < <(env -0)
 # This script's folder, by bash's own text handling, not a dirname program (one started per command adds up); a path
 # with no slash is in the current folder.
 HERE=.; [[ ${BASH_SOURCE[0]} != */* ]] || HERE=${BASH_SOURCE[0]%/*}; HERE=$(cd "$HERE" && pwd -P)
-# bash 5.1 for `wait -n -p`; flock, and on macOS the GNU tools (lib/portable.sh, plan section 4).
-. "$HERE/lib/portable.sh" && require_bash 5.1 && p_tools || exit 1
+# bash 5.1 for `wait -n -p`, run again in the bash first on PATH when this one is older; flock, and on macOS the GNU
+# tools and Homebrew's copies first on PATH (lib/portable.sh, plan section 4). The service and the Board are started
+# with this PATH and this bash.
+. "$HERE/lib/portable.sh" && p_path && p_bash 5.1 "$HERE/conveyor.sh" "$@" && p_tools || exit 1
 exec {LOGFD}>&2 # the engine's own stderr: gh_write's privacy warnings, whatever a caller does with its stderr
 # Every git the engine runs, without the loop's run lock (fd 8): the project's hooks git starts (pre-commit, post-checkout,
 # reference-transaction...) are not the loop, and one given the lock could pass it on to a second loop (run()).
@@ -43,7 +45,7 @@ git() { command git "$@" 8>&-; }
 # checkout, the record lines (records.sh). The command's script (commands/, below) then sources the other engine files
 # it uses, each in this order, into this one shell: slots, prompts, control, views, snapshot, issues, pick, session,
 # review, testrun, claim, push, followups, flaky, fulltest, testaction, testfiles, mutate, testrules, survey, card, lane, run,
-# machine, install, setup.
+# machine, install, setup, requires.
 . "$HERE/lib/paths.sh" || exit 1
 . "$HERE/lib/records.sh" || exit 1
 # The command table, one line a command: `cmd <command> <its script under commands/> <its part of the usage message>`
