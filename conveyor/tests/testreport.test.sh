@@ -226,6 +226,20 @@ t_reportmocha() {
   out=$(rp_page) || fail "the run's times could not be read: $out"
   [ "$(tail -n 1 <<<"$out")" = '{"test/a.test.js":[0.75,null],"test/b.test.js":[1.5,null]}' ] || fail "the Tests page does not show mocha's time of each file: $out"
 }
+# Bug caught (#165): a card's run that failed ran again (tests(): testonce() twice after one reportask()), and mocha's
+# timer adds to Conveyor's report file, so the run again's times held the first run's too (0.25 + 0.5 s here). Each
+# run reads only the report it wrote.
+t_reportagain() {
+  rp_main '{"runner": "mocha", "format": "mocha-times", "env": {"CONVEYOR_MOCHA_REPORT": "<file>"}}' test/a.test.js
+  local w=$T/$CASE/wt out
+  # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), which testonce() runs; names() is not run here
+  out=$( ( LIVE=0.2 STUCK=1200; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && reportask "$w" \
+    && { testonce "$w" "echo '{\"file\": \"$w/test/a.test.js\", \"sec\": 0.25}' >> \"\${CONVEYOR_MOCHA_REPORT//\\\"/}\"; exit 1"; [ $? = 1 ]; } \
+    && testonce "$w" "echo '{\"file\": \"$w/test/a.test.js\", \"sec\": 0.5}' >> \"\${CONVEYOR_MOCHA_REPORT//\\\"/}\"" && cat "$w.reported" ) 2>&1 ) \
+    || fail "the two runs failed: $out $(cat "$w.test" 2>/dev/null)"
+  [ "$out" = $'TESTRUN sec\ttest/a.test.js\t0.500' ] || fail "the run again's times hold the first run's: $out"
+}
 # Bug caught: a Ruby project (rspec's JSON formatter) recorded no test times. Each example's run_time, by its file.
 t_reportrspec() {
   local d=$T/$CASE/d; mkdir -p "$d"

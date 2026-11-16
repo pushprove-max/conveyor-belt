@@ -1122,10 +1122,12 @@ mainwait() { # <worktree> <main's commit> <the cases, as one text>
   done
   rm -f "$1.live"
 }
-# One run of the command <cmd> in the worktree, on the slot tests() holds.
+# One run of the command <cmd> in the worktree, on the slot tests() holds. The report file an earlier run wrote
+# (<worktree>.report, reportask()) goes first: a runner that adds to it (tools/mochatimes.cjs) would otherwise give the
+# run again the first run's times too.
 testonce() { # <worktree> <cmd>
   local pid clock rc r='' t0
-  [ ! -s "$1.rerun" ] || r=$1.rerun
+  [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report"
   t0=$(date +%s)
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
     CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
@@ -1146,7 +1148,7 @@ testonce() { # <worktree> <cmd>
 REPORT_ENV=()
 reportask() { # <worktree>
   local e a q
-  REPORT_ENV=(); REPORT_ARGS=''; rm -f "$1.report"
+  REPORT_ENV=(); REPORT_ARGS=''
   packget test.report.env e test.report.args a 2>/dev/null || return 0
   printf -v q '%q' "$1.report"; REPORT_ARGS=${a//<file>/$q}
   [ -z "$e" ] || mapfile -t REPORT_ENV < <(jq -r --arg f "\"$1.report\"" --arg m "\"$HERE/tools/mochatimes.cjs\"" 'objects | to_entries[]
