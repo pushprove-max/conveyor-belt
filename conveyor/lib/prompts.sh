@@ -391,7 +391,8 @@ main'"'"'s code without the fix and passes with it, and keep the fix. The check'
 BUGREVIEW='# The bug-card check
 This issue is a bug: after the build, the test cases the change adds or changes were run on main'"'"'s code without the
 fix (its test files alone, in a worktree of main). At least one must fail there. A change to test files alone is not
-run, as it has no fix to take out. Its result:'
+run, as it has no fix to take out. A change that selects no test of its own (comments only) is proved by the test
+files its issue'"'"'s Done-when names instead, and is not checked when it names none. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

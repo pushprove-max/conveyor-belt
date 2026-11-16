@@ -195,7 +195,8 @@ t_conflict() {
 t_corrupt() {
   setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST"
   good='{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}'
-  for bad in '{"card":"c0-5","iss' '{"card":"c","issue":7,"step":"landed"}' "${good/picked/future}" "${good/picked/landed}"; do
+  # A bugproof line only says the bug-card check was skipped: one with another result is not a record of it.
+  for bad in '{"card":"c0-5","iss' '{"card":"c","issue":7,"step":"landed"}' "${good/picked/future}" "${good/picked/landed}" "${good/picked/bugproof}"; do
     printf '%s\n' "$good" "$bad" > "$ST/cards.jsonl"
     out=$(loop run 2>&1) && fail "loop ran on: $bad"; grep -q 'line 2' <<<"$out" || fail "loop did not name line 2: $bad"
     out=$(loop cards 2>&1) && fail "cards answered: $bad"

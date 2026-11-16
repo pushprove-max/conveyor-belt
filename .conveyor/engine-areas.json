@@ -384,6 +384,7 @@
 {"area": "record", "test": "budgetrun.test.sh"}
 {"area": "record", "test": "budgetkept.test.sh"}
 {"area": "record", "test": "mainred.test.sh"}
+{"area": "record", "test": "bugproof.test.sh"}
 {"area": "record", "file": "conveyor/jq/check.jq"}
 {"area": "rows", "test": "records.test.sh"}
 {"area": "rows", "test": "mainred.test.sh"}

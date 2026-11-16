@@ -182,14 +182,15 @@ card() { # <card> <issue> [<branch> <tip>]
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return
     # A bug card (the pack's type label): the tests it adds or changes must fail on main's code without the fix
-    # (bugproof()). When none does, or it adds none, it goes back to its build session once, told why; when the check
+    # (bugproof(); a change that selects no test of its own is proved by the test files its issue's Done-when names,
+    # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
     # check's result.
-    if jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null && ! bugproof "$c" "$wt"; then
+    if jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null && ! bugproof "$c" "$wt" "$issue"; then
       began "$c" "$n" build
       redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"$BUGBUILD"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
       checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$UNFIXED" '. + {reason: $r}' <<<"$t")" || return
-      bugproof "$c" "$wt" || { block "$c" "$n" "$wt" "build: $UNFIXED"$'\n'"$(<"$wt.unfixed")"; return; }
+      bugproof "$c" "$wt" "$issue" || { block "$c" "$n" "$wt" "build: $UNFIXED"$'\n'"$(<"$wt.unfixed")"; return; }
     fi
   fi
   msg=$(jq -r --arg c "$c" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title) (#\(.number))\n\nCloses #\(.number)\nConveyor card \($c)"' <<<"$issue")

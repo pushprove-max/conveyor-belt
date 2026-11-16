@@ -499,11 +499,18 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # tests. At least one must fail there: a test that passes without the fix does not prove it. Writes the result in
 # <worktree>.unfixed, which the review is shown, and fails when the check does not hold: the change adds or changes no
 # test file, or no test failed in their run on main (it passed, or only its runner failed it). A run that cannot be made (no worktree, or the files do not apply) fails
-# nothing, as a build session cannot repair it: the result says so. A change to test files alone (a test fix for a
+# nothing, as a build session cannot repair it (but for a change with no test file, which fails as before): the result says so. A change to test files alone (a test fix for a
 # red main) is not run and fails nothing: with no fix to take out, its tests run on the same code and pass. The result
 # says it is test-only, and the review judges its tests.
-bugproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() out rc held=1 sha
+# A change that selects no test of its own (the command, run on main's code with the whole change staged, ended
+# "nothing selected": every changed line is a comment, or it touches no code the command knows) is proved by the test
+# files the issue's `## Done when` section names that are test files of that commit (a name with `.test.` or `.spec.`
+# in it): each named in the command's list (CONVEYOR_TEST_RERUN) as `fail<TAB><file>`, so the command runs them
+# alone, with the fix and then without it. At least one must fail without it, and they must pass with it. When the
+# issue names none, the check is skipped and holds: the result and the card's `bugproof` line (result skipped) say why.
+# That selection run is made only when the change adds or changes no test file, or its test files' run selected nothing.
+bugproof() { # <card> <worktree> <issue json>
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() nf=() f out rc fx held='' sha='' why
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -518,26 +525,69 @@ bugproof() { # <card> <worktree>
     return 0
   fi
   mapfile -d '' -t fs < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | grep -zE "$NOTPRODUCT")
-  [ ${#fs[@]} != 0 ] || { echo "The change adds or changes no test file: $UNFIXED." > "$2.unfixed"; return 1; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
-      && git -C "$2" diff --cached --binary --no-renames HEAD -- "${fs[@]/#/:(literal)}" | git -C "$mwt" apply --index; } 2>&1 < /dev/null); then
-    tests "$mwt" test.command; rc=$?
-    # A run that failed is proof only when a test failed in it: with the runner's logs (testlogs()), when they name a
-    # file that failed (testfails()); an exit of the runner itself with no test failing (its own check refused the
-    # run) proves nothing. A command that writes no logs says no more than its exit.
-    [ $rc != 0 ] && { [ -z "$(testlogs "$mwt")" ] || jq -e '.files != []' <<<"$(testfails "$mwt.test" "$rc")" >/dev/null 2>&1; } || held=''
-    { printf 'Its test files, run on main'"'"'s code at %s without the fix:\n' "$sha"; printf -- '- %s\n' "${fs[@]}"
-      if [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
-      elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
-      else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; fi
-      echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
+      && { [ ${#fs[@]} = 0 ] || git -C "$2" diff --cached --binary --no-renames HEAD -- "${fs[@]/#/:(literal)}" | git -C "$mwt" apply --index; }; } 2>&1 < /dev/null); then
+    if [ ${#fs[@]} = 0 ]; then
+      echo "The change adds or changes no test file: $UNFIXED." > "$2.unfixed"
+    else
+      tests "$mwt" test.command; rc=$?
+      ! testfailed "$mwt" "$rc" || held=1
+      { printf 'Its test files, run on main'"'"'s code at %s without the fix:\n' "$sha"; printf -- '- %s\n' "${fs[@]}"
+        if [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
+        elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
+        else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; fi
+        echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
+    fi
+    # Does the change select any test of its own? Asked only when its test files proved nothing and selected nothing
+    # (a run that selected a test that passed says the change is not one that selects none). Asked alone with no list,
+    # so no file is kept off as passed before (cacheoff()): a code change whose tests were all kept off would select none.
+    if [ -z "$held" ] && { [ ${#fs[@]} = 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; } \
+      && git -C "$mwt" reset -q --hard && rm -f "$mwt.rerun" \
+      && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>/dev/null \
+      && { tests "$mwt" test.command alone; rc=$?; [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; }; then
+      mapfile -t nf < <(jq -r '[.body // "" | splits("\r?\n")] as $l
+        | ([range($l | length) | select($l[.] | test("^#{1,2}\\s+Done when\\s*$"; "i"))] | first) as $i | select($i != null)
+        | $l[($i + 1):] | ((map(test("^#{1,2}\\s")) | index(true)) as $e | if $e == null then . else .[:$e] end)[]
+        | scan("[^\\s`\"'"'"'(),;<>]+") | sub("::.*$"; "") | sub("(:[0-9]+(-[0-9]+)?)?[.,:;]*$"; "")' <<<"$3" 2>/dev/null \
+        | LC_ALL=C sort -u | while IFS= read -r f; do
+            [[ ${f##*/} =~ \.(test|spec)\. && $f != *$'\t'* ]] && [ "$(git -C "$mwt" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] && printf '%s\n' "$f"
+          done)
+      if [ ${#nf[@]} = 0 ]; then
+        why='the change selects no test (every changed line is a comment, or it touches no code the test command knows), and the issue'"'"'s Done-when names no test file'
+        printf 'The bug-card check was skipped: %s.\n' "$why" > "$2.unfixed"; held=1
+        record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof skipped "$(jq -cn --arg r "$why" '{reason: $r}')"
+      else
+        # With the fix (staged above), then without it: the named files alone, each a `fail` line of the list.
+        printf 'fail\t%s\n' "${nf[@]}" > "$mwt.rerun"; tests "$mwt" test.command alone; fx=$?
+        # Main's code put back fails the check (rc empty): the logs left are those of the run with the fix.
+        if git -C "$mwt" reset -q --hard && printf 'fail\t%s\n' "${nf[@]}" > "$mwt.rerun"; then tests "$mwt" test.command alone; rc=$?; else rc=''; fi
+        [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" || held=1
+        { printf 'The change selects no test of its own (every changed line is a comment, or it touches no code the test command knows), so the test files its issue'"'"'s Done-when names were run alone on main'"'"'s code at %s, with the fix and without it:\n' "$sha"
+          printf -- '- %s\n' "${nf[@]}"
+          if [ "$fx" != 0 ]; then echo "They failed with the fix (exit $fx): $UNFIXED."
+          elif [ -z "$rc" ]; then echo "Main's code could not be put back without the fix, so they did not run without it: $UNFIXED."
+          elif [ "$rc" = 0 ]; then echo "They all passed without the fix: $UNFIXED."
+          elif [ -z "$held" ]; then echo "The run without the fix failed (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
+          else echo "They pass with the fix, and the run without it failed (exit $rc): at least one fails without the fix, as it should."; fi
+          echo 'The end of the run without the fix:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
+      fi
+    fi
+  elif [ ${#fs[@]} = 0 ]; then
+    echo "The change adds or changes no test file: $UNFIXED." > "$2.unfixed"
   else
     printf 'Its test files could not be run on main'"'"'s code at %s: %s\nThe check says nothing of them.\n' "${sha:-a commit that could not be read}" "${out:0:600}" > "$2.unfixed"
+    held=1
   fi
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -n "$held" ]
+}
+# A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
+# (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
+# own check refused the run) proves nothing. A command that writes no logs says no more than its exit.
+testfailed() { # <worktree> <exit>
+  [ "$2" != 0 ] && { [ -z "$(testlogs "$1")" ] || jq -e '.files != []' <<<"$(testfails "$1.test" "$2")" >/dev/null 2>&1; }
 }
 # A case that fails on main (verdicts()) goes to the fix card of main's commit, a card with no GitHub issue (issue 0;
 # the owner, 2026-11-15: 13 issues filed in 9 hours, three by one landing): one card per broken main commit, holding

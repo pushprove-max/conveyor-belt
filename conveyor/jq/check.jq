@@ -8,7 +8,9 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
           "wait", "run", "slotsFree", "selected", "ended", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
         and ([.card, .result, .sha, .reason] | all(type == "string")) and (.issue | type == "number")
         and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
-        and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue"))
+        and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
+        # A bugproof line: the bug-card check was skipped (bugproof()), its reason saying why.
+        and (.step != "bugproof" or .result == "skipped")
         and (.step != "start" or (.of | IN("build", "review", "fix", "test", "file", "land", "rebase")))
         and (.counts // {P0: 0, P1: 0, P2: 0, P3: 0} | type == "object" and keys == ["P0", "P1", "P2", "P3"] and all(type == "number"))
         and (.created // "" | type == "string")

@@ -712,6 +712,13 @@ no fix to take out, so its tests would run on the same code and pass, and the ca
 Its result says the change is test-only, and the review judges whether each changed test still checks what it was
 written to check. A change with any other file is checked as above.
 
+A change that selects no test of its own is checked another way. This is a change where every changed line is a
+comment, or one that touches no code the `test.command` knows: that command, run on main's code with the whole change
+staged, selects nothing. The check then runs the test files that the issue's `## Done when` section names, alone, on
+main's code with the fix and without it. At least one must fail without the fix, and they must pass with it. When
+the issue names no test file, the card goes on to review with no check. Its `bugproof` line (result `skipped`) and
+the result the review sees say why. The review reads that change as it reads any other.
+
 ## The whole test on main
 
 A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs
