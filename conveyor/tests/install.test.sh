@@ -379,3 +379,23 @@ t_board() {
   (cd "$R" && HOME=$h bash "$V/$A/conveyor/conveyor.sh" board >/dev/null 2>&1) || fail "board run again exited non-zero"
   [ "$(grep -c ' add-user ' "$STUB/py")" = 1 ] || fail "board asked for an admin again though one has a password: $(cat "$STUB/py")"
 }
+
+# Bugs: a command run through shim.sh from an install takes the install's version folder, read-only and with no .git,
+# as the project: git prints `fatal:` and its state folder is made inside the install, so `control` fails; or the shim
+# drops the main checkout its caller names.
+t_shimmain() {
+  setup '[]'; local c=0123456789abcdef0123456789abcdef01234567 v o=$T/$CASE/other out
+  v=$T/$CASE/data/conveyor/versions/$c; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  mkdir -p "$v" && cp -a "$SRC" "$v/conveyor" && cp "$SRC/../shim.sh" "$v/" && chmod -R a-w "$v" && cp -a "$R" "$o" \
+    || fail "the fixture install could not be made"
+  tune --arg c "$c" '.plugin.commit = $c'
+  shim() { (cd "$R" && exec env -u CLAUDE_PROJECT_DIR -u CONVEYOR_CARDS -u CONVEYOR_MAIN XDG_DATA_HOME="$T/$CASE/data" "$@" bash "$v/shim.sh" conveyor/conveyor.sh control hold 1 2>&1); }
+  # sd <checkout>: its state folder, as the engine finds it; held <checkout>: the issues its control record holds.
+  sd() { CONVEYOR_MAIN=$1 bash "$SRC/conveyor.sh" state-dir; }
+  held() { jq -c .held "$(sd "$1")/control.json"; }
+  [ "$(sd "$R")" != "$(sd "$o")" ] || fail "the two checkouts share a state folder: $(sd "$R")"
+  out=$(shim) && [ "$(held "$R")" = '[1]' ] || fail "the hold through the shim did not reach the project's state folder: $out"
+  ! grep -q 'fatal:' <<<"$out" || fail "the shim's command ran git in the version folder: $out"
+  out=$(shim CONVEYOR_MAIN="$o") && [ "$(held "$o")" = '[1]' ] \
+    || fail "the shim did not keep the caller's CONVEYOR_MAIN: $out"
+}

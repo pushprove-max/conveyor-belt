@@ -35,9 +35,11 @@ off() {
   exit 0
 }
 commit=$(jq -r '.plugin.commit // empty' "$pack" 2>/dev/null); look=''
+# The project's main checkout (empty outside a git checkout): the command run below works on it, not on the version
+# folder it runs from, which has no .git (CONVEYOR_MAIN, lib/paths.sh).
+main=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && main=${main%/.git} || main=''
 if [ -z "$commit" ] && [ -n "$(jq -r '.plugin.follow // empty' "$pack" 2>/dev/null)" ]; then
-  main=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && main=${main%/.git} \
-    || off "$top is no git checkout: its engine cannot be found"
+  [ -n "$main" ] || off "$top is no git checkout: its engine cannot be found"
   engine() { jq -r '.commit // empty' "$main/.git/conveyor-engine.json" 2>/dev/null; }
   commit=$(engine)
   # The take's output goes on stderr, as a hook's stdout is read by Claude Code; it reads nothing of the hook's stdin,
@@ -68,4 +70,6 @@ fi
 # The path must stay inside the version folder once resolved, so neither a .. segment nor a symlink escapes it.
 real=$(realpath "$dir/$1") && root=$(realpath "$dir") && [[ $real == "$root"/* ]] \
   || { echo "conveyor: the path $1 leaves the plugin" >&2; exit 2; }
+# A main checkout the caller names is kept.
+[ -z "$main" ] || export CONVEYOR_MAIN=${CONVEYOR_MAIN:-$main}
 exec "$dir/$1" "${@:2}"
