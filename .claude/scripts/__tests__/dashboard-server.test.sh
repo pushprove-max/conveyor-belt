@@ -640,6 +640,9 @@ case \$1 in
   retry) echo "conveyor: issue #\$2 can be picked again" ;;
   shut) echo "conveyor: issue #\$2 was closed while card c1 was blocked; the card is closed" ;;
   machine) echo "conveyor: the machine's Conveyor: \$2" ;;
+  # A test action's id, or an issue's address; a file named gone is not main's.
+  testaction|testissue) [[ "\$*" != *gone* ]] || { echo "conveyor: the file is not a file of main" >&2; exit 2; }
+    if [ "\$1" = testaction ]; then echo "id-\${3##*/}"; else echo "https://github.com/o/r/issues/\$(grep -c . "$F/conveyor-calls")"; fi ;;
 esac
 STUB
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/gh-calls"\npwd >> "%s/gh-pwd"\ncase "$1 $2" in "issue view") echo "Old body" ;; "issue edit") cat > "%s/gh-body" ;; esac\n' "$F" "$F" "$F" > "$M/bin/gh"
@@ -903,6 +906,34 @@ done
   && [ "$(ctl "$(act test-issue -x.test.sh title body)")" = 400 ] || fail "test_actions_take_only_their_shapes: a title of two lines answered '$(cat "$M/ctl.out")'"
 [ -z "$(calls)" ] && [ ! -e "$F/gh-writes" ] || fail "test_actions_take_only_their_shapes: ran '$(calls)' wrote '$(cat "$F/gh-writes" 2>&1)'"
 pass=$((pass + 3))
+# The Tests page's actions on many files (#72): a list of files in one POST is one action or issue a file, each
+# answered on its own, in the list's order. Bug: a list ran one command for all, ran only its first file, or answered
+# one text for all, so the Board could not tell which file was taken and which refused.
+fresh_control
+[ "$(ctl "$(act testaction judge t/a.test.sh t/b.test.sh t/c.test.sh)")" = 200 ] \
+  && [ "$(jq -c '.results' "$M/ctl.out")" = '[{"file":"t/a.test.sh","id":"id-a.test.sh"},{"file":"t/b.test.sh","id":"id-b.test.sh"},{"file":"t/c.test.sh","id":"id-c.test.sh"}]' ] \
+  && [ "$(calls)" = "CONVEYOR_MAIN=$HM testaction judge t/a.test.sh
+CONVEYOR_MAIN=$HM testaction judge t/b.test.sh
+CONVEYOR_MAIN=$HM testaction judge t/c.test.sh" ] || fail "testaction_list_one_a_file: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control
+[ "$(ctl "$(act test-issue t/a.test.sh 'Optimize the test file t/a.test.sh' 'Median 12 CPU s. VERDICT: split' t/b.test.sh 'Optimize the test file t/b.test.sh' 'Median 9 CPU s. VERDICT: delete')")" = 200 ] \
+  && [ "$(jq -c '.results' "$M/ctl.out")" = '[{"file":"t/a.test.sh","id":"https://github.com/o/r/issues/1"},{"file":"t/b.test.sh","id":"https://github.com/o/r/issues/2"}]' ] \
+  && [ "$(calls)" = "CONVEYOR_MAIN=$HM testissue t/a.test.sh Optimize the test file t/a.test.sh Median 12 CPU s. VERDICT: split
+CONVEYOR_MAIN=$HM testissue t/b.test.sh Optimize the test file t/b.test.sh Median 9 CPU s. VERDICT: delete" ] || fail "test_issue_list_one_a_file: $(cat "$M/ctl.out") ran '$(calls)'"
+# One file refused leaves the others taken, and says why for that file alone.
+fresh_control
+[ "$(ctl "$(act testaction run t/a.test.sh t/gone.test.sh)")" = 200 ] \
+  && [ "$(jq -c '.results' "$M/ctl.out")" = '[{"file":"t/a.test.sh","id":"id-a.test.sh"},{"file":"t/gone.test.sh","refused":"conveyor: the file is not a file of main"}]' ] \
+  || fail "test_list_refuses_one_file_alone: $(cat "$M/ctl.out") ran '$(calls)'"
+# A list with a file of a bad shape, a test-issue list with a part missing, or a list over TEST_FILES_MAX runs nothing.
+fresh_control
+# shellcheck disable=SC2046 # each file an argument
+for body in "$(act testaction judge t/a.test.sh -x.test.sh)" "$(act test-issue t/a.test.sh title body t/b.test.sh title)" \
+  "$(act testaction judge $(seq -f 't/%g.test.sh' 21))"; do
+  [ "$(ctl "$body")" = 400 ] || fail "test_list_takes_only_its_shapes: '$body' answered '$(cat "$M/ctl.out")'"
+done
+[ -z "$(calls)" ] || fail "test_list_takes_only_its_shapes: ran '$(calls)'"
+pass=$((pass + 4))
 # Yes on a visible change: the approval line, naming the Board user who said yes, is added to the issue's body,
 # then the card is retried.
 fresh_control; echo 12 > "$F/waiting"

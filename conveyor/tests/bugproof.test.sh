@@ -240,3 +240,70 @@ t_speedfails() {
   [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file f.test.sh fails with the change (exit 1)' ] && [ ! -e "$STUB/asked" ] \
     || fail "a speed-up card whose file fails was not blocked: $(st 'select(.step | IN("review", "blocked"))')"
 }
+
+# One card of #7, an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`), whose median on
+# record is 10 CPU s (three whole-suite runs: 9, 10, 11). Its build runs <build>. Each run under cards/mainrun/ runs
+# the files of its list: it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each
+# as passed, and times each at the CPU seconds $STUB/cpu-<file> holds. The reviewer's prompt is kept in $STUB/asked.
+optcard() { # <build> <cpu of f> [<cpu of f1> <cpu of f2>]
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"
+  echo 'echo slow' > "$R/f.test.sh"
+  git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
+  echo "$GO" > "$STUB/review.1"
+  echo "$1" > "$STUB/build"
+  echo "$2" > "$STUB/cpu-f.test.sh"; echo "${3:-}" > "$STUB/cpu-f1.test.sh"; echo "${4:-}" > "$STUB/cpu-f2.test.sh"
+  for c in 9 10 11; do
+    jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
+  done
+  cat > "$STUB/mainrun-cmd" <<'EOF'
+while IFS=$'\t' read -r k f; do
+  [ "$k" = fail ] || continue; echo "$f: $(cat "$f" 2>/dev/null)" >> "$STUB/mainran"; printf '== %s\nok one\nok two\n' "$f"
+  printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
+done < "$CONVEYOR_TEST_RERUN"
+EOF
+  loop run >/dev/null || fail "run exited non-zero"
+}
+
+# D1. Bug it catches: an Optimize card, whose tests pass on main by design, is blocked for not failing there, or a
+# change that keeps the file lands with no proof that it is faster. It runs alone with the change and is faster than
+# its median: its record holds both numbers, the review is shown the Optimize check, and it lands.
+t_optkeep() {
+  optcard 'echo fast > f.test.sh' 4
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+  [ "$(cat "$STUB/mainran")" = 'f.test.sh: fast' ] || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
+  grep -qx '# The Optimize check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
+    || fail "the review was not shown the Optimize check"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster Optimize card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}
+
+# D1. Bug it catches: an Optimize card that keeps its file as slow as its median lands. It is blocked before review.
+t_optslow() {
+  optcard 'echo fast > f.test.sh' 10
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+    || fail "an Optimize card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
+}
+
+# D2. Bug it catches: a split into f1 and f2 (f removed) is blocked because f is gone, or is let through unrun. The two
+# new files run alone with the change, and their CPU seconds summed (2 + 3) are lower than f's median.
+t_optsplit() {
+  optcard 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 2 3
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":5}' ] || fail "the split's record does not hold its summed CPU seconds: $(st 'select(.step == "bugproof")')"
+  [ "$(sort "$STUB/mainran" | tr '\n' '|')" = 'f1.test.sh: one|f2.test.sh: two|' ] || fail "the split's new files did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
+  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed, lower than the median on record of f.test.sh, 10 CPU s' "$STUB/asked" \
+    || fail "the review was not shown the split's numbers"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster split did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}
+
+# D3. Bug it catches: a delete is blocked for having no test that fails on main, or for having no file to time, or the
+# review is never told what the file tested. The file runs alone on main's code as main has it, and the review is
+# given its cases and asked for the test that covers each.
+t_optdelete() {
+  optcard 'rm f.test.sh' 4
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null}' ] || fail "a delete's record: $(st 'select(.step == "bugproof")')"
+  [ "$(cat "$STUB/mainran")" = 'f.test.sh: echo slow' ] || fail "the file did not run alone as main has it: $(cat "$STUB/mainran" 2>&1)"
+  grep -qx '# The Optimize check' "$STUB/asked" && grep -qx -- '- one' "$STUB/asked" && grep -qx -- '- two' "$STUB/asked" \
+    && grep -qF 'Name, for each of its cases, the test that still covers it after the change' "$STUB/asked" \
+    || fail "the review was not given the file's cases and asked for the test that covers each"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a delete did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}

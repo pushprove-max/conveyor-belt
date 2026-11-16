@@ -10,7 +10,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
         and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
         and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
         # A bugproof line: the bug-card check was skipped (bugproof()), its reason saying why; or a speed-up card's check
-        # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof()).
+        # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof(), optproof()).
         and (.step != "bugproof" or (.result == "skipped" and .speed == null) or ((.result | IN("ok", "fail"))
           and (.speed | type == "object" and keys == ["after", "before", "file"] and (.file | type == "string") and ([.before, .after] | all(. == null or type == "number")))))
         and (.speed == null or .step == "bugproof")

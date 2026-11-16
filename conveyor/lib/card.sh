@@ -19,7 +19,7 @@ redbrief() { # <card> <issue> <branch>
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
-  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf=''
+  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
@@ -185,11 +185,14 @@ card() { # <card> <issue> [<branch> <tip>]
     # (bugproof(); a change that selects no test of its own is proved by the test files its issue's Done-when names,
     # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
-    # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead: when its
-    # file is not faster, or does not pass, the card is blocked with that reason and no review.
+    # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
+    # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when its file is not faster, or does not pass, the
+    # card is blocked with that reason and no review.
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       speedproof "$c" "$wt" "$issue" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+    elif sf=$(speedfile "$issue" "$OPTIMIZE"); then
+      sk=$OPTREVIEW; optproof "$c" "$wt" "$issue" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
       # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
       # build session cannot repair the runner.
@@ -233,7 +236,7 @@ card() { # <card> <issue> [<branch> <tip>]
       # The review sees the card's commit trailers beside the diff, and the D<n> lines of the last checked reply.
       t="the engine could not read the commit trailers of the card"; more=$(trailerview "$wt") \
         && { [ ! -s "$wt.donewhen" ] || more+=$'\n\n'"$DONEWHENREVIEW"$'\n'"$(<"$wt.donewhen")"; } || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
-      [ ! -s "$wt.unfixed" ] || more+=$'\n\n'"$(if [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)"$'\n'"$(<"$wt.unfixed")"
+      [ ! -s "$wt.unfixed" ] || more+=$'\n\n'"$(if [ -n "$sk" ]; then echo "$sk"; elif [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)"$'\n'"$(<"$wt.unfixed")"
       # What this review reads, kept on its line: the staged change, the main commit and what it is shown beside the
       # diff (seen: the trailers and D<n> lines above). A review due on the same three as the card's last review is
       # that review again (reusable()), with no review session. Not the one review of a port, which reads the port's

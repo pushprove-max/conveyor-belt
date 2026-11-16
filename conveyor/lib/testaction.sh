@@ -7,13 +7,17 @@
 # cards that ran it and its flaky entries (testfacts()). It reads a copy of main as it is at the ask, a worktree of
 # that commit whose files it cannot write ($CARDS/testactions/<id>, removed when it ends), and finds a gh that refuses
 # every call first on its PATH; a Claude session has only Read, Grep and Glob, a Codex one its read-only sandbox and an
-# OpenCode one the review's read-only agent (ocrun()). The ask returns once the session has started.
-# Each action keeps, in $TESTACTS: <id>.json, its record: {id, action, file, project, start, end (null while it runs),
-# state (running, done, stopped, failed or timed out), cli, model, effort, limit (TESTACTION_TIMEOUT, the seconds it
+# OpenCode one the review's read-only agent (ocrun()). The ask returns once the session has started, or is queued
+# behind TAMAX running actions (taqueue()).
+# Each action keeps, in $TESTACTS: <id>.json, its record: {id, action, file, project, commit (main's commit at the
+# ask, the one it reads), start (the ask while it is
+# queued, then its start), end (null while it runs), state (queued, running, done, stopped, failed or timed out), cli,
+# model, effort, limit (TESTACTION_TIMEOUT, the seconds it
 # may run), verdict (judge: the word its text's last line names, VERDICT: <keep | speed up | split | merge | delete>,
 # else "no verdict"; explain: null), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
 # session's text, written as the session writes it; <id>.events and <id>.err, the CLI's output and its errors. All of
-# it stays after the session ends. `conveyor.sh testaction stop <id>` ends that one session and no other.
+# it stays after the session ends. `conveyor.sh testaction stop <id>` ends that one session and no other, or takes a
+# queued one off, unstarted.
 # `conveyor.sh testaction run <test file>` is no session: it runs the file alone, now, on a test slot (tafile()).
 TESTACTS=${STATE%/*}/testactions
 TAVERDICTS='keep|speed up|split|merge|delete'
@@ -24,8 +28,8 @@ TATEXT='fromjson? // empty | objects | if .type == "assistant" then .message.con
   elif .type == "text" then .part.text | strings | . + "\n" else empty end'
 TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), or delete it. Give the evidence for your choice: its recorded times below, what it tests, and whether another test already proves the same behaviour. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. End your answer with one line: VERDICT: <keep | speed up | split | merge | delete>"
 TAEXPLAIN="Explain the slowdown of one test file of this project. From its recorded times below, find when it became slower, which card's change made it slower, and what in that change is the cause. Read the repository and its history as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state."
-# `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (speed up, split,
-# merge or delete; the owner read and edited the title and body), filed through the GitHub write path with the pack's
+# `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (an Optimize issue,
+# "Optimize the test file <file>", checked by optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
 # type and its last priority. Each one filed is kept in $TAFILED, one line {time, event: filed, file, issue}, so the
 # file's row has its issue (testspart(): the Board's Close its issue as done). It prints the issue's address.
 TAFILED=$TESTACTS/filed.jsonl
@@ -49,7 +53,7 @@ testaction() { # <judge | explain | run> <test file> | stop <id>
     judge:2 | explain:2) ;;
     *) echo "usage: conveyor.sh testaction <judge | explain | run> <test file> | testaction stop <id>" >&2; return 2 ;;
   esac
-  local how=$1 f=$2 c s cli model effort id wt facts p out i
+  local how=$1 f=$2 c s cli model effort id out sha
   c=$(ctl) || return 1
   s=$(jq -ce '.tests | objects' <<<"$c") \
     || { echo "conveyor: no Tests seat is set (conveyor.sh control tests <cli> <model> [effort], or the Board's Rules tab); no session started" >&2; return 2; }
@@ -57,31 +61,77 @@ testaction() { # <judge | explain | run> <test file> | stop <id>
   [ "$effort" != null ] || effort=medium
   out=$(seatready "Tests seat" "$(jq -c '{model, agent: .cli}' <<<"$s")") || { echo "conveyor: $out; no session started" >&2; return 2; }
   [ "$cli" != codex ] || model=$(codexmodel "$model") || { echo "conveyor: $model; no session started" >&2; return 2; }
-  # A path of the repo as main has it now: no absolute path, no . or .. part, a file.
-  [[ -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* ]] && [ "$(git -C "$MAIN" cat-file -t "refs/heads/$BRANCH:$f" 2>/dev/null)" = blob ] \
+  # A path of the repo as main has it now (sha, the commit the session reads, even when it is queued): no absolute
+  # path, no . or .. part, a file.
+  sha=$(git -C "$MAIN" rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
+  [[ -n $sha && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* ]] && [ "$(git -C "$MAIN" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $f is not a file of $BRANCH; no session started" >&2; return 2; }
-  facts=$(testfacts "$f") || { echo "conveyor: the records of $f could not be read; no session started" >&2; return 1; }
-  id=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n'); wt=$CARDS/testactions/$id
-  mkdir -p "$TESTACTS" "$CARDS/testactions/bin" || { echo "conveyor: the test actions' folders could not be made; no session started" >&2; return 1; }
-  # The gh the session finds: one that refuses, so it files no issue through gh on its PATH.
-  [ -x "$CARDS/testactions/bin/gh" ] || { printf '#!/bin/sh\necho "conveyor: a test action files no issue and changes nothing on GitHub" >&2\nexit 1\n' > "$CARDS/testactions/bin/gh" \
-    && chmod +x "$CARDS/testactions/bin/gh"; } || { echo "conveyor: the test actions' gh could not be made; no session started" >&2; return 1; }
-  out=$(git -C "$MAIN" worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1 < /dev/null && chmod -R a-w "$wt" 2>&1) \
-    || { tadrop "$wt"; echo "conveyor: the copy of $BRANCH the session reads could not be made: ${out:0:300}; no session started" >&2; return 1; }
-  if [ "$how" = judge ]; then p=$TAJUDGE; else p=$TAEXPLAIN; fi
-  p+=$'\n\n'"$(jq -r --arg f "$f" '"Test file: \($f)\n\nIts recorded times, from the test lines of the card records, oldest first (times: its CPU seconds in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget):\n"
-    + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
-    + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
-    + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)' <<<"$facts")"
-  # The session's runner holds no descriptor of this process's: the Board's ssh ends with this process, not with it.
-  ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
-    tarun "$(jq -cn --arg id "$id" --arg a "$how" --arg f "$f" --arg p "$REPO" --arg t "$(clock)" --arg c "$cli" --arg m "$model" --arg e "$effort" --argjson l "$TESTACTION_TIMEOUT" \
-      '{id: $id, action: $a, file: $f, project: $p, start: $t, end: null, state: "running", cli: $c, model: $m, effort: $e, limit: $l, verdict: null}')" "$wt" "$p" ) \
-    >> "$TESTACTS/$id.err" 2>&1 < /dev/null 8>&- &
-  # The record is the runner's to write, first and last: the ask returns once it is there.
-  for ((i = 0; i < 100; i++)); do [ ! -s "$TESTACTS/$id.json" ] || break; sleep 0.1; done
-  [ -s "$TESTACTS/$id.json" ] || { echo "conveyor: the test action $id did not start: $(tail -n 5 "$TESTACTS/$id.err" 2>/dev/null)" >&2; return 1; }
-  echo "$id"
+  id=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+  mkdir -p "$TESTACTS" || { echo "conveyor: the test actions' folder could not be made; no session started" >&2; return 1; }
+  taput "$TESTACTS/$id.json" "$(jq -cn --arg id "$id" --arg a "$how" --arg f "$f" --arg p "$REPO" --arg t "$(clock)" --arg c "$cli" --arg m "$model" --arg e "$effort" --argjson l "$TESTACTION_TIMEOUT" \
+    --argjson q "${EPOCHREALTIME/[.,]/}" --arg h "$sha" '{id: $id, action: $a, file: $f, project: $p, commit: $h, start: $t, end: null, state: "queued", asked: $q, cli: $c, model: $m, effort: $e, limit: $l, verdict: null}')" \
+    || { echo "conveyor: the record of the test action could not be written; no session started" >&2; return 1; }
+  taask "$id"
+}
+# At most TAMAX test actions run at once (sessions and runs by hand alike). Each ask is kept first as queued, in its
+# record, with asked, the microseconds since the epoch of the ask (start has whole seconds: two asks in one second kept
+# no order); taqueue() then starts the queued ones, oldest ask first, while fewer than TAMAX run, and each runner calls it
+# again as it ends (tarun(), tarunfile()). One holder at a time ($TESTACTS/queue.lock): two ends, or an end and an ask,
+# never start one action twice or more than TAMAX at once. An action counts as running while its record says so and
+# its runner is there. The ask prints the id once the action has started or is queued; one that could not start is
+# failed, saying why (exit 1).
+TAMAX=3
+taask() { # <id>
+  local r
+  taqueue
+  r=$(jq -ce 'objects' "$TESTACTS/$1.json" 2>/dev/null) || { echo "conveyor: the record of the test action $1 could not be read" >&2; return 1; }
+  [ "$(jq -r .state <<<"$r")" != failed ] || { echo "conveyor: the test action $1 did not start: $(jq -r '.reason // "no reason given"' <<<"$r")" >&2; return 1; }
+  echo "$1"
+}
+taqueue() {
+  local a n p id fs
+  { exec {TALOCK}>>"$TESTACTS/queue.lock"; } 2>/dev/null && flock "$TALOCK" || { echo "conveyor: the test actions' queue could not be locked; nothing started" >&2; return 1; }
+  while fs=("$TESTACTS"/*.json) && [ -e "${fs[0]}" ] && a=$(jq -cs 'map(objects)' "${fs[@]}" 2>/dev/null); do
+    n=0; for p in $(jq -r '.[] | select(.state == "running") | .pid | numbers' <<<"$a"); do ! kill -0 "$p" 2>/dev/null || n=$((n + 1)); done
+    id=$(jq -r '[.[] | select(.state == "queued")] | sort_by(.asked) | first | .id // empty' <<<"$a")
+    [ "$n" -lt "$TAMAX" ] && [ -n "$id" ] && tastart "$id" || break
+  done
+  exec {TALOCK}>&-
+}
+# A queued action <id>, started (taqueue(), which holds the lock): its runner is started with its record, now running
+# from now (start), and is waited for until it has written it. One that cannot start is failed, with the reason.
+tastart() { # <id>
+  local f=$TESTACTS/$1 r how t sha wt=$CARDS/testactions/$1 p facts out i
+  r=$(jq -ce 'objects | .state = "running"' "$f.json" 2>/dev/null) && jqget "$r" action how file t commit sha || return 1
+  r=$(jq -c --arg t "$(clock)" '.start = $t' <<<"$r")
+  if [ "$how" = run ]; then
+    mkdir -p "$CARDS/testactions" || { tafail "$1" "the test actions' folder could not be made"; return; }
+    # The runner holds no descriptor of this process's (nor the queue's lock): the Board's ssh ends with this process, not with it.
+    ( trap - TERM; trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2; tarunfile "$r" "$wt" ) >> "$f.err" 2>&1 < /dev/null 8>&- {TALOCK}>&- &
+  else
+    facts=$(testfacts "$t") || { tafail "$1" "the records of $t could not be read"; return; }
+    mkdir -p "$CARDS/testactions/bin" || { tafail "$1" "the test actions' folders could not be made"; return; }
+    # The gh the session finds: one that refuses, so it files no issue through gh on its PATH.
+    [ -x "$CARDS/testactions/bin/gh" ] || { printf '#!/bin/sh\necho "conveyor: a test action files no issue and changes nothing on GitHub" >&2\nexit 1\n' > "$CARDS/testactions/bin/gh" \
+      && chmod +x "$CARDS/testactions/bin/gh"; } || { tafail "$1" "the test actions' gh could not be made"; return; }
+    out=$(git -C "$MAIN" worktree add -q --detach "$wt" "$sha" 2>&1 < /dev/null && chmod -R a-w "$wt" 2>&1) \
+      || { tadrop "$wt"; tafail "$1" "the copy of $BRANCH the session reads could not be made: ${out:0:300}"; return; }
+    if [ "$how" = judge ]; then p=$TAJUDGE; else p=$TAEXPLAIN; fi
+    p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts recorded times, from the test lines of the card records, oldest first (times: its CPU seconds in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget):\n"
+      + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
+      + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
+      + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)' <<<"$facts")"
+    # The session's runner holds no descriptor of this process's (nor the queue's lock): the Board's ssh ends with this
+    # process, not with it.
+    ( trap - TERM; trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2; tarun "$r" "$wt" "$p" ) >> "$f.err" 2>&1 < /dev/null 8>&- {TALOCK}>&- &
+  fi
+  # The record is the runner's to write, first and last: the action has started once it says so.
+  for ((i = 0; i < 100; i++)); do [ "$(jq -r .state "$f.json" 2>/dev/null)" = queued ] || return 0; sleep 0.1; done
+  tafail "$1" "$(tail -n 5 "$f.err" 2>/dev/null)"
+}
+tafail() { # <id> <why>: a queued action that could not start, failed
+  local r
+  r=$(jq -ce 'objects' "$TESTACTS/$1.json" 2>/dev/null) && taput "$TESTACTS/$1.json" "$(jq -c --arg t "$(clock)" --arg w "${2:0:600}" '. + {end: $t, state: "failed", reason: $w}' <<<"$r")"
 }
 # What the session is given of <file>: {runs: each test line that timed it, oldest first, {card, issue, time} and its
 # times, timed and slow parts for the file; cards: the cards of those lines, {card, issue}; flaky: the entries of the
@@ -135,35 +185,34 @@ tarun() { # <the record> <worktree> <prompt>
   fi
   taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" '. + {end: $t, state: $s, verdict: $v} + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"
+  taqueue # the next queued action, now that this one has ended
 }
 # `testaction run <test file>` (README.md, Test actions): the file alone, run now with the pack's test.command, on main
 # as it is at the ask, in a worktree of that commit ($CARDS/testactions/<id>, removed when the run ends), on one of the
 # machine's test slots, waited for as a card's test step waits for one (tests()). It is no session: it needs no seat.
 # The command's CONVEYOR_TEST_RERUN list names the file alone, a `fail` line with no case: on main's clean tree the
 # command runs that file whole and nothing else. A path that is not a test file of main (a file whose own name has
-# `.test.` or `.spec.`; a helper in a __tests__ folder is not one) is refused (exit 2), and nothing runs. Its record in $TESTACTS/<id>.json, as a session's: {id, action: "run", file, project, start,
-# end, state (running, done, stopped, failed or timed out), load (the machine's 1-minute load at the ask), limit
+# `.test.` or `.spec.`; a helper in a __tests__ folder is not one) is refused (exit 2), and nothing runs. Its record in $TESTACTS/<id>.json, as a session's: {id, action: "run", file, project, commit, start,
+# end, state (queued, running, done, stopped, failed or timed out), load (the machine's 1-minute load at the ask), limit
 # (TEST_TIMEOUT, the seconds the test run may run once it has its slot, as a card's test step), result (pass
 # or fail; null until it ends, and when it did not run), sec (the file's clock seconds as its runner timed it, else the
 # command's), cpu (the file's CPU seconds; null when its runner gave none), wait (the seconds it waited for its slot),
 # pid (while it runs) and reason (failed: why)}; <id>.txt, the command's output as it writes it, kept when it ends;
-# <id>.err, the runner's own errors. A run that passed is a recorded time of the file (beforetimes()). The ask returns
-# the id once the run has started.
+# <id>.err, the runner's own errors. A run that passed is a recorded time of the file (beforetimes()). It is queued as
+# a session is (taqueue()); the ask returns the id once the run has started or is queued.
 tafile() { # <test file>
-  local f=$1 id i
-  [[ -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* && ${f##*/} =~ \.(test|spec)\. ]] \
-    && [ "$(git -C "$MAIN" cat-file -t "refs/heads/$BRANCH:$f" 2>/dev/null)" = blob ] \
+  local f=$1 id sha
+  # sha: the commit of main at the ask, the one the run runs, even when it is queued.
+  sha=$(git -C "$MAIN" rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
+  [[ -n $sha && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* && ${f##*/} =~ \.(test|spec)\. ]] \
+    && [ "$(git -C "$MAIN" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $f is not a test file of $BRANCH; nothing run" >&2; return 2; }
   id=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
-  mkdir -p "$TESTACTS" "$CARDS/testactions" || { echo "conveyor: the test actions' folders could not be made; nothing run" >&2; return 1; }
-  # The runner holds no descriptor of this process's: the Board's ssh ends with this process, not with it.
-  ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
-    tarunfile "$(jq -cn --arg id "$id" --arg f "$f" --arg p "$REPO" --arg t "$(clock)" --arg l "$(p_load)" --arg lim "${TEST_TIMEOUT:-}" \
-      '{id: $id, action: "run", file: $f, project: $p, start: $t, end: null, state: "running", load: ($l | tonumber? // null), limit: ($lim | tonumber? // null),
-        result: null, sec: null, cpu: null, wait: null}')" "$CARDS/testactions/$id" ) >> "$TESTACTS/$id.err" 2>&1 < /dev/null 8>&- &
-  for ((i = 0; i < 100; i++)); do [ ! -s "$TESTACTS/$id.json" ] || break; sleep 0.1; done
-  [ -s "$TESTACTS/$id.json" ] || { echo "conveyor: the test action $id did not start: $(tail -n 5 "$TESTACTS/$id.err" 2>/dev/null)" >&2; return 1; }
-  echo "$id"
+  mkdir -p "$TESTACTS" || { echo "conveyor: the test actions' folder could not be made; nothing run" >&2; return 1; }
+  taput "$TESTACTS/$id.json" "$(jq -cn --arg id "$id" --arg f "$f" --arg p "$REPO" --arg t "$(clock)" --arg l "$(p_load)" --arg lim "${TEST_TIMEOUT:-}" --argjson q "${EPOCHREALTIME/[.,]/}" --arg h "$sha" \
+    '{id: $id, action: "run", file: $f, project: $p, commit: $h, start: $t, end: null, state: "queued", asked: $q, load: ($l | tonumber? // null), limit: ($lim | tonumber? // null),
+      result: null, sec: null, cpu: null, wait: null}')" || { echo "conveyor: the record of the run could not be written; nothing run" >&2; return 1; }
+  taask "$id"
 }
 # Each process <pid> started and has not ended, and <pid>: one a line, a parent before its children. Each is stopped
 # (STOP) before its children are looked for, so none starts one more unseen: a child started after the look (watch()'s
@@ -190,14 +239,14 @@ taend() { # <pid>
 # TERM (tastop()) ends the run (taend()); the record says stopped once each process it started has ended, so its slot
 # is free again.
 tarunfile() { # <the record> <worktree>
-  local r=$1 wt=$2 t f id tp rc='' w='' s='' stopped='' state='done' res=null why=null tm x me=$BASHPID
+  local r=$1 wt=$2 t sha f id tp rc='' w='' s='' stopped='' state='done' res=null why=null tm x me=$BASHPID
   trap 'stopped=1' TERM
-  jqget "$r" id id file t || return 1
+  jqget "$r" id id file t commit sha || return 1
   f=$TESTACTS/$id
   taput "$f.json" "$(jq -c --argjson p "$me" '. + {pid: $p}' <<<"$r")" || return 1
   # The command's output (tests(): <worktree>.test), read as it is written.
   ln -sfn "$wt.test" "$f.txt"
-  ( x=$({ git -C "$MAIN" worktree add -q --detach "$wt" "refs/heads/$BRANCH" && deps "$wt"; } 2>&1 < /dev/null) \
+  ( x=$({ git -C "$MAIN" worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) \
       || { printf 'the copy of %s it runs in could not be made: %s\n' "$BRANCH" "${x:0:300}" > "$wt.test"; exit 1; }
     printf 'fail\t%s\n' "$t" > "$wt.rerun"
     tests "$wt" test.command alone; x=$?
@@ -219,12 +268,22 @@ tarunfile() { # <the record> <worktree>
     '. + {end: $t, state: $s, result: $res, sec: ($tm.sec // ($sec | tonumber? // null)), cpu: ($tm.cpu // null), wait: ($wait | tonumber? // null)}
       + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"; rm -rf "$wt".*
+  taqueue # the next queued action, now that this one has ended
 }
 # `testaction stop <id>`: TERM to that action's runner (tarun(), tarunfile()), again every 2 s while its record says running, for up
-# to 40 s; prints the state it ended in. One not running is refused (exit 2) and nothing is stopped.
+# to 40 s; prints the state it ended in. A queued one is taken off, stopped, with no session or run, under the queue's
+# lock, so taqueue() cannot start it meanwhile. One neither running nor queued is refused (exit 2) and nothing is stopped.
 tastop() { # <id>
-  local f=$TESTACTS/$1 r p i
+  local f=$TESTACTS/$1 r p i x=1
   [[ $1 =~ ^[0-9a-f]{12}$ ]] && r=$(jq -ce 'objects' "$f.json" 2>/dev/null) || { echo "conveyor: there is no test action $1" >&2; return 2; }
+  if [ "$(jq -r .state <<<"$r")" = queued ]; then
+    { exec {TALOCK}>>"$TESTACTS/queue.lock"; } 2>/dev/null && flock "$TALOCK" || { echo "conveyor: the test actions' queue could not be locked; nothing stopped" >&2; return 1; }
+    r=$(jq -ce 'objects' "$f.json" 2>/dev/null) && [ "$(jq -r .state <<<"$r")" = queued ] \
+      && taput "$f.json" "$(jq -c --arg t "$(clock)" '. + {end: $t, state: "stopped"}' <<<"$r")" && x=0
+    exec {TALOCK}>&-
+    [ "$x" != 0 ] || { echo "conveyor: the test action $1 is stopped"; return 0; }
+    r=$(jq -ce 'objects' "$f.json" 2>/dev/null) || { echo "conveyor: there is no test action $1" >&2; return 2; }
+  fi
   [ "$(jq -r .state <<<"$r")" = running ] && p=$(jq -er '.pid | numbers' <<<"$r") && kill -0 "$p" 2>/dev/null \
     || { echo "conveyor: the test action $1 is not running ($(jq -r .state <<<"$r")); nothing stopped" >&2; return 2; }
   for ((i = 0; i < 400; i++)); do

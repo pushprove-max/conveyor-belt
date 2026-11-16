@@ -223,7 +223,13 @@ and the project's test budget (in the pack).
 An opened row has the test actions. "now" runs at once and files no issue. "issue" files an issue. A card for a
 "File an issue: speed up" issue does not need a test that fails on main. It must make the file pass in fewer CPU
 seconds than the file's median, else the card is blocked with "the file is not faster" and both numbers
-(`conveyor/README.md`, Bug cards: the new tests fail without the fix). Judge this test and
+(`conveyor/README.md`, Bug cards: the new tests fail without the fix). An Optimize issue ("Optimize the test file
+<file>") holds the file's numbers and the newest verdict of Judge this test, with its text. Its card picks the fix:
+speed the file up, split it, merge it into another test file, or delete it. A file it keeps must pass in fewer CPU
+seconds than its median. The files of a split must pass in fewer CPU seconds summed. For a delete or a merge, the
+review names the test that still covers each case of the file. A test action or an issue can be asked for many files
+at once: each file gets its own action or issue, and its own answer. At most 3 test actions run at once. The others
+wait as queued and start in the order asked. Stop takes a queued one off before it starts. Judge this test and
 Explain the slowdown need a model for the test actions ("Model for Tests actions"). Auto-file shows the test rules
 (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test actions).
 

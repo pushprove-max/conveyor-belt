@@ -735,6 +735,21 @@ is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s
 fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
 shown the result.
 
+A bug card that optimizes one test file is checked in the same way. This is an issue whose title starts "Optimize the
+test file", as the Tests page files it. The card picks the fix: it speeds the file up, splits it, merges it into
+another test file, or deletes it. No test must fail on main's code. The check depends on what the change does:
+
+- The change keeps the file and adds no test file: the check is the speed-up check above.
+- The change adds test files (a split): the new files run alone, with the change, on a test slot, and so does the rest
+  of the old file when the change keeps it. They must pass, and their CPU seconds summed must be lower than the old
+  file's median. Else the card is blocked with the reason, with no review.
+- The change removes the file and adds no test file (a delete, or a merge into another file): it is not run with the
+  change. The file runs alone on main's code, and the review gets the cases that its runner named. The review must
+  name, for each case, the test that still covers it. A case with no test named is a finding.
+
+The card's `bugproof` line names the file and both numbers, as for a speed-up: `after` is the CPU seconds summed of a
+split, and null for a delete or a merge.
+
 ## The whole test on main
 
 A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs
@@ -853,13 +868,20 @@ The session is given the file; its recorded times, from the test lines of the ca
 main as it is at the ask (a worktree under the cards folder, removed when the session ends), whose files it cannot
 write. It may not write to the repo, file an issue or change state: a Claude session has only Read, Grep and Glob, a
 Codex one its read-only sandbox, an OpenCode one the review's read-only agent, and the `gh` first on its PATH refuses
-every call. The command returns the action's id once the session has started.
+every call. The command returns the action's id once the session has started, or once it is queued.
+
+At most 3 test actions run at once: sessions and runs by hand (`testaction run`, below) together. The command takes
+each ask. When 3 actions run, it keeps the new ask as `queued`. When an action ends, the oldest queued ask starts.
+`conveyor.sh testaction stop <id>` takes a queued ask off without starting it; its record says stopped. An ask that
+cannot start (its copy of main cannot be made) is failed, with the reason.
 
 Each action keeps two files in `testactions/` of the state folder, which stay after the session ends:
 
 - `<id>.txt`: the session's text, written as the session writes it, so the Board can show it while the session runs.
-- `<id>.json`: its record: `id`, `action` (judge or explain), `file`, `project`, `start`, `end` (null while it
-  runs), `state` (running, done, stopped, failed or timed out), `cli`, `model`, `effort`, `limit` (the time limit, in
+- `<id>.json`: its record: `id`, `action` (judge or explain), `file`, `project`, `commit` (the commit of main at the
+  ask, which the session reads, also when it is queued), `start` (the time of the ask while it
+  is queued, then the time it started), `asked` (the time of the ask, in microseconds since 1970, which orders the
+  queue), `end` (null while it is queued or runs), `state` (queued, running, done, stopped, failed or timed out), `cli`, `model`, `effort`, `limit` (the time limit, in
   seconds, so the Board can show time used against it), `verdict` (judge: the verdict word, or `no verdict` when the
   text's last line names none; explain: null), `pid` while it runs, and `reason` for a failed one.
 
@@ -875,9 +897,9 @@ on it no more than on a second card. The command's `CONVEYOR_TEST_RERUN` list na
 with no case: on main's clean tree the command runs that file and no other. A path that is not a test file of main
 (a file whose own name has `.test.` or `.spec.` in it; a helper or fixture in a `__tests__` folder is not one) is
 refused (exit 2), and nothing runs. The
-command returns the action's id once the run has started. Its `<id>.txt` is the command's output, written as the
-command writes it and kept when the run ends. Its `<id>.json` holds `id`, `action` (run), `file`, `project`, `start`,
-`end`, `state` (running, done, stopped, failed or timed out), `load` (the machine's 1-minute load at the ask),
+command returns the action's id once the run has started, or once it is queued. Its `<id>.txt` is the command's output, written as the
+command writes it and kept when the run ends. Its `<id>.json` holds `id`, `action` (run), `file`, `project`, `commit` (the commit of main at the ask, which it runs, also when it is queued), `start`,
+`asked`, `end`, `state` (queued, running, done, stopped, failed or timed out), `load` (the machine's 1-minute load at the ask),
 `limit` (the pack's `testTimeout`, the seconds the run may run once it has its slot, as a card's test step),
 `result` (pass or fail; null until it ends, or when it did not run), `sec` (the file's clock seconds, as its runner
 timed it, else the command's), `cpu` (the file's CPU seconds; null when its runner gave none), `wait` (the seconds it
@@ -890,6 +912,9 @@ time of the file, as one from a landed card does: a later card that modifies the
 issue through the GitHub write path, with the pack's type and its last priority, prints its address, and keeps
 `{time, event: "filed", file, issue}` in `testactions/filed.jsonl`, so the file's row has the issue and its Close its
 issue as done. A file main does not have, a title of more than one line, or an empty body files nothing and exits 2.
+The Tests page files an Optimize issue with it: its title starts "Optimize the test file <file>", and its body holds
+the file's numbers and the newest verdict of Judge this test, with its text (above, Bug cards: the new tests fail
+without the fix, for the check of its card).
 
 The snapshot's `testActions` holds `seat` (the Tests seat, or null), `limit` and `actions`: the records of the 20
 newest actions, running and kept, and of each file's newest older judge with a verdict, newest first; the other

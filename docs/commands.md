@@ -71,7 +71,8 @@ Tests:
 - `flaky add <case> <source> <note>` adds a flaky-test entry. `flaky off` adds one and files no issue.
 - `testaction <judge | explain> <test file>` asks the Tests seat (the model set for test actions) about one test
   file in a read-only session. `testaction run <test file>` runs that test file alone, now, on a test slot.
-  `testaction stop <id>` stops one (`conveyor/README.md`, Test actions).
+  At most 3 run at once; the others wait as queued. `testaction stop <id>` stops one, or takes a queued one off
+  (`conveyor/README.md`, Test actions).
 - `testissue <test file> <title> <body>` files the Board's issue about one test file.
 - `test-settings` saves a test setting in the pack: the budget of all files or of one, a "slow on purpose" mark, and
   whether slow files file issues (`conveyor/README.md`, The test files in the snapshot).

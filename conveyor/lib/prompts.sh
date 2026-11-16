@@ -399,6 +399,14 @@ SPEEDREVIEW='# The speed-up check
 This issue speeds up one test file and keeps what it tests, so no test must fail on main'"'"'s code without the change.
 After the build, the file was run alone with the change, on a test slot. It must pass, and its CPU seconds must be lower
 than its median on record. Judge whether the file still tests all that it tested before. Its result:'
+# What the review of an Optimize card (optproof(), card()) is told before the check's result.
+# shellcheck disable=SC2034 # used in lib/card.sh
+OPTREVIEW='# The Optimize check
+This issue optimizes one test file: the change speeds it up, splits it, merges it into another test file or deletes
+it, and keeps what it tests, so no test must fail on main'"'"'s code without the change. A file the change keeps, and the
+test files a split adds, were run alone with the change, on a test slot: they must pass, and their CPU seconds summed
+must be lower than the file'"'"'s median on record. Judge whether the tests still test all that the file tested before.
+Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

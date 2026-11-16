@@ -170,7 +170,10 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or prices (the Rules tab's Model prices: one model's price override set or cleared: `conveyor.sh prices`),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
 # (its seat), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
-# flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent),
+# flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
+# such as an Optimize issue, "Optimize the test file <file>"); testaction judge, explain or run and test-issue also take a list of
+# files (test-issue: a file, title and body each), one action or issue a file, and answer JSON {results: [{file, id} or
+# {file, refused}]}, one a file in the list's order,
 # with its arguments as strings, each checked here before any command is built from it. Every action carries repo:
 # the record of conveyor/host.json it is for (the Board and the Rules tab steer every record on the host, and Needs you
 # lists every record's cards); the command then runs on that record's checkout, so an issue number is never read as
@@ -371,8 +374,9 @@ def control_ok(body):
     if a == 'prices':  # the Rules tab's Model prices: one model's override set (input, output, cache read) or cleared
         return ((n == 5 and v[0] == 'set' and all(PRICE.fullmatch(x) for x in v[2:])) or (n == 2 and v[0] == 'clear')) \
             and MODEL.fullmatch(v[1]) is not None and not v[1].startswith('opencode:')
-    if a == 'testaction':  # the Tests page: judge, explain or run one test file, or stop one action by its id
-        return n == 2 and ((v[0] in ('judge', 'explain', 'run') and TEST_FILE.fullmatch(v[1]) is not None) or (v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None))
+    if a == 'testaction':  # the Tests page: judge, explain or run one test file or a list of them, or stop one action by its id
+        return (2 <= n <= 1 + TEST_FILES_MAX and v[0] in ('judge', 'explain', 'run') and all(TEST_FILE.fullmatch(x) for x in v[1:])) \
+            or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testrules':  # the Tests page's Auto-file: the switch, a guard, or one setting of a rule
         return (v in (['on'], ['off']) or (n == 3 and v[0] == 'guard' and v[1] in RULE_GUARDS and RULE_VALUE.fullmatch(v[2]) is not None)
                 or (n == 4 and v[0] == 'set' and said_ok(v[1]) and v[2] in RULE_KEYS and RULE_VALUE.fullmatch(v[3]) is not None))
@@ -380,10 +384,24 @@ def control_ok(body):
         return n == 2 and said_ok(v[0]) and said_ok(v[1]) and TEST_FILE.fullmatch(v[0].split(': ', 1)[0]) is not None and ': ' in v[0]
     if a == 'test-close':  # Close its issue as done, or put back a flaky case (its flaky issue closed): the issue, then the comment
         return n == 2 and ISSUE.fullmatch(v[0]) is not None and said_ok(v[1])
-    if a == 'test-issue':  # File an issue about a test file: the file, the title, then the body the owner read and edited
-        return n == 3 and TEST_FILE.fullmatch(v[0]) is not None and said_ok(v[1]) and len(v[1]) <= 200 and isinstance(v[2], str) and 1 <= len(v[2].strip()) \
-            and len(v[2]) <= TEST_ISSUE_BODY and all(line.isprintable() for line in v[2].split('\n'))
+    if a == 'test-issue':  # File an issue about a test file, or one about each of a list: the file, the title, then the body the owner read and edited
+        return n % 3 == 0 and 3 <= n <= 3 * TEST_FILES_MAX and all(
+            TEST_FILE.fullmatch(f) is not None and said_ok(t) and len(t) <= 200 and 1 <= len(b.strip()) and len(b) <= TEST_ISSUE_BODY
+            and all(line.isprintable() for line in b.split('\n')) for f, t, b in zip(v[0::3], v[1::3], v[2::3]))
     return False
+
+
+def test_files(action, args):
+    """A Tests page action on a list of files (testaction judge, explain or run, test-issue), as (file, the arguments of
+    the action on that file alone) for each: control() runs each on its own, as the action on one file, and answers
+    each on its own. None for any other action, and for one on a single file, answered as before."""
+    if action == 'testaction' and args[0] != 'stop':
+        each = [(f, [args[0], f]) for f in args[1:]]
+    elif action == 'test-issue':
+        each = [(f, [f, t, b]) for f, t, b in zip(args[0::3], args[1::3], args[2::3])]
+    else:
+        each = []
+    return each if len(each) > 1 else None
 
 
 # The Auto-file guards and settings of a rule, and a value of one, as `conveyor.sh testrules` takes them (it checks each).
@@ -391,6 +409,9 @@ RULE_GUARDS = frozenset({'perDay', 'maxOpen', 'quietDays', 'burst'})
 RULE_KEYS = frozenset({'on', 'measure', 'limit', 'runs', 'minRuns', 'days', 'minClock'})
 RULE_VALUE = re.compile(r'true|false|budget|usual|clock|flaky|failed|[0-9]{1,6}(\.[0-9]{1,3})?')
 TEST_ISSUE_BODY = 2500  # the most characters of an issue body the Tests page files: 3 bytes each still fit MAX_CONTROL_BODY
+# The most files of one Tests page action on a list of files; such a body may be TEST_FILES_MAX times MAX_CONTROL_BODY.
+TEST_FILES_MAX = 20
+MAX_TEST_LIST_BODY = TEST_FILES_MAX * MAX_CONTROL_BODY
 
 
 # A test file's path from the repository root, as the Tests page sends it (the host checks that main's checkout tracks
@@ -1398,7 +1419,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not user:
             return self.reply(401, 'log in to steer the loop')
         length = self.headers.get('Content-Length', '')
-        if not length.isdigit() or int(length) > MAX_CONTROL_BODY:
+        if not length.isdigit() or int(length) > (MAX_CONTROL_BODY if machine else MAX_TEST_LIST_BODY):
             return self.send_error(413)
         try:
             body = json.loads(self.rfile.read(int(length)))
@@ -1406,6 +1427,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_error(400)
         if not (machine_ok(body) if machine else control_ok(body)):
             return self.send_error(400)
+        # A Tests page action on a list of files is answered one result a file; only it may be over MAX_CONTROL_BODY.
+        files = None if machine else test_files(body['action'], body['args'])
+        if int(length) > MAX_CONTROL_BODY and not files:
+            return self.send_error(413)
         if self.authed() != user:  # a logout, revoke or removal while the body was on its way
             return self.reply(401, 'log in to steer the loop')
         try:
@@ -1421,20 +1446,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if record is None:
                 return self.reply(409, 'conveyor/host.json has no record %s; nothing changed' % body['repo'])
             today = datetime.datetime.now(ET).strftime('%Y-%m-%d')
-            script = control_script(action, args, main, today, record, user)
+            script = None if files else control_script(action, args, main, today, record, user)
         print('dashboard: control %s by %s from %s' % (' '.join([action] + args), user, self.client_address[0]), file=sys.stderr, flush=True)
-        try:
-            run = run_script(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', target, 'bash -c ' + shlex.quote(script)],
-                             CONTROL_TIMEOUT.get(action, 30))
-        except subprocess.TimeoutExpired:
-            return self.reply(504, '%s did not finish in time; the change may or may not have been made' % host)
-        except OSError as e:
-            return self.reply(500, 'could not start ssh: %s' % e)
-        if run.returncode == 255:
-            return self.reply(502, '%s did not answer' % host)
-        if run.returncode != 0:
-            return self.reply(409, (run.stderr.strip().splitlines() or ['%s refused it (exit %d)' % (host, run.returncode)])[-1])
-        said = (run.stdout.strip().splitlines() or ['done'])[-1]
+
+        def on_host(script):
+            """The host's run of one script: (None, its run), or (the HTTP code and text of the answer, None)."""
+            try:
+                run = run_script(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', target, 'bash -c ' + shlex.quote(script)],
+                                 CONTROL_TIMEOUT.get(action, 30))
+            except subprocess.TimeoutExpired:
+                return (504, '%s did not finish in time; the change may or may not have been made' % host), None
+            except OSError as e:
+                return (500, 'could not start ssh: %s' % e), None
+            if run.returncode == 255:
+                return (502, '%s did not answer' % host), None
+            if run.returncode != 0:
+                return (409, (run.stderr.strip().splitlines() or ['%s refused it (exit %d)' % (host, run.returncode)])[-1]), None
+            return None, run
+        results = None
+        if files:
+            # Each file on its own, as the action on that file alone (one ssh call each: a list of issue bodies in one
+            # command line could pass the length the host takes for one argument). One result a file, in the list's
+            # order: its id (an action's, or an issue's address), or why it was refused.
+            results = []
+            for f, a in files:
+                err, run = on_host(control_script(action, a, main, today, record, user))
+                results.append({'file': f, 'refused': err[1]} if err else {'file': f, 'id': (run.stdout.strip().splitlines() or ['done'])[-1]})
+            said = '%d of %d taken: %s' % (sum('id' in r for r in results), len(results), ', '.join(r.get('id', 'refused') for r in results))
+        else:
+            err, run = on_host(script)
+            if err:
+                return self.reply(*err)
+            said = (run.stdout.strip().splitlines() or ['done'])[-1]
         try:  # the ruling row names the Board user who did it, as /answer's does
             log_ruling('Board control: %s' % ' '.join([action] + args), said, user)
         except OSError:
@@ -1442,6 +1485,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # When the host's answer was in, by this machine's clock in whole seconds rounded up. The collector on
         # this machine stamps a snapshot (updatedAt) before it reads the host, so one stamped at or after this time
         # read the record after the change; the Board keeps the answer until such a snapshot comes.
+        if results is not None:
+            return self.json_reply(200, {'results': results}, {'X-Answered-At': str(math.ceil(time.time()))})
         self.reply(200, said, {'X-Answered-At': str(math.ceil(time.time()))})
 
     def do_GET(self):
