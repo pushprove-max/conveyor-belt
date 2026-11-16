@@ -50,145 +50,8 @@ t_nogo() {
   [ ! -e "$STUB/filed" ] && [ "$(st 'select(.step == "landed") | has("leftover") or has("followups")')" = false ] || fail "a card that landed on a GO filed follow-ups or is recorded as leftover"
 }
 
-# The Done-when check: a card that says it is done without showing each line of the issue's `## Done when` holds
-# leaves the review to find the missing item. Bugs: a reply with every item met and real evidence fails; a missing
-# D<n> line, an empty evidence, or an added TODO the reply hides (naming
-# another file that ends in the same path) passes, or fails without that item named; a named file that is not there
-# (a bare root name too, or two on one line) fails its item, or is not a note shown to the review; indented bullets
-# are not items; a failed check blocks at once, or sends no fix session, or a second failure lands; a rebuild after a
-# landing conflict goes to review unchecked, with the build's D<n> lines; an issue with no `## Done when` is checked;
-# the reviewer is not given the D<n> lines, or its `DONE-WHEN: D<n> holds` line is read as a finding; the record check
-# takes notes that are not a list of strings.
-t_donewhen() {
-  local dw=$'## Done when\n- the first thing\n- the second thing'
-  setup "[$(issue 7 2026-01-01 | jq -c --arg b "body of 7"$'\n\n'"$dw" '.body = $b')]"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  # The session's reply is $STUB/reply.<its number>.
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
-r=$(cat "$STUB/reply.$(wc -l < "$STUB/sessions")" 2>/dev/null)
-jq -cn --arg r "$r" '{type: "result", is_error: false, result: $r, usage: {input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 999, output_tokens: 5}}'
-EOF
-  # #7: every item met, with evidence that holds (a test file the change adds, a root file and its line): one
-  # session, review, landed.
-  echo 'mkdir -p lib && echo x > lib/t.test.sh && echo two >> a.txt' > "$STUB/build"
-  printf 'Done.\n\n## Done when\nD1 met: lib/t.test.sh case one passes\nD2 met: a.txt:2 holds the second thing\n' > "$STUB/reply.1"
-  printf '%s\n' 'DONE-WHEN: D1 holds' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.issue == 7 and .step == "build") | .doneWhen | tojson')" = '{"items":2,"met":2,"failed":[]}' ] \
-    || fail "a reply with every item and real evidence did not pass the check in one session: $(st 'select(.issue == 7 and .step == "build")')"
-  [ "$(st 'select(.issue == 7 and .step == "review") | .result')" = GO ] && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
-    || fail "a DONE-WHEN holds line was read as a finding, or #7 did not land: $(st 'select(.issue == 7 and .step == "review")')"
-  grep -q "^# The card's Done-when lines$" "$STUB/asked" && grep -qx 'D1 met: lib/t.test.sh case one passes' "$STUB/asked" \
-    && grep -qx 'D2 met: a.txt:2 holds the second thing' "$STUB/asked" || fail "the reviewer was not given the D<n> lines: $(cat "$STUB/asked")"
-  # #8 (its bullets indented, one nested under another): a missing D3, an empty evidence and an added TODO named only
-  # beside another file each fail by name, and a named root test file that is not there is a note; one fix session is told them,
-  # and its reply passes: review, landed.
-  issue 8 2026-01-02 | jq -c '[.body = "## Done when\n  - the first thing\n    - a detail of it\n  - the second thing\n  - the third thing\n\n## Notes\n- not an item"]' > "$STUB/issues.json"
-  rm -f "$STUB"/reply.* "$STUB"/review.* "$STUB/sessions" "$STUB/reviews"
-  echo "echo 'TODO later' >> a.txt" > "$STUB/build"
-  printf '## Done when\nD1 met: none\nD2 met: missing.test.sh case_two passes\nThe TODO in other/a.txt is old.\n' > "$STUB/reply.1"
-  printf 'The TODO in a.txt is left for a later card.\n\n## Done when\nD1 met: a.txt:2 holds the line\nD2 met: `git diff --cached a.txt` shows it\nD3 not met: no test here\n' > "$STUB/reply.2"
-  echo "$GO" > "$STUB/review.1"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(st 'select(.issue == 8 and .step == "build") | .doneWhen | [.items, .met, (.failed | sort | join(" | "))] | tojson')" \
-    = '[3,1,"D1: met, with no evidence | D3: no `D3 met:` or `D3 not met:` line in the `## Done when` section that ends the reply | TODO added in a.txt is not named in the reply"]' ] \
-    && [ "$(st 'select(.issue == 8 and .step == "build") | .doneWhen.notes | tojson')" = '["D2: names missing.test.sh, which is not in this worktree"]' ] \
-    || fail "the failed items are not each named, or a missing file failed its item instead of being a note: $(st 'select(.issue == 8 and .step == "build") | .doneWhen')"
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -q '^# The Done-when check failed' "$STUB/brief" && grep -qx -- '- D1: met, with no evidence' "$STUB/brief" \
-    && grep -qx -- '- TODO added in a.txt is not named in the reply' "$STUB/brief" || fail "no one fix session told the failed items: $(cat "$STUB/brief")"
-  [ "$(st 'select(.issue == 8 and .step == "fix") | [(.reason | startswith("the Done-when check failed: ")), .doneWhen] | tojson')" = '[true,{"items":3,"met":2,"failed":[]}]' ] \
-    && [ -n "$(st 'select(.issue == 8 and .step == "landed") | .sha')" ] || fail "the fix line does not carry the second check, or #8 did not land: $(st 'select(.issue == 8)')"
-  # #9: the fix session's reply fails too: blocked, with the item listed, and never reviewed.
-  issue 9 2026-01-03 | jq -c --arg b "$dw" '[.body = $b]' > "$STUB/issues.json"
-  rm -f "$STUB"/reply.* "$STUB"/review.* "$STUB/sessions" "$STUB/reviews"
-  echo 'echo three >> a.txt' > "$STUB/build"
-  printf '## Done when\nD1 met: a.txt:3\n' | tee "$STUB/reply.1" > "$STUB/reply.2"
-  loop run --only 9 >/dev/null
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ ! -e "$STUB/reviews" ] \
-    && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^the Done-when check failed again after its one fix session: D2: no `D2 met:`' \
-    || fail "a second failure did not block #9 with the item named, before any review: $(st 'select(.issue == 9)')"
-  # The Board's card detail reads the last check from the snapshot: Landed today and Needs you carry it.
-  snap=$(loop snapshot) || fail "snapshot exited non-zero"
-  [ "$(jq -c '[(.landed[] | select(.issue == 7) | .doneWhen), (.needsYou.blocked[] | select(.issue == 9) | .doneWhen | [.items, .met, (.failed | length)])]' <<<"$snap")" \
-    = '[{"items":2,"met":2,"failed":[]},[2,1,1]]' ] || fail "the snapshot does not carry the cards' Done-when checks: $(jq -c '[.landed, .needsYou.blocked] | map(map({issue, doneWhen}))' <<<"$snap")"
-  # #11: the landing conflicts and the rebuild's reply has no D<n> line: the rebase line carries the failed check, one
-  # fix session is told the items, and the review after it gets that session's D<n> lines, not the build's.
-  issue 11 2026-01-05 | jq -c --arg b "$dw" '[.body = $b]' > "$STUB/issues.json"
-  rm -f "$STUB"/reply.* "$STUB"/review.* "$STUB/sessions" "$STUB/reviews"; echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
-  echo 'if grep -q "^# Landing conflict" "$STUB/brief"; then printf "ONE\nfive\n" > a.txt; else echo five >> a.txt; fi' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
-  printf '## Done when\nD1 met: a.txt holds five\nD2 met: a.txt:1 is the build\n' > "$STUB/reply.1"; echo 'Rebuilt.' > "$STUB/reply.2"
-  printf '## Done when\nD1 met: a.txt holds five\nD2 met: a.txt:2 after the rebuild\n' > "$STUB/reply.3"
-  loop run --only 11 >/dev/null || fail "run of #11 exited non-zero"
-  [ "$(st 'select(.issue == 11 and .step == "rebase") | .doneWhen | [.items, .met, (.failed | length)] | tojson')" = '[2,0,2]' ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] \
-    && [ "$(st 'select(.issue == 11 and .step == "fix") | .doneWhen | tojson')" = '{"items":2,"met":2,"failed":[]}' ] && [ -n "$(st 'select(.issue == 11 and .step == "landed") | .sha')" ] \
-    || fail "the rebuild's reply was not checked, or #11 did not land after its one fix: $(st 'select(.issue == 11)')"
-  grep -qx 'D2 met: a.txt:2 after the rebuild' "$STUB/asked" && ! grep -q 'is the build' "$STUB/asked" || fail "the review after the rebuild had stale D<n> lines: $(cat "$STUB/asked")"
-  # #12: a pytest case after a missing path, a missing name with a one-letter extension and a :line, and one with no
-  # :line and a one-letter extension (beside an e.g., which names no file), a missing path with no extension and a
-  # :line, an absolute path outside the worktree, and a TODO added in a file whose name git quotes in a diff header are
-  # each noted by name, not failed; the TODO fails, the fix reply names it (beside an i.e.), and the card lands.
-  issue 12 2026-01-06 | jq -c '[.body = "## Done when\n- one\n- two\n- three\n- four\n- five"]' > "$STUB/issues.json"
-  rm -f "$STUB"/reply.* "$STUB"/review.* "$STUB/sessions" "$STUB/reviews"; echo "$GO" > "$STUB/review.1"
-  echo "mkdir -p src && echo all: > src/Makefile && echo int > x.c && echo int > ok.h && echo 'TODO later' > café.py" > "$STUB/build"
-  printf '## Done when\nD1 met: tests/missing.py::test_case passed\nD2 met: missing.c:1\nD3 met: lib/Makefile:1\nD4 met: %s:1 passes\nD5 met: y.c implements the requirement, e.g. as asked\n' "$STUB/x.py" > "$STUB/reply.1"
-  printf 'The TODO in café.py stays.\n\n## Done when\nD1 met: tests/missing.py::test_case and tests/gone.py passed\nD2 met: x.c:1\nD3 met: src/Makefile:1\nD4 met: x.c:1 holds\nD5 met: x.c and ok.h implement it, i.e. as asked\n' > "$STUB/reply.2"
-  loop run --only 12 >/dev/null || fail "run of #12 exited non-zero"
-  [ "$(st 'select(.issue == 12 and .step == "build") | .doneWhen | [.items, .met, (.failed | sort | join(" | "))] | tojson')" \
-    = '[5,5,"TODO added in café.py is not named in the reply"]' ] \
-    && [ "$(st 'select(.issue == 12 and .step == "build") | .doneWhen.notes | join(" | ")')" = "D1: names tests/missing.py, which is not in this worktree | D2: names missing.c, which is not in this worktree | D3: names lib/Makefile, which is not in this worktree | D4: names $STUB/x.py, which is not in this worktree | D5: names y.c, which is not in this worktree" ] \
-    || fail "a file reference was not noted, failed its item, or a quoted-name TODO slipped past the check: $(st 'select(.issue == 12 and .step == "build") | .doneWhen')"
-  # The fix reply still names two missing files on one line: the card is not blocked for them, and the review is shown
-  # a note for each.
-  [ "$(st 'select(.issue == 12 and .step == "fix") | .doneWhen | tojson')" = '{"items":5,"met":5,"failed":[],"notes":["D1: names tests/gone.py, which is not in this worktree","D1: names tests/missing.py, which is not in this worktree"]}' ] && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] \
-    && grep -qx 'Note: D1: names tests/missing.py, which is not in this worktree' "$STUB/asked" && grep -qx 'Note: D1: names tests/gone.py, which is not in this worktree' "$STUB/asked" \
-    || fail "#12's fix reply did not pass with its missing file as a note shown to the review, or #12 did not land: $(st 'select(.issue == 12)')"
-  # #10: no `## Done when`: no check, and a reply with no section lands.
-  echo "[$(issue 10 2026-01-04)]" > "$STUB/issues.json"
-  rm -f "$STUB"/reply.* "$STUB"/review.* "$STUB/sessions" "$STUB/reviews"; echo "$GO" > "$STUB/review.1"; echo 'echo four >> b.txt' > "$STUB/build"
-  loop run --only 10 >/dev/null || fail "run of #10 exited non-zero"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.issue == 10) | select(has("doneWhen"))')" = '' ] && [ -n "$(st 'select(.issue == 10 and .step == "landed") | .sha')" ] \
-    || fail "an issue with no Done when section was checked, or did not land: $(st 'select(.issue == 10)')"
-  ! grep -q "Done-when lines" "$STUB/asked" || fail "the reviewer of #10 was given Done-when lines"
-  loop check || fail "a line with doneWhen is not a whole record"
-  local bad; bad=$(jq -c 'select(.issue == 12 and .step == "fix") | .doneWhen.notes = false' "$ST/cards.jsonl"); echo "$bad" >> "$ST/cards.jsonl"
-  ! loop check >/dev/null 2>&1 || fail "the record check took doneWhen notes that are not a list of strings"
-}
-
-# The reply check counts a TODO or [VERIFY] marker as added only when the change adds more lines holding it than it
-# removes. Bugs: a line holding one moved from one file to another fails a reply that does not name it (a split of a
-# file then costs fix sessions); a new line holding TODO passes unnamed.
-t_movedmarker() {
-  setup '[]'
-  printf 'TODO later\n' > "$R/t.txt"; printf '[VERIFY] the limit\n' > "$R/v.txt"; git -C "$R" add t.txt v.txt; git -C "$R" commit -qm markers; git -C "$R" push -q origin main
-  cat > "$STUB/claude" <<'EOF2'
-#!/usr/bin/env bash
-cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
-jq -cn '{type: "result", is_error: false, result: "Done.\n\n## Done when\nD1 met: the change holds it", usage: {input_tokens: 1, output_tokens: 1}}'
-EOF2
-  local n b
-  for n in 7 8 9; do
-    case $n in
-      7) b="rm t.txt; echo 'TODO later' > t2.txt" ;;
-      8) b=": > v.txt; echo '[VERIFY] the limit' > v2.txt" ;;
-      9) b="echo 'TODO again' > n.txt" ;;
-    esac
-    issue "$n" 2026-01-01 | jq -c '[.body = "## Done when\n- the thing"]' > "$STUB/issues.json"
-    rm -f "$STUB"/review.* "$STUB/sessions" "$STUB/reviews"; echo "$GO" > "$STUB/review.1"; echo "$b" > "$STUB/build"
-    loop run --only "$n" >/dev/null
-  done
-  [ "$(st 'select(.issue == 7 and .step == "build") | .doneWhen | tojson')" = '{"items":1,"met":1,"failed":[]}' ] \
-    || fail "a TODO line moved to another file failed the reply check: $(st 'select(.issue == 7 and .step == "build") | .doneWhen')"
-  [ "$(st 'select(.issue == 8 and .step == "build") | .doneWhen | tojson')" = '{"items":1,"met":1,"failed":[]}' ] \
-    || fail "a [VERIFY] line moved to another file failed the reply check: $(st 'select(.issue == 8 and .step == "build") | .doneWhen')"
-  [ "$(st 'select(.issue == 9 and .step == "build") | .doneWhen.failed | tojson')" = '["TODO added in n.txt is not named in the reply"]' ] \
-    || fail "a new TODO line passed the reply check unnamed: $(st 'select(.issue == 9 and .step == "build") | .doneWhen')"
-}
-
-# Bugs: an UNPROVEN line holds a GO, is counted as a finding, is filed as a follow-up after a last NO-GO, or
-# is dropped from the review's record; a proven finding beside a GO lets the card land; the fix session is not told
-# to fix the same mistake elsewhere in the change; the reviewer is not asked for a proof or the three angles.
+# Bugs: an UNPROVEN line holds a GO, is counted as a finding, or is dropped from the review's record; the reviewer is
+# not asked for a proof or the three angles.
 t_unproven() {
   setup "[$(issue 8 2026-01-01)]"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
@@ -201,8 +64,13 @@ t_unproven() {
     && grep -q 'look for the same mistake elsewhere in the staged change' "$STUB/asked" && grep -q '^- bypass and trust:' "$STUB/asked" \
     && grep -q '^- behaviour:' "$STUB/asked" && grep -q '^- tests and words:' "$STUB/asked" && grep -q 'is a P1 finding' "$STUB/asked" \
     && grep -q 'a smaller change that fully solves the issue is a finding' "$STUB/asked" || fail "the reviewer is not asked for proofs, the same mistake elsewhere, the angles or the checks"
+}
+
+# Bugs: an UNPROVEN line is counted as a finding, or filed as a follow-up after a last NO-GO; a proven finding beside a
+# GO lets the card land; the fix session is not told to fix the same mistake elsewhere in the change.
+t_proven() {
   # #7: a proven finding beside a GO is a NO-GO; the third NO-GO lands and files only the proven finding.
-  issue 7 2026-01-02 | jq -cs . > "$STUB/issues.json"; rm -f "$STUB/reviews"
+  setup "[$(issue 7 2026-01-02)]"
   F='[P1] a.txt:1 wrong word. Proof: a.txt line 2 reads "two"'
   printf '%s\n' "$(moved 1 "$F")" 'UNPROVEN: b.txt may be stale' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"
   printf '%s\n' "$(moved 2 "$F")" 'UNPROVEN: b.txt may be stale' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
@@ -321,15 +189,21 @@ t_deep() {
 
 # Bugs: a follow-up is known only by its depth line, so one with the follow-up label and no such line files another
 # generation; a body past a pipe's 64 KiB (#8's, long lines: 6500 short ones took 100 s) hides it (its read ends early).
-t_fuknown() {
-  setup "$(jq -cs . <(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5"') \
-    <(issue 8 2026-01-02 bug P1 | jq -c '.body = "Follow-up depth: 1\n" + (("filler text " * 70 + "\n") * 100)'))"
-  provenbug; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do moved $i "$NOGO" > "$STUB/review.$i"; done # the second to land is reviewed again on main as the first left it
-  mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"; [ "$(jq -r '.[1].body' "$STUB/issues.json" | wc -c)" -gt 65536 ] || fail "#8's body fits a pipe"
+# fukept <issue json>: that bug card's three NO-GO reviews land it with its leftover finding declined, filing none.
+fukept() {
+  local n; n=$(jq .number <<<"$1")
+  setup "[$1]"; provenbug; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done
+  mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"
   loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed" and .issue != 5) | [.issue, .leftover, .followups] | tojson' | sort | tr '\n' ' ')" = '[7,true,[]] [8,true,[]] ' ] && [ ! -e "$STUB/filed" ] \
+  [ "$(st 'select(.step == "landed" and .issue != 5) | [.issue, .leftover, .followups] | tojson')" = "[$n,true,[]]" ] && [ ! -e "$STUB/filed" ] \
     || fail "a card whose issue has the follow-up label, or a depth line in a long body, filed a follow-up or did not land: $(st 'select(.step | IN("landed", "blocked", "filed"))'; cat "$STUB/filed" 2>&1)"
-  [ "$(jq -c '[.issue, .why]' "$ST/declined.jsonl" | sort | tr '\n' ' ')" = '[7,"follow-up of a follow-up"] [8,"follow-up of a follow-up"] ' ] || fail "their leftover findings are not in the declined list: $(cat "$ST/declined.jsonl" 2>&1)"
+  [ "$(jq -c '[.issue, .why]' "$ST/declined.jsonl")" = "[$n,\"follow-up of a follow-up\"]" ] || fail "its leftover finding is not in the declined list: $(cat "$ST/declined.jsonl" 2>&1)"
+}
+t_fuknown() { fukept "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5"')"; }
+t_fuknownlong() {
+  local i; i=$(issue 8 2026-01-02 bug P1 | jq -c '.body = "Follow-up depth: 1\n" + (("filler text " * 70 + "\n") * 100)')
+  [ "$(jq -r .body <<<"$i" | wc -c)" -gt 65536 ] || fail "#8's body fits a pipe"
+  fukept "$i"
 }
 
 # Bug: a declined list that cannot be written (here a folder is in its place) loses the findings: the card ends as
@@ -362,27 +236,33 @@ t_pipeline() {
   [ "$(jq -rs 'map(.body | split("\n") | map(select(startswith("Cost to every card: "))) | join(",")) | join("|")' "$STUB/filed")" = 'Cost to every card: not assessed||' ] \
     && jq -rs '.[0].body' "$STUB/filed" | grep -qx 'Follow-up depth: 1' || fail "only the finding on the pipeline file a.txt gets the cost line, and keeps its depth line: $(cat "$STUB/filed")"
   [ "$(jq -c .held "$ST/control.json")" = '[100101]' ] || fail "the control record holds $(jq -c .held "$ST/control.json"), not the follow-up on the pipeline file alone"
-  # The loop builds the two other follow-ups, as before, and never the held one (a run with no --only: one limited
-  # to #7 goes on polling for the held follow-up). Bug cards (provenbug): both add a.test.sh, so one is reviewed twice.
-  jq -cs . "$STUB/filed" > "$STUB/issues.json"; provenbug
+  # The loop builds a follow-up on another file, as before, and never the held one (a run with no --only: one limited
+  # to #7 goes on polling for the held follow-up). One such follow-up (#100102) is open: a second proves no more and
+  # costs a card. A bug card (provenbug).
+  jq -cs '.[:2]' "$STUB/filed" > "$STUB/issues.json"; provenbug
   loop run >/dev/null || fail "second run exited non-zero"
-  [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "7 100102 100103 " ] || fail "picks with the pipeline follow-up held: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 100103 " ] || fail "the follow-ups on other files did not land: $(st 'select(.step | IN("landed", "blocked"))')"
+  [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "7 100102 " ] || fail "picks with the pipeline follow-up held: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 " ] || fail "the follow-up on another file did not land: $(st 'select(.step | IN("landed", "blocked"))')"
   jq -cs '[.[0]]' "$STUB/filed" > "$STUB/issues.json"
   [ "$(loop snapshot | jq -c '.needsYou.pipeline | map([.issue, .title, .cost, .parent])')" = '[[100101,"[P0] a.txt:1 wrong word","not assessed",7]]' ] \
     || fail "Needs you does not list the held pipeline follow-up with its cost line: $(loop snapshot | jq -c .needsYou.pipeline)"
   # The owner releases it: it is built like any follow-up, and leaves Needs you.
   loop control release 100101 >/dev/null; loop run >/dev/null || fail "third run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 100103 100101 " ] || fail "the released pipeline follow-up was not built: $(st 'select(.step | IN("picked", "landed", "blocked")) | [.step, .issue] | join(":")' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 100101 " ] || fail "the released pipeline follow-up was not built: $(st 'select(.step | IN("picked", "landed", "blocked")) | [.step, .issue] | join(":")' | tr '\n' ' ')"
   [ "$(loop snapshot | jq -c .needsYou.pipeline)" = '[]' ] || fail "a released pipeline follow-up is still in Needs you"
 }
 
 # A finding that comes back after its fix round stops the loop. Bugs: the same finding comes back round after round,
 # each round a fix session and a review, until the round limit; the fix session after a repeat is not told the
-# finding came back, nor shown the earlier fix, so it repeats it.
-t_cameback() {
-  setup "[$(issue 7 2026-01-01)]"; steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
+# finding came back, nor shown the earlier fix, so it repeats it. Its cases (cameback*) each run one issue's card.
+# A cameback case's main and stubs: its one issue; each session's brief kept as $STUB/brief.<its number>.
+backsetup() { # <issue>
+  setup "[$(issue "$1" 2026-01-01)]"; steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'cp "$STUB/brief" "$STUB/brief.$(wc -l < "$STUB/sessions")"; echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
+}
+
+t_cameback() {
+  backsetup 7
   # #7: a P2 finding back after its fix round (its proof in other words, its line text the same), every finding P2 or
   # P3: the card lands at once and files it, with no second fix session.
   printf '%s\n' '[P2] a.txt:1 The nit stays here. Proof: line 2 reads fix1' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
@@ -394,8 +274,11 @@ t_cameback() {
     && [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = '[P2] a.txt:1 the nit stays here. Proof: line 3 reads fix2|[P3] c.txt:3 a style nit|' ] \
     || fail "the card that landed on a repeat did not file its findings: $(cat "$STUB/filed" 2>&1)"
   ! grep -q 'came back after a fix round' "$STUB/brief.2" || fail "the first fix session was told of a repeat"
+}
+
+t_camebackp1() {
+  backsetup 8; head=$(git -C "$R" rev-parse HEAD)
   # #8: a P1 finding back after its fix round blocks the card for the owner, with no second fix session and nothing filed.
-  issue 8 2026-01-02 | jq -cs . > "$STUB/issues.json"; rm -f "$STUB"/review.* "$STUB/reviews" "$STUB/sessions" "$STUB/filed"; head=$(git -C "$R" rev-parse HEAD)
   printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P1] a.txt:1 wrong word. Proof: line 3 reads fix2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
@@ -403,9 +286,12 @@ t_cameback() {
     && [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = 'the fix for [P1] a.txt:1 wrong word. Proof: line 3 reads fix2 did not hold after 1 round' ] \
     || fail "a P1 finding back after its fix did not block the card with the reason: $(steps 8) $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ ! -e "$STUB/filed" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#8 landed, filed, or left its worktree"
+}
+
+t_camebacktold() {
+  backsetup 9
   # #9: a P2 finding comes back beside a new P1: the fix session is told it came back, with the earlier review's
   # finding and the diff of the fix round after it; the GO after it lands the card.
-  issue 9 2026-01-03 | jq -cs . > "$STUB/issues.json"; rm -f "$STUB"/review.* "$STUB/reviews" "$STUB/sessions" "$STUB"/brief.*
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 2 reads fix1' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 3 reads fix2' '[P1] b.txt:2 a new bug' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   echo "$GO" > "$STUB/review.3"
@@ -437,10 +323,15 @@ t_retryrounds() {
 
 # A repeat is known whatever else ends the loop. Bugs: a P1 finding back after its fix on the last round lands with
 # follow-ups instead of blocking; a card that blocks deletes its fix rounds, so its retry fixes a finding that came
-# back as if new; a card whose patch could not be kept deletes them too.
-t_repeatkept() {
-  setup "[$(issue 10 2026-01-01)]"; steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
+# back as if new; a card whose patch could not be kept deletes them too. Its cases (repeatkept*) each run one issue's
+# card. A repeatkept case's main and stubs: its one issue, each session adding a line fix<n> to a.txt.
+keptsetup() { # <issue>
+  setup "[$(issue "$1" 2026-01-01)]"; steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"; B='[P1] b.txt:2 broken'; head=$(git -C "$R" rev-parse HEAD)
+}
+
+t_repeatkept() {
+  keptsetup 10
   # #10: the third review, the round limit, repeats a P1 its fix round was told to fix: blocked, nothing filed.
   echo "$NOGO" > "$STUB/review.1"; printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' | tee "$STUB/review.2" > "$STUB/review.3"
   loop run --only 10 >/dev/null || fail "run of #10 exited non-zero"
@@ -450,9 +341,12 @@ t_repeatkept() {
   echo "$GO" > "$STUB/review.4"; loop retry 10 >/dev/null && loop run --only 10 >/dev/null || fail "run of the retried #10 exited non-zero"
   grep -qx '# These findings came back after a fix round for them' "$STUB/brief" && grep -qx "## \\$B" "$STUB/brief" && grep -qx '+fix3' "$STUB/brief" \
     || fail "the resumed session of a card blocked on a repeat was not told it came back with the earlier fix's diff: $(cat "$STUB/brief")"
+}
+
+t_repeatkeptfail() {
+  keptsetup 11
   # #11: a NO-GO, its fix, then a review that fails: blocked with its patch and its fix round kept. The retry's review
   # repeats the P1: blocked, with no fix session after it.
-  issue 11 2026-01-02 | jq -cs . > "$STUB/issues.json"; rm -f "$STUB"/review.* "$STUB/reviews" "$STUB/sessions"
   for i in 1 2 3 4; do printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] || [ ! -e "$STUB/review-fail" ] || exit 3' > "$STUB/review-cmd"; : > "$STUB/review-fail"
   loop run --only 11 >/dev/null; k=$(st 'select(.issue == 11 and .step == "blocked") | "\($ENV.ST)/\(.kept)/\(.card)"')
@@ -462,14 +356,23 @@ t_repeatkept() {
   [ "$(st 'select(.issue == 11 and .step == "blocked") | .reason')" = "the fix for $B did not hold after 1 round" ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] \
     || fail "a retry did not know a repeat of its earlier card's fix round: $(steps 11) $(wc -l < "$STUB/sessions") sessions"
   ! grep -q 'came back after a fix round' "$STUB/brief" || fail "the resumed session was told of a repeat its kept review, written before the fix round, cannot show"
-  # #12: the same, but the change cannot be staged when it blocks: the worktree stays, and its fix round is kept.
-  issue 12 2026-01-03 | jq -cs . > "$STUB/issues.json"; rm -f "$STUB"/review.* "$STUB/reviews" "$STUB/sessions"; echo "$NOGO" > "$STUB/review.1"
+}
+
+t_repeatkeptstage() {
+  keptsetup 12
+  # #12: as #11 (t_repeatkeptfail), but the change cannot be staged when it blocks: the worktree stays, and its fix
+  # round is kept.
+  echo "$NOGO" > "$STUB/review.1"
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] || { for w in "$STUB"/../cards/*-12; do : > "$(git -C "$w" rev-parse --git-path index.lock)"; done; exit 3; }' > "$STUB/review-cmd"
   loop run --only 12 >/dev/null; k=$(st 'select(.issue == 12 and .step == "blocked") | "\($ENV.ST)/\(.kept)/\(.card)"')
   st 'select(.issue == 12 and .step == "blocked") | .reason' | grep -q 'could not be kept as a patch' && [ "$(jq -r .line "$k.rounds/findings.jsonl" | head -n 1)" = '[P1] a.txt:1 wrong word' ] \
     && grep -qx '+fix2' "$k.rounds/1.diff" || fail "a card whose patch could not be kept lost its fix round: $(steps 12) $(ls "${k%/*}")"
+}
+
+t_repeatkeptmove() {
+  keptsetup 13
   # #13: its fix rounds cannot be moved to the kept folder (one of that name is there): they stay beside the worktree.
-  issue 13 2026-01-04 | jq -cs . > "$STUB/issues.json"; rm -f "$STUB"/review.* "$STUB/reviews" "$STUB/sessions"; echo "$NOGO" > "$STUB/review.1"
+  echo "$NOGO" > "$STUB/review.1"
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] || exit 3' > "$STUB/review-cmd"
   echo 'mkdir -p "$ST/kept/${PWD##*/}/${PWD##*/}.rounds/x"; echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
   loop run --only 13 >/dev/null; c=$(st 'select(.issue == 13 and .step == "blocked") | .card')
@@ -573,15 +476,13 @@ t_dismissed() {
 
 # The reviewer is told what not to raise. Bugs: the review prompt lacks the project's stated limits (its README's
 # accepted limits) or the reasons of the declined findings, so the reviewer raises the same class on the next card;
-# it takes the README's other sections for limits; it still forbids a finding the owner asked to be built; a project
-# with no limit and no declined finding gets an empty "Do not raise these"; a finding still declined is left out
-# because many lines the owner asked to be built came after it, or because it was dismissed from the Board's panel.
+# it takes the README's other sections for limits; it still forbids a finding the owner asked to be built; a finding
+# still declined is left out because many lines the owner asked to be built came after it, or because it was dismissed
+# from the Board's panel.
 t_donotraise() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
+  setup "[$(issue 8 2026-01-02)]"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  grep -q '^Review the staged change' "$STUB/asked" && ! grep -q 'Do not raise these' "$STUB/asked" || fail "a project with nothing declined and no stated limit is told not to raise something: $(grep -n -A3 'Do not raise' "$STUB/asked")"
+  echo "$GO" > "$STUB/review.1"
   printf '%s\n' '# Sample' '' '## Run' 'Run it with care.' '' '## Accepted limits' '' '- Two changes that each pass alone can fail together on main.' '' '## License' 'Any.' > "$R/README.md"
   git -C "$R" add README.md && git -C "$R" commit -qm readme && git -C "$R" push -q origin main || fail "the README was not committed"
   loop declined add c1-7 7 judge 'its proof needs a stub built to misbehave' '[P1] b.txt:2 no mark here' \
@@ -599,4 +500,13 @@ t_donotraise() {
   ! grep -q 'follow-up of a follow-up\|built after all' "$STUB/asked" || fail "the reviewer is told not to raise a finding the owner asked to be built"
   # The issue comes after the instructions, as before.
   [ "$(grep -n -m1 '^# Do not raise these$' "$STUB/asked" | cut -d: -f1)" -lt "$(grep -n -m1 'body of 8' "$STUB/asked" | cut -d: -f1)" ] || fail "what not to raise is not part of the review's instructions"
+}
+
+# Bug: a project with no limit and no declined finding gets an empty "Do not raise these".
+t_donotraisenone() {
+  setup "[$(issue 7 2026-01-01)]"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
+  echo "$GO" > "$STUB/review.1"
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  grep -q '^Review the staged change' "$STUB/asked" && ! grep -q 'Do not raise these' "$STUB/asked" || fail "a project with nothing declined and no stated limit is told not to raise something: $(grep -n -A3 'Do not raise' "$STUB/asked")"
 }

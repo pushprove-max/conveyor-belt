@@ -19,7 +19,6 @@ conveyor/tests/port.test.sh resume 19
 .claude/hooks/__tests__/adversarial-review-gate.test.sh 19
 .claude/hooks/__tests__/suite-rerun-guard.test.sh 19
 .claude/hooks/__tests__/new-test-file-guard.test.sh 18
-conveyor/tests/review.test.sh donewhen 17
 conveyor/tests/views.test.sh live 17
 conveyor/tests/fail.test.sh reviewretry 15
 conveyor/tests/port.test.sh kept 15
