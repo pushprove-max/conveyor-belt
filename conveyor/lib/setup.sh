@@ -387,6 +387,13 @@ doctor() {
   elif c=$(ctl 2>/dev/null) && e=$(timeout 60 gh issue list --state open --limit 100000 --json number 2>/dev/null | jq -e --argjson c "$c" '[.[].number | select(IN($c.held[]))] | length'); then
     ok "$(heldline "$e")"
   fi
+  # Card records an older engine left in another state folder (strays()): the belt, retry and health do not read them.
+  while IFS= read -r f; do
+    e=$(jq -Rnr '[inputs | fromjson? | objects] | group_by(.card)[] | select(map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | last | .step == "blocked")
+      | "#\(.[0].issue)"' "$f/cards.jsonl" 2>/dev/null | sort -u | paste -sd' ' -)
+    no "card records only in the state folder $ST: $f holds others, written by an older engine (blocked there: ${e:-none})" \
+      "this belt never reads them; for each blocked issue you want built, run \`conveyor.sh control release <issue>\` if it is held, then move $f away"
+  done < <(strays)
   for p in $(progs); do
     # OpenCode's sessions start only on 1.x, the plugin API of the guard plugin (ocready()).
     if [ "$p" = opencode ] && command -v opencode >/dev/null && ! [[ $(timeout 60 opencode --version 2>/dev/null | head -n 1) =~ ^v?1\.[0-9]+ ]]; then

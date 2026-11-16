@@ -1,4 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
+# The state folders other than ST that an older engine may have written this checkout's card records to, each that
+# holds card records, one a line: the checkout's own conveyor/state when the host file names another state folder for
+# it, and /conveyor/state, where an engine whose project path came out empty wrote (`//conveyor`). This belt reads
+# neither: retry names one that holds a card of the issue it is asked for, and doctor names each.
+strays() {
+  local s
+  for s in "$MAIN/conveyor/state" /conveyor/state; do
+    [ -s "$s/cards.jsonl" ] && [ "$(realpath -m -- "$s")" != "$(realpath -m -- "$ST")" ] && printf '%s\n' "$s"
+  done
+  return 0
+}
 # Under the lock: every line of the issue's blocked card (of each, when it was blocked more than once) moves from the
 # card records to the retried file, so the issue has no card and pick takes it again. A card that ended closed because
 # its issue was closed while it was blocked (shut()) counts as blocked. Nothing changes when the issue
@@ -9,7 +20,7 @@
 # A main-red fix card (issue 0, redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing.
 retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
-  local n=$1 ends l what k='.issue == $n' a p
+  local n=$1 ends l what k='.issue == $n' a p f
   check || return 1
   if [[ $1 =~ ^[0-9]+$ ]]; then
     what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1") || return 1
@@ -25,7 +36,12 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
         | if . == null then "open" elif .step == "closed" and .reason == $shut then "blocked" else .step end end)
     | if length == 0 then "none" elif index("open") then "open" elif index("landed") or index("closed") then "landed" else "blocked" end' <<<"$l") || return 1
   case $ends in
-    none) echo "conveyor: $what has no card; nothing to retry" >&2; return 1 ;;
+    none) [ "$k" = '.issue == $n' ] || { echo "conveyor: $what has no card; nothing to retry" >&2; return 1; }
+      # The state folder read is named, and any other folder (strays) that holds a card of the issue: two commands that
+      # disagree on a card have read two folders.
+      p=$(strays | while IFS= read -r f; do jq -Rne --argjson n "$n" 'any(inputs | fromjson? | objects; .issue == $n)' "$f/cards.jsonl" >/dev/null 2>&1 && printf ' %s' "$f"; done)
+      echo "conveyor: $what has no card in the state folder $ST; nothing to retry.${p:+ A card of it is in another state folder, which an older engine wrote to and this belt does not read:$p (doctor names it).} If the issue is held, release it with \`conveyor.sh control release $n\`, which starts a new card" >&2
+      return 1 ;;
     open) echo "conveyor: $what has a card that is still open; nothing changed" >&2; return 1 ;;
     landed) echo "conveyor: $what has a card that landed, or that closed it as already fixed; nothing changed" >&2; return 1 ;;
   esac

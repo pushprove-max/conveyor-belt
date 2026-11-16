@@ -93,6 +93,35 @@ t_retry() {
   done
 }
 
+# Bugs: a held issue's blocked card (setup holds every open issue), which health lists as blocked (foreman status
+# reads that list), is not given back by `retry`, or is given back and left held, so the loop never builds it.
+t_retryheld() {
+  setup "$(jq -cs . <(issue 7 2026-01-01))"; mkdir -p "$ST"
+  landed 7 | jq -c '.step = "blocked" | .result = "blocked" | .reason = "build: it failed"' >> "$ST/cards.jsonl"
+  loop control hold 7 >/dev/null || fail "the hold of #7"
+  [ "$(loop health | jq -c '[.blocked[].issue]')" = '[7]' ] || fail "health does not list #7 as blocked, so the case proves nothing"
+  out=$(loop retry 7 2>&1) || fail "retry of the held, blocked #7 exited non-zero: $out"
+  [ "$(loop health | jq -c '[.blocked[].issue]')" = '[]' ] && grep -q '"step":"blocked"' "$ST/retried.jsonl" || fail "#7's blocked card was not given back: $(cat "$ST/cards.jsonl")"
+  [ "$(jq -c .held "$ST/control.json")" = '[]' ] && grep -qF 'issue #7 was held; it is released' <<<"$out" || fail "#7 is still held, or retry did not say it released it: $(jq -c .held "$ST/control.json"); $out"
+}
+
+# Bugs: retry of an issue with no card says only "nothing to retry": not which state folder it read, not that a card
+# of the issue is in another state folder an older engine wrote to, and not what to do instead; doctor does not name
+# that other folder, so the owner never learns the belt cannot see those cards.
+t_retrynocard() {
+  setup '[]'; local old=$R/conveyor/state out
+  # The host file names another state folder for this checkout, so the checkout's own conveyor/state is not read.
+  mkdir -p "$XDG_CONFIG_HOME/conveyor"; jq -n --arg d "$T/$CASE/state" '{stateDir: $d}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  ST=$(loop state-dir); mkdir -p "$ST" "$old"
+  landed 7 | jq -c '.step = "blocked" | .result = "blocked"' > "$old/cards.jsonl"
+  out=$(loop retry 7 2>&1) && fail "retry of #7, which has no card in the state folder, exited 0"
+  grep -qF "issue #7 has no card in the state folder $ST; nothing to retry. A card of it is in another state folder, which an older engine wrote to and this belt does not read: $old (doctor names it). If the issue is held, release it with \`conveyor.sh control release 7\`, which starts a new card" <<<"$out" \
+    || fail "retry's message: $out"
+  out=$(loop retry 9 2>&1); grep -qF 'issue #9 has no card in the state folder' <<<"$out" && ! grep -qF 'another state folder' <<<"$out" || fail "retry of #9, of no folder, names another folder: $out"
+  out=$(cd "$R" && loop doctor 2>&1)
+  grep -qF "missing: card records only in the state folder $ST: $old holds others, written by an older engine (blocked there: #7)" <<<"$out" || fail "doctor does not name $old: $out"
+}
+
 # The Board's Hold on a blocked card (`unblock <issue> --hold`). Bugs: the issue is not held, so the loop builds it
 # again at once; its card stays blocked, so it stays in Needs you; its kept work is dropped, so once released it builds
 # from nothing; a refused unblock (no blocked card) leaves a hold behind, or takes off a hold the owner had set.

@@ -13,4 +13,15 @@
 . "$HERE/lib/install.sh" || exit 1
 [[ ${2:-} =~ ^([0-9]+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] && { [ $# = 2 ] || { [ $# = 3 ] && [ "$3" = --fresh ] && [[ $2 =~ ^[0-9]+$ ]]; }; } \
   || { echo "usage: conveyor.sh retry <issue> [--fresh] | retry <the card id of a main-red fix card>" >&2; exit 2; }
-locked retry "$2" ${3:+fresh}
+# A held issue (setup holds every open one) would stay off the belt once its card is given back: the owner's retry
+# releases it too, under the same lock, once the retry is done. A refused retry leaves the hold as it was.
+again() { # <issue | card id> [fresh]
+  local held=false
+  [[ ! $1 =~ ^[0-9]+$ ]] || held=$(ctl | jq -r --argjson n "$1" '.held | index($n) != null') \
+    || { echo "conveyor: cannot read the control record; nothing changed" >&2; return 1; }
+  retry "$@" || return 1
+  [ "$held" = true ] || return 0
+  control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
+  echo "conveyor: issue #$1 was held; it is released, so the loop picks it again"
+}
+locked again "$2" ${3:+fresh}
