@@ -215,7 +215,7 @@ hostput() { # [checkout]
   echo "conveyor: added $n to the machine's Conveyor (a record of $HOST$([ -z "$e" ] || echo ", run from its own checkout"))"
 }
 # conveyor.sh doctor: each thing Conveyor needs on this machine for the project it is called in, one line each, "ok: ..."
-# or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code. Exit 1 when anything is missing,
+# or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code or a Board not running. Exit 1 when anything is missing,
 # but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
 # which says how to get a newer one. The project's checks need jq and git; without either they are named as not checked.
 doctor() {
@@ -290,6 +290,10 @@ doctor() {
     if "$BOARD_VENV/bin/python3" -c "import $p" 2>/dev/null; then ok "$p, in the Board's virtualenv $BOARD_VENV"
     else no "$p, for the Board, in its virtualenv $BOARD_VENV" "run /conveyor-belt:setup, which installs it there"; fi
   done; fi
+  # The Board is optional, so one not running is a warning with its fix (bad stays 0), named by its address.
+  if ! command -v curl >/dev/null; then echo "not checked: the Board: it is checked with curl"
+  elif boardup; then ok "the Board, running at $(boardurl)"
+  else echo "warning: the Board is not running (nothing serves $(boardurl)); fix: run /conveyor-belt:setup and answer yes to \"Start the Board now?\", or conveyor.sh board in the project's checkout"; fi
   agentfiles
   if ! command -v jq >/dev/null || ! type -P git >/dev/null; then
     echo "not checked: the pack, its models' programs, the pin and the terms file: they are read with jq and git"; return 1

@@ -1206,19 +1206,19 @@ chmod a-w "$OUT"
 ! inst > "$T/inst.log" 2>&1 || fail "--install must fail when the page cannot be copied"
 grep -qx 'previous job' "$PL" || fail "a failed copy must not replace the existing job"
 chmod u+w "$OUT"
-# A restart that would serve a login nobody can get through refuses before launchd is touched, so the old
-# server keeps serving. The store checked is the one the restarted job serves: an override set at install time is
-# forwarded to it.
-AUTHD=$T/userhome/.claude/rulings/dashboard-auth.json VALID=$T/valid-auth.json EMPTY=$T/empty-auth.json
-mkdir -p "${AUTHD%/*}"; echo '{}' > "$EMPTY"; rm -f "$AUTHD" "$T/launchctl-calls"
-python3 -c 'import hashlib, json; s = b"0" * 16; print(json.dumps(dict(epoch=1, users=dict(max=dict(role="admin", salt=s.hex(), n=2, r=1, p=1, epoch=1,
+# A restart that would serve a login nobody can get through (No login on this device off, and no admin with a
+# password) refuses before launchd is touched, so the old server keeps serving. The store checked is the one the
+# restarted job serves: an override set at install time is forwarded to it.
+AUTHD=$T/userhome/.claude/rulings/dashboard-auth.json VALID=$T/valid-auth.json OFF=$T/off-auth.json NONE=$T/none-auth.json
+mkdir -p "${AUTHD%/*}"; echo '{"noLoginHere": false}' | tee "$OFF" > "$AUTHD"; echo '{}' > "$NONE"; rm -f "$T/launchctl-calls"
+python3 -c 'import hashlib, json; s = b"0" * 16; print(json.dumps(dict(epoch=1, noLoginHere=False, users=dict(max=dict(role="admin", salt=s.hex(), n=2, r=1, p=1, epoch=1,
   hash=hashlib.scrypt(b"password1", salt=s, n=2, r=1, p=1, dklen=32).hex())))))' > "$VALID"
-! inst > "$T/inst.log" 2>&1 || fail "--install must refuse when the auth store holds no password"
+! inst > "$T/inst.log" 2>&1 || fail "--install must refuse when No login on this device is off and the auth store holds no password"
 grep -qF "$AUTHD" "$T/inst.log" || fail "the refusal must name the store it read: $(cat "$T/inst.log")"
 [ ! -e "$T/launchctl-calls" ] || fail "a refused install must not boot the running job out: $(cat "$T/launchctl-calls")"
 grep -qx 'previous job' "$PL" || fail "a refused install must not replace the existing job"
 # A hash with no salt, user or scrypt parameters fails every login, so it is no password either.
-echo '{"hash":"h"}' > "$AUTHD"
+echo '{"hash":"h","noLoginHere":false}' > "$AUTHD"
 ! inst > "$T/inst.log" 2>&1 || fail "--install accepted a store with a hash but no salt, user or scrypt parameters"
 [ ! -e "$T/launchctl-calls" ] && grep -qx 'previous job' "$PL" || fail "a store no login can use still touched the running job"
 rm -f "$AUTHD"
@@ -1226,8 +1226,12 @@ inst CONVEYOR_DASHBOARD_AUTH="$VALID" > "$T/inst.log" 2>&1 || fail "an override 
 grep -qF "<key>CONVEYOR_DASHBOARD_AUTH</key><string>$VALID</string>" "$PL" \
   || fail "the job does not carry the auth store the preflight read, so it would serve the empty default: $(cat "$PL")"
 cp "$VALID" "$AUTHD"; echo 'previous job' > "$PL"; rm -f "$T/launchctl-calls"
-! inst CONVEYOR_DASHBOARD_AUTH="$EMPTY" > "$T/inst.log" 2>&1 || fail "an empty override store was accepted because the default store has a hash"
-[ ! -e "$T/launchctl-calls" ] && grep -qx 'previous job' "$PL" || fail "an empty override store still touched the running job"
+! inst CONVEYOR_DASHBOARD_AUTH="$OFF" > "$T/inst.log" 2>&1 || fail "an override store with no password was accepted because the default store has a hash"
+[ ! -e "$T/launchctl-calls" ] && grep -qx 'previous job' "$PL" || fail "an override store with no password still touched the running job"
+# Bug caught (#108): the first install needed a typed admin password, so an agent could not start the Board. With no
+# user at all and No login on this device at its default (on), this machine gets in, so the install goes ahead.
+inst CONVEYOR_DASHBOARD_AUTH="$NONE" < /dev/null > "$T/inst.log" 2>&1 || fail "a store with no user, with No login on this device on, was refused: $(cat "$T/inst.log")"
+grep -q 'bootstrap' "$T/launchctl-calls" || fail "the install with no user did not start the job: $(cat "$T/launchctl-calls" 2>&1)"
 ! inst LAUNCHCTL_FAIL=1 >/dev/null 2>&1 || fail "--install must fail when launchd refuses the job"
 inst > /dev/null || fail "--install failed"
 [ "$(view_list | wc -l)" -ge 11 ] || fail "the page is its core files and one file for each panel: $(view_list | tr '\n' ' ')"
@@ -1250,14 +1254,14 @@ grep -q 'bootout' "$T/launchctl-calls" || fail "uninstall must boot the job out"
 stub systemctl 'echo "$*" >> "'"$T"'/systemctl-calls"'
 linst() { env HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" "$@" bash "$DASH" --install; }
 SVCF=$T/userhome/.config/systemd/user/dashboard.service
-rm -f "$AUTHD" "$T/systemctl-calls"
-! linst > "$T/inst.log" 2>&1 || fail "a Linux --install must refuse when the auth store holds no password"
+cp "$OFF" "$AUTHD"; rm -f "$T/systemctl-calls"
+! linst > "$T/inst.log" 2>&1 || fail "a Linux --install must refuse when No login on this device is off and the auth store holds no password"
 [ ! -e "$T/systemctl-calls" ] || fail "a refused Linux install restarted the service: $(cat "$T/systemctl-calls")"
 linst CONVEYOR_DASHBOARD_AUTH="$VALID" > "$T/inst.log" 2>&1 || fail "a Linux override store that holds a hash was refused: $(cat "$T/inst.log")"
 grep -qxF "Environment=\"CONVEYOR_DASHBOARD_AUTH=$VALID\"" "$SVCF" || fail "the service does not carry the auth store the preflight read: $(cat "$SVCF")"
 cp "$VALID" "$AUTHD"; rm -f "$T/systemctl-calls"
-! linst CONVEYOR_DASHBOARD_AUTH="$EMPTY" > "$T/inst.log" 2>&1 || fail "a Linux empty override store was accepted because the default store has a hash"
-[ ! -e "$T/systemctl-calls" ] || fail "an empty Linux override store still restarted the service"
+! linst CONVEYOR_DASHBOARD_AUTH="$OFF" > "$T/inst.log" 2>&1 || fail "a Linux override store with no password was accepted because the default store has a hash"
+[ ! -e "$T/systemctl-calls" ] || fail "a Linux override store with no password still restarted the service"
 linst >/dev/null || fail "--install failed on Linux"
 grep -qE '^ExecStart="[^"]+" "[^"]+/dashboard\.sh" --loop$' "$SVCF" || fail "the service's command is not quoted: $(grep ExecStart "$SVCF")"
 grep -q -- '--user restart dashboard.service' "$T/systemctl-calls" || fail "a Linux install did not restart the running service: $(cat "$T/systemctl-calls")"

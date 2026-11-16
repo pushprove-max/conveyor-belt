@@ -56,8 +56,14 @@ check "option on, a pack and a fresh start open the Board once, on localhost" \
 check "the option unset (its default) opens it too" \
   "rc=0|opened https://localhost:$PORT/" "$(start startup "$T/repo" | paste -sd'|')"
 echo '{"board": {"lan": true}}' > "$T/config/conveyor/host.json"
-check "a host file that says LAN opens the Board at this machine's LAN name" \
+# Bug caught (#108): with LAN on, a new Board (no password yet) opened at the LAN name, where "No login on this device"
+# does not let this machine in, so the tab showed a login no one could pass. While that setting is on, localhost opens.
+check "a host file that says LAN, with No login on this device on (its default), opens the Board on localhost" \
+  "rc=0|opened https://localhost:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
+echo '{"noLoginHere": false}' > "$CONVEYOR_DASHBOARD_AUTH"
+check "a host file that says LAN, with No login on this device off, opens the Board at this machine's LAN name" \
   "rc=0|opened https://$(hostname -s).local:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
+rm -f "$CONVEYOR_DASHBOARD_AUTH"
 echo '{}' > "$T/config/conveyor/host.json"
 check "option off opens nothing" "rc=0" "$(start startup "$T/repo" false | paste -sd'|')"
 for s in resume clear compact; do

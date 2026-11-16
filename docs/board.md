@@ -9,16 +9,29 @@ Foreman, and a filter and a sort by project on every list.
 
 The Board reads the belt over ssh, from the `ssh` target of the host file, this machine's settings file. Set its
 `host`, `ssh` and `main` ([The host file](setup.md#the-host-file)). The `ssh` target must take a login by key from this
-machine: `ssh -o BatchMode=yes localhost true` must work. Then, in a terminal, in your project's checkout, run:
+machine: `ssh -o BatchMode=yes localhost true` must work.
+
+`/conveyor-belt:setup` asks "Start the Board now?" when the Board is not running. Yes starts it. To start it
+yourself, run this in your project's checkout:
 
 ```sh
 conveyor.sh board
 ```
 
-It installs the Board from the release of Conveyor that setup installed, with the virtualenv that setup filled. When
-the Board has no admin yet, it first adds one, `admin`, who logs in from other devices, and asks for the password
-twice. The Board runs as a user service and prints the address to open. After the project takes a new release, run
-`conveyor.sh board` again to move the Board to it.
+It installs the Board from the release of Conveyor that setup installed, with the virtualenv that setup filled. It
+asks for no password, because **No login on this device** (below) lets you in from this machine. To log in from other
+devices, add an admin on the Board's account page. The new user sets their password from a one-time link. The Board
+runs as a user service and prints the address to open. `conveyor.sh doctor` also names the address, or says that the
+Board is not running. After the project takes a new release, run `conveyor.sh board` again to move the Board to it.
+
+When **No login on this device** is off and no admin has a password, `conveyor.sh board` stops and names the fix. Then
+setup asks you for an admin password in Claude Code's prompt. It runs `conveyor.sh board --password-file <file>`,
+which adds the admin `admin` with that password (or gives it to an `admin` that has no password yet), deletes the file and starts the Board. The password is never on a
+command line.
+
+The address that opens is `https://localhost:<port>/`. When the host file says `{"board": {"lan": true}}` and **No
+login on this device** is off, it is `https://<this host>.local:<port>/`. While the setting is on, only `localhost`
+lets this machine in with no password.
 
 ## Users and authenticator codes
 

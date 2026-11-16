@@ -1047,9 +1047,10 @@ install() {
     || { echo "dashboard: the Board's Python ($BOARD_PY) or its packages are missing: run /conveyor-belt:setup (conveyor.sh doctor names what is missing)" >&2; return 1; }
   # The page is served over HTTPS only; this makes the self-signed certificate once and keeps it after that.
   "$BOARD_PY" "${script%/*}/dashboard_server.py" make-cert >/dev/null || { echo "dashboard: could not make the HTTPS certificate" >&2; return 1; }
-  # A restart with no login set serves a page nobody can open, and the old server is gone by then. Asked here
-  # with the environment the job below is given, so the store checked is the store the restarted job serves.
-  "$BOARD_PY" "${script%/*}/dashboard_server.py" has-password || return 1
+  # A restart that no one can get past the login (No login on this device off, and no admin with a password) serves a
+  # page nobody can open, and the old server is gone by then. Asked here with the environment the job below is given,
+  # so the store checked is the store the restarted job serves.
+  "$BOARD_PY" "${script%/*}/dashboard_server.py" can-open || return 1
   # Every override set at install time goes into the job; with only PATH and HOME it reads the default folders.
   local k mac="" sysd=""
   for k in CONVEYOR_DASHBOARD_AUTH CONVEYOR_RULING_LOG CONVEYOR_DASHBOARD_DIR CONVEYOR_MAIN CONVEYOR_WORKSPACES CONVEYOR_SCRATCH XDG_CONFIG_HOME XDG_DATA_HOME; do

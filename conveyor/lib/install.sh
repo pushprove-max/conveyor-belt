@@ -400,10 +400,18 @@ UNIT
 }
 # `conveyor.sh board`, in a project's checkout: the Board installed as this user's service (dashboard.sh --install),
 # reading this project, from the install of the commit the project runs (its pin, or the commit it took of the
-# releases or main it follows), not from a clone of its own. With no Board admin who has a password yet, it first adds
-# one, admin, asking for the password. The service names the install by its path: listed in USES, so prune() keeps it.
-board() {
-  local repo pin f s
+# releases or main it follows), not from a clone of its own. It asks for no password, so an agent can run it: "No login
+# on this device" (on by default) lets this machine in, and an admin adds the users of other devices on the Board.
+# With that setting off and no admin with a password, the Board cannot be opened: given a password file (setup writes
+# the password the user typed in Claude Code's prompt), board adds the admin `admin` with it, or sets it for an `admin`
+# that has none, on stdin, never on a command line, and removes the file first, whatever happens next.
+# The service names the install by its path: listed in USES, so prune() keeps it.
+board() { # [password file]
+  local repo pin f s pw=''
+  if [ -n "${1-}" ]; then
+    IFS= read -r pw < "$1"; rm -f -- "$1"
+    [ -n "$pw" ] || { echo "conveyor: the password file $1 was empty or could not be read" >&2; return 1; }
+  fi
   repo=$(cd "$CALLED" && cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd -P) \
     || { echo "conveyor: board runs in the checkout of a project" >&2; return 1; }
   pin=$("$HERE/lib/pack.sh" get plugin.commit "$repo/.conveyor/project.json") && f=$("$HERE/lib/pack.sh" get plugin.follow "$repo/.conveyor/project.json") || return 1
@@ -412,10 +420,35 @@ board() {
   installed "$pin" ro && [ -f "$s/dashboard.sh" ] \
     || { echo "conveyor: the pack of $repo names Conveyor commit ${pin:-(none)}, which is not installed and verified with a Board: run /conveyor-belt:setup" >&2; return 1; }
   [ -x "$BOARD_VENV/bin/python3" ] || { echo "conveyor: the Board's virtualenv $BOARD_VENV is not there: run /conveyor-belt:setup" >&2; return 1; }
-  CONVEYOR_MAIN=$repo "$BOARD_VENV/bin/python3" "$s/dashboard_server.py" has-password >/dev/null 2>&1 \
-    || CONVEYOR_MAIN=$repo "$BOARD_VENV/bin/python3" "$s/dashboard_server.py" add-user admin --admin || return 1
-  CONVEYOR_MAIN=$repo "$BASH" "$s/dashboard.sh" --install || return 1
+  if [ -n "$pw" ] && ! CONVEYOR_MAIN=$repo "$BOARD_VENV/bin/python3" "$s/dashboard_server.py" can-open >/dev/null 2>&1; then
+    # An `admin` added on the account page whose setup link was never used is a user with no password: add-user
+    # refuses it as already a user, so it gets the password, and the admin role, in place.
+    if jq -e '.users.admin | objects' "$(boardauth)" >/dev/null 2>&1; then
+      printf '%s\n%s\n' "$pw" "$pw" | CONVEYOR_MAIN=$repo "$BOARD_VENV/bin/python3" "$s/dashboard_server.py" set-password admin \
+        && CONVEYOR_MAIN=$repo "$BOARD_VENV/bin/python3" "$s/dashboard_server.py" set-role admin admin || return 1
+    else
+      printf '%s\n%s\n' "$pw" "$pw" | CONVEYOR_MAIN=$repo "$BOARD_VENV/bin/python3" "$s/dashboard_server.py" add-user admin --admin || return 1
+    fi
+  fi
+  CONVEYOR_MAIN=$repo "$BASH" "$s/dashboard.sh" --install </dev/null || return 1
   if [ "$(uname -s)" = Darwin ]; then f=$HOME/Library/LaunchAgents/com.conveyor.dashboard.plist; else f=$HOME/.config/systemd/user/dashboard.service; fi
   grep -qxF "$f" "$USES" 2>/dev/null || echo "$f" >> "$USES" || return 1
-  echo "conveyor: the Board runs from $s for $repo"
+  echo "conveyor: the Board runs from $s for $repo, at $(boardurl)"
+}
+# The Board's login store, where dashboard_server.py reads it.
+boardauth() { echo "${CONVEYOR_DASHBOARD_AUTH:-$(dirname "${CONVEYOR_RULING_LOG:-$HOME/.claude/rulings/conveyor.jsonl}")/dashboard-auth.json}"; }
+# The Board's address on this machine, as board-open.sh opens it: https://localhost:<port>/, or
+# https://<this host>.local:<port>/ when the host file says {"board": {"lan": true}} and "No login on this device" is
+# off. While it is on, only localhost lets this machine in with no password.
+boardurl() {
+  local n=localhost
+  [ "$(jq -r '.board.lan // false' "$HOST" 2>/dev/null)" != true ] || [ "$(jq -r '.noLoginHere' "$(boardauth)" 2>/dev/null)" != false ] \
+    || n=$(hostname -s).local
+  echo "https://$n:${CONVEYOR_DASHBOARD_PORT:-8790}/"
+}
+# 0 when the Board answers on its port with its login page under its own certificate (board-open.sh's check): another
+# service on the port is not the Board. -q skips the user's curl configuration, whose `insecure` would drop the check.
+boardup() {
+  [[ $(curl -q -s --cacert "$(dirname "$(boardauth)")/dashboard-tls/cert.pem" --max-time 2 "https://127.0.0.1:${CONVEYOR_DASHBOARD_PORT:-8790}/login" 2>/dev/null) \
+    == *'<title>Conveyor Board</title>'* ]]
 }

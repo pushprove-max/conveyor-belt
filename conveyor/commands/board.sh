@@ -6,4 +6,6 @@
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
-[ $# = 1 ] || { echo "usage: conveyor.sh board" >&2; exit 2; }; board
+if [ $# = 1 ]; then board
+elif [ $# = 3 ] && [ "$2" = --password-file ] && [ -n "$3" ]; then board "$3"
+else echo "usage: conveyor.sh board [--password-file <file>]" >&2; exit 2; fi

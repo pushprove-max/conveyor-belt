@@ -1,5 +1,5 @@
 ---
-description: Set up Conveyor Belt in this project (the pack, the plugin releases or main it follows or the commit it pins, its install, the Board's virtualenv, the labels, a first test-speed survey if wanted, the host file's record), then check this machine with conveyor doctor, offer to write a missing CLAUDE.md or AGENTS.md, and start Conveyor as its service if wanted; with --foreman, also set up Foreman mode; with --survey, ask again whether to run a test-speed survey
+description: Set up Conveyor Belt in this project (the pack, the plugin releases or main it follows or the commit it pins, its install, the Board's virtualenv, the labels, a first test-speed survey if wanted, the host file's record), then check this machine with conveyor doctor, offer to write a missing CLAUDE.md or AGENTS.md, and start Conveyor and the Board as this machine's services if wanted; with --foreman, also set up Foreman mode; with --survey, ask again whether to run a test-speed survey
 argument-hint: "[--foreman] [--pin] [--survey]"
 allowed-tools: Bash, AskUserQuestion, Read, Glob, Grep, Write
 ---
@@ -37,12 +37,22 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
    reviewer needs beyond it. Show each file you wrote, and give the user the one command that commits it, on the
    default branch: `git add CLAUDE.md AGENTS.md && git commit -m "Add the agent instruction files"` (naming only
    the files you wrote). Do not run it yourself.
-5. When doctor printed no `missing:` line other than the `CLAUDE.md` and `AGENTS.md` ones, ask the user "Start Conveyor now as this machine's service?" (yes / no).
-   On yes, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" install-service` and show its output. On no, say that
-   running `/conveyor-belt:setup` again in this checkout asks again and starts it on yes.
+5. When doctor printed no `missing:` line other than the `CLAUDE.md` and `AGENTS.md` ones, ask the user "Start Conveyor now as this machine's service?" (yes / no)
+   and, beside it, when doctor printed the `warning: the Board is not running` line, "Start the Board now?" (yes / no).
+   On yes to the first, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" install-service` and show its output. On
+   yes to the second, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" board` and show its output: it asks for no
+   password, as "No login on this device" lets this machine in; an admin password for other devices is set later on
+   the Board. When it stops with `"No login on this device" is off and no dashboard admin has a usable password`, ask
+   the user with AskUserQuestion for a password for the Board's admin `admin` (they type it as their own answer; when
+   board refuses it, it says why: ask again). Make a private folder with `mktemp -d`, write the
+   password as the one line of a file `pw` in it with the Write tool, and run
+   `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" board --password-file <that folder>/pw`, which deletes the file,
+   gives the admin `admin` the password (adding it when it is not a user) and starts the Board; then remove the folder. Never put the password in a command, and never show it
+   again. Never ask the user to run a command with `!` to finish setup. On no, say that running
+   `/conveyor-belt:setup` again in this checkout asks again and starts it on yes.
 6. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed), doctor's line "N open issues held; release one with
    `conveyor.sh control release <issue>` or on the Board", and each `missing:` line
-   doctor printed, with its fix, and each instruction file you wrote. List the lanes setup made (its `created: the fast lane` and `created: the research
+   doctor printed, with its fix, the Board's address (the `the Board runs` line of step 5, or doctor's Board line), and each instruction file you wrote. List the lanes setup made (its `created: the fast lane` and `created: the research
    lane's worktree` lines), with the command that starts the research lane when setup printed one. Make no change of your own to the pack, the pin or the labels. With `--foreman`, add
    that the Foreman is started by typing `/conveyor-belt:foreman` in a Claude Code session in this checkout (it stays
    the Foreman when continued, resumed or cleared with `/clear`; `/conveyor-belt:foreman off` ends it), that it is this project's Foreman

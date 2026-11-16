@@ -372,7 +372,11 @@ t_doctor() {
   doctortests '{}' '{times: {"a.test": 1}}'
   # A service whose conveyor.sh is there (the machine's, on the pinned install) is no missing piece.
   mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
-  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
+  # The Board running (#108): curl gets its login page, under its own certificate, on the port the Board is set to.
+  mkdir -p "$T/$CASE/board" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
+    && chmod +x "$T/$CASE/board/curl" || fail "the curl stub was not made"
+  out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
+  grep -qx 'ok: the Board, running at https://localhost:8791/' <<<"$out" || fail "doctor did not name the running Board's address: $out"
   ! grep -q '^missing' <<<"$out" && grep -q '^ok: the pinned commit' <<<"$out" && grep -q '^ok: codex' <<<"$out" && grep -q '^ok: the terms file' <<<"$out" \
     && grep -q "^ok: segno, in the Board's virtualenv " <<<"$out" && ! grep -q 'no test times' <<<"$out" \
     && grep -qx 'ok: the plugin mattpocock-skills@claude-plugins-official, for /conveyor-belt:plan' <<<"$out" || fail "doctor with everything in place: $out"
@@ -402,7 +406,13 @@ t_doctormissing() {
   # The host file's one record is another checkout of the same folder name (setup adds no second record of a name).
   jq --arg m "$T/$CASE/other/sample" '.records = [{repo: "sample", main: $m}]' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" \
     && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file was not rewritten"
-  out=$(cd "$S" && PATH=$(without codex) bash "$X" doctor 2>&1) && fail "doctor passed with pieces missing: $out"
+  # Nothing serves the Board's port: curl gets no page.
+  mkdir -p "$T/$CASE/noboard" && printf '#!/bin/sh\nexit 7\n' > "$T/$CASE/noboard/curl" && chmod +x "$T/$CASE/noboard/curl" || fail "the curl stub was not made"
+  out=$(cd "$S" && PATH=$(PATH=$T/$CASE/noboard:$PATH without codex) bash "$X" doctor 2>&1) && fail "doctor passed with pieces missing: $out"
+  # Bug caught (#108): after setup no Board ran, and doctor said nothing of it. It names the Board as not running, at
+  # its address, with the fix; a warning, as the Board is optional.
+  grep -qxF 'warning: the Board is not running (nothing serves https://localhost:8790/); fix: run /conveyor-belt:setup and answer yes to "Start the Board now?", or conveyor.sh board in the project'"'"'s checkout' <<<"$out" \
+    || fail "doctor did not name the Board as not running, with its fix: $out"
   # Bug caught (#17): the machine's Conveyor did not serve this checkout, as no record of the host file named it, and
   # doctor printed only "ok: the host file".
   grep -q "^missing: a record of the host file $XDG_CONFIG_HOME/conveyor/host.json for this checkout $S .*; fix: run /conveyor-belt:setup; .*add {\"repo\": \"<name>\", \"main\": \"$S\"}" <<<"$out" \

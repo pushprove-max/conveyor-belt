@@ -1043,11 +1043,12 @@ def cli_set_password(name):
     print('password set for %s' % name)
 
 
-def cli_has_password():
-    """Exit 0 when an admin in the store the login reads has a password; `dashboard.sh --install` asks before it
-    restarts the server."""
+def cli_can_open():
+    """Exit 0 when the Board the store the login reads serves can be opened: "No login on this device" is on (this
+    machine needs no password), or an admin has a password; `dashboard.sh --install` asks before it restarts the
+    server."""
     store = read_store()
-    ok = False
+    ok = no_login_here(store)
     for name in admins(store):
         u = users_of(store)[name]
         try:
@@ -1058,7 +1059,7 @@ def cli_has_password():
         except (KeyError, ValueError, TypeError):
             pass
     if not ok:
-        sys.exit('no dashboard admin with a usable password in %s: add one first with dashboard_server.py add-user <user> --admin; the running server is untouched' % AUTH)
+        sys.exit('"No login on this device" is off and no dashboard admin has a usable password in %s: add one first with dashboard_server.py add-user <user> --admin; the running server is untouched' % AUTH)
 
 
 def cli_devices(name=None):
@@ -1874,8 +1875,8 @@ if __name__ == '__main__':
     elif cmd == 'mfa-off' and len(args) == 1:
         cli_action('mfa-off', args[0])
         print('MFA off for %s' % args[0])
-    elif cmd == 'has-password':
-        cli_has_password()
+    elif cmd == 'can-open':
+        cli_can_open()
     elif cmd == 'devices' and len(args) <= 1:
         cli_devices(*args)
     elif cmd == 'revoke' and len(args) == 1:
@@ -1884,4 +1885,4 @@ if __name__ == '__main__':
         serve(int(cmd), args[0])
     else:
         sys.exit('usage: dashboard_server.py <port> <directory> | make-cert [--force] | add-user <user> [--admin] | set-role <user> admin|member'
-                 ' | set-password <user> | remove-user <user> | mfa-off <user> | has-password | devices [<user>] | revoke <id>|all')
+                 ' | set-password <user> | remove-user <user> | mfa-off <user> | can-open | devices [<user>] | revoke <id>|all')

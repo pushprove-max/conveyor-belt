@@ -130,8 +130,15 @@ Conveyor runs once per machine, and each project is a record of the host file. S
 (`conveyor.sh machine`), keeps a loop running for every record. `conveyor.sh install-service` installs it: a systemd
 user unit on Linux, a launchd agent on macOS. Install it while no card is in flight.
 
-Setup's last question is "Start Conveyor now as this machine's service?". Yes runs `install-service`. To start it
-later, run `/conveyor-belt:setup` again in your project's checkout and answer yes.
+Setup's last question is "Start Conveyor now as this machine's service?". Yes runs `install-service`. Beside it,
+when the Board is not running, setup asks "Start the Board now?". Yes runs `conveyor.sh board`, which starts the
+[Board](board.md) as this machine's user service. It asks for no password: **No login on this device** lets you in
+from this machine. When that setting is off and no admin has a password, setup asks you for one in Claude Code's
+prompt and gives it to `conveyor.sh board` in a file that it deletes. To log in from another device, add a user on the
+Board's account page. To start either one later,
+run `/conveyor-belt:setup` again in your project's checkout and answer yes.
+
+`doctor` names the Board's address when it runs. When it does not run, `doctor` prints a `warning:` line with the fix.
 
 Before it adds the project to the host file, setup writes the project's control record. By default, new issues start
 held, and each issue that is open at setup is held. Thus the first loop builds nothing: it does not queue the backlog
