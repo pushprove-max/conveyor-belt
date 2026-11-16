@@ -9,7 +9,7 @@
 # A main-red fix card (issue 0, redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing.
 retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
-  local n=$1 ends l what k='.issue == $n' a
+  local n=$1 ends l what k='.issue == $n' a p
   check || return 1
   if [[ $1 =~ ^[0-9]+$ ]]; then
     what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1") || return 1
@@ -56,8 +56,26 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
   echo "conveyor: $what can be picked again; its old lines are in $RETRIED"
   [ "$k" = '.issue == $n' ] || return 0
   [ -z "${2:-}" ] || { echo "conveyor: its next card builds from nothing; $([ -n "$moved" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
-  ends=$(prior "$n" | jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"')
-  [ -z "$ends" ] || [ ! -s "$ends" ] || echo "conveyor: its next card starts from the kept patch $ends: applied if it still applies to main, brought onto main by a session if not"
+  p=$(prior "$n"); ends=$(jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"' <<<"$p")
+  [ -n "$ends" ] && [ -s "$ends" ] || return 0
+  # A patch stopped for the owner's yes: what card() does with it, by the issue as it is now (keptway()), and by the
+  # check card() makes after it: with the rule "visible changes need the owner's yes" off, nothing waits for the yes;
+  # on, a yes with a condition has the kept patch reviewed against it with no build.
+  if names 2>/dev/null && yeskept "$p" && l=$(gh issue view "$n" --json number,title,body,labels,milestone 2>/dev/null); then
+    what=$(keptway "$l" "${ends%.patch}.body")
+    if ! yesrule; then [ "$what" != wait ] && [ "$what" != land ] || what=off
+    elif [ "$what" = land ] && conditional "$l"; then what=held
+    fi
+    case $what in
+      held) echo "conveyor: its next card reviews the kept patch $ends against $OWNER's yes as the issue now gives it, with no build: the patch lands only after that review"; return 0 ;;
+      off) echo "conveyor: its next card lands from the kept patch $ends, with no build and no review while it still applies to main: the rule \"visible changes need the owner's yes\" is off, and the issue is the one its review read"; return 0 ;;
+      land) echo "conveyor: its next card lands from the kept patch $ends, with no build and no review while it still applies to main: an approval line has come since its review, and the issue is the one that review read"; return 0 ;;
+      wait) echo "conveyor: its next card stops again for $OWNER's yes on the kept patch $ends: the issue is the one its review read, with no approval line since"; return 0 ;;
+      review) echo "conveyor: its next card starts from the kept patch $ends, with one session, then a review against the issue as it is now: the issue changed since that patch was reviewed"; return 0 ;;
+      build) echo "conveyor: its next card is built from nothing: the issue's section of what customers or staff will see changed since the kept patch $ends was reviewed"; return 0 ;;
+    esac
+  fi
+  echo "conveyor: its next card starts from the kept patch $ends: applied if it still applies to main, brought onto main by a session if not"
 }
 # Under the lock, at a turn of the loop that found a blocked card's issue closed: a blocked card whose issue is closed
 # (among the issue numbers given), for whatever reason, is done waiting on the owner. It ends with a closed line whose
@@ -130,6 +148,29 @@ prior() { # <issue>
   done < <(jq -c --argjson n "$1" --arg st "$ST" 'select(.issue == $n and .step == "blocked") | {card, kept: (.kept // "" | if . == "" then . else $st + "/" + . end), reason}' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
   [ -n "$patch$rev" ] || return 0
   jq -cn --argjson p "${patch:-null}" --arg r "$rev" '{card: ($p.card // ""), kept: ($p.kept // ""), reason: ($p.reason // ""), review: $r}'
+}
+# Whether the kept patch of prior() ($1) is one card() would land with no build and no review: its card stopped for
+# the owner's yes after a review of that patch (the kept review is that card's own) that gave a verdict and said
+# whether the change is visible.
+yeskept() { # <prior json>
+  local from was rev
+  from=$(jq -r .card <<<"$1"); was=$(jq -r .reason <<<"$1"); rev=$(jq -r .review <<<"$1")
+  [ -n "$from" ] && [[ $was == "$YES"* ]] && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
+    && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && [ -n "$(visible "$rev" any)" ]
+}
+# How the next card takes up such a kept patch, from the issue as it is now ($1, its json) and the issue as the
+# review of that patch read it (the .body file its card kept when it stopped for the yes, $2). Approval lines aside:
+# land: the body is the one the review read and an approval line has come since; wait: nothing has changed, and the
+# card stops again for the yes (no build and no review); review: the body changed, or cannot be compared, with the
+# same section of what customers or staff will see, so the patch is built on and reviewed against the issue as it
+# is now; build: that section changed, so the issue asks for another change and the card is built from nothing.
+keptway() { # <issue json> <kept body file>
+  local was
+  was=$(jq -ce 'objects' "$2" 2>/dev/null) || { echo review; return 0; }
+  jq -rn --argjson now "$1" --argjson was "$was" "$SEE"'
+    def asks: [.body // "" | splits("\r?\n") | select(startswith("Visible change approved:") | not) | sub("\\s+\\z"; "") | select(. != "")];
+    if ($now | section) != ($was | section) then "build" elif ($now | asks) != ($was | asks) then "review"
+    elif ($now | approvals) > ($was | approvals) then "land" else "wait" end'
 }
 # The approval lines an issue saying nothing visible changes had when its last card stopped for the owner's yes,
 # as the .approvals file of its newest blocked card that kept one says; nothing when none did.

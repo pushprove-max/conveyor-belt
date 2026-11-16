@@ -43,8 +43,7 @@ card() { # <card> <issue> [<branch> <tip>]
         # goes on from there, as a run again does, on main as it is now (rerunsince()).
         cp "$fromk/$from.rerun" "$wt.rerun" 2>/dev/null || :
         mode=session; note="resumed from the kept patch of card $from: one session, then review"
-        [[ $was != "$YES"* ]] || { [ "$rev" != "$fromk/$from.review" ] && [ "$rev" != "$CARDS/$from.review" ]; } || [ ! -s "$wt.review" ] || [ "$(verdict "$wt.review")" = none ] || [ -z "$(visible "$wt.review" any)" ] \
-          || { mode=land; note="landing from the kept patch of card $from: no build and no review"; }
+        ! yeskept "$prev" || { mode=land; note="landing from the kept patch of card $from: no build and no review"; }
       elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
         mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"
         # Its loop finished: only a landing conflict blocked it, and the kept review is the review of that
@@ -69,6 +68,17 @@ card() { # <card> <issue> [<branch> <tip>]
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
   # brief and the review leave the approval out, and a visible change lands as any change does.
   yesrule "${CARDCTL:-}" || { vrule=off; rv=$REVIEWOFF; }
+  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
+  # stopped for the yes). A body changed since: the patch is built on and reviewed against the issue as it is now. A
+  # section of what customers or staff will see changed since: the issue asks for another change, built from nothing.
+  if [ "$mode" = land ] && [ -n "$issue" ]; then
+    d=$fromk/$from.body; [ -e "$d" ] || d=$CARDS/$from.body
+    case $(keptway "$issue" "$d") in
+      review) mode=session; note="resumed from the kept patch of card $from: the issue changed since its review: one session, then review" ;;
+      build) git -C "$wt" reset -q --hard 2>/dev/null || { block "$c" "$n" "$wt" "worktree: the kept patch of card $from could not be taken out of the worktree"; return; }
+        rm -f "$wt.rerun" "$wt.trailers"; mode=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
+    esac
+  fi
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
   # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
   [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
@@ -309,12 +319,13 @@ card() { # <card> <issue> [<branch> <tip>]
     # that section, with no second ask; one that differs stops, and the ask names the difference only. A section
     # saying nothing visible changes is no yes: a visible change stops as it would with no section. With the rule
     # "visible changes need the owner's yes" off, none of this holds a card.
+    # A card that stops here keeps the issue body this review read (.body; keptway(): its retry lands only on it).
     yesfrom=''
     if [ -n "$heldto" ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths; then
       case $vis in
         matches) echo "conveyor: card $c: what it shows matches the change $OWNER approved before the build" ;;
-        "differs: "*) printf '%s\n' "$nyes" > "$wt.approvals"; block "$c" "$n" "$wt" "${YES}it differs from the change approved before the build: ${vis#differs: }" post; return ;;
-        *) printf '%s\n' "$nyes" > "$wt.approvals"; block "$c" "$n" "$wt" "${YES}the review did not say whether it matches the change approved before the build" post; return ;;
+        "differs: "*) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}it differs from the change approved before the build: ${vis#differs: }" post; return ;;
+        *) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}the review did not say whether it matches the change approved before the build" post; return ;;
       esac
     elif [ "$vrule" = on ] && [ -z "$heldto" ] && [ "$vis" != no ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths \
       && { [ "$nyes" = 0 ] || { [ "$seen" = nothing ] && [ "$nyes" -le "$ybase" ]; }; }; then
@@ -327,7 +338,7 @@ card() { # <card> <issue> [<branch> <tip>]
           *) more=" (the review did not say whether it is part of the yes of #$old)" ;;
         esac
       fi
-      [ -n "$yesfrom" ] || { [ "$seen" != nothing ] || printf '%s\n' "$nyes" > "$wt.approvals"; block "$c" "$n" "$wt" "$YES${vis#yes: }$more" post; return; }
+      [ -n "$yesfrom" ] || { [ "$seen" != nothing ] || printf '%s\n' "$nyes" > "$wt.approvals"; jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES${vis#yes: }$more" post; return; }
       echo "conveyor: card $c: its visible change is part of the change $OWNER approved in #$yesfrom: the yes is inherited"
     fi
     # The trailers the pack requires of the files this change adds (commit.trailers): one session per card writes

@@ -244,7 +244,7 @@ t_resume() {
   loop run >/dev/null || fail "run exited non-zero"
   st 'select(.step == "blocked") | .reason' | grep -q "needs Dana's yes" && [ ! -e "$STUB/filed" ] || fail "#7 was not blocked for Dana's yes with nothing filed: $(steps 7)"
   issue 7 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-11"]' > "$STUB/issues.json"
-  loop retry 7 | grep -q 'starts from the kept patch .*-7\.patch' || fail "retry does not say the next card starts from the kept patch"
+  loop retry 7 | grep -q 'lands from the kept patch .*-7\.patch, with no build and no review' || fail "retry does not say the approved next card lands from the kept patch"
   loop run >/dev/null || fail "run of the retried #7 exited non-zero"
   [ "$(st 'select(.issue == 7 and '"$NOMARK"') | .step' | tr '\n' ' ')" = "picked worktree brief test landed " ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
     || fail "the retried card was built or reviewed again: $(steps 7)"
@@ -308,7 +308,9 @@ t_resumeyes() {
   issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
   printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$YES" 'VERDICT: NO-GO' > "$STUB/review.$((r + 2))"; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.$((r + 3))"
   echo 'echo admins >> e.txt' > "$STUB/build"
-  loop retry 11 >/dev/null && loop run >/dev/null || fail "run of the retried #11 exited non-zero"
+  # Bug: retry said this card lands "with no build and no review", though the condition has it reviewed first.
+  loop retry 11 | grep -q "reviews the kept patch .*-11\.patch against Dana's yes as the issue now gives it, with no build" || fail "retry does not say the conditionally approved kept patch is reviewed before it lands"
+  loop run >/dev/null || fail "run of the retried #11 exited non-zero"
   [ "$(st 'select(.issue == 11 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] \
     && [ "$(tr '\n' ' ' < "$R/e.txt")" = "eleven admins " ] || fail "a kept patch approved with a condition was not reviewed against it before landing: $(steps 11)"
   st 'select(.issue == 11 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old against the condition of Dana's yes" && loop check || fail "the worktree line does not say the kept patch is reviewed, or the records do not check: $(steps 11)"

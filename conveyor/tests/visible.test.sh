@@ -57,7 +57,8 @@ t_visibleyes() {
   grep -qx '+two' "$k/$old.patch" && [ "$(cat "$k/$old.base")" = "$head" ] && [ -s "$k/$old.review" ] && [ -s "$k/$old.trailers" ] || fail "the blocked card's patch, the commit it was built on and its review are not in the kept folder: $(ls "$k" 2>&1)"
   grep -q "kept as a patch: <state>/kept/${k##*/}/$old.patch (2 files, 1 KB, built on commit $head)" "$STUB/comments" || fail "the block comment does not name the kept patch and its size: $(cat "$STUB/comments")"
   # Retried without the approval line, the card waits again, still with no build and no review, and keeps its work.
-  sessions=$(wc -l < "$STUB/sessions"); loop retry 8 >/dev/null || fail "retry of the blocked #8 exited non-zero"
+  sessions=$(wc -l < "$STUB/sessions"); out=$(loop retry 8) || fail "retry of the blocked #8 exited non-zero"
+  grep -q "stops again for Dana's yes on the kept patch" <<<"$out" || fail "retry does not say the unapproved card stops again for the yes: $out"
   loop run >/dev/null || fail "run of the unapproved retry exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | .step' | tr '\n' ' ')" = "picked worktree brief blocked " ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] \
     && grep -qx '+two' "$(st 'select(.issue == 8 and .step == "blocked") | "\($ENV.ST)/\(.kept)/\(.card).patch"')" || fail "an unapproved retry did not wait again with its work kept: $(steps 8)"
@@ -65,7 +66,8 @@ t_visibleyes() {
   # Bug: the same card, retried with the approval line in the issue body, is built and reviewed again from
   # nothing. It lands from its kept patch: the changed tests and the landing, with no build and no review step.
   issue 8 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02, r-9 (yes)\n"]' > "$STUB/issues.json"
-  runs=$(wc -l < "$STUB/tests"); loop retry 8 >/dev/null || fail "second retry of the blocked #8 exited non-zero"
+  runs=$(wc -l < "$STUB/tests"); out=$(loop retry 8) || fail "second retry of the blocked #8 exited non-zero"
+  grep -q 'lands from the kept patch .*, with no build and no review' <<<"$out" || fail "retry does not say the approved card lands from its kept patch: $out"
   loop run >/dev/null || fail "third run exited non-zero"
   [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(grep -c "^[0-9]* --body " "$STUB/comments")" = 2 ] || fail "the approved card did not land: $(steps 8)"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | .step' | tr '\n' ' ')" = "picked worktree brief test landed " ] && [ "$(wc -l < "$STUB/sessions")" = "$sessions" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
@@ -75,6 +77,49 @@ t_visibleyes() {
   git -C "$R" log -1 --format=%B | grep -qx 'Mutation-verified: broke X, test went red' || fail "the approved card landed without the trailer its build wrote: $(git -C "$R" log -1 --format=%B)"
   loop check || fail "the record check refuses the lines of a card that landed from a kept patch"
   [ "$(loop cards | jq -c --arg c "$(st 'select(.issue == 8 and .step == "landed") | .card')" '.cards[] | select(.card == $c) | [.step, .stage, .reviews]')" = '["landed",5,0]' ] || fail "dashboard row of a card landed from a kept patch: $(loop cards)"
+}
+# Bug: with the rule "visible changes need the owner's yes" turned off after a card stopped for the yes, retry says
+# the next card stops again for the yes, though it lands from the kept patch with no build and no review.
+t_retryoff() {
+  visiblestart 9; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
+  loop run >/dev/null; st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#9 was not blocked for Dana's yes: $(steps 9)"
+  loop control rules visible=off >/dev/null || fail "control rules visible=off was refused"
+  out=$(loop retry 9) && grep -q 'lands from the kept patch .*-9\.patch, with no build and no review .*is off' <<<"$out" || fail "retry with the rule off does not say the card lands from its kept patch: $out"
+  loop run >/dev/null; [ "$(st 'select(.issue == 9 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
+    || fail "with the rule off, the retried card did not land from its kept patch with no second review: $(steps 9)"
+}
+# Bug: a card stopped for the yes whose issue the owner then rewrote to ask for another change (its section now
+# says nothing visible changes), with no approval line, is taken up from its kept patch with no build and no
+# review. Its next card is built from nothing (the kept patch taken out first, so the change is not made twice),
+# then reviewed, and retry says so.
+t_visiblerewritten() {
+  visiblestart 21; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  loop run >/dev/null; st 'select(.issue == 21 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#21's visible change did not stop: $(steps 21)"
+  old=$(st 'select(.issue == 21 and .step == "blocked") | .card'); sessions=$(wc -l < "$STUB/sessions")
+  issue 21 2026-01-01 | jq -c '[.body = "Do (b) instead.\n\n## What customers or staff will see\nNothing visible changes."]' > "$STUB/issues.json"
+  out=$(loop retry 21) && grep -q 'its next card is built from nothing' <<<"$out" || fail "retry does not say the rewritten issue's card is built from nothing: $out"
+  loop run >/dev/null || fail "run of the retried #21 exited non-zero"
+  new=$(st 'select(.issue == 21 and .step == "landed") | .card')
+  [ -n "$new" ] && [ "$(st "select(.card == \"$new\" and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
+    && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] || fail "the rewritten issue's card was not built and reviewed before it landed: $(steps 21)"
+  st "select(.card == \"$new\" and .step == \"worktree\") | .reason" | grep -q "changed since the review of the kept patch of card $old: built from nothing" \
+    && [ "$(grep -c '^two$' "$R/a.txt")" = 1 ] || fail "the card did not build from nothing, or kept the old patch under its build: $(steps 21) / $(cat "$R/a.txt")"
+}
+# Bug: an approval line added with a body changed since the review is taken as the yes to that review's patch, and
+# the patch lands with no review. The section is the same: the card goes on from the kept patch with one session and
+# a review against the issue as it is now, and retry says so.
+t_visiblechanged() {
+  visiblestart 22; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"; cp "$STUB/review.1" "$STUB/review.2"
+  loop run >/dev/null; st 'select(.issue == 22 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#22's visible change did not stop: $(steps 22)"
+  old=$(st 'select(.issue == 22 and .step == "blocked") | .card'); sessions=$(wc -l < "$STUB/sessions")
+  issue 22 2026-01-01 | jq -c '[.body += "\nAlso show the price.\n\nVisible change approved: Dana 2026-01-02, r-9 (yes)\n"]' > "$STUB/issues.json"
+  out=$(loop retry 22) && grep -q 'one session, then a review against the issue as it is now' <<<"$out" || fail "retry does not say the changed issue's card is reviewed again: $out"
+  loop run >/dev/null || fail "run of the retried #22 exited non-zero"
+  new=$(st 'select(.issue == 22 and .step == "landed") | .card')
+  [ -n "$new" ] && [ "$(st "select(.card == \"$new\" and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
+    && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] || fail "the changed issue's card landed its kept patch with no session or review: $(steps 22)"
+  st "select(.card == \"$new\" and .step == \"worktree\") | .reason" | grep -q "^resumed from the kept patch of card $old: the issue changed since its review" \
+    || fail "the worktree line does not say the card resumes from the kept patch for a review: $(steps 22)"
 }
 # The words inside a line of the body are not the approval line: counted as the loop counts an issue's approval
 # lines (card.sh: SEE's approvals, prompts.sh), with no card run. A card with none stops (t_visibleyes).
