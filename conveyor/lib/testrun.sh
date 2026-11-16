@@ -498,7 +498,11 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # files alone, staged, on a test slot, with the card's own command (test.command), which selects them as that change's
 # tests. At least one must fail there: a test that passes without the fix does not prove it. Writes the result in
 # <worktree>.unfixed, which the review is shown, and fails when the check does not hold: the change adds or changes no
-# test file, or no test failed in their run on main (it passed, or only its runner failed it). A run that cannot be made (no worktree, or the files do not apply) fails
+# test file, or no test failed in their run on main (it passed, or only its runner failed it). A failed run on main
+# that gave no result for one of those files (noresult(): no pass and no fail of it) proves nothing either way: it runs
+# once more, and when that run gives none either, the result's first line is "the proof run on main gave no result for
+# <file>: <the run's last lines>" and the check fails with exit 2 (the card is blocked, as a build session cannot
+# repair the runner). A run that cannot be made (no worktree, or the files do not apply) fails
 # nothing, as a build session cannot repair it (but for a change with no test file, which fails as before): the result says so. A change to test files alone (a test fix for a
 # red main) is not run and fails nothing: with no fix to take out, its tests run on the same code and pass. The result
 # says it is test-only, and the review judges its tests.
@@ -510,7 +514,7 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # issue names none, the check is skipped and holds: the result and the card's `bugproof` line (result skipped) say why.
 # That selection run is made only when the change adds or changes no test file, or its test files' run selected nothing.
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() nf=() f out rc fx held='' sha='' why
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() nf=() f out rc fx held='' sha='' why nr=''
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -534,8 +538,18 @@ bugproof() { # <card> <worktree> <issue json>
     else
       tests "$mwt" test.command; rc=$?
       ! testfailed "$mwt" "$rc" || held=1
-      { printf 'Its test files, run on main'"'"'s code at %s without the fix:\n' "$sha"; printf -- '- %s\n' "${fs[@]}"
+      # A failed run that proved nothing and gave no result for a file it was given (noresult()) says nothing either
+      # way: it runs once more, and when that run gives none either the card is blocked with that reason (exit 2).
+      if [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
+        tests "$mwt" test.command; rc=$?
+        ! testfailed "$mwt" "$rc" || held=1
+        [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
+      fi
+      { [ -z "$nr" ] || printf 'the proof run on main gave no result for %s: %s\n' "$nr" \
+          "$(tail -n 5 "$mwt.test" 2>/dev/null | tr -d '\000\r' | sed 's/\x1b\[[0-9;]*m//g' | awk 'NF { sub(/^[ \t]+/, ""); s = s (s == "" ? "" : " / ") $0 } END { print substr(s, 1, 300) }')"
+        printf 'Its test files, run on main'"'"'s code at %s without the fix:\n' "$sha"; printf -- '- %s\n' "${fs[@]}"
         if [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
+        elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."
         elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
         else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; fi
         echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
@@ -543,7 +557,7 @@ bugproof() { # <card> <worktree> <issue json>
     # Does the change select any test of its own? Asked only when its test files proved nothing and selected nothing
     # (a run that selected a test that passed says the change is not one that selects none). Asked alone with no list,
     # so no file is kept off as passed before (cacheoff()): a code change whose tests were all kept off would select none.
-    if [ -z "$held" ] && { [ ${#fs[@]} = 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; } \
+    if [ -z "$held" ] && [ -z "$nr" ] && { [ ${#fs[@]} = 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; } \
       && git -C "$mwt" reset -q --hard && rm -f "$mwt.rerun" \
       && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>/dev/null \
       && { tests "$mwt" test.command alone; rc=$?; [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; }; then
@@ -581,6 +595,7 @@ bugproof() { # <card> <worktree> <issue json>
     held=1
   fi
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  [ -z "$nr" ] || return 2
   [ -n "$held" ]
 }
 # The test file of a speed-up issue (card()): an issue whose title starts SPEEDUP, as the Board's Tests page files it
@@ -633,6 +648,22 @@ speedproof() { # <card> <worktree> <issue json> <test file>
 # own check refused the run) proves nothing. A command that writes no logs says no more than its exit.
 testfailed() { # <worktree> <exit>
   [ "$2" != 0 ] && { [ -z "$(testlogs "$1")" ] || jq -e '.files != []' <<<"$(testfails "$1.test" "$2")" >/dev/null 2>&1; }
+}
+# A failed run of the bug-card check that gave no result for a file it was given: the runner's logs (testlogs()) name
+# it neither passed nor failed, and name no case of it that passed (testfails()), and no case the run names as passed
+# or failed, under any file, is in its text (a runner that runs another's cases logs them under its own name: the
+# engine's runner, conveyor/conveyor.test.sh, those of its case files). Prints the first such file; fails when there is
+# none, the run passed, or the command writes no logs (its exit is all it says).
+noresult() { # <worktree> <exit> <file>...
+  local w=$1 rc=$2 t f cs; shift 2
+  [ "$rc" != 0 ] && [ -n "$(testlogs "$w")" ] && t=$(testfails "$w.test" "$rc") || return 1
+  cs=$(jq -r '(.okcases + .passcases)[]?.cases[]?, .files[]?.cases[]?.name | select(. != "")' <<<"$t")
+  for f in "$@"; do
+    jq -e --arg f "$f" 'IN(.passed[]?, .files[]?.file, .okcases[]?.file; $f)' <<<"$t" >/dev/null && continue
+    [ -n "$cs" ] && grep -qF -- "$cs" "$w/$f" 2>/dev/null && continue
+    printf '%s\n' "$f"; return 0
+  done
+  return 1
 }
 # A case that fails on main (verdicts()) goes to the fix card of main's commit, a card with no GitHub issue (issue 0;
 # the owner, 2026-11-15: 13 issues filed in 9 hours, three by one landing): one card per broken main commit, holding

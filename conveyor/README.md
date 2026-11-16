@@ -708,7 +708,10 @@ the fix, alone, in a worktree of the commit the card was built on (`cards/mainru
 back to its build session once, told "the new tests pass without the fix, so they do not prove it" (its second `build`
 line has that reason), and the check runs again; when it still does not hold, the card is blocked with that reason,
 with no review. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
-file that failed (a runner that stops the run with no test failing proves nothing). The review is shown the check's
+file that failed (a runner that stops the run with no test failing proves nothing). A failed run whose logs give no
+result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
+that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:
+<the run's last lines>", with no second build session and no review. The review is shown the check's
 result. A card whose issue is not a bug, and a build that left no change, are not checked. A change to test files
 alone (every path it changes is a test file, as in a fix to a test that main made wrong) is not checked either: it has
 no fix to take out, so its tests would run on the same code and pass, and the card would be blocked though correct.

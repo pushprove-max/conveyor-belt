@@ -190,11 +190,19 @@ card() { # <card> <issue> [<branch> <tip>]
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       speedproof "$c" "$wt" "$issue" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-    elif ! bugproof "$c" "$wt" "$issue"; then
-      began "$c" "$n" build
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"$BUGBUILD"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
-      checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$UNFIXED" '. + {reason: $r}' <<<"$t")" || return
-      bugproof "$c" "$wt" "$issue" || { block "$c" "$n" "$wt" "build: $UNFIXED"$'\n'"$(<"$wt.unfixed")"; return; }
+    else
+      # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
+      # build session cannot repair the runner.
+      bugproof "$c" "$wt" "$issue"; trc=$?
+      [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      if [ $trc != 0 ]; then
+        began "$c" "$n" build
+        redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"$BUGBUILD"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
+        checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$UNFIXED" '. + {reason: $r}' <<<"$t")" || return
+        bugproof "$c" "$wt" "$issue"; trc=$?
+        [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+        [ $trc = 0 ] || { block "$c" "$n" "$wt" "build: $UNFIXED"$'\n'"$(<"$wt.unfixed")"; return; }
+      fi
     fi
   fi
   msg=$(jq -r --arg c "$c" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title) (#\(.number))\n\nCloses #\(.number)\nConveyor card \($c)"' <<<"$issue")

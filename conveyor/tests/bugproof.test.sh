@@ -59,6 +59,40 @@ t_bugrunner() {
   [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|the new tests pass without the fix, so they do not prove it|" ] \
     && grep -q '^The run failed there (exit 1), but no test failed in it' "$STUB/brief" \
     || fail "a runner's own failure on main was taken for the new test failing: $(st 'select(.step == "build")'; tail -n 20 "$STUB/brief")"
+  # D2 of #69: the file ran and passed there, so it is no "no result" run: it is blocked as passing without the fix.
+  [ "$(grep -c '/cards/mainrun/' "$STUB/mainran")" = 2 ] && [ "$(st 'select(.step == "blocked") | .reason')" = "build: the new tests pass without the fix, so they do not prove it" ] \
+    || fail "a run on main whose file ran and passed was not blocked as passing without the fix: $(st 'select(.step == "blocked")'; cat "$STUB/mainran")"
+}
+
+# D1 of #69. Bug it catches: a run on main whose runner exits 1 and gives no result for the card's test file (its logs
+# name another file only, as a runner whose part for that file was unavailable) is taken for "the new tests pass
+# without the fix", and the card goes back to its build for a fault no build can mend. It runs once more on main, no
+# build session follows, and the card is blocked with the "gave no result" reason and the runner's last lines.
+t_bugnoresult() {
+  MAINRUN='printf "== o.test.sh\n-- ok o.test.sh\n" > "$CONVEYOR_TEST_LOG/r"; echo "Tests unavailable"; exit 1' \
+    bugcard 'grep -qx one a.txt' bug
+  [ "$(grep -c '/cards/mainrun/' "$STUB/mainran")" = 2 ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
+    && [ -z "$(st 'select(.step == "build") | .reason // empty')" ] \
+    || fail "a run on main with no result for the test file was not run once more, or went back to build: $(st 'select(.step == "build")'; cat "$STUB/mainran")"
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the proof run on main gave no result for a.test.sh: Tests unavailable' ] && [ ! -e "$STUB/asked" ] \
+    || fail "the card was not blocked with the no-result reason before review: $(st 'select(.step | IN("review", "blocked"))')"
+}
+
+# Bug it catches: a runner that runs another file's cases logs them under its own name (the engine's runner,
+# conveyor/conveyor.test.sh, those of a case file), so a run whose case file passed, and which failed only for the
+# runner's own check, was read as giving no result for the case file and blocked as "gave no result" in place of
+# "the new tests pass without the fix". noresult() is called on such a run: a case of the file passed, so it has a
+# result; a file with none of the run's cases in it has none.
+t_bugnoresultnested() {
+  local w=$T/$CASE/wt; mkdir -p "$w.testlog" "$w/conveyor/tests"
+  printf 't_fixed() { :; }\n' > "$w/conveyor/tests/new.test.sh"; printf 't_other() { :; }\n' > "$w/conveyor/tests/none.test.sh"
+  printf '== conveyor/conveyor.test.sh\n-- ok conveyor/conveyor.test.sh\n' > "$w.testlog/r"
+  printf '== conveyor/conveyor.test.sh (cases: fixed)\nok fixed\nthe area map does not name conveyor/tests/new.test.sh\n' > "$w.test"
+  local got
+  got=$( eval "$(sed -n '/^testfails() {/,/^}/p; /^noresult() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+    packget() { return 1; }; TEST_TIMEOUT=600 noresult "$w" 1 conveyor/tests/new.test.sh conveyor/tests/none.test.sh )
+  [ "$got" = conveyor/tests/none.test.sh ] \
+    || fail "noresult() did not take a case logged under the runner as the case file's result: '$got'"
 }
 
 # Bug it catches: a bug card whose change is a test file alone (a test fixed for a red main, which passes on main's
