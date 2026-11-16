@@ -391,7 +391,10 @@ const begin = async ($: EngineInterface) => {
   paneUp = false
   await update($, state, () => null)
   await $.command.register({ name: 'units', description: "Conveyor's board (needs you, the belt, the queue, landed today, the lanes): /units, or /units band|pane|status on|off" })
-  await setViews($)
+  // The open here is unasked, so the host places it only on a wide terminal (a narrower one leaves it undrawn, with
+  // the reason): the session is told why and that /units pane on, an asked open, places it at any width.
+  const placed = await setViews($)
+  if (placed && placed.isPlaced === false) $.ui.log(`units: the Conveyor pane is not drawn (${placed.reason ?? 'not placed'}); /units pane on tries again`)
   // Claude Code's timer is an object with cancel, not a function: calling it made every later begin throw.
   stopPoll?.cancel()
   spin?.cancel()

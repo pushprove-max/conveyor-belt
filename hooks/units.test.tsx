@@ -449,6 +449,28 @@ test('/units band, pane and status flip one view for the session, and a pane tha
   expect(w.status.at(-1)).toBe(undefined)
 })
 
+// The pane option set to on at setup opens the pane at session start, even in a worker checkout, where auto leaves it off.
+test('with the pane option on, the session start opens the Conveyor pane with no /units pane on', { options: { pane: 'on' } }, async ($, on) => {
+  const w = world(on, 'worker', answer(FULL))
+  const logs: string[] = []
+  on('ui.log', (_, e) => (logs.push(e.text), { value: undefined }))
+  await start($, 'worker')
+  expect(w.opened).toEqual(['units'])
+  expect(logs).toEqual([])
+})
+
+// Bug (issue 107): the session start's open is unasked, so a terminal under the host's width floor leaves the pane
+// undrawn; its reason was dropped, so the pane set to on never showed and nothing said why.
+test('a pane the host does not place at session start gives the session one line with the reason and /units pane on', { options: { pane: 'on' } }, async ($, on) => {
+  const w = world(on, 'worker', answer(FULL))
+  const logs: string[] = []
+  on('ui.log', (_, e) => (logs.push(e.text), { value: undefined }))
+  w.placed = false
+  await start($, 'worker')
+  expect(w.opened).toEqual(['units'])
+  expect(logs).toEqual(['units: the Conveyor pane is not drawn (no room); /units pane on tries again'])
+})
+
 // Bug (issue 616): with /conveyor-belt:auto on and /units band on, each band's hook drew its own view in place of the
 // next one's, so one band hid the other. Both bands, and the view beneath them ('engine'), are drawn.
 test('with /conveyor-belt:auto on and /units band on, the place above the prompt shows both bands', async ($, on) => {

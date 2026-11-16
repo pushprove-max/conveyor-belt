@@ -91,7 +91,11 @@ line (`shop paused`, `shop stopped`, `shop paused by guard`, `shop: no loop proc
 
 Each view has its own option in `/config`, under the plugin: `band`, `pane`, `status` (status line and toasts), each
 `auto`, `on` or `off`. `auto` is on in main, where the Foreman runs, off in every other worktree (a card's, a lane's).
-`/units band|pane|status on|off` flips one for the current session. `motion` (`off` by default, or `on`) turns the mark
+`/units band|pane|status on|off` flips one for the current session.
+
+With `pane` on, the pane opens when a session starts. Claude Code places a pane that opens by itself only in a wide
+terminal. In a narrower one the pane waits, not drawn, and the session shows one line with the reason Claude Code gives
+and says that `/units pane on` tries again. `/units pane on` places the pane at any width. `motion` (`off` by default, or `on`) turns the mark
 of each card on the belt `◐ ◓ ◑ ◒` once a second; off, the mark stands still.
 
 ## What it reads
