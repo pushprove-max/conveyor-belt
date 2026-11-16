@@ -6,7 +6,8 @@
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
 // usedFor: [what it is used for] | null, cards (a card runs on it; null: not known), others (the Rules tab can move its work to another account)}]} | null,
 // stream: {live, heardAt, since, error, writtenAt} | null (Conveyor's live stream), update: {checkedAt, head, error, moved: {from, to, at,
-// restart, restartFailed?} | null} | null (the main checkout brought forward to origin/main)}.
+// restart, restartFailed?} | null} | null (the main checkout brought forward to origin/main), pluginBugs: [{repo, projects, count, file, url}] (the plugin
+// problems each Foreman noted, their file, and the Board's copy of it)}.
 // A row whose chip is a fault or a warning is failing: the failing rows come first, faults before warnings, each with
 // one line of what to do next ("Next: …"); the rows that are fine fold into one "N checks fine" that opens to them.
 // A row is one plain line: a long or many-line text (a push's output) shows its first line, cut, and the whole under
@@ -283,6 +284,19 @@ window.DASH_APP.panel({
         m ? `${m.restartFailed ? 'brought forward, restart failed' : m.restart ? 'restarted on new code' : 'brought forward'} ${m.from}..${m.to}` : null, m ? ctx.since(m.at, ' ago') : null).next =
         m && m.restartFailed ? 'Restart the Board on this machine to run the new code.' : 'Make the main checkout the same as origin/main by hand. The reason is beside it.';
     }
+    // The plugin problems a Foreman noted (conveyor/foreman/stop.sh): only the owner can fix or file them in the
+    // plugin's repository, so each Foreman that noted one has a warning row, with a link to the Board's copy of its
+    // file (url, served beside the page: a browser opens no file:// link from an https page). A grouped Foreman's
+    // notes come once for each of its projects, so the project filter keeps them: the row is drawn once a file.
+    const bugs = Array.isArray(d.pluginBugs) ? d.pluginBugs.filter((b, i, all) => b && b.count > 0 && typeof b.file === 'string'
+      && all.findIndex((o) => o && o.file === b.file) === i) : [];
+    bugs.forEach((b) => {
+      const of = bugs.length > 1 && Array.isArray(b.projects) ? ` (${b.projects.join(', ')})` : '';
+      const link = h('a', null, b.file);
+      if (typeof b.url === 'string' && b.url) { link.href = b.url; link.target = '_blank'; link.rel = 'noopener'; }
+      check(`Plugin problems${of}`, ctx.chip(`${b.count} noted`, 'warn'), `${b.count} plugin ${b.count === 1 ? 'problem' : 'problems'} noted in `, link).next =
+        'Read each note in the file. Then fix it, or file it as an issue in the conveyor-belt repo.';
+    });
     // Failing first (faults, then warnings, each in the order drawn), each with its next step before its output; the
     // rest fold into "N checks fine". While a check here is a fault or another panel could not read its data
     // (ctx.faults()), the Data row and its restart stay out of the fold, where the texts that name the restart send

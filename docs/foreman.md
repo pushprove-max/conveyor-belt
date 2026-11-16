@@ -48,6 +48,16 @@ it up:
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 
+The Foreman's reply to a wake says only what needs you. If nothing needs you, the reply is the one word Idle. A
+problem that the Foreman finds in Conveyor itself always needs you, because only you can fix it or file it. The
+Foreman says it on a line of its own:
+
+`Plugin problem (for the conveyor-belt repo): <what it saw>, card <card>, evidence <path>`
+
+Each such problem also goes into `plugin-bugs.md` in the Foreman's folder, one line each: the time, the card, what the
+Foreman saw and the evidence path. The Board's Health panel and `/units` then show "N plugin problems noted", with
+the path of that file.
+
 The watchers run from the Conveyor version that the project uses. When the project moves to a new version, as when
 it follows the plugin's main and a new commit lands, the watchers stop within a minute and start again from the new
 version. A card that lands while the version changes still wakes the Foreman. An update does not delete a version

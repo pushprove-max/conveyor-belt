@@ -92,6 +92,25 @@ test('Health: a test file kept off card test steps is listed with why and its is
   assert.equal(row.querySelector(':scope > details.output a.issue').href, 'https://github.com/example/sample/issues/17');
 });
 
+// Issue 139: a plugin problem a Foreman noted needs the owner, who alone can fix or file it in the plugin's repository.
+// Bug it catches: the note sat in the Foreman's folder and Health never said so. The row is a warning that says how
+// many and links the file. Bug (review): the link was file://, which a browser does not open from the https Board: it
+// is the Board's served copy. Bug (review): a grouped Foreman's notes come once a project (so the project filter keeps
+// them), and were drawn as one row each.
+test('Health: the plugin problems a Foreman noted are a warning row, "N plugin problems noted", with a link to the file', () => {
+  const w = boot();
+  const data = full();
+  const note = { projects: ['sample', 'widgetshop'], count: 2, file: '/srv/sample/conveyor/state/foreman/plugin-bugs.md', url: 'plugin-bugs/sample.txt' };
+  data.panels.health.data.pluginBugs = [{ repo: 'sample', ...note }, { repo: 'widgetshop', ...note }];
+  deliver(w, data);
+  assert.ok(failingRows(w).includes('Plugin problems'), `a failing row: ${failingRows(w)}`);
+  assert.equal(failingRows(w).filter((t) => t.startsWith('Plugin problems')).length, 1, `one row a file: ${failingRows(w)}`);
+  const row = dd(w, 'Plugin problems');
+  assert.match(row.textContent, /2 plugin problems noted in \/srv\/sample\/conveyor\/state\/foreman\/plugin-bugs\.md/);
+  assert.equal(row.querySelector('a').getAttribute('href'), 'plugin-bugs/sample.txt');
+  assert.match(row.querySelector('.check-next').textContent, /conveyor-belt repo/);
+});
+
 // Bug: the live feed rewrites the stream every 10 s and the panel is drawn again on each write, so an opened "Show
 // output" or "checks fine" closed under the owner while they read it. What was open stays open; what was not, stays shut.
 // Bug (#557): the push's output was a new box at each draw, so a reader scrolled in it went back to its top.

@@ -5,6 +5,7 @@
 #   paths <the Research lane's worktree, empty when none is named> <home> <this checkout's record's repo, empty when none>
 #   fast norecord | none | unread | ok <branch> <commits ahead of the default branch> <tracked files changed> <first subject>
 #   foreman <its role, waiter and watchers> (below), only where a Foreman is expected
+#   pluginbugs <how many> <file>: the plugin problems the Foreman noted (below), only when it noted one
 #   host <name> <how> <exit> [<path looked at>...], then for every record of the host file, in its order: <repo> <its
 #   snapshot, or null>
 # The lanes are the worktrees the host file names for this checkout's record (the record whose main is this checkout:
@@ -77,6 +78,10 @@ if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
   [ -n "$cur" ] || cur=$(jq -r '.commit // empty | strings' .git/conveyor-engine.json 2>/dev/null)
   printf 'foreman\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mark" "$wpid" "$wcommit" "$wsid" "$live" "$cur" "$watch"
 fi
+# The plugin problems the Foreman noted (conveyor/foreman/stop.sh, one "- " line each in plugin-bugs.md), printed only
+# when there is one: pluginbugs <how many> <the file>.
+n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0
+[ "$n" -eq 0 ] || printf 'pluginbugs\t%s\t%s\n' "$n" "$fd/plugin-bugs.md"
 [ "${1:-}" != feed ] || { printf 'host\t\tfeed\t0\n'; exit 0; }
 
 [ -e "$cfg" ] || { printf 'host\t\tnofile\t0\t%s\t%s\n' "$mine" "$cfg"; exit 0; }

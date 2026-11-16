@@ -1014,6 +1014,17 @@ for (const [what, fields, why] of notListening) {
   })
 }
 
+// Issue 139: a plugin problem the Foreman noted needs the owner, who alone can fix or file it in the plugin's
+// repository. Bug it catches: the note sat in its file and /units never said so. Bug (review): the file was a bare
+// path, which a terminal does not open: it is a file:// link, its space encoded so the link is whole.
+test('plugin problems the Foreman noted: "N plugin problems noted" with a link to the file, in /units and the pane, not in the band', async ($, on) => {
+  const fetch = withForeman(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP]).replace('\nhost\t', '\npluginbugs\t2\t/r/my main/conveyor/state/foreman/plugin-bugs.md\nhost\t')
+  const { text } = await foremanWorld($, on, fetch)
+  expect(text).toContain('\n2 plugin problems noted\n  file:///r/my%20main/conveyor/state/foreman/plugin-bugs.md\n')
+  expect(await draw($, 'Pane')).toContain('2 plugin problems noted')
+  expect(await draw($, 'AbovePrompt')).not.toContain('plugin problem')
+})
+
 test('D4: no Foreman is expected (the fetch prints no foreman line): no indicator anywhere', async ($, on) => {
   const { w, text } = await foremanWorld($, on, answer(FULL))
   expect(text).not.toContain('Foreman')

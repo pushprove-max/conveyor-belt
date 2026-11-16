@@ -127,5 +127,9 @@ same 'D4: a Foreman folder with no role and no setup prints no line' 'no foreman
 echo '{}' > "$FD/settings.json"
 same 'a set-up Foreman whose role no session holds still prints its line' \
   "$(printf 'foreman\t\t%s\t%s\ts1\t0\t%s\t' "$WP" "$A" "$A")" "$(foreman)"
+# Issue 139: the plugin problems the Foreman noted (stop.sh writes one "- " line each) are counted, with the file, so
+# /units can say so; the file's heading is no problem. Bug it catches: a noted problem /units never showed.
+printf '# Plugin problems\n\n- 2026-11-16T10:00:00Z · card #7 · a · evidence: -\n- 2026-11-16T11:00:00Z · card - · b · evidence: -\n' > "$FD/plugin-bugs.md"
+same 'the plugin problems noted: how many, and the file' "$(printf 'pluginbugs\t2\t%s' "$FD/plugin-bugs.md")" "$(fetch "$M/bakery" feed | grep '^pluginbugs')"
 
 [ "$fails" = 0 ] || exit 1

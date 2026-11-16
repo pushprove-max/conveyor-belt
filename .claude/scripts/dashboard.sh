@@ -537,7 +537,11 @@ lanes() {
 
 # The Foremen of this machine, one a project or one a group (conveyor/foreman/lib.sh mine: a list of the host file's
 # foreman.groups is one Foreman over the records it names; groups that name a project twice are not understood, and
-# then each project has its own): {foremen: [{projects, group, held, since, lastWakeAt, waiting}], error}. A Foreman's
+# then each project has its own): {foremen: [{projects, group, held, since, lastWakeAt, waiting, pluginBugs,
+# pluginBugsFile, pluginBugsUrl}], error}; pluginBugs: how many plugin problems it noted (plugin-bugs.md,
+# conveyor/foreman/stop.sh), pluginBugsFile: that file, pluginBugsUrl: its copy in the Board's folder
+# (plugin-bugs/<first project>.txt, which the page server serves, as a browser opens no file:// link from an https
+# page); both null when it noted none. A Foreman's
 # folder is foreman/ in the state folder of its first project (lib.sh's FD), which is the host file's stateDir for the
 # host file's own checkout and that checkout's conveyor/state for any other (conveyor.sh's ST); the host file's own
 # checkout is the one its main leads to, links followed, as the engine compares them. held: a session holds
@@ -564,7 +568,9 @@ checkout_of() {
   return 1
 }
 foremen() {
-  local cfg=$HOST_FILE rows projects main hm sd ssh led here dir sid since wake f out='[]' waiting
+  local cfg=$HOST_FILE rows projects main hm sd ssh led here dir sid since wake f out='[]' waiting bugs url
+  # The copies are made again each read: a Foreman whose notes are gone has none left.
+  rm -rf "$OUT/plugin-bugs"
   [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
   [ -e "$cfg" ] || { echo '{"foremen":[],"error":null}'; return 0; }
   rows=$(jq -ec '(.records // []) as $r | (.foreman.groups // []) as $g
@@ -594,8 +600,13 @@ foremen() {
     [[ $since =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || since=''
     wake=$(stat -c %Y "$dir/last-wake.txt" 2>/dev/null) && wake=$(iso "$wake") || wake=''
     waiting=$(for f in "$dir"/pending/*.wake; do [ ! -f "$f" ] || head -n 1 "$f" | cut -c1-200; done | jq -Rc . | jq -cs .) || waiting='[]'
+    bugs=$(grep -c '^- ' "$dir/plugin-bugs.md" 2>/dev/null) || bugs=0
+    url=$(jq -r '.[0]' <<<"$projects"); url=plugin-bugs/${url//[^A-Za-z0-9._-]/_}.txt
+    [ "$bugs" -eq 0 ] || { mkdir -p "$OUT/plugin-bugs" && cp -- "$dir/plugin-bugs.md" "$OUT/$url" && chmod 644 "$OUT/$url"; } || url=''
     out=$(jq -c --argjson p "$projects" --arg sid "$sid" --arg s "$since" --arg w "$wake" --argjson q "${waiting:-[]}" \
-      'def n: if . == "" then null else . end; . + [{projects: $p, group: ($p | length > 1), held: ($sid != ""), since: ($s | n), lastWakeAt: ($w | n), waiting: $q}]' <<<"$out") || return 1
+      --argjson nb "${bugs:-0}" --arg fb "$dir/plugin-bugs.md" --arg u "$url" \
+      'def n: if . == "" then null else . end; . + [{projects: $p, group: ($p | length > 1), held: ($sid != ""), since: ($s | n), lastWakeAt: ($w | n), waiting: $q,
+        pluginBugs: $nb, pluginBugsFile: (if $nb > 0 then $fb else null end), pluginBugsUrl: (if $nb > 0 then $u | n else null end)}]' <<<"$out") || return 1
   done < <(jq -j '.[] | (.projects | tojson), "\u0000", .main, "\u0000", .hm, "\u0000", .sd, "\u0000", .ssh, "\u0000", .led, "\u0000"' <<<"$rows")
   jq -c '{foremen: ., error: null}' <<<"$out"
 }
@@ -825,7 +836,11 @@ PANELS_JQ='
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
         records: (if $R == null then null else $R | map({repo, lastPushAt} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), routes: (.routes // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
-        limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd}},
+        limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
+        # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads
+        # it), so a grouped Foreman'"'"'s show whichever of its projects is picked; the page shows each file once.
+        pluginBugs: [$fm.foremen | arrays | .[] | select((.pluginBugs | numbers) > 0) | . as $f | .projects[]
+          | {repo: ., projects: $f.projects, count: $f.pluginBugs, file: $f.pluginBugsFile, url: $f.pluginBugsUrl}]}},
    lanes: (if ($lanes.error // null) != null then {error: $lanes.error, data: null} else {error: null, data: {
         records: ($lanes.records | map(.repo as $repo | .fast |= (if . != null and .present then . + {landing: landing(.; $repo)} else . end))),
         cardsError: $cerr}} end),

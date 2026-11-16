@@ -434,6 +434,24 @@ out=$(turn u4 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#5 is still ru
 out=$(turn u5 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'Idle'); [ -z "$out" ] || fail "a one-word wake reply was refused: $out"
 out=$(turn u6 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a report in a wake reply passed: $out"
 out=$(turn u7 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#7 needs your call: its fix changes the sign-in page.'); [ -z "$out" ] || fail "a wake reply naming what needs the owner was refused: $out"
+# Bug (#139): a wake reply reporting a defect in Conveyor itself was refused as a status note, so the Foreman wrote
+# Idle and the owner never saw it. A plugin-problem line passes, and is noted in plugin-bugs.md once.
+bug='Plugin problem (for the conveyor-belt repo): setup never sets linkFromMain, so card c20261116T101500-alpha-7 has no packages; evidence ~/cards/c20261116T101500-alpha-7/test.log.'
+out=$(turn u10 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$bug"); [ -z "$out" ] || fail "a plugin-problem line in a wake reply was refused: $out"
+[ "$(grep -c '^- ' "$FD/plugin-bugs.md" 2>/dev/null)" = 1 ] && grep -qE '^- [0-9T:-]+Z · card c20261116T101500-alpha-7 · setup never sets linkFromMain.* · evidence: ~/cards/c20261116T101500-alpha-7/test\.log$' "$FD/plugin-bugs.md" \
+  || fail "the plugin problem was not noted with its time, card, finding and evidence: $(cat "$FD/plugin-bugs.md" 2>&1)"
+# A status note beside it is still refused, the form named; the line said again is not noted twice.
+out=$(turn u11 'Stop hook feedback: Conveyor: alpha: blocked: #7' "Released #926 so its review could finish."$'\n'"$bug")
+jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <what you saw>"))' <<<"$out" >/dev/null || fail "a status note beside a plugin problem passed: $out"
+[ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "a plugin problem said again was noted twice: $(cat "$FD/plugin-bugs.md")"
+# A finding in other words is refused, and told the form that keeps it.
+out=$(turn u12 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'The tests likely failed because Conveyor does not install packages in card worktrees, another plugin problem.')
+jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>"))' <<<"$out" >/dev/null \
+  || fail "a refused plugin finding was not told the form to use: $out"
+# Only the owner can file a plugin problem, so "not filed yet" on its line is no unfinished work of the Foreman's; a
+# finding that is part of one noted before is noted on its own.
+out=$(turn u13 'what now' 'Plugin problem (for the conveyor-belt repo): setup never sets linkFromMain, not filed yet.'); [ -z "$out" ] || fail "a plugin problem not filed yet was refused as unfinished work: $out"
+[ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 2 ] || fail "a shorter plugin problem was taken for one noted before: $(cat "$FD/plugin-bugs.md")"
 # A wake delivered as a meta entry opens its own turn: its reply is checked as a wake reply, not as the owner's last message.
 jq -cn '{type: "user", uuid: "u8", message: {content: "watch"}}, {type: "assistant", message: {content: [{type: "text", text: "Watching."}]}},
   {type: "user", uuid: "u8w", isMeta: true, message: {content: "Stop hook feedback: Conveyor: alpha: blocked: #7"}},

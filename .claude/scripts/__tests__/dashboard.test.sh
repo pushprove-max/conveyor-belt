@@ -636,16 +636,28 @@ echo 'sess-1 2026-11-12T08:00:00Z' > "$FM/session"
 printf 'Conveyor: sample: blocked: #13\n#13 is blocked since then\n' > "$FM/last-wake.txt"; touch -d '2026-11-12T09:30:00Z' "$FM/last-wake.txt"
 printf 'Conveyor: widgetshop: needs the owner'"'"'s yes: #5\n#5 needs it\n' > "$FM/pending/20261112T100000Z-1-a.wake"
 printf 'Limit: 91%% of the week used\n' > "$FM/pending/20261112T100100Z-1-b.wake"; : > "$FM/pending/.put.half"
+# Issue 139: the plugin problems it noted (conveyor/foreman/stop.sh, one "- " line each under a heading) are counted,
+# with the file, and Health has them. Bug it catches: a noted plugin problem the Board never showed.
+printf '# Plugin problems\n\n- 2026-11-12T09:00:00Z · card #13 · a · evidence: -\n- 2026-11-12T09:10:00Z · card - · b · evidence: -\n' > "$FM/plugin-bugs.md"
 jq --arg s "$T/fstate" '.stateDir = $s | .foreman = {groups: [["sample", "widgetshop", "gone"]]}' "$T/host.before" > "$MAIN/conveyor/host.json"
 answer "$P" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
 q '.panels.machine.data.foremen == [{projects: ["sample", "widgetshop"], group: true, held: true, since: "2026-11-12T08:00:00Z", lastWakeAt: "2026-11-12T09:30:00Z",
-  waiting: ["Conveyor: widgetshop: needs the owner'"'"'s yes: #5", "Limit: 91% of the week used"]}]' "a grouped Foreman is one line with both its projects (a name no record has passed over), its claim, its last wake and what waits on it"
+  waiting: ["Conveyor: widgetshop: needs the owner'"'"'s yes: #5", "Limit: 91% of the week used"], pluginBugs: 2, pluginBugsFile: "'"$FM"'/plugin-bugs.md",
+  pluginBugsUrl: "plugin-bugs/sample.txt"}]' "a grouped Foreman is one line with both its projects (a name no record has passed over), its claim, its last wake, what waits on it and the plugin problems it noted"
+# Bug it catches: the notes were under the first project alone, so picking widgetshop (the project filter keeps the
+# rows whose repo it names) hid its Foreman's notes. Each project of the group has them.
+q '.panels.health.data.pluginBugs | map(.repo) == ["sample", "widgetshop"] and all(.projects == ["sample", "widgetshop"] and .count == 2
+  and .file == "'"$FM"'/plugin-bugs.md" and .url == "plugin-bugs/sample.txt")' "Health has the plugin problems the Foreman noted, under each of its projects, with the Board's copy"
+# Bug it catches: the link was file://, which a browser does not open from the https Board; the copy is served beside the page.
+cmp -s "$FM/plugin-bugs.md" "$OUT/plugin-bugs/sample.txt" || fail "the Board's folder has a copy of the notes, which the page links to"
+rm -f "$FM/plugin-bugs.md"
 # No group: the same folder is sample's own Foreman, and widgetshop has none. A mark emptied (the role turned off)
 # is no Foreman either. Groups that name a project twice are not understood: each project has its own.
 jq --arg s "$T/fstate" '.stateDir = $s' "$T/host.before" > "$MAIN/conveyor/host.json"
 run
 q '.panels.machine.data.foremen | map([.projects, .group, .held]) == [[["sample"], false, true], [["widgetshop"], false, false]]' "each project its own Foreman: one holds the role, the other has none"
+[ ! -e "$OUT/plugin-bugs" ] || fail "notes that are gone leave no copy in the Board's folder"
 # Bug: the host file's own checkout was told by its main as written, while the engine follows links: a record that
 # names that checkout through a link keeps its Foreman in the stateDir, and the page read the link's conveyor/state
 # and said the project has no Foreman.

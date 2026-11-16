@@ -95,7 +95,9 @@ export type Limit = { pct: number; resetsAt: number }
 // The Foreman indicator (foremanOf): null where no Foreman is expected; else listening or not, why not, and the line
 // of details under it.
 export type Foreman = { ok: boolean; why: string; detail: string }
-export type State = { now: number; snap: Snap | null; note: string; notes: string[]; host: string; limit: Limit | null; fast: Fast; research: Research; foreman?: Foreman | null }
+// The plugin problems the Foreman noted (conveyor/foreman/stop.sh): how many, and the file they are in.
+export type PluginBugs = { n: number; path: string }
+export type State = { now: number; snap: Snap | null; note: string; notes: string[]; host: string; limit: Limit | null; fast: Fast; research: Research; foreman?: Foreman | null; pluginBugs?: PluginBugs | null }
 
 const time = (v: unknown) => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null }
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -107,10 +109,11 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 // own: the repo of the record whose main is this checkout, the session's own project; empty when no record is. `how`
 // is local (a record of the host file is this checkout) or ssh, else the reason nothing was asked: nofile (with the
 // paths of the host file looked at), config or nossh. foreman: its line's fields after the word, where a Foreman is
-// expected (the fetch says which); null where none is.
-export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
+// expected (the fetch says which); null where none is. pluginBugs: `pluginbugs <how many> <file>`, null when the Foreman
+// noted none.
+export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; pluginBugs: PluginBugs | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
 export const parseFetch = (stdout: string): Fetched | null => {
-  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, host: null, records: [] }
+  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, pluginBugs: null, host: null, records: [] }
   for (const line of stdout.split('\n')) {
     const f = line.split('\t')
     if (out.host) { if (f.length >= 2 && f[0]) out.records.push({ repo: f[0], json: f.slice(1).join('\t') }) }
@@ -119,6 +122,7 @@ export const parseFetch = (stdout: string): Fetched | null => {
     else if (f[0] === 'fast' && f[1] === 'norecord') out.fast = { state: 'norecord' }
     else if (f[0] === 'fast' && f[1] === 'ok' && /^\d+$/.test(f[3] ?? '') && /^\d+$/.test(f[4] ?? '')) out.fast = { state: 'ok', branch: f[2], ahead: Number(f[3]), dirty: Number(f[4]), subject: one(f[5]) }
     else if (f[0] === 'foreman') out.foreman = f.slice(1)
+    else if (f[0] === 'pluginbugs' && /^[1-9]\d*$/.test(f[1] ?? '') && f[2]) out.pluginBugs = { n: Number(f[1]), path: f[2] }
     else if (f[0] === 'host') out.host = { name: f[1] ?? '', how: f[2] ?? '', rc: Number(f[3]), looked: f.slice(4).filter(Boolean) }
   }
   // An empty Research lane is one the host file does not name: the board still reads.
@@ -545,11 +549,19 @@ const foremanDetail = (detail: string, w: number): Line[] => {
   out.push(cur.trimEnd())
   return out.map(t => fitWidth([{ t, d: true }], w))
 }
-// The indicator, and with `details` the lines under it. None where no Foreman is expected.
-export const foremanModel = (s: State, w: number, details: boolean): Line[] => (s.foreman ? [
-  [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }],
-  ...(details ? foremanDetail(s.foreman.detail, w) : []),
-] : [])
+// The indicator, and with `details` the lines under it. None where no Foreman is expected. With `details`, the plugin
+// problems the Foreman noted follow, with a link to their file (a file:// URL, which the terminal opens; uncut, as a
+// cut URL opens nothing): only the owner can fix or file them in the plugin's repository.
+export const foremanModel = (s: State, w: number, details: boolean): Line[] => [
+  ...(s.foreman ? [
+    [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }],
+    ...(details ? foremanDetail(s.foreman.detail, w) : []),
+  ] : []),
+  ...(details && s.pluginBugs ? [
+    fitWidth([{ t: `${s.pluginBugs.n} plugin problem${s.pluginBugs.n === 1 ? '' : 's'} noted`, c: C.you, b: true }], w),
+    [{ t: `  file://${encodeURI(s.pluginBugs.path)}`, d: true }],
+  ] : []),
+]
 
 // The Research lane's run is its newest Claude session in the lane's worktree: working while that session wrote in the
 // last five minutes.

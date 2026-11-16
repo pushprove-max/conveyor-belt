@@ -216,6 +216,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
     research: f ? await readResearch($, f.research, f.home).catch((): Research => ({ state: 'none' })) : { state: 'none' },
     // The fetch reads the Foreman's folder; whether this session is the one it names is the session's own id.
     foreman: f ? foremanOf(f.foreman, await $.session.id().catch(() => '')) : null,
+    pluginBugs: f ? f.pluginBugs : null,
   }
   return { st, fedAt: fed && f ? fed.at : null, fedKey: fed && f ? fed.key : null }
 }

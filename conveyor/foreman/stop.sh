@@ -11,6 +11,10 @@
 #     your or owner, or a sentence reporting a card (landed, merged, done ...) without them; a reply to a wake says only
 #     what needs the owner, otherwise one word (Idle);
 #   - leaves the Foreman's own work undone ("haven't filed it", "I still need to file", "I'll fix", "want me to ...").
+#   A line in the plugin-problem form (PLUG: "Plugin problem (for the conveyor-belt repo): <what was seen>") reports a
+#   suspected defect in Conveyor itself, which only the owner can fix or file: it needs the owner, so the wake and
+#   unfinished-work checks read the reply without it, and each such line is noted once in $FD/plugin-bugs.md (time,
+#   card, what was seen, evidence path) before any check, so the finding outlives a refused or short reply.
 set -uo pipefail
 INPUT=$(cat)
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
@@ -38,6 +42,23 @@ TURN=$(jq -cs --arg w "$W" 'def txt: .message.content | if type == "string" then
         | [$b[(if $k == null then 0 else $k + 1 end):][] | select(.type == "text") | .text] | join("\n"))} end' "$T" 2>/dev/null)
 U=$(jq -r '.uuid // empty' <<<"$TURN" 2>/dev/null); REPLY=$(jq -r '.reply // empty' <<<"$TURN" 2>/dev/null)
 [ -n "$U" ] && [ -n "$REPLY" ] || exit 0
+PLUG='^[[:space:]*_>-]*plugin problem \(for the conveyor-belt repo\):[[:space:]*_]*'
+FORM="'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>'"
+# Each plugin-problem line is noted once: a reply that says it again (after a refusal) adds no second note.
+NOTES=$FD/plugin-bugs.md
+shopt -s nocasematch
+while IFS= read -r l; do
+  [[ $l =~ $PLUG ]] || continue
+  seen=${l:${#BASH_REMATCH[0]}}; seen=${seen%"${seen##*[![:space:]]}"}; [ -n "$seen" ] || continue
+  ! grep -qF -- " · $seen · evidence: " "$NOTES" 2>/dev/null || continue
+  card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]|#[0-9]+' <<<"$seen" | head -n 1)
+  ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$seen" | head -n 1); ev=${ev%.}
+  { mkdir -p "$FD" && { [ -s "$NOTES" ] || printf '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n'
+    printf -- '- %s · card %s · %s · evidence: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${card:--}" "$seen" "${ev:--}"; } >> "$NOTES"; } 2>/dev/null
+done < <(grep -iE "${PLUG}[^[:space:]]" <<<"$REPLY")
+shopt -u nocasematch
+# The wake and unfinished-work checks below read the reply without its plugin-problem lines.
+REST=$(grep -viE "$PLUG" <<<"$REPLY")
 MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0
 refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || exit 0; block "$1"; }
@@ -45,15 +66,15 @@ refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || ex
 if grep -qE '\?[[:space:]*_)]*($|[[:space:]])' <<<"$REPLY"; then
   refuse "Your reply asks the owner a question in text. Ask the owner only with the picker (AskUserQuestion), with the options you propose; keep the rest of the reply."
 fi
-if [ -n "$W" ] && jq -e --arg w "$W" '.opening | contains($w)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REPLY")" -gt 1 ]; then
+if [ -n "$W" ] && jq -e --arg w "$W" '.opening | contains($w)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REST")" -gt 1 ]; then
   # What needs the owner is said to them: a reply that never says you, your or owner reports, and so does a sentence
   # that gives a card's progress without them.
-  HIT=$(grep -oiE 'still (running|working|in progress)|not done yet|\b[0-9]+ ?(of|/) ?[0-9]+\b[^.]*\b(done|passed|landed|tests?)\b|nothing (needs|for) you|no action (needed|required)' <<<"$REPLY" | head -3 | paste -sd'|' -)
-  [ -n "$HIT" ] || grep -qiwE "you|your|owner('?s)?" <<<"$REPLY" || HIT="a report"
-  [ -n "$HIT" ] || HIT=$(tr '\n' ' ' <<<"$REPLY" | grep -oE '[^.!?]+' | grep -viwE "you|your|owner('?s)?" \
+  HIT=$(grep -oiE 'still (running|working|in progress)|not done yet|\b[0-9]+ ?(of|/) ?[0-9]+\b[^.]*\b(done|passed|landed|tests?)\b|nothing (needs|for) you|no action (needed|required)' <<<"$REST" | head -3 | paste -sd'|' -)
+  [ -n "$HIT" ] || grep -qiwE "you|your|owner('?s)?" <<<"$REST" || HIT="a report"
+  [ -n "$HIT" ] || HIT=$(tr '\n' ' ' <<<"$REST" | grep -oE '[^.!?]+' | grep -viwE "you|your|owner('?s)?" \
     | grep -iwE 'landed|merged|pushed|passed|succeeded|finished|completed|released|deployed|done|running|in progress' | sed 's/^ *//' | head -3 | paste -sd'|' -)
-  [ -z "$HIT" ] || refuse "A reply to a wake says only what needs the owner to act or decide ($HIT is not that). Rewrite it without that, or reply with the one word Idle if nothing needs them."
+  [ -z "$HIT" ] || refuse "A reply to a wake says only what needs the owner to act or decide ($HIT is not that). Rewrite it without that, or reply with the one word Idle if nothing needs them. A suspected defect in Conveyor itself needs the owner, who alone can fix or file it: keep it, as its own line in the form $FORM."
 fi
-HIT=$(grep -oiE "(haven'?t|have not|did not|didn'?t|not yet) (filed|file it|sent|fixed|checked)|not filed yet|want me to|shall i|should i |if you'?d like|i can (also )?(file|fix|send|check|do|open|run)|let me know if|\b(i|we) (still|yet) (need|have|got) to|\bi (need|have) to (file|fix|send|check|retry|open|run|hold|release)|\bi('ll| will) (file|fix|send|check|retry|open|run|hold|release)|\b(next|later),? i('ll| will)" <<<"$REPLY" | head -3 | paste -sd'|' -)
+HIT=$(grep -oiE "(haven'?t|have not|did not|didn'?t|not yet) (filed|file it|sent|fixed|checked)|not filed yet|want me to|shall i|should i |if you'?d like|i can (also )?(file|fix|send|check|do|open|run)|let me know if|\b(i|we) (still|yet) (need|have|got) to|\bi (need|have) to (file|fix|send|check|retry|open|run|hold|release)|\bi('ll| will) (file|fix|send|check|retry|open|run|hold|release)|\b(next|later),? i('ll| will)" <<<"$REST" | head -3 | paste -sd'|' -)
 [ -z "$HIT" ] || refuse "Unfinished work in your reply ($HIT). If it is yours to do (file, check, retry, fix), do it now and say it is done. Keep the line only when it truly needs the owner, and say why in the same sentence."
 exit 0
