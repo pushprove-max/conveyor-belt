@@ -64,13 +64,17 @@ t_portfix() {
   loop check || fail "the records do not check"
 }
 
-# Bug: a NO-GO on the one review of a port (a finished loop stopped only by a landing conflict) lands with
-# follow-ups as if it were a last review, instead of being fixed and going round the loop as any card's.
+# Bugs: the port's landing conflicts too (its session moves main again) and something lands, or a second port runs:
+# it blocks for the owner. A NO-GO on the one review of a port (a finished loop stopped only by a landing conflict)
+# lands with follow-ups as if it were a last review, instead of being fixed and going round the loop as any card's.
 t_port() {
   setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
   echo "echo two >> a.txt; $AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
-  loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "#8 was not blocked on its landing conflict: $(steps 8)"
+  loop run >/dev/null || fail "run of #8 exited non-zero"
+  [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,blocked blocked," ] \
+    && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
+    && [ "$(git -C "$R" log -1 --format=%s)" = again ] || fail "a conflict after the port did not block for the owner: $(steps 8)"
   echo "$NOGO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"; f=$(wc -l < "$STUB/filed")
   loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the retried #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] \
@@ -151,16 +155,23 @@ EOF
 # Bug: a card whose review loop had finished (a last NO-GO, its follow-ups filed) blocked for the owner when its
 # landing met a conflict, and sat there until the owner ran `retry`. It is ported in the card with no owner action:
 # one session, one review of that port alone, the tests and the landing, which files the loop's findings again; the
-# Board shows the port as a step, not a block. A conflict after that port blocks for the owner.
+# Board shows the port as a step, not a block. A conflict after that port blocks for the owner (t_port).
+# Bug: its last NO-GO's test pass was stored nowhere (see lastsetup); here it is stored, keyed to its staged change,
+# and the port, a different change, runs its tests again; it lands alone.
 t_autoport() {
   setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'echo two >> a.txt' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"; echo '[ ! -e "$PWD.port" ] || cp "$PWD.port" "$STUB/port"' > "$STUB/review-cmd"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
+  echo '[ ! -e "$PWD.port" ] || { cp "$PWD.port" "$STUB/port"; cp "$PWD.ready" "$STUB/readyatport"; }' > "$STUB/review-cmd"
   loop run >/dev/null || fail "run of #8 exited non-zero"
   [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,landed ok," ] \
     && [ "$(wc -l < "$STUB/sessions")" = 4 ] && [ "$(wc -l < "$STUB/reviews")" = 4 ] \
     || fail "a finished loop whose landing conflicted was not ported by one session, reviewed once, tested and landed: $(steps 8)"
+  [ "$(jq -c '[.tested, .alone, (.patch | length > 0)]' "$STUB/readyatport" 2>/dev/null)" = '[true,true,true]' ] \
+    || fail "the card with a last NO-GO did not store its test pass, marked alone, keyed to its staged change: $(cat "$STUB/readyatport" 2>&1)"
+  [ "$(wc -l < "$STUB/tests")" = 2 ] && [ "$(st 'select(.issue == 8 and .step == "landed") | .batch')" = null ] \
+    || fail "the port, a different staged change, did not run its tests, or did not land alone: $(wc -l < "$STUB/tests") runs, $(st 'select(.issue == 8 and .step == "landed")')"
   st 'select(.issue == 8 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts: ' || fail "the port's step does not name the conflict"
   grep -q '^# This review is of a port alone$' "$STUB/asked" && grep -q "^The difference is the file $T/$CASE/cards/.*-8\.port\.$" "$STUB/asked" \
     && grep -qx -- '+ ONE' "$STUB/port" && grep -qx -- ' +two' "$STUB/port" || fail "the review after the port was not of the port alone: $(cat "$STUB/port" 2>&1)"
@@ -303,20 +314,9 @@ t_resumeyes() {
   st 'select(.issue == 11 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old against the condition of Dana's yes" && loop check || fail "the worktree line does not say the kept patch is reviewed, or the records do not check: $(steps 11)"
 }
 
-# The port's landing conflicts too (its session moves main again): blocked for the owner, nothing landed, no second port.
-t_autoportagain() {
-  setup "[$(issue 9 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
-  steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
-  echo "echo two >> a.txt; $AGAIN" > "$STUB/build"; echo 'NINE ninth' > "$STUB/move"
-  loop run >/dev/null || fail "run of #9 exited non-zero"
-  [ "$(steps 9)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,blocked blocked," ] \
-    && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
-    && [ "$(git -C "$R" log -1 --format=%s)" = again ] || fail "a conflict after the port did not block for the owner: $(steps 9)"
-}
-
 # Bug: a card that files a last NO-GO's follow-ups had no <worktree>.ready, so its test pass was stored nowhere and it
 # ran its tests again each time it came to the test step (the owner: passes are reused). Its pass is kept, keyed to
-# its staged change: a different change (the port after its landing conflict) runs its tests (lastrerun); main
+# its staged change: a different change (the port after its landing conflict) runs its tests (autoport); main
 # moving on another file during the port's tests fits it onto main with the same change, which reuses the pass and
 # starts no run (lastreuse). Either way it lands alone, with the earlier loop's findings filed.
 lastsetup() { # [<line of the test stub>]
@@ -328,13 +328,6 @@ lastsetup() { # [<line of the test stub>]
     || fail "the card with a last NO-GO did not store its test pass, marked alone, keyed to its staged change: $(cat "$STUB/readyatport" 2>&1)"
 }
 laststeps() { st "select(.issue == 8 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
-t_lastrerun() {
-  lastsetup
-  [ "$(laststeps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,landed ok," ] \
-    && [ "$(wc -l < "$STUB/tests")" = 2 ] || fail "the port, a different staged change, did not run its tests: $(laststeps) $(wc -l < "$STUB/tests") runs"
-  [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .batch] | tojson')" = '[true,null]' ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "ONE two " ] \
-    || fail "#8 did not land alone with its follow-ups: $(st 'select(.issue == 8 and .step == "landed")')"
-}
 t_lastreuse() {
   lastsetup '[ "$(wc -l < "$STUB/tests")" != 2 ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main adds b.txt"; }'
   [ "$(laststeps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,test pass,landed ok," ] \
