@@ -30,7 +30,7 @@ const PRICES = {
   seen: [{ model: 'claude-sonnet-4.6', sessions: 3, routes: ['proxy'], as: null }, { model: 'proxy/sonnet', sessions: 2, routes: [], as: 'claude-sonnet-5-5' },
     { model: 'opencode:prov/m-2', sessions: 1, routes: [], as: null }],
 };
-// The Rules tab with these prices; the Tests seat runs Haiku 5.5 (the builder and judge Opus 5.5, the reviewer Sol).
+// The Rules tab with these prices; the Tests step runs Haiku 5.5 (the builder and judge Opus 5.5, the reviewer Sol).
 function open(over = {}) {
   const w = boot({ tab: 'rules' });
   const d = full();
@@ -80,7 +80,7 @@ test('Rules: the Model prices search filters by ID, name or alias and opens a fo
   assert.equal(groupOf(w, 'claude').querySelector('details').open, true);
 });
 
-// Bug: Change filled a form at the bottom, far from the row, with no units and nothing saying the price was saved.
+// Bug: Change filled a form at the bottom, far from the row, with no "$" or "/ M tokens" and nothing saying the price was saved.
 // Edit opens the row in place, with $ and "/ M tokens"; Save sends each change (a refusal says why and keeps what
 // was typed); the saved row then says it is from the pack, by its new name.
 test('Rules: a model row edits in place; Save sends its price, name and other IDs and the row says it is saved', async () => {

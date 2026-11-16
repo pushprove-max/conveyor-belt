@@ -1185,8 +1185,9 @@ rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT"
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 RETIRED='\b([u]nits?|[s]eats?|[p]ass(es)?|[m]erge queue|[c]hain)\b'
 found=$(grep -n -i -E "$RETIRED" "$DASH" "$VIEW"/*.* "$VIEW"/panels/*.js "$SOURCE"/.claude/scripts/__tests__/dashboard.test.sh \
-  "$SOURCE"/.claude/scripts/__tests__/dashboard-view.*.mjs | grep -v -F ':[Unit]' || true)
-# Exempt: the service file's section header.
+  "$SOURCE"/.claude/scripts/__tests__/dashboard-view.*.mjs | grep -v -E ':[0-9]+:\[[U]nit\]$' || true)
+# Exempt: the service file's section header, a line that is only that header. Any other line still fails: the
+# header's text anywhere in a line used to exempt it, so this check's own line could hide a retired word beside it.
 [ -z "$found" ] || fail "the retired workflow is still named (the service file's own section header aside): $found"
 ) & started update
 

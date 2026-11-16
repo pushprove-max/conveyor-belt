@@ -1,0 +1,41 @@
+{
+  ".conveyor/engine-areas.json": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "commands/setup.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/commands/doctor.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/commands/setup.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/conveyor.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/lib/card.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/lib/push.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/lib/setup.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/schema/pack.schema.json": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/workdeps.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "docs/commands.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "docs/configuration.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "docs/setup.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ]
+}

@@ -1471,7 +1471,7 @@
     // A price field: $, the box, "/ M tokens".
     const money = (act, t, value, set, hint) => {
       const w = h('label', 'rules-price-field');
-      w.append(h('span', null, t), h('span', 'rules-price-unit', '$'), field(act, `${t} price, dollars per million tokens`, value, set, hint), h('span', 'rules-price-unit', '/ M tokens'));
+      w.append(h('span', null, t), h('span', 'rules-price-affix', '$'), field(act, `${t} price, dollars per million tokens`, value, set, hint), h('span', 'rules-price-affix', '/ M tokens'));
       return w;
     };
     // This is…: the model an ID means, the likely one picked first, then a button that adds the ID as its alias.
