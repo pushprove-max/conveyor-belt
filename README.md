@@ -34,12 +34,6 @@ sessions in Claude Code, Codex or OpenCode.
 /plugin install conveyor-belt@conveyor-belt
 ```
 
-To get a later release:
-
-```
-/plugin marketplace update conveyor-belt
-```
-
 ## Set up
 
 In Claude Code, in your project's checkout, run `/conveyor-belt:setup`. It asks who approves a change that users will
