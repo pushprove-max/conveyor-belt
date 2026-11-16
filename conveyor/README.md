@@ -571,9 +571,27 @@ and the test files of main's checkout, and holds:
   only a Board filing names is listed too. `removed` is true for a file that main's checkout no longer has, when a
   landed Optimize deleted it or merged it. The totals leave such a file out;
 - `slower`: the names of the files slower than their usual;
+- `edits`: each entry of the `testedits` of the landed cards (below), newest first, with the card's `card`, `issue`
+  and `time` (when it landed); the newest 5 of each file;
 - `totals`: `files` (those with CPU seconds on record), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
   test steps that ran in the 7 days to today, `{count, waitSec, runSec}`, with the seconds they waited for a test slot
   and the seconds their test commands ran.
+
+When a card lands, Conveyor reads its staged change to each test file that main already has (a file with `.test.` in
+its name; a new test file is not read) and writes `testedits` on the landed line, one entry a file: `file`, `read`,
+`removedAsserts`, `changedExpected`, `skipsAdded`, `timeoutsRaised` and `casesDeleted`. A card that changed no such
+file has no `testedits`. One table in `lib/testfiles.sh` (`TESTEDIT_TABLE`) holds the patterns, one row a language:
+shell (`.sh`, `.bash`, `.bats`: `|| fail` and `assert` lines, `skip`, `t_<name>()`, `test<name>()` and `@test` cases,
+`timeout <N>`, `--timeout` and `# timeout:`) and JavaScript and TypeScript (`expect(` and `assert` calls,
+`it.skip`, `test.only`, `describe.todo`, `xit`, `skip: true` and the like, `it(` and `test(` cases, `timeout:` and
+`setTimeout(` numbers). A file of another kind has `read` false and its counts null: edited, not read. A test file
+that the card deletes is read too: all of its assertions and cases are removed. An assertion includes the lines after
+it up to its closing bracket. A line removed and added again unchanged counts for nothing. An assertion that keeps its
+call and actual value but changes its expected value is a changed expected value: the value after `expect(...)`'s
+matcher, the second argument of `assert.equal` and the like, the value of `assert(...)` or `assert.ok`, or a shell
+test before `|| fail`. A changed message alone counts for nothing. A timeout whose number went up and nothing else is a raised timeout. Removed assertions, added
+marks and deleted cases count what the file lost or gained on balance, so an assertion rewritten or a case renamed
+counts for nothing.
 
 A project with no test file and no run on record has the part with an empty `files` list and its step totals. The
 part is `null` only when the pack cannot be read.

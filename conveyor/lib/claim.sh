@@ -704,7 +704,9 @@ land() { # <card> <issue> <worktree> <commit message> [extra json for the landed
   for ((i = 0; i < ${#a[@]}; i += 5)); do
     set -- "${a[@]:i:5}"; x=${5:-}; [ -n "$x" ] || x='{}'
     ! jq -e '.passed == true' "$3.claim" >/dev/null 2>&1 || { echo "$PASSED"; return 1; }
-    x=$(jq -c --argjson d "$(diffsize "$3")" --argjson e "$(ending)" --argjson b "$b" '. + {diff: $d} + $e + if $b == [] then {} else {batch: $b} end' <<<"$x") \
+    # testedits: what it did to the test files main had (testedits(), lib/testfiles.sh), when it changed any.
+    x=$(jq -c --argjson d "$(diffsize "$3")" --argjson e "$(ending)" --argjson b "$b" --argjson te "$(testedits "$3")" \
+      '. + {diff: $d} + $e + (if $b == [] then {} else {batch: $b} end) + if $te == [] then {} else {testedits: $te} end' <<<"$x") \
       || { echo "cannot read the card's diff"; return 1; }
     git -C "$3" diff --cached --binary --no-renames > "$3.patch" && printf '%s\n' "$4" > "$3.msg" \
       && mapfile -d '' -O "${#paths[@]}" paths < <(git -C "$3" diff --cached --name-only --no-renames -z) || { echo "cannot read the card's diff"; return 1; }

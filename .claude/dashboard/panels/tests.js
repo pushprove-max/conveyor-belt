@@ -2,9 +2,9 @@
 // The Tests page (#520; the owner chose mockup A, with mockup B's column "against its own median"): a tab of its own,
 // after Rules. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
 // on the Rules tab, and the heading names it ("Tests: sample").
-// The page, top to bottom (#73, #74): the figures, the table with its search and filters, Removed by Optimize, the bar
-// of the files selected, Recent actions, and one section "Settings", collapsed until opened, with the Tests model, Test
-// limits and Auto-file.
+// The page, top to bottom (#73, #74): the figures, the table with its search and filters, Test edits by cards (#76),
+// Removed by Optimize, the bar of the files selected, Recent actions, and one section "Settings", collapsed until
+// opened, with the Tests model, Test limits and Auto-file.
 // The figures: Timed files, files over budget, files slower than usual, files that wait more than they work (their
 // last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the 7 days: their slot
 // wait and their run time. A figure that counts the files of a status is a button that shows that status alone, as
@@ -37,6 +37,10 @@
 // before and after, with the median of the runs since it landed beside before. The run where one landed (the first
 // after it) is marked in its Last runs bars and in its runs. A file a landed Optimize deleted or merged (removed) is not
 // in the table: Removed by Optimize, after it, shows its last numbers, the issue and the files that took its cases.
+// Test edits by cards (#76): what each landed card did to a test file main had (the snapshot's edits, newest first):
+// its issue as a link, its card, the file, the time and its counts (assertions removed, expected values changed, skip,
+// only or todo marks added, timeouts raised, cases deleted), or "Edited, not read" for a kind of file the engine does
+// not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row lists its own edits.
 // Its More menu holds Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
 // Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
@@ -77,7 +81,7 @@
 // with its guard's result, and asks for a second click), the guards and each rule's fields (each Unsaved until Save posts
 // `conveyor.sh testrules guard|set`), and the log of what the rules filed and stopped.
 // Its part (dashboard.sh, tests): {repo (null: none is steered), tests (the snapshot's: settings, rules, files (each
-// with its optimize issues, each with its url, and removed), slower, totals; null from a snapshot without it),
+// with its optimize issues, each with its url, and removed), slower, edits, totals; null from a snapshot without it),
 // machine ({maxLoad, unread, cores, load}), testActions ({limit, actions, allowed:
 // the pack's models by CLI, offered for a CLI that lists none}), control (the control record: its tests, the Tests model),
 // clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), repos, others}.
@@ -99,6 +103,7 @@
     ['runner', 'Runs other test files', 'quiet', false], ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false]];
   const S = { el: null, ctx: null, d: null, read: null, repo: undefined, filter: 'all', open: new Set(), busy: false,
     sort: null,          // the column the table is sorted by, {key, dir: asc | desc}; null: rows that need a look first, then the highest CPU s
+    edits: 'weakened',   // the filter of Test edits by cards: weakened (any count above zero) or all
     query: '', search: null,  // the text of the search box, and the box: the same node from one draw to the next, so it keeps the caret
     held: false, late: false,  // the pointer is pressed in the panel; a snapshot came meanwhile, to draw on its release
     drafts: new Map(),   // the values typed and not yet saved, by dk(key)
@@ -829,6 +834,50 @@
     return el;
   }
 
+  // ---- Test edits by cards (#76): what each landed card did to the test files main had ----
+  // The five counts of an edit (the engine's testedits()), with their words for one and for more.
+  const EDITS = [['removedAsserts', 'assertion removed', 'assertions removed'], ['changedExpected', 'expected value changed', 'expected values changed'],
+    ['skipsAdded', 'skip, only or todo mark added', 'skip, only or todo marks added'], ['timeoutsRaised', 'timeout raised', 'timeouts raised'],
+    ['casesDeleted', 'case deleted', 'cases deleted']];
+  const weakened = (e) => EDITS.some(([k]) => (num(e[k]) || 0) > 0);
+  const editsOf = () => list((tests() || {}).edits).filter((e) => obj(e) && typeof e.file === 'string');
+  function editSaid(e) {
+    if (e.read === false) return 'Edited, not read';
+    const said = EDITS.filter(([k]) => (num(e[k]) || 0) > 0).map(([k, one1, more1]) => `${e[k]} ${e[k] === 1 ? one1 : more1}`);
+    return said.length ? said.join(', ') : 'Edited, nothing weakened';
+  }
+  // One edit: its card's issue and card, the file (withFile), its time and its counts.
+  function editLine(e, withFile, any) {
+    const h = S.ctx.h, li = h('li', 'tests-edit');
+    li.dataset.file = e.file;
+    if (num(e.issue) !== null) li.append(S.ctx.issueLink({ issue: e.issue, url: any ? any.replace(/\d+$/, String(e.issue)) : null }), h('span', null, ' '));
+    li.append(h('span', 'board-from', String(e.card || 'a card')));
+    if (withFile) li.append(h('span', null, ' · '), h('span', 'board-label', e.file));
+    li.append(h('span', 'board-from', ` · ${S.ctx.when(e.time)}`), h('span', 'tests-edit-counts', ` · ${editSaid(e)}`));
+    return li;
+  }
+  function editsList(edits, label, withFile, any) {
+    const ul = S.ctx.h('ul', 'tests-runs tests-edits-list');
+    ul.setAttribute('aria-label', label);
+    edits.forEach((e) => ul.append(editLine(e, withFile, any)));
+    return ul;
+  }
+  function editsSection(files) {
+    const h = S.ctx.h, el = h('section', 'tests-edits'), all = editsOf(), weak = all.filter(weakened), any = anyIssueUrl(files);
+    el.append(h('h3', 'board-head', 'Test edits by cards'));
+    const bar = h('div', 'tests-filters');
+    bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Show the test edits');
+    [['weakened', 'Weakened', weak.length], ['all', 'All edits', all.length]].forEach(([k, name, n]) => {
+      const b = button(`${name} ${n}`, 'rules-tog', 'edits-filter', `${name}: ${n} ${n === 1 ? 'edit' : 'edits'}`, () => { S.edits = k; draw(); say(`Showing: ${name}`); });
+      b.dataset.filter = k; b.setAttribute('aria-pressed', String(S.edits === k));
+      bar.append(b);
+    });
+    const shown = S.edits === 'all' ? all : weak;
+    el.append(bar, shown.length ? editsList(shown, 'Test edits by cards, newest first', true, any)
+      : h('p', 'board-from', S.edits === 'all' ? 'No landed card changed a test file that main had.' : 'No landed card weakened a test file that main had.'));
+    return el;
+  }
+
   // ---- Auto-file: the switch, the preview, the guards, the rules and the log ----
   const rulesCmd = (args) => ['control', { action: 'testrules', args, repo: S.d.repo }];
   const WHOLE1 = /^[1-9][0-9]{0,5}$/, WHOLE0 = /^[0-9]{1,6}$/, LIMIT = /^[0-9]{1,6}(\.[0-9]{1,3})?$/;
@@ -996,6 +1045,9 @@
       opts.forEach((o) => ul.append(optLine(o)));
       el.append(h('p', 'board-head', 'Optimize issues'), ul);
     }
+    // What landed cards did to this file, newest first.
+    const edits = editsOf().filter((e) => e.file === file);
+    if (edits.length) el.append(h('p', 'board-head', 'Test edits by cards'), editsList(edits, `Test edits of ${file}`, false, anyIssueUrl([f])));
     el.append(rowActions(f));
     // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
     if (f.wholeOnly === true) return el;
@@ -1213,6 +1265,7 @@
       parts.push(figures(files, counts));
       parts.push(files.length ? table(files, counts) : S.ctx.state('empty', 'No file times for this project',
         'Conveyor records the CPU time of each test file when the test command prints a "TESTRUN sec" line for it. The helper conveyor/tools/testtime.sh prints this line. The table starts when the first card with file times runs its tests.'));
+      parts.push(editsSection(files));
       if (gone.length) parts.push(removed(gone));
       if (S.sel.size) parts.push(selBar(files));
       parts.push(recent(files, gone));
@@ -1232,7 +1285,7 @@
     if (wide) wide.scrollLeft = left;
     if (S.busy) {
       root.querySelectorAll('button, input, select, textarea').forEach((b) => {
-        if (!['filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more'].includes(b.dataset.act) && !/^(sort|figure)-/.test(b.dataset.act || '')) b.disabled = true;
+        if (!['filter', 'edits-filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more'].includes(b.dataset.act) && !/^(sort|figure)-/.test(b.dataset.act || '')) b.disabled = true;
       });
     }
     if (keep) {

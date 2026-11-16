@@ -211,8 +211,8 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows, from top to bottom: the figures, the table of test files, Removed by Optimize, Recent actions,
-and Settings.
+The Tests tab shows, from top to bottom: the figures, the table of test files, Test edits by cards, Removed by
+Optimize, Recent actions, and Settings.
 
 The figures count the timed files, the files over budget, the files slower than usual and the files that wait more
 than they work, and give the slot wait and run time of the card Test steps of 7 days. Click the figure of files over
@@ -259,6 +259,14 @@ commit), or closed without landing. A landed issue also shows the fix of its car
 or deleted) and the CPU seconds of the file before and after the fix. Next to "before", it shows the median CPU
 seconds of the file's runs since the fix landed, when the file ran since then. The first run after the fix has a mark
 in the row's Last runs and in its list of runs, while the row still shows that run.
+
+Test edits by cards shows what each landed card did to a test file that the project already had, newest first. A
+new test file is not in it. Each entry shows the issue and the card, the file, when the card landed and the counts:
+assertions removed, expected values changed in kept assertions, skip, only or todo marks added, timeouts raised and
+cases deleted. Conveyor reads shell test files and JavaScript and TypeScript test files. A file of another kind shows
+"Edited, not read". The Weakened filter, which shows first, shows the edits with one of these counts above zero. All
+edits shows every edit. Weakened edits on many cards show a pattern: tests that were made weaker to get green. An
+open row lists the edits of its own file.
 
 A file that an Optimize deleted, or merged into another file, is not in the table. "Removed by Optimize", below the
 table, shows it with its last numbers, its issue and the test files that now have its cases. For a deleted file,

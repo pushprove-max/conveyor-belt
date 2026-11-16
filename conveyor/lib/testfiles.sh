@@ -36,6 +36,8 @@
 #   a file that only a Board filing names is listed too;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
+# edits: each entry of the landed lines' testedits (testedits(), below), newest first, with its card, issue and time;
+#   a file's newest TESTKEEP alone, so the list grows with the test files, not with the cards that land;
 # totals: files (those with CPU seconds on record), overBudget (over and not slow on purpose), slower, and steps: the card test steps that ran in
 #   the 7 days to today ({count, waitSec: their seconds waiting for a test slot, runSec: their test commands' seconds}).
 TESTKEEP=5
@@ -57,6 +59,100 @@ OWNERS='def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]
     def caseowners: index(": ") as $i | if $i == null then [.] else owners(.[:$i]; .[$i + 2:]) end;
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
         | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings)] | unique;'
+# What a card did to the test files it changed that main already had (#76), written on its landed line as testedits:
+# one entry a file, {file, read, removedAsserts, changedExpected, skipsAdded, timeoutsRaised, casesDeleted}. The one
+# table of patterns, a language a row: the file name endings it reads and the jq regular expressions of an assertion,
+# a skip, only or todo mark, a case and a timeout (its number captured as n). A file whose ending no row has is
+# recorded as edited, not read: read false, its counts null.
+TESTEDIT_TABLE='def table: [
+  {ext: ["sh", "bash", "bats"], assert: "\\|\\|\\s*fail\\b|\\bassert[A-Za-z_]*\\b", skip: "^\\s*skip\\b",
+   case: "^\\s*(function\\s+)?(t_|test)[A-Za-z0-9_]*\\s*\\(\\)|^\\s*@test\\s",
+   timeout: "(\\btimeout\\s+|--timeout[= ]|^#\\s*timeout:\\s*)(?<n>[0-9][0-9_]*)"},
+  {ext: ["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"], assert: "\\b(expect|assert)(\\.[A-Za-z]+)*\\s*\\(",
+   skip: "\\b(it|test|describe|suite)\\.(skip|only|todo)\\b|\\b[xf](it|describe|test)\\s*\\(|\\bt\\.(skip|todo)\\s*\\(|[{,]\\s*(skip|only|todo)\\s*:\\s*(true|[\"\u0027`])",
+   case: "^\\s*[xf]?(it|test)(\\.[A-Za-z]+)?\\s*\\(",
+   timeout: "\\b(timeout|setTimeout)\\s*[:(=]\\s*(?<n>[0-9][0-9_]*)"}];'
+# The counts, from the file as main had it and as the card left it (the input, raw: the two joined by a NUL; nothing
+# after it for a file the card deleted) and its path ($f). Each is read as statements: a line, or an assertion line
+# with the lines after it that close its brackets, so an expected value on a line of its own is part of its assertion.
+# A statement the card removes and adds again unchanged (a move) counts for nothing. A removed and an added statement
+# that differ only in the number of a timeout pair up: a raised timeout when the new number is higher. Of the
+# assertions left, a removed and an added one with the same call and actual value pair up (key): a changed expected
+# value when the expected value (val) differs, while a changed message alone counts for nothing. Removed assertions,
+# added marks and deleted cases are what the file lost or gained on balance (never below 0), so a case renamed or an
+# assertion rewritten counts for nothing.
+TESTEDIT_JQ='def count($re): map(select(test($re))) | length;
+  def minus($b): (reduce $b[] as $x ({}; .[$x] += 1)) as $n
+    | reduce .[] as $x ({n: $n, o: []}; if (.n[$x] // 0) > 0 then .n[$x] -= 1 else .o += [$x] end) | .o;
+  def norm: gsub("\\s+"; " ") | gsub("^ | $"; "");
+  # Strings to S, numbers to N, literals to L; with $js also a regular expression literal (a / where a value starts,
+  # its escapes and [classes] read) to R, so its brackets, quotes and commas are not read as code.
+  def mask($js): gsub("\"([^\"\\\\]|\\\\.)*\"|\u0027([^\u0027\\\\]|\\\\.)*\u0027|`([^`\\\\]|\\\\.)*`"
+      + (if $js then "|(?<p>^|[(,=:\\[!&|?{};])\\s*/(?![/*])([^/\\\\\\[\\n]|\\\\.|\\[([^\\]\\\\\\n]|\\\\.)*\\])+/[A-Za-z]*" else "" end);
+      if .p == null then "S" else .p + "R" end) | gsub("\\b[0-9][0-9_.]*"; "N")
+    | gsub("\\b(true|false|null|undefined)\\b"; "L") | norm;
+  def mask: mask(false);
+  def depth($js): mask($js) | [explode[] | if . == 40 or . == 91 or . == 123 then 1 elif . == 41 or . == 93 or . == 125 then -1 else 0 end] | add // 0;
+  # The arguments of a call, its text read from just after its "(": {args, rest: the text after its ")"}. A / where a
+  # value starts (p: the last character that is not a space) opens a regular expression literal (q 47, k: in a class).
+  def call: explode as $c | (reduce range(0; $c | length) as $i ({d: 0, q: null, e: false, k: false, p: 40, s: 0, a: [], end: null};
+      if .end != null then . else $c[$i] as $h
+      | (if .q == 47 then (if .e then .e = false elif $h == 92 then .e = true elif .k then (if $h == 93 then .k = false else . end)
+          elif $h == 91 then .k = true elif $h == 47 then .q = null else . end)
+        elif .q != null then (if .e then .e = false elif $h == 92 then .e = true elif $h == .q then .q = null else . end)
+        elif $h == 47 and (.p | IN(40, 44, 61, 58, 91, 33, 38, 124, 63, 123, 59)) and ($c[$i + 1] | IN(47, 42) | not) then .q = 47 | .k = false
+        elif $h == 34 or $h == 39 or $h == 96 then .q = $h
+        elif $h == 40 or $h == 91 or $h == 123 then .d += 1
+        elif $h == 41 or $h == 93 or $h == 125 then (if .d == 0 then .a += [$c[.s:$i] | implode] | .end = $i else .d -= 1 end)
+        elif $h == 44 and .d == 0 then .a += [$c[.s:$i] | implode] | .s = $i + 1
+        else . end) | if $h | IN(32, 9, 10, 13) then . else .p = $h end end)) as $r
+    | {args: ($r.a + (if $r.end == null then [$c[$r.s:] | implode] else [] end) | map(norm | select(. != ""))),
+       rest: (if $r.end == null then "" else $c[$r.end + 1:] | implode end)};
+  def pair(f): . as $in | ($in.r | map({s: ., k: f})) as $rk | reduce ($in.a[] | {s: ., k: f}) as $x ({r: $rk, a: [], p: []};
+      (if $x.k == null then null else first(range(0; .r | length) as $j | select(.r[$j].k == $x.k) | $j) // null end) as $j
+      | if $j == null then .a += [$x.s] else .p += [[.r[$j].s, $x.s]] | .r |= del(.[$j]) end) | .r |= map(.s);
+  ((($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x | first(table[] | select(any(.ext[]; . == $x))) // null) as $t
+  | if $t == null then {file: $f, read: false, removedAsserts: null, changedExpected: null, skipsAdded: null, timeoutsRaised: null, casesDeleted: null}
+    else def stmts: split("\n") | reduce .[] as $l ({o: [], c: null, d: 0, n: 0};
+        if .c != null then .c += "\n" + $l | .d += ($l | depth($t.ext[0] != "sh")) | .n += 1 | if .d <= 0 or .n >= 50 then .o += [.c] | .c = null else . end
+        elif ($l | test($t.assert)) and ($l | depth($t.ext[0] != "sh")) > 0 then .c = $l | .d = ($l | depth($t.ext[0] != "sh")) | .n = 1
+        else .o += [$l] end) | .o + if .c == null then [] else [.c] end;
+      # An assertion as key (the call and its actual value) and val (its expected value), its message left out: a shell
+      # test the text before `|| fail`; expect(actual).matcher(expected); assert.method(actual, expected, message), or
+      # assert(value, message) and assert.ok, whose value is masked in key and is val.
+      def parts: if $t.ext[0] == "sh" then sub("\\s*\\|\\|\\s*fail\\b[\\s\\S]*$"; "") | {key: mask, val: norm}
+        elif test("\\bexpect\\s*\\(") then capture("^(?<h>[\\s\\S]*?\\bexpect)\\s*\\((?<b>[\\s\\S]*)$") as $m | ($m.b | call) as $a
+          | ($a.rest | capture("^(?<m>(\\s*\\.\\s*[A-Za-z_$]+)+)\\s*\\((?<b>[\\s\\S]*)$") // null) as $x
+          | if $x == null then {key: ($m.h + "(" + ($a.args | join(", ")) + ")" + $a.rest | norm), val: ""}
+            else ($x.b | call) as $e | {key: ($m.h + "(" + ($a.args | join(", ")) + ")" + $x.m + "() " + $e.rest | norm), val: ($e.args | join(", "))} end
+        elif test("\\bassert(\\.[A-Za-z]+)*\\s*\\(") then capture("^(?<h>[\\s\\S]*?\\bassert(?<m>(\\.[A-Za-z]+)*))\\s*\\((?<b>[\\s\\S]*)$") as $m
+          | ($m.b | call) as $a | ($m.m | sub("^.*\\."; "")) as $n
+          | if $n | IN("", "ok", "ifError") then {key: ($m.h + "(" + ($a.args[0] // "" | mask(true)) + ") " + $a.rest | norm), val: ($a.args[0] // "")}
+            elif $n == "fail" then {key: ($m.h + "() " + $a.rest | norm), val: ""}
+            else {key: ($m.h + "(" + ($a.args[0] // "") + ") " + $a.rest | norm), val: ($a.args[1] // "")} end
+        else {key: mask(true), val: norm} end;
+      split("\u0000") as $v | ($v[0] | stmts) as $o | ($v[1] // "" | stmts) as $w
+      | {r: ($o | minus($w)), a: ($w | minus($o))} as $c
+      | def tval: capture($t.timeout).n | gsub("_"; "") | tonumber;
+      ($c | pair(if test($t.timeout) then sub($t.timeout; "T") else null end)) as $to
+      | ($to | {r, a} | pair(if test($t.assert) then parts.key else null end)) as $ex
+      | {file: $f, read: true, removedAsserts: ([($ex.r | count($t.assert)) - ($ex.a | count($t.assert)), 0] | max),
+         changedExpected: ([$ex.p[] | select((.[0] | parts.val) != (.[1] | parts.val))] | length),
+         skipsAdded: ([($c.a | count($t.skip)) - ($c.r | count($t.skip)), 0] | max),
+         timeoutsRaised: ([$to.p[] | select((.[1] | tval) > (.[0] | tval))] | length),
+         casesDeleted: ([($c.r | count($t.case)) - ($c.a | count($t.case)), 0] | max)} end'
+testedits() { # <worktree>: its staged change's testedits, a JSON list (empty when it changed no test file main had)
+  local n s f o w e out=''
+  # Each changed (M) or deleted (D) test file, as its status and path.
+  n=$(git -C "$1" diff --cached --name-status --no-renames --diff-filter=MD -z -- '*.test.*' | jq -Rsc 'split("\u0000") | map(select(. != ""))') || return 1
+  while IFS= read -r -d '' s && IFS= read -r -d '' f; do
+    o=$(git -C "$1" show "HEAD:$f") || return 1
+    w=''; [ "$s" = D ] || w=$(git -C "$1" show ":$f") || return 1
+    e=$(printf '%s\0%s' "$o" "$w" | jq -Rsc --arg f "$f" "$TESTEDIT_TABLE$TESTEDIT_JQ") || return 1
+    out+=$e
+  done < <(jq -j '.[] | . + "\u0000"' <<<"$n")
+  jq -sc '.' <<<"$out"
+}
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   local b si sh rn mn fs fl sf defs refs ru all ln ch
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
@@ -134,6 +230,9 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | {settings: {fileBudget: $b, slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
        rules: (if $ru == null then null else $ru + {last: $last[0], log: ($lg[0] // [])} end),
        files: ., slower: map(select(.slower) | .file),
+       edits: (reduce ($cr | reverse[] | select(.step == "landed" and (.testedits | type == "array")) | . as $l
+         | .testedits[] | objects | select(.file | type == "string") | {card: $l.card, issue: $l.issue, time: $l.time} + .) as $e ({n: {}, out: []};
+           if (.n[$e.file] // 0) < $keep then .out += [$e] | .n[$e.file] += 1 else . end) | .out),
        totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}'
 }

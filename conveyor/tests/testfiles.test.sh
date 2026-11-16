@@ -248,3 +248,49 @@ t_tfcaught() {
   got=$(tf_file f.test | jq -c '{caught, changedToPass, runsOnRecord, failedSteps}')
   [ "$got" = '{"caught":1,"changedToPass":1,"runsOnRecord":6,"failedSteps":4}' ] || fail "f.test's catches: $got"
 }
+
+# A card that weakens a test file main had, to get green, shows on the Tests page (#76). One card, landed by land():
+# in a.test.mjs it removes one expect( line, changes toBe(3) to toBe(4), adds it.skip and raises a timeout; in
+# s.test.sh it deletes a case (t_two, with its assertion) and raises the file's timeout; it edits a.test.py, a kind
+# the table does not read; it changes true to false in bool.test.mjs, the message alone in msg.test.mjs and the
+# expected value on its own line in multi.test.mjs; in re.test.mjs it changes 7 to 8 in a regular expression with a
+# comma and removes the assertion after one with an unclosed \( in its regular expression; it deletes gone.test.sh;
+# and it adds new.test.mjs. Bug caught: a landed line with no testedits, a count read wrong (a changed assertion taken
+# for a removed one, a boolean, multiline or regular expression expected value missed, a regular expression's comma
+# or bracket read as code, a changed message taken for a changed expected value, a skip or a deleted case
+# missed), a deleted test file left out, a new test file counted as an edit of one main had, or an unread kind left
+# out; and a Tests part with no list of them, or one that grows with every card that lands.
+t_tfedits() {
+  setup '[]'
+  printf '%s\n' "it('a', () => {" '  expect(f()).toBe(3);' '  expect(g()).toBe(1);' '});' "it('b', () => {" '  expect(h()).toBe(2);' '}, { timeout: 1000 });' > "$R/a.test.mjs"
+  printf '%s\n' "test('b', () => { assert.equal(on(), true, 'it is on'); });" > "$R/bool.test.mjs"
+  printf '%s\n' "test('m', () => { assert.equal(n(), 2, 'two'); });" > "$R/msg.test.mjs"
+  printf '%s\n' "test('l', () => {" '  assert.deepEqual(list(),' '    [1, 2]);' '});' > "$R/multi.test.mjs"
+  printf '%s\n' "test('r', () => {" '  assert.match(cost(), /no price \(1 today, 2 in 7 days\)/);' '  assert.match(open(), /a \( b/);' '  assert.equal(n(), 1);' '});' > "$R/re.test.mjs"
+  printf '%s\n' 't_gone() {' '  [ "$(z)" = 3 ] || fail "z"' '}' > "$R/gone.test.sh"
+  printf '%s\n' '# timeout: 120' 't_one() {' '  [ "$(x)" = 1 ] || fail "x"' '}' 't_two() {' '  [ "$(y)" = 2 ] || fail "y"' '}' > "$R/s.test.sh"
+  echo x > "$R/a.test.py"
+  git -C "$R" add a.test.mjs s.test.sh a.test.py bool.test.mjs msg.test.mjs multi.test.mjs re.test.mjs gone.test.sh && git -C "$R" commit -qm tests || fail "main's test files"
+  W=$T/$CASE/cards/c-1; git -C "$R" worktree add -q --detach "$W" || fail "the card's worktree"
+  printf '%s\n' "it('a', () => {" '  expect(f()).toBe(4);' '});' "it.skip('b', () => {" '  expect(h()).toBe(2);' '}, { timeout: 5000 });' > "$W/a.test.mjs"
+  printf '%s\n' '# timeout: 300' 't_one() {' '  [ "$(x)" = 1 ] || fail "x"' '}' > "$W/s.test.sh"
+  echo y > "$W/a.test.py"; echo "it('n', () => { expect(1).toBe(1); });" > "$W/new.test.mjs"
+  printf '%s\n' "test('b', () => { assert.equal(on(), false, 'it is on'); });" > "$W/bool.test.mjs"
+  printf '%s\n' "test('m', () => { assert.equal(n(), 2, 'it is two'); });" > "$W/msg.test.mjs"
+  printf '%s\n' "test('l', () => {" '  assert.deepEqual(list(),' '    [1, 3]);' '});' > "$W/multi.test.mjs"
+  printf '%s\n' "test('r', () => {" '  assert.match(cost(), /no price \(1 today, 2 in 8 days\)/);' '  assert.match(open(), /a \( b/);' '});' > "$W/re.test.mjs"
+  git -C "$W" rm -q gone.test.sh || fail "gone.test.sh not deleted"
+  git -C "$W" add -A && tf_card eval 'names && land c-1 7 "$W" "weaken the tests"' || fail "the card did not land"
+  got=$(st 'select(.step == "landed") | .testedits | map([.file, .read, .removedAsserts, .changedExpected, .skipsAdded, .timeoutsRaised, .casesDeleted])' | jq -c .)
+  [ "$got" = '[["a.test.mjs",true,1,1,1,1,0],["a.test.py",false,null,null,null,null,null],["bool.test.mjs",true,0,1,0,0,0],["gone.test.sh",true,1,0,0,0,1],["msg.test.mjs",true,0,0,0,0,0],["multi.test.mjs",true,0,1,0,0,0],["re.test.mjs",true,1,1,0,0,0],["s.test.sh",true,1,0,0,1,1]]' ] \
+    || fail "the landed line's testedits: $got"
+  loop check >/dev/null || fail "the landed line with testedits does not check"
+  # Five later cards edit a.test.mjs: the part keeps a file's newest five edits alone (the snapshot stays small).
+  for i in 2 3 4 5 6; do
+    jq -cn --argjson i "$i" '{card: "c-\($i)", issue: $i, step: "landed", time: "2099-01-01T0\($i):00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "s", reason: "",
+      product: false, testedits: [{file: "a.test.mjs", read: true, removedAsserts: 0, changedExpected: 0, skipsAdded: 0, timeoutsRaised: 0, casesDeleted: 0}]}' >> "$ST/cards.jsonl"
+  done
+  got=$(tf_in testspart 2026-11-09 | jq -c '.edits | map([.card, .issue, .file])')
+  [ "$got" = '[["c-6",6,"a.test.mjs"],["c-5",5,"a.test.mjs"],["c-4",4,"a.test.mjs"],["c-3",3,"a.test.mjs"],["c-2",2,"a.test.mjs"],["c-1",7,"a.test.py"],["c-1",7,"bool.test.mjs"],["c-1",7,"gone.test.sh"],["c-1",7,"msg.test.mjs"],["c-1",7,"multi.test.mjs"],["c-1",7,"re.test.mjs"],["c-1",7,"s.test.sh"]]' ] \
+    || fail "the Tests part's edits, newest first, a file's newest five: $got"
+}

@@ -5,7 +5,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 [inputs] | to_entries[] | select(.value | (try (fromjson
       | (keys - ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
           "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-          "wait", "run", "slotsFree", "selected", "ended", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
+          "wait", "run", "slotsFree", "selected", "ended", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
         and ([.card, .result, .sha, .reason] | all(type == "string")) and (.issue | type == "number")
         and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
         and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
@@ -70,5 +70,9 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
         and (.doneWhen // {items: 0, met: 0, failed: []} | type == "object" and (keys - ["notes"]) == ["failed", "items", "met"]
           and (.items | type == "number") and (.met | type == "number") and (.failed | type == "array" and all(type == "string"))
           and ((has("notes") | not) or (.notes | type == "array" and all(type == "string"))))
+        # What a landed card did to the test files main had (testedits()): counts null on a file it could not read.
+        and (.testedits // [] | type == "array" and all(type == "object" and keys == ["casesDeleted", "changedExpected", "file", "read", "removedAsserts", "skipsAdded", "timeoutsRaised"]
+          and (.file | type == "string") and (.read | type == "boolean") and (.read as $read
+          | [.removedAsserts, .changedExpected, .skipsAdded, .timeoutsRaised, .casesDeleted] | all(if $read then type == "number" else . == null end))))
         and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"))) catch false) | not)
     | .key + 1
