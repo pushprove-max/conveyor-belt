@@ -159,3 +159,50 @@ t_notbug() {
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/mainran" ] && ! grep -q 'bug-card check' "$STUB/asked" \
     || fail "a card that is not a bug was checked: $(cat "$STUB/mainran" 2>&1)"
 }
+
+# One card of #7, a bug filed from the Tests page to speed up f.test.sh, whose median on record is 10 CPU s (three
+# whole-suite runs: 9, 10, 11). Its build changes f.test.sh. The file's run with the change (under cards/mainrun/)
+# notes its folder, the file as it runs and its list in $STUB/mainran, times the file at <cpu> CPU s and exits <exit>.
+# The reviewer's prompt is kept in $STUB/asked; one GO review.
+speedcard() { # <cpu> [exit]
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Speed up the test file f.test.sh"')]"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
+  echo "$GO" > "$STUB/review.1"
+  echo 'echo fast > f.test.sh' > "$STUB/build"
+  for c in 9 10 11; do
+    jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
+  done
+  echo '{ pwd; cat f.test.sh; cat "$CONVEYOR_TEST_RERUN"; } >> "$STUB/mainran"; printf "TESTRUN sec\tf.test.sh\t1\t%s\n" '"$1"' > "$CONVEYOR_TEST_LOG/r"; exit '"${2:-0}" > "$STUB/mainrun-cmd"
+  loop run >/dev/null || fail "run exited non-zero"
+}
+speedline() { st 'select(.step == "bugproof") | "\(.result) \(.speed | tojson)"'; }
+
+# D1. Bug it catches: a speed-up card, whose tests pass on main by design, is blocked for not failing there, or goes on
+# with no proof that the file is faster. Its file runs alone with the change and is faster than its median on record:
+# one build session, the review shown the numbers, both numbers on its record, and it lands.
+t_speedfaster() {
+  speedcard 4
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+  [[ $(head -1 "$STUB/mainran") == */cards/mainrun/* ]] && [ "$(sed -n 2p "$STUB/mainran")" = fast ] && grep -qx $'fail\tf.test.sh' "$STUB/mainran" \
+    || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -qx '# The speed-up check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
+    || fail "the card went back to build, or the review was not shown the speed-up check: $(st 'select(.step == "build")')"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster speed-up card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  loop check || fail "the record check refuses the speed-up bugproof line"
+}
+
+# D2. Bug it catches: a speed-up card whose file is as slow as its median lands as a speed-up. It is blocked with the
+# "not faster" reason naming both numbers, never reviewed.
+t_speedslow() {
+  speedcard 10
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+    || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
+  [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+}
+
+# Bug it catches: a speed-up card whose file fails with the change is let through because it ran fast.
+t_speedfails() {
+  speedcard 4 1
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file f.test.sh fails with the change (exit 1)' ] && [ ! -e "$STUB/asked" ] \
+    || fail "a speed-up card whose file fails was not blocked: $(st 'select(.step | IN("review", "blocked"))')"
+}

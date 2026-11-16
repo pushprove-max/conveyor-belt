@@ -583,6 +583,51 @@ bugproof() { # <card> <worktree> <issue json>
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -n "$held" ]
 }
+# The test file of a speed-up issue (card()): an issue whose title starts SPEEDUP, as the Board's Tests page files it
+# (`conveyor.sh testissue`). The file is the one that filing kept for the issue ($TAFILED), else the title's word after
+# SPEEDUP. Prints it; fails for any other issue.
+SPEEDUP='Speed up the test file '
+speedfile() { # <issue json>
+  local t f
+  t=$(jq -r '.title // ""' <<<"$1"); [[ $t == "$SPEEDUP"* ]] || return 1
+  f=$(jq -rRn --argjson n "$(jq -r '.number // 0' <<<"$1")" '[inputs | fromjson? | objects | select(.event == "filed" and .issue == $n) | .file | strings] | last // empty' "$TAFILED" 2>/dev/null)
+  [ -n "$f" ] || { f=${t#"$SPEEDUP"}; f=${f%%[[:space:]]*}; }
+  [ -n "$f" ] && printf '%s\n' "$f"
+}
+# The check of a speed-up card (card(): a bug card whose issue speedfile() names a test file), in place of the bug-card
+# check (bugproof()): a speed-up keeps what the file tests, so its tests pass on main's code by design. The file runs
+# alone, on a test slot, with the pack's test.command, in a worktree of the commit the card was built on with the whole
+# staged change ($CARDS/mainrun/<card>.speed). It must pass, and its CPU seconds there (its runner's `TESTRUN sec` line,
+# timed()) must be lower than its median on record (the Tests page's, testspart()). Writes the result in
+# <worktree>.unfixed, which the review is shown, its first line the reason when the check does not hold, and records a
+# bugproof line (result ok or fail) with speed: {file, before: the median, after: the CPU seconds now; each null when
+# not known}. Fails when the check does not hold: no median on record, a run that could not be made, failed or gave no
+# CPU seconds, or CPU seconds not lower than the median.
+speedproof() { # <card> <worktree> <issue json> <test file>
+  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why=''
+  rm -f "$2.unfixed"
+  # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
+  git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
+  before=$(testspart "$(date +%F)" 2>/dev/null | jq -r --arg f "$f" 'first(.files[]? | select(.file == $f) | .median | numbers) // empty' 2>/dev/null)
+  if [ -z "$before" ]; then why="the file $f has no CPU seconds on record to compare with"
+  elif sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+    && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
+      && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index; } 2>&1 < /dev/null); then
+    printf 'fail\t%s\n' "$f" > "$mwt.rerun"; tests "$mwt" test.command alone; rc=$?
+    after=$(timed "$mwt" 2>/dev/null | jq -r --arg f "$f" '.[$f].cpu? | numbers' 2>/dev/null)
+    if [ "$rc" != 0 ]; then why="the file $f fails with the change (exit $rc)"
+    elif [ -z "$after" ]; then why="the run of $f with the change gave no CPU seconds"
+    elif ! jq -en --argjson a "$after" --argjson b "$before" '$a < $b' >/dev/null 2>&1; then why="the file is not faster: $before CPU s on record, $after CPU s now"; fi
+  else why="the file $f could not be run with the change: ${out:0:300}"; fi
+  { if [ -z "$why" ]; then printf 'This issue speeds up the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, it passed in %s CPU s, lower than its median on record, %s CPU s.\n' "$f" "$after" "$before"
+    else printf '%s\n' "$why"; fi
+    [ -z "$rc" ] || { echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; }; } > "$2.unfixed"
+  record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof "$(if [ -z "$why" ]; then echo ok; else echo fail; fi)" \
+    "$(jq -cn --arg r "$why" --arg f "$f" --arg b "$before" --arg a "$after" '{reason: $r, speed: {file: $f, before: ($b | tonumber? // null), after: ($a | tonumber? // null)}}')"
+  git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  [ -z "$why" ]
+}
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
 # own check refused the run) proves nothing. A command that writes no logs says no more than its exit.

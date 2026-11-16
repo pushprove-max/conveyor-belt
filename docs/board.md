@@ -220,7 +220,10 @@ chip work together. A row opens to show its runs, each marked with its card or "
 file or to mark it slow on purpose (`conveyor.sh test-settings`). Test limits holds the Load limit (`maxLoad`, in the host file)
 and the project's test budget (in the pack).
 
-An opened row has the test actions. "now" runs at once and files no issue. "issue" files an issue. Judge this test and
+An opened row has the test actions. "now" runs at once and files no issue. "issue" files an issue. A card for a
+"File an issue: speed up" issue does not need a test that fails on main. It must make the file pass in fewer CPU
+seconds than the file's median, else the card is blocked with "the file is not faster" and both numbers
+(`conveyor/README.md`, Bug cards: the new tests fail without the fix). Judge this test and
 Explain the slowdown need a model for the test actions ("Model for Tests actions"). Auto-file shows the test rules
 (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test actions).
 

@@ -393,6 +393,12 @@ This issue is a bug: after the build, the test cases the change adds or changes 
 fix (its test files alone, in a worktree of main). At least one must fail there. A change to test files alone is not
 run, as it has no fix to take out. A change that selects no test of its own (comments only) is proved by the test
 files its issue'"'"'s Done-when names instead, and is not checked when it names none. Its result:'
+# What the review of a speed-up card (speedproof(), card()) is told before the check's result.
+# shellcheck disable=SC2034 # used in lib/card.sh
+SPEEDREVIEW='# The speed-up check
+This issue speeds up one test file and keeps what it tests, so no test must fail on main'"'"'s code without the change.
+After the build, the file was run alone with the change, on a test slot. It must pass, and its CPU seconds must be lower
+than its median on record. Judge whether the file still tests all that it tested before. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

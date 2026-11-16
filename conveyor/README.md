@@ -722,6 +722,16 @@ main's code with the fix and without it. At least one must fail without the fix,
 the issue names no test file, the card goes on to review with no check. Its `bugproof` line (result `skipped`) and
 the result the review sees say why. The review reads that change as it reads any other.
 
+A bug card that speeds up one test file is checked another way too. This is an issue whose title starts "Speed up the
+test file", as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing named, else
+the title's next word. Such a change keeps what the file tests, so its tests pass on main's code, and no test must fail
+there. The file runs alone, with the change, on a test slot, with the pack's `test.command`. It must pass, and its CPU
+seconds must be lower than its median on record (the median the Tests page shows). The card's `bugproof` line (result
+`ok` or `fail`) names the file and both numbers: `speed: {file, before, after}`. When the file is not faster, the card
+is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s now", with no review. When the file
+fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
+shown the result.
+
 ## The whole test on main
 
 A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs
