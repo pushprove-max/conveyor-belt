@@ -511,7 +511,7 @@ export const SAYS = {
     'Draft notes', 'Show 2 changes'], empty: 'No project releases with Conveyor.', failed: 'The Board could not read the release state' },
   declined: { title: 'Declined', count: '1', data: ['#63', '[P1] b.txt:2 no mark here', 'declined by the judge', '30 min ago', 'Why: its proof needs a stub built to misbehave', 'File as issue',
     'Dismiss', 'Dismiss all shown (1)', 'Show every line'], empty: 'No declined finding', failed: 'The Board could not read the declined findings' },
-  health: { title: 'Health', count: '', data: ['buildhost', 'Reachable', 'Conveyor', 'Running', 'Last push', 'All pushed', 'Usage limit', '44% of the 7-day limit used', 'account default, noreply-a@example.com: build and fix and reviews', '6 checks fine'], empty: 'No health reading yet', failed: 'The Board could not read Health' },
+  health: { title: 'Health', count: '', data: ['buildhost', 'Reachable', 'Conveyor', 'Running', 'Last push', 'All pushed', 'Usage limit', '44% of the 7-day limit used', 'account default, noreply-a@example.com: build and fix and reviews', 'checks fine'], empty: 'No health reading yet', failed: 'The Board could not read Health' },
   lanes: { title: 'Lanes', count: '', data: ['Fast lane', 'Not committed', '1 file changed, not committed', 'on fix-123-fast', 'Landing: on the belt', 'review 1 of 3', 'Research lane', 'Working: Compare OCR vendors, last activity 1 min ago', 'on research-notes'], empty: 'No lanes set up', failed: 'The Board could not read the lanes' },
   cost: { title: 'Cost', count: '', data: ['$4.25', 'Cards today', '$14.00', 'Cards, last 7 days', '$1.00', 'Landed in the last 7 days: 3 after 1 review, 1 after 2 reviews.', 'Per card, last 7 days', 'Landed days ago', '$0.00 today', '$6.25 in 7 days', 'Broken build', 'Blocked', '$0.75 today', '$3.50 in 7 days', 'Every session on this machine: $12.50 today, $80.00 this limit week.'], empty: 'No spend in the last 7 days', failed: 'The Board could not read Cost' },
   metrics: { title: 'Metrics', count: '', data: ['Lead time (opened to landed)', '1 h 58 min (90th: 2 h 21 min)', 'Passed first review', '66.7%', 'Findings per card', 'Block rate', '50%: 1 timeout, 1 visible change',
@@ -645,8 +645,8 @@ export const panelState = {
     // Issue 415 (UX5): what is not seen and the one thing to try; the build machine's raw reply on tap only.
     // The page names the build machine only when Health says one is set up (#112): with Health's own part failed it
     // does not know, so it names Conveyor.
-    const said = id === 'health' ? 'The Board could not get this panel from Conveyor, so it cannot show it. Press Restart the Board\'s feed in Health. If this continues, the details say what to correct.'
-      : 'The Board could not get this panel from the build machine, so it cannot show it. Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.';
+    const said = id === 'health' ? 'The Board could not get this panel from Conveyor, so it cannot show it. Press Restart the Board\'s feed in this panel. If this continues, the details say what to correct.'
+      : 'The Board could not get this panel from the build machine, so it cannot show it. Make sure that the build machine is on. Then press Restart the Board\'s feed in this panel.';
     assert.ok(text.includes(SAYS[id].failed) && text.includes(said), text);
     assert.ok(!text.includes('did not answer'), `the raw reply is not in the text: ${text}`);
     assert.equal(panel(w, id).querySelector('.state-detail').dataset.tip, 'Details: buildhost did not answer: timed out');
@@ -654,7 +654,7 @@ export const panelState = {
     delete data.panels[id];
     next(w, data);
     assert.equal(state(w, id), 'error');
-    assert.match(panel(w, id).textContent, new RegExp(`${id === 'health' ? 'Conveyor' : 'The build machine'} sent nothing for this panel, so the Board cannot show it\\. If this continues, press Restart the Board's feed in Health\\.`));
+    assert.match(panel(w, id).textContent, new RegExp(`${id === 'health' ? 'Conveyor' : 'The build machine'} sent nothing for this panel, so the Board cannot show it\\. If this continues, press Restart the Board's feed, below\\.`));
   },
   own(id) {
     const w = boot({ tab: TAB(id) });

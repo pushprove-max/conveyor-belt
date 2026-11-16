@@ -1409,9 +1409,33 @@
   const answerer = () => (remote() ? 'the build machine' : 'the Board');
   // A read that failed says what is not seen and the one thing to try (text: retryText() for what Conveyor sends);
   // the reader's own reason, which names files and internal parts, only on tap: on one machine, that reason is what
-  // to correct. A note in the panel, or a state's detail (draw()).
-  const retryText = () => (remote() ? 'Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.'
-    : 'Press Restart the Board\'s feed in Health. If this continues, the details say what to correct.');
+  // to correct. A note in the panel, or a state's detail (draw()). The text sends the owner to the panel's own
+  // restart button (restartHere()), which the panel shows next to it (#115): the head's shows only at a fault.
+  const retryText = () => (remote() ? 'Make sure that the build machine is on. Then press Restart the Board\'s feed in this panel.'
+    : 'Press Restart the Board\'s feed in this panel. If this continues, the details say what to correct.');
+  // A "Restart the Board's feed" button for a text that tells the owner to press it, with what the host answered
+  // beside it: that it is asking, then the answer (restart()). A restart costs the collector's time: a second click.
+  function restartHere() {
+    const box = h('span', 'restart-here'), b = h('button', 'btn btn-quiet', 'Restart the Board\'s feed'), said = h('span', 'detail');
+    b.type = 'button'; b.dataset.act = 'restart';
+    said.setAttribute('role', 'status');
+    twice(b, 'spend', 'Click again to restart the Board\'s feed', () => {
+      b.disabled = true; said.textContent = asking();
+      restart().then((t) => { said.textContent = t; b.disabled = false; });
+    });
+    box.append(b, said);
+    return box;
+  }
+  // Whether a panel of the tab in view, Health aside, could not read or draw its data (an error, or a note over the
+  // data it read last). Health's Data row shows its restart then (ctx.faults()), and is drawn again when it changes.
+  let faultsShown = false;
+  const panelFaults = () => Array.from(panels.values()).some((q) => q.mod.id !== 'health' && tabOf(q.mod.id) === tab && (q.state === 'error' || !!q.note));
+  function faultsChanged() {
+    const f = panelFaults(), hp = panels.get('health');
+    if (f === faultsShown) return;
+    faultsShown = f;
+    if (hp && hp.state === 'ready' && tabOf('health') === tab && last) { hp.json = undefined; draw(hp, last.panels[partOf('health')]); }
+  }
   const details = (raw) => (raw ? `Details: ${raw}` : '');
   function unread(text, raw) { return tip(h('p', 'warn-note', text), details(raw)); }
   function stateBlock(kind, title, detail) {
@@ -1503,7 +1527,7 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
@@ -1549,18 +1573,19 @@
     const mod = p.mod;
     let state = 'ready', message = null, raw = '';
     const from = remote() ? 'the build machine' : 'Conveyor', From = remote() ? 'The build machine' : 'Conveyor';
-    if (!part || typeof part !== 'object') { state = 'error'; message = `${From} sent nothing for this panel, so the Board cannot show it. If this continues, press Restart the Board's feed in Health.`; }
+    if (!part || typeof part !== 'object') { state = 'error'; message = `${From} sent nothing for this panel, so the Board cannot show it. If this continues, press Restart the Board's feed, below.`; }
     else if (typeof part.error === 'string' && part.error) { state = 'error'; message = `The Board could not get this panel from ${from}, so it cannot show it. ${retryText()}`; raw = part.error; }
-    else if (!part.data || typeof part.data !== 'object') { state = 'error'; message = `${From} sent no data for this panel, so the Board cannot show it. If this continues, press Restart the Board's feed in Health.`; }
+    else if (!part.data || typeof part.data !== 'object') { state = 'error'; message = `${From} sent no data for this panel, so the Board cannot show it. If this continues, press Restart the Board's feed, below.`; }
     // A panel that shows data keeps it through a failed read, with a short note above it. Emptied, it moved all below
     // it up, and its next good read built it anew: each open "Every step", output and inner scroll was closed or reset.
     if (p.note) { p.note.remove(); p.note = null; }
     if (state === 'error' && p.state === 'ready') {
-      p.note = unread(`The Board could not read ${mod.title} just now, so it shows what it read last. If this continues, press Restart the Board's feed in Health.`, raw);
-      p.note.classList.add('panel-note');
+      p.note = h('div', 'panel-note');
       p.note.setAttribute('role', 'status');
+      p.note.append(unread(`The Board could not read ${mod.title} just now, so it shows what it read last. If this continues, press Restart the Board's feed, below.`, raw), restartHere());
       p.body.prepend(p.note);
       clip(p);
+      if (mod.id !== 'health') faultsChanged();
       return;
     }
     try {
@@ -1571,6 +1596,8 @@
         mod.error(p.body, message, p.ctx);
         const detail = raw && p.body.querySelector('.state-detail');
         if (detail) tip(detail, details(raw));
+        // The restart the message names, next to it.
+        (p.body.querySelector('.state-error') || p.body).append(restartHere());
       }
       // An empty panel is given its data too: what it says under its tick may need it (Needs you's retried pushes).
       else if (state === 'empty') mod.empty(p.body, p.ctx, data);
@@ -1588,6 +1615,7 @@
     p.state = state;
     p.el.dataset.state = state;
     clip(p);
+    if (mod.id !== 'health') faultsChanged();
   }
 
   // ---- Customize: show or hide the panels of the tab in view, density, theme, restore ----
@@ -1927,12 +1955,13 @@
       if (typeof a.view === 'string') { if (view === null) view = a.view; else if (a.view !== view) window.location.reload(); }
     });
   }
-  // The Board's feed (the collector) restarted, from the head or the Health panel (ctx.restart): what the host
+  // The Board's feed (the collector) restarted, from the head or a panel's button (restartHere()): what the host
   // answered goes under the head, and to the promise returned (the panel shows it beside its button).
+  const asking = () => `Asking ${remote() ? 'the build machine' : 'the Board'} to restart the Board's feed…`;
   function restart() {
     const note = byId('restart-note');
     const who = remote() ? 'the build machine' : 'the Board', Who = remote() ? 'The build machine' : 'The Board';
-    note.textContent = `Asking ${who} to restart the Board's feed…`;
+    note.textContent = asking();
     return post('restart', {}).then((r) => r.text().then((t) => (r.ok ? 'Restarting. The page catches up in about a minute.' : `Not restarted: ${String(t).trim() || `${who} answered ${r.status}`}`)), () => `${Who} did not answer. Make sure that it is on. Then press Restart again.`)
       .then((text) => { note.textContent = text; return text; });
   }

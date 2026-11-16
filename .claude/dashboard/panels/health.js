@@ -76,17 +76,14 @@ window.DASH_APP.panel({
       ? 'Conveyor on this machine did not answer in time. The Board asks again in about a minute.'
       : 'Check the build machine is on and this computer reaches it over SSH.';
     else check(name, ctx.chip('Not checked', 'warn'), error(d.host.error)).next = 'The Board checks it again in about a minute. Before that check, correct the host file as the error says.';
-    // How old what the page shows is: dataRow below (it draws its own next step).
-    const s = d.stream;
-    if (s && typeof s === 'object') dataRow(check('Data', h('span')).dd, s, ctx);
-    // The Board's feed restarted from here, beside the data's age; the head shows it too only while the feed is at
-    // fault (app.js). What the host answered shows beside it.
-    const restart = h('button', 'btn btn-quiet', 'Restart the Board\'s feed'), said = h('span', 'detail');
-    restart.type = 'button'; restart.dataset.act = 'restart';
-    said.setAttribute('role', 'status');
-    // A restart costs the collector's time: a second click, as the head's (ctx.twice).
-    ctx.twice(restart, 'spend', 'Click again to restart the Board\'s feed', () => { restart.disabled = true; ctx.restart().then((t) => { said.textContent = t; restart.disabled = false; }); });
-    check('Board\'s feed', restart, said);
+    // How old what the page shows is: dataRow below (it draws its own next step). The Board's feed is restarted from
+    // this row, after its next step (ctx.restartButton, with what the host answered beside it); the head shows a
+    // restart too only while its mark says the feed is at fault (app.js). With no stream to tell the data's age, the
+    // row is the restart alone, named for it.
+    const s = d.stream, data = check(s && typeof s === 'object' ? 'Data' : 'Board\'s feed', h('span'));
+    data.dd.restart = ctx.restartButton();
+    if (s && typeof s === 'object') dataRow(data.dd, s, ctx);
+    else data.dd.append(data.dd.restart);
     // A stuck card; one waiting on a same-file card names that card's issue and where it is (blocked, queued).
     const stuck = (s) => (s.step === 'waiting' && s.waitsOn && typeof s.waitsOn === 'object'
       ? `#${s.issue} waiting on ${typeof s.waitsOn.issue === 'number' ? `#${s.waitsOn.issue}` : 'a card'}${s.waitsOn.state ? ` (${s.waitsOn.state})` : ''}`
@@ -287,10 +284,13 @@ window.DASH_APP.panel({
         m && m.restartFailed ? 'Restart the Board on this machine to run the new code.' : 'Make the main checkout the same as origin/main by hand. The reason is beside it.';
     }
     // Failing first (faults, then warnings, each in the order drawn), each with its next step before its output; the
-    // rest fold into "N checks fine".
+    // rest fold into "N checks fine". While a check here is a fault or another panel could not read its data
+    // (ctx.faults()), the Data row and its restart stay out of the fold, where the texts that name the restart send
+    // the owner (#115).
     const rank = (row) => healthRank(row.dd);
-    const failing = rows.filter((row) => rank(row) < 2).sort((a, b) => rank(a) - rank(b));
-    const fine = rows.filter((row) => rank(row) === 2);
+    const shown = (row) => rank(row) < 2 || (row === data && (rows.some((r) => rank(r) === 0) || ctx.faults()));
+    const failing = rows.filter(shown).sort((a, b) => rank(a) - rank(b));
+    const fine = rows.filter((row) => !shown(row));
     const list = (rs) => {
       const dl = h('dl', 'checks');
       rs.forEach((row) => {
@@ -377,7 +377,7 @@ function dataRow(dd, s, ctx) {
   delete dd.dataset.liveUntil;
   if (live && f.open) {
     dd.dataset.liveUntil = String(until);
-    dd.replaceChildren(ctx.chip('Live', 'ok'), h('span', 'detail', 'each change as it happens'));
+    dd.replaceChildren(ctx.chip('Live', 'ok'), h('span', 'detail', 'each change as it happens'), ...(dd.restart ? [dd.restart] : []));
     return;
   }
   if (live) dd.dataset.liveUntil = String(until);
@@ -391,9 +391,9 @@ function dataRow(dd, s, ctx) {
   const why = live ? `this page asks ${remote ? 'the build machine' : 'the Board'} for news every 15 s`
     : s.live ? 'the live feed stopped' : e ? e.line : 'the live stream is down';
   const next = live ? 'Reload the page to open its live feed again.'
-    : `Reload the page. If the data stays old, ${remote ? 'make sure that the build machine is on. Then press' : 'press'} Restart the Board's feed.`;
+    : `Reload the page. If the data stays old, ${remote ? 'make sure that the build machine is on. Then press' : 'press'} Restart the Board's feed, below.`;
   const raw = e ? ctx.output(e.raw, null, 'Raw error', dd.querySelector(':scope > details.output')) : null;
-  dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`), ...(raw ? [raw] : []));
+  dd.replaceChildren(c, h('span', 'detail', healthWaits(why, ctx)), h('p', 'check-next', `Next: ${next}`), ...(dd.restart ? [dd.restart] : []), ...(raw ? [raw] : []));
 }
 // "N s old" (minutes and hours past two minutes); "Age unknown" with no time to count from.
 function healthAge(iso, ctx) {

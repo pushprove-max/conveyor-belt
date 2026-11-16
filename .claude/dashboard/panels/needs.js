@@ -482,6 +482,10 @@ window.DASH_APP.panel({
       warn.textContent = errors[key] || '';
       warn.hidden = !errors[key];
       ctx.tip(warn, errors[key] ? ctx.details(why[key]) : '');
+      // The cards not read: their text names the restart, so it is next to it, kept through a redraw while they stay
+      // unread (it shows what the host answered).
+      const restart = g.querySelector(':scope > .restart-here');
+      if (key === 'waiting' && errors.waiting) { if (!restart) warn.after(ctx.restartButton()); } else if (restart) restart.remove();
       g.hidden = items[key].length === 0 && !errors[key];
       // A new item draws the eye once: the mark goes with the next change of this panel's data.
       const show = (xs) => ctx.list(g.querySelector('.rows'), xs, keyOf[key], make[key], (li, x) => {

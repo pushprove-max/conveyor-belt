@@ -28,13 +28,14 @@ const dd = (w, label) => panel(w, 'health').querySelector(`dt[data-check="${labe
 test('Health: failing rows come first, faults before warnings, each with a next step; the rows that are fine fold into "N checks fine"', () => {
   const w = boot();
   deliver(w, failing());
-  assert.deepEqual(failingRows(w), ['Last push', 'Flaky tests', 'Usage limit', 'Dashboard code'], 'the fault first, then the warnings in the order drawn');
-  for (const label of failingRows(w)) assert.match(dd(w, label).querySelector('.check-next')?.textContent ?? '', /^Next: \S/, `${label} says what to do next`);
+  // The row with the Board's feed restart comes last, out of the fold while a check is a fault (issue 115).
+  assert.deepEqual(failingRows(w), ['Last push', 'Flaky tests', 'Usage limit', 'Dashboard code', 'Board\'s feed'], 'the fault first, then the warnings in the order drawn');
+  for (const label of failingRows(w).slice(0, -1)) assert.match(dd(w, label).querySelector('.check-next')?.textContent ?? '', /^Next: \S/, `${label} says what to do next`);
   assert.match(dd(w, 'Last push').querySelector('.check-next').textContent, /Needs you.*waits until a fix lands on main/);
   const fine = panel(w, 'health').querySelector('details.checks-fine');
   assert.ok(fine && !fine.open, 'the rows that are fine are folded, closed');
-  assert.equal(fine.querySelector('summary').textContent, '4 checks fine');
-  assert.deepEqual(Array.from(fine.querySelectorAll('dt'), (dt) => dt.dataset.check), ['buildhost', 'Board\'s feed', 'Conveyor', 'Codex limit']);
+  assert.equal(fine.querySelector('summary').textContent, '3 checks fine');
+  assert.deepEqual(Array.from(fine.querySelectorAll('dt'), (dt) => dt.dataset.check), ['buildhost', 'Conveyor', 'Codex limit']);
   assert.equal(fine.querySelector('.check-next'), null, 'a row that is fine has no next step');
   // Nothing failing: no failing list, every row folded.
   const ok = boot();
@@ -132,7 +133,9 @@ test('Health: the Data row that turns stale on a tick leaves "checks fine" and l
   assert.ok(panel(w, 'health').querySelector('details.checks-fine dt[data-check="Data"]'), 'Live is fine');
   tick(w, 91000); // past health.js STREAM_EXPIRE_MS (90 s)
   assert.deepEqual(failingRows(w), ['Data']);
-  assert.match(dd(w, 'Data').textContent, /91 s old.*the live feed stopped.*Next: Reload the page/);
+  assert.match(dd(w, 'Data').textContent, /91 s old.*the live feed stopped.*Next: Reload the page.*press Restart the Board's feed, below\./);
+  // Issue 115: the restart its next step names is in the row, also once the tick has drawn the row again.
+  assert.equal(dd(w, 'Data').querySelector('[data-act="restart"]')?.textContent, 'Restart the Board\'s feed');
 });
 
 // Issue 407 (UX3). Bug: three words for the same wait ("the next snapshot", "the next reading", "within a minute");

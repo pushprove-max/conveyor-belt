@@ -34,7 +34,7 @@ test('a panel with data keeps it through a failed read, with a note, and the nex
   assert.equal(steps.open, true, 'the open "Every step" stays open');
   assert.equal(panel(w, 'belt').querySelector('.state-error'), null, 'no error block in place of the data');
   assert.match(note().textContent, /^The Board could not read .+ just now, so it shows what it read last\./);
-  assert.equal(note().dataset.tip, 'Details: buildhost did not answer: timed out', 'the raw reply on tap only');
+  assert.equal(note().querySelector('.warn-note').dataset.tip, 'Details: buildhost did not answer: timed out', 'the raw reply on tap only');
   assert.equal(panel(w, 'belt').querySelector('.panel-body').firstChild, note(), 'the note is above the data');
 
   // D2: the next good read takes the note away and draws as a refresh: the same rows, open, scrolled where they were.

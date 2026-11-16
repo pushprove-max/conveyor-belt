@@ -66,7 +66,17 @@ serves the Board, because its requests come from a loopback address. An admin se
 - **Tests**: the project's test files.
 
 A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
-each panel. It never hides Needs you. **Restart the Board's feed** is in the Health panel.
+each panel. It never hides Needs you.
+
+**Restart the Board's feed** is in each place that tells you to press it:
+
+- A panel that could not read its data shows the button next to its error text.
+- In Health, the button is in the **Data** row. When Health has no data age, the row is **Board's feed**. While a
+  panel or a Health check has an error, this row stays out of **N checks fine**.
+- When the status mark says **Stale**, **No data** or **Feed stopped**, the button is next to the mark. On a phone,
+  it is in **Menu**.
+
+Click the button, then click it again. The text next to the button shows that the feed restarts, and then the result.
 
 **Show**, in the machine bar, picks the project that every tab shows.
 

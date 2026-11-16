@@ -317,7 +317,7 @@ test('a part read only in part says which piece is missing, and is never shown a
   deliver(w, data);
   for (const id of ['needs', 'queue', 'cost', 'health', 'lanes']) assert.equal(state(w, id), 'ready', `${id} is neither empty nor failed`);
   // Issue 415 (UX5): each says what is not seen and what to try; the reader's own reason is on tap, never in the text.
-  const retry = 'Make sure that the build machine is on. Then press Restart the Board\'s feed in Health.';
+  const retry = 'Make sure that the build machine is on. Then press Restart the Board\'s feed in this panel.';
   const note = (id, re) => Array.from(panel(w, id).querySelectorAll('[data-tip]')).find((el) => re.test(el.textContent));
   assert.equal(note('needs', /could not read the cards/).textContent, `The Board could not read the cards, so it shows none. ${retry}`);
   assert.equal(note('needs', /could not read the cards/).dataset.tip, 'Details: buildhost did not answer');

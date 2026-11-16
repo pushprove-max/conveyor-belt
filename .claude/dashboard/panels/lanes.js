@@ -11,7 +11,7 @@
   function landing(l, ctx, cardsError) {
     const x = l.landing, h = ctx.h, p = h('p', 'row-meta');
     // The reader's reason (it names files and internal parts) on tap only.
-    if (!x) p.append(ctx.chip('Landing not read', 'warn'), ctx.tip(h('span', null, `The Board could not read the cards. ${ctx.retry}`), ctx.details(cardsError)));
+    if (!x) p.append(ctx.chip('Landing not read', 'warn'), ctx.tip(h('span', null, `The Board could not read the cards. ${ctx.retry}`), ctx.details(cardsError)), ctx.restartButton());
     else if (x.state === 'belt') p.append(ctx.chip('Landing: on the belt', 'info'), h('span', null, x.step === 'review' ? `review ${x.review} of ${x.of}` : x.step), ctx.since(x.since, ' in this step'));
     else if (x.state === 'waiting') p.append(ctx.chip('Landing: waiting for your yes', 'warn'), h('span', null, x.reason));
     else if (x.state === 'blocked') {

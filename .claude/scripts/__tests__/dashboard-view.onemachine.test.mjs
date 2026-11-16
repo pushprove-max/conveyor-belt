@@ -32,8 +32,8 @@ test('One machine: a panel the Board cannot read says why on tap and what to do,
   deliver(w, data);
   assert.equal(state(w, 'belt'), 'error');
   const belt = panel(w, 'belt').textContent;
-  assert.ok(belt.includes('The Board could not get this panel from Conveyor, so it cannot show it. Press Restart the Board\'s feed in Health. If this continues, the details say what to correct.'), belt);
+  assert.ok(belt.includes('The Board could not get this panel from Conveyor, so it cannot show it. Press Restart the Board\'s feed in this panel. If this continues, the details say what to correct.'), belt);
   assert.equal(panel(w, 'belt').querySelector('.state-detail').dataset.tip, `Details: ${why}`);
-  assert.match(panel(w, 'needs').textContent, /The Board could not read the cards, so it shows none\. Press Restart the Board's feed in Health\./);
+  assert.match(panel(w, 'needs').textContent, /The Board could not read the cards, so it shows none\. Press Restart the Board's feed in this panel\./);
   assert.doesNotMatch(overviewText(w), /build machine|Build machine/);
 });

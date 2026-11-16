@@ -300,6 +300,8 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .state-error .ico { color: var(--bad); }
 .state-title { font-weight: 700; }
 .state-detail { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+/* A panel's own "Restart the Board's feed", next to the text that names it, with the host's answer beside it. */
+.restart-here { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-inline-start: var(--sp-1); }
 
 /* ---- what the panels draw with ---- */
 .group + .group { margin-top: var(--sp-4); }

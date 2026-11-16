@@ -88,7 +88,7 @@ window.DASH_APP.panel({
         const byCost = c.perCard.slice().sort((a, b) => (apart && a.repo !== b.repo ? (a.repo < b.repo ? -1 : 1) : usd(b) - usd(a)));
         out.push(h('h3', 'group-title', 'Per card, last 7 days'), ul, ctx.more('per-card', byCost, (xs) => ul.replaceChildren(...xs.map(row))));
       }
-    } else out.push(ctx.unread(`The Board could not read the card costs, so it shows none. ${ctx.retry}`, d.cardsError));
+    } else out.push(ctx.unread(`The Board could not read the card costs, so it shows none. ${ctx.retry}`, d.cardsError), ctx.restartButton());
     if (d.sessions) {
       const s = d.sessions, p = h('p', 'foot');
       p.append(h('span', null, 'Every session on this machine: '), ctx.number('s-today', s.todayUsd, ctx.money),
