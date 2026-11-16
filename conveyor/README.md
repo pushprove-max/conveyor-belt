@@ -1110,7 +1110,7 @@ the older ones.
 
 ## Belt 3D
 
-The Board's Belt 3D tab (after Overview; `?tab=belt3d` opens it) shows a factory floor: one belt lane for each card
+The Board's 3D View tab (after Overview; `?tab=belt3d` opens it) shows a factory floor: one belt lane for each card
 on the belt, with six pads (Build, Review, Fix, Test, Land, Push), each coloured by what happened at that step, and the
 card's crate on the step it is in. Each lane has the card's number and title at its left and its live status at its
 right: how many tests have run, with a bar, while it is in Test, else the time in its step. Stuck cards (blocked, or

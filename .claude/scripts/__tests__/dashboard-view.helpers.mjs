@@ -96,7 +96,7 @@ export const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 export const clone = (x) => JSON.parse(JSON.stringify(x));
 
 // The Board changes the loop: it is on the Control tab; the Rules panel is a tab of its own, Rules, and Belt 3D
-// one of its own, Belt 3D, and the Tests panel one of its own, Tests; every other panel reports, on Overview.
+// one of its own, 3D View, and the Tests panel one of its own, Tests; every other panel reports, on Overview.
 // The Board's part and the Rules part are each drawn as more than one panel, [id, title] in their default order.
 export const SPLIT = {
   board: [['board-loop', 'Loop'], ['board-push', 'Push landed and full test suite'], ['board', 'Board']],

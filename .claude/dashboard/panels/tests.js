@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Tests page (#520; the owner chose mockup A, with mockup B's column "against its own median"): a tab of its own,
-// after Belt 3D. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
+// after Rules. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
 // on the Rules tab, and the heading names it ("Tests: sample").
 // The page, top to bottom (#73, #74): the figures, the table with its search and filters, Removed by Optimize, the bar
 // of the files selected, Recent actions, and one section "Settings", collapsed until opened, with the Tests model, Test

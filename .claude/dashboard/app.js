@@ -3,7 +3,7 @@
 // It knows no panel. A panel is one file in panels/ that calls DASH_APP.panel({...}) and one entry in
 // panels/index.js; it is handed its own part of data.js (`panels.<id>`, written by .claude/scripts/dashboard.sh)
 // and nothing else. Everything a source wrote reaches the page as text, never as markup.
-// The page has tabs, Overview (what reports), Control (what changes the loop), Rules, Belt 3D and Tests; a panel states its tab
+// The page has tabs, Overview (what reports), 3D View, Control (what changes the loop), Rules and Tests; a panel states its tab
 // and is drawn only on it, and each tab keeps its own layout. A panel states its default length in rows (`rows`, a
 // number or 'all'); the owner sets it with the handle on its lower edge (or its keyboard), a longer list scrolls inside the
 // body under a head that stays, and the panel says "6 of 23" with one control to show all. The panels are packed on a
@@ -13,9 +13,9 @@
   const STORE_KEY = 'conveyor-board-layout';  // the layout of each tab, density and theme, in this browser only
   const TAB_KEY = 'conveyor-board-tab';        // the tab in view last
   const SEEN_KEY = 'conveyor-board-seen';     // the "Needs you" items already shown once
-  // The two daily tabs first, then Rules; Belt 3D, the one to look at rather than act on; then Tests, the test files
-  // and the test limits (#520).
-  const TABS = [['overview', 'Overview'], ['control', 'Control'], ['rules', 'Rules'], ['belt3d', 'Belt 3D'], ['tests', 'Tests']];
+  // Overview first, with 3D View, the one to look at rather than act on, beside it (#87); then Control and Rules; then
+  // Tests, the test files and the test limits (#520).
+  const TABS = [['overview', 'Overview'], ['belt3d', '3D View'], ['control', 'Control'], ['rules', 'Rules'], ['tests', 'Tests']];
   const SIZES = ['small', 'wide', 'full'];
   const DENSITIES = ['comfortable', 'compact'];
   const THEMES = ['system', 'light', 'dark'];
@@ -1134,7 +1134,7 @@
     if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(run); else run();
   }
 
-  // ---- the tabs: Overview, Control, Rules and Belt 3D, kept in the address and in this browser ----
+  // ---- the tabs: Overview, 3D View, Control, Rules and Tests, kept in the address and in this browser ----
   const tabFromAddress = () => { try { const t = new URL(window.location.href).searchParams.get('tab'); return TABS.some((x) => x[0] === t) ? t : null; } catch (e) { return null; } };
   function address(t, push) {
     try {

@@ -46,7 +46,7 @@ test('the tab in view is in the address and survives a reload; Back goes to the 
   assert.equal(new w.URL(w.location.href).searchParams.get('tab'), 'rules');
   assert.deepEqual(order(boot({ store: { 'conveyor-board-tab': 'rules' } })), RULES_IDS, 'Rules is kept in the browser too');
   assert.deepEqual(order(boot({ tab: 'rules' })), RULES_IDS, 'and opened by its address');
-  assert.deepEqual(order(boot({ tab: 'belt3d' })), BELT3D_IDS, '?tab=belt3d opens Belt 3D');
+  assert.deepEqual(order(boot({ tab: 'belt3d' })), BELT3D_IDS, '?tab=belt3d opens 3D View');
   // #520: the Tests page is a tab of its own, and a link to ?tab=tests opens it.
   assert.deepEqual(order(boot({ tab: 'tests' })), TESTS_IDS, '?tab=tests opens Tests');
   // Back: the browser restores the address before, and the page follows it.
@@ -56,32 +56,32 @@ test('the tab in view is in the address and survives a reload; Back goes to the 
   assert.equal(tabBtn(w, 'overview').getAttribute('aria-selected'), 'true');
 });
 
-// Issue 408 (UX7): Belt 3D, the tab to look at, sat between the two daily ones; the daily ones come first now, and the
-// Overview tab says the Needs you count ("Overview · 2"), so it is read from every tab.
-// #520: Tests, the fifth, after Belt 3D.
-test('the tabs are Overview, Control, Rules, Belt 3D and Tests, reached by keyboard, saying which one is selected; Overview counts Needs you, Rules a paused loop', () => {
+// Issue 408 (UX7): the Overview tab says the Needs you count ("Overview · 2"), so it is read from every tab.
+// #520: Tests, the fifth, after Rules.
+// #87: the 3D tab is named 3D View and sits next to Overview; this fails while it is named Belt 3D or comes after Rules.
+test('the tabs are Overview, 3D View, Control, Rules and Tests, reached by keyboard, saying which one is selected; Overview counts Needs you, Rules a paused loop', () => {
   const w = boot();
   deliver(w, full());
   const list = w.document.querySelector('#tabs [role="tablist"]');
   assert.ok(list);
   const words = (b) => [b.querySelector('.tab-name').textContent, b.querySelector('.tab-count').textContent].filter(Boolean).join(' ');
-  assert.deepEqual(Array.from(list.querySelectorAll('[role="tab"]'), (b) => [words(b), b.tabIndex, b.getAttribute('aria-controls')]), [['Overview · 2', 0, 'grid'], ['Control', -1, 'grid'], ['Rules', -1, 'grid'], ['Belt 3D', -1, 'grid'], ['Tests', -1, 'grid']]);
+  assert.deepEqual(Array.from(list.querySelectorAll('[role="tab"]'), (b) => [words(b), b.tabIndex, b.getAttribute('aria-controls')]), [['Overview · 2', 0, 'grid'], ['3D View', -1, 'grid'], ['Control', -1, 'grid'], ['Rules', -1, 'grid'], ['Tests', -1, 'grid']]);
   assert.equal(fig(w, 'needs'), '2', 'the count is the Needs you tile\'s');
   assert.equal(tabBtn(w, 'overview').getAttribute('aria-label'), 'Overview: 2 things need attention');
   tabBtn(w, 'overview').focus();
   key(w, tabBtn(w, 'overview'), 'ArrowRight');
+  assert.equal(w.document.activeElement, tabBtn(w, 'belt3d'));
+  assert.deepEqual(order(w), BELT3D_IDS);
+  assert.equal(words(tabBtn(w, 'overview')), 'Overview · 2', 'the count stays on the Overview tab from another tab');
+  key(w, tabBtn(w, 'belt3d'), 'ArrowRight');
   assert.equal(w.document.activeElement, tabBtn(w, 'control'));
   assert.deepEqual(order(w), CONTROL_IDS);
-  assert.equal(words(tabBtn(w, 'overview')), 'Overview · 2', 'the count stays on the Overview tab from another tab');
   key(w, tabBtn(w, 'control'), 'ArrowRight');
   assert.equal(w.document.activeElement, tabBtn(w, 'rules'));
   assert.deepEqual(order(w), RULES_IDS);
   assert.equal(tabBtn(w, 'rules').getAttribute('aria-selected'), 'true');
   assert.equal(w.document.getElementById('grid').getAttribute('aria-labelledby'), 'tab-rules');
   key(w, tabBtn(w, 'rules'), 'ArrowRight');
-  assert.equal(w.document.activeElement, tabBtn(w, 'belt3d'));
-  assert.deepEqual(order(w), BELT3D_IDS);
-  key(w, tabBtn(w, 'belt3d'), 'ArrowRight');
   assert.equal(w.document.activeElement, tabBtn(w, 'tests'));
   assert.deepEqual(order(w), TESTS_IDS);
   key(w, tabBtn(w, 'tests'), 'ArrowRight');

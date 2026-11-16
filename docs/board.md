@@ -35,6 +35,7 @@ serves the Board, because its requests come from a loopback address. An admin se
 
 - **Overview**: the panels Needs you, On the belt, Queue, Landed today, Release, Declined, Health, Lanes, Cost and Metrics. The
   tab shows the count of cards stopped for you, "Overview · 4".
+- **3D View**: the belt drawn as a conveyor line, each card on the track of its step (`conveyor/README.md`, Belt 3D).
 - **Control**: the panels **Projects and Foremen**, **Loop**, **Push landed and full test suite** and **Board**. Loop
   has the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit bar, and
   today's landed count and cost. Board has the cards in their columns. The machine head has **Pause all projects**.
@@ -42,7 +43,6 @@ serves the Board, because its requests come from a loopback address. An admin se
   **Open issues**. On Control and Rules, the line that says what an action did, with its Undo, shows in the panel
   where you did it.
 - **Tests**: the project's test files.
-- **Belt 3D**: the belt drawn as a conveyor line, each card on the track of its step (`conveyor/README.md`, Belt 3D).
 
 A panel's head moves and collapses it. Customize shows or hides each panel and sets its width. It never hides Needs
 you. **Restart the Board's feed** is in the Health panel.
