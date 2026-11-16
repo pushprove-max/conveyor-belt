@@ -147,6 +147,19 @@ t_reportargs() {
   out=$(rp_page) || fail "the run's times could not be read: $out"
   [ "$(tail -n 1 <<<"$out")" = '{"src/a.test.js":[1.5,null]}' ] || fail "the Tests page does not show the time of Conveyor's report file: $out"
 }
+# Bug caught (#164): the full test suite (test.full, which setup gives the card's command; release-prep's suite too)
+# was not asked for the runner's report, so its run, an `npm test` of node --test for one, recorded no file times. The
+# run of test.full (tests()) adds test.report's args with Conveyor's file, and the suite's record (suiterec()) has the
+# report's seconds of the file.
+t_reportfull() {
+  rp_main '{"runner": "jest", "format": "junit", "args": "<file>"}' t/a.test.js
+  tune '.test.full = "f() { printf %s \"<testsuites><testsuite name=\\\"a\\\" file=\\\"t/a.test.js\\\"><testcase name=\\\"x\\\" time=\\\"0.5\\\"/></testsuite></testsuites>\" > \"$1\"; }; f"'
+  local w=$T/$CASE/wt out
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && names && tests "$w" test.full && suiterec "$w" full abc \
+    && jq -c 'select(.sha == "abc") | .files | walk(if type == "number" then . + 0 else . end)' "$SUITERUNS" ) 2>&1 ) || fail "the full suite's run failed: $out $(cat "$w.test" 2>/dev/null)"
+  [ "$out" = '{"t/a.test.js":{"result":null,"sec":0.5,"cpu":null}}' ] || fail "the full suite's run did not ask for the runner's report, or its record lacks the report's time: $out"
+}
 # Bug caught: a runner Conveyor does not know that writes JUnit XML files to a folder recorded no test times. Each
 # file of the folder written in the run is read, its suites' file attribute naming the file; one an earlier run left
 # (written before the run began) is not, so its times are never taken for this run's.

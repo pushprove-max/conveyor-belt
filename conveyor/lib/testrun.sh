@@ -392,7 +392,9 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then listcmd "$1" "$cmd" 2>"$1.test" || return 1; cmd=$LISTCMD; fi
-  REPORT_ENV=(); if [ -z "${2:-}" ]; then reportask "$1"; [ -z "$REPORT_ARGS" ] || cmd="$cmd $REPORT_ARGS"; fi
+  # A card's run and the full test suite (fulltest(), release-prep's relsuite()) ask for the runner's report: setup gives
+  # test.full the card's command.
+  REPORT_ENV=(); if [ -z "${2:-}" ] || [ "$2" = test.full ]; then reportask "$1"; [ -z "$REPORT_ARGS" ] || cmd="$cmd $REPORT_ARGS"; fi
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)
     b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); t=$(git -C "$1" write-tree 2>/dev/null)
@@ -1135,7 +1137,8 @@ testonce() { # <worktree> <cmd>
   # descriptor still keeps the slot (slot_left).
   [ -n "$SLOT_HOME" ] || slot_left "$pid"; return $rc
 }
-# What a card's run (tests()) asks the runner for so that it writes its report, with no change to the test command
+# What a card's run and a full test suite's run (tests()) ask the runner for so that it writes its report, with no
+# change to the test command
 # (the pack's test.report env and args, setup.sh reportguess()), its <file> made <worktree>.report: REPORT_ENV, each
 # variable as `<name>=<value>`, the words after the variable's own (testonce() exports them), <file> and <mochatimes>
 # (Conveyor's mocha timer, tools/mochatimes.cjs) in double quotes, as an option in NODE_OPTIONS takes a path;

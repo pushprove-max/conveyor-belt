@@ -363,7 +363,7 @@ reportguess() { # <test command>
   p=${p# }; p=${p##* }; p=${p#./}
   # A report named by a variable or a pattern, or one a report file is needed for and none is named, is not read.
   [[ $p != *[\$*?\{]* ]] || f=''; [ -n "$p" ] || [[ $f =~ ^(go-json|go-text|cargo|pytest-durations)$ ]] || f=''
-  # A runner whose report the command does not ask for: Conveyor asks for it at each card run (testrun.sh reportask()),
+  # A runner whose report the command does not ask for: Conveyor asks for it at each card run and full test suite run (testrun.sh reportask()),
   # so the test command stays as it is: by environment variables (env: {variable: its words}), or, for vitest and
   # jest when their words end the command, by their options added at its end (args; after `--` for an npm script).
   # <file> is the report file Conveyor names. A command that names a report or reporter of its own is not given

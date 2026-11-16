@@ -526,7 +526,7 @@ has a `TESTRUN sec` line for a file, that line wins.
 `go test` gives a time for each test. Conveyor adds it to the `_test.go` file that declares the test. `setup` finds
 the runner in the test command (or in the `package.json` script that `npm test` runs) and writes `test.report`, with
 `format` and `path` when the command already writes a report. When the command writes no report, Conveyor asks for
-one at each card test run, and the test command stays as it is:
+one at each card test run and each run of the full test suite (`test.full`), and the test command stays as it is:
 
 - `node --test`, pytest and rspec: `test.report` has `env`, the environment variable Conveyor sets for the run
   (`NODE_OPTIONS`, `PYTEST_ADDOPTS` or `SPEC_OPTS`). Conveyor adds the report option after the variable's own value.
