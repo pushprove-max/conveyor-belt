@@ -453,9 +453,11 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
 # card's run is given), in LISTCMD, in the form the pack's test.list names: args (each path added at the end, quoted
 # for the shell), placeholder (the paths in place of each `{files}` of test.command), env (CONVEYOR_TEST_FILES, one
-# path a line: TEST_FILES, which testonce() gives the command) or none (the command takes no list). A run of the whole
-# suite (none, testsel()'s whole, placeholder with no `{files}` in the command, or args with a command that already
-# names the test files its runner runs, testrunner(), which paths added at its end would not narrow) adds no path. <worktree>.testlist
+# path a line: TEST_FILES, which testonce() gives the command), runner (go test and cargo test, which take packages
+# and test targets, not files: runnercmd()) or none (the command takes no list). A run of the whole suite (none,
+# testsel()'s whole, placeholder with no `{files}` in the command, args with a command that already names the test
+# files its runner runs, testrunner(), which paths added at its end would not narrow, or runner with a list
+# runnercmd() cannot give) adds no path. <worktree>.testlist
 # says which: {mode: "changed", files: <count>, by: "map" or "name", age: the commits the made test map is behind
 # (only with one)} or {mode: "whole", why}. With no test.list, the command is as it is and no file is written.
 listcmd() { # <worktree> <command>
@@ -468,7 +470,9 @@ listcmd() { # <worktree> <command>
   elif [ "$lm" = args ] && s=$(testrunner "$2" "$1") && [[ $s == named* ]]; then
     why="test.list is args, and test.command already names the tests it runs (${s##* }): use placeholder"
   elif ! s=$(testsel "$1"); then why=$s
-  else mapfile -t fs <<<"${s#*$'\n'}"; by=${s%%$'\n'*}; fi
+  else mapfile -t fs <<<"${s#*$'\n'}"; by=${s%%$'\n'*}
+    if [ "$lm" = runner ] && ! LISTCMD=$(runnercmd "$2" "$1" "${fs[@]}"); then why=$LISTCMD; LISTCMD=$2; fs=(); fi
+  fi
   if [ -n "$why" ]; then jq -cn --arg w "$why" '{mode: "whole", why: $w}' > "$1.testlist"
   else jq -cn --argjson n ${#fs[@]} --argjson b "$by" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end' > "$1.testlist"; fi || return 1
   [ ${#fs[@]} = 0 ] || q=$(printf '%q ' "${fs[@]}"); q=${q% }
@@ -476,6 +480,35 @@ listcmd() { # <worktree> <command>
     args) [ -z "$q" ] || LISTCMD="$2 $q" ;;
     placeholder) LISTCMD=${2//\{files\}/"$q"} ;;
     env) [ ${#fs[@]} = 0 ] || TEST_FILES=$(printf '%s\n' "${fs[@]}") ;;
+  esac
+}
+# The command of a card's run with test.list runner (listcmd()): <command> given the test files <file>... in the form
+# its runner (testrunner()) takes: go test, the package (folder) of each, as ./<folder> or ., in place of the word
+# ./...; cargo test, --test <name> of each tests/<name>.rs, after `cargo test`. Else prints why the whole suite runs
+# (exit 1): the command runs neither runner itself (or go test with no ./...), or a file is no test the runner can be
+# given alone (a Go file not *_test.go; a Rust file not tests/<name>.rs, such as a helper module or a source file's
+# own test module), as a run of less than the whole suite could skip it.
+runnercmd() { # <command> <worktree> <file>...
+  local c=$1 r f g a=()
+  r=$(testrunner "$1" "$2") || r=''; shift 2
+  case $r in
+    'runner go'*)
+      [[ " $c " == *' ./... '* ]] || { echo 'test.list is runner, and test.command has no ./... to put the packages in place of'; return 1; }
+      for f; do
+        [[ $f == *_test.go ]] || { echo "$f: go test takes packages, and this is no *_test.go file"; return 1; }
+        if [[ $f == */* ]]; then a+=("./${f%/*}"); else a+=(.); fi
+      done
+      mapfile -t a < <(printf '%s\n' "${a[@]}" | sort -u)
+      g=$(printf '%q ' "${a[@]}"); c=" $c "; c=${c// .\/... / ${g% } }; c=${c# }; printf '%s\n' "${c% }" ;;
+    'runner cargo'*)
+      g=${r#runner }
+      [[ $c == *"$g"* ]] || { echo "test.list is runner, and test.command does not run $g itself"; return 1; }
+      for f; do
+        [[ $f =~ ^tests/[^/]+\.rs$ ]] || { echo "$f: cargo test takes test targets, and this is no tests/<name>.rs file"; return 1; }
+        f=${f#tests/}; a+=(--test "$(printf %q "${f%.rs}")")
+      done
+      printf '%s\n' "${c/"$g"/"$g ${a[*]}"}" ;;
+    *) echo 'test.list is runner, and test.command runs neither go test nor cargo test'; return 1 ;;
   esac
 }
 # The tests a card's change touches (its staged change against HEAD), one path a line after a first line that says how

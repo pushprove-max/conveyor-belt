@@ -100,8 +100,8 @@ reads the script in `package.json`. For node --test, vitest, jest, mocha, pytest
 `test.list` to `args`. Then a card's test run gets only the tests that its change touches
 ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). If the command already names its test files, for example
 `node --test checks/*.js`, setup does not ask. For go test and cargo test, it asks if it can
-set `test.list` to `none`. These runners do not take a list of test files, so each card runs the whole suite. The
-answer is `--test-list yes|no`. If your pack already sets `test.list`, setup does not ask.
+set `test.list` to `runner`. These runners take packages and test targets, not test files, so a card's test run gets
+the packages or test targets of the tests that its change touches. The answer is `--test-list yes|no`. If your pack already sets `test.list`, setup does not ask.
 
 Setup then offers to make the test map ([The test map](configuration.md#the-test-map)). The map tells which test
 files cover which source files, so a card runs only the tests that cover its change. To make it, setup runs your

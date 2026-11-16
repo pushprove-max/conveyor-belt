@@ -33,7 +33,8 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # the globs and how many tracked files they match; yes writes them as the pack's tests.patterns.
 # The question "Set the pack's test.list?": answered by --test-list yes|no, and asked (exit 2, nothing written) while
 # the pack sets no test.list and the test command runs a runner listguess() knows, naming it; yes writes what
-# listguess() offers (args, or none for a runner that takes no list of files) as the pack's test.list.
+# listguess() offers (args, or runner for go test and cargo test, which take packages and test targets, not files) as
+# the pack's test.list.
 # The question "Make the test map?": answered by --test-map yes|no, and asked (exit 2, nothing written) while the pack
 # sets no test.map, there is no made map and the project's language has a coverage tool the map knows (lib/testmap.sh
 # maptool()), naming the tool and what the run may cost (mapcost()); yes runs the whole suite under coverage and
@@ -131,7 +132,7 @@ setup() { # as SETUP_USAGE
       if [ "${tl%% *}" = args ]; then
         need+=("--test-list <yes or no: the test command runs ${tl#* }, which takes test files as arguments; set the pack's test.list to args, so a card's test run is given only the tests its change touches?>")
       else
-        need+=("--test-list <yes or no: the test command runs ${tl#* }, which cannot take a list of test files; set the pack's test.list to none, so a card's test run is the whole suite?>")
+        need+=("--test-list <yes or no: the test command runs ${tl#* }, which takes packages or test targets, not test files; set the pack's test.list to runner, so a card's test run is given only the packages or test targets of the tests its change touches?>")
       fi
     fi
   fi

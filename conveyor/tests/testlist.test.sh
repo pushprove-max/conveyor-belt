@@ -109,3 +109,41 @@ t_testlistnotest() {
   listgot 'args:|env:' 'no list for a file with no test found'
   listrec '{"mode":"whole","why":"lib/other.js: no test found for it"}'
 }
+
+# Main holds <file>...; the pack's test.list is runner and its command <command>, whose runner (go or cargo) is a stub
+# on PATH that writes the arguments it was given to $STUB/got.
+runnersetup() { # <runner> <command> <file>...
+  local r=$1 c=$2 f; shift 2
+  listsetup runner
+  for f; do mkdir -p "$R/$(dirname "$f")" && echo x > "$R/$f"; done
+  git -C "$R" add -A && git -C "$R" commit -qm runner || fail "main's files could not be committed"
+  { echo '#!/usr/bin/env bash'; cat "$STUB/list-cmd"; } > "$STUB/$r" && chmod +x "$STUB/$r" || fail "the stub $r"
+  tune --arg c "$c" '.test.command = $c'
+}
+
+# #154. Bug it catches: setup gave go test test.list none, so every card ran `go test ./...`, the whole suite, though
+# the map knew its tests. The packages of the tests the change touches go where ./... was, each once, and the rest of
+# the command stays.
+t_testlistgo() {
+  runnersetup go 'go test ./... -count=1' pkg/cart/cart.go pkg/cart/cart_test.go pkg/tax/tax_test.go
+  listrun 'echo y >> pkg/cart/cart.go; echo y >> pkg/cart/cart_test.go; echo x > root_test.go'
+  listgot 'args:test . ./pkg/cart -count=1|env:' 'the packages of the tests, in place of ./...'
+  listrec '{"mode":"changed","files":2,"by":"name"}'
+}
+
+# #154, the same for cargo test: each tests/<name>.rs the change touches is a --test <name> after cargo test.
+t_testlistcargo() {
+  runnersetup cargo 'cargo test --release' src/cart.rs tests/cart.rs tests/tax.rs
+  listrun 'echo y >> src/cart.rs; echo x > tests/fee.rs'
+  listgot 'args:test --test cart --test fee --release|env:' 'a --test of each test target'
+  listrec '{"mode":"changed","files":2,"by":"name"}'
+}
+
+# A test file cargo test cannot be given alone (a test's own module, tests/cart/util.rs) runs the whole suite: a
+# --test of no target would fail, and leaving it out would skip the tests that read it.
+t_testlistcargomod() {
+  runnersetup cargo 'cargo test' tests/cart.rs tests/cart/util.rs
+  listrun 'echo y >> tests/cart/util.rs'
+  listgot 'args:test|env:' 'no test target for a test module'
+  listrec '{"mode":"whole","why":"tests/cart/util.rs: cargo test takes test targets, and this is no tests/<name>.rs file"}'
+}

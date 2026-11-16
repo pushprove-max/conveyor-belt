@@ -414,10 +414,12 @@ may have broken. Files and cases are read from the logs the command writes to th
 
 With the pack's `test.list` set, each run of a card's `test.command` (not `test.full`, `test.main` or a run of
 named failed cases alone) is given the test files its change touches, as arguments (`args`), in place of `{files}`
-(`placeholder`) or in `CONVEYOR_TEST_FILES`, one path a line (`env`); [Which tests a card
+(`placeholder`), in `CONVEYOR_TEST_FILES`, one path a line (`env`), or as the packages and test targets of `go test`
+and `cargo test` (`runner`); [Which tests a card
 runs](../docs/configuration.md#which-tests-a-card-runs) says which files. A change that touches shared setup or
-config, or a file with no test found for it, `none`, and `args` with a command that already names the tests its runner
-runs (such as `node --test checks/*.js`), give no list: the command runs the whole suite. The live
+config, or a file with no test found for it, `none`, `args` with a command that already names the tests its runner
+runs (such as `node --test checks/*.js`), and `runner` with a test file its runner cannot be given alone (such as a
+helper module), give no list: the command runs the whole suite. The live
 record and the test line hold `list`: `{"mode": "changed", "files": <count>, "by": "map" or "name", "age": <commits>}`
 (`age`, the commits the made test map is behind, only with one) or `{"mode": "whole", "why": "..."}`. The Board shows
 it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed: 7 files (by name)`,

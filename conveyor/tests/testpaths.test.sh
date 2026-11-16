@@ -98,9 +98,9 @@ t_inlinekinds() {
 
 # #147. Bug it catches: setup could not tell which runner a test command starts, so it could not offer test.list. Each
 # common runner is found, in the command or in the package.json script `npm test` / `npm run <name>` runs: args for
-# those that take test files, none for go test and cargo test, nothing for a command it does not know. Nor for one
-# that already names the files its runner runs (a glob, a path, a folder of main; not an option's value), as paths
-# added at its end would not narrow it.
+# those that take test files, runner for go test and cargo test (#154: none ran their whole suite on every card),
+# nothing for a command it does not know. Nor for one that already names the files its runner runs (a glob, a path, a
+# folder of main; not an option's value), as paths added at its end would not narrow it.
 t_listguess() {
   setup '[]'
   printf '{"scripts": {"test": "eslint . && vitest run", "unit": "mocha", "glob": "node --test checks/*.js"}}\n' > "$R/package.json"
@@ -109,6 +109,6 @@ t_listguess() {
   out=$(tpeng 'for c in "node --max-old-space-size=4096 --test" "npx jest --ci" "python3 -m pytest -q" "bundle exec rspec" "npm test" "npm run unit" \
       "go test ./..." "cargo test" "make check" "node --test-only x.js" "node --test checks/*.js" "npm run glob" "pytest -q tests" "pytest -k cart" \
       "node --test --test-reporter dot"; do printf "%s|" "$(listguess "$c")"; done') || fail "the guess failed: $out"
-  [ "$out" = 'args node --test|args jest|args pytest|args rspec|args vitest|args mocha|none go test|none cargo test||||||args pytest|args node --test|' ] \
+  [ "$out" = 'args node --test|args jest|args pytest|args rspec|args vitest|args mocha|runner go test|runner cargo test||||||args pytest|args node --test|' ] \
     || fail "setup did not find each runner, and what test.list it takes: $out"
 }

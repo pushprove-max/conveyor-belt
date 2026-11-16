@@ -309,8 +309,8 @@ testpaths() { # [-v] [-z]
   grep -E "$@" -e "$TESTRX" || :
 }
 # The runner a test command starts, and how it takes a list of test files, as one line `<mode> <runner>`: args for a
-# runner that takes test files as arguments (node --test, vitest, jest, mocha, pytest, rspec), none for one that takes
-# packages or names, not files (go test, cargo test); `named <runner> <word>` when the command already names what an
+# runner that takes test files as arguments (node --test, vitest, jest, mocha, pytest, rspec), runner for one that
+# takes packages or test targets, not files (go test, cargo test: runnercmd(), lib/testrun.sh); `named <runner> <word>` when the command already names what an
 # args runner runs (<word>: a glob, a path with a /, or a file or folder in <folder>), as `node --test checks/*.js`
 # does, so paths added at its end would not narrow it. Nothing for a runner it does not know. A command that runs a
 # package.json script (npm, yarn, pnpm or bun: `npm test`, `npm run <name>`) is read as that script, in <folder>.
@@ -330,7 +330,7 @@ testrunner() { # <test command> <folder>
     done
     echo "args $r"
   elif [[ $s =~ (^|[;&|[:space:]])(go[[:space:]]+test|cargo[[:space:]]+test)([[:space:]]|$) ]]; then
-    echo "none ${BASH_REMATCH[2]}"
+    echo "runner ${BASH_REMATCH[2]}"
   fi
 }
 # Product code: the one place that says which paths count. A file under one of the pack's productPaths

@@ -123,6 +123,10 @@ your test command (`test.command`) takes the list:
 - `placeholder`: the paths go where `{files}` is in the command, for example `"command": "npx jest {files} --ci"`.
 - `env`: an environment variable holds the paths, one on each line. [conveyor/README.md](../conveyor/README.md#the-list-of-tests-a-cards-run-is-given)
   gives its name.
+- `runner`: for `go test` and `cargo test`, which take packages and test targets, not files. With `go test`, the
+  folder of each `*_test.go` file goes where `./...` is in the command, for example `go test ./cart ./tax`. With
+  `cargo test`, each `tests/<name>.rs` file adds `--test <name>` after `cargo test`. If the list holds another file,
+  for example a helper module or a test module inside a source file, the card runs the whole suite.
 - `none`: your command cannot take a list. Each card runs the whole suite.
 
 Without `test.list`, your command gets no list. Use this when your command selects the tests itself.
