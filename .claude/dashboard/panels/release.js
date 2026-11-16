@@ -269,8 +269,7 @@
   window.DASH_APP.panel({
     id: 'release',
     title: 'Release',
-    size: 'wide',
-    widths: ['wide', 'full'],
+    size: 'small',
     tab: 'overview',
     rows: 'all',
     isEmpty: (d) => !releasing(d).length,

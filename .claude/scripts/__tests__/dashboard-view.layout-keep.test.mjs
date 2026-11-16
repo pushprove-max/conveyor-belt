@@ -28,8 +28,8 @@ const TALL = { queue: 1500 };
 test('a refresh where one panel grows taller keeps every panel in the column it had', () => {
   const w = page({});
   const before = columnsOf(w);
-  assert.deepEqual([before.queue, before.health, before.lanes], ['2', '2', '2'], 'the three start in the right column');
-  assert.equal(before.release, '0', 'the Release panel starts in the main column');
+  // Release is Small by default (#97), so it starts in the right column with the other small ones.
+  assert.deepEqual([before.queue, before.release, before.health, before.lanes], ['2', '2', '2', '2'], 'the four start in the right column');
   w.heights = TALL;
   next(w, full());
   frames(w);

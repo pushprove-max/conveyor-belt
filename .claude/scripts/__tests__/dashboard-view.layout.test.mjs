@@ -114,9 +114,6 @@ test('a collapsing panel fades its body out, then the panels below slide up; ope
 test('a layout control keeps the keyboard focus after it is used', () => {
   const w = boot();
   deliver(w, full());
-  // The width controls are in the Customize sheet: open it, as the owner does, since a control in a closed (hidden)
-  // sheet cannot take the focus (jsdom 31, as a browser).
-  w.document.getElementById('customize-open').click();
   for (const id of ['needs', 'landed', 'cost']) {
     const fold = panel(w, id).querySelector('.tool.collapse');
     fold.focus(); fold.click();
@@ -125,7 +122,7 @@ test('a layout control keeps the keyboard focus after it is used', () => {
     assert.equal(w.document.activeElement, fold, `${id}: and still has it once the body is gone`);
     fold.click();
     assert.equal(w.document.activeElement, fold, `${id}: expand keeps the focus`);
-    // Customize is drawn again at each change: its width control keeps the focus all the same.
+    // The layout is applied again at each change: the head's width control keeps the focus all the same.
     w.document.getElementById(`size-${id}`).focus();
     setSize(w, id, 'full');
     assert.equal(w.document.activeElement, w.document.getElementById(`size-${id}`), `${id}: resize keeps the focus`);
@@ -305,7 +302,9 @@ test('at phone width the page is one column, and move up and move down replace d
   const phone = css.slice(css.indexOf('@media (max-width: 700px)'));
   assert.match(phone, /\.grid \{ grid-template-columns: minmax\(0, 1fr\);/, 'one column');
   assert.match(phone, /\.panel, \.panel\[data-size="wide"\], \.panel\[data-size="full"\] \{ grid-column: 1 \/ -1; \}/, 'every width is the full column');
-  assert.match(phone, /\.drag, \.custom-size \{ display: none; \}/, 'no drag handle, and no width to change');
+  assert.match(phone, /\.drag \{ display: none; \}/, 'no drag handle');
+  // The owner's order (#97): the width control is reachable on a phone. A test with no layout reads the rule.
+  assert.doesNotMatch(phone, /\.size[^{]*\{[^}]*display: none/, 'the head\'s width control is not hidden');
   assert.match(phone, /\.move \{ display: inline-flex; \}/, 'the move buttons show');
   assert.match(css.slice(0, css.indexOf('@media (max-width: 1080px)')), /\.move \{ display: none; \}/, 'which are off at desktop width');
   assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);

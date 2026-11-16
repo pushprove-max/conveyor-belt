@@ -215,7 +215,7 @@ details.why > summary { cursor: pointer; font-weight: 650; }
 .sheet h2 { font-size: var(--fs-lg); }
 .sheet-note { font-size: var(--fs-sm); color: var(--muted); margin-bottom: var(--sp-3); }
 .choice { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-4); }
-/* A panel's row in Customize: whether it shows, then its width. */
+/* A panel's row in Customize: whether it shows. */
 .custom-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .choice legend { width: 100%; font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: var(--sp-1); }
 .choice-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 32px; font-size: var(--fs-sm); cursor: pointer; }
@@ -276,6 +276,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tool:hover { background: var(--surface-2); color: var(--text); }
 .tool:disabled { opacity: .35; cursor: default; }
 .tool .ico { width: 16px; height: 16px; }
+.tool.size { font-family: inherit; }
 .drag { cursor: grab; }
 .move { display: none; }  /* at phone width these replace dragging; see the media rule at the end */
 .panel-body { padding: var(--sp-4); min-height: 96px; animation: rise var(--motion) var(--ease); }
@@ -553,6 +554,10 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .release-cases, .release-reasons { margin: var(--sp-1) 0 0 var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .release-change { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
 .release-change-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* At Small, a card is one narrow column: each step's chip above its line, the version field above its button. */
+.panel[data-panel="release"][data-size="small"] .release-steps .row-main,
+.panel[data-panel="release"][data-size="small"] .release-go { flex-direction: column; align-items: stretch; }
+.panel[data-panel="release"][data-size="small"] .release-version { width: 100%; }
 .board-today { margin-left: auto; }
 .board-stepper { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .board-meter { position: relative; display: inline-block; width: 150px; }
@@ -1052,11 +1057,12 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .panel[data-size="wide"], .panel[data-size="full"] { grid-column: 1 / -1; }
 }
-/* Phone: one column; dragging gives way to move up and move down, and a width has nothing to change. */
+/* Phone: one column; dragging gives way to move up and move down. The width control stays: the layout is kept for
+   this browser, as on a wider window. */
 @media (max-width: 700px) {
   .grid { grid-template-columns: minmax(0, 1fr); padding: var(--sp-3); gap: var(--sp-3); }
   .panel, .panel[data-size="wide"], .panel[data-size="full"] { grid-column: 1 / -1; }
-  .drag, .custom-size { display: none; }
+  .drag { display: none; }
   .step-time { display: none; }
   .phone-note { display: block; flex: 1 0 100%; font-size: var(--fs-sm); color: var(--muted); }
   .move { display: inline-flex; }

@@ -44,8 +44,8 @@ serves the Board, because its requests come from a loopback address. An admin se
   where you did it.
 - **Tests**: the project's test files.
 
-A panel's head moves and collapses it. Customize shows or hides each panel and sets its width. It never hides Needs
-you. **Restart the Board's feed** is in the Health panel.
+A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
+each panel. It never hides Needs you. **Restart the Board's feed** is in the Health panel.
 
 **Show**, in the machine bar, picks the project that every tab shows.
 
@@ -138,7 +138,8 @@ pre-push hook cover. Use Push landed when you want the whole suite green before 
 
 ## Release
 
-The Release panel on Overview is as wide as Landed today. Customize sets it to wide or full only. It shows one card for each project that releases with
+The Release panel on Overview is Small at first. Its width menu sets it to Small, Wide or Full. At Small, each card is
+one narrow column. It shows one card for each project that releases with
 Conveyor: a project whose `main` has a `docs/releases/` folder. Other projects do not show. When no project releases
 with Conveyor, the panel says "No project releases with Conveyor."
 

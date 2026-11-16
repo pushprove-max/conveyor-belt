@@ -6,7 +6,7 @@
 // setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { T0, STORE, OVERVIEW, read, boot, panel, deliver, settle, pending, tick, full, fig, tile, act, cases, pickProject, heading } from './dashboard-view.helpers.mjs';
+import { T0, STORE, OVERVIEW, read, boot, panel, deliver, settle, pending, tick, full, fig, tile, act, cases, pickProject, heading, kept } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -84,19 +84,30 @@ test('the head tiles: only Needs you has a colour, and a tap says in words what 
 });
 
 // UX39: a panel head carried a width word and an ×; the × read as "close", and one stray tap on a phone took Needs you
-// off the page until Customize brought it back. A head keeps move and collapse only; width and hiding are in
-// Customize, which has no switch to hide Needs you, and a layout kept with Needs you hidden shows it.
-test('a panel head has no hide or width button; Customize sets both, and never hides Needs you', () => {
+// off the page until Customize brought it back. Hiding is in Customize, which has no switch to hide Needs you, and a
+// layout kept with Needs you hidden shows it. Bug (#97): width was in Customize only, a sheet away from the panel; the
+// head's width control sets it there and saves it, and Customize has no width setting left.
+test('D1: a panel head\'s width control sets its width and the saved layout; Customize hides panels, sets no width, and never hides Needs you', () => {
   const w = boot();
   deliver(w, full());
   for (const id of OVERVIEW) {
     const tools = Array.from(panel(w, id).querySelectorAll('.panel-head .tool'), (t) => t.className.replace('tool ', ''));
-    assert.deepEqual(tools, ['drag', 'move move-up', 'move move-down', 'collapse'], `${id}: the head moves and collapses, nothing else`);
+    assert.deepEqual(tools, ['drag', 'size', 'move move-up', 'move move-down', 'collapse'], `${id}: the head sizes, moves and collapses, nothing else`);
   }
-  const row = (id) => w.document.getElementById(`size-${id}`).closest('.custom-row');
+  const size = panel(w, 'belt').querySelector('.panel-head select.size');
+  assert.equal(size.id, 'size-belt');
+  assert.equal(size.value, 'wide');
+  size.value = 'small'; size.dispatchEvent(new w.Event('change'));
+  assert.equal(panel(w, 'belt').dataset.size, 'small', 'the panel takes the width');
+  assert.equal(kept(w).sizes.belt, 'small', 'and the layout keeps it');
+  assert.equal(panel(w, 'belt').hidden, false, 'the width control hides nothing');
+  const sheet = w.document.getElementById('customize-body');
+  assert.equal(sheet.querySelector('select'), null, 'Customize has no width setting');
+  assert.equal(sheet.querySelector('#size-belt'), null);
+  const row = (id) => w.document.getElementById(`show-${id}`).closest('.custom-row');
   assert.equal(w.document.getElementById('show-needs').disabled, true, 'no switch hides Needs you');
   assert.equal(row('needs').querySelector('label').textContent, 'Needs you (always shown)');
-  assert.ok(w.document.getElementById('show-belt') && w.document.getElementById('size-belt'), 'another panel has both');
+  assert.ok(w.document.getElementById('show-belt'), 'another panel can be hidden');
   const again = boot({ store: { [STORE]: JSON.stringify({ tabs: { overview: { hidden: ['needs', 'belt'] } } }) } });
   assert.equal(panel(again, 'needs').hidden, false, 'a kept layout that hid Needs you shows it');
   assert.equal(panel(again, 'belt').hidden, true, 'and keeps the other panel hidden');

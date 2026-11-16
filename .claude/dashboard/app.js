@@ -847,7 +847,7 @@
     const lens = s.lengths && typeof s.lengths === 'object' ? s.lengths : {};
     return {
       order: order.concat(d.order.filter((id) => !order.includes(id))),  // a panel added since the last visit goes last
-      // A width the panel cannot take (Release kept small before it was wide only) is its default.
+      // A width the panel cannot take is its default.
       sizes: Object.fromEntries(d.order.map((id) => [id, s.sizes && widthsOf(id).includes(s.sizes[id]) ? s.sizes[id] : d.sizes[id]])),
       lengths: Object.fromEntries(d.order.filter((id) => lengthOk(lens[id])).map((id) => [id, lens[id]])),
       // A layout that lists no collapsed panels (nothing kept yet) has the default's: the phone's folded reports.
@@ -906,6 +906,7 @@
       if (grid.children[i] !== p.el) grid.insertBefore(p.el, grid.children[i] || null);
       p.el.hidden = l.hidden.includes(id);
       p.el.dataset.size = size;
+      p.tools.size.value = size;
       p.el.dataset.collapsed = String(collapsed);
       if (!collapsed) { p.body.classList.remove('folding'); p.body.hidden = false; }
       else if (was === 'false' && !p.el.hidden && !p.body.hidden && motion()) fold(id, p);
@@ -1436,11 +1437,16 @@
       up: tool('move move-up', `Move ${title} up`, 'up', () => { move(id, -1); (tools.up.disabled ? tools.down : tools.up).focus(); }),
       down: tool('move move-down', `Move ${title} down`, 'down', () => { move(id, 1); (tools.down.disabled ? tools.up : tools.down).focus(); }),
       collapse: tool('collapse', '', 'down', () => toggle('collapsed', id, !lay().collapsed.includes(id))),
+      // The panel's width, among the widths it can take; applyLayout() shows the one in the layout.
+      size: h('select', 'tool size'),
     };
-    // A panel's width and whether it shows are set in Customize only: an × on the head read as "close", and one stray
-    // tap on a phone took the panel off the page.
+    tools.size.id = `size-${id}`; tools.size.setAttribute('aria-label', `Width of ${title}`); tools.size.title = `Width of ${title}`;
+    widthsOf(id).forEach((s) => { const o = h('option', null, s[0].toUpperCase() + s.slice(1)); o.value = s; tools.size.append(o); });
+    tools.size.addEventListener('change', () => { const to = tools.size.value; change(() => { lay().sizes[id] = to; }, `${title} is now ${to}`); });
+    // Whether a panel shows is set in Customize only: an × on the head read as "close", and one stray tap on a phone
+    // took the panel off the page.
     const bar = h('div', 'panel-tools');
-    bar.append(tools.up, tools.down, tools.collapse);
+    bar.append(tools.size, tools.up, tools.down, tools.collapse);
     // A panel's own actions on its whole list (ctx.headActs), between its count and the panel's tools.
     const acts = h('span', 'panel-acts');
     acts.hidden = true;
@@ -1585,7 +1591,7 @@
     });
     return set;
   }
-  // Each panel of the tab in view: whether it shows (fixed for one that always shows) and its width.
+  // Each panel of the tab in view: whether it shows (fixed for one that always shows). Its width is on its head (frame()).
   function drawCustomize() {
     const box = byId('customize-body'), open = byId('customize-open');
     if (!box) return;
@@ -1599,11 +1605,7 @@
       // A panel that is always shown keeps its box, ticked and fixed, so the list still names every panel of the tab.
       if (!hideable(id)) input.disabled = true;
       label.append(input, h('span', null, hideable(id) ? mod.title : `${mod.title} (always shown)`));
-      const width = h('select', 'field custom-size');
-      width.id = `size-${id}`; width.setAttribute('aria-label', `Width of ${mod.title}`);
-      widthsOf(id).forEach((s) => { const o = h('option', null, s[0].toUpperCase() + s.slice(1)); o.value = s; o.selected = s === l.sizes[id]; width.append(o); });
-      width.addEventListener('change', () => { const to = width.value; change(() => { lay().sizes[id] = to; }, `${mod.title} is now ${to}`); });
-      row.append(label, width);
+      row.append(label);
       set.append(row);
     });
     // The layout is kept in this browser alone: the owner's other browsers (the phone, another computer) keep their own.
@@ -1938,7 +1940,7 @@
   // older(live, history) (its live part with the older entries of the history laid in: withOlder())}, and part (the id
   // of the panel on the list whose part it is drawn from: one file's part shown as more than one panel, such as the
   // Rules tab's; default its own id), and widths (the sizes it can take, its size among them; default every size:
-  // Customize offers only these, and a kept layout's other width is read as its default: tidy()).
+  // the head's width control offers only these, and a kept layout's other width is read as its default: tidy()).
   function panel(mod) {
     const need = ['render', 'empty', 'error', 'isEmpty'];
     if (!mod || typeof mod.id !== 'string' || typeof mod.title !== 'string' || !need.every((k) => typeof mod[k] === 'function')) throw new Error('a panel needs id, title, render, empty, error and isEmpty');

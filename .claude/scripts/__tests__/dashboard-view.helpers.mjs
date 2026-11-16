@@ -193,8 +193,8 @@ export const saved = (w) => JSON.parse(w.localStorage.getItem(STORE));
 // The layout kept for one tab (each tab keeps its own).
 export const kept = (w, tab = 'overview') => saved(w).tabs[tab];
 // Cost is one column wide, so on a wide screen it fills the right column under Lanes (UX36).
-export const SIZES0 = { needs: 'wide', belt: 'wide', queue: 'small', landed: 'wide', release: 'wide', declined: 'wide', health: 'small', lanes: 'small', cost: 'small', metrics: 'wide' };
-// A panel's width and whether it shows are set in Customize only (its head has no width or hide button).
+export const SIZES0 = { needs: 'wide', belt: 'wide', queue: 'small', landed: 'wide', release: 'small', declined: 'wide', health: 'small', lanes: 'small', cost: 'small', metrics: 'wide' };
+// A panel's width is set by the width control on its head (whether it shows, in Customize only).
 export function setSize(w, id, size) { const s = w.document.getElementById(`size-${id}`); s.value = size; s.dispatchEvent(new w.Event('change')); }
 export const hidePanel = (w, id) => w.document.getElementById(`show-${id}`).click();
 // The one project picker is Show, in the machine head over every tab (issue 408, UX34): the Board and the Rules have

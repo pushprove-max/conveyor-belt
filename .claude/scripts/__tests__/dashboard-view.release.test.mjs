@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Release panel on Overview (#27): one wide card for each project that releases with Conveyor, its status chip,
+// The Release panel on Overview (#27, Small by default since #97): one card for each project that releases with Conveyor, its status chip,
 // three steps, the version and one button whose label follows the state (each on a second click), and the changes
 // since the tag, closed until opened. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, next, full, panel, act, settle, cases, STORE } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, full, panel, act, settle, cases, css } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const HEAD = 'b'.repeat(40), NEW = 'c'.repeat(40);
@@ -28,12 +28,11 @@ const chip = (w) => card(w).querySelector('[data-figure="status"]').textContent;
 const stepOf = (w, name) => card(w).querySelector(`[data-step="${name}"]`);
 const sent = async (w, fn) => { fn(); await settle(); await settle(); return w.posts.splice(0).map((p) => p.body); };
 
-// Bugs this guards: the panel sits in the narrow column and shows a project that does not release with Conveyor; the
+// Bugs this guards: the panel shows a project that does not release with Conveyor; the
 // version is the next minor of no tag (0.1.0) though main holds the 1.0.0 notes; nothing says what to do next.
 test('D1: one card, for the project that releases with Conveyor: No release yet, notes done, Suite not run, 1.0.0, Run suite on a second press', async () => {
   const w = boot();
   deliver(w, data(null));
-  assert.equal(rel(w).dataset.size, 'wide', 'as wide as Landed, not the right column');
   assert.deepEqual(Array.from(rel(w).querySelectorAll('[data-project]'), (x) => x.dataset.project), ['plugin'], 'the shop, with no docs/releases/, is left out');
   assert.equal(card(w).querySelector('[data-figure="tag"]').textContent, 'No release yet');
   assert.equal(card(w).querySelector('[data-figure="count"]').textContent, '26 changes since');
@@ -71,16 +70,23 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.equal(rel(none).querySelector('.state-title').textContent, 'No project releases with Conveyor.');
 });
 
-// Bug this guards: a layout kept in the browser when Release was small (Customize keeps every panel's width) put it
-// back in the narrow column. Release takes wide or full only; the queue's kept width stays the owner's.
-test('a kept layout with Release small shows it wide, and Customize offers no small width for it', () => {
-  const store = { [STORE]: JSON.stringify({ tabs: { overview: { sizes: { release: 'small', queue: 'wide' } } } }) };
-  const w = boot({ store });
+// Bug this guards (#97): Release offered Wide and Full only, and started Wide; the owner wants it Small by default, and
+// a Small card must still show its three steps and its button, laid out in one column.
+test('D2: Release offers Small, Wide and Full, starts Small, and at Small shows each card\'s steps and next button in one column', async () => {
+  const w = boot();
   deliver(w, data(null));
-  assert.equal(rel(w).dataset.size, 'wide');
-  assert.equal(panel(w, 'queue').dataset.size, 'wide');
-  w.document.getElementById('customize-open').click();
-  assert.deepEqual(Array.from(w.document.getElementById('size-release').options, (o) => o.value), ['wide', 'full']);
+  const size = rel(w).querySelector('.panel-head select.size');
+  assert.deepEqual(Array.from(size.options, (o) => o.value), ['small', 'wide', 'full']);
+  assert.equal(rel(w).dataset.size, 'small', 'a new layout starts Small');
+  assert.equal(size.value, 'small');
+  assert.deepEqual(Array.from(card(w).querySelectorAll('.release-steps > [data-step]'), (s) => s.dataset.step), ['release-notes', 'full-suite', 'release']);
+  assert.equal(act(card(w), 'release').textContent, 'Run suite');
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release').click(); act(card(w), 'release').click(); }),
+    [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }], 'the button works at Small');
+  // jsdom lays nothing out: the rule that puts each step's chip above its line, and the field above its button, is read.
+  assert.match(css, /\.panel\[data-panel="release"\]\[data-size="small"\] \.release-steps \.row-main,\s*\.panel\[data-panel="release"\]\[data-size="small"\] \.release-go \{ flex-direction: column;/);
+  size.value = 'wide'; size.dispatchEvent(new w.Event('change'));
+  assert.equal(rel(w).dataset.size, 'wide', 'and it can be set Wide again');
 });
 
 // Bugs this guards: a run under way shows no progress and cannot be stopped from the Board, or a second run is offered.
