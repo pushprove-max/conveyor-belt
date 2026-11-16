@@ -9,7 +9,6 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-
 # One project of the machine under $T/<case>/<name>: lib.sh's setup there, polling every second, every review a GO, and
 # a build that marks its card running ($SH/run/<name>-<issue>) and waits for $SH/go-<name>-<issue> (or $SH/go) before
 # it writes a file of its own, so no two cards share a file. Sets P_<name> to its main checkout.
