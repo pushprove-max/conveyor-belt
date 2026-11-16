@@ -2,6 +2,7 @@
 # `conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]`:
 # the project set up for Conveyor (setup(), lib/setup.sh), from its checkout. Sourced by conveyor.sh.
 . "$HERE/lib/prompts.sh" || exit 1
+. "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1
 . "$HERE/lib/survey.sh" || exit 1

@@ -46,6 +46,10 @@ case "$1 $2" in
     ! grep -qixF -- "$n" "$G/labels" && echo "$n" >> "$G/labels" && echo "$n" >> "$G/created" ;;
   "auth status") [ ! -e "$G/out" ] ;;
   "release list") cat "$G/releases" ;;
+  "issue list") # $G/issues: the repo's issues, a JSON list of {number, state} (none: no issues); --state all: the newest
+    i=$(cat "$G/issues" 2>/dev/null || echo '[]')
+    if [[ " $* " == *" --state all --limit 1 "* ]]; then jq -c 'sort_by(-.number) | .[:1] | map({number})' <<<"$i"
+    elif [[ " $* " == *" --state open "* ]]; then jq -c 'map(select(.state == "open") | {number})' <<<"$i"; else exit 1; fi ;;
   "issue create") # each issue filed, its arguments as a JSON list a line in $G/filed, numbered from 101
     printf '%s\0' "${@:3}" | jq -cRs 'split("\u0000")[:-1]' >> "$G/filed" && echo "https://github.com/example/sample/issues/$((100 + $(wc -l < "$G/filed")))" ;;
   *) exit 1 ;;
@@ -117,7 +121,7 @@ t_setup() {
   # Bug caught (#17): the default state folder showed as untracked in the project, so `git add -A` committed it.
   mkdir -p "$S/conveyor/state" && echo '{}' > "$S/conveyor/state/cards.jsonl" \
     && [ -z "$(git -C "$S" status --porcelain --untracked-files=all -- conveyor/state)" ] || fail "git status lists the state folder after setup: $(git -C "$S" status --porcelain -- conveyor/state)"
-  rm -r "$S/conveyor"
+  rm "$S/conveyor/state/cards.jsonl"
   # Bug: Matt Pocock's skills, which /conveyor-belt:plan reads, were left uninstalled: setup installs them from the
   # official marketplace once, and a rerun, finding them installed, does not install them again.
   [ "$(cat "$G/claude-installs" 2>&1)" = mattpocock-skills@claude-plugins-official ] || fail "setup did not install mattpocock-skills: $(cat "$G/claude-installs" 2>&1)"
@@ -282,6 +286,41 @@ t_setupfresh() {
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:), which is information, not a check.
   ! grep -qvE '^(ok|builder|reviewer): ' <<<"$out" && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
     || fail "doctor after setup printed a line that is not ok:, or did not say the terms file is optional: $out"
+}
+
+# Bug (#111): setup wrote no control record, so the loop read the defaults (new issues start in the Queue) and queued
+# and built every open issue of the project the moment its service started. Setup now writes the record with new
+# issues held and every issue open then held. The sample's issues: 3 and 5 open, 6 closed (the newest).
+heldsample() { # $X, $st (the sample's state folder) and $out (setup's output)
+  sample; X=$D/conveyor/conveyor.sh
+  echo '[{"number":3,"state":"open"},{"number":5,"state":"open"},{"number":6,"state":"closed"}]' > "$G/issues"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no 2>&1) || fail "setup exited non-zero: $out"
+  st=$(cd "$S" && CONVEYOR_MAIN=$S bash "$X" state-dir) || fail "the state folder"
+}
+t_setupheld() {
+  local X out st doc; heldsample
+  jq -e '.start == "held" and .startHeld == [{from: 6, to: null}] and .held == [3, 5]' "$st/control.json" >/dev/null \
+    || fail "setup did not write the record with new issues held and 3 and 5 held: $(cat "$st/control.json" 2>&1)"
+  grep -qF 'new issues start held; 2 open issues held; release one with `conveyor.sh control release <issue>` or on the Board' <<<"$out" || fail "setup did not say what it held: $out"
+  doc=$(cd "$S" && bash "$X" doctor 2>&1)
+  grep -qxF 'ok: 2 open issues held; release one with `conveyor.sh control release <issue>` or on the Board' <<<"$doc" || fail "doctor did not say what is held: $doc"
+  # The first pass: the open issues as the loop reads them, with 7 opened after setup. With setup's record the pick
+  # takes none; with no record (the defaults, as before) it takes one, so the answer is the record's doing.
+  jq -cs . <(issue 3 2026-01-01 P1) <(issue 5 2026-02-01 P0) <(issue 7 2026-03-01 P0) > "$T/$CASE/open.json"
+  [ "$(CONVEYOR_MAIN=$S bash "$X" pick --dry --issues "$T/$CASE/open.json" --state "$st")" = '' ] || fail "the loop's first pass after setup picks an issue"
+  mkdir -p "$T/$CASE/none" && [ -n "$(CONVEYOR_MAIN=$S bash "$X" pick --dry --issues "$T/$CASE/open.json" --state "$T/$CASE/none")" ] \
+    || fail "with no control record the pick takes nothing either, so the case above proves nothing"
+  # With no record, doctor names it missing, so the service is not offered before setup wrote it.
+  rm "$st/control.json"; doc=$(cd "$S" && bash "$X" doctor 2>&1)
+  grep -q "^missing: the control record $st/control.json .*; fix: run /conveyor-belt:setup" <<<"$doc" || fail "doctor with no control record: $doc"
+}
+# A second setup keeps the owner's later choices: new issues to the Queue, and 3 released.
+t_setupheldkept() {
+  local X out st was; heldsample
+  (cd "$S" && CONVEYOR_MAIN=$S bash "$X" control start queue >/dev/null && CONVEYOR_MAIN=$S bash "$X" control release 3 >/dev/null) || fail "the owner's control actions failed"
+  was=$(cat "$st/control.json"); jq -e '.start == "queue" and .held == [5]' <<<"$was" >/dev/null || fail "the owner's choices were not made: $was"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup run again exited non-zero: $out"
+  [ "$(cat "$st/control.json")" = "$was" ] || fail "setup run again changed the control record: $was, now $(cat "$st/control.json")"
 }
 
 # Bug (#91): setup and doctor said nothing of the project's CLAUDE.md and AGENTS.md, so a project without them gave

@@ -40,7 +40,8 @@ before step 1, and add `--survey yes` or `--survey no`, as answered, to every se
 5. When doctor printed no `missing:` line other than the `CLAUDE.md` and `AGENTS.md` ones, ask the user "Start Conveyor now as this machine's service?" (yes / no).
    On yes, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" install-service` and show its output. On no, say that
    running `/conveyor-belt:setup` again in this checkout asks again and starts it on yes.
-6. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed) and each `missing:` line
+6. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed), doctor's line "N open issues held; release one with
+   `conveyor.sh control release <issue>` or on the Board", and each `missing:` line
    doctor printed, with its fix, and each instruction file you wrote. List the lanes setup made (its `created: the fast lane` and `created: the research
    lane's worktree` lines), with the command that starts the research lane when setup printed one. Make no change of your own to the pack, the pin or the labels. With `--foreman`, add
    that the Foreman is started by typing `/conveyor-belt:foreman` in a Claude Code session in this checkout (it stays

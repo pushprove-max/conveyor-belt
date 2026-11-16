@@ -46,7 +46,13 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - the rules: P0 to P3, follow-ups, push, visible changes and the dependency guard,
 - where new issues start.
 
-A new project starts on Conveyor's default values (`conveyor/README.md`, Control). A record keeps each value it sets.
+Setup writes the control record of a new project. In it, new issues start held, and each issue that is open at setup
+is held. Thus Conveyor builds no issue until you release it. Without this, the first loop would queue and build the
+whole backlog of the project. Release an issue with `conveyor.sh control release <issue>` or on the Board. To let new
+issues go into the Queue by themselves, run `conveyor.sh control start queue`, or set where new issues start on the
+Rules tab. A second setup keeps the record as it is.
+
+Each other value of a new project starts on Conveyor's default values (`conveyor/README.md`, Control). A record keeps each value it sets.
 With the default push rule, Conveyor lands each card and pushes when you press "Push landed" on the Board, or on its
 own once you turn push on in the Rules tab.
 Only the keys it leaves out take those defaults. `default` sets a value back: for example `conveyor.sh control cap off`

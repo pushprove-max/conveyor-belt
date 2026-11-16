@@ -133,6 +133,12 @@ user unit on Linux, a launchd agent on macOS. Install it while no card is in fli
 Setup's last question is "Start Conveyor now as this machine's service?". Yes runs `install-service`. To start it
 later, run `/conveyor-belt:setup` again in your project's checkout and answer yes.
 
+Before it adds the project to the host file, setup writes the project's control record. By default, new issues start
+held, and each issue that is open at setup is held. Thus the first loop builds nothing: it does not queue the backlog
+of the project. Setup and `conveyor.sh doctor` say
+"N open issues held; release one with `conveyor.sh control release <issue>` or on the Board". To let new issues go into the Queue by themselves, run `conveyor.sh control start queue`.
+A second setup does not change the record ([The control record](configuration.md#the-control-record)).
+
 Each project keeps its own pack, pin, checkout, state folder, control record, issue repo and push. Its cards folder is
 `conveyor-cards` beside its checkout, or `conveyor-cards-<repo>` when another project shares that folder
 (`conveyor-cards-<repo>-2` and on after that). Pausing or capping a project touches only that project.

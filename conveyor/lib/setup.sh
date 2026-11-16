@@ -28,6 +28,8 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # --research-lane yes|no, and asked (exit 2, nothing written) on every run; yes makes the lane (setuplane()) once the
 # project is in the host file, where its create writes the lane's folder. PACK0's lanes.research is the research
 # lane's model and effort, which its create needs; yes writes it into a pack that has none.
+# Before the host file names the project, the control record is written when there is none, with new issues and every
+# open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
 # Then it says which of the project's instruction files, CLAUDE.md and AGENTS.md, are there (agentfiles()).
 # Its last line says that landed cards wait for the Board's Push landed: the control record's push rule is off by
@@ -107,6 +109,8 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
   x=$(git -C "$MAIN" rev-parse --path-format=absolute --git-path info/exclude) && mkdir -p "${x%/*}" \
     && { grep -qxF /conveyor/state/ "$x" 2>/dev/null || { { [ ! -s "$x" ] || [ -z "$(tail -c 1 "$x")" ] || echo >> "$x"; } && echo /conveyor/state/ >> "$x" && echo "conveyor: wrote /conveyor/state/ in git's exclude file $x, so git leaves out the state folder"; }; } \
     || { echo "conveyor: the state folder conveyor/state/ could not be added to git's exclude file" >&2; return 1; }
+  # Before hostadd: once the host file names the project, a machine's service already running serves it.
+  heldstart || return 1
   hostadd || return 1
   [ "$fl" = no ] || setuplane fast || return 1
   if [ "$rl" = yes ]; then
@@ -122,6 +126,26 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
   packget test.full full || return 1
   echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
 }
+# The control record, when the project has none (no file, or an empty one, which reads as the defaults): new issues
+# start held (as `control start held` sets it, from the newest issue's number) and every issue open now is held, so
+# no loop builds an issue the owner did not release. With no record the loop reads the defaults, where new issues
+# start in the Queue, and it would queue the whole backlog. The newest number is read before the open issues, so an
+# issue opened between the two reads is in the span (adopt() holds it) or in the list. setup writes it before the
+# host file names the project (hostadd), and doctor names a project with no record as missing, so the service is not
+# offered before it is there. A record already there, with the owner's later `start queue` and releases, is never
+# changed. No lock: no loop serves the project yet, and the record is written whole beside its place and moved in.
+heldstart() {
+  local top open new
+  [ ! -s "$CONTROL" ] || return 0
+  top=$(timeout 60 gh issue list --state all --limit 1 --json number 2>/dev/null | jq -e '.[0].number // 0 | numbers') \
+    && open=$(timeout 60 gh issue list --state open --limit 100000 --json number 2>/dev/null | jq -ce 'map(.number | numbers) | unique') \
+    && new=$(jq -c --argjson top "$top" --argjson open "$open" '.start = "held" | .startHeld = [{from: $top, to: null}] | .held = $open' <<<"$CTL0") \
+    && [ -n "$new" ] && mkdir -p "${CONTROL%/*}" && printf '%s\n' "$new" > "$CONTROL.new" && mv -f "$CONTROL.new" "$CONTROL" \
+    || { rm -f "$CONTROL.new"; echo "conveyor: the control record $CONTROL could not be written with the open issues held (gh issue list, or the folder); run setup again" >&2; return 1; }
+  echo "conveyor: wrote the control record $CONTROL: new issues start held; $(heldline "$(jq length <<<"$open")")"
+}
+# What setup and doctor say of the open issues the control record holds.
+heldline() { echo "$1 open issue$([ "$1" = 1 ] || echo s) held; release one with \`conveyor.sh control release <issue>\` or on the Board"; }
 # The project's instruction files that Conveyor's sessions read, at the root of the main checkout: CLAUDE.md (the
 # builder, the fixer, the Foreman and the lanes) and AGENTS.md (the Codex reviewer). One `ok:` or `missing:` line for
 # each, printed by setup and by doctor. Only read: /conveyor-belt:setup asks the user whether to write a missing one,
@@ -274,6 +298,12 @@ doctor() {
   if [ ! -e "$PACK" ]; then no "the pack $PACK" "run /conveyor-belt:setup"; return 1; fi
   e=$("$HERE/lib/pack.sh" check "$PACK" 2>&1) || { no "a valid pack" "correct what the check names: ${e//$'\n'/; }"; return 1; }
   ok "the pack $PACK"
+  # The control record setup writes (heldstart()): with none, the loop would queue every open issue. With one, the
+  # open issues it holds.
+  if [ ! -s "$CONTROL" ]; then no "the control record $CONTROL (with none, the loop queues every open issue)" "run /conveyor-belt:setup, which writes it with every open issue held"
+  elif c=$(ctl 2>/dev/null) && e=$(timeout 60 gh issue list --state open --limit 100000 --json number 2>/dev/null | jq -e --argjson c "$c" '[.[].number | select(IN($c.held[]))] | length'); then
+    ok "$(heldline "$e")"
+  fi
   for p in $(progs); do
     # OpenCode's sessions start only on 1.x, the plugin API of the guard plugin (ocready()).
     if [ "$p" = opencode ] && command -v opencode >/dev/null && ! [[ $(timeout 60 opencode --version 2>/dev/null | head -n 1) =~ ^v?1\.[0-9]+ ]]; then
