@@ -204,34 +204,53 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows every test file of the project: each file's CPU seconds, its median, its last runs, the clock
-time of its newest run (Last run took; point at it to see when that run was) and its status (Over budget, Slower than
-usual, Waits, Flaky and others). The runs are those of card Test steps and of whole-suite runs (Run full test suite,
-Push landed, and the suite of a release). A file that no run ran yet shows "Never run" and dashes. A file that only
-whole-suite runs run (`wholeOnly` in the pack's `test.files`) shows "Whole suite only". Such a file starts other test
-files, and each of them has its own budget, so the file itself has no budget. It shows "Runs other test files" in
-place of a budget. It never shows Over budget, Slower than usual or Waits, and its row offers no "File an issue: speed
-up". When it is open, it has no field to set a budget or to mark it slow on purpose.
+The Tests tab shows, from top to bottom: the figures, the table of test files, Results of actions, and Settings.
 
-Click a column heading to sort the table by that column. Click it again to reverse the order. An arrow shows the
-column and the direction. Until you pick a column, the files that need a look come first, then the highest CPU
-seconds. Type part of a file's path in the search box to see only the files that match it. The search and a filter
-chip work together. A row opens to show its runs, each marked with its card or "whole suite", to set a budget for the
-file or to mark it slow on purpose (`conveyor.sh test-settings`). Test limits holds the Load limit (`maxLoad`, in the host file)
-and the project's test budget (in the pack).
+The figures count the timed files, the files over budget, the files slower than usual and the files that wait more
+than they work, and give the slot wait and run time of the card Test steps of 7 days. Click the figure of files over
+budget, slower than usual or that wait, and the table shows those files only, as their filter chip does.
 
-An opened row has the test actions. "now" runs at once and files no issue. "issue" files an issue. A card for a
-"File an issue: speed up" issue does not need a test that fails on main. It must make the file pass in fewer CPU
-seconds than the file's median, else the card is blocked with "the file is not faster" and both numbers
-(`conveyor/README.md`, Bug cards: the new tests fail without the fix). An Optimize issue ("Optimize the test file
-<file>") holds the file's numbers and the newest verdict of Judge this test, with its text. Its card picks the fix:
-speed the file up, split it, merge it into another test file, or delete it. A file it keeps must pass in fewer CPU
-seconds than its median. The files of a split must pass in fewer CPU seconds summed. For a delete or a merge, the
-review names the test that still covers each case of the file. A test action or an issue can be asked for many files
-at once: each file gets its own action or issue, and its own answer. At most 3 test actions run at once. The others
-wait as queued and start in the order asked. Stop takes a queued one off before it starts. Judge this test and
-Explain the slowdown need a model for the test actions ("Model for Tests actions"). Auto-file shows the test rules
-(`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test actions).
+The table shows every test file of the project: each file's CPU seconds, its median, its last runs, the clock time of
+its newest run (Last run took; point at it to see when that run was) and its status (Over budget, Slower than usual,
+Waits, Flaky and others). A file with an issue shows a link to it, "#NN". The runs are those of card Test steps and of
+whole-suite runs (Run full test suite, Push landed, and the suite of a release). A file with no CPU time yet shows
+"Not timed yet" in place of its figures and comes after the timed files. A file that only whole-suite runs run
+(`wholeOnly` in the pack's `test.files`) shows "Whole suite only". Such a file starts other test files, and each of
+them has its own budget, so the file itself has no budget. It shows "Runs other test files" in place of a budget. It
+never shows Over budget, Slower than usual or Waits, and you cannot optimize it, set its budget or mark it slow on
+purpose.
+
+Point at a column heading, or move the keyboard focus to it, to see what the column shows. Click a column heading to
+sort the table by that column. Click it again to reverse the order. An arrow shows the column and the direction. Until
+you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path in
+the search box to see only the files that match it. The search and a filter chip work together.
+
+Click a file's name to open its row. The row shows its runs, each marked with its card or "whole suite", its budget,
+and three actions: Judge, Optimize and Run. Judge (Judge this test) and Run (Run this file now) start at once.
+Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers and the newest
+verdict of Judge, with the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds
+Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose
+(`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
+
+Each row has a checkbox. The checkbox in the heading selects every file that the search and the filter show. With one
+file or more selected, a bar at the bottom of the screen shows how many, with Judge, Optimize, Run and Clear. Judge and
+Run ask for all the selected files at once. Optimize shows one issue for each file, each with a title and a text that
+you can edit, and "File N issues" files them. Cancel files nothing. The bar shows the answer for each file, and each
+file that it left out, with the reason: Optimize leaves out a file that runs other test files, and Judge needs a model
+for the test actions. One action takes at most 20 files.
+
+An Optimize card picks the fix: speed the file up, split it, merge it into another test file, or delete it. It does
+not need a test that fails on main. A file it keeps must pass in fewer CPU seconds than its median, else the card is
+blocked with "the file is not faster" and both numbers (`conveyor/README.md`, Bug cards: the new tests fail without
+the fix). The files of a split must pass in fewer CPU seconds summed. For a delete or a merge, the review names the
+test that still covers each case of the file. Each file of an action on many files gets its own action or issue, and
+its own answer. At most 3 test actions run at once. The others wait as queued and start in the order asked. Stop
+takes a queued one off before it starts.
+
+Settings is closed until you open it. It holds "Model for Tests actions" (Judge and Explain the slowdown need it),
+Test limits (the Load limit, `maxLoad` in the host file, and the project's test budget in the pack), and Auto-file,
+which shows the test rules (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test
+actions).
 
 ## Accounts
 

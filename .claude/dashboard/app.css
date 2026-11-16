@@ -660,18 +660,43 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 /* The least width of the File column: short of room, the table scrolls in .tests-scroll and a name breaks at its
    slashes, not one letter a line. */
 .tests-name { min-width: 24ch; min-height: 32px; text-align: left; overflow-wrap: anywhere; }
+/* Issue 73: a file's name is plain text with an open arrow, not a bordered button; a checkbox before it selects it. */
+.tests-table .tests-name { padding: 0; border-color: transparent; background: transparent; font-weight: 500; }
+.tests-name::before { content: '▸'; display: inline-block; width: 1.2em; color: var(--muted); }
+.tests-name[aria-expanded="true"]::before { content: '▾'; }
+.tests-file { white-space: nowrap; }
+.tests-file .tests-name { white-space: normal; }
+.tests-check { width: 18px; height: 18px; margin: 0 var(--sp-2) 0 0; vertical-align: middle; }
+.tests-selected { margin-right: var(--sp-2); color: var(--text); }
+.tests-quiet { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+.tests-untimed { color: var(--muted); }
+/* A column heading's hint, on hover and on focus. */
+.tests-table th { position: relative; }
+.tests-hint { display: none; position: absolute; z-index: 5; top: 100%; left: 0; width: max-content; max-width: 32ch; padding: var(--sp-1) var(--sp-2);
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow); font-weight: 400; white-space: normal; }
+.tests-table th:hover .tests-hint, .tests-table th:focus-within .tests-hint { display: block; }
+/* The bar of the files selected stays at the foot of the screen; the page leaves room under the table for it. */
+.tests-selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 70vh; overflow: auto;
+  padding: var(--sp-2) var(--sp-3); background: var(--surface); border-top: 1px solid var(--border); box-shadow: var(--shadow); }
+.tests-has-selbar { padding-bottom: 10rem; }
+.tests-selbar-answers { display: flex; flex-direction: column; gap: 2px; list-style: none; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.tests-refused { color: var(--bad); }
+/* An opened row's More menu opens on a line of its own, under the actions. */
+.tests-more-menu { display: contents; }
+.tests-menu { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; padding: var(--sp-1); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.tests-settings > summary { cursor: pointer; }
+.tests-settings > section { margin-top: var(--sp-3); }
 .tests-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; }
 .tests-bar { width: 6px; height: 100%; border-radius: 1px; background: var(--accent); transform-origin: bottom; }
 .tests-more { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); padding: var(--sp-2) 0; }
 .tests-runs, .tests-list { display: grid; gap: var(--sp-1); list-style: none; }
 .tests-fact { font-size: var(--fs-sm); }
 .tests-where { font-size: var(--fs-xs); color: var(--muted); }
-/* The actions (issue 521): the marked buttons, the box of an action, the results and Auto-file. */
+/* The actions (issue 521): the buttons, the box of an action, the results and Auto-file. */
 .tests-act-row, .tests-box-head, .tests-box-btns, .tests-result-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .tests-acts, .tests-preview, .tests-box, .tests-rule { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
 .tests-preview, .tests-box, .tests-rule { border: 1px solid var(--surface-2); border-radius: var(--radius-sm); padding: var(--sp-2); }
-.tests-mark { margin-left: var(--sp-1); }
-.tests-legend, .tests-why { font-size: var(--fs-xs); color: var(--muted); }
+.tests-why { font-size: var(--fs-xs); color: var(--muted); }
 .tests-progress { width: 12ch; }
 .tests-out { max-height: 24em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-xs); margin: 0; }
 .tests-body { width: 100%; font-family: inherit; }

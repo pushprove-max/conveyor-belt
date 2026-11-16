@@ -1,30 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
-// The dashboard page's Tests page, its actions (#521): the marks, Judge this test and its box, the text as it comes,
-// Stop and Copy, the result kept, and the Tests model. The rest (no Tests model, the issue preview, Auto-file) is in
-// dashboard-view.tests-autofile.test.mjs. Shared setup: dashboard-view.helpers.mjs (TESTS: three files; TA: the
-// snapshot with the actions).
+// The dashboard page's Tests page, its actions (#521, #73): an opened row's buttons and its More menu, Judge this test
+// and its box, the text as it comes, Stop and Copy, the result kept, and the Tests model. The rest (no Tests model, the
+// issue preview, Auto-file) is in dashboard-view.tests-autofile.test.mjs; the bar of the files selected is in
+// dashboard-view.tests-select.test.mjs. Shared setup: dashboard-view.helpers.mjs (TESTS: three files; TA: the snapshot
+// with the actions).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, later, act, cases, iso, T0, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, later, act, cases, iso, key, T0, TA } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { MERGE, X, ID1, ID2, rec, snap, tp, rowOf, opened, open, type, pick, said, model, resultRow, reply } = TA;
 
-// Bug it guards: an owner who cannot tell an action that runs now from one that files an issue. Each action button of
-// a row has its mark; a button that opens a view (a row's name, View) has none, and the legend says what each means.
-test('Tests actions: each action button has its mark, now or issue; a view button has none', () => {
+// Bug it guards (issue 73): a row crowded with ten marked buttons, four of them "File an issue" kinds the owner had to
+// choose between. An opened row has Judge, Optimize and Run, and More with its five items; no mark, no legend, and no
+// File an issue kind. The menu works with the keyboard: arrows move between its items, Escape closes it.
+test('Tests actions: an opened row has Judge, Optimize, Run and More with its five items, and no File an issue kind', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, snap({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'keep' })] }));
-  const more = open(w, MERGE);
-  const marks = (acts) => acts.map((a) => [a, act(more, a) && act(more, a).dataset.mark]);
-  const now = ['judge', 'explain', 'run', 'flaky-back', 'flaky-off', 'close-done'];
-  const iss = ['issue-speed', 'issue-split', 'issue-merge', 'issue-delete'];
-  assert.deepEqual(marks(now), now.map((a) => [a, 'now']));
-  assert.deepEqual(marks(iss), iss.map((a) => [a, 'issue']));
-  assert.match(act(more, 'judge').textContent, /^Judge this test now$/);
-  assert.match(act(more, 'issue-speed').textContent, /^File an issue: speed up issue$/);
-  assert.equal(act(rowOf(w, MERGE), 'open').dataset.mark, undefined, 'the name opens a view: no mark');
-  assert.equal(act(resultRow(w, ID1), 'view').dataset.mark, undefined, 'View opens a view: no mark');
-  assert.match(model(w).querySelector('.tests-legend').textContent, /"now": the action runs now .* files no issue\. "issue": the action files an issue, because it changes code\. A button with no mark opens a view\./);
+  const more = open(w, MERGE), words = (els) => Array.from(els, (b) => b.textContent);
+  assert.deepEqual(words(more.querySelectorAll('.tests-act-row > button, .tests-act-row > .tests-more-menu > button')), ['Judge', 'Optimize', 'Run', 'More']);
+  assert.equal(act(more, 'more').getAttribute('aria-expanded'), 'false');
+  assert.equal(more.querySelector('[role="menu"]'), null, 'the menu is closed');
+  act(more, 'more').click();
+  const menu = opened(w, MERGE).querySelector('[role="menu"]');
+  assert.deepEqual(words(menu.querySelectorAll('[role="menuitem"]')),
+    ['Explain the slowdown', 'Keep a case off', 'Close its issue as done', 'Set a budget for this file', 'Mark as slow on purpose']);
+  assert.equal(w.document.activeElement, act(menu, 'explain'), 'opened, the focus is on its first item');
+  key(w, w.document.activeElement, 'ArrowDown');
+  assert.equal(w.document.activeElement, act(menu, 'flaky-off'));
+  key(w, w.document.activeElement, 'ArrowUp');
+  key(w, w.document.activeElement, 'ArrowUp');
+  assert.equal(w.document.activeElement, act(menu, 'menu-mark'), 'up from the first item: the last');
+  key(w, w.document.activeElement, 'Escape');
+  assert.equal(opened(w, MERGE).querySelector('[role="menu"]'), null, 'Escape closes it');
+  assert.equal(w.document.activeElement, act(opened(w, MERGE), 'more'), 'and the focus is back on More');
+  const all = tp(w).textContent;
+  for (const gone of ['File an issue: speed up', 'split the file', 'merge with a second file', 'delete the test']) assert.ok(!all.includes(gone), gone);
+  assert.equal(tp(w).querySelector('[data-mark], .tests-mark, .tests-legend'), null, 'no "now" or "issue" mark, no legend');
 });
 
 // Bug it guards (#652): the page is drawn whole at each snapshot; a row's name or an action button drawn anew between
@@ -198,7 +209,7 @@ test('Tests actions: Put back shows a runner-named flaky case on its case file a
   deliver(w, snap());
   assert.equal(act(open(w, X), 'flaky-back'), null, 'not on a file the case does not count for');
   const b = act(open(w, MERGE), 'flaky-back');
-  assert.match(b.textContent, /^Put back a flaky case: mergeclean now$/);
+  assert.match(b.textContent, /^Put back a flaky case: mergeclean$/);
   b.click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'test-close', repo: 'sample',
@@ -211,7 +222,8 @@ for (const [file, entry] of [[MERGE, 'conveyor/conveyor.test.sh: mergeclean'], [
   test(`Tests actions: Keep a case off of ${file} records ${entry}`, async () => {
     const w = boot({ tab: 'tests' });
     deliver(w, snap());
-    act(open(w, file), 'flaky-off').click();
+    act(open(w, file), 'more').click();
+    act(opened(w, file), 'flaky-off').click();
     type(act(opened(w, file), 'keep-case'), 'mergeclean');
     type(act(opened(w, file), 'keep-why'), 'fails one run in ten');
     act(opened(w, file), 'keep-confirm').click();

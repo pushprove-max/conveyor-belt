@@ -329,6 +329,8 @@ async function main() {
       for (const [how, file] of Object.entries(TEST_ANSWERS).map(([how, a]) => [how, a.file])) {
         await click(page, row(file));
         await sleep(600);
+        // Explain the slowdown is in the row's More menu; Judge is on the row.
+        if (how === 'explain') { await click(page, opened(file, '[data-act="more"]')); await sleep(400); }
         await click(page, opened(file, `[data-act="${how}"]`));
         await page.waitForSelector(opened(file, '.tests-box .tests-result'), { timeout: 20000 });
         await point(page, opened(file, '.tests-out'));

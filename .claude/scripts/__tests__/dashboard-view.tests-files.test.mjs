@@ -16,6 +16,8 @@ const said = (w) => tp(w).querySelector('.tests-note').textContent;
 const type = (el, v) => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input')); };
 const figure = (w, k) => { const f = tp(w).querySelector(`[data-figure="${k}"]`); return f && f.querySelector('.rules-big').textContent; };
 const open = (w, f) => { act(rowOf(w, f), 'open').click(); return opened(w, f); };
+// An item of an opened row's More menu picked (issue 73); the row as it is then.
+const menu = (w, f, item) => { act(opened(w, f), 'more').click(); act(opened(w, f), item).click(); return opened(w, f); };
 
 // Bug: a file that got three times slower showed no change when it was over the one budget from the start. Each row
 // compares the file with its own median, and the files that need a look come first.
@@ -27,7 +29,7 @@ test('Tests: a snapshot with 3 files gives 3 rows with now, median and change; t
     ['conveyor/tests/e2e.test.sh', '40.0', '39.0', '+3%'],
     ['.claude/scripts/__tests__/x.test.mjs', '2.0', '4.0', '-50%']], 'merge needs a look: first; then the highest CPU s');
   assert.deepEqual(cells(rowOf(w, MERGE)).slice(5, 7), ['2.5×', '7']);
-  assert.match(cells(rowOf(w, MERGE))[8], /Over budget.*Slower than usual.*Waits.*Flaky.*Fails often.*Has an issue/);
+  assert.match(cells(rowOf(w, MERGE))[8], /Over budget.*Slower than usual.*Waits.*Flaky.*Fails often.*#480$/);
   assert.doesNotMatch(cells(rowOf(w, 'conveyor/tests/e2e.test.sh'))[8], /Slower than usual|Over budget/, 'over its budget but slow on purpose: not "Over budget"');
   assert.match(cells(rowOf(w, 'conveyor/tests/e2e.test.sh'))[8], /Slow on purpose/);
   assert.match(cells(rows(w)[2])[8], /Faster/);
@@ -61,8 +63,12 @@ test('Tests: a row opens to list its runs, each with a link to its card, its bud
   assert.match(more.querySelector('.tests-run').textContent, /^12\.0 CPU s · 30\.0 s on the clock · card #509/);
   assert.match(more.querySelectorAll('.tests-run')[2].textContent, /clock not recorded/);
   assert.match(more.textContent, /Budget: 8\.0 CPU s, the project budget\.Slow on purpose: none\./);
-  assert.deepEqual(Array.from(more.querySelectorAll('.rules-row'), (r) => [r.querySelector('.board-label').textContent, r.querySelector('.rules-ctl .chip').textContent, r.querySelector('.tests-where').textContent]),
-    [['Set a budget for this file', 'now', 'Saves to: Pack file: this project'], ['Mark as slow on purpose', 'now', 'Saves to: Pack file: this project']], 'each action that runs at once is marked "now"');
+  // Issue 73: the budget and the mark are set from the More menu; each editor shows once picked there, with where it saves.
+  assert.equal(more.querySelector('.rules-row'), null, 'no editor until picked from More');
+  menu(w, MERGE, 'menu-budget');
+  menu(w, MERGE, 'menu-mark');
+  assert.deepEqual(Array.from(opened(w, MERGE).querySelectorAll('.rules-row'), (r) => [r.querySelector('.board-label').textContent, r.querySelector('.tests-where').textContent]),
+    [['Set a budget for this file', 'Saves to: Pack file: this project'], ['Mark as slow on purpose', 'Saves to: Pack file: this project']]);
   act(rowOf(w, MERGE), 'open').click();
   assert.equal(opened(w, MERGE), undefined, 'and closes again');
 });
@@ -72,7 +78,8 @@ test('Tests: a row opens to list its runs, each with a link to its card, its bud
 test('Tests: Set a budget shows Unsaved; a refusal shows the reason and keeps the old value; Save posts the file and value', async () => {
   const w = boot({ tab: 'tests' });
   deliver(w, full());
-  let more = open(w, MERGE);
+  open(w, MERGE);
+  let more = menu(w, MERGE, 'menu-budget');
   assert.ok(act(more, 'file-budget-save').hidden, 'nothing to save yet');
   type(act(more, 'file-budget-field'), '40');
   assert.ok(!act(more, 'file-budget-save').hidden && more.textContent.includes('Unsaved'), 'typed: Unsaved, with Save and Cancel');
@@ -104,9 +111,8 @@ test('Tests: Set a budget shows Unsaved; a refusal shows the reason and keeps th
 test('Tests: Mark as slow on purpose with no reason does not post; with one it posts the reason', async () => {
   const w = boot({ tab: 'tests' });
   deliver(w, full());
-  let more = open(w, MERGE);
-  act(more, 'slow-mark').click();
-  more = opened(w, MERGE);
+  open(w, MERGE);
+  let more = menu(w, MERGE, 'menu-mark');
   assert.ok(act(more, 'slow-mark-field'), 'it asks for the reason');
   act(more, 'slow-mark-save').click();
   await settle();

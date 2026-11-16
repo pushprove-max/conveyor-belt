@@ -13,29 +13,31 @@ const { MERGE, X, NO_RULES, rec, snap, opened, open, type, said, auto, reply } =
 test('Tests actions: with no Tests model, Judge and Explain are disabled with the reason; Run this file now is not', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, snap({ model: null }));
-  const more = open(w, MERGE);
+  act(open(w, MERGE), 'more').click();
+  const more = opened(w, MERGE);
   for (const a of ['judge', 'explain']) assert.deepEqual([act(more, a).disabled, act(more, a).title], [true, 'Set the Tests model first.'], a);
   assert.match(more.querySelector('.tests-why').textContent, /Set the Tests model first\./);
   assert.equal(act(more, 'run').disabled, false);
 });
 
 // Bug it guards: an issue filed on one click, with no look at its text; a Cancel that filed; a preview with a run
-// count or time target as its Done-when.
-test('Tests actions: File an issue: speed up shows the preview and files only on the second button; Cancel files nothing', async () => {
+// count or time target as its Done-when; an Optimize issue the engine does not know as one (its title), or with no
+// judge's text for its card to start from (a tab in the text, which the server refuses in a body, is a space).
+test('Tests actions: Optimize shows the preview and files only on the second button; Cancel files nothing', async () => {
   const w = boot({ tab: 'tests' });
-  deliver(w, snap({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'speed up' })] }));
-  act(open(w, MERGE), 'issue-speed').click();
+  deliver(w, snap({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'speed up', text: 'It waits on a sleep.\tCut it.\nVERDICT: speed up\n' })] }));
+  act(open(w, MERGE), 'optimize').click();
   let more = opened(w, MERGE);
   const title = act(more, 'issue-title'), body = act(more, 'issue-body');
-  assert.equal(title.value, `Speed up the test file ${MERGE}`);
+  assert.equal(title.value, `Optimize the test file ${MERGE}`);
   assert.match(body.value, /CPU s in its last run: 12\.0\n- Median of its runs: 6\.0 CPU s \(\+100% against its median\)/);
-  assert.match(body.value, /The judge's verdict .*: speed up\./, 'the verdict kept');
+  assert.match(body.value, /The judge's verdict .*: speed up\.\n\nThe end of its text:\nIt waits on a sleep\. Cut it\.\nVERDICT: speed up$/, 'the verdict kept, with its text');
   assert.doesNotMatch(body.value, /done.when/i, 'no Done-when line');
   assert.deepEqual(w.posts, [], 'the preview files nothing');
   act(more, 'issue-cancel').click();
   assert.deepEqual(w.posts, []);
   assert.equal(opened(w, MERGE).querySelector('.tests-preview'), null);
-  act(opened(w, MERGE), 'issue-speed').click();
+  act(opened(w, MERGE), 'optimize').click();
   more = opened(w, MERGE);
   type(act(more, 'issue-title'), 'Make merge.test.sh fast again');
   w.reply = reply('https://github.com/example/sample/issues/600');

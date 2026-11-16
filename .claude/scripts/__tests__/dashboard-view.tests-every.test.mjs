@@ -11,8 +11,8 @@ const tp = (w) => panel(w, 'tests');
 const CARD = 'lib/c.test.sh', WHOLE = 'conveyor/conveyor.test.sh', NEVER = 'lib/n.test.sh';
 const at = (h) => new Date(T0 - h * 3600000).toISOString();
 // CARD: one card run, flaky (so it needs a look and comes first with no sort), 2 CPU s in 600 s of clock. WHOLE:
-// wholeOnly and slow on purpose, one whole-suite run that failed, 400 CPU s in 487 s. NEVER: no run. The snapshot's
-// order: highest CPU s first.
+// wholeOnly and slow on purpose, one whole-suite run that failed, 400 CPU s in 487 s. NEVER: no run, flaky (it needs a
+// look, yet comes last: it has no time) and with issue #77. The snapshot's order: highest CPU s first.
 const file = (o) => ({ cpu: null, median: null, change: null, runs: [], lastRun: null, timedRuns: 0, wholeOnly: false, failedSteps: 0, flaky: 0,
   issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, over: false, usual: null, slower: false, ...o });
 const PART = { ...clone(TESTS), settings: { ...clone(TESTS.settings), files: { [WHOLE]: { wholeOnly: true, slowOnPurpose: 'runs every engine case' } } }, slower: [],
@@ -24,7 +24,7 @@ const PART = { ...clone(TESTS), settings: { ...clone(TESTS.settings), files: { [
     file({ file: CARD, cpu: 2, median: 2, change: 0, timedRuns: 1, flaky: 1,
       runs: [{ cpu: 2, sec: 600, card: 'c-12', time: at(1), whole: false, issue: 12, repo: 'sample', url: `${P}/12` }],
       lastRun: { sec: 600, cpu: 2, clockPerCpu: 300, time: at(1), whole: false } }),
-    file({ file: NEVER }),
+    file({ file: NEVER, flaky: 1, issue: 77 }),
   ] };
 const show = () => { const w = boot({ tab: 'tests' }); const d = full(); d.panels.tests.data.tests = clone(PART); deliver(w, d); return w; };
 const rows = (w) => Array.from(tp(w).querySelectorAll('.tests-row'));
@@ -38,10 +38,14 @@ const search = (w, v) => { const s = act(tp(w), 'search'); s.value = v; s.dispat
 // were missing, and a whole-suite run of a file showed nowhere.
 test('Tests: every test file has a row: the card run, the whole-only file with its chip and whole-suite run, the never-run file', () => {
   const w = show();
-  assert.deepEqual(names(w), [CARD, WHOLE, NEVER], 'with no sort: the file that needs a look first, then the snapshot\'s order');
+  assert.deepEqual(names(w), [CARD, WHOLE, NEVER], 'with no sort: the file that needs a look first, then the snapshot\'s order; the file never timed last');
   assert.match(cells(rowOf(w, WHOLE))[8], /Whole suite only/);
   assert.doesNotMatch(cells(rowOf(w, CARD))[8], /Whole suite only|Never run/);
-  assert.deepEqual(cells(rowOf(w, NEVER)).slice(1, 9), ['—', '—', '—', '', '—', '—', '—', 'Never run'], 'dashes in its figures');
+  // Bug (issue 73): a file never timed showed 0.0, dashes and 0 s, as if it had a time of none.
+  assert.deepEqual(cells(rowOf(w, NEVER)).slice(1), ['Not timed yet', 'Flaky#77Never run'], 'one cell in place of its figures');
+  // Bug (issue 73): "Has an issue" was a chip with no way to the issue.
+  const link = rowOf(w, NEVER).querySelector('a.issue');
+  assert.deepEqual([link.textContent, link.getAttribute('href')], ['#77', `${P}/77`]);
   act(rowOf(w, WHOLE), 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.match(more.textContent, /runs only in whole-suite runs/);
@@ -66,24 +70,24 @@ test('Tests: a wholeOnly runner has "Runs other test files" in place of a budget
   act(rowOf(w, WHOLE), 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.match(more.textContent, /Budget: none, it runs other test files/);
-  assert.equal(act(more, 'issue-speed'), null, 'no speed-up issue for a runner');
+  assert.equal(act(more, 'optimize').disabled, true, 'no Optimize issue for a runner');
   // Bug: the budget editor saved a budget for the runner and said "budget of ... now 8 CPU s", which never applies.
   assert.equal(act(more, 'file-budget-field'), null, 'no budget editor for a runner');
-  assert.equal(act(more, 'slow-mark'), null, 'no slow-on-purpose mark for a runner');
-  act(more, 'issue-split').click();
-  assert.match(tp(w).querySelector('.tests-body').value, /\n- Budget: none, it runs other test files\n/, 'the draft gives no budget');
+  assert.equal(act(more, 'slow-mark-field'), null, 'no slow-on-purpose mark for a runner');
+  act(more, 'more').click();
+  const menu = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
+  assert.deepEqual(['menu-budget', 'menu-mark'].map((a) => act(menu, a).disabled), [true, true], 'nor from its More menu');
   act(rowOf(w, CARD), 'open').click();
   const card = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === CARD);
-  assert.ok(act(card, 'issue-speed'), 'a file with a budget keeps its speed-up action');
+  assert.equal(act(card, 'optimize').disabled, false, 'a file with a budget keeps its Optimize');
 });
 
 // The clock time of the newest run, card or whole suite, and when it ran on hover.
 test('Tests: Last run took shows each file\'s newest run\'s clock time, with its date and time on hover', () => {
   const w = show();
-  assert.deepEqual(rows(w).map((r) => cells(r)[7]), ['10 min 0 s', '8 min 7 s', '—']);
+  assert.deepEqual(rows(w).slice(0, 2).map((r) => cells(r)[7]), ['10 min 0 s', '8 min 7 s']);
   const took = rowOf(w, WHOLE).children[7];
   assert.equal(took.title, `${new Date(at(2)).toLocaleString()}, whole suite`);
-  assert.equal(rowOf(w, NEVER).children[7].title, '');
 });
 
 test('Tests: a column heading sorts the rows, a second click reverses them, and an arrow shows the sort', () => {

@@ -2,23 +2,35 @@
 // The Tests page (#520; the owner chose mockup A, with mockup B's column "against its own median"): a tab of its own,
 // after Belt 3D. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
 // on the Rules tab, and the heading names it ("Tests: sample").
-// First, the figures: files with a CPU time, files over budget, files slower than usual, files that wait more than
-// they work (their last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the
-// 7 days: their slot wait and their run time.
-// Then the table, one row a test file (every test file of main's checkout, run or not): file, CPU s now, median,
-// change against its own median, its last runs as bars (oldest first), clock against CPU, runs on record, the clock
-// time its newest run took (Last run took, with that run's date and time on hover), and its status chips (Over
-// budget, Slower than usual, Faster, Waits, Flaky, Fails often, Has an issue, Slow on purpose, Runs other test files,
-// Whole suite only, Never run). A file the pack marks wholeOnly (a runner that starts other test files whole, each of
-// them with its own budget) is held to no budget: it has "Runs other test files" in place of a budget, is never Over
-// budget, Slower than usual or Waits, and has no "File an issue: speed up". A search box over it keeps the rows whose path holds its text (any case); filter chips, each with its count,
-// show one status alone; the two apply together. Each column heading sorts the table by that column (file names A to
-// Z, any other highest first; a second click reverses it, and an arrow shows which). With no sort picked, the rows
-// that need a look (over budget and not slow on purpose, slower than usual, waits, flaky or fails often) come first,
-// then the highest CPU s. A row opens to show its runs, each with a link to its card's issue or marked "whole suite"
-// with its result, its budget and its mark, and the actions that run at once ("now"): Set a budget for this file,
-// Mark as slow on purpose (it asks for the reason) and Clear for each.
-// Last, the panel Test limits. Each row names where it saves: Load limit in the host file (this machine, all
+// The page, top to bottom (#73): the figures, the table with its search and filters, the bar of the files selected,
+// Results of actions, and one section "Settings", collapsed until opened, with the Tests model, Test limits and
+// Auto-file.
+// The figures: Timed files, files over budget, files slower than usual, files that wait more than they work (their
+// last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the 7 days: their slot
+// wait and their run time. A figure that counts the files of a status is a button that shows that status alone, as
+// its filter chip does.
+// The table, one row a test file (every test file of main's checkout, run or not): a checkbox and the file, CPU s now,
+// median, change against its own median, its last runs as bars (oldest first), clock against CPU, runs on record,
+// the clock time its newest run took (Last run took, with that run's date and time on hover), and its status (chips;
+// its issue as a link, "#NN"; Runs other test files and Whole suite only as grey text). A file with no CPU time on
+// record shows "Not timed yet" in place of its figures and comes after the timed files (by name, it sorts as any
+// other). Each column heading has a hint on hover and on focus. A file the pack marks wholeOnly (a runner that starts
+// other test files whole, each of them with its own budget) is held to no budget: it has "Runs other test files" in
+// place of a budget, is never Over budget, Slower than usual or Waits, and has no Optimize. A search box over it keeps
+// the rows whose path holds its text (any case); filter chips, each with its count, show one status alone; the two
+// apply together. Each column heading sorts the table by that column (file names A to Z, any other highest first; a
+// second click reverses it, and an arrow shows which). With no sort picked, the rows that need a look (over budget
+// and not slow on purpose, slower than usual, waits, flaky or fails often) come first, then the highest CPU s.
+// Selected files: the header checkbox selects every row the search and filters show. With one file or more selected,
+// a bar fixed at the foot of the screen (aria-live) says how many, with Judge, Optimize, Run and Clear. Judge and Run
+// send one POST for all of them (control {action: testaction, args: [judge | run, file...]}); Optimize opens one
+// preview, an issue a file (title and body editable), and its "File N issues" sends one test-issue with them all.
+// The bar shows the answer for each file, and each file left out with why: the runner for Optimize, every file for
+// Judge with no Tests model.
+// A row opens to show its runs, each with a link to its card's issue or marked "whole suite" with its result, its
+// budget and its mark, and three actions: Judge, Optimize and Run. Its More menu holds Explain the slowdown, Keep a
+// case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
+// Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
 // project): CPU budget for a test file (test.fileBudget), the budgets of single files and the files slow on purpose
 // (lists), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
@@ -30,19 +42,17 @@
 // in its row.
 // A project with no file times shows its step figures and one state, "No file times for this project", with what
 // starts the record, and no table.
-// The actions (#521; mockup A for the row's actions, the Tests model, the box and the results, mockup C for
-// Auto-file). The Board calls the control record's tests (`conveyor.sh control tests`) "the Tests model": its
-// strip-down test (dashboard.test.sh) keeps the engine's retired word for it out of the page. Each
-// action button has a mark: "now" (it runs now and files no issue) or "issue" (it files an issue, as it changes code);
-// a button that only opens a view has none, and one legend line says so. An opened row has, marked "now": Judge this
-// test and Explain the slowdown (a session on the Tests model: POST control {action: testaction, args: [judge |
-// explain, file]}), Run this file now (testaction run: no session, no model), Put back a flaky case (its flaky issue
-// closed, test-close: the case runs on cards again), Keep a case off (flaky-off: `conveyor.sh flaky off`, which files no issue), and Close its
-// issue as done (test-close, with the file's before and after numbers as its comment); marked "issue": File an issue:
-// speed up, split the file, merge with a second file, delete the test. Each of these shows a preview first (title and
-// body, with the measured numbers and the judge's kept verdict, both editable; no Done-when line), and files (POST
-// control {action: test-issue, args: [file, title, body]}: `conveyor.sh testissue`, which keeps it as the file's issue) only on its second button; Cancel files nothing. With no Tests
-// model, Judge and Explain are disabled and say "Set the Tests model first."
+// The actions (#521, #73). The Board calls the control record's tests (`conveyor.sh control tests`) "the Tests
+// model": its strip-down test (dashboard.test.sh) keeps the engine's retired word for it out of the page. Judge (Judge
+// this test) and Explain the slowdown are a session on the Tests model (POST control {action: testaction, args:
+// [judge | explain, file]}); Run (Run this file now) is testaction run (no session, no model). Put back a flaky case
+// (its flaky issue closed, test-close: the case runs on cards again) shows beside the file's facts; Keep a case off is
+// flaky-off (`conveyor.sh flaky off`, which files no issue); Close its issue as done is test-close, with the file's
+// before and after numbers as its comment. Optimize shows a preview first (title "Optimize the test file <file>" and
+// body, with the measured numbers and the judge's kept verdict with the end of its text, both editable; no Done-when
+// line), and files (POST control {action: test-issue, args: [file, title, body]}: `conveyor.sh testissue`, which keeps
+// it as the file's issue) only on its second button; Cancel files nothing. With no Tests model, Judge and Explain are
+// disabled and say "Set the Tests model first."
 // "Model for Tests actions": CLI, model (with Other… for a typed name) and effort, as the Rules tab's roles; a pick
 // says Unsaved, Save sends POST control {action: tests, args: [cli, model, effort] or [default]}, Cancel puts back the
 // one in force.
@@ -87,8 +97,13 @@
     texts: new Map(),    // each action's text as seen here, by id: the snapshot holds the end of a long one only
     shown: new Map(),    // the action a row's box shows, by dk(file): its id
     viewed: null,        // the result opened under Results of actions: its id
-    ask: null,           // a preview open: {kind: issue | close | keep | on, file, title, body, case, why}
-    stopping: new Set() };  // the ids of the actions a Stop was sent for
+    ask: null,           // a preview open: {kind: issue | close | keep | on | many, file, title, body, case, why; many: items [{file, title, body}]}
+    stopping: new Set(),    // the ids of the actions a Stop was sent for
+    sel: new Set(),      // the files selected, for the bar's actions
+    answers: null,       // the bar's last action: {what, lines: [{file, ok, text}], note}
+    menu: null,          // the file whose More menu is open
+    edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|budget` or `${dk(file)}|mark`
+    settingsOpen: false };  // the Settings section is open
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -132,20 +147,24 @@
     })[k]);
   }
   const look = (f) => marks(f).some((m) => m[3]);
+  // A file is timed when a run of it on record has a CPU time; one that is not shows "Not timed yet" and comes last.
+  const timed = (f) => list(f.runs).some((r) => obj(r) && num(r.cpu) !== null);
   // The clock time of a run: "48 s", "8 min 7 s".
   const clockTook = (s) => { if (num(s) === null) return '—'; const r = Math.round(s); return r < 60 ? `${r} s` : `${Math.floor(r / 60)} min ${r % 60} s`; };
-  // The table's columns: key, heading, and the value a sort by it reads (null sorts last both ways). A first click
-  // sorts the file names A to Z and every other column highest first.
+  // The table's columns: key, heading, the value a sort by it reads (null sorts last both ways; a file not timed is
+  // null in every column but File), and the hint its heading shows on hover and on focus. A first click sorts the file
+  // names A to Z and every other column highest first.
   const COLS = [
-    ['file', 'File', (f) => f.file],
-    ['cpu', 'CPU s now', (f) => num(f.cpu)],
-    ['median', 'Median', (f) => num(f.median)],
-    ['change', 'Against its median', (f) => num(f.change)],
-    ['runs', 'Last runs', (f) => { const c = list(f.runs).filter(obj).map((r) => num(r.cpu)).filter((x) => x !== null); return c.length ? Math.max(...c) : null; }],
-    ['clock', 'Clock / CPU', (f) => num((obj(f.lastRun) || {}).clockPerCpu)],
-    ['count', 'Runs', (f) => (list(f.runs).length ? num(f.timedRuns) || 0 : null)],
-    ['took', 'Last run took', (f) => num((obj(f.lastRun) || {}).sec)],
-    ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length]];
+    ['file', 'File', (f) => f.file, 'The path of the test file. Click a name to see its runs and its actions.'],
+    ['cpu', 'CPU s now', (f) => num(f.cpu), 'CPU seconds of its newest timed run.'],
+    ['median', 'Median', (f) => num(f.median), 'The median CPU seconds of its runs on record.'],
+    ['change', 'Against its median', (f) => num(f.change), 'CPU s now against its median. Above 0% it is slower than usual.'],
+    ['runs', 'Last runs', (f) => { const c = list(f.runs).filter(obj).map((r) => num(r.cpu)).filter((x) => x !== null); return c.length ? Math.max(...c) : null; },
+      'The CPU seconds of its last runs, oldest first.'],
+    ['clock', 'Clock / CPU', (f) => num((obj(f.lastRun) || {}).clockPerCpu), 'Wall time divided by CPU time. Above 2× the file waits more than it works.'],
+    ['count', 'Runs', (f) => (list(f.runs).length ? num(f.timedRuns) || 0 : null), 'The runs on record that have a CPU time.'],
+    ['took', 'Last run took', (f) => num((obj(f.lastRun) || {}).sec), 'The clock time of its newest run. Point at a time to see when it ran.'],
+    ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length, 'What needs a look first, then the other marks of the file.']];
 
   function say(text) { const n = S.el && S.el.querySelector('.tests-note'); if (n) n.textContent = text; }
   function button(text, cls, act, label, fn) {
@@ -166,13 +185,11 @@
 
   // ---- one value: typed or picked, then Save or Cancel ----
   // o: act (the control's name), label, type (number or text) or choices ([value, words]), placeholder, clear (the
-  // words of a button that empties it), ask (a value that is empty in force is asked for by this button first), check(v,
-  // set) (why it is not sent, or null), send(v, set) ([path, body]) and said(v) (what was saved, in words).
+  // words of a button that empties it), ask (true: a value that is empty in force is asked for, so an empty draft of it
+  // can be saved, to be told what to type), check(v, set) (why it is not sent, or null), send(v, set) ([path, body]) and
+  // said(v) (what was saved, in words).
   function setting(key, o) {
     const h = S.ctx.h, k = dk(key), set = shown(key);
-    if (o.ask && set === '' && !S.drafts.has(k)) {
-      return [button(o.ask, 'btn-quiet', o.act, o.ask, () => { S.drafts.set(k, ''); S.keep = { act: `${o.act}-field`, file: o.file }; draw(); })];
-    }
     let input;
     if (o.choices) {
       input = h('select', 'field rules-field tests-field');
@@ -224,7 +241,8 @@
 
   // ---- the actions ----
   const ACTS = { judge: 'Judge this test', explain: 'Explain the slowdown', run: 'Run this file now' };
-  const KINDS = [['speed', 'File an issue: speed up'], ['split', 'File an issue: split the file'], ['merge', 'File an issue: merge with a second file'], ['delete', 'File an issue: delete the test']];
+  const FILES_MAX = 20;  // the most files of one action on a list of them, as dashboard_server.py's TEST_FILES_MAX
+  const RUNNER_WHY = 'It runs other test files, and each of them has its own budget.';
   const ENDED = { done: 'Done', stopped: 'Stopped', failed: 'Failed', 'timed out': 'Timed out' };
   const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,191}$/;  // a model, as dashboard_server.py's MODEL
   const OTHER = '*other';  // the model list's Other…: a name typed in (no model starts with *)
@@ -249,16 +267,10 @@
   // The judge's newest verdict for a file, when one is kept.
   const verdictOf = (file) => actions().find((a) => a.file === file && a.action === 'judge' && a.state === 'done' && typeof a.verdict === 'string' && a.verdict !== 'no verdict') || null;
 
-  // A button with its mark: now (it runs now and files no issue) or issue (it files an issue).
-  function marked(text, mark, act, label, fn) {
-    const b = button(text, 'btn-quiet tests-act', act, label, fn), c = S.ctx.chip(mark, mark === 'now' ? 'ok' : 'info');
-    c.classList.add('tests-mark');
-    b.dataset.mark = mark;
-    b.append(' ', c);
-    return b;
-  }
-  // One action sent: POST control {action, args, repo}; then(text, at) on a yes, and the answer or the refusal said.
-  function send(action, args, said, then) {
+  const actBtn = (text, act, label, fn) => button(text, 'btn-quiet tests-act', act, label, fn);
+  // One action sent: POST control {action, args, repo}; then(text, at) on a yes, no(refusal) on a no, and the answer or
+  // the refusal said.
+  function send(action, args, said, then, no) {
     if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return; }
     const repo = S.d.repo;
     S.busy = true; draw(); say('Sending…');
@@ -268,6 +280,7 @@
     }), () => [false, 'the build machine did not answer', null]).then(([ok, text, at]) => {
       S.busy = false;
       if (ok && then && repo === S.d.repo) then(text, at);
+      if (!ok && no && repo === S.d.repo) no(S.ctx.refusal(text));
       draw();
       say(ok ? said(text) : `Not done: ${S.ctx.refusal(text)}`);
     });
@@ -340,20 +353,25 @@
     const st = S.started.get(dk(file));
     return (want && all.find((a) => a.id === want)) || st || all.find(running) || all[0] || null;
   }
-  function draftIssue(f, kind) {
+  // An Optimize issue's draft: the title the engine knows it by (OPTIMIZE, lib/testrun.sh), the measured numbers, and
+  // the judge's newest kept verdict with as much of the end of its text as the body holds. Each line is printable (the
+  // server refuses a body with a tab or another control character in a line).
+  function draftIssue(f) {
     const file = f.file, v = verdictOf(file), runs = list(f.runs).filter(obj), last = obj(f.lastRun) || {};
-    const title = { speed: `Speed up the test file ${file}`, split: `Split the test file ${file}`, merge: `Merge the test file ${file} with a second test file`, delete: `Delete the test file ${file}` }[kind];
-    const ask = { speed: 'Make this test file faster. Keep what it tests.', split: 'Split this test file into smaller files. Keep what it tests.',
-      merge: 'Merge this test file with a second test file that tests the same behaviour. Second file: (name it here)', delete: 'Delete this test file. Name here the test that proves what it tests.' }[kind];
-    const lines = [ask, '', 'What the Board measured:',
+    const lines = ['Optimize this test file: speed it up, split it, merge it into another test file, or delete it. Keep what it tests.', '', 'What the Board measured:',
       `- CPU s in its last run: ${one(f.cpu)}`,
       `- Median of its runs: ${one(f.median)} CPU s (${pct(f.change)} against its median)`,
-      f.wholeOnly === true ? '- Budget: none, it runs other test files' : `- Budget: ${one(f.budget)} CPU s`,
+      `- Budget: ${one(f.budget)} CPU s`,
       `- Clock / CPU in its last run: ${num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`}`,
       `- Runs on record: ${num(f.timedRuns) || 0}. Test steps that failed in it: ${num(f.failedSteps) || 0}. Flaky entries: ${num(f.flaky) || 0}.`,
       `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (card ${r.card})`).join(', ') || 'none'}`];
-    if (v) lines.push('', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`);
-    return { kind: 'issue', repo: S.d.repo, file, title, body: lines.join('\n') };
+    if (v) {
+      lines.push('', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`);
+      const text = (S.texts.get(v.id) || '').split('\n').map((l) => l.replace(/[\p{C}\p{Z}]/gu, ' ').trimEnd()).join('\n').trim();
+      const room = BODY_MAX - lines.join('\n').length - 40, chars = Array.from(text);
+      if (text && room > 0) lines.push('', 'The end of its text:', chars.length > room ? `…${chars.slice(-room).join('')}` : text);
+    }
+    return { kind: 'issue', repo: S.d.repo, file, title: `Optimize the test file ${file}`, body: lines.join('\n') };
   }
   const asking = (kind, file) => S.ask && S.ask.repo === S.d.repo && S.ask.kind === kind && (file === undefined || S.ask.file === file);
   function field(act, label, value, set, o = {}) {
@@ -374,7 +392,7 @@
       el.append(h('p', 'board-head', 'Preview of the issue. Edit it, then file it.'),
         field('issue-title', 'Title of the issue', a.title, (v) => { a.title = v; }, { max: TITLE_MAX }),
         field('issue-body', 'Text of the issue', a.body, (v) => { a.body = v; }, { area: true, max: BODY_MAX }),
-        marked('File this issue', 'issue', 'issue-file', `File this issue about ${file}`, () => {
+        button('File this issue', 'btn-primary', 'issue-file', `File this issue about ${file}`, () => {
           const t = a.title.trim(), b = a.body.trim();
           if (!t || /[\r\n]/.test(t)) { say('Type a title of one line first.'); return; }
           if (!b) { say('Type the text of the issue first.'); return; }
@@ -383,7 +401,7 @@
     } else if (a.kind === 'close') {
       el.append(h('p', 'board-head', `Close #${f.issue} as done, with this comment.`),
         field('close-comment', `Comment that closes #${f.issue}`, a.body, (v) => { a.body = v; }),
-        marked(`Close #${f.issue}`, 'now', 'close-confirm', `Close #${f.issue} as done`, () => {
+        button(`Close #${f.issue}`, 'btn-primary', 'close-confirm', `Close #${f.issue} as done`, () => {
           const c = a.body.trim();
           if (!c) { say('Type the comment first.'); return; }
           send('test-close', [String(f.issue), c], () => `Closed #${f.issue} as done.`, () => { S.ask = null; });
@@ -392,7 +410,7 @@
       el.append(h('p', 'board-head', 'Keep a case of this file off card test steps. The full suite and the whole test on main still run it.'),
         field('keep-case', `Case of ${file} to keep off`, a.case, (v) => { a.case = v; }, { placeholder: 'The name of the case' }),
         field('keep-why', 'Why it is kept off', a.why, (v) => { a.why = v; }, { placeholder: 'Why it is kept off' }),
-        marked('Keep it off', 'now', 'keep-confirm', `Keep the case off: ${file}`, () => {
+        button('Keep it off', 'btn-primary', 'keep-confirm', `Keep the case off: ${file}`, () => {
           const c = `${CASE_FILE.test(file) ? RUNNER : file}: ${a.case.trim()}`, why = a.why.trim();
           if (!a.case.trim() || !why) { say('Type the case and why first.'); return; }
           if (c.length > SAID_MAX) { say(`The file and case are more than ${SAID_MAX} characters.`); return; }
@@ -401,38 +419,76 @@
     }
     return el;
   }
-  // The actions of an opened row, the preview open on it, and the box of its action.
-  function rowActions(f) {
-    const h = S.ctx.h, file = f.file, el = h('div', 'tests-acts'), noSeat = !tmodel();
-    const now = h('div', 'tests-act-row'), iss = h('div', 'tests-act-row');
-    ['judge', 'explain', 'run'].forEach((how) => {
-      const b = marked(ACTS[how], 'now', how, `${ACTS[how]}: ${file}`, () => start(how, file));
-      if (how !== 'run' && noSeat) { b.disabled = true; b.title = NO_SEAT; }
-      now.append(b);
-    });
-    if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
-    // A flaky case is kept off until its flaky issue closes: Put back closes it. A case shows on each file it counts for
-    // (the snapshot's files: a runner's case on its case file too).
-    list(S.d.flaky).filter((c) => obj(c) && typeof c.case === 'string' && c.case.includes(': ') && list(c.files).includes(file)).forEach((c) => {
-      const name = c.case.slice(c.case.indexOf(': ') + 2);
-      const b = marked(`Put back a flaky case: ${name}`, 'now', 'flaky-back', `Put back the flaky case ${c.case}`, () => send('test-close',
-        [String(c.issue), `Put back from the Board's Tests page: the case "${name}" runs on card test steps again.`.slice(0, SAID_MAX)], () => `Put back: ${c.case}. Its flaky issue #${c.issue} is closed.`));
-      if (num(c.issue) === null) { b.disabled = true; b.title = 'It has no flaky issue to close. It stays off until its entries are 30 days old.'; }
-      now.append(b);
-    });
-    now.append(marked('Keep a case off', 'now', 'flaky-off', `Keep a case of ${file} off card test steps`, () => {
-      S.ask = { kind: 'keep', repo: S.d.repo, file, case: '', why: '' }; S.keep = { act: 'keep-case', file }; draw();
-    }));
-    if (num(f.issue) !== null) {
-      now.append(marked('Close its issue as done', 'now', 'close-done', `Close #${f.issue} as done`, () => {
+  // The items of an opened row's More menu: act, words, why it is disabled (null: it is not), and what it does.
+  function moreItems(f) {
+    const file = f.file, runner = f.wholeOnly === true;
+    const edit = (what, act) => () => {
+      S.edit.add(`${dk(file)}|${what}`);
+      if (what === 'mark' && !S.drafts.has(dk(`mark:${file}`))) S.drafts.set(dk(`mark:${file}`), shown(`mark:${file}`));
+      S.keep = { act, file }; draw();
+    };
+    return [
+      ['explain', ACTS.explain, tmodel() ? null : NO_SEAT, () => start('explain', file)],
+      ['flaky-off', 'Keep a case off', null, () => { S.ask = { kind: 'keep', repo: S.d.repo, file, case: '', why: '' }; S.keep = { act: 'keep-case', file }; draw(); }],
+      ['close-done', 'Close its issue as done', num(f.issue) === null ? 'It has no issue to close.' : null, () => {
         const before = num(f.usual) === null ? f.median : f.usual;
         S.ask = { kind: 'close', repo: S.d.repo, file, body: `Done: ${file} used ${one(before)} CPU s before (its usual) and ${one(f.cpu)} CPU s in its last run. Closed from the Board's Tests page.` };
         S.keep = { act: 'close-comment', file }; draw();
-      }));
-    }
-    // A runner (wholeOnly) is held to no budget: its time is its files' time, so no issue asks to speed it up.
-    KINDS.filter(([k]) => !(k === 'speed' && f.wholeOnly === true)).forEach(([k, words]) => iss.append(marked(words, 'issue', `issue-${k}`, `${words}: ${file}`, () => { S.ask = draftIssue(f, k); S.keep = { act: 'issue-title', file }; draw(); })));
-    el.append(h('p', 'board-head', 'Actions'), now, iss);
+      }],
+      // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
+      ['menu-budget', 'Set a budget for this file', runner ? RUNNER_WHY : null, edit('budget', 'file-budget-field')],
+      ['menu-mark', 'Mark as slow on purpose', runner ? RUNNER_WHY : null, edit('mark', 'slow-mark-field')]];
+  }
+  // The More menu of an opened row: a button that opens it, and its items. Arrow keys move between the items, Escape
+  // closes it and puts the focus back on More.
+  function moreMenu(f) {
+    const h = S.ctx.h, file = f.file, on = S.menu === file, wrap = h('span', 'tests-more-menu');
+    const b = button('More', 'btn-quiet tests-act', 'more', `More actions: ${file}`, () => {
+      const first = moreItems(f).find((x) => !x[2]);  // opened, the focus goes to its first item that is not disabled
+      S.menu = on ? null : file; S.keep = { act: on || !first ? 'more' : first[0], file }; draw();
+    });
+    b.setAttribute('aria-haspopup', 'menu'); b.setAttribute('aria-expanded', String(on));
+    wrap.append(b);
+    if (!on) return wrap;
+    const m = h('div', 'tests-menu');
+    m.setAttribute('role', 'menu'); m.setAttribute('aria-label', `More actions: ${file}`);
+    moreItems(f).forEach(([act, words, why, fn]) => {
+      const i = button(words, 'btn-quiet', act, `${words}: ${file}`, () => { S.menu = null; fn(); });
+      i.setAttribute('role', 'menuitem');
+      if (why) { i.disabled = true; i.title = why; }
+      m.append(i);
+    });
+    m.addEventListener('keydown', (e) => {
+      const items = Array.from(m.querySelectorAll('[role="menuitem"]:not(:disabled)')), at = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.preventDefault(); S.menu = null; S.keep = { act: 'more', file }; draw(); return; }
+      const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+      if (step && items.length) { e.preventDefault(); items[(at + step + items.length) % items.length].focus(); }
+    });
+    wrap.append(m);
+    return wrap;
+  }
+  // The actions of an opened row (Judge, Optimize, Run and More), the preview open on it, and the box of its action.
+  function rowActions(f) {
+    const h = S.ctx.h, file = f.file, el = h('div', 'tests-acts'), noSeat = !tmodel();
+    const now = h('div', 'tests-act-row');
+    const judge = actBtn('Judge', 'judge', `${ACTS.judge}: ${file}`, () => start('judge', file));
+    if (noSeat) { judge.disabled = true; judge.title = NO_SEAT; }
+    // A runner (wholeOnly) is held to no budget: its time is its files' time, so no issue asks to optimize it.
+    const opt = actBtn('Optimize', 'optimize', `Optimize: preview an issue about ${file}`, () => { S.ask = draftIssue(f); S.keep = { act: 'issue-title', file }; draw(); });
+    if (f.wholeOnly === true) { opt.disabled = true; opt.title = RUNNER_WHY; }
+    now.append(judge, opt, actBtn('Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
+    if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
+    el.append(h('p', 'board-head', 'Actions'), now);
+    // A flaky case is kept off until its flaky issue closes: Put back closes it. A case shows on each file it counts for
+    // (the snapshot's files: a runner's case on its case file too).
+    list(S.d.flaky).filter((c) => obj(c) && typeof c.case === 'string' && c.case.includes(': ') && list(c.files).includes(file)).forEach((c) => {
+      const name = c.case.slice(c.case.indexOf(': ') + 2), line = h('p', 'tests-fact tests-flaky', `Kept off as flaky: ${name} `);
+      const b = button(`Put back a flaky case: ${name}`, 'btn-quiet', 'flaky-back', `Put back the flaky case ${c.case}`, () => send('test-close',
+        [String(c.issue), `Put back from the Board's Tests page: the case "${name}" runs on card test steps again.`.slice(0, SAID_MAX)], () => `Put back: ${c.case}. Its flaky issue #${c.issue} is closed.`));
+      if (num(c.issue) === null) { b.disabled = true; b.title = 'It has no flaky issue to close. It stays off until its entries are 30 days old.'; }
+      line.append(b);
+      el.append(line);
+    });
     const p = preview(f);
     if (p) el.append(p);
     const a = rowAction(file);
@@ -497,8 +553,104 @@
   function actionsHead() {
     const h = S.ctx.h, el = h('section', 'tests-actions');
     el.append(h('h3', 'board-head', 'Test actions'),
-      h('p', 'tests-legend', 'Marks: "now": the action runs now on the build machine and files no issue. "issue": the action files an issue, because it changes code. A button with no mark opens a view.'),
-      row('tmodel', 'Model for Tests actions', 'The CLI, model and effort of Judge this test and Explain the slowdown. Run this file now needs none.', null, ...seatCtl()));
+      row('tmodel', 'Model for Tests actions', 'The CLI, model and effort of Judge and Explain the slowdown. Run needs none.', null, ...seatCtl()));
+    return el;
+  }
+
+  // ---- the bar of the files selected: Judge, Optimize, Run and Clear, and the answer for each file ----
+  // The files an action of the bar acts on, in the table's order, and those it leaves out with why.
+  function chosen(files, how) {
+    const out = { files: [], left: [] };
+    files.filter((f) => S.sel.has(f.file)).forEach((f) => {
+      const why = how === 'judge' && !tmodel() ? NO_SEAT : how === 'optimize' && f.wholeOnly === true ? RUNNER_WHY : null;
+      if (why) out.left.push({ file: f.file, why }); else out.files.push(f);
+    });
+    return out;
+  }
+  // One answer a file: the server answers {results: [{file, id} or {file, refused}]} for a list of files, and the text
+  // of the one action (its id or address on the last line) for a single file.
+  function answersOf(files, text) {
+    let r = null;
+    try { r = JSON.parse(text); } catch (e) { r = null; }
+    if (obj(r) && Array.isArray(r.results)) {
+      return r.results.filter(obj).map((x) => (typeof x.id === 'string' ? { file: String(x.file), ok: true, text: x.id } : { file: String(x.file), ok: false, text: String(x.refused || 'refused') }));
+    }
+    const last = String(text).split('\n').pop().trim();
+    return files.map((file) => ({ file, ok: true, text: last }));
+  }
+  // An action of the bar on its files: Judge or Run (testaction, then each action started shows on its row as one
+  // started there does) or the issues of Optimize (test-issue). Each file's answer, and those left out, show in the bar.
+  function bulk(what, action, args, files, left, done) {
+    if (files.length > FILES_MAX) { S.answers = { what, lines: [], left, note: `At most ${FILES_MAX} files at a time: ${files.length} are selected. Select fewer.` }; draw(); return; }
+    send(action, args, (t) => { const a = answersOf(files, t); return `${what}: ${a.filter((x) => x.ok).length} of ${a.length} taken.`; }, (t) => {
+      const lines = answersOf(files, t);
+      S.answers = { what, lines, left, note: null };
+      if (done) done(lines);
+    }, (why) => { S.answers = { what, lines: files.map((file) => ({ file, ok: false, text: why })), left, note: null }; });
+  }
+  function startMany(how, files) {
+    const { files: fs, left } = chosen(files, how), names = fs.map((f) => f.file);
+    if (!names.length) { S.answers = { what: ACTS[how], lines: [], left, note: 'No file to act on.' }; draw(); return; }
+    bulk(ACTS[how], 'testaction', [how, ...names], names, left, (lines) => lines.forEach((l) => {
+      if (!l.ok || !ID.test(l.text)) return;
+      S.started.set(dk(l.file), { id: l.text, action: how, file: l.file, start: new Date(S.ctx.now()).toISOString(), state: 'running' });
+      S.shown.set(dk(l.file), l.text);
+    }));
+  }
+  function selBar(files) {
+    const h = S.ctx.h, el = h('section', 'tests-selbar'), n = files.filter((f) => S.sel.has(f.file)).length;
+    el.setAttribute('aria-label', 'Selected test files');
+    const status = h('div', 'tests-selbar-status');
+    status.setAttribute('aria-live', 'polite');
+    status.append(h('p', 'board-label tests-selbar-count', `${n} selected`));
+    const btns = h('div', 'tests-act-row');
+    const judge = actBtn('Judge', 'bulk-judge', `Judge the ${n} selected files`, () => startMany('judge', files));
+    if (!tmodel()) { judge.disabled = true; judge.title = NO_SEAT; }
+    const opt = actBtn('Optimize', 'bulk-optimize', `Optimize: preview an issue for each of the ${n} selected files`, () => {
+      const { files: fs, left } = chosen(files, 'optimize');
+      S.answers = null;  // the preview names the files left out
+      if (!fs.length) { S.answers = { what: 'Optimize', lines: [], left, note: 'No file to act on.' }; draw(); return; }
+      if (fs.length > FILES_MAX) { S.answers = { what: 'Optimize', lines: [], left, note: `At most ${FILES_MAX} files at a time: ${fs.length} are selected. Select fewer.` }; draw(); return; }
+      S.ask = { kind: 'many', repo: S.d.repo, items: fs.map((f) => { const d = draftIssue(f); return { file: f.file, title: d.title, body: d.body }; }), left };
+      S.keep = { act: 'many-title', file: fs[0].file }; draw();
+    });
+    if (!chosen(files, 'optimize').files.length) { opt.disabled = true; opt.title = RUNNER_WHY; }
+    btns.append(judge, opt, actBtn('Run', 'bulk-run', `Run the ${n} selected files now`, () => startMany('run', files)),
+      actBtn('Clear', 'bulk-clear', 'Clear the selection', () => {
+        S.sel.clear(); S.answers = null; if (asking('many')) S.ask = null; draw(); say('Selection cleared.');
+      }));
+    if (!tmodel()) btns.append(h('span', 'tests-why', `Judge: ${NO_SEAT}`));
+    const a = S.answers;
+    if (a) {
+      const ul = h('ul', 'tests-selbar-answers');
+      a.lines.forEach((l) => { const li = h('li', l.ok ? null : 'tests-refused', `${l.file}: ${l.ok ? `${a.what}, taken: ${l.text}` : `${a.what}, refused: ${l.text}`}`); li.dataset.file = l.file; ul.append(li); });
+      a.left.forEach((l) => { const li = h('li', 'tests-why', `${l.file}: left out of ${a.what}: ${l.why}`); li.dataset.file = l.file; ul.append(li); });
+      if (a.note) ul.append(h('li', 'tests-refused', a.note));
+      status.append(ul);
+    }
+    el.append(status, btns);
+    if (asking('many')) el.append(manyPreview());
+    return el;
+  }
+  // Optimize's preview for the files selected: one issue a file, its title and body editable; "File N issues" sends
+  // them all in one test-issue, and Cancel files nothing.
+  function manyPreview() {
+    const h = S.ctx.h, a = S.ask, el = h('div', 'tests-preview tests-selbar-preview'), n = a.items.length;
+    el.append(h('p', 'board-head', `Preview of ${n} ${n === 1 ? 'issue' : 'issues'}, one a file. Edit them, then file them.`));
+    a.items.forEach((it) => {
+      const item = h('div', 'tests-preview');
+      item.dataset.file = it.file;
+      item.append(h('p', 'board-label', it.file),
+        field('many-title', `Title of the issue about ${it.file}`, it.title, (v) => { it.title = v; }, { max: TITLE_MAX }),
+        field('many-body', `Text of the issue about ${it.file}`, it.body, (v) => { it.body = v; }, { area: true, max: BODY_MAX }));
+      el.append(item);
+    });
+    a.left.forEach((l) => el.append(h('p', 'tests-why', `Left out: ${l.file}: ${l.why}`)));
+    el.append(button(`File ${n} ${n === 1 ? 'issue' : 'issues'}`, 'btn-primary', 'bulk-file', `File ${n} ${n === 1 ? 'issue' : 'issues'}`, () => {
+      const bad = a.items.find((it) => !it.title.trim() || /[\r\n]/.test(it.title.trim()) || !it.body.trim());
+      if (bad) { say(`Type a title of one line and a text for the issue about ${bad.file} first.`); return; }
+      bulk('Optimize', 'test-issue', a.items.flatMap((it) => [it.file, it.title.trim(), it.body.trim()]), a.items.map((it) => it.file), a.left, () => { S.ask = null; });
+    }), button('Cancel', 'btn-quiet', 'bulk-cancel', 'Cancel: file nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was filed.'); }));
     return el;
   }
   // ---- Results of actions: each kept action, newest first ----
@@ -564,13 +716,13 @@
     if (!obj(tests() && tests().rules)) { el.append(h('p', 'board-from', 'The build machine names no auto-file rules. It runs an older Conveyor.')); return el; }
     const on = shown('rules-on') === 'true', confirm = asking('on');
     const sw = on
-      ? marked('Turn off', 'now', 'auto-off', 'Turn auto-file off', () => sendRule('rules-on', ['off'], 'false', 'Auto-file is now Off.'))
-      : marked('Turn on', 'now', 'auto-on', 'Turn auto-file on: shows the preview first', () => { S.ask = { kind: 'on', repo: S.d.repo }; S.keep = { act: 'auto-on-confirm' }; draw(); say('Check the preview. Then click "Turn on: confirm".'); });
+      ? actBtn('Turn off', 'auto-off', 'Turn auto-file off', () => sendRule('rules-on', ['off'], 'false', 'Auto-file is now Off.'))
+      : actBtn('Turn on', 'auto-on', 'Turn auto-file on: shows the preview first', () => { S.ask = { kind: 'on', repo: S.d.repo }; S.keep = { act: 'auto-on-confirm' }; draw(); say('Check the preview. Then click "Turn on: confirm".'); });
     el.append(row('auto-switch', 'Auto-file test issues', 'One switch for all rules. Off: the rules file no issue.', PACK, h('span', 'board-value', on ? 'On' : 'Off'), confirm ? null : sw));
     if (confirm && !on) {
       const c = h('div', 'tests-preview');
       c.append(h('p', 'board-head', 'Check the preview below. With the switch on, the rules file such issues after each card test step.'),
-        marked('Turn on: confirm', 'now', 'auto-on-confirm', 'Turn auto-file on', () => { S.ask = null; sendRule('rules-on', ['on'], 'true', 'Auto-file is now On.'); }),
+        button('Turn on: confirm', 'btn-primary', 'auto-on-confirm', 'Turn auto-file on', () => { S.ask = null; sendRule('rules-on', ['on'], 'true', 'Auto-file is now On.'); }),
         button('Cancel', 'btn-quiet', 'auto-on-cancel', 'Cancel: keep auto-file off', () => { S.ask = null; draw(); say('Cancelled. Auto-file stays Off.'); }));
       el.append(c);
     }
@@ -621,12 +773,24 @@
   }
 
   // ---- the figures ----
-  function figures(files) {
+  // A figure that counts the files of a status is a button that shows that status alone, as its filter chip does
+  // (disabled when no file has the status that the chip counts).
+  function figures(files, counts) {
     const h = S.ctx.h, t = obj(tests().totals) || {}, st = obj(t.steps) || {}, el = h('div', 'rules-stats tests-figs');
-    const fig = (key, value, label) => { const x = h('div', 'rules-stat'); x.dataset.figure = key; x.append(h('span', 'rules-big', value), h('span', 'rules-what', label)); return x; };
+    const fig = (key, value, label) => {
+      const by = MARKS.find(([k]) => k === key), x = h(by ? 'button' : 'div', by ? 'rules-stat rules-stat-open' : 'rules-stat');
+      x.dataset.figure = key; x.append(h('span', 'rules-big', value), h('span', 'rules-what', label));
+      if (by) {
+        x.type = 'button'; x.dataset.act = `figure-${key}`; x.setAttribute('aria-pressed', String(S.filter === key));
+        x.setAttribute('aria-label', `${label}: ${value}. Show them.`);
+        x.disabled = !counts[key];
+        x.addEventListener('click', () => { S.filter = key; S.keep = { act: `figure-${key}` }; draw(); say(`Showing: ${by[1]}`); });
+      }
+      return x;
+    };
     const steps = num(st.count) || 0, took = (s) => (num(s) === null ? '—' : S.ctx.took(s));
     if (files.length) {
-      el.append(fig('files', String(num(t.files) === null ? files.length : t.files), 'Files with a CPU time'),
+      el.append(fig('files', String(num(t.files) === null ? files.length : t.files), 'Timed files'),
         fig('over', String(num(t.overBudget) || 0), 'Files over budget'),
         fig('slower', String(num(t.slower) || 0), 'Files slower than usual'),
         fig('waits', String(files.filter((f) => marks(f).some((m) => m[0] === 'waits')).length), 'Files that wait more than they work'));
@@ -665,25 +829,40 @@
     const budget = f.wholeOnly === true ? 'none, it runs other test files and each of them has its own'
       : mine !== '' ? `${one(Number(mine))} CPU s, its own` : all !== '' ? `${one(Number(all))} CPU s, the project budget` : 'not known';
     el.append(h('p', 'board-head', 'Runs'), runs, h('p', 'tests-fact', `Budget: ${budget}.`), h('p', 'tests-fact', `Slow on purpose: ${reason}.`));
-    const now = () => S.ctx.chip('now', 'info');
-    // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
-    if (f.wholeOnly === true) { el.append(rowActions(f)); return el; }
-    el.append(row('budget', 'Set a budget for this file', 'CPU s in place of the project budget', PACK, now(), ...setting(`budget:${file}`, {
-      act: 'file-budget', file, label: `Budget of ${file}`, type: 'number', placeholder: 'None', clear: 'Clear',
-      check: budgetCheck, send: (v) => control(v === '' ? ['file-budget-clear', file] : ['file-budget', file, v]),
-      said: (v) => (v === '' ? `${file} has no budget of its own` : `budget of ${file} now ${v} CPU s`) })));
-    el.append(row('mark', 'Mark as slow on purpose', 'No budget holds this file', PACK, now(), ...setting(`mark:${file}`, {
-      act: 'slow-mark', file, label: `Why ${file} is slow on purpose`, placeholder: 'Why it is slow on purpose', clear: 'Clear', ask: 'Mark as slow on purpose',
-      check: (v, set) => (v === '' ? (set === '' ? 'Type why the file is slow on purpose first.' : null) : null),
-      send: (v) => control(v === '' ? ['slow-mark-clear', file] : ['slow-mark', file, v]),
-      said: (v) => (v === '' ? `${file} is no longer marked slow on purpose` : `${file} is marked slow on purpose`) })));
     el.append(rowActions(f));
+    // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
+    if (f.wholeOnly === true) return el;
+    // The editor of the budget, or of the mark, shows once picked from More, and while a value typed, refused or saved
+    // here is in it.
+    const editing = (what, key) => S.edit.has(`${dk(file)}|${what}`) || S.drafts.has(dk(key)) || S.pending.has(dk(key)) || (S.refused && S.refused.dk === dk(key));
+    if (editing('budget', `budget:${file}`)) {
+      el.append(row('budget', 'Set a budget for this file', 'CPU s in place of the project budget', PACK, ...setting(`budget:${file}`, {
+        act: 'file-budget', file, label: `Budget of ${file}`, type: 'number', placeholder: 'None', clear: 'Clear',
+        check: budgetCheck, send: (v) => control(v === '' ? ['file-budget-clear', file] : ['file-budget', file, v]),
+        said: (v) => (v === '' ? `${file} has no budget of its own` : `budget of ${file} now ${v} CPU s`) })));
+    }
+    if (editing('mark', `mark:${file}`)) {
+      el.append(row('mark', 'Mark as slow on purpose', 'No budget holds this file', PACK, ...setting(`mark:${file}`, {
+        act: 'slow-mark', file, label: `Why ${file} is slow on purpose`, placeholder: 'Why it is slow on purpose', clear: 'Clear', ask: true,
+        check: (v, set) => (v === '' ? (set === '' ? 'Type why the file is slow on purpose first.' : null) : null),
+        send: (v) => control(v === '' ? ['slow-mark-clear', file] : ['slow-mark', file, v]),
+        said: (v) => (v === '' ? `${file} is no longer marked slow on purpose` : `${file} is marked slow on purpose`) })));
+    }
     return el;
   }
-  function table(files) {
-    const h = S.ctx.h, el = h('section', 'tests-files');
-    const counts = Object.fromEntries(MARKS.map(([k]) => [k, files.filter((f) => marks(f).some((m) => m[0] === k)).length]));
-    if (S.filter !== 'all' && !counts[S.filter]) S.filter = 'all';
+  // The files of each status, by its key.
+  const countsOf = (files) => Object.fromEntries(MARKS.map(([k]) => [k, files.filter((f) => marks(f).some((m) => m[0] === k)).length]));
+  // A file's issue as a link, "#NN": the snapshot gives its number, and the project's issue address is that of a run's
+  // card issue (each run is this project's): any, one such address, read once a draw. With no such run, "#NN" as text.
+  const ISSUE_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+$/;
+  const anyIssueUrl = (files) => files.flatMap((x) => list(x.runs)).map((r) => obj(r) && r.url).find((u) => typeof u === 'string' && ISSUE_URL.test(u)) || null;
+  function issueOf(f, any) {
+    const a = S.ctx.issueLink({ issue: f.issue, url: any ? any.replace(/\d+$/, String(f.issue)) : null });
+    a.title = 'Its issue';
+    return a;
+  }
+  function table(files, counts) {
+    const h = S.ctx.h, el = h('section', 'tests-files'), any = anyIssueUrl(files);
     const bar = h('div', 'tests-filters');
     bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Show the files');
     [['all', 'All', files.length]].concat(MARKS.filter(([k]) => counts[k]).map(([k, name]) => [k, name, counts[k]])).forEach(([k, name, n]) => {
@@ -701,13 +880,13 @@
     S.search.value = S.query;
     const find = h('div', 'tests-filters'); find.append(S.search);
     const q = S.query.trim().toLowerCase();
-    // With no sort picked, the rows that need a look first; the snapshot's order (the highest CPU s first) inside each.
-    // A sort keeps that order among equal values.
+    // With no sort picked, the timed files first, then the rows that need a look; the snapshot's order (the highest CPU s
+    // first) inside each. A sort keeps that order among equal values.
     let shownFiles = files.map((f, i) => [f, i]).filter(([f]) => (S.filter === 'all' || marks(f).some((m) => m[0] === S.filter)) && (!q || f.file.toLowerCase().includes(q)))
-      .sort((a, b) => (look(b[0]) - look(a[0])) || (a[1] - b[1])).map(([f]) => f);
+      .sort((a, b) => (timed(b[0]) - timed(a[0])) || (look(b[0]) - look(a[0])) || (a[1] - b[1])).map(([f]) => f);
     const col = S.sort && COLS.find((c) => c[0] === S.sort.key);
     if (col) {
-      const by = col[2], up = S.sort.dir === 'asc' ? 1 : -1;
+      const by = (f) => (col[0] !== 'file' && !timed(f) ? null : col[2](f)), up = S.sort.dir === 'asc' ? 1 : -1;
       shownFiles = shownFiles.slice().sort((a, b) => {
         const x = by(a), y = by(b);
         if (x === null || y === null) return (x === null) - (y === null);
@@ -715,16 +894,36 @@
       });
     }
     const t = h('table', 'tests-table'), head = h('tr');
-    COLS.forEach(([key, words]) => {
+    COLS.forEach(([key, words, , hint]) => {
       const th = h('th'), on = col && col[0] === key, dir = on ? S.sort.dir : null;
       th.scope = 'col';
       th.setAttribute('aria-sort', on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
+      // The header checkbox selects every row shown (the search and the filter), or, when all of them are, clears them.
+      if (key === 'file') {
+        const n = shownFiles.filter((f) => S.sel.has(f.file)).length, all = h('input', 'tests-check');
+        all.type = 'checkbox'; all.dataset.act = 'select-all';
+        all.checked = n > 0 && n === shownFiles.length; all.indeterminate = n > 0 && n < shownFiles.length;
+        all.disabled = !shownFiles.length;
+        all.setAttribute('aria-label', `Select the ${shownFiles.length} files shown`);
+        all.addEventListener('change', () => {
+          const on2 = n < shownFiles.length;
+          shownFiles.forEach((f) => (on2 ? S.sel.add(f.file) : S.sel.delete(f.file)));
+          S.keep = { act: 'select-all' }; draw();
+          say(on2 ? `${S.sel.size} selected.` : 'Selection cleared for the files shown.');
+        });
+        th.append(all);
+        if (S.sel.size) th.append(h('span', 'tests-selected', `${S.sel.size} selected`));
+      }
       const b = button(`${words}${on ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}`, 'btn-quiet tests-sort', `sort-${key}`, `Sort by ${words}`, () => {
         S.sort = { key, dir: on ? (dir === 'asc' ? 'desc' : 'asc') : key === 'file' ? 'asc' : 'desc' };
         S.keep = { act: `sort-${key}` }; draw();
         say(`Sorted by ${words}, ${S.sort.dir === 'asc' ? (key === 'file' ? 'A to Z' : 'lowest first') : key === 'file' ? 'Z to A' : 'highest first'}`);
       });
-      th.append(b); head.append(th);
+      // The hint shows on hover and on focus (app.css), and is read with the heading.
+      const tip = h('span', 'tests-hint', hint);
+      tip.id = `tests-hint-${key}`; tip.setAttribute('role', 'tooltip');
+      b.setAttribute('aria-describedby', tip.id);
+      th.append(b, tip); head.append(th);
     });
     const thead = h('thead'); thead.append(head);
     const body = h('tbody');
@@ -734,17 +933,31 @@
       tr.dataset.file = f.file;
       const name = button(f.file, 'btn-quiet tests-name', 'open', `${f.file}: ${open ? 'close' : 'open'} its runs`, () => { if (S.open.has(f.file)) S.open.delete(f.file); else S.open.add(f.file); S.keep = { act: 'open', file: f.file }; draw(); });
       name.setAttribute('aria-expanded', String(open));
+      const check = h('input', 'tests-check');
+      check.type = 'checkbox'; check.dataset.act = 'select'; check.checked = S.sel.has(f.file);
+      check.setAttribute('aria-label', `Select ${f.file}`);
+      check.addEventListener('change', () => { if (check.checked) S.sel.add(f.file); else S.sel.delete(f.file); S.keep = { act: 'select', file: f.file }; draw(); });
       const cell = (x, cls) => { const td = h('td', cls); td.append(x); return td; };
+      // The status: chips; its issue as a link; Runs other test files and Whole suite only as grey text.
       const chips = h('span', 'rules-marks');
-      marks(f).forEach(([, words, tone]) => chips.append(S.ctx.chip(words, tone)));
-      // The newest run's clock time, with its date and time on hover.
-      const took = cell(clockTook(last.sec), 'tests-num');
-      if (num(last.sec) !== null && typeof last.time === 'string' && !Number.isNaN(Date.parse(last.time))) {
-        took.title = `${new Date(last.time).toLocaleString()}, ${last.whole === true ? 'whole suite' : 'card'}`;
+      marks(f).forEach(([k, words, tone]) => chips.append(k === 'issue' ? issueOf(f, any) : k === 'runner' || k === 'whole' ? h('span', 'tests-quiet', words) : S.ctx.chip(words, tone)));
+      const fileCell = cell(check, 'tests-file');
+      fileCell.append(name);
+      if (!timed(f)) {
+        // A file never timed: one cell in place of its figures.
+        const none = cell('Not timed yet', 'tests-untimed');
+        none.colSpan = COLS.length - 2;
+        tr.append(fileCell, none, cell(chips));
+      } else {
+        // The newest run's clock time, with its date and time on hover.
+        const took = cell(clockTook(last.sec), 'tests-num');
+        if (num(last.sec) !== null && typeof last.time === 'string' && !Number.isNaN(Date.parse(last.time))) {
+          took.title = `${new Date(last.time).toLocaleString()}, ${last.whole === true ? 'whole suite' : 'card'}`;
+        }
+        const count = COLS.find((c) => c[0] === 'count')[2](f);
+        tr.append(fileCell, cell(one(f.cpu), 'tests-num'), cell(one(f.median), 'tests-num'), cell(pct(f.change), 'tests-num'),
+          cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, cell(chips));
       }
-      const count = COLS.find((c) => c[0] === 'count')[2](f);
-      tr.append(cell(name, 'tests-file'), cell(one(f.cpu), 'tests-num'), cell(one(f.median), 'tests-num'), cell(pct(f.change), 'tests-num'),
-        cell(bars(f)), cell(num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`, 'tests-num'), cell(count === null ? '—' : String(count), 'tests-num'), took, cell(chips));
       body.append(tr);
       if (open) { const more2 = h('tr', 'tests-open'), td = h('td'); td.colSpan = COLS.length; td.append(more(f)); more2.dataset.file = f.file; more2.append(td); body.append(more2); }
     });
@@ -804,27 +1017,48 @@
     const keep = S.keep || (a && a.dataset.act ? { act: a.dataset.act, file: (a.closest('[data-file]') || { dataset: {} }).dataset.file } : null);
     S.keep = null;
     const t = tests(), files = list(t && t.files).filter((f) => obj(f) && typeof f.file === 'string');
+    // A file selected that the snapshot no longer lists is no longer selected; with none selected, the bar's answers go.
+    S.sel.forEach((x) => { if (!files.some((f) => f.file === x)) S.sel.delete(x); });
+    if (!S.sel.size) { S.answers = null; if (asking('many')) S.ask = null; }
     const parts = [];
-    if (!t) parts.push(h('p', 'warn-note', 'Conveyor could not read the test figures of this project. Its pack does not read, or the build machine runs an older Conveyor.'));
-    else {
-      parts.push(figures(files), actionsHead());
-      parts.push(files.length ? table(files) : S.ctx.state('empty', 'No file times for this project',
+    // Settings: the Tests model, Test limits and Auto-file, collapsed until opened; it stays as it was from one draw to
+    // the next.
+    const wasSet = el.querySelector('.tests-settings');
+    if (wasSet) S.settingsOpen = wasSet.open;
+    const set = h('details', 'tests-settings');
+    set.open = S.settingsOpen;
+    set.addEventListener('toggle', () => { S.settingsOpen = set.open; });
+    set.append(h('summary', 'board-head', 'Settings'));
+    if (!t) {
+      parts.push(h('p', 'warn-note', 'Conveyor could not read the test figures of this project. Its pack does not read, or the build machine runs an older Conveyor.'));
+      set.append(limits());
+    } else {
+      const counts = countsOf(files);
+      if (S.filter !== 'all' && !counts[S.filter]) S.filter = 'all';
+      parts.push(figures(files, counts));
+      parts.push(files.length ? table(files, counts) : S.ctx.state('empty', 'No file times for this project',
         'Conveyor records the CPU time of each test file when the test command prints a "TESTRUN sec" line for it. The helper conveyor/tools/testtime.sh prints this line. The table starts when the first card with file times runs its tests.'));
-      parts.push(results(), autofile());
+      if (S.sel.size) parts.push(selBar(files));
+      parts.push(results());
+      set.append(actionsHead(), limits(), autofile());
     }
-    parts.push(limits());
+    parts.push(set);
     const note = h('p', 'board-note tests-note');
     note.setAttribute('aria-live', 'polite');
     const was = el.querySelector('.tests-note');
     if (was) note.textContent = was.textContent;
-    const root = h('div', 'tests');
+    const root = h('div', S.sel.size ? 'tests tests-has-selbar' : 'tests');
     root.append(...parts);
     // The table scrolls sideways when wider than the panel (app.css): a new snapshot keeps its place.
     const side = el.querySelector('.tests-scroll'), left = side ? side.scrollLeft : 0;
     el.replaceChildren(root, note);
     const wide = root.querySelector('.tests-scroll');
     if (wide) wide.scrollLeft = left;
-    if (S.busy) root.querySelectorAll('button, input, select, textarea').forEach((b) => { if (!['filter', 'open', 'view', 'copy', 'search'].includes(b.dataset.act) && !(b.dataset.act || '').startsWith('sort-')) b.disabled = true; });
+    if (S.busy) {
+      root.querySelectorAll('button, input, select, textarea').forEach((b) => {
+        if (!['filter', 'open', 'view', 'copy', 'search', 'select', 'select-all', 'more'].includes(b.dataset.act) && !/^(sort|figure)-/.test(b.dataset.act || '')) b.disabled = true;
+      });
+    }
     if (keep) {
       const scope = keep.file ? Array.from(el.querySelectorAll('[data-file]')).filter((x) => x.dataset.file === keep.file) : [el];
       const again = scope.map((x) => x.querySelector(`[data-act="${keep.act}"]`)).find(Boolean);
@@ -839,7 +1073,10 @@
     const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Tests: ${view.repo}` : null);
-    if (S.repo !== undefined && view.repo !== S.repo) { S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null; S.viewed = null; }
+    if (S.repo !== undefined && view.repo !== S.repo) {
+      S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null; S.viewed = null;
+      S.sel.clear(); S.answers = null; S.menu = null; S.edit.clear();
+    }
     Object.assign(S, { el, ctx, d: view, read, repo: view.repo });
     if (view.repo !== null) {
       const after = (p) => read !== null && (p.at !== null && p.at !== undefined ? read >= p.at : read !== p.read);
