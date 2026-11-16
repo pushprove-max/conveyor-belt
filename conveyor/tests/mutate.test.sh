@@ -45,38 +45,12 @@ EOF
   mkdir -p "$T/$CASE/cards"
 }
 muone() { jq -c "${@:2}" "$1" "$ST"/testactions/mutations/*.json; } # <jq filter> [jq options]: of the one check's record
+muof() { jq -c --arg f "$1" "select(.file == \$f) | $2" "$ST"/testactions/mutations/*.json; } # <test file> <jq filter>: of that file's check's record
 mufree() { flock -n "$T/$CASE/slots/1" true; } # the pool's one slot is free
 # The engine's functions as `serve` loads them, in a shell of the case's main: <function> run there. The runner's own
 # pool (SLOT_DIR, where the runner's test run asks for a slot) is dropped, so the shell reads the case's pool.
 mu_in() { ( unset SLOT_DIR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
   && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && "$@" ); }
-
-# D1. Bugs this guards: a check that found no source the test file sources by a $(dirname "$0") path, changed main's
-# own checkout, left its copy of main, or counted a mutant the boundary test kills as one that survived.
-t_mutkill() {
-  musetup; local out
-  out=$(loop mutate k.test.sh 2>&1) || fail "the check failed: $out"
-  [ "$(muone '[.state, .base, (.mutants | length), .tried, .killed, (.survived | length), .noresult]')" = '["done","pass",3,3,3,0,0]' ] \
-    || fail "the boundary test did not kill each of its 3 mutants: $(muone .)"
-  [ "$(muone '[.mutants[] | select(.kind == "flip") | [.source, .line, .after]]')" = '[["src.sh",3,"  if [ \"$a\" -ge 3 ]; then echo small; else echo big; fi"]]' ] \
-    || fail "the flipped comparison was not among the mutants: $(muone .mutants)"
-  [ "$(muone '[(.seed | type), (.blobs | keys)]')" = '["number",["k.test.sh","src.sh"]]' ] || fail "the record has no seed, or not the blobs of the file and its source: $(muone .)"
-  git -C "$R" diff --quiet && [ "$(git -C "$R" worktree list | wc -l)" = 1 ] && [ -z "$(ls "$T/$CASE/cards/mutate" 2>/dev/null)" ] \
-    || fail "main's checkout was changed, or the copy the check ran in was left: $(git -C "$R" status --short; git -C "$R" worktree list)"
-}
-
-# D1. Bugs this guards: a survivor recorded with no line or change, or one the Tests part of the snapshot (and so
-# dashboard.sh's tests part) does not carry; a mutant counted as killed by k.test.sh, which the mutant's change
-# selects beside s.test.sh, as the test command picks tests.
-t_mutsurvive() {
-  musetup; local out
-  out=$(loop mutate s.test.sh 2>&1) || fail "the check failed: $out"
-  [ "$(muone '[.state, .tried, .killed, (.survived | length)]')" = '["done",3,0,3]' ] || fail "the test with no assertion did not let its mutants survive: $(muone .)"
-  [ "$(muone '.survived[] | select(.kind == "flip") | [.source, .line, .before, .after]')" = '["src.sh",3,"  if [ \"$a\" -lt 3 ]; then echo small; else echo big; fi","  if [ \"$a\" -ge 3 ]; then echo small; else echo big; fi"]' ] \
-    || fail "the record does not list the flipped comparison as a survivor, with its line and change: $(muone .survived)"
-  [ "$(mu_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "s.test.sh") | .mutation | [.state, .tried, (.survived | length), .seed == ($s | tonumber)]' --arg s "$(muone .seed)")" = '["done",3,3,true]' ] \
-    || fail "the Tests part does not carry the file's newest check: $(mu_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "s.test.sh")')"
-}
 
 # D2. Bugs this guards: a mutant started while a card is in its test step, a test run of another project (which shares
 # the test slots) asks for a slot, or the load is not below the Load limit; a mutant that went on, or kept the test
@@ -115,6 +89,11 @@ t_mutyield() {
 # the idle job checks them even when it found its queue empty on main's commit. Bugs this guards: an ask that took a
 # file that is not a test file of main, put a file behind those asked before, started a check itself, or that the idle
 # job never read; an asked file left on the list after its check.
+# D1. The same two checks guard a check itself (mutrun()). Of k.test.sh: one that found no source the test file sources
+# by a $(dirname "$0") path, changed main's own checkout, left its copy of main, or counted a mutant the boundary test
+# kills as one that survived. Of s.test.sh: a survivor recorded with no line or change, or one the Tests part of the
+# snapshot (and so dashboard.sh's tests part) does not carry; a mutant counted as killed by k.test.sh, which the
+# mutant's change selects beside s.test.sh, as the test command picks tests.
 t_mutask() {
   musetup; local out
   out=$(loop mutate ask k.test.sh src.sh 2>&1); [ $? = 2 ] && [ ! -s "$ST/testactions/mutations/asked" ] || fail "an ask with a file that is not a test file was taken: $out"
@@ -126,6 +105,18 @@ t_mutask() {
   mu_in eval 'names && mutnext' > /dev/null 2>&1
   [ "$(jq -cs 'map([.file, .state]) | sort' "$ST"/testactions/mutations/*.json)" = '[["k.test.sh","done"],["s.test.sh","done"]]' ] && [ ! -s "$ST/testactions/mutations/asked" ] \
     || fail "the idle job did not check the asked files, or left them asked: $(cat "$ST"/testactions/mutations/*.json "$ST/testactions/mutations/asked")"
+  [ "$(muof k.test.sh '[.state, .base, (.mutants | length), .tried, .killed, (.survived | length), .noresult]')" = '["done","pass",3,3,3,0,0]' ] \
+    || fail "the boundary test did not kill each of its 3 mutants: $(muof k.test.sh .)"
+  [ "$(muof k.test.sh '[.mutants[] | select(.kind == "flip") | [.source, .line, .after]]')" = '[["src.sh",3,"  if [ \"$a\" -ge 3 ]; then echo small; else echo big; fi"]]' ] \
+    || fail "the flipped comparison was not among the mutants: $(muof k.test.sh .mutants)"
+  [ "$(muof k.test.sh '[(.seed | type), (.blobs | keys)]')" = '["number",["k.test.sh","src.sh"]]' ] || fail "the record has no seed, or not the blobs of the file and its source: $(muof k.test.sh .)"
+  git -C "$R" diff --quiet && [ "$(git -C "$R" worktree list | wc -l)" = 1 ] && [ -z "$(ls "$T/$CASE/cards/mutate" 2>/dev/null)" ] \
+    || fail "main's checkout was changed, or the copy the check ran in was left: $(git -C "$R" status --short; git -C "$R" worktree list)"
+  [ "$(muof s.test.sh '[.state, .tried, .killed, (.survived | length)]')" = '["done",3,0,3]' ] || fail "the test with no assertion did not let its mutants survive: $(muof s.test.sh .)"
+  [ "$(muof s.test.sh '.survived[] | select(.kind == "flip") | [.source, .line, .before, .after]')" = '["src.sh",3,"  if [ \"$a\" -lt 3 ]; then echo small; else echo big; fi","  if [ \"$a\" -ge 3 ]; then echo small; else echo big; fi"]' ] \
+    || fail "the record does not list the flipped comparison as a survivor, with its line and change: $(muof s.test.sh .survived)"
+  [ "$(mu_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "s.test.sh") | .mutation | [.state, .tried, (.survived | length), .seed == ($s | tonumber)]' --arg s "$(muof s.test.sh .seed)")" = '["done",3,3,true]' ] \
+    || fail "the Tests part does not carry the file's newest check: $(mu_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "s.test.sh")')"
 }
 
 # D3. Bug this guards: a queue that did not put first the files the Tests page flags. On main, n.test.sh has 20 runs
