@@ -473,11 +473,11 @@ def request_row(r):
 
 # List prices in $ per million tokens: (input, output, cache read). Cache writes
 # are 1.25x input for the 5-minute TTL and 2x for 1 hour. Source:
-# https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-15.
+# https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-16.
 # The ":fast" Claude rows are that page's "Fast mode pricing" table, read
-# 2026-11-15; the cache multipliers stack on the fast input price. The gpt-*
+# 2026-11-16; the cache multipliers stack on the fast input price. The gpt-*
 # rows are Codex's models, from the Standard and Fast tables of
-# https://developers.openai.com/api/docs/pricing, read 2026-11-15 (a cache
+# https://developers.openai.com/api/docs/pricing, read 2026-11-16 (a cache
 # write is 1.25x input there too; "priority" in a Codex log is its fast mode).
 # A mode with no published price is priced by estimate() and its dollars are
 # reported as estimated. A model with no row and nothing to estimate from is
