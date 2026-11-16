@@ -96,7 +96,7 @@ t_reviewretry() {
 # Bugs: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
 # numbered), lands as a clean GO; a review that says GO twice (once mid-way, once at the end) blocks as having no
 # clear verdict. Read as the engine reads a review (followups.sh's verdict()): a review with no clear verdict blocks
-# its card (visible.test.sh t_visibleinline), and a NO-GO goes to a fix round (port.test.sh t_autoport), so no card run is
+# its card (visible.test.sh t_unclearnogo), and a NO-GO goes to a fix round (port.test.sh t_autoport), so no card run is
 # needed for the answers.
 verdictof() { # <the review's lines...>
   local NOTFINDING; eval "$(grep '^NOTFINDING=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p' "$SRC/lib/followups.sh")"

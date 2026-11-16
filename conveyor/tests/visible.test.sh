@@ -43,6 +43,10 @@ t_visibleyes() {
   loop run >/dev/null || fail "second run exited non-zero"
   [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] || fail "a visible GO was not blocked for Dana's yes: $(steps 8)"
   [ "$(st 'select(.issue == 8 and .step == "review") | [.result, .visible] | join("|")')" = "GO|yes: guests see a new Pay button" ] || fail "review line of a visible GO: $(st 'select(.issue == 8 and .step == "review")')"
+  # With the rule on, the brief and the review speak of the approval line; an issue with no section of what
+  # customers or staff will see is reviewed against none, and stops as above.
+  grep -q 'Visible change approved:' "$STUB/brief" && grep -q 'Visible change approved:' "$STUB/asked" || fail "with the rule on, the brief or the review does not speak of the approval line"
+  ! grep -q '^# The approved visible change$' "$STUB/asked" || fail "an issue with no section was reviewed against one"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] && [ "$(wc -l < "$STUB/tests")" = "$runs" ] \
     || fail "a visible GO with no approval landed, ran the tests or left its worktree"
   [ "$(grep -c "^[0-9]* --body " "$STUB/comments")" = 1 ] && grep -q "^8 --body .*needs Dana's yes: guests see a new Pay button" "$STUB/comments" || fail "the reviewer's sentence was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
@@ -72,27 +76,40 @@ t_visibleyes() {
   loop check || fail "the record check refuses the lines of a card that landed from a kept patch"
   [ "$(loop cards | jq -c --arg c "$(st 'select(.issue == 8 and .step == "landed") | .card')" '.cards[] | select(.card == $c) | [.step, .stage, .reviews]')" = '["landed",5,0]' ] || fail "dashboard row of a card landed from a kept patch: $(loop cards)"
 }
-# The words inside a line of the body are not the approval line.
+# The words inside a line of the body are not the approval line: counted as the loop counts an issue's approval
+# lines (card.sh: SEE's approvals, prompts.sh), with no card run. A card with none stops (t_visibleyes).
 t_visibleinline() {
-  visiblestart 9
-  issue 9 2026-01-01 | jq -c '[.body += " (no Visible change approved: line yet)"]' > "$STUB/issues.json"
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"; loop run >/dev/null
-  st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "approval words in the middle of a line were taken as Dana's yes: $(steps 9)"
+  local SEE; eval "$(sed -n "/^SEE='/,/;'\$/p" "$SRC/lib/prompts.sh")"; [ -n "$SEE" ] || fail "the engine no longer defines SEE where this case reads it"
+  [ "$(issue 9 2026-01-01 | jq -c '.body += "\nVisible change approved: Dana"' | jq "$SEE"' approvals')" = 1 ] || fail "an approval line of its own was not counted, so this case proves nothing"
+  [ "$(issue 9 2026-01-01 | jq -c '.body += " (no Visible change approved: line yet)"' | jq "$SEE"' approvals')" = 0 ] || fail "approval words in the middle of a line were taken as Dana's yes"
 }
 # No USER-VISIBLE line, two of them, or one not written as asked: no clear answer, nothing lands, no fix round.
-unclear() { # <review>
-  local r=$1 head; visiblestart 10; head=$(git -C "$R" rev-parse HEAD)
-  echo "$r" > "$STUB/review.1"; loop run >/dev/null
-  st "select(.issue == 10 and .step == \"blocked\") | .reason" | grep -q "review 1 ended without one clear verdict.*USER-VISIBLE" || fail "review '${r//$'\n'/ / }' was taken as a clear answer: $(steps 10)"
-  [ "$(st "select(.issue == 10 and .step == \"review\") | [.result, .visible] | join(\"|\")")" = "none|" ] || fail "review line of '${r//$'\n'/ / }': $(st "select(.issue == 10 and .step == \"review\")")"
+# One card proves what the loop does with such a review (a NO-GO with no line, which would otherwise go to a fix
+# round); the other answers are read as the loop reads a review (card.sh: verdict() and visible() of followups.sh),
+# with no card run.
+t_unclearnogo() {
+  local head; visiblestart 10; head=$(git -C "$R" rev-parse HEAD)
+  printf '%s\n' '[P1] a.txt:1 wrong word' 'VERDICT: NO-GO' > "$STUB/review.1"; loop run >/dev/null
+  st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q "review 1 ended without one clear verdict.*USER-VISIBLE" || fail "a NO-GO with no USER-VISIBLE line was taken as a clear answer: $(steps 10)"
+  [ "$(st 'select(.issue == 10 and .step == "review") | [.result, .visible] | join("|")')" = "none|" ] || fail "review line of a NO-GO with no USER-VISIBLE line: $(st 'select(.issue == 10 and .step == "review")')"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a review with no clear USER-VISIBLE answer landed or got a fix round"
 }
-t_unclearnone() { unclear 'VERDICT: GO'; }
-t_uncleartwo() { unclear $'USER-VISIBLE: no\nUSER-VISIBLE: no\nVERDICT: GO'; }
-t_unclearboth() { unclear $'USER-VISIBLE: no\nUSER-VISIBLE: yes: a button\nVERDICT: GO'; }
-t_unclearmaybe() { unclear $'USER-VISIBLE: maybe\nVERDICT: GO'; }
-t_unclearempty() { unclear $'USER-VISIBLE: yes: \nVERDICT: GO'; }
-t_unclearnogo() { unclear $'[P1] a.txt:1 wrong word\nVERDICT: NO-GO'; }
+# Bug: a review with no USER-VISIBLE line, two, or one not written as asked is read as a clear answer, so its card
+# lands. Each has a verdict, so only the missing answer can block it (the reason t_unclearnogo checks).
+visibleof() { # <the review's lines...>: "<verdict>|<visible answer>"
+  local NOTFINDING; eval "$(grep '^NOTFINDING=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p; /^visible() {/,/^}/p' "$SRC/lib/followups.sh")"
+  [ -n "$NOTFINDING" ] && declare -F verdict visible >/dev/null || fail "the engine no longer defines verdict(), visible() or NOTFINDING where this case reads them"
+  mkdir -p "$T/$CASE"; printf '%s\n' "$@" > "$T/$CASE/review"; echo "$(verdict "$T/$CASE/review")|$(visible "$T/$CASE/review")"
+}
+t_unclear() {
+  [ "$(visibleof 'USER-VISIBLE: no' 'VERDICT: GO')" = 'GO|no' ] && [ "$(visibleof 'USER-VISIBLE: yes: a button' 'VERDICT: GO')" = 'GO|yes: a button' ] \
+    || fail "a clear answer is not read as one, so this case's other answers prove nothing"
+  local r
+  for r in 'VERDICT: GO' $'USER-VISIBLE: no\nUSER-VISIBLE: no\nVERDICT: GO' $'USER-VISIBLE: no\nUSER-VISIBLE: yes: a button\nVERDICT: GO' \
+    $'USER-VISIBLE: maybe\nVERDICT: GO' $'USER-VISIBLE: yes: \nVERDICT: GO'; do
+    [ "$(visibleof "$r")" = 'GO|' ] || fail "review '${r//$'\n'/ / }' was taken as a clear answer: $(visibleof "$r")"
+  done
+}
 # A NO-GO at the cap with `yes` and no approval: blocked, no follow-ups filed, findings and sentence posted.
 t_visiblecap() {
   visiblestart 20; head=$(git -C "$R" rev-parse HEAD)
@@ -112,16 +129,14 @@ t_visiblecapyes() {
   grep -qx 'Visible change approved: r-10' "$STUB/brief" && grep -qx 'Visible change approved: r-10' "$STUB/asked" || fail "the approval line was not shown to the build session and the reviewer"
   [ "$(st 'select(.issue == 21 and .step == "landed") | [.sha, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",[100101]]" ] || fail "an approved NO-GO at the cap did not land with its follow-up: $(steps 21)"
 }
-# The control record's rule "visible changes need the owner's yes" (rules.visible). t_visibleyes is the rule unset.
-# Bug: set on by `control rules`, a visible change lands without the approval line.
+# The control record's rule "visible changes need the owner's yes" (rules.visible). What a card does with the rule
+# on is t_visibleyes (setup seeds it on); with it off, t_visibleoff, whose card reads the rule `control rules` sets.
+# Bug: `control rules visible=on` does not set the rule on in the control record, so a visible change lands without
+# the approval line.
 t_visibleon() {
-  visiblestart 8
-  loop control rules visible=off >/dev/null && [ "$(loop control rules visible=on | jq .rules.visible)" = true ] || fail "control rules visible=on was refused or not printed"
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"; head=$(git -C "$R" rev-parse HEAD)
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] \
-    && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "with the rule on, a visible GO was not held for Dana's yes: $(steps 8)"
-  grep -q 'Visible change approved:' "$STUB/brief" && grep -q 'Visible change approved:' "$STUB/asked" || fail "with the rule on, the brief or the review does not speak of the approval line"
+  setup '[]'
+  loop control rules visible=off >/dev/null && [ "$(loop control rules visible=on | jq .rules.visible)" = true ] && [ "$(loop control | jq .rules.visible)" = true ] \
+    || fail "control rules visible=on was refused, not printed or not kept: $(loop control | jq -c .rules)"
 }
 # Bugs: with the rule off, a visible change is still held for the approval line, the reason posted on its issue, or
 # the build brief or the review still asks about the line; the review stops asking the USER-VISIBLE question.
@@ -154,23 +169,18 @@ t_visibletooling() {
   [ "$(st 'select(.issue == 22 and .step == "review") | .visible')" = "yes: guests see a new Pay button" ] || fail "the tooling card's review line lost its USER-VISIBLE answer: $(steps 22)"
   loop check || fail "the record check refuses the lines of a tooling card that landed on a yes"
 }
-# A card that changes only a file under web/, reviewed `yes`, with no approval line: it still stops.
+# A card whose change names only a file under web/, or files under both .claude/ and web/, touches product code: it
+# stops for Dana's yes as t_visibleyes's card does (a.txt beside web/pay.ts). Read as the loop reads a card's
+# staged paths (card.sh: productpaths() of issues.sh, with the test pack's productPaths made into PRODUCT as names()
+# makes it), with no card run; t_visibletooling's card is one that touches none.
 t_visibleweb() {
-  visiblestart 23
-  echo 'mkdir -p web; echo only >> web/only.ts' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null || fail "run of a web-only card exited non-zero"
-  [ "$(st 'select(.issue == 23 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] \
-    && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a visible card that changes web/ landed without Dana's yes: $(steps 23)"
-}
-# A card that changes both .claude/ and web/: a product card, it stops.
-t_visiblemixed() {
-  visiblestart 24
-  echo 'mkdir -p .claude web; echo both >> .claude/both.md; echo both >> web/both.ts' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null || fail "run of a mixed card exited non-zero"
-  st 'select(.issue == 24 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] \
-    || fail "a visible card that changes .claude/ and web/ landed without Dana's yes: $(steps 24)"
+  local NOTPRODUCT PRODUCT; eval "$(grep '^NOTPRODUCT=' "$SRC/lib/issues.sh"; sed -n '/^productpaths() {/p' "$SRC/lib/issues.sh"; grep '^RX=' "$SRC/lib/prompts.sh")"
+  [ -n "$NOTPRODUCT" ] && declare -F productpaths >/dev/null || fail "the engine no longer defines productpaths() or NOTPRODUCT where this case reads them"
+  # shellcheck disable=SC2034 # PRODUCT is read by productpaths(), defined by the eval
+  PRODUCT=$(jq -r "$RX"'.productPaths | map(rx) | "^(" + join("|") + ")"' "$SRC/lib/test-pack.json") || fail "the test pack's productPaths could not be read"
+  ! printf '%s\n' .claude/dashboard/x.js web/__tests__/pay.test.ts | productpaths || fail "a tooling change and a test were taken as product code, so this case proves nothing"
+  printf '%s\n' web/only.ts | productpaths || fail "a change of a file under web/ alone was not taken as product code"
+  printf '%s\n' .claude/both.md web/both.ts | productpaths || fail "a change of files under .claude/ and web/ was not taken as product code"
 }
 
 # Bugs: an issue whose section "What customers or staff will see" names a change is built before the owner's yes,
@@ -297,35 +307,24 @@ t_beforeyesno() {
   loop run >/dev/null; st 'select(.issue == 12 and .step == "blocked") | .reason' | grep -q "ended without one clear verdict.*USER-VISIBLE" \
     || fail "a yes answer to a review held to the section was taken as clear: $(steps 12)"
 }
-# #20: the Board's approval line names the Board user who said yes (dashboard_server.py). That is who, not a
-# condition: the card lands on a plain yes; the same line with a condition is still held to it (#21).
+# The Board's approval line names the Board user who said yes (dashboard_server.py). That is who, not a condition;
+# the same line with a condition is still held to it. The Board opened on its own machine with no login names its
+# user "this device" (dashboard_server.py LOCAL): the space in it must not read as a condition, or every yes given
+# there holds the card to words nobody wrote. Read as the loop reads an approval line (card.sh: conditional() of
+# prompts.sh), with no card run: a card whose line gives a condition is held to it (t_beforediffers's brief).
 t_beforeboard() {
-  beforestart
-  sec 20 "$S"$'\n\n'"$A (Board user ops.dana)" | jq -cs . > "$STUB/issues.json"
-  printf '%s\n' 'USER-VISIBLE: matches' 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null || fail "run of #20 exited non-zero"
-  [ "$(st 'select(.issue == 20 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && ! grep -q 'That yes gives a condition' "$STUB/brief" \
-    || fail "the Board user named on the approval line was taken as a condition: $(steps 20)"
-}
-t_beforeboardcond() {
-  beforestart
-  sec 21 "$S"$'\n\n'"$A (Board user ops.dana); condition: staff only" | jq -cs . > "$STUB/issues.json"
-  printf '%s\n' 'USER-VISIBLE: matches' 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null || fail "run of #21 exited non-zero"
-  grep -q 'That yes gives a condition' "$STUB/brief" || fail "a Board approval line with a condition was not held to it: $(steps 21)"
-}
-# #22: the Board opened on its own machine with no login names its user "this device" (dashboard_server.py LOCAL):
-# the space in it must not read as a condition, or every yes given there holds the card to words nobody wrote.
-t_beforedevice() {
-  beforestart
-  sec 22 "$S"$'\n\n'"$A (Board user this device)" | jq -cs . > "$STUB/issues.json"
-  printf '%s\n' 'USER-VISIBLE: matches' 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null || fail "run of #22 exited non-zero"
-  [ "$(st 'select(.issue == 22 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && ! grep -q 'That yes gives a condition' "$STUB/brief" \
-    || fail "the Board user \"this device\" on the approval line was taken as a condition: $(steps 22)"
+  # shellcheck disable=SC2034 # OWNER is read by conditional(), defined by the eval
+  local OWNER=Dana RX; eval "$(grep '^RX=' "$SRC/lib/prompts.sh"; sed -n '/^conditional() {/,/^}/p' "$SRC/lib/prompts.sh")"
+  [ -n "$RX" ] && declare -F conditional >/dev/null || fail "the engine no longer defines conditional() or RX where this case reads them"
+  A='Visible change approved: Dana, 2026-01-02'
+  cond() { conditional "$(jq -cn --arg b "Make Pay green."$'\n\n'"$1" '{body: $b}')"; } # <approval line>
+  ! cond "$A" && cond "$A; condition: staff only" || fail "a plain yes and a yes with a condition are not told apart, so this case proves nothing"
+  ! cond "$A (Board user ops.dana)" || fail "the Board user named on the approval line was taken as a condition"
+  cond "$A (Board user ops.dana); condition: staff only" || fail "a Board approval line with a condition was not held to it"
+  ! cond "$A (Board user this device)" || fail "the Board user \"this device\" on the approval line was taken as a condition"
 }
 # #13 says nothing visible changes; its review finds a visible change: it stops, as with no section, though it
-# has an approval line. #14 says the same and nobody would see it: it lands.
+# has an approval line.
 t_beforenothing() {
   beforestart
   sec 13 $'## What customers or staff will see\nNothing visible changes.'$'\n\n'"$A" | jq -cs . > "$STUB/issues.json"; head=$(git -C "$R" rev-parse HEAD)
@@ -335,14 +334,9 @@ t_beforenothing() {
     || fail "a visible change to an issue saying nothing visible changes did not stop: $(steps 13)"
   ! grep -q '^# The approved visible change$' "$STUB/brief" || fail "an issue saying nothing visible changes was held to a section"
 }
-t_beforenothingno() {
-  beforestart
-  sec 14 $'## What customers or staff will see\nNothing visible changes.' | jq -cs . > "$STUB/issues.json"
-  echo "$GO" > "$STUB/review.1"
-  loop run >/dev/null; [ "$(st 'select(.issue == 14 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] || fail "an issue saying nothing visible changes was not picked or did not land: $(steps 14)"
-}
-# #18 says nothing visible changes and has no approval line; its visible change stops. The owner's one yes after the
-# stop lands the kept patch: no second yes is asked for.
+# #18 says nothing visible changes and has no approval line: it is picked and built, with no yes before its build,
+# and its visible change stops. The owner's one yes after the stop lands the kept patch: no second yes is asked for.
+# (Such an issue whose change nobody would see lands as any card on a GO with `no` does: t_visible.)
 t_beforenothingyes() {
   beforestart
   sec 18 $'## What customers or staff will see\nNothing visible changes.' | jq -cs . > "$STUB/issues.json"
@@ -353,14 +347,8 @@ t_beforenothingyes() {
   [ "$(st 'select(.issue == 18 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/sessions")" = "$sessions" ] \
     || fail "an issue saying nothing visible changes did not land on the owner's one yes after its stop: $(steps 18)"
 }
-# #15 has no section: picked with no approval line, and a visible change stops after review as before.
-t_beforenone() {
-  beforestart
-  issue 15 2026-01-01 | jq -cs . > "$STUB/issues.json"
-  printf '%s\n' 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null; [ "$(st 'select(.issue == 15 and .step == "blocked") | .reason')" = "${Y}guests see a new Pay button" ] || fail "an issue with no section did not stop as before: $(steps 15)"
-  grep -q 'USER-VISIBLE: yes: <one sentence' "$STUB/asked" && ! grep -q '^# The approved visible change$' "$STUB/asked" || fail "an issue with no section was reviewed against one"
-}
+# An issue with no section is picked with no approval line, and a visible change stops after review as before:
+# t_visibleyes, whose issue has none (and t_visible: its review is asked the USER-VISIBLE question).
 # #16 is a tooling issue (area:tooling only) whose section names a change, with no approval line: the gate is for
 # product issues, so it is picked and not listed for a yes before its build. #17 has a product area beside it: held.
 t_beforetooling() {
@@ -468,10 +456,10 @@ t_inheritno() {
   # Bugs: a blocked line holds only the first 200 paths, so a list cut short there is read whole from
   # the kept patch; and a follow-up of a parent with no yes is said to go beyond one.
   jq -c 'if .issue == 100103 and .step == "blocked" then .paths = ["a.txt"] else . end' "$ST/cards.jsonl" > "$STUB/c" && mv "$STUB/c" "$ST/cards.jsonl"
-  [ "$(loop snapshot | jq -c '.needsYou.waiting[] | select(.issue == 100103) | .files')" = '{"count":2,"paths":["a.txt","web/pay.ts"]}' ] \
-    || fail "a waiting card's files cut short in its line were not read whole from its kept patch: $(loop snapshot | jq -c .needsYou.waiting)"
-  [ "$(loop snapshot | jq -c '.needsYou.waiting | map({issue, beyond})')" = '[{"issue":100103,"beyond":null}]' ] \
-    || fail "a waiting follow-up of a parent with no yes is said to go beyond one: $(loop snapshot | jq -c .needsYou.waiting)"
+  w=$(loop snapshot | jq -c .needsYou.waiting) || fail "snapshot exited non-zero"
+  [ "$(jq -c '.[] | select(.issue == 100103) | .files' <<<"$w")" = '{"count":2,"paths":["a.txt","web/pay.ts"]}' ] \
+    || fail "a waiting card's files cut short in its line were not read whole from its kept patch: $w"
+  [ "$(jq -c 'map({issue, beyond})' <<<"$w")" = '[{"issue":100103,"beyond":null}]' ] || fail "a waiting follow-up of a parent with no yes is said to go beyond one: $w"
   # Bugs: #8 gains a long approval line whose condition sits past 1,000 characters, and has a review
   # in the current records newer than the one `retry` set aside. #100103, retried, would land from its kept patch on a
   # review never asked about that yes (and block again for want of an INHERITED line); the reviewer would be given
