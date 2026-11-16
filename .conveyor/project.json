@@ -85,5 +85,8 @@
       "model": "claude-fable-5-2",
       "effort": "medium"
     }
+  },
+  "plugin": {
+    "follow": "main"
   }
 }
