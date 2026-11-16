@@ -171,6 +171,15 @@ startagain() { # <open issues, a json list>
     | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
     | select((.spent.start | type) == "object" and (try (.time | fromdate) catch now) + $p <= now) | "\(.issue)\t\(.spent.start | tojson)"' < <(turncards) 2>/dev/null)
 }
+# Under the lock, at `control resume` (the Board's Resume too), as a sign-in failure paused the loop (signinpause()):
+# each issue whose newest card was blocked by a session whose sign-in failed (nostart(): its spent's start has signin) is given back with
+# `retry`, once (startonce()). What retry says goes to stderr: control prints the record alone.
+signinback() {
+  local n
+  while read -r n; do ! startonce "$n" || retry "$n" >&2 || true; done < <(stdb ask lines cards | jq -rs 'map(select(.step != "push")) | group_by(.issue)[]
+    | select(all(.step != "landed" and .step != "pushed" and .step != "closed"))
+    | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(.spent.start.signin? == true) | .issue' 2>/dev/null)
+}
 # Under the lock: the lines the jq test picks (asked of each record, with the jq arguments given) move from the card
 # records to the retried file; MOVETAG, when set, is a jq filter each moved line goes through ($at: now).
 moveout() { # <jq test> <jq arguments>...

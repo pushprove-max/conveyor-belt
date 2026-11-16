@@ -35,5 +35,6 @@
   "startHeld": [],
   "startSeen": [],
   "depGuard": true,
-  "forced": []
+  "forced": [],
+  "signin": null
 }

@@ -17,9 +17,19 @@ A build, fix or review session can end with no turn and no token. Its CLI then s
 reason names the cause from the CLI's own error output: not logged in, a model the account does not have, a settings
 error, or a CLI that is not installed. The reason also says what to do. Under it are the last lines of that output,
 each cut short. Conveyor writes your home folder as `~`. It leaves out text that looks like a credential, and each
-line that the privacy check's patterns find. The loop then runs a short check session on the same account, with the
+line that the privacy check's patterns find.
+
+When the cause is the sign-in (it expired, it is missing or it was refused), the reason says so and what to run, for
+example `build: the Claude sign-in expired`, then `run claude /login (or set up the proxy route), then conveyor.sh
+control resume`. The loop pauses at that first card, so the next cards do not fail in the same way. Cards that already
+started go on. The Board, `/units` and `conveyor.sh foreman status` show the pause with that reason. When you resume
+(`conveyor.sh control resume`, or Resume on the Board), each card that the sign-in stopped goes back to the queue,
+once for each issue. When the role has a working fallback route through a proxy (`claudeProxy` or `codexProxy`), the
+step runs again on that route and the loop does not pause.
+
+For any other cause, the loop runs a short check session on the same account, with the
 CLI and model the builder or reviewer is set to at that time, at most once every `tunables.apiPause` seconds (the
-pack, `.conveyor/project.json`). When the check session starts, for example after you log in or set another model,
+pack, `.conveyor/project.json`). When the check session starts, for example after you set another model,
 the card goes back to the queue. This happens once for each issue. A card that
 stops again in the same way stays on Needs you until you retry it.
 

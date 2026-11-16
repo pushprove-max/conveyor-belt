@@ -434,7 +434,7 @@ EOF
 # Bug: a session whose CLI was not logged in ended in 2 s with no token, and its card was blocked with "session failed
 # (exit 1; 124 is the 3600s timeout)": no cause, and a timeout that was not the cause. Its reason now names the cause
 # from the CLI's own words, with no credential and nothing the privacy check's patterns hit, and says what to do;
-# the card is put back once, when a check session starts (a login made since), and only once.
+# the card is put back once, at the resume of the loop its sign-in failure paused, and only once.
 t_nostart() {
   setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0'
   # A credential and an address, made here so that this file holds neither.
@@ -453,19 +453,19 @@ EOT
   touch "$STUB/loggedout"; : > "$STUB/checks"
   loop run >/dev/null 2>&1
   b=$(st 'select(.issue == 7 and .step == "blocked")')
-  [ "$(jq -r .reason <<<"$b")" = 'build: the claude CLI is not logged in (exit 1): log it in (run claude, then /login). The card is put back once by itself when a check session on the builder'"'"'s CLI and model starts' ] \
+  [ "$(jq -r .reason <<<"$b")" = 'build: the Claude sign-in is missing (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume' ] \
     || fail "a session that was not logged in is not blocked naming the cause: $(jq -r .reason <<<"$b")"
   [ "$(jq -r .tail <<<"$b")" = $'Not logged in · Please run /login\nAuthorization: Bearer [left out]\n[a line left out: email]' ] \
     || fail "the CLI's words are not kept, or kept with a credential or an address: $(jq -r .tail <<<"$b")"
   ! grep -qF -e "$(cat "$STUB/secret")" -e "corp-mail" <<<"$b" || fail "the blocked line holds the credential or the address"
-  # Still not logged in: each check session fails, and the card stays blocked.
-  [ ! -s "$ST/retried.jsonl" ] || fail "the card was put back while its check session failed"
-  # Logged in, but the next session stops on a settings error: the check passes, the card is put back once, and
+  # Not resumed: the card stays blocked.
+  [ ! -s "$ST/retried.jsonl" ] || fail "the card was put back before the loop was resumed"
+  # Logged in and resumed, but the next session stops on a settings error: the card is put back once, and
   # blocked again it says to retry it, and is not put back again.
   rm "$STUB/loggedout"; touch "$STUB/badsettings"; n=$(wc -l < "$STUB/checks")
-  loop run >/dev/null 2>&1
+  loop control resume >/dev/null 2>&1; loop run >/dev/null 2>&1
   [ "$(jq -r 'select(.issue == 7 and .step == "blocked") | .spent.start | "\(.cli) \(.model)"' "$ST/retried.jsonl")" = "claude m" ] \
-    || fail "the card was not put back once its check session started: $(cat "$ST/retried.jsonl" 2>&1)"
+    || fail "the card was not put back at the resume: $(cat "$ST/retried.jsonl" 2>&1)"
   [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'build: the claude CLI stopped on a settings error (exit 1): fix the setting its words below name, then retry the card (conveyor.sh retry 7, or Retry on the Board)' ] \
     || fail "the card put back and blocked again does not say to retry it: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")' | tr '\n' ,)"
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error in ~/.claude/settings.json: permissions.allow is not an array' \
@@ -473,8 +473,9 @@ EOT
   # A quoted value (JSON) after password is a credential too: an opening quote does not let it through.
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error: {"password":[left out]}' && ! st 'select(.issue == 7)' | grep -qF short-secret \
     || fail "a quoted credential is kept in the reason: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
-  [ "$(wc -l < "$STUB/checks")" = $((n + 1)) ] && [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] \
-    || fail "the card was put back more than once: $((n)) checks before, $(wc -l < "$STUB/checks") after"
+  loop control resume >/dev/null 2>&1
+  [ "$(wc -l < "$STUB/checks")" = "$n" ] && [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] \
+    || fail "the card was put back more than once, or by a check session: $((n)) checks before, $(wc -l < "$STUB/checks") after"
 }
 t_nostartmodel() {
   setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0 | .models.allowed.claude += ["m2"]'

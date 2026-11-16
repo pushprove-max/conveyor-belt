@@ -73,7 +73,7 @@
       h('span', null, `${p.landedToday} landed today`), h('span', 'num', `${ctx.money(p.todayUsd)} today${num(p.todayLeftOut) && p.todayLeftOut > 0 ? ` (${p.todayLeftOut} ${p.todayLeftOut === 1 ? 'step has' : 'steps have'} no price)` : ''}`));
     li.append(head);
     // Paused or stopped: who did it and how to start it again, in one line.
-    const why = ctx.pausedSaid(p.state, p.repo, p.guard);
+    const why = ctx.pausedSaid(p.state, p.repo, p.guard, p.reason);
     if (why) li.append(h('p', 'project-paused', why));
     if (p.reason) li.append(h('p', 'reason', p.reason));
     li.append(issues('Needs you', p.needs || [], ctx),issues('On the belt', p.belt || [], ctx), issues('Queue', p.queue, ctx), heldList(p, ctx));

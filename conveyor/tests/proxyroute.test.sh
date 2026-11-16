@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a Claude or Codex session whose subscription login fails runs again through the fallback API proxy,
-# each role on its own route.
+# each role on its own route; with no route left, the loop pauses until it is resumed.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -40,6 +40,8 @@ t_proxyfallback() {
   PROXY_KEY=px-secret loop run >/dev/null 2>&1
   [ "$(cat "$STUB/routes")" = "subscription"$'\n'"$PXURL px-secret" ] || fail "the build did not run again through the proxy, with its key: $(cat "$STUB/routes")"
   [ "$(st 'select(.issue == 7) | .step' | grep -c '^landed$')" = 1 ] || fail "the card did not land: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
+  # Issue 135: a sign-in failure the fallback route got past does not pause the loop.
+  [ "$(jq -c '[.mode, .signin]' "$ST/control.json")" = '["run",null]' ] || fail "a sign-in failure with a working fallback paused the loop: $(cat "$ST/control.json")"
   [ "$(st 'select(.issue == 7 and .step == "build") | .route')" = proxy ] || fail "the build line does not say it ran through the proxy: $(st 'select(.issue == 7 and .step == "build")')"
   [ "$(loop snapshot | jq -r '.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "build") | .route')" = proxy ] \
     || fail "the Board's timeline of the build does not say the proxy: $(loop snapshot | jq -c '.landed[] | select(.issue == 7) | .metrics.timeline')"
@@ -52,10 +54,34 @@ t_proxynone() {
   pxsetup
   loop run >/dev/null 2>&1
   [ "$(sort -u "$STUB/routes")" = subscription ] || fail "a build with no proxy set ran on another route: $(cat "$STUB/routes")"
-  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q '^build: the claude CLI is not logged in (exit 1): log it in (run claude, then /login)' \
+  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -qF 'build: the Claude sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume' \
     || fail "the build is not blocked with the login as its cause: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'OAuth session expired and could not be refreshed' || fail "the blocked line lost the CLI's words: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
   [ "$(loop health | jq -c '.routes | [.subscription.state, .proxy.state]')" = '["expired","not set"]' ] || fail "health does not show the proxy not set: $(loop health | jq -c .routes)"
+}
+# Issue 135. Bug: an expired Claude sign-in blocked 19 cards in five minutes: each build failed in a second with
+# authentication_failed, and the loop kept picking. The first such failure, with no fallback route, pauses the loop
+# with the reason and what to run (health's reason: the Board, the snapshot /units reads and foreman status show it),
+# no second card is picked, and a resume puts the card back.
+t_signinpause() {
+  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; tune '.tunables.apiPause = 0'
+  loop control cap 1 >/dev/null || fail "the cap was not set"
+  # The field report's own last line.
+  cat > "$STUB/build" <<'EOT'
+case "$*" in *bypassPermissions*) ;; *) exit 1 ;; esac
+echo '{"type":"result","subtype":"success","is_error":true,"error":"authentication_failed","result":"Failed to authenticate: OAuth session expired and could not be refreshed","num_turns":1,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}'; exit 1
+EOT
+  loop run >/dev/null 2>&1
+  local why='build: the Claude sign-in expired; run claude /login (or set up the proxy route), then conveyor.sh control resume' out
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'build: the Claude sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume' ] \
+    || fail "the card is not blocked naming the sign-in and what to run: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
+  [ "$(jq -c '[.mode, .signin]' "$ST/control.json")" = "$(jq -cn --arg w "$why" '["pause", $w]')" ] || fail "the loop did not pause itself with the reason: $(cat "$ST/control.json")"
+  [ "$(loop health | jq -c '[.state, .reason]')" = "$(jq -cn --arg w "$why" '["paused", $w]')" ] || fail "health does not say paused with the reason: $(loop health | jq -c '[.state, .reason]')"
+  [ -z "$(st 'select(.issue == 8)')" ] || fail "a second card was picked after the sign-in failure: $(st 'select(.issue == 8) | .step' | tr '\n' ,)"
+  # Resumed: the record runs again, still prints as one record, and the blocked card is put back.
+  out=$(loop control resume 2>/dev/null) && jq -e '.mode == "run" and .signin == null' <<<"$out" >/dev/null || fail "control resume did not resume: $out"
+  [ "$(jq -r 'select(.step == "blocked") | .issue' "$ST/retried.jsonl" 2>/dev/null)" = 7 ] && [ -z "$(st 'select(.issue == 7)')" ] \
+    || fail "the resume did not put the blocked card back: $(cat "$ST/retried.jsonl" 2>&1)"
 }
 # Both routes failing: the card is blocked naming the subscription's cause and the proxy's, with the words of each.
 t_proxyboth() {
@@ -64,7 +90,7 @@ t_proxyboth() {
   # A proxy named with no key variable is given a stand-in token, so the expired login is not tried again through it.
   [ "$(head -n 2 "$STUB/routes")" = "subscription"$'\n'"$PXURL no-key" ] || fail "the build did not run again through the proxy: $(cat "$STUB/routes")"
   b=$(st 'select(.issue == 7 and .step == "blocked")')
-  jq -r .reason <<<"$b" | grep -q '^build: on the subscription login, the claude CLI is not logged in (exit 1): .*; through the proxy, the claude CLI is not logged in (exit 1): ' \
+  jq -r .reason <<<"$b" | grep -q '^build: on the subscription login, the Claude sign-in expired (exit 1): .*; through the proxy, the Claude sign-in was refused (exit 1): ' \
     || fail "the blocked line does not name both causes: $(jq -r .reason <<<"$b")"
   jq -r .tail <<<"$b" | grep -qxF 'OAuth session expired and could not be refreshed' && jq -r .tail <<<"$b" | grep -qxF 'Invalid API key · Please run /login' \
     || fail "the blocked line lost the words of one route: $(jq -r .tail <<<"$b")"

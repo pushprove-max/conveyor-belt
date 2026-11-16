@@ -135,7 +135,8 @@ cards() {
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
 # the weekly limit reading is at or over the guard, or "control record unreadable"; a loop that is not running picks
 # nothing, whatever `loop` says of there being one; the running loop's own "control record unreadable" stands over
-# this code's reading) and reason (why the record is unreadable, null otherwise), guard: at (the guard's percent, null for none), reading and
+# this code's reading) and reason (why the record is unreadable, or, paused by a sign-in failure, that failure and what
+# to run: the record's signin; null otherwise), guard: at (the guard's percent, null for none), reading and
 # readAt (the reading it is held against, null when no guard is set or there is no reading) and missing (true when a
 # guard is set and there is no reading: the guard then pauses nothing), start (where new issues start: queue or held;
 # null when the record does not read), builderCap (the cap in force), models and
@@ -204,6 +205,8 @@ health() {
   [ "$(jq -r .guard <<<"$c")" = null ] || r=$(guardread "$c" ask); [ -n "$r" ] || r=null
   ( flock -n 9 ) 9>>"$STATE.run" && loop=false
   st=$(state "$c" "$(jq -r '.pct // empty' <<<"$r")")
+  # A loop a sign-in failure paused (signinpause()) says why, and what to run.
+  [ "$st" != paused ] || why=$(jq -r '.signin // ""' <<<"$c")
   if [ "$loop" = true ] && said=$(jq -ce 'select(.state == "control record unreadable" and (.pid | type == "number")) | {pid, reason}' "$SAYS" 2>/dev/null) \
     && kill -0 "$(jq -r .pid <<<"$said")" 2>/dev/null; then st='control record unreadable'; why=$(jq -r '.reason // ""' <<<"$said"); fi
   [ "$loop" = true ] && cm=$(jq -ce '.commit | strings' "$SAYS" 2>/dev/null) || cm=null

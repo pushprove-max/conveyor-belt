@@ -5,6 +5,10 @@
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
+# A resume puts back the cards a sign-in failure blocked (signinback()): retry reads the records (check()), once
+# (startonce()).
+. "$HERE/lib/views.sh" || exit 1
+. "$HERE/lib/session.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1

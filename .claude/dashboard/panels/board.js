@@ -254,7 +254,7 @@
     else if (d.commit) S.ctx.tip(chip, `${word}: Conveyor started on its code of commit ${d.commit.slice(0, 7)}`);
     if (st === d.state && d.reason) state.append(h('span', 'board-from', d.reason));
     // Paused or stopped: who did it and how to start it again, in one line.
-    const why = S.ctx.pausedSaid(st, d.repo, c && num(c.guard) !== null ? c.guard : null);
+    const why = S.ctx.pausedSaid(st, d.repo, c && num(c.guard) !== null ? c.guard : null, st === d.state ? d.reason : null);
     if (why) state.append(h('span', 'board-paused', why));
     el.append(state);
     // Each control names the project it acts on, and Stop now its cost: how many cards in progress it sends back to

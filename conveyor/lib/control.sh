@@ -12,7 +12,8 @@
 # to is null for the one in force, the last), startSeen the issues this setting has had its say on: held by adopt(), or released while there is a span.
 # depGuard is the dependency guard (true, the seed's, for a record written before it: no issue is picked while an
 # issue it depends on is open) and forced the issues `control force` lets past their open dependencies while it is
-# off (adopted() drops each once it lands or its issue closes). A key this copy of the engine does not know, at the top
+# off (adopted() drops each once it lands or its issue closes). signin is null, or why the loop paused itself: a session
+# whose sign-in failed, with no fallback route left (signinpause()); resume clears it. A key this copy of the engine does not know, at the top
 # or in rules (one a newer copy added, while a card runs on the older copy in its worktree), is passed through
 # unchecked, so a control action keeps it when it writes the record. Anything else is not a record: the reason on
 # stderr and exit 1.
@@ -59,6 +60,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.tests == null or .tests.cli != null)
       and (.judgeOn | type == "boolean") and (.judgeAlways | type == "array" and all(type == "string"))
       and (.depGuard | type == "boolean") and (.forced | type == "array" and all(type == "number"))
+      and (.signin == null or (.signin | type == "string"))
       and ([.account, .reviewAccount] | all(. == null or (type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")))))' \
     "$@" 2>/dev/null
 }
@@ -478,7 +480,7 @@ control() { # [action [arguments]]
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   case $a in
     '') [ $# = 0 ] || { bad; return; } ;;
-    pause | resume | stop) [ $# = 0 ] || { bad; return; }; f='.mode = {pause: "pause", resume: "run", stop: "stop"}[$a]' ;;
+    pause | resume | stop) [ $# = 0 ] || { bad; return; }; f='.mode = {pause: "pause", resume: "run", stop: "stop"}[$a] | if $a == "resume" then .signin = null else . end' ;;
     cap) [ $# = 1 ] && [[ $1 =~ ^(100|[1-9][0-9]?|off)$ ]] || { bad; return; }; f='.cap = ($v[0] | if . == "off" then null else tonumber end)' ;;
     guard) [ $# = 1 ] && [[ $1 =~ ^(100|[1-9][0-9]?|off)$ ]] || { bad; return; }; f='.guard = ($v[0] | if . == "off" then null else tonumber end)' ;;
     hold) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held = (.held + ($v | map(tonumber)) | unique)' ;;
@@ -544,7 +546,16 @@ control() { # [action [arguments]]
   # A release dates only the issues the record held.
   case $a in hold) movedlocked movedhold hold "$new" "$@" ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
     [ -z "$x" ] || movedlocked movedhold release "$new" $x ;; esac
+  # A resume puts back the cards a sign-in failure blocked, once each (signinback()).
+  [ "$a" != resume ] || signinback
   printf '%s\n' "$new"
+}
+# Under the lock: a step whose session never began its work because its sign-in failed (nostart(): NOSTART_SIGNIN),
+# with no fallback route left, pauses the loop as `control pause` does, so no further card meets the same failure;
+# signin holds the reason, the first one while it stands. Cards already started go on. A stopped loop stays stopped.
+signinpause() { # <reason>
+  local c new; c=$(ctl) || return 1
+  new=$(jq -c --arg r "$1" 'if .mode == "stop" then . else .mode = "pause" | .signin //= $r end' <<<"$c") && ctlput "$c" "$new"
 }
 # `control depends <issue> add|remove <issue>...` (the Board's "Depends on…"): the issue's `Depends on: #N` lines, the
 # ones pick reads (DEPS, prompts.sh), changed on GitHub through gh_write; the control record is not touched, and the

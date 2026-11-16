@@ -343,9 +343,11 @@
 
   // ---- what stops the loop, and dependencies: words the machine head, Projects and the Board share ----
   // One line for a loop that picks nothing: who paused it and how to start it again. name: the project, or null for
-  // the whole machine; guard: the weekly-limit guard's percent, or null. Nothing for a loop that runs.
-  function pausedSaid(state, name, guard) {
+  // the whole machine; guard: the weekly-limit guard's percent, or null; reason: why the loop paused itself (a sign-in
+  // failure: health's reason, shown beside this line), or null. Nothing for a loop that runs.
+  function pausedSaid(state, name, guard, reason) {
     const resume = name ? `Resume ${name}` : 'Resume all projects';
+    if (state === 'paused' && reason) return `Paused by Conveyor for the reason shown. Fix it, then ${resume} to pick again.`;
     if (state === 'paused') return name ? `Paused by you (Pause ${name}). ${resume} to pick again.` : `Every project paused by you (Pause all projects). ${resume} to pick again.`;
     if (state === 'paused by guard') return `Paused by the weekly-limit guard${num(guard) ? ` at ${guard}%` : ''}. Raise or turn off "Pause when the weekly limit reaches" in Rules to pick again.`;
     if (state === 'stopped' && name) return `Stopped by Stop now: the cards in progress went back to the queue. ${resume} to pick again.`;

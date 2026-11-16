@@ -123,7 +123,7 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
       [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return $no
     fi
-    s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+    signinstop review; s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
   fi
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
@@ -185,7 +185,7 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
     [ "$(verdict "$1.review.new")" != none ] || no=2; fi
   # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
   [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" opencode "$4" reviewer "" "$1" \
-    || { s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
+    || { signinstop review; s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
   echo "$s"; return "${no:-1}"
@@ -232,7 +232,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
       [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return $no
     fi
-    s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+    signinstop review; s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
   else routedone 1; fi
   jq -c '{step: "review"} + del(.ok)' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }

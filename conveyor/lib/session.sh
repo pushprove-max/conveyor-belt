@@ -505,7 +505,7 @@ session1() {
       s=$NOSTART_WHY; f=$(PROXY_NOW=1 session1 "$@") && { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return 1
     fi
-    printf '%s\n' "$NOSTART_WHY"; return 1
+    signinstop "${3:-build}"; printf '%s\n' "$NOSTART_WHY"; return 1
   fi
   [ "$agent" != claude ] || routedone 1
   [ $rc = 0 ] || { printf 'session failed (%s)\n%s\n' "$(exitsaid "$rc" "$BUILD_TIMEOUT")" "$(tail -n 60 "$1.err")"; return 1; }
@@ -545,10 +545,11 @@ bothsaid() { # <the subscription try's reason> <the proxy try's reason>
   [[ $1 != *$'\n'* ]] || printf '%s\n' "${1#*$'\n'}"
   [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"
 }
-# A failed session's or review's own error words, whatever its CLI: its error results (Claude), its error and
-# turn.failed events (Codex, OpenCode) and the lines that are no JSON, the last 5 of them.
+# A failed session's or review's own error words, whatever its CLI: its error results (Claude: the error's code, such
+# as authentication_failed, and its text), its error and turn.failed events (Codex, OpenCode) and the lines that are no
+# JSON, the last 5 of them.
 NOSTARTSAID='[inputs | select(test("\\S")) | (fromjson? // {type: "plain", message: .}) | objects
-  | if .type == "result" then select(.is_error == true) | .result elif .type == "turn.failed" then .error.message?
+  | if .type == "result" then select(.is_error == true) | (.error?, .result) elif .type == "turn.failed" then .error.message?
     elif .type == "error" then (.message? // .error.data.message? // .error.message? // .error.name?) elif .type == "plain" then .message else empty end
   | strings] | .[-5:][]'
 # The words of a CLI whose login failed (nostart(), loginfallback()).
@@ -576,9 +577,12 @@ loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stder
 # CLI, model and account it ran on: a check session on that seat as it is set then runs before the card is put back
 # (startagain(), startnow()). Fails, setting neither, for any other session. NOSTART_LOGIN: the login's state when
 # the cause is the login (expired: its words say expired, refresh, revoked or refused; else not set), else empty.
+# NOSTART_SIGNIN, when the cause is the login: the sign-in failure (expired, was refused or is missing) and what to
+# run, for the pause (signinstop()); NOSTART_START then has signin: true, so a resume puts the card back
+# (signinback()). Else empty.
 nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer> <account, "" for the default login> <worktree>
   local raw words hits cause todo n c=${9##*/}
-  NOSTART_LOGIN=''
+  NOSTART_LOGIN='' NOSTART_SIGNIN=''
   [ "$1" != 0 ] && [ "$1" != 124 ] && [ ! -e "$9.stalled" ] || return 1
   jq -e '([.tokens // {} | .[] | numbers] | add // 0) == 0 and (.stats.turns // 0) <= 1' <<<"$2" >/dev/null 2>&1 || return 1
   raw=$( { jq -rRn "$NOSTARTSAID" "$3" 2>/dev/null; tail -n 20 "$4" 2>/dev/null; } | tr -d '\000')
@@ -597,13 +601,15 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
   if [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
     cause="the $5 CLI is not installed"; todo="install it, or set the $7 to a CLI this host has (conveyor.sh control, or Rules on the Board)"
   elif grep -Eqi "$LOGINSAID" <<<"$raw"; then
-    cause="the $5 CLI is not logged in"
     NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
+    if grep -Eqi 'expired|refresh' <<<"$raw"; then cause=expired
+    elif grep -Eqi 'revoked|refused|invalid|unauthori[sz]ed|denied' <<<"$raw"; then cause='was refused'; else cause='is missing'; fi
     case $5 in
-      codex) todo="log it in (codex login)" ;;
-      opencode) todo="log it in (opencode auth login)" ;;
-      *) todo="log it in (run claude, then /login)${8:+, on the account $8}" ;;
+      codex) cause="the Codex sign-in $cause"; todo="run codex login (or set up the proxy route)" ;;
+      opencode) cause="the OpenCode sign-in $cause"; todo="run opencode auth login" ;;
+      *) cause="the Claude sign-in $cause"; todo="run claude /login${8:+ on the account $8} (or set up the proxy route)" ;;
     esac
+    todo+=", then conveyor.sh control resume"; NOSTART_SIGNIN="$cause; $todo"
   elif grep -Eqi 'model' <<<"$raw" && grep -Eqi 'not found|not_found|not exist|unknown|invalid|not available|not supported|access' <<<"$raw"; then
     cause="the $5 CLI cannot run the model $6 on this account"; todo="set the $7 to a model the account has (conveyor.sh control, or Rules on the Board)"
   elif grep -Eqi 'setting|config' <<<"$raw"; then
@@ -611,11 +617,16 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
   else cause="the $5 CLI stopped before any work"; todo="fix what its words below say"; fi
   # A card's worktree is named by its card id, c<time>-<project>-<issue> (pick()); a lane's preview is not a card.
   n=${c##*-}; [[ $n =~ ^[1-9][0-9]*$ ]] || n=$c
-  if startonce "$n"; then todo+=". The card is put back once by itself when a check session on the $7's CLI and model starts"
-  elif [[ $c =~ ^c[0-9]{8}T[0-9]{6}- ]]; then todo+=", then retry the card (conveyor.sh retry $n, or Retry on the Board)"; fi
+  if ! startonce "$n"; then [[ ! $c =~ ^c[0-9]{8}T[0-9]{6}- ]] || todo+=", then retry the card (conveyor.sh retry $n, or Retry on the Board)"
+  elif [ -n "$NOSTART_SIGNIN" ]; then todo+=". The card is put back once by itself on resume"
+  else todo+=". The card is put back once by itself when a check session on the $7's CLI and model starts"; fi
   NOSTART_WHY="$cause ($(exitsaid "$1" 0)): $todo"$'\n'"${words:-(the $5 CLI wrote nothing)}"
-  NOSTART_START=$(jq -cn --arg s "$7" --arg c "$5" --arg m "$6" --arg a "$8" '{seat: $s, cli: $c, model: $m, account: $a}')
+  NOSTART_START=$(jq -cn --arg s "$7" --arg c "$5" --arg m "$6" --arg a "$8" --arg g "$NOSTART_SIGNIN" '{seat: $s, cli: $c, model: $m, account: $a}
+    + if $g == "" then {} else {signin: true} end')
 }
+# After nostart(), for a step that runs nowhere else (no fallback route, or the fallback's own sign-in failed too): a
+# sign-in failure pauses the loop with the step and its reason (signinpause()), as every card would meet it.
+signinstop() { [ -z "$NOSTART_SIGNIN" ] || locked signinpause "$1: $NOSTART_SIGNIN" || true; } # <step>
 # Whether an issue's card blocked by a session that never began its work (nostart()) is still put back by itself
 # (startagain()): an issue, not a main-red fix card (issue 0), none of whose earlier cards was put back so.
 startonce() { # <issue>

@@ -74,6 +74,22 @@ test('UX10: paused, paused by the guard or stopped, each says in one line who di
   assert.equal(head(m).querySelector('.machine-paused').textContent, 'Every project paused by you (Pause all projects). Resume all projects to pick again.');
 });
 
+// Bug (issue 135): a loop that paused itself on an expired sign-in was shown as "Paused by you", with no word of the
+// sign-in or what to run.
+test('a loop paused by a sign-in failure shows that reason, not a pause by you', () => {
+  const why = 'build: the Claude sign-in expired; run claude /login (or set up the proxy route), then conveyor.sh control resume';
+  const d = full(), b = d.panels.board.data, p = d.panels.machine.data.projects[0];
+  Object.assign(b, { state: 'paused', reason: why, control: { ...CONTROL, mode: 'pause' } });
+  Object.assign(p, { state: 'paused', reason: why, mode: 'pause' });
+  const w = boot({ tab: 'control' });
+  deliver(w, d);
+  const line = 'Paused by Conveyor for the reason shown. Fix it, then Resume sample to pick again.';
+  assert.equal(loopP(w).querySelector('.board-from').textContent, why);
+  assert.equal(loopP(w).querySelector('.board-paused').textContent, line);
+  assert.equal(project(w).querySelector('.reason').textContent, why);
+  assert.equal(project(w).querySelector('.project-paused').textContent, line);
+});
+
 // Bug: "Depends on…" took bare numbers, so the owner could not see which issue a number was; the host's refusal of a
 // cycle came back as its own text.
 test('UX19: each number typed into "Depends on…", and each dependency set, shows its title; a cycle is refused as what already waits on what', async () => {
