@@ -80,9 +80,6 @@
   "privacy": {
     "mode": "public"
   },
-  "plugin": {
-    "follow": "releases"
-  },
   "lanes": {
     "research": {
       "model": "claude-fable-5-2",
