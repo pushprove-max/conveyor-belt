@@ -12,7 +12,7 @@
     "boardAutoOpen": {
       "type": "boolean",
       "title": "Open the Board at start",
-      "description": "Open the Conveyor Board in the browser when a session starts in a repo with a Conveyor pack.",
+      "description": "Open the Conveyor Board in the browser when a session starts in a repo with a Conveyor pack, and when a session becomes the Foreman. When the Board is not running, conveyor.sh board starts it first.",
       "default": true
     },
     "band": {

@@ -12,6 +12,8 @@ B=$(mktemp -d) || exit 1
 trap 'rm -rf "$B"' EXIT
 cd "$B" || exit 1
 unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_LAUNCH CONVEYOR_CARD CONVEYOR_LANE CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR
+# A claim opens the Board in the browser (board-open.test.sh, with a stub opener); here no claim may open a real one.
+export CLAUDE_PLUGIN_OPTION_boardAutoOpen=false
 # Records cannot be asked here: the live summary says so, which the start's context prints all the same.
 export CONVEYOR_FOREMAN_ASK='exit 3'
 # fixture <case>: a project alpha, its Foreman's folder with a saved state, and this test's own shell (an ancestor of

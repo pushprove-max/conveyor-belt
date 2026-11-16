@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Pins when a session opens the Board: only a fresh start (source startup) in a repo with a pack, with the plugin
-# option on, opens it, once, at the host file's URL. A resume, clear or compact would stack another tab each time, a
+# option on, opens it, once, on localhost. A resume, clear or compact would stack another tab each time, a
 # repo with no pack has no Board of its own, and a card session must never open one: it runs headless on the loop.
 # The opener (open / xdg-open) is a stub that records what it was asked to open. Each case runs the command
 # hooks/hooks.json registers, so through shim.sh and the pinned install it resolves, as Claude Code runs it.
@@ -9,10 +9,11 @@ set -u
 SRC=$(cd "$(dirname "$0")/../../.." && pwd)
 CMD=$(jq -r '.hooks.SessionStart[].hooks[].command | select(test("board-open"))' "$SRC/hooks/hooks.json")
 PIN=0123456789abcdef0123456789abcdef01234567
-T=$(mktemp -d); LSN='' RAW_LSN='' FULL_LSN='' FORGE_LSN=''
-trap 'kill $LSN $RAW_LSN $FULL_LSN $FORGE_LSN 2>/dev/null; rm -rf "$T"' EXIT
-mkdir -p "$T/bin" "$T/repo/.conveyor" "$T/bare" "$T/config/conveyor" "$T/data/conveyor/versions/$PIN/.claude/hooks"
+T=$(mktemp -d); LSN='' RAW_LSN='' FULL_LSN='' FORGE_LSN='' DEAD_LSN=''
+trap 'kill $LSN $RAW_LSN $FULL_LSN $FORGE_LSN $DEAD_LSN $(cat "$T/server" 2>/dev/null) 2>/dev/null; rm -rf "$T"' EXIT
+mkdir -p "$T/bin" "$T/repo/.conveyor" "$T/bare" "$T/config/conveyor" "$T/data/conveyor/versions/$PIN/.claude/hooks/lib"
 cp "$SRC/.claude/hooks/board-open.sh" "$T/data/conveyor/versions/$PIN/.claude/hooks/"
+cp "$SRC/.claude/hooks/lib/board-open.sh" "$T/data/conveyor/versions/$PIN/.claude/hooks/lib/"
 jq -n --arg c "$PIN" '{plugin: {commit: $c}}' > "$T/repo/.conveyor/project.json"
 # A Conveyor project is a git checkout: outside one the plugin's hooks do nothing (plugin-hooks.test.sh).
 git init -q "$T/repo"
@@ -60,9 +61,10 @@ echo '{"board": {"lan": true}}' > "$T/config/conveyor/host.json"
 # does not let this machine in, so the tab showed a login no one could pass. While that setting is on, localhost opens.
 check "a host file that says LAN, with No login on this device on (its default), opens the Board on localhost" \
   "rc=0|opened https://localhost:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
+# The owner's rule (#106): the open always uses localhost, never the LAN name, whatever the login settings are.
 echo '{"noLoginHere": false}' > "$CONVEYOR_DASHBOARD_AUTH"
-check "a host file that says LAN, with No login on this device off, opens the Board at this machine's LAN name" \
-  "rc=0|opened https://$(hostname -s).local:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
+check "a host file that says LAN, with No login on this device off, still opens the Board on localhost" \
+  "rc=0|opened https://localhost:$PORT/" "$(start startup "$T/repo" true | paste -sd'|')"
 rm -f "$CONVEYOR_DASHBOARD_AUTH"
 echo '{}' > "$T/config/conveyor/host.json"
 check "option off opens nothing" "rc=0" "$(start startup "$T/repo" false | paste -sd'|')"
@@ -71,10 +73,18 @@ for s in resume clear compact; do
 done
 # No pack, so no pin: the shim would fail the start with "pins no Conveyor Belt commit" if the command reached it.
 check "a repo with no pack opens nothing and reports no error" "rc=0" "$(start startup "$T/bare" true | paste -sd'|')"
+# A Board that is not running is started first, from the project's checkout, then opened (the owner's rule, #106).
+# Bug: the start only said the Board was not running. The start is a stub that records where it ran and serves the
+# Board's own page on the port, as `conveyor.sh board` would.
 DEAD=$(free_port)
-check "a Board that is not running is named in one line and nothing opens" \
-  "conveyor: the Board is not running (nothing serves https://localhost:$DEAD/), so it was not opened|rc=0" \
-  "$(start startup "$T/repo" true "$DEAD" | paste -sd'|')"
+down=$(CONVEYOR_BOARD_START_CMD="pwd -P > '$T/started'; '$PY' '$SRC/.claude/scripts/dashboard_server.py' $DEAD '$T/out' >/dev/null 2>&1 & echo \$! > '$T/server'" \
+  start startup "$T/repo" true "$DEAD" | head -n 1)
+check "a Board that is not running is named in one line, with the start's output file" yes \
+  "$([[ $down == "conveyor: the Board is not running (nothing serves https://localhost:$DEAD/), so conveyor.sh board starts it; it opens when it answers (the start's output: "*")" ]] && echo yes || echo "no, $down")"
+for _ in $(seq 100); do [ -s "$T/opened" ] && break; sleep 0.1; done
+DEAD_LSN=$(cat "$T/server" 2>/dev/null)
+check "it is started from the project's checkout" "$(cd "$T/repo" && pwd -P)" "$(cat "$T/started" 2>/dev/null)"
+check "and opened once it answers, on localhost" "https://localhost:$DEAD/" "$(cat "$T/opened" 2>/dev/null)"
 # Another service on the Board's port is not the Board: a listener that accepts connections and never answers must
 # not open a tab, even once the background check gives up (its two-second limit).
 RAW=$(free_port)

@@ -17,6 +17,13 @@ the Foreman a name in `foreman.name`, the line shows it in brackets: `This sessi
 The session stays the Foreman when you continue or resume it, and after `/clear` in it. `/clear` in another session
 does not give it the role. `/conveyor-belt:foreman off` ends the role, and it stays off after `/clear`.
 
+When `/conveyor-belt:foreman` or your words make a session the Foreman, the Board opens in your default browser at
+`https://localhost:<port>/`. It opens once for each claim. A claim by the session that is already the Foreman, a
+resume, `/clear` or a compact opens no new tab. When the Board is not running, the claim says so in one line and
+names a file for the start's output. `conveyor.sh board` then starts the Board from your checkout, and the Board opens
+when it answers. The session is the Foreman all the same, also when the start fails. The plugin option `boardAutoOpen` (set in `/plugin`) turns this off, as it turns
+off the Board that opens when a session starts.
+
 ## Status and wakes
 
 `conveyor.sh foreman status` prints the state of the Foreman's projects as short plain text. Give a project's name to

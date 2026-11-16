@@ -8,9 +8,10 @@ Run from the main checkout this session runs in. The arguments given were: `$ARG
 
 - When they are `off`, run `"${CLAUDE_PLUGIN_ROOT}/shim.sh" conveyor/foreman/foreman.sh off` and reply with its one
   line.
-- Otherwise run `"${CLAUDE_PLUGIN_ROOT}/shim.sh" conveyor/foreman/foreman.sh claim ${CLAUDE_SESSION_ID}`. When it
-  succeeds, its first line says this session is now the Foreman: reply with that one line, and from now on work by
-  the rest of its output, your rules and saved state as the Foreman. When it fails, show its message and stop.
+- Otherwise run `CLAUDE_PLUGIN_OPTION_boardAutoOpen='${user_config.boardAutoOpen}' "${CLAUDE_PLUGIN_ROOT}/shim.sh" conveyor/foreman/foreman.sh claim ${CLAUDE_SESSION_ID}`.
+  When it succeeds, its first line says this session is now the Foreman: reply with that one line, and with the line
+  that says the Board is not running and is started when there is one. From now on work by the rest of its output, your rules and
+  saved state as the Foreman. When it fails, show its message and stop.
 
 When you file several issues at once, read them beside each other and beside the cards on the belt (picked and not
 landed, closed or blocked) before you file them. Where two clearly change the same part of the same file, for example

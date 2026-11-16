@@ -299,9 +299,16 @@ cleared_() {
 }
 
 # claim <session id> (/conveyor-belt:foreman): this session becomes the Foreman; its watchers start at its next stop.
+# A session that was not the Foreman before also gets the Board opened in the browser (board_open, as a fresh start
+# opens it; boardAutoOpen false turns it off), once: a claim by the Foreman's own session opens no second tab, and a
+# resume, /clear or compact never comes here. When the Board is not running, one line says so and the Board is started
+# from this checkout (conveyor.sh board), then opened; the claim stands.
 claim_cmd() {
+  local was
+  was=$(marked)
   claim "$2" || { echo "foreman: this session could not be made the Foreman ($MARK)"; return 1; }
   echo "This session is now the Foreman$(named): its watchers start at the end of this turn."
+  [ "$was" = "$2" ] || { . "$FHERE/../../.claude/hooks/lib/board-open.sh" && board_open "$MAIN"; }
   echo; context
 }
 off() {

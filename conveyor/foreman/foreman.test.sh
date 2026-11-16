@@ -30,6 +30,8 @@ fail() { echo "FAIL [$CASE]: $*" >&2; exit 1; }
 # checkout and its Foreman; the loop also runs with CONVEYOR_MAIN set (machine.sh), so its cards inherit it. A case
 # that sets none of its own would run for that checkout: t_setup's launch (conveyor.sh foreman) would launch for it.
 unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_DIR CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_LAUNCH CONVEYOR_MAIN CLAUDE_PROJECT_DIR CLAUDE_CODE_PROMPT_CACHE_TTL
+# A claim opens the Board in the browser (board-open.test.sh, with a stub opener); here no claim may open a real one.
+export CLAUDE_PLUGIN_OPTION_boardAutoOpen=false
 export CLAUDE_PLUGIN_ROOT=$SRC/../.. PLUGIN=$SRC/../..
 PIN=0123456789abcdef0123456789abcdef01234567 PIN2=89abcdef0123456789abcdef0123456789abcdef
 fixture() { # <case>

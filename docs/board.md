@@ -29,9 +29,9 @@ setup asks you for an admin password in Claude Code's prompt. It runs `conveyor.
 which adds the admin `admin` with that password (or gives it to an `admin` that has no password yet), deletes the file and starts the Board. The password is never on a
 command line.
 
-The address that opens is `https://localhost:<port>/`. When the host file says `{"board": {"lan": true}}` and **No
-login on this device** is off, it is `https://<this host>.local:<port>/`. While the setting is on, only `localhost`
-lets this machine in with no password.
+The address that opens in the browser is always `https://localhost:<port>/`. When the host file says
+`{"board": {"lan": true}}` and **No login on this device** is off, `conveyor.sh board` names
+`https://<this host>.local:<port>/`. While the setting is on, only `localhost` lets this machine in with no password.
 
 ## Users and authenticator codes
 

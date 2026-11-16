@@ -437,7 +437,7 @@ board() { # [password file]
 }
 # The Board's login store, where dashboard_server.py reads it.
 boardauth() { echo "${CONVEYOR_DASHBOARD_AUTH:-$(dirname "${CONVEYOR_RULING_LOG:-$HOME/.claude/rulings/conveyor.jsonl}")/dashboard-auth.json}"; }
-# The Board's address on this machine, as board-open.sh opens it: https://localhost:<port>/, or
+# The Board's address that board prints (the browser opens localhost only, .claude/hooks/lib/board-open.sh): https://localhost:<port>/, or
 # https://<this host>.local:<port>/ when the host file says {"board": {"lan": true}} and "No login on this device" is
 # off. While it is on, only localhost lets this machine in with no password.
 boardurl() {
@@ -446,7 +446,7 @@ boardurl() {
     || n=$(hostname -s).local
   echo "https://$n:${CONVEYOR_DASHBOARD_PORT:-8790}/"
 }
-# 0 when the Board answers on its port with its login page under its own certificate (board-open.sh's check): another
+# 0 when the Board answers on its port with its login page under its own certificate (board_open's check): another
 # service on the port is not the Board. -q skips the user's curl configuration, whose `insecure` would drop the check.
 boardup() {
   [[ $(curl -q -s --cacert "$(dirname "$(boardauth)")/dashboard-tls/cert.pem" --max-time 2 "https://127.0.0.1:${CONVEYOR_DASHBOARD_PORT:-8790}/login" 2>/dev/null) \
