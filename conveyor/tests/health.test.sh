@@ -11,44 +11,22 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Bug: a card waited about 10 hours behind one same-file card after another, and health never named it: a waiting
 # card keeps its live record fresh, so it is never silent. A card that has waited on other cards for more than
-# tunables.waitLimitMin minutes in all is stuck, with every card it waited on. #8 waits on #7, which holds a.txt
-# until its tests are let go ($STUB/go). The limit is 1 minute here; health is asked on the tests' clock (CONVEYOR_NOW).
+# tunables.waitLimitMin minutes in all is stuck, with every card it waited on. A card's first wait, and health on it, is
+# read from a real loop's wait in t_waitsum; here the cards' records and live records are written as the loop writes
+# them, with no card run, the limit is the pack's (1 minute), and health is asked on the tests'
+# clock (CONVEYOR_NOW). All its waits count, not the one it is in: c9-9 waited 40 s behind #7 and #8 before this wait,
+# 30 s old, on #11; c10-10 waited 20 s before its own. Neither wait alone passes the minute. c12-12 has waited 31
+# minutes on #11, a card that is on no belt: stuck for that alone (its wait never ends), it is still said to have
+# waited that long, and behind which cards (a bug: the chain was left out of a card another check had listed).
 t_waitlong() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
-  tune '.tunables.waitLimitMin = 1'
-  # #8 builds once #7 holds a.txt, so it is #8 that waits; after #7 landed, one session brings #8 onto main.
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
-else case $PWD in
-  *-7) echo seven >> a.txt ;;
-  *) while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done; echo eight >> a.txt ;;
-esac; fi
-EOF
-  echo 'case $PWD in *-7) while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
-  loop run >/dev/null 2>&1 & run=$!
-  wait_until "jq -e .waits.on '$T/$CASE/cards/'*-8.live" || fail "#8 never waited on #7"
-  c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
-  live=$(cat "$T/$CASE/cards/$c8.live")
-  [ "$(jq -c .waited <<<"$live")" = "{\"before\":0,\"behind\":[\"$c7\"]}" ] || fail "the live record of a first wait does not name what the card waited before it, and behind which cards: $live"
-  at=$(jq -r '.at | fromdate' <<<"$live")
-  [ "$(CONVEYOR_NOW=$((at + 60)) loop health | jq -c .stuck)" = '[]' ] || fail "a card that has waited no longer than the limit is stuck: $(CONVEYOR_NOW=$((at + 60)) loop health | jq -c .stuck)"
-  h=$(CONVEYOR_NOW=$((at + 61)) loop health) || fail "health failed: $h"
-  [ "$(jq -c '.stuck' <<<"$h")" = "$(jq -cn --arg c7 "$c7" --arg c8 "$c8" --arg at "$(jq -r .at <<<"$live")" \
-      '[{card: $c8, issue: 8, step: "waiting", since: $at, waitsOn: {card: $c7, issue: 7, state: "test"}, waitedMin: 1, waitedOn: [{card: $c7, issue: 7, state: "test"}]}]')" ] \
-    || fail "a card that has waited on another for longer than waitLimitMin is not stuck with the card it waited on: $(jq -c .stuck <<<"$h")"
-  : > "$STUB/go"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] || fail "both did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  # All its waits count, not the one it is in: c9-9 waited 40 s behind #7 and #8 before this wait, 30 s old, on #11;
-  # c10-10 waited 20 s before its own. Neither wait alone passes the minute. c12-12 has waited 31 minutes on #11, a
-  # card that is on no belt: stuck for that alone (its wait never ends), it is still said to have waited that long, and
-  # behind which cards (a bug: the chain was left out of a card another check had listed).
-  now=$(date +%s); mkdir -p "$T/$CASE/cards"
+  local k s now; setup '[]'; tune '.tunables.waitLimitMin = 1'
+  now=$(date +%s); mkdir -p "$ST" "$T/$CASE/cards"
   for k in 9 10 12; do
     for s in picked start; do
       jq -cn --arg c "c$k-$k" --argjson n "$k" --arg s "$s" --argjson t "$now" \
         '{card:$c,issue:$n,step:$s,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} + (if $s == "start" then {of:"land"} else {title:"t",created:"2026-01-01T00:00:00Z"} end)' >> "$ST/cards.jsonl"
     done
-    jq -cn --argjson t "$now" --argjson b "$(case $k in 9) echo 40 ;; 10) echo 20 ;; *) echo 0 ;; esac)" --argjson a "$([ $k = 12 ] && echo 1860 || echo 30)" --arg c7 "$c7" --arg c8 "$c8" \
+    jq -cn --argjson t "$now" --argjson b "$(case $k in 9) echo 40 ;; 10) echo 20 ;; *) echo 0 ;; esac)" --argjson a "$([ $k = 12 ] && echo 1860 || echo 30)" --arg c7 c7-7 --arg c8 c8-8 \
       '{step: "land", at: ($t - $a | todate), last: ($t | todate), turns: 0, waits: {on: "c11-11", paths: ["a.txt"]}, waited: {before: $b, behind: [$c7, $c8, "c11-11"]}}' > "$T/$CASE/cards/c$k-$k.live"
   done
   [ "$(CONVEYOR_NOW=$now loop health | jq -c '.stuck | map([.card, .waitedMin, .waitsOn.issue, (.waitedOn | map(.issue))])')" = '[["c12-12",31,11,[7,8,11]],["c9-9",1,11,[7,8,11]]]' ] \
@@ -76,8 +54,20 @@ EOF
   echo 'case $PWD in *-7) while [ -d "$STUB" ] && [ ! -e "$STUB/go7" ]; do sleep 0.1; done ;; *-9) while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ]; do sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
   loop run >/dev/null 2>&1 & run=$!
   wait_until "jq -e .waits.on '$T/$CASE/cards/'*-8.live" || fail "#8 never waited on #7"
-  : > "$STUB/go7"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card'); c9=$(st 'select(.issue == 9 and .step == "picked") | .card')
+  # The first wait (t_waitlong's bug): its live record names what the card waited before it, nothing, and behind which
+  # card; with a limit of 1 minute (the pack's, for these two asks), past it, and not at it, health names it stuck with
+  # the card it waits on.
+  live=$(cat "$T/$CASE/cards/$c8.live")
+  [ "$(jq -c .waited <<<"$live")" = "{\"before\":0,\"behind\":[\"$c7\"]}" ] || fail "the live record of a first wait does not name what the card waited before it, and behind which cards: $live"
+  at=$(jq -r '.at | fromdate' <<<"$live")
+  h=$(CONVEYOR_NOW=$((at + 60)) tuned '.tunables.waitLimitMin = 1' loop health) || fail "health failed: $h"
+  [ "$(jq -c .stuck <<<"$h")" = '[]' ] || fail "a card that has waited no longer than the limit is stuck: $(jq -c .stuck <<<"$h")"
+  h=$(CONVEYOR_NOW=$((at + 61)) tuned '.tunables.waitLimitMin = 1' loop health) || fail "health failed: $h"
+  [ "$(jq -c .stuck <<<"$h")" = "$(jq -cn --arg c7 "$c7" --arg c8 "$c8" --arg at "$(jq -r .at <<<"$live")" \
+      '[{card: $c8, issue: 8, step: "waiting", since: $at, waitsOn: {card: $c7, issue: 7, state: "test"}, waitedMin: 1, waitedOn: [{card: $c7, issue: 7, state: "test"}]}]')" ] \
+    || fail "a card that has waited on another for longer than waitLimitMin is not stuck with the card it waited on: $(jq -c .stuck <<<"$h")"
+  : > "$STUB/go7"
   wait_until "jq -e --arg c '$c9' '.waits.on == \$c' '$T/$CASE/cards/$c8.live'" "st '\"\(.issue) \(.step) \(.of // \"\") \(.reason)\"' | tr '\n' ," || fail "#8 never waited on #9"
   live=$(cat "$T/$CASE/cards/$c8.live")
   [ "$(jq -c --arg c7 "$c7" --arg c9 "$c9" '.waited.before >= 2 and .waited.behind == [$c7, $c9]' <<<"$live")" = true ] \
@@ -86,6 +76,7 @@ EOF
   h=$(CONVEYOR_NOW=$(($(jq -r '.at | fromdate' <<<"$live") + 1800)) loop health) || fail "health failed: $h"
   [ "$(jq -c '.stuck | map(select(.issue == 8) | [.waitedMin, (.waitedOn | map(.issue))])' <<<"$h")" = '[[30,[7,9]]]' ] \
     || fail "health does not add the wait that ended to the one the card is in: $(jq -c .stuck <<<"$h")"
+  # The waits end: #9's tests let go, every card lands, #9 before #8, which waited on it.
   : > "$STUB/go9"; wait $run || fail "run exited non-zero"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 9 8 " ] || fail "the three did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
 }
@@ -121,35 +112,58 @@ EOF
   h=$(CONVEYOR_NOW=$(($(jq -r '.at | fromdate' <<<"$live") + 61)) loop health) || fail "health failed: $h"
   [ "$(jq -c '.stuck | map(select(.issue == 8) | [.step, .waitedMin, .waitsOn.issue, (.waitedOn | map(.issue))])' <<<"$h")" = '[["waiting",1,9,[7,9]]]' ] \
     || fail "a wait that follows a session of a card that kept its claim is not counted: $(jq -c .stuck <<<"$h") $(st 'select(.issue == 8) | "\(.step) \(.of // "")"' | tr '\n' ,)"
+  # #9, its tests over, claims again to land: #8, the older, kept its claim and goes first, and #9 is brought onto its main.
   : > "$STUB/go9"; wait $run || fail "run exited non-zero"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 9 " ] || fail "the three did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+}
+
+# Card c7-7's records, each a step or start:<step> (review:GO: a step and its result), at <epoch seconds>, as the loop
+# writes them: a case of what health makes of a card at a step writes them, with no card run.
+c7at() { # <epoch seconds> <step>...
+  local t=$1; shift; mkdir -p "$ST"
+  printf '%s\n' "$@" | jq -cR --argjson t "$t" 'split(":") as [$s, $x]
+    | {card:"c7-7",issue:7,step:$s,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} + if $s == "start" then {of: $x} elif $x then {result: $x} else {} end' >> "$ST/cards.jsonl"
+}
+# Runs <command file> in the background as card c7-7's <step>, watched by the engine's own watch() (lib/session.sh), as
+# a card's step is: its output where the card's is ($w.out, or $w.test for a test run, whose logs are in $w.testlog,
+# CONVEYOR_TEST_LOG) and its live record in $w.live. Sets run (the watch's pid) and w.
+c7watch() { # <step> <command file>
+  local f; w=$T/$CASE/cards/c7-7; f=$w.out; [ "$1" != test ] || f=$w.test; mkdir -p "$w.testlog"
+  ( . "$SRC/lib/portable.sh"; eval "$(for g in watch testlogs testcases testdone; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done)"
+    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
+    LIVE=0.5 STUCK=1200; (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash "$2" < /dev/null) > "$f" 2>&1 &
+    watch $! "$f" "$w.live" "$1" ) > "$T/$CASE/run.out" 2>&1 & run=$!
 }
 
 # Bug: a test step ran 41 minutes, 35 of them with two cases hung; the other cases kept printing, so the output was
 # never silent and health never named the card. A runner names each running case in its log folder (cases/<name>,
 # from the case's start to its end); a case that has run for tunables.caseStuck seconds makes the card stuck, by its
-# name, whatever the others print. Here the limit is 2 s: slow hangs until $STUB/go, quick ends at once, and the run
-# prints a line every 0.1 s. A case that ends between the look that lists the cases and the one that reads their times
-# is left out and the others stay (a bug: the live record then took no cases at all): the third file's name, two
-# lines, is listed as two files that are not there.
+# name, whatever the others print. Card c7-7 is at its test step by its records, and its run is watched as its test
+# step does it (c7watch), with no card run. Here the limit is 2 s: slow hangs until $STUB/go, quick ends at once, and
+# the run prints a line every 0.1 s until $STUB/end. A case that ends between the look that lists the cases and the one
+# that reads their times is left out and the others stay (a bug: the live record then took no cases at all): the third
+# file's name, two lines, is listed as two files that are not there.
 t_casehung() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; tune '.tunables.caseStuck = 2'
-  cat > "$STUB/test-cmd" <<'EOF'
+  local c=c7-7 was h live now s; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.caseStuck = 2'
+  c7at "$(date +%s)" picked worktree deps brief start:build build start:review review:GO start:test
+  cat > "$STUB/cases-cmd" <<'EOF'
 C=$CONVEYOR_TEST_LOG/cases; mkdir -p "$C"; : > "$C/slow"; : > "$C/quick"; rm "$C/quick"; : > "$C/gone"$'\n'"x"
-while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do echo "ok another case"; sleep 0.1; done; rm -f "$C/slow"
+while [ -d "$STUB" ] && [ ! -e "$STUB/end" ]; do echo "ok another case"; [ ! -e "$STUB/go" ] || rm -f "$C/slow"; sleep 0.1; done
 EOF
-  loop run >/dev/null 2>&1 & run=$!
+  c7watch test "$STUB/cases-cmd"
   wait_until "[ \"\$(loop health | jq -c '.stuck | map([.issue, .step, .cases])')\" = '[[7,\"test\",[\"slow\"]]]' ]" "loop health | jq -c .stuck; cat '$T/$CASE/cards/'*.live" \
     || fail "a test step with one case past its ceiling is not stuck by that case's name"
   # The run still prints: its last output moves on, and the card is stuck all the same, since the case began.
-  c=$(st 'select(.step == "picked") | .card'); was=$(jq -r .last "$T/$CASE/cards/$c.live")
+  was=$(jq -r .last "$T/$CASE/cards/$c.live")
   wait_until "[ \"\$(jq -r .last '$T/$CASE/cards/$c.live')\" != '$was' ]" || fail "the run did not go on printing"
   h=$(loop health); live=$(cat "$T/$CASE/cards/$c.live")
   [ "$(jq -c '.stuck | map([.issue, .step, .cases, .since])' <<<"$h")" = "[[7,\"test\",[\"slow\"],$(jq -c '.cases[0].since' <<<"$live")]]" ] \
     && [ "$(jq -r '.last > .cases[0].since' <<<"$live")" = true ] \
     || fail "a hung case is not named while the other cases still print: $(jq -c .stuck <<<"$h") $live"
-  : > "$STUB/go"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(loop health | jq -c .stuck)" = '[]' ] || fail "the card did not land once its case ended, or is still stuck"
+  # Once the case ends, the run going on, the card is no longer stuck.
+  : > "$STUB/go"
+  wait_until "[ \"\$(loop health | jq -c .stuck)\" = '[]' ]" "loop health | jq -c .stuck; cat '$T/$CASE/cards/'*.live" || fail "the card is still stuck once its hung case ended"
+  : > "$STUB/end"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
   # Once every case is silent too, the card is stuck for that already, and the case is still named (a bug: its name
   # was left out of a card another check had listed). c12-12's run and its case slow began 1300 s ago, with no output since.
   now=$(date +%s)
@@ -165,37 +179,33 @@ EOF
 
 # Bug: build and fix sessions stalled, receiving nothing, for 10 and 20 minutes before anyone acted: health named a
 # silent card only after tunables.stuck (20 minutes). A session (build, fix, rebase) with no output for
-# tunables.sessionStuck seconds, 10 minutes unless the pack says otherwise, is stuck. The session here says nothing
-# until $STUB/go; health is asked on the tests' clock (CONVEYOR_NOW).
+# tunables.sessionStuck seconds, 10 minutes unless the pack says otherwise, is stuck. The card c7-7 is in its build by
+# its records, as the loop writes them, with no card run, and its session has said nothing; health is asked on the
+# tests' clock (CONVEYOR_NOW).
 t_sessionquiet() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
-  echo 'while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done; echo two >> a.txt' > "$STUB/build"
-  loop run >/dev/null 2>&1 & run=$!
-  wait_until "[ -n \"\$(jq -c 'select(.step == \"start\" and .of == \"build\")' '$ST/cards.jsonl')\" ]" || fail "the build never began"
-  at=$(st 'select(.step == "start" and .of == "build") | .time | fromdate')
+  local at; setup "[$(issue 7 2026-01-01)]"; at=$(date +%s); c7at "$at" picked worktree deps brief start:build
   [ "$(loop health | jq -c '.homes["tunables.sessionStuck"]')" = '{"value":600,"home":"schema default"}' ] || fail "the session limit is not 10 minutes by default: $(loop health | jq -c .homes)"
   [ "$(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)" = '[]' ] || fail "a session silent for under 10 minutes is stuck: $(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)"
   [ "$(CONVEYOR_NOW=$((at + 600)) loop health | jq -c '.stuck | map([.issue, .step, .since])')" = "[[7,\"build\",\"$(jq -rn --argjson t "$at" '$t | todate')\"]]" ] \
     || fail "a session with no output for 10 minutes is not stuck: $(CONVEYOR_NOW=$((at + 600)) loop health | jq -c .stuck)"
   # The limit is the pack's setting.
   [ "$(CONVEYOR_NOW=$((at + 600)) tuned '.tunables.sessionStuck = 900' loop health | jq -c .stuck)" = '[]' ] || fail "the session limit is not the pack's tunables.sessionStuck"
-  : > "$STUB/go"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
 }
 
 # Bug: a stalled session was still sent keep-alive bytes, lines with nothing in them, and each counted as output, so
 # the session was never silent for tunables.sessionStuck. Only a line that says something is output. The session here
 # calls one tool, then is sent an empty line every 0.1 s until $STUB/go: its last output stays the tool call, and it is
-# stuck 10 minutes after that.
+# stuck 10 minutes after that. Card c7-7 is in its build by its records, written before the tool call, and its session
+# is watched as its build does it (c7watch), with no card run.
 t_keepalive() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
-  cat > "$STUB/build" <<'EOF'
+  local c=c7-7 live was at n; setup "[$(issue 7 2026-01-01)]"; c7at "$(($(date +%s) - 5))" picked worktree deps brief start:build
+  cat > "$STUB/session" <<'EOF'
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'
-while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do echo; sleep 0.1; done; echo two >> a.txt
+while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do echo; sleep 0.1; done
 EOF
-  loop run >/dev/null 2>&1 & run=$!
-  wait_until "jq -e '.action == \"Bash: npm test\"' '$T/$CASE/cards/'*-7.live" || fail "the session's tool call never showed in its live record"
-  c=$(st 'select(.step == "picked") | .card'); live=$T/$CASE/cards/$c.live; was=$(jq -r .last "$live"); at=$(jq -rn --arg t "$was" '$t | fromdate')
+  c7watch build "$STUB/session"
+  wait_until "jq -e '.action == \"Bash: npm test\"' '$T/$CASE/cards/$c.live'" || fail "the session's tool call never showed in its live record"
+  live=$T/$CASE/cards/$c.live; was=$(jq -r .last "$live"); at=$(jq -rn --arg t "$was" '$t | fromdate')
   # Empty lines written more than a second after that output, and read: the live record is written anew at each look
   # that finds the output grown.
   wait_until "[ \$(date +%s) -gt $((at + 2)) ]" || fail "the clock did not move on"
@@ -205,8 +215,7 @@ EOF
   [ "$(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)" = '[]' ] || fail "a session whose last output is under 10 minutes old is stuck: $(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)"
   [ "$(CONVEYOR_NOW=$((at + 600)) loop health | jq -c '.stuck | map([.issue, .step, .since])')" = "[[7,\"build\",\"$was\"]]" ] \
     || fail "a session sent only empty lines for 10 minutes is not stuck: $(CONVEYOR_NOW=$((at + 600)) loop health | jq -c .stuck)"
-  : > "$STUB/go"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+  : > "$STUB/go"; wait $run || fail "the watch of the session exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug caught (#632): a card landing normally was listed stuck, and woke the Foreman, as its session process had ended:
