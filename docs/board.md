@@ -235,6 +235,14 @@ often that happened. A step of a card that did not land counts neither way. A fi
 and no catch shows "Never caught anything" in grey text, which is not a status chip. A file that never fails may
 check nothing.
 
+A file with hollow cases shows "Hollow". A hollow case passes but proves nothing. The kinds are `mock-echo` (it only
+checks that a mock gives back what the mock was told to give), `text-only` (it only checks that a file contains some
+text), `no-assert` (it has no assertion) and `defined-only` (it only checks that a value is defined or truthy). For a
+JavaScript or TypeScript test file, Conveyor finds the clear cases with no model: a case with no `expect` or `assert`
+call, and a case whose only assertions are `toBeDefined` or `toBeTruthy`. When Judge this test ends, its hollow cases
+replace these. Click the "Hollow N" filter chip to see only these files. An open row lists its hollow cases, each
+with its kind and the reason.
+
 Point at a column heading, or move the keyboard focus to it, to see what the column shows. Click a column heading to
 sort the table by that column. Click it again to reverse the order. An arrow shows the column and the direction. Until
 you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path in
@@ -242,8 +250,8 @@ the search box to see only the files that match it. The search and a filter chip
 
 Click a file's name to open its row. The row shows its runs, each marked with its card or "whole suite", its budget,
 and three actions: Judge, Optimize and Run. Judge (Judge this test) and Run (Run this file now) start at once.
-Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers and the newest
-verdict of Judge, with the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds
+Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers, its hollow cases
+and the newest verdict of Judge, with the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds
 Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
 

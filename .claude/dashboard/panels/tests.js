@@ -41,6 +41,8 @@
 // its issue as a link, its card, the file, the time and its counts (assertions removed, expected values changed, skip,
 // only or todo marks added, timeouts raised, cases deleted), or "Edited, not read" for a kind of file the engine does
 // not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row lists its own edits.
+// Hollow (#77): a file with hollow cases (hollowOf(): its newest ended judge's, else the engine's cheap check's) has the
+// status Hollow, so its filter chip "Hollow N"; an opened row lists them with their kind and reason.
 // Its More menu holds Explain the slowdown, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
 // Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
@@ -61,7 +63,7 @@
 // (its flaky issue closed, test-close: the case runs on cards again) shows beside the file's facts; Keep a case off is
 // flaky-off (`conveyor.sh flaky off`, which files no issue); Close its issue as done is test-close, with the file's
 // before and after numbers as its comment. Optimize shows a preview first (title "Optimize the test file <file>" and
-// body, with the measured numbers and the judge's kept verdict with the end of its text, both editable; no Done-when
+// body, with the measured numbers, the file's hollow cases and the judge's kept verdict with the end of its text, both editable; no Done-when
 // line), and files (POST control {action: test-issue, args: [file, title, body]}: `conveyor.sh testissue`, which keeps
 // it as the file's issue) only on its second button; Cancel files nothing. With no Tests model, Judge and Explain are
 // disabled and say "Set the Tests model first."
@@ -99,6 +101,7 @@
   const MARKS = [
     ['over', 'Over budget', 'bad', true], ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
     ['waits', 'Waits', 'info', true], ['flaky', 'Flaky', 'warn', true], ['fails', 'Fails often', 'bad', true],
+    ['hollow', 'Hollow', 'warn', false],
     ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false],
     ['runner', 'Runs other test files', 'quiet', false], ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false]];
   const S = { el: null, ctx: null, d: null, read: null, repo: undefined, filter: 'all', open: new Set(), busy: false,
@@ -160,7 +163,7 @@
     return MARKS.filter(([k]) => ({
       over: f.over === true && !f.slowOnPurpose, slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
-      fails: (num(f.failedSteps) || 0) >= FAILS, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
+      fails: (num(f.failedSteps) || 0) >= FAILS, hollow: hollowOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
       runner, whole: runner, never: !list(f.runs).length,
     })[k]);
   }
@@ -283,6 +286,13 @@
   const sameSeat = (a, b) => JSON.stringify(seatOf(a)) === JSON.stringify(seatOf(b));
   // The Tests model in force: the one saved here and not yet in a snapshot, else the snapshot's.
   const tmodel = () => (S.seatSaved && S.seatSaved.repo === S.d.repo ? S.seatSaved.value : seatOf(ctlTests()));
+  // A file's hollow cases (#77), [{case, kind, reason}]: those of its newest Judge this test that ended, once one names
+  // them (its record's hollow), else those of the engine's cheap check (the snapshot's hollow of the file).
+  const hollowOf = (f) => {
+    const j = actions().find((a) => a.file === f.file && a.action === 'judge' && a.state === 'done' && Array.isArray(a.hollow));
+    return list(j ? j.hollow : f.hollow).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
+  };
+  const hollowSaid = (x) => `${x.case} (${x.kind})${typeof x.reason === 'string' && x.reason ? `: ${x.reason}` : ''}`;
   // The judge's newest verdict for a file, when one is kept.
   const verdictOf = (file) => actions().find((a) => a.file === file && a.action === 'judge' && a.state === 'done' && typeof a.verdict === 'string' && a.verdict !== 'no verdict') || null;
 
@@ -451,6 +461,13 @@
       `- Clock / CPU in its last run: ${num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`}`,
       `- Runs on record: ${num(f.timedRuns) || 0}. Test steps that failed in it: ${num(f.failedSteps) || 0}. Flaky entries: ${num(f.flaky) || 0}.`,
       `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (card ${r.card})`).join(', ') || 'none'}`];
+    // Its hollow cases, so the card fixes them too: as many as the body holds with room for a line that counts the rest.
+    const hollow = hollowOf(f);
+    if (hollow.length) {
+      lines.push('', 'Hollow cases (they pass without proving anything): fix each one or delete it.');
+      const at = hollow.findIndex((x) => { const l = `- ${hollowSaid(x)}`.replace(/\p{C}/gu, ' '); if (lines.join('\n').length + l.length + 40 > BODY_MAX) return true; lines.push(l); return false; });
+      if (at >= 0) lines.push(`- and ${hollow.length - at} more`);
+    }
     if (v) {
       lines.push('', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`);
       const text = (S.texts.get(v.id) || '').split('\n').map((l) => l.replace(/[\p{C}\p{Z}]/gu, ' ').trimEnd()).join('\n').trim();
@@ -1047,6 +1064,14 @@
     }
     // What landed cards did to this file, newest first.
     const edits = editsOf().filter((e) => e.file === file);
+    // Its hollow cases, each with its kind and reason.
+    const hollow = hollowOf(f);
+    if (hollow.length) {
+      const ul = h('ul', 'tests-runs tests-hollow');
+      ul.setAttribute('aria-label', `Hollow cases of ${file}`);
+      hollow.forEach((x) => ul.append(h('li', 'tests-hollow-case', hollowSaid(x))));
+      el.append(h('p', 'board-head', 'Hollow cases'), ul);
+    }
     if (edits.length) el.append(h('p', 'board-head', 'Test edits by cards'), editsList(edits, `Test edits of ${file}`, false, anyIssueUrl([f])));
     el.append(rowActions(f));
     // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.

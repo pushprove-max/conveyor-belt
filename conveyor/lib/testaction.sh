@@ -14,7 +14,8 @@
 # queued, then its start), end (null while it runs), state (queued, running, done, stopped, failed or timed out), cli,
 # model, effort, limit (TESTACTION_TIMEOUT, the seconds it
 # may run), verdict (judge: the word its text's last line names, VERDICT: <keep | speed up | split | merge | delete>,
-# else "no verdict"; explain: null), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
+# else "no verdict"; explain: null), hollow and hollowSkipped (judge: the hollow cases its HOLLOW lines name, and the
+# HOLLOW lines that could not be read: tahollow()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
 # session's text, written as the session writes it; <id>.events and <id>.err, the CLI's output and its errors. All of
 # it stays after the session ends. `conveyor.sh testaction stop <id>` ends that one session and no other, or takes a
 # queued one off, unstarted.
@@ -26,7 +27,16 @@ TAVERDICTS='keep|speed up|split|merge|delete'
 TATEXT='fromjson? // empty | objects | if .type == "assistant" then .message.content[]? | select(.type == "text") | .text | strings | . + "\n"
   elif .type == "item.completed" and .item.type == "agent_message" then .item.text | strings | . + "\n"
   elif .type == "text" then .part.text | strings | . + "\n" else empty end'
-TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), or delete it. Give the evidence for your choice: its recorded times below, what it tests, and whether another test already proves the same behaviour. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. End your answer with one line: VERDICT: <keep | speed up | split | merge | delete>"
+TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), or delete it. Give the evidence for your choice: its recorded times below, what it tests, and whether another test already proves the same behaviour. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, name each hollow case of the file, a case that passes without proving anything, on a line of its own: HOLLOW: <case> | <kind> | <one-line reason>. The kind is one of: mock-echo (it only checks that a mock returned what the mock was told to return), text-only (it only checks that a file contains some text), no-assert (it has no assertion), defined-only (it only checks that a value is defined or truthy). Give no HOLLOW line when no case is hollow. End your answer with one line: VERDICT: <keep | speed up | split | merge | delete>"
+# A judge's HOLLOW lines, from its text: {hollow: [{case, kind, reason}], hollowSkipped: the lines that start HOLLOW:
+# and do not read as a case, a kind of TAHOLLOW and a reason}. A line may start with the marks of a list, quote or
+# emphasis, as the VERDICT line may.
+TAHOLLOW='mock-echo|text-only|no-assert|defined-only'
+tahollow() { # <text file>
+  jq -Rnc --arg k "$TAHOLLOW" '[inputs | sub("^[\\s*`_>-]+"; "") | select(startswith("HOLLOW:"))
+      | (capture("^HOLLOW:\\s*(?<case>.*?\\S)\\s*\\|\\s*(?<kind>" + $k + ")\\s*\\|\\s*(?<reason>.*?[^\\s*`_])[\\s*`_]*$") // false)]
+    | {hollow: map(objects), hollowSkipped: map(select(. == false)) | length}' "$1"
+}
 TAEXPLAIN="Explain the slowdown of one test file of this project. From its recorded times below, find when it became slower, which card's change made it slower, and what in that change is the cause. Read the repository and its history as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state."
 # `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (an Optimize issue,
 # "Optimize the test file <file>", checked by optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
@@ -150,7 +160,7 @@ tadrop() { chmod -R u+w "$1" 2>/dev/null; git -C "$MAIN" worktree remove --force
 # TESTACTION_TIMEOUT with its text going to <id>.txt as it comes, and its record written last with how it ended.
 # A TERM (tastop()) ends the session: its CLI's process group is told to end, and killed 10 s later if it has not.
 tarun() { # <the record> <worktree> <prompt>
-  local r=$1 wt=$2 f tp='' tx txp stopped='' rc=0 t0=$EPOCHSECONDS state v=null why=null k acct cli model effort id me=$BASHPID
+  local r=$1 wt=$2 f tp='' tx txp stopped='' rc=0 t0=$EPOCHSECONDS state v=null why=null hv='{}' k acct cli model effort id me=$BASHPID
   trap 'stopped=1' TERM
   jqget "$r" id id cli cli model model effort effort || return 1
   f=$TESTACTS/$id
@@ -182,8 +192,9 @@ tarun() { # <the record> <worktree> <prompt>
   if [ "$(jq -r .action <<<"$r")" = judge ]; then
     v=$(grep -v '^[[:space:]]*$' "$f.txt" | tail -n 1 | sed -nE "s/^[[:space:]*\`_>-]*VERDICT:[[:space:]*\`_]*($TAVERDICTS)([^[:alpha:]].*)?$/\1/Ip")
     v=$(jq -cn --arg v "${v,,}" 'if $v == "" then "no verdict" else $v end')
+    hv=$(tahollow "$f.txt" 2>/dev/null) || hv='{"hollow": [], "hollowSkipped": 0}'
   fi
-  taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" '. + {end: $t, state: $s, verdict: $v} + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
+  taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" --argjson hv "$hv" '. + {end: $t, state: $s, verdict: $v} + $hv + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"
   taqueue # the next queued action, now that this one has ended
 }

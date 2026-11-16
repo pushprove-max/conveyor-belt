@@ -294,3 +294,18 @@ t_tfedits() {
   [ "$got" = '[["c-6",6,"a.test.mjs"],["c-5",5,"a.test.mjs"],["c-4",4,"a.test.mjs"],["c-3",3,"a.test.mjs"],["c-2",2,"a.test.mjs"],["c-1",7,"a.test.py"],["c-1",7,"bool.test.mjs"],["c-1",7,"gone.test.sh"],["c-1",7,"msg.test.mjs"],["c-1",7,"multi.test.mjs"],["c-1",7,"re.test.mjs"],["c-1",7,"s.test.sh"]]' ] \
     || fail "the Tests part's edits, newest first, a file's newest five: $got"
 }
+
+# The cheap check for hollow tests (#77): in a .test.ts of main, a case with no assertion and a case whose only
+# assertion is toBeDefined are hollow; a case with a real expect(x).toBe(2) is not, and neither is a one-line case
+# whose assertion follows its name on the same line, or a case that calls a variable named before (before.click())
+# ahead of its assertion. Bugs it catches: a case that passes without proving anything
+# showed on the Tests page as any other; a case that asserts was flagged.
+t_tfhollow() {
+  setup '[]'
+  printf '%s\n' "import { describe, it, expect } from 'vitest';" "describe('sum', () => {" "  it('loads', async () => {" '    await load();' '  });' \
+    "  it('has a value', () => {" '    expect(get()).toBeDefined();' '  });' "  it(\"adds\", () => {" '    before.click();' '    const x = add(1, 1);' '    expect(x).toBe(2);' '  });' \
+    "  test('one line', () => expect(add(0, 1)).toBe(1));" '});' > "$R/sum.test.ts"
+  git -C "$R" add sum.test.ts && git -C "$R" commit -qm tests || fail "main's test file"
+  got=$(tf_file sum.test.ts | jq -c '.hollow | map([.case, .kind])')
+  [ "$got" = '[["loads","no-assert"],["has a value","defined-only"]]' ] || fail "the hollow cases of sum.test.ts: $got"
+}

@@ -33,6 +33,8 @@
 #   named on its COVERED-BY lines; null and [] with none), since (the median CPU seconds of the
 #   file's runs after it landed; null with none or before it lands) and sinceRuns (their count)}; removed: true for a
 #   file main's checkout no longer tracks whose landed Optimize deleted or merged it (the totals leave it out);
+#   hollow: the cheap check's hollow cases of a JavaScript or TypeScript file (testhollow(), below), [{case, kind,
+#   reason}], [] with none; null for a file of another kind or not in main's checkout;
 #   a file that only a Board filing names is listed too;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
@@ -153,13 +155,57 @@ testedits() { # <worktree>: its staged change's testedits, a JSON list (empty wh
   done < <(jq -j '.[] | . + "\u0000"' <<<"$n")
   jq -sc '.' <<<"$out"
 }
+# The cheap check for hollow cases (#77), with no model: in each JavaScript or TypeScript test file of main's checkout
+# (HOLLOWFILES), a case (a line that starts `it(` or `test(` with its name, `.only` or `.concurrent` too) is its line
+# after the name and the lines up to the next case, skipped case, describe or hook (a hook is its bare call, such as
+# `before(`: a variable named before, as in `before.click()`, does not end a case). A case with no `expect(` and no
+# `assert` (assert.equal, t.assert, a helper named assert...) is no-assert; one whose every assertion is
+# `expect(...).toBeDefined()` or `.toBeTruthy()` is defined-only. An assertion in a comment counts too: the check may
+# miss a hollow case, never flag a case that asserts. testhollow prints {file: [{case, kind, reason}]}, a file with
+# none []. A judge's own HOLLOW lines (lib/testaction.sh tahollow()) take the place of these on the Board.
+# One awk reads every file, a line at a time (jq, a regular expression a line, took over half a CPU second on 70
+# files), and prints a line for each hollow case: its file, its name and its kind, between tabs.
+HOLLOWFILES='\.test\.[cm]?[jt]sx?$'
+HOLLOW_AWK='function flush() {
+    if (name != "" && e + a == 0) print f "\t" name "\tno-assert"
+    else if (name != "" && a == 0 && d >= e) print f "\t" name "\tdefined-only"
+    name = ""; e = 0; a = 0; d = 0
+  }
+  function count(s,  t) {
+    t = s; e += gsub(/(^|[^A-Za-z0-9_$])expect[ \t]*\(/, "", t)
+    t = s; a += gsub(/(^|[^A-Za-z0-9_$])assert/, "", t)
+    t = s; d += gsub(/\.toBe(Defined|Truthy)[ \t]*\(/, "", t)
+  }
+  FNR == 1 { flush(); f = FILENAME; sub(/^\.\//, "", f) }
+  match($0, /^[ \t]*((it|test|describe|suite)([.](only|skip|todo|concurrent|each|failing|sequential))*|before|after|beforeEach|afterEach|beforeAll|afterAll)[ \t]*\(/) {
+    flush()
+    w = substr($0, 1, RLENGTH); sub(/^[ \t]*/, "", w); sub(/[ \t]*\($/, "", w)
+    rest = substr($0, RLENGTH + 1); sub(/^[ \t]*/, "", rest); q = substr(rest, 1, 1)
+    if ((w == "it" || w == "test" || w == "it.only" || w == "test.only" || w == "it.concurrent" || w == "test.concurrent") && (q == "\047" || q == "\"" || q == "`")) {
+      i = index(substr(rest, 2), q)
+      if (i > 1) { name = substr(rest, 2, i - 1); gsub(/\t/, " ", name); count(substr(rest, i + 2)) }
+    }
+    next
+  }
+  name != "" { count($0) }
+  END { flush() }'
+# Each file is given to awk as ./<path>, so a name with = in it is never read as an assignment.
+testhollow() { # <the test files of main's checkout, a JSON list>
+  local f fs=()
+  while IFS= read -r -d '' f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done < <(jq -j --arg re "$HOLLOWFILES" '.[] | select(test($re)) | . + "\u0000"' <<<"$1")
+  [ ${#fs[@]} -gt 0 ] || { echo '{}'; return; }
+  (cd "$MAIN" && LC_ALL=C awk "$HOLLOW_AWK" "${fs[@]}") | jq -Rnc '($ARGS.positional | map({key: .[2:], value: []}) | from_entries) as $all
+    | reduce (inputs | split("\t") | select(length == 3)) as [$f, $c, $k] ($all; .[$f] += [{case: $c, kind: $k,
+        reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])' --args "${fs[@]}"
+}
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru all ln ch
+  local b si sh rn mn fs fl sf defs refs ru all ln ch hv
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
   ru=$(testrulesettings) || ru=null
+  hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   testowners
   # A project with no test line has its part all the same: grep finding none is no failure. The steps other than test
   # are those that give a Board filing's state (optimize, below) and a card's landed commit (caught, below).
@@ -174,7 +220,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   printf '%s\n' "$ln" | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
-    --argjson ru "$ru" --argjson all "$all" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
     --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) "$OWNERS"'
@@ -222,7 +268,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
            budget: (if $wo then null else $bud end), budgetFrom: (if $wo then null elif $own.budget != null then "file" else "project" end),
            slowOnPurpose: ($own.slowOnPurpose // null), over: ($wo | not) and $now != null and $now > $bud, usual: ($usual | r3),
-           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh))}
+           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null)}
         | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
     | sort_by(-(.cpu // -1), .file)

@@ -569,7 +569,14 @@ and the test files of main's checkout, and holds:
   review of its landed card named on its `COVERED-BY` lines), `since` (the median CPU seconds of the file's runs after
   it landed; null before it lands or with no run since) and `sinceRuns` (how many runs that median has). A file that
   only a Board filing names is listed too. `removed` is true for a file that main's checkout no longer has, when a
-  landed Optimize deleted it or merged it. The totals leave such a file out;
+  landed Optimize deleted it or merged it. The totals leave such a file out. `hollow` lists the hollow cases that a
+  check with no model finds in a JavaScript or TypeScript test file (a name that ends `.test.js`, `.test.ts`, `.test.mjs`,
+  `.test.tsx` and the like), each `{case, kind, reason}`, and is empty with none; it is null for a file of another kind.
+  A case (an `it(` or `test(` line with its name) runs to the next case, skipped case, `describe` or hook. It is
+  `no-assert` with no `expect(` and no `assert` in it, and `defined-only` when each of its assertions is
+  `expect(...).toBeDefined()` or `.toBeTruthy()`. An assertion in a comment counts too, so the check can miss a hollow
+  case but never names a case that asserts. The Board shows a Judge's `hollow` (Test actions, below) in place of this
+  one once a Judge of the file ended;
 - `slower`: the names of the files slower than their usual;
 - `edits`: each entry of the `testedits` of the landed cards (below), newest first, with the card's `card`, `issue`
   and `time` (when it landed); the newest 5 of each file;
@@ -917,7 +924,10 @@ and files no issue (or runs the file by hand, with no session: `testaction run`,
 
 - `conveyor.sh testaction judge <test file>`: is the file worth its cost? The session answers keep, speed up, split,
   merge with another file (it names that file), or delete, with its evidence, and ends with a line
-  `VERDICT: <keep | speed up | split | merge | delete>`.
+  `VERDICT: <keep | speed up | split | merge | delete>`. Before that line it names each hollow case of the file, a case
+  that passes but proves nothing, on a line `HOLLOW: <case> | <kind> | <one-line reason>`. The kind is `mock-echo`
+  (it only checks that a mock gives back what it was told to give), `text-only` (it only checks that a file contains
+  some text), `no-assert` (it has no assertion) or `defined-only` (it only checks that a value is defined or truthy).
 - `conveyor.sh testaction explain <test file>`: which card made the file slower, and what in its change is the cause.
 
 The test file is a path of the repo as main has it. The session runs on the Tests seat of the control record: a CLI
@@ -945,7 +955,9 @@ Each action keeps two files in `testactions/` of the state folder, which stay af
   is queued, then the time it started), `asked` (the time of the ask, in microseconds since 1970, which orders the
   queue), `end` (null while it is queued or runs), `state` (queued, running, done, stopped, failed or timed out), `cli`, `model`, `effort`, `limit` (the time limit, in
   seconds, so the Board can show time used against it), `verdict` (judge: the verdict word, or `no verdict` when the
-  text's last line names none; explain: null), `pid` while it runs, and `reason` for a failed one.
+  text's last line names none; explain: null), `hollow` and `hollowSkipped` (judge: its `HOLLOW` lines as
+  `[{case, kind, reason}]`, and how many lines that start `HOLLOW:` could not be read, with no case, no kind of the
+  four or no reason; such a line is left out and fails nothing), `pid` while it runs, and `reason` for a failed one.
 
 `conveyor.sh testaction stop <id>` stops that one running action, and no other; its record says stopped. One time
 limit applies to every action: the pack's `tunables.testActionTimeout`, 900 seconds by default. An action that runs
@@ -975,7 +987,7 @@ issue through the GitHub write path, with the pack's type and its last priority,
 `{time, event: "filed", file, issue}` in `testactions/filed.jsonl`, so the file's row has the issue and its Close its
 issue as done. A file main does not have, a title of more than one line, or an empty body files nothing and exits 2.
 The Tests page files an Optimize issue with it: its title starts "Optimize the test file <file>", and its body holds
-the file's numbers and the newest verdict of Judge this test, with its text (above, Bug cards: the new tests fail
+the file's numbers, its hollow cases and the newest verdict of Judge this test, with its text (above, Bug cards: the new tests fail
 without the fix, for the check of its card).
 
 The snapshot's `testActions` holds `seat` (the Tests seat, or null), `limit` and `actions`: the records of the 20
