@@ -2,7 +2,7 @@
 // The Tests page lists every test file (issue 34): a file a card ran, a whole-only file that only a whole-suite run
 // ran, and a file never run; its Last run took column, its sortable columns and its search box. Shared setup:
 // dashboard-view.helpers.mjs; the tests part is the one the engine makes for such a project (testfiles.test.sh,
-// tfeveryfile).
+// tfrunner).
 import assert from 'node:assert/strict';
 import { P, TESTS, T0, clone, boot, deliver, full, act, panel, cases } from './dashboard-view.helpers.mjs';
 
@@ -55,7 +55,7 @@ test('Tests: every test file has a row: the card run, the whole-only file with i
 
 // Bug: conveyor/conveyor.test.sh, a runner (wholeOnly) whose CPU is the sum of its case files', showed Over budget for
 // ever and offered "File an issue: speed up", an issue no change can meet. WHOLE here is as the engine now gives such
-// a file (testfiles.test.sh, tfwholeonly): not slow on purpose, 900 CPU s, no budget; its last run took 3 times its
+// a file (testfiles.test.sh, tfslower): not slow on purpose, 900 CPU s, no budget; its last run took 3 times its
 // CPU time on the clock, which the Board would show as Waits.
 test('Tests: a wholeOnly runner has "Runs other test files" in place of a budget, no Over budget or Waits, and no speed-up action', () => {
   const part = clone(PART);
