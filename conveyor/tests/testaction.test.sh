@@ -210,6 +210,20 @@ t_tarunstop() {
   trfree || fail "the stopped run still holds the test slot"
 }
 
+# Bug this guards (issue 42): a stopped run's record said stopped while a process of it still held its test slot. Its
+# processes were looked for once, then ended: a child started after the look (watch()'s timer) was never ended. Here a
+# process starts children all the time, each holding the lock it took, as the run's processes hold its slot: once
+# taend() returns, the lock is free.
+t_taendall() {
+  local p f=$T/$CASE/slot
+  mkdir -p "$T/$CASE" || fail "the case's folder"
+  ( exec 7>>"$f"; flock 7; while :; do sleep 5 & sleep 0.01; done ) & p=$! # sleep: children started all the time, each holding the lock
+  wait_until "! flock -n '$f' true" || fail "the process did not take the lock"
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testaction.sh (TESTACTS=${STATE%/*}/testactions)
+  ( STATE=$T/$CASE/cards.jsonl; . "$SRC/lib/testaction.sh" && taend "$p" ) || fail "taend() could not be run"
+  flock -n "$f" true || fail "a child started while the processes were looked for still runs, holding the lock"
+}
+
 # Bug this guards (issue 517): a run by hand of a path that is not a test file of main (a source file, a file main has
 # not, a path out of the repo, a helper main has in a __tests__ folder) ran something, or took a slot.
 t_tarunrefused() {

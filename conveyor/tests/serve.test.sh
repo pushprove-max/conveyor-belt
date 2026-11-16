@@ -9,6 +9,18 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
+# The end of the loops a case started, waited for: [pid] (a loop the case started in the background) is ended with a
+# TERM, as an owner ends one, then the case waits until that process is gone and the loop's run lock is free. The
+# loop's cards and its push hold that lock too (fd 8: run(), lib/run.sh) and end on their own a while after the loop's
+# own process: a loop started before then is refused ("a loop is already running here"), and on a busy machine the
+# case failed so ([restart]: its `run`; [serve]: the serve it restarts, which took no turn). With no pid (the case's
+# loops ran in the foreground), only the lock is waited for. Called before a case starts its next loop, and at its end.
+loopend() { # [pid]
+  [ -z "${1:-}" ] || { kill "$1" 2>/dev/null; wait "$1" 2>/dev/null; }
+  wait_until "${1:+! kill -0 $1 2>/dev/null && }flock -n '$ST/cards.jsonl.run' true" \
+    || fail "the loop's process${1:+ ($1)}, or a card or push of it, still runs and holds the loop's run lock"
+}
+
 # Bugs: a `serve` run from an install goes on running its commit after the pack pins another, and so stalls for good
 # on a cap only the new commit accepts; it waits for a card in flight before it restarts, or kills it; health says "running" while
 # that loop picks nothing; a `run` whose pin changes goes on picking on the old commit, or ends without saying why;
@@ -43,7 +55,7 @@ t_restart() {
     || fail "#7 and #8 did not both land through the restarted loop: $(cat "$STUB/serve.out")"
   kill -0 $pid 2>/dev/null || fail "serve did not restart itself in its own process: $(cat "$STUB/serve.out")"
   [ "$(loop health | jq -c '[.state, .reason]')" = '["running",null]' ] || fail "health of the restarted loop: $(loop health | jq -c '[.state, .reason]')"
-  kill $pid; wait $pid 2>/dev/null
+  loopend $pid
   # A `run` whose pin changes during its card ends once that card is done, with a line that says why, and picks nothing more.
   issue 9 2026-01-03 | jq -cs ". + [$(issue 10 2026-01-04)]" > "$STUB/issues.json"; loop control cap 1 >/dev/null
   echo 'echo two >> a.txt; jq --arg c "'"$A"'" ".plugin.commit = \$c" "'"$R"'/.conveyor/project.json" > "$STUB/p.new" && mv "$STUB/p.new" "'"$R"'/.conveyor/project.json"' > "$STUB/build"
@@ -61,6 +73,7 @@ t_restart() {
   out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards timeout 60 bash "$V/$A/conveyor/conveyor.sh" serve 2>&1) && fail "serve went on with a pin with no machine's Conveyor: $out"
   grep -q "pins Conveyor commit $C, which has no machine's Conveyor" <<<"$out" && ! grep -q "restarting on the new code" <<<"$out" \
     || fail "serve restarted on a pin with no machine's Conveyor, or did not say why: $out"
+  loopend
 }
 
 # Bugs: a `serve` run straight from a checkout (no install, so no pin to follow) runs the code it started on for good
@@ -92,7 +105,7 @@ t_follow() {
   till '[ -n "$(st '"'"'select(.issue == 8 and .step == "landed")'"'"')" ] && [ -n "$(st '"'"'select(.issue == 7 and .step == "landed")'"'"')" ]' \
     || fail "#7 and #8 did not both land through the restarted loop: $(cat "$STUB/serve.out")"
   kill -0 $pid 2>/dev/null && [ "$(grep -c restarting "$STUB/serve.out")" = 1 ] || fail "serve did not restart once in its own process: $(cat "$STUB/serve.out")"
-  kill $pid; wait $pid 2>/dev/null
+  loopend $pid
   # doctor warns of a running loop behind its checkout's HEAD, or, from an install, behind the pin; not of one on it.
   sleep 60 & z=$!; t=$(p_started $z) # sleep: a stand-in for a running loop's process
   says() { jq -n --argjson p "$z" --arg t "$t" --arg c "$1" --arg h "$2" '{pid: $p, started: $t, state: "running", commit: $c, checkout: (if $h == "" then null else $h end)}' > "$S/loop.json"; }
@@ -167,7 +180,7 @@ t_serve() {
   # Bug: a push that failed its check was run again every pushRetry on the same commit, where it fails the same way.
   # After a restart the push is still owed, but it failed its check on the commit main is at: it is not tried again,
   # at once or on the timer (2 s here), while main stays there.
-  kill $pid; wait $pid 2>/dev/null; n=$(wc -l < "$STUB/hookruns"); serve 2; turns 4
+  loopend $pid; n=$(wc -l < "$STUB/hookruns"); serve 2; turns 4
   [ "$(fails)" = 2 ] && [ "$(wc -l < "$STUB/hookruns")" = "$n" ] || fail "a push that failed its check was tried again on the same main: $(fails) push lines"
   # The remote refuses the next landing's push (its own hook: transport, not a check): tried at once, then on the
   # timer, until it works.
@@ -177,7 +190,7 @@ t_serve() {
     || fail "a push the remote refused is not recorded as transport under the card that landed: $(st 'select(.step == "push") | [.card, .kind]')"
   rm "$O/hooks/pre-receive"; till '[ "$(originat)" = "$(mainat)" ]' || fail "the push did not go through once it could: $(cat "$STUB/serve.out")"
   n=$(fails); turns 3; [ "$(fails)" = "$n" ] && [ "$(tail -n 1 "$STUB/pushes")" = "$(mainat)" ] || fail "a push that worked was tried again, or did not pass the pre-push check"
-  kill $pid; wait $pid 2>/dev/null
+  loopend $pid
   loop check || fail "the record check refuses a push line"
   [ "$(loop cards | jq -c '[.landed, .open, (.cards | map("\(.step) \(.stage)") | unique)]')" = '[4,0,["landed 5"]]' ] || fail "a push line changed a landed card's dashboard row: $(loop cards)"
   CONVEYOR_MAIN=$R bash "$SRC/report.sh" | grep -Eq '^cards landed +4$' || fail "the report miscounts cards that hold a push line"
@@ -226,6 +239,7 @@ t_serverun() {
   handfix 'the fast checks pass'; loop run > /dev/null 2>&1 || fail "a run with only an owed push to make failed once main moved"
   [ "$(originat)" = "$(mainat)" ] && [ "$(tail -n 1 "$STUB/pushes")" = "$(mainat)" ] && [ "$(fails)" = 1 ] && [ -z "$(ls "$T/$CASE/cards")" ] \
     || fail "the next run did not push the owed landing through the pre-push check once main moved"
+  loopend
 }
 
 # One push carries three landings, and GitHub keeps the issue of the first of them open. The three are
@@ -240,6 +254,7 @@ t_servebatch() {
   [ "$(jq -cs --argjson o "$open" 'map(select(.issue > 10 and (.step | IN("pushed", "issue")))) | (map(select(.step == "pushed") | .time | fromdate) | max) as $p
       | map(select(.step == "issue")) | [(map(.result) | join(" ")), (.[2].issue == $o), (.[2].reason | test("still shows the issue open")), (.[:2] | all((.time | fromdate) - $p < 4)), ((.[2].time | fromdate) - $p >= 5)]' "$S/cards.jsonl")" \
     = '["ok ok fail",true,true,true,true]' ] || fail "the issue checks of a batch push were not made in turn under one wait: $(st 'select(.issue > 10 and (.step | IN("pushed", "issue"))) | "\(.issue) \(.step) \(.result) \(.time) \(.reason)"' | tr '\n' ,)"
+  loopend
 }
 
 # Bugs: the loop waits for a push before it picks the next card; two landings during one push bring two more
@@ -283,6 +298,7 @@ EOF2
     || fail "the run did not end with main pushed in two pushes: $(started)"
   [ "$(loop health | jq -c '[.pushing, .unpushed]')" = '[null,[]]' ] && [ ! -e "$ST/pushing" ] \
     || fail "a push is still reported after the run: $(loop health | jq -c '[.pushing, .unpushed]')"
+  loopend
 }
 
 # Bugs: the remote's main holds a commit the Conveyor's main lacks (landed there by hand), so every push is refused
@@ -340,6 +356,7 @@ t_pushmerge() {
   [ -n "$l9" ] && [ "$(mainat)" = "$l9" ] && [ "$(originat)" = "$hand" ] && [ -z "$(git -C "$R" status --porcelain)" ] \
     && [[ $(st 'select(.step == "push" and .result == "fail") | .reason' | tail -n 1) == *"commit of the merge refused: no merge commits here"* ]] \
     || fail "a merge main's commit-msg hook refuses was made, or the push line does not say it was refused: $(git -C "$R" log --oneline -3 main) $(st 'select(.step == "push")' | tail -n 1)"
+  loopend
 }
 
 # Bugs: the remote pushes to other URLs than the one it fetches from (remote.origin.pushurl), and the commit that
@@ -368,6 +385,7 @@ t_pushurl() {
   [ "$(st 'select(.step == "push" and .result == "fail") | .card' | wc -l)" = 0 ] && [ "$(git -C "$O" rev-parse refs/heads/main)" = "$was" ] \
     || fail "the push failed first, or went to the URL the remote fetches from: $(st 'select(.step == "push")')"
   grep -qxF "$C" "$T/$CASE/served" || fail "the push URL was not fetched with the remote's own uploadpack: $(cat "$T/$CASE/served" 2>&1)"
+  loopend
 }
 
 # Bugs: the remote has two URLs and pushes to both (no pushurl, or the same list again), and the commit that refuses
@@ -387,6 +405,7 @@ t_pushurls() {
       || fail "$x, where pushes go, does not hold both the commit made by hand and the landing: $(git -C "$x" log --oneline main) $(st 'select(.step == "push")')"
   done
   [ "$(st 'select(.step == "push" and .result == "fail") | .card' | wc -l)" = 0 ] || fail "the push failed first: $(st 'select(.step == "push")')"
+  loopend
 }
 
 # Bugs: the push URL is set by the pack's push.env alone (git's GIT_CONFIG_* variables), and is a path relative to the
@@ -407,6 +426,7 @@ t_pushurlenv() {
     || fail "where pushes go does not hold both the commit made by hand and the landing: $(git -C "$B" log --oneline main) $(st 'select(.step == "push")')"
   [ "$(st 'select(.step == "push" and .result == "fail") | .card' | wc -l)" = 0 ] && [ "$(git -C "$O" rev-parse refs/heads/main)" = "$was" ] \
     || fail "the push failed first, or went to the URL the remote fetches from: $(st 'select(.step == "push")')"
+  loopend
 }
 
 # Bugs: the health record misses a blocked card, a card waiting on the owner's yes, an open card with no new step,
@@ -467,7 +487,7 @@ w=$(jq -c "select(.step == \"worktree\")" "$ST/cards.jsonl"); [ "$(LC_ALL=C ps -
       '{card:$c,issue:9,step:"worktree",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:"",pid:$p,started:$s}' >> "$S/cards.jsonl"
   done
   [ "$(loop health | jq -c '.stuck | map(.card)')" = '["b","c"]' ] || fail "stuck at once: the gone and the reused pid, not the live one: $(loop health | jq -c .stuck)"
-  kill $alive; wait $alive 2>/dev/null; :
+  kill $alive; wait $alive 2>/dev/null; loopend
 }
 
 # Bug: the loop that a restart starts adopts a card that has landed and not pushed yet; the card's process ends while
@@ -499,7 +519,7 @@ t_landedrestart() {
   till '[ -n "$(st '"'"'select(.card == "c1-14" and .step == "issue")'"'"')" ]' || fail "the landed card was not pushed: $(cat "$STUB/serve.out")"
   [ "$(git -C "$O" rev-parse main)" = "$sha" ] && [ -z "$(st 'select(.step == "blocked")')" ] && loop check \
     || fail "the landed card's push did not go out, or it was blocked: $(st '"\(.card) \(.step)"' | tr '\n' ,) $(cat "$STUB/serve.out")"
-  kill $pid; wait $pid 2>/dev/null; :
+  loopend $pid
 }
 
 # Bug: an installed loop whose pack does not read wrote why at every turn, twice: it asks the pack for its pin at
@@ -517,5 +537,5 @@ t_servesame() {
   wait_until 'grep -q "^conveyor pack: .*project.json: no such file" "$STUB/serve.out"' || fail "the loop does not say its pack does not read: $(cat "$STUB/serve.out")"
   turns 6
   [ "$(cat "$STUB/serve.out")" = "conveyor pack: $R/.conveyor/project.json: no such file" ] || fail "held for 6 turns by a pack that does not read, the installed loop said more than the reason, once: $(cat "$STUB/serve.out")"
-  kill $pid; wait $pid 2>/dev/null; :
+  loopend $pid
 }

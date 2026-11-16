@@ -165,14 +165,32 @@ tafile() { # <test file>
   [ -s "$TESTACTS/$id.json" ] || { echo "conveyor: the test action $id did not start: $(tail -n 5 "$TESTACTS/$id.err" 2>/dev/null)" >&2; return 1; }
   echo "$id"
 }
-# Each process <pid> started and has not ended, and <pid>: one a line, a parent before its children.
-tatree() { local c; echo "$1"; for c in $(pgrep -P "$1" 2>/dev/null); do tatree "$c"; done; } # <pid>
+# Each process <pid> started and has not ended, and <pid>: one a line, a parent before its children. Each is stopped
+# (STOP) before its children are looked for, so none starts one more unseen: a child started after the look (watch()'s
+# timer, every LIVE seconds) was never ended, and held the run's test slot after its record said stopped. The caller
+# ends them (taend()).
+tatree() { local c; kill -STOP "$1" 2>/dev/null; echo "$1"; for c in $(pgrep -P "$1" 2>/dev/null); do tatree "$c"; done; } # <pid>
+# Ends <pid> and each process under it: each is told to end (TERM, to its process group too: timeout makes one for the
+# command), then let go on (CONT) to do so, and killed 10 s later if it, or a process of its group, has not ended.
+# Returns once they all have.
+taend() { # <pid>
+  local ps p x i
+  ps=$(tatree "$1")
+  for p in $ps; do kill -TERM -- "-$p" 2>/dev/null; kill -TERM "$p" 2>/dev/null; done
+  for p in $ps; do kill -CONT -- "-$p" 2>/dev/null; kill -CONT "$p" 2>/dev/null; done
+  for ((i = 0; i < 100; i++)); do
+    x=''; for p in $ps; do ! kill -0 "$p" 2>/dev/null && ! kill -0 -- "-$p" 2>/dev/null || x=1; done
+    [ -n "$x" ] || break
+    [ "$i" != 99 ] || for p in $ps; do kill -KILL -- "-$p" 2>/dev/null; kill -KILL "$p" 2>/dev/null; done
+    sleep 0.1
+  done
+}
 # The run of one file (tafile()), in the background: its record written first (running, pid this process), the file
 # run in a process of its own, which holds the test slot (tests()), and its record written last with how it ended. A
-# TERM (tastop()) ends the run: each process it started is told to end (timeout tells the command's group), and
-# killed 10 s later if it has not; the record says stopped once they have all ended, so its slot is free again.
+# TERM (tastop()) ends the run (taend()); the record says stopped once each process it started has ended, so its slot
+# is free again.
 tarunfile() { # <the record> <worktree>
-  local r=$1 wt=$2 t f id tp rc='' w='' s='' stopped='' state='done' res=null why=null tm x ps p i me=$BASHPID
+  local r=$1 wt=$2 t f id tp rc='' w='' s='' stopped='' state='done' res=null why=null tm x me=$BASHPID
   trap 'stopped=1' TERM
   jqget "$r" id id file t || return 1
   f=$TESTACTS/$id
@@ -187,15 +205,7 @@ tarunfile() { # <the record> <worktree>
   [ -n "$stopped" ] || wait "$tp"
   if [ -n "$stopped" ]; then
     trap '' TERM
-    ps=$(tatree "$tp")
-    for p in $ps; do kill -TERM -- "-$p" 2>/dev/null; kill -TERM "$p" 2>/dev/null; done
-    for ((i = 0; i < 100; i++)); do
-      x=''; for p in $ps; do ! kill -0 "$p" 2>/dev/null || x=1; done
-      [ -n "$x" ] || break
-      [ "$i" != 99 ] || for p in $ps; do kill -KILL -- "-$p" 2>/dev/null; kill -KILL "$p" 2>/dev/null; done
-      sleep 0.1
-    done
-    wait "$tp" 2>/dev/null; state=stopped
+    taend "$tp"; wait "$tp" 2>/dev/null; state=stopped
   elif IFS=$'\t' read -r rc w s < "$wt.res" 2>/dev/null && [ -n "$s" ]; then
     if [ "$rc" = 0 ]; then res='"pass"'; else res='"fail"'; fi
     [ "$rc" != 124 ] || state="timed out"
