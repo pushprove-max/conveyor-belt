@@ -77,11 +77,8 @@ t_reviewretry() {
   loop run >/dev/null || fail "run of #12 exited non-zero"; rm "$STUB/review-cmd"
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 12 and .step == "review") | "\(.result) \(.firstTry.reason)"')" = "GO review reported no token usage" ] \
     && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] || fail "an answer with no verdict and no usage was not run again: $(st 'select(.issue == 12)')"
-  # A NO-GO is a verdict: that review runs once, and the fix goes to the next review.
-  echo "[$(issue 9 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  loop run >/dev/null || fail "run of #9 exited non-zero"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 9 and .step == "review") | .result' | tr '\n' ' ')" = "NO-GO GO " ] \
-    || fail "a review that said NO-GO was run again: $(st 'select(.issue == 9 and .step == "review") | .result' | tr '\n' ' ')"
+  # A NO-GO is a verdict: that review runs once, and the fix goes to the next review (port.test.sh t_autoport: three
+  # NO-GOs and a GO are four reviews).
   # A review that wrote its NO-GO and then exited non-zero gave a verdict: it is not run again.
   echo "[$(issue 10 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo "$NOGO" > "$STUB/review.1"; echo 'cat "$STUB/review.1" > "$out"; exit 3' > "$STUB/review-cmd"
   loop run >/dev/null
@@ -96,33 +93,30 @@ t_reviewretry() {
     || fail "a retried review whose model changed between its attempts is priced at one model: $(st 'select(.issue == 13 and .step == "review")')"
 }
 
-# Bug: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
-# numbered), lands as a clean GO.
+# Bugs: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
+# numbered), lands as a clean GO; a review that says GO twice (once mid-way, once at the end) blocks as having no
+# clear verdict. Read as the engine reads a review (followups.sh's verdict()): a review with no clear verdict blocks
+# its card (visible.test.sh t_visibleinline), and a NO-GO goes to a fix round (port.test.sh t_autoport), so no card run is
+# needed for the answers.
+verdictof() { # <the review's lines...>
+  local NOTFINDING; eval "$(grep '^NOTFINDING=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p' "$SRC/lib/followups.sh")"
+  [ -n "$NOTFINDING" ] && declare -F verdict >/dev/null || fail "the engine no longer defines verdict() or NOTFINDING where this case reads them"
+  mkdir -p "$T/$CASE"; printf '%s\n' "$@" > "$T/$CASE/review"; verdict "$T/$CASE/review"
+}
 t_contra() {
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01))"; head=$(git -C "$R" rev-parse HEAD)
-  printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: NO-GO' 'VERDICT: GO' | tee "$STUB/review.1" > "$STUB/review.2"
-  printf '%s\n' '[P1] a.txt:1 unresolved defect' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.3"
-  printf '%s\n' '1. [P1] a.txt:1 numbered defect' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.5"
-  echo "$GO" | tee "$STUB/review.4" > "$STUB/review.6"
-  loop run 1 >/dev/null
-  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q 'without one clear verdict' || fail "two verdicts were accepted"
-  [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a contradictory review landed"
-  loop run 1 >/dev/null; loop run 1 >/dev/null
-  for n in 8 9; do
-    [ "$(st "select(.issue == $n and (.step == \"review\" or .step == \"fix\")) | .result" | tr '\n' ' ')" = "NO-GO ok GO " ] || fail "issue $n: GO beside an open finding was accepted without a fix round"
-  done
+  [ "$(verdictof 'USER-VISIBLE: no' 'VERDICT: GO')" = GO ] || fail "a clean GO is not a GO, so this case's other answers prove nothing"
+  [ "$(verdictof 'USER-VISIBLE: no' 'VERDICT: NO-GO' 'VERDICT: GO')" = none ] || fail "two verdicts were accepted"
+  [ "$(verdictof '[P1] a.txt:1 unresolved defect' 'USER-VISIBLE: no' 'VERDICT: GO')" = NO-GO ] || fail "GO beside an open finding was accepted"
+  [ "$(verdictof '1. [P1] a.txt:1 numbered defect' 'USER-VISIBLE: no' 'VERDICT: GO')" = NO-GO ] || fail "GO beside an open numbered finding was accepted"
+  [ "$(verdictof 'VERDICT: GO' '' 'USER-VISIBLE: no' 'VERDICT: GO')" = GO ] || fail "a review that said GO twice was not a GO"
 }
 
 # Bugs: a review that says the same verdict twice (once mid-way, once at the end, its findings repeated) blocks as
 # having no clear verdict; a finding the review repeats word for word is filed as two follow-ups.
 t_repeat() {
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"
-  printf '%s\n' 'VERDICT: GO' '' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"
+  setup "[$(issue 8 2026-02-01)]"
   F='[P2] a.txt:1 wrong word. Proof: a.txt line 2 reads "two"'
-  for i in 2 3 4; do f=$(moved "${i/4/}" "$F"); printf '%s\n' "$f" 'VERDICT: NO-GO' "  $f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
-  loop run 1 >/dev/null
-  [ "$(st 'select(.issue == 7 and .step == "review") | .result')" = GO ] && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
-    || fail "a review that said GO twice did not land as a GO: $(st 'select(.issue == 7)')"
+  for i in 1 2 3; do f=$(moved "${i/3/}" "$F"); printf '%s\n' "$f" 'VERDICT: NO-GO' "  $f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
   loop run 1 >/dev/null
   [ "$(st 'select(.issue == 8 and .step == "review") | "\(.result) \(.counts.P2)"' | tr '\n' ,)" = 'NO-GO 1,NO-GO 1,NO-GO 1,' ] \
     || fail "a review that said NO-GO twice was not a NO-GO, or its repeated finding counted twice: $(st 'select(.issue == 8 and .step == "review")')"
@@ -236,8 +230,8 @@ t_corrupt() {
 # Bug: a session the model API refused (a Cloudflare 403 challenge on every request for some minutes) blocked its card
 # as "session failed (exit 1)": four cards in three minutes, each retried by hand once the API answered again.
 # $STUB/refuse holds how many sessions the API still refuses: each ends as Claude Code ends one then.
-refusing() { # <sessions refused> [the result each ends with, in place of the Cloudflare 403's]
-  echo "$1" > "$STUB/refuse"; echo "${2:-Failed to authenticate. API Error: 403 Attention Required! | Cloudflare}" > "$STUB/refusal"
+refusing() { # <sessions refused>
+  echo "$1" > "$STUB/refuse"; echo "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare" > "$STUB/refusal"
   cat > "$STUB/build" <<'EOT'
 date +%s.%N >> "$STUB/calls"; n=$(cat "$STUB/refuse")
 [ "$n" -le 0 ] || { echo $((n - 1)) > "$STUB/refuse"
@@ -265,29 +259,32 @@ t_apierror() {
     || fail "the card the API kept refusing is not blocked naming the error: $(st 'select(.issue == 8) | [.step, .reason] | join(" ")' | tr '\n' ,)"
   st 'select(.issue == 8 and .step == "blocked") | .tail' | grep -q 'API Error: 403 Attention Required! | Cloudflare' || fail "the blocked line lost the API's own words: $(st 'select(.issue == 8 and .step == "blocked") | .tail')"
   [ "$(st 'select(.issue == 8 and .step == "blocked") | .spent.tokens.claude')" = 20 ] || fail "the five refused tries' tokens are not on the blocked line: $(st 'select(.issue == 8 and .step == "blocked") | .spent')"
+}
+# Which words of a failed session are an API-side error, read as the engine reads them (session.sh's APIERROR, on the
+# session's output and stderr): an error it names is retried as t_apierror's 403 is (and t_apicodexrefused's 429), and
+# one it does not name fails the card at once as any failed session does (t_fail). No card run is needed for the words.
+apiread() { # <codex: true or false> <the session's output> [its stderr]
+  # shellcheck disable=SC2034 # APISAID is read where the eval'd APIERROR is built from it
+  local APISAID APIERROR; eval "$(sed -n "/^APISAID='/,/^APIERR=/p" "$SRC/lib/session.sh" | sed '$d')"
+  [ -n "$APIERROR" ] || fail "session.sh no longer defines APIERROR where this case reads it"
+  jq -rRn --argjson codex "$1" --rawfile e <(printf '%s' "${3:-}") "$APIERROR" <<<"$2"
+}
+claudesaid() { jq -cn --arg r "$1" '{type: "result", is_error: true, result: $r}'; } # <result>
+t_apiwords() {
+  [ "$(apiread false "$(claudesaid 'Failed to authenticate. API Error: 403 Attention Required! | Cloudflare')")" = "403 Cloudflare" ] \
+    || fail "the Cloudflare 403 is no longer read as an API error, so this case's other answers prove nothing"
   # A failure that is the card's own is still one: an error result that names no API-side error blocks at once.
-  echo "[$(issue 9 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/calls"
-  echo 'date +%s.%N >> "$STUB/calls"; echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"API Error: 403 forbidden: this account may not use the model\"}"; exit 1' > "$STUB/build"
-  loop run >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/calls")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^build: session failed (exit 1' \
-    || fail "an error of the card's own was run again, or not blocked as a failed session: $(st 'select(.issue == 9) | [.step, .reason] | join(" ")' | tr '\n' ,)"
+  [ -z "$(apiread false "$(claudesaid 'API Error: 403 forbidden: this account may not use the model')")" ] || fail "a 403 that is no Cloudflare challenge was read as an API error"
   # Bug: a failed result that names an HTTP status in the card's own words (a failing test's) was read as an outage:
   # five sessions, and a queue paused for nothing. Only the words "API Error" before the status make it the API's.
-  echo "[$(issue 14 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/calls"; rm -f "$ST/apierror"
-  echo 'date +%s.%N >> "$STUB/calls"; echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"Test failed: expected status 500, got 200\"}"; exit 1' > "$STUB/build"
-  loop run >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/calls")" = 1 ] && [ ! -e "$ST/apierror" ] && st 'select(.issue == 14 and .step == "blocked") | .reason' | grep -q '^build: session failed (exit 1' \
-    || fail "a failed result naming a status in its own words was run again, or marked an API error: $(wc -l < "$STUB/calls") sessions, $(st 'select(.issue == 14) | [.step, .reason] | join(" ")' | tr '\n' ,)"
+  [ -z "$(apiread false "$(claudesaid 'Test failed: expected status 500, got 200')")" ] || fail "a status named in the card's own words was read as an API error"
   # Bug: a connection reset or an overloaded result that does not start with the words "API Error" blocked at once.
-  # Each is an API-side error as the 403 is: the session runs again and its card lands.
-  local n=10 r
-  for r in 'Connection reset (ECONNRESET)' 'Overloaded'; do
-    echo "[$(issue $n 2026-01-01)]" > "$STUB/issues.json"; printf '%s\n' "$GO" > "$STUB/review.$((n - 8))"; refusing 1 "$r"; : > "$STUB/calls"
-    loop run >/dev/null 2>&1
-    [ "$(wc -l < "$STUB/calls")" = 2 ] && [ "$(st "select(.issue == $n and (.step | IN(\"blocked\", \"landed\"))) | .step")" = landed ] \
-      || fail "a session that ended with '$r' did not run again and land its card: $(st "select(.issue == $n) | [.step, .reason] | join(\" \")" | tr '\n' ,)"
-    n=$((n + 1))
-  done
+  # Each is an API-side error as the 403 is, so the session runs again.
+  [ "$(apiread false "$(claudesaid 'Connection reset (ECONNRESET)')")" = "connection reset" ] || fail "a connection reset was not read as an API error"
+  [ "$(apiread false "$(claudesaid 'Overloaded')")" = overloaded ] || fail "an overloaded result was not read as an API error"
+  # Bug: a refusal Codex prints in plain words, no JSON event, was read as no API error: the review ran again once
+  # only, as one without a verdict, and marked nothing.
+  [ "$(apiread true 'API Error: 429')" = 429 ] || fail "a Codex refusal in plain words was not read as an API error"
 }
 # One outage must not burn through the queue: while a session's API error is fresh (5 times apiPause), the loop picks
 # no card. Two issues, one builder: the first card is refused once and lands; the second card's session starts only
@@ -369,15 +366,7 @@ t_apicodexrefused() {
     || fail "a Codex review that wrote a verdict and was then refused by the API was run again: $(wc -l < "$STUB/reviews") reviews, $(st 'select(.issue == 9) | [.step, .reason] | join(" ")' | tr '\n' ,)"
   # Bug: that review, kept as answered, marked no API error either, so the queue went on into the outage it met.
   jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex review refused by the API after its verdict did not mark the API error"
-  # Bug: a refusal Codex prints in plain words, no JSON event, was read as no API error: the review ran again once
-  # only, as one without a verdict, and marked nothing. Refused so once here, it runs again and answers GO.
-  echo "[$(issue 10 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo 1 > "$STUB/refuse"; rm -f "$ST/apierror"
-  # shellcheck disable=SC2016
-  echo 'n=$(cat "$STUB/refuse"); [ "$n" -le 0 ] || { echo $((n - 1)) > "$STUB/refuse"; echo "API Error: 429"; exit 1; }' > "$STUB/review-cmd"
-  loop run >/dev/null 2>&1
-  [ "$(st 'select(.issue == 10 and .step == "review") | [.result, .firstTry] | tojson')" = '["GO",null]' ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
-    && jq -e numbers "$ST/apierror" >/dev/null 2>&1 \
-    || fail "a Codex review refused in plain words was not run again as an API error, or marked none: $(wc -l < "$STUB/reviews") reviews, $(st 'select(.issue == 10) | [.step, .reason] | join(" ")' | tr '\n' ,)"
+  # A refusal Codex prints in plain words is read as one (t_apiwords).
   # Bug: a refusal Codex wrote to stderr alone, its stream empty, was read as no API error either. Refused so at every
   # try, the review runs 5 times and its card blocks naming the error, with the words stderr held.
   echo "[$(issue 11 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; rm -f "$ST/apierror"
