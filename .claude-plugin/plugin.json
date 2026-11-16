@@ -1,6 +1,6 @@
 {
   "name": "conveyor-belt",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Issue-to-merged-commit automation for Claude Code: one issue becomes one card, built in a fresh worktree, reviewed, tested, landed, and pushed when you choose.",
   "author": {
     "name": "pushprove-max"
