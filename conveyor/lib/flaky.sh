@@ -29,6 +29,48 @@ flaky() { # <source> <entries, a JSON array of {case} and any of {card, issue, n
   [ "${3:-}" = nofile ] || while IFS= read -r c; do flakyfile "$c" "$now" || rc=1; done < <(jq -r '.[].case' <<<"$2" | sort -u)
   exec {lock}>&-; return $rc
 }
+# `conveyor.sh flaky` drops, as it reads the record and before it adds, each case `<file>: <case>` gone from main's
+# checkout ($MAIN), with all its entries and filed issues. Its files: the tracked file at that path or ending in /<file>
+# (a runner may name a path from a subfolder), and each test file that names the file (a runner's case files: the
+# engine's conveyor.test.sh). Gone: none of them holds the case's name as a word, or there is no such file. Each
+# dropped case is said on stderr with its count of entries and its reason; its last filed issue, when open, is closed
+# with a comment that names the reason. A case whose issue could not be closed, or whose state was unread, is kept
+# for the next read; so is the whole record when main's tracked files cannot be read.
+flakyprune() {
+  local lock rec tracked c f k w n s why m out gone='[]' files own
+  [ -s "$FLAKY" ] || return 0
+  tracked=$(git -C "$MAIN" -c core.quotePath=false ls-files 2>/dev/null) && [ -n "$tracked" ] || return 0
+  { exec {lock}>>"$FLAKY.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the flaky-test record could not be locked; nothing dropped" >&2; return 1; }
+  rec=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || { exec {lock}>&-; return 0; }
+  while IFS= read -r c; do
+    f=${c%%: *} k=${c#*: }
+    mapfile -t own < <(F=$f awk '$0 == ENVIRON["F"] || substr($0, length($0) - length(ENVIRON["F"])) == "/" ENVIRON["F"]' <<<"$tracked")
+    mapfile -t files < <(git -C "$MAIN" -c core.quotePath=false grep -lwF -e "${f##*/}" -- '*.test.*' 2>/dev/null)
+    files+=("${own[@]}")
+    # A word: no letter or digit on either side (an engine case is defined as t_<case>, so _ is no part of one). A quote
+    # may have a backslash before it, as in a quoted name in the source ('it\'s').
+    w=$(sed -e 's/[][\.*^$+?(){}|]/\\&/g' -e 's/['\''"`]/\\\\?&/g' <<<"$k")
+    [ ${#files[@]} = 0 ] || ! git -C "$MAIN" grep -qE -e "(^|[^A-Za-z0-9])$w([^A-Za-z0-9]|\$)" -- "${files[@]/#/:(literal)}" 2>/dev/null || continue
+    if [ ${#own[@]} = 0 ] && [ "${#files[@]}" = 0 ]; then why="its file $f is not in main's checkout"
+    elif [ ${#own[@]} = 0 ]; then why="its file $f is not in main's checkout, and no test file that runs through it holds the case \"$k\""
+    else why="the case \"$k\" is no longer in $f or in a test file that runs it"; fi
+    n=$(jq -r --arg c "$c" '[.filed[]? | select(.case == $c) | .issue][-1] // empty' <<<"$rec")
+    if [ -n "$n" ]; then
+      s=$(timeout 20 gh issue view "$n" --json state 2>/dev/null </dev/null | jq -r '.state // ""' 2>/dev/null) || s=''
+      if [ "$s" = OPEN ]; then
+        out=$(gh_write issue close "$n" --comment "Conveyor: the flaky-test record dropped the case \`$c\`: $why. Nothing is kept off card test steps for it now." 2>&1 </dev/null) \
+          || { echo "conveyor: flaky test $c: $why, but #$n could not be closed; kept: $out" >&2; continue; }
+      elif [ "$s" != CLOSED ]; then echo "conveyor: flaky test $c: $why, but the state of #$n could not be read; kept" >&2; continue; fi
+    fi
+    m=$(jq --arg c "$c" '[.entries[]? | select(.case == $c)] | length' <<<"$rec")
+    echo "conveyor: flaky test $c: dropped from the flaky-test record with its $m entries${n:+ and #$n}: $why" >&2
+    gone=$(jq -c --arg c "$c" '. + [$c]' <<<"$gone")
+  done < <(jq -r '[(.entries[]?.case), (.filed[]?.case) | strings | select(test("^.+?: .+$"))] | unique[]' <<<"$rec")
+  [ "$gone" = '[]' ] || flakyput "$(jq -c --argjson g "$gone" '.entries = [.entries[]? | select(IN(.case; $g[]) | not)]
+    | .filed = [.filed[]? | select(IN(.case; $g[]) | not)]' <<<"$rec")" \
+    || { exec {lock}>&-; echo "conveyor: the flaky-test record could not be written; nothing dropped" >&2; return 1; }
+  exec {lock}>&-
+}
 # One issue for a case whose entries come from FLAKY_SOURCES different sources within FLAKY_DAYS days, unless the one
 # filed for it last is open; its state unread files none (it may be open), and the next entry asks again. An issue
 # GitHub did not take is not kept, so the next entry files it. Its labels: the pack's type, its last priority, the

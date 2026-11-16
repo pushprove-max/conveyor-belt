@@ -12,6 +12,8 @@ fl() { jq -r "$1" "$ST/flaky.json"; } # <jq filter> over the flaky-test record
 flakyfiled() { [ -s "$STUB/filed" ] && jq -c "select(.labels | map(.name) | index(\"flaky-test\"))" "$STUB/filed" | wc -l || echo 0; }
 # An entry of the record added at <seconds ago> by `flaky add`.
 flakyat() { CONVEYOR_NOW=$(($(date +%s) - $1)) loop flaky add "${@:2}"; } # <seconds ago> <case> <source> <note>
+# The test files the cases below name, on main: `flaky` drops an entry whose case is not in its file (t_flakyprune).
+flakymain() { printf 'flaky\n' > "$R/b.test"; printf 'other\n' > "$R/c.test"; printf 'one\n' > "$R/x.test"; git -C "$R" add b.test c.test x.test && git -C "$R" commit -qm tests || fail "main's test files"; }
 
 # The owner, 2026-11-13: all 20 failed test runs of a day passed on their next run, and nothing said which cases did
 # that. A card whose run passed on re-run (its first run in <worktree>.first) adds one entry for each case that had not
@@ -33,7 +35,7 @@ t_flakyrerun() {
 # A main-red fix card and a land-branch card have no issue, and their ids end in -0. Bug: flakyrun() read the 0 as
 # the card's issue, so the entry held issue 0 and the filed issue listed it as "issue #0".
 t_flakyrunzero() {
-  setup '[]'
+  setup '[]'; flakymain
   local c=c20260101T000000-repo-0 b
   local w=$T/$CASE/cards/$c
   mkdir -p "${w%/*}"
@@ -69,7 +71,7 @@ t_flakyoffissue() {
 # `flaky add` (the nightly whole test: a case that failed in the full run and passed alone) adds one entry with its
 # source and note; a call with no case name adds none.
 t_flakyadd() {
-  setup '[]'
+  setup '[]'; flakymain
   loop flaky add "x.test: one" nightly "failed in the full run, passed alone" > /dev/null || fail "flaky add failed"
   [ "$(fl '.entries | map([.case, .source, .note] | join("|")) | join(",")')" = "x.test: one|nightly|failed in the full run, passed alone" ] \
     || fail "the entry is not the one added: $(cat "$ST/flaky.json")"
@@ -83,7 +85,7 @@ t_flakyadd() {
 # body; while it is open a fourth files nothing, and once it is closed the next files again. An entry older than seven
 # days does not count, and one older than 30 days is dropped. The Board's line has each case's count and its issue.
 t_flakyfile() {
-  setup '[]'
+  setup '[]'; flakymain
   tune '.labels.nonProductAreas += ["area:engine"]'
   local k="b.test: flaky" day=86400 b
   flakyat $((40 * day)) "$k" old "forty days ago" > /dev/null && flakyat $((9 * day)) "$k" week "nine days ago" > /dev/null \
@@ -119,7 +121,7 @@ t_flakyfile() {
 # `flaky off` (the Board's Keep a case off, an action that files no issue) adds its entry and files none, though it is
 # the case's third source within seven days. Bug it catches: the Board ran `flaky add`, which filed an issue then.
 t_flakyoffadd() {
-  setup '[]'
+  setup '[]'; flakymain
   local k="b.test: flaky" day=86400
   flakyat $((2 * day)) "$k" one "first" > /dev/null && flakyat $day "$k" two "second" > /dev/null || fail "flaky add failed"
   loop flaky off "$k" "Board user" "kept off" > /dev/null || fail "flaky off failed"
@@ -141,8 +143,32 @@ t_flakysnapfiles() {
 
 # Three entries from one source are one source: nothing is filed.
 t_flakysame() {
-  setup '[]'
+  setup '[]'; flakymain
   local i; for i in 1 2 3; do loop flaky add "b.test: flaky" nightly "run $i" > /dev/null || fail "flaky add failed"; done
   [ "$(fl '.entries | length')" = 3 ] || fail "not three entries: $(cat "$ST/flaky.json")"
   [ "$(flakyfiled)" = 0 ] || fail "three entries from one source filed an issue: $(cat "$STUB/filed")"
+}
+
+# `conveyor.sh flaky` drops, as it reads the record, each case gone from main: renamed in its file, no longer in a
+# runner's case files, or its file gone; its open issue is closed with the reason. A case still in its file (its name
+# quoted there as 'it\'s kept' too), one in a file named from a subfolder (pkg/s.test as s.test) and a runner's case
+# still in its case file stay. Bug it catches:
+# the record kept a renamed case's entries under each old name, and a removed file's, so they named cases that no
+# longer ran.
+t_flakyprune() {
+  setup '[]'; mkdir -p "$R/cases" "$R/pkg" "$ST"
+  printf "test('new name', () => {})\ntest('kept', () => {})\ntest('it\\\\'s kept', () => {})\n" > "$R/b.test.mjs"; printf '# runs cases/\n' > "$R/r.test.sh"
+  printf '# r.test.sh\nt_rcase() {\n  :\n}\n' > "$R/cases/c.test.sh"; printf "test('sub', () => {})\n" > "$R/pkg/s.test"
+  git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files"
+  jq -cn --arg q "b.test.mjs: it's kept" '{entries: (["b.test.mjs: old name", "b.test.mjs: kept", $q, "gone.test.mjs: x", "r.test.sh: rcase", "r.test.sh: rgone", "s.test: sub"]
+    | map({case: ., source: "s", time: (now - 86400 | todate)})), filed: [{case: "b.test.mjs: old name", issue: 100101}, {case: "gone.test.mjs: x", issue: 100102}]}' > "$ST/flaky.json"
+  echo OPEN > "$STUB/state.100101"; echo CLOSED > "$STUB/state.100102"
+  loop flaky off "b.test.mjs: kept" "Board user" "kept off" > /dev/null 2> "$STUB/err" || fail "flaky off failed: $(cat "$STUB/err")"
+  [ "$(fl '[.entries[].case] | join("|")')" = "b.test.mjs: kept|b.test.mjs: it's kept|r.test.sh: rcase|s.test: sub|b.test.mjs: kept" ] || fail "the entries kept: $(cat "$ST/flaky.json")"
+  [ "$(fl '.filed | length')" = 0 ] || fail "a dropped case's filed issue was kept: $(cat "$ST/flaky.json")"
+  [ "$(cat "$STUB/closed" 2>&1)" = 100101 ] || fail "not exactly the open issue of the renamed case was closed: $(cat "$STUB/closed" 2>&1)"
+  grep -q 'b.test.mjs: old name.*no longer in b.test.mjs' "$STUB/close-comments" || fail "the closing comment does not give the reason: $(cat "$STUB/close-comments" 2>&1)"
+  grep -q 'b.test.mjs: old name: dropped .* 1 entries and #100101: the case "old name" is no longer in b.test.mjs' "$STUB/err" \
+    && grep -q "gone.test.mjs: x: dropped .*: its file gone.test.mjs is not in main's checkout$" "$STUB/err" \
+    && grep -q 'r.test.sh: rgone: dropped .*: the case "rgone" is no longer in r.test.sh' "$STUB/err" || fail "a dropped case was not said with its reason: $(cat "$STUB/err")"
 }

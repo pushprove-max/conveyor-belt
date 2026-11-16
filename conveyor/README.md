@@ -686,6 +686,12 @@ same way and files no issue for it (the Board's Keep a case off, which files non
 counts it. A call with no case name or no source adds nothing and exits 2.
 Entries older than 30 days are dropped.
 
+Before it adds its entry, `conveyor.sh flaky` drops each case that is gone from main, with all its entries. A case is
+gone when its file is not in main's checkout, or when its name is not in its file or in a test file that runs through
+it (a runner's case files). A file named from a subfolder of the checkout counts as that file. The command prints each
+dropped case with its reason, and closes the case's open flaky issue with a comment that gives the reason. When it
+cannot close the issue, or GitHub does not say whether the issue is open, it keeps the case.
+
 When a case has entries from three different sources within seven days and no open issue filed for it, Conveyor files
 one issue through its GitHub write path (the privacy check included): the title "Flaky test: <case> fails at random",
 the labels of the pack's type, its last priority, `<areaPrefix>engine` when the pack's `nonProductAreas` names it, and
