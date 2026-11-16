@@ -32,7 +32,7 @@ First install the requirements, then sign in, before step 1:
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
    - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--fast-lane`,
      `--research-lane`, `--link`, `--builder-route`, `--reviewer-route`, `--fallback-route`, `--claude-proxy`,
-     `--codex-proxy`, `--claude-key`, `--codex-key`), ask
+     `--codex-proxy`, `--claude-key`, `--codex-key`, `--claude-proxy-key`, `--codex-proxy-key`), ask
      the user for exactly those, and nothing else: whose yes a change customers or staff will
      see needs; the path prefixes of product code; the command that runs a change's tests; "Run a first test-speed
      survey now?" (yes / no); "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
@@ -44,17 +44,19 @@ First install the requirements, then sign in, before step 1:
      always the provider's API with your own key / subscription: the CLI's own login only); "Which second route does
      a fallback take?" (proxy / api); "Which local proxy does Claude (or Codex) go through?" (each base URL that setup
      named); "Where is your Anthropic (or OpenAI) API key kept?" (nowhere, I use no API key, when setup offers none /
-     in the env of Claude Code's settings file, as setup named it / in a key file). For a key file, ask the user for the key with
+     in the env of Claude Code's settings file, as setup named it / in a key file); "Where is the key of Claude's (or Codex's)
+     local proxy kept?" (in the env of Claude Code's settings file / in a key file). For a key file, ask the user for the key with
      AskUserQuestion (they type it as their own answer). Make the folder with
      `mkdir -p -m 700 "${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/keys"`, write the key as the one line of the file
-     `anthropic.key` (or `openai.key`) in it with the Write tool, then run `chmod 600` on that file. Never put the key
+     `anthropic.key` (or `openai.key`, `claude-proxy.key`, `codex-proxy.key`) in it with the Write tool, then run `chmod 600` on that file. Never put the key
      in a command, and never show it. Then run it again
      with the answers, each `--product` once per path, `--survey yes` or `--survey no`, `--fast-lane yes` or
      `--fast-lane no`, `--research-lane yes` or `--research-lane no`, `--link yes`, `--link no` or
      `--worktree-setup <command>`, `--builder-route` and `--reviewer-route` each
      `fallback`, `proxy`, `api` or `subscription`, `--fallback-route proxy` or `--fallback-route api`,
      `--claude-proxy` or `--codex-proxy` each the base URL chosen, and `--claude-key` or `--codex-key` each `none`,
-     `settings` or the key file's path, every value quoted for the shell.
+     `settings` or the key file's path, `--claude-proxy-key` or `--codex-proxy-key` each `settings` or the key
+     file's path, every value quoted for the shell.
    - When it exits 1 naming a key file (a mode that lets others read it, or no file there), or a key that is not in
      the settings file, show its message and ask the same question again.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.

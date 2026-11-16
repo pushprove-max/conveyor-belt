@@ -136,13 +136,18 @@ answer it before:
   write it (mode 600). Setup refuses a file with a looser mode. `/conveyor-belt:setup` can make the file for you: it
   asks for the key and writes it.
 
-Do not keep the key only in your shell's environment. The machine's service starts with a bare environment, so its
+For a CLI that takes a proxy, setup asks where the proxy's key is kept (`--claude-proxy-key`, `--codex-proxy-key`),
+when setup found that key only in your shell's environment. The answer is `settings` (the `CLAUDE_PROXY_KEY` or
+`CODEX_PROXY_KEY` in the `env` of `~/.claude/settings.json`) or the path of a key file, as for the API key. Setup
+checks the proxy with the key from there.
+
+Do not keep a key only in your shell's environment. The machine's service starts with a bare environment, so its
 cards do not get a key from there.
 
 Setup then writes the route of each CLI in the host file: `claudeProxy` for Claude, and `codexProxy` for Codex. Its
 `kind` is `subscription`, `proxy` or `api` ([Configuration](configuration.md#the-control-record)). A `proxy` route
-has the proxy's base URL and the name of the variable that holds the proxy's key: `CLAUDE_PROXY_KEY` or
-`CODEX_PROXY_KEY`. An `api` route has the API's base URL, the name of the key's variable and, when you gave one, the
+has the proxy's base URL, the name of the variable that holds the proxy's key (`CLAUDE_PROXY_KEY` or
+`CODEX_PROXY_KEY`) and, when you gave one, the key file's path. An `api` route has the API's base URL, the name of the key's variable and, when you gave one, the
 key file's path. Setup never writes a key. Setup does not ask again for a CLI whose route is in the host file.
 Conveyor gives `codexProxy` to each Codex session as Codex's own provider settings, and does not change Codex's
 `config.toml`.
@@ -172,7 +177,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

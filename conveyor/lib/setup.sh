@@ -55,10 +55,10 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
   local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks
-  local -A keyarg=() pxarg=() rcli=() lg=() pxu=() ak=() akf=() as=() kd=(); local clis=()
+  local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
     [ "$1" != --foreman ] || { fm=1; shift; continue; }
@@ -75,7 +75,9 @@ setup() { # as SETUP_USAGE
       --claude-key) keyarg[claude]=${2-}; [ -n "${keyarg[claude]}" ] || { set -- x; break; } ;;
       --codex-key) keyarg[codex]=${2-}; [ -n "${keyarg[codex]}" ] || { set -- x; break; } ;;
       --claude-proxy) pxarg[claude]=${2-}; [ -n "${pxarg[claude]}" ] || { set -- x; break; } ;;
-      --codex-proxy) pxarg[codex]=${2-}; [ -n "${pxarg[codex]}" ] || { set -- x; break; } ;; *) set -- x; break ;; esac
+      --codex-proxy) pxarg[codex]=${2-}; [ -n "${pxarg[codex]}" ] || { set -- x; break; } ;;
+      --claude-proxy-key) pkarg[claude]=${2-}; [ -n "${pkarg[claude]}" ] || { set -- x; break; } ;;
+      --codex-proxy-key) pkarg[codex]=${2-}; [ -n "${pkarg[codex]}" ] || { set -- x; break; } ;; *) set -- x; break ;; esac
     [ $# -ge 2 ] || { set -- x; break; }; shift 2
   done
   [ $# = 0 ] || { echo "usage: conveyor.sh $SETUP_USAGE" >&2; return 2; }
@@ -314,10 +316,13 @@ declare -A APIKEY=([claude]=ANTHROPIC_API_KEY [codex]=OPENAI_API_KEY) APINAME=([
 # (off); its route is asked when that is more than the CLI's own login, and an answer naming a route not offered is
 # refused (exit 2). Adds to need each question still unanswered: the roles' routes; --fallback-route, when a role takes
 # the fallback and its CLI has both a proxy and the API; --claude-proxy or --codex-proxy, when more than one proxy
-# works for the CLI a role goes through; --claude-key or --codex-key, where the key of a CLI going to its API is kept.
+# works for the CLI a role goes through; --claude-key or --codex-key, where the key of a CLI going to its API is kept;
+# --claude-proxy-key or --codex-proxy-key, where the key of a CLI going to its proxy is kept, while it is only in the
+# shell setup runs in, which the service does not have.
 # Sets clis, the CLIs with a route that works, whose route setup writes (routewrite()), and kd, each one's second route
 # (proxy, api, or empty for its own login only), with its proxy in pxu. A key file that is not there, not the user's
-# own or readable by others, or an answer of settings with no key there, stops setup (exit 1).
+# own or readable by others, or an answer of settings with no key there, stops setup (exit 1), for an API key or a
+# proxy's.
 routeask() {
   local c a r o t u k s cs=() asked=''
   local -A off=() pxok=() desc=()
@@ -348,10 +353,21 @@ routeask() {
   for c in "${cs[@]}"; do
     t=$([ $c = claude ] && echo Claude || echo Codex)
     lg[$c]=$(routecall $c ""); s="$t: its own login ${lg[$c]}"; pxok[$c]=''
+    # The proxies' key (pk), where --claude-proxy-key or --codex-proxy-key answers it is kept, else in the settings
+    # file, else in this shell. pkf: settings, the key file's path, or empty while the key is only in this shell.
+    k=${PROXYKEY[$c]}; a=${pkarg[$c]:-}
+    if [ -z "$a" ]; then routekey "{\"keyEnv\": \"$k\"}" service; pkf[$c]=${KEY_V:+settings}; [ -n "$KEY_V" ] || routekey "{\"keyEnv\": \"$k\"}"
+    elif [ "$a" = settings ]; then routekey "{\"keyEnv\": \"$k\"}" service
+      [ -n "$KEY_V" ] || { echo "conveyor: --$c-proxy-key settings: $KEY_FROM; add it there, or answer the path of a key file" >&2; return 1; }
+      pkf[$c]=settings
+    else a=$(cd "$(dirname -- "$a")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename -- "$a")") || a=${pkarg[$c]}
+      keyfile "$a" || { echo "conveyor: --$c-proxy-key: $KEY_FROM" >&2; return 1; }
+      pkf[$c]=$a
+    fi
+    pk[$c]=$KEY_V
     while IFS= read -r u; do
       [ -n "$u" ] || continue
-      routekey "{\"keyEnv\": \"${PROXYKEY[$c]}\"}"
-      o=$(routecall $c "" "$(jq -cn --arg b "$u" --arg k "${PROXYKEY[$c]}" '{kind: "proxy", baseUrl: $b, keyEnv: $k}')" "$KEY_V")
+      o=$(routecall $c "" "$(jq -cn --arg b "$u" --arg k "$k" '{kind: "proxy", baseUrl: $b, keyEnv: $k}')" "${pk[$c]}")
       s+=", a local API proxy at $u $o"; [ "$o" != works ] || pxok[$c]+="$u "
     done < <(findproxy "$([ $c = claude ] && echo messages || echo responses)")
     as[$c]=''
@@ -402,14 +418,16 @@ routeask() {
     fi
     [ "${kd[$c]:-}" != api ] || [ -n "${akf[$c]}" ] \
       || need+=("--$c-key <settings, the ${APIKEY[$c]} in the env of $CLAUDE_SETTINGS ($( [ -n "$(jq -r --arg k "${APIKEY[$c]}" '.env[$k] // empty' "$CLAUDE_SETTINGS" 2>/dev/null)" ] && echo "it is there" || echo "it is not there now")), or the path of a key file that only you can read (mode 600): where the ${APINAME[$c]} API key is kept, so the service's sessions can read it>")
+    [ "${kd[$c]:-}" != proxy ] || [ -n "${pkf[$c]}" ] || [ -z "${pk[$c]}" ] \
+      || need+=("--$c-proxy-key <settings, the ${PROXYKEY[$c]} in the env of $CLAUDE_SETTINGS, or the path of a key file that only you can read (mode 600): where the local API proxy's key is kept, so the service's sessions can read it; now it is only in this shell>")
   done
   return 0
 }
 # A CLI's route in the host file, claudeProxy or codexProxy (under the machine's lock, mlocked, as hostput writes the
 # host file), from setup()'s answers (routeask()): {kind: "subscription"} when the CLI takes no second route or both
 # roles answered subscription; else its kind (proxy or api), base URL, the NAME of the variable its key is read by
-# (never the key), the key file's path when the key is kept in one, and each role's route. A role that names a route
-# this CLI cannot take runs on its own login.
+# (never the key), the key file's path when the key, the API's or the proxy's, is kept in one, and each role's route.
+# A role that names a route this CLI cannot take runs on its own login.
 routewrite() { # <claude|codex>
   local n t k r b o
   n=$([ "$1" = claude ] && echo claudeProxy || echo codexProxy); k=${kd[$1]:-}
@@ -417,7 +435,7 @@ routewrite() { # <claude|codex>
   if [ -z "$k" ] || [ "$r" = '{"builder":"subscription","reviewer":"subscription"}' ]; then o='{"kind":"subscription"}'
   else
     if [ "$k" = proxy ]; then b=${pxu[$1]}; else b=$([ "$1" = claude ] && echo "$ANTHROPIC_API" || echo "$OPENAI_API"); fi
-    o=$(jq -cn --arg k "$k" --arg b "$b" --arg e "$([ "$k" = proxy ] && echo "${PROXYKEY[$1]}" || echo "${APIKEY[$1]}")" --arg f "$([ "$k" = api ] && [ "${akf[$1]}" != settings ] && echo "${akf[$1]}")" --argjson r "$r" \
+    o=$(jq -cn --arg k "$k" --arg b "$b" --arg e "$([ "$k" = proxy ] && echo "${PROXYKEY[$1]}" || echo "${APIKEY[$1]}")" --arg f "$(if [ "$k" = api ]; then f=${akf[$1]}; else f=${pkf[$1]}; fi; [ "$f" = settings ] || echo "$f")" --argjson r "$r" \
       '{kind: $k, baseUrl: $b, keyEnv: $e} + (if $f == "" then {} else {keyFile: $f} end) + {roles: $r}')
   fi
   t=$(mktemp "$HOST.XXXXXX") || return 1

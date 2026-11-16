@@ -116,11 +116,12 @@ t_apisetup() {
 # claude posts to the proxy, the stub proxies answer 401 to a key they refuse), and Codex's login with codex exec;
 # offers each role only its own CLI's routes that work, naming a failing one with why; asks which proxy when two work;
 # and writes the host file's claudeProxy and codexProxy with each role's route, the proxy chosen and the NAME of the
-# key variable, never its value; run again, it does not ask.
+# key variable, never its value, and the proxy's key file when its key is kept in one; run again, it does not ask.
 t_setupproxy() {
   local X out was h a=(--fast-lane no --research-lane no); setupdone; h=$XDG_CONFIG_HOME/conveyor/host.json
   jq 'del(.claudeProxy, .codexProxy)' "$h" > "$h.new" && mv "$h.new" "$h" || fail "the host file's routes were not taken out"
   export CLAUDE_PROXY_KEY=px-$RANDOM$RANDOM-secret CODEX_PROXY_KEY=cx-$RANDOM$RANDOM-secret
+  export CONVEYOR_CLAUDE_SETTINGS=$T/$CASE/settings.json; mkdir -p "$T/$CASE"; echo '{}' > "$CONVEYOR_CLAUDE_SETTINGS"
   cat > "$T/$CASE/proxy.py" <<'PY'
 import http.server, json, os, sys, threading
 d, key = sys.argv[1], sys.argv[2]
@@ -170,8 +171,20 @@ PY
   rm "$T/$CASE/refuse"
   out=$(cd "$S" && bash "$X" setup "${a[@]}" --builder-route proxy --reviewer-route fallback 2>&1); [ $? = 2 ] \
     && grep -qF -- "--claude-proxy <$b1 or $b2: the local API proxy claude goes through" <<<"$out" || fail "setup did not ask which of the two proxies Claude goes through: $out"
-  out=$(cd "$S" && bash "$X" setup "${a[@]}" --builder-route proxy --reviewer-route fallback --claude-proxy "$b2" 2>&1) || fail "setup with the routes failed: $out"
-  jq -e --arg b "$b1" --arg c "$b2" '.claudeProxy == {kind: "proxy", baseUrl: $c, keyEnv: "CLAUDE_PROXY_KEY", roles: {builder: "proxy", reviewer: "fallback"}}
+  # Bug: each proxy's key was only in this shell, which the machine's service does not have, and setup wrote the
+  # route with no keyFile, so the service's sessions had no key and the proxy refused their cards. Setup asks where
+  # each proxy's key is kept, and changes nothing yet.
+  out=$(cd "$S" && bash "$X" setup "${a[@]}" --builder-route proxy --reviewer-route fallback --claude-proxy "$b2" 2>&1); [ $? = 2 ] \
+    && grep -qF -- "--claude-proxy-key <settings, the CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, or the path of a key file" <<<"$out" \
+    && grep -qF -- "--codex-proxy-key <settings, the CODEX_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, or the path of a key file" <<<"$out" \
+    && [ "$(cat "$h")" = "$was" ] || fail "setup did not ask where each proxy's key is kept while it is only in this shell: $out"
+  # Claude's key in a key file, and no longer in this shell: the proxy is checked with the file's key, and the file
+  # is written as the route's keyFile. Codex's key in the settings file: not asked, and no keyFile.
+  local f=$T/$CASE/proxy.key; printf '%s\n' "$CLAUDE_PROXY_KEY" > "$f"; chmod 600 "$f"
+  jq -n --arg k "$CODEX_PROXY_KEY" '{env: {CODEX_PROXY_KEY: $k}}' > "$CONVEYOR_CLAUDE_SETTINGS"
+  out=$(cd "$S" && env -u CLAUDE_PROXY_KEY -u CODEX_PROXY_KEY bash "$X" setup "${a[@]}" --builder-route proxy --reviewer-route fallback --claude-proxy "$b2" --claude-proxy-key "$f" 2>&1) \
+    || fail "setup with the routes and the proxy's key file failed: $out"
+  jq -e --arg b "$b1" --arg c "$b2" --arg f "$f" '.claudeProxy == {kind: "proxy", baseUrl: $c, keyEnv: "CLAUDE_PROXY_KEY", keyFile: $f, roles: {builder: "proxy", reviewer: "fallback"}}
       and .codexProxy == {kind: "proxy", baseUrl: "\($b)/v1", keyEnv: "CODEX_PROXY_KEY", roles: {builder: "proxy", reviewer: "fallback"}}' "$h" >/dev/null \
     || fail "setup did not write claudeProxy and codexProxy with the proxy chosen, the key's variable and each role's route: $(cat "$h")"
   ! grep -qF -e "$CLAUDE_PROXY_KEY" -e "$CODEX_PROXY_KEY" "$h" || fail "the host file holds a proxy's key"
