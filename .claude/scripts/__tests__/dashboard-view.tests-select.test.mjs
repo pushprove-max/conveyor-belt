@@ -126,6 +126,20 @@ test('Tests select: Optimize previews one issue a file and leaves the runner out
     `${X}: left out of Optimize: It runs other test files, and each of them has its own budget.`]);
 });
 
+// Bug it guards (#104): "File N issues" with a title cleared said why only in the note at the page foot; the bar of the
+// files selected, by the button clicked, showed nothing.
+test('Tests select: "File N issues" with a title cleared posts nothing and the bar says which file needs a title', async () => {
+  const w = show();
+  pick(w, MERGE);
+  act(bar(w), 'bulk-optimize').click();
+  type(act(bar(w).querySelector('.tests-selbar-preview [data-file]'), 'many-title'), '');
+  act(bar(w), 'bulk-file').click();
+  await settle();
+  assert.deepEqual(w.posts, []);
+  assert.deepEqual(answers(w), [`Type a title of one line and a text for the issue about ${MERGE} first.`]);
+  assert.ok(bar(w).querySelector('.tests-selbar-preview'), 'the preview stays open to fix it');
+});
+
 // Bug it guards: a figure that counted the files over budget, with no way to see which ones.
 test('Tests select: a figure that counts files is a button that shows them alone, as its chip does', () => {
   const w = show();

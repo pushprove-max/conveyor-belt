@@ -907,7 +907,8 @@
     a.left.forEach((l) => el.append(h('p', 'tests-why', `Left out: ${l.file}: ${l.why}`)));
     el.append(button(`File ${n} ${n === 1 ? 'issue' : 'issues'}`, 'btn-primary', 'bulk-file', `File ${n} ${n === 1 ? 'issue' : 'issues'}`, () => {
       const bad = a.items.find((it) => !it.title.trim() || /[\r\n]/.test(it.title.trim()) || !it.body.trim());
-      if (bad) { say(`Type a title of one line and a text for the issue about ${bad.file} first.`); return; }
+      // The bar shows why, by the button clicked; the preview already names the files left out.
+      if (bad) { const why = `Type a title of one line and a text for the issue about ${bad.file} first.`; S.answers = { what: 'Optimize', lines: [], left: [], note: why }; draw(); say(why); return; }
       bulk('Optimize', 'test-issue', a.items.flatMap((it) => [it.file, it.title.trim(), it.body.trim()]), a.items.map((it) => it.file), a.left, () => { S.ask = null; });
     }), button('Cancel', 'btn-quiet', 'bulk-cancel', 'Cancel: file nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was filed.'); }));
     return el;
