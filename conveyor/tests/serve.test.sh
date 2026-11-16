@@ -465,7 +465,14 @@ t_health() {
   # Health asks a second on (the clock seam, CONVEYOR_NOW): #4, picked just now, is then a second old.
   [ "$(CONVEYOR_NOW=$(( $(date +%s) + 1 )) tuned '.tunables.stuck = 1' h '.stuck | map(.issue)')" = '[3,4]' ] || fail "the stuck time is not the pack's tunables.stuck"
   git -C "$R" push -q origin main; [ "$(h '[.unpushed, .pushError, .pushFailingSince]')" = '[[],null,null]' ] || fail "a pushed commit is still listed, or its push error is"
-  echo junk >> "$S/cards.jsonl"; out=$(loop health 2>&1) && fail "a health record was given over records that do not check"; grep -q 'line 16 ' <<<"$out" || fail "bad record: $out"
+  # A line that does not check (#157): health still answers. The line is set aside in quarantined.jsonl and named,
+  # and the record gives the rest. Bug: one bad line stopped health, or health read it.
+  echo junk >> "$S/cards.jsonl"; mkdir -p "$T/$CASE"; out=$(loop health 2>&1 > "$T/$CASE/health") || fail "health stopped on a line that does not check: $out"
+  grep -qF "line 16 is not a whole record of a known step (the check refused (not JSON))" <<<"$out" || fail "health did not name the line it set aside: $out"
+  ! grep -qx junk "$S/cards.jsonl" && jq -se 'map([.line, .field, .record]) == [[16, "(not JSON)", "junk"]]' "$S/quarantined.jsonl" >/dev/null \
+    || fail "the bad line was not moved out of the records to the quarantine: $(cat "$S/quarantined.jsonl" 2>&1)"
+  [ "$(jq -c '[(.quarantined | map([.line, .field])), (.blocked | map(.issue)), (.waiting | map(.issue)), (.stuck | map(.issue))]' "$T/$CASE/health")" = '[[[16,"(not JSON)"]],[1],[2],[3]]' ] \
+    || fail "health did not name the line set aside, or did not give the rest of the records: $(cat "$T/$CASE/health")"
 }
 
 # Bugs: a card whose process is gone (or whose pid now names another process) is not seen as stuck until

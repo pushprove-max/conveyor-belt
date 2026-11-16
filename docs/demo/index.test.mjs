@@ -47,8 +47,12 @@ test('beats 10 and 11 are the Claude Code clips, each its section long', () => {
 test("the end card's install lines are the README's Install section's, in its order", () => {
   const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
   const install = readme.match(/^## Install\n([\s\S]*?)^## /m)[1];
-  const readmeLines = [...install.matchAll(/`(\/plugin (?:marketplace add|install) [^`]+)`/g)].map((m) => m[1]);
-  assert.equal(readmeLines.length, 2, 'the README gives the marketplace add and the plugin install');
+  // The section's one code block, a line a command.
+  const block = install.match(/^```[^\n]*\n([\s\S]*?)^```/m);
+  assert.ok(block, 'the Install section has a code block');
+  const readmeLines = block[1].split('\n').filter((l) => l.trim() !== '');
+  assert.deepEqual(readmeLines.map((l) => l.match(/^\/plugin (marketplace add|install) /)?.[1]), ['marketplace add', 'install'],
+    'the README gives the marketplace add and the plugin install');
   const { document } = new JSDOM(beats.at(-1).body).window;
   assert.deepEqual([...document.querySelectorAll('.cmd')].map((e) => e.textContent), readmeLines);
 });

@@ -223,6 +223,10 @@ t_routedoctor() {
   p=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
   export CONVEYOR_CLAUDE_SETTINGS=$T/$CASE/settings.json; mkdir -p "$T/$CASE" "$XDG_CONFIG_HOME/conveyor"
   echo '{"env": {"CLAUDE_PROXY_KEY": "px-in-settings"}}' > "$CONVEYOR_CLAUDE_SETTINGS"
+  # The case's own Codex config, which names a provider: doctor read the machine's ~/.codex otherwise, so the case
+  # passed only where that file named one, and failed from an install with a fresh HOME.
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME"
+  printf 'model_provider = "own"\n\n[model_providers.own]\nbase_url = "https://example.com/v1"\n' > "$CODEX_HOME/config.toml"
   jq -n --arg b "http://127.0.0.1:$p" '{claudeProxy: {kind: "proxy", baseUrl: $b, keyEnv: "CLAUDE_PROXY_KEY", roles: {builder: "proxy", reviewer: "proxy"}},
     codexProxy: {kind: "subscription"}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   setup '[]'
@@ -233,7 +237,7 @@ t_routedoctor() {
   grep -qxF "builder: m (claude) through http://127.0.0.1:$p, key in CLAUDE_PROXY_KEY; the service reads the key from CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and one call through it fails (API Error: Unable to connect to API)" <<<"$out" \
     || fail "doctor did not call the stopped proxy as the service does: $out"
   # The case's Codex config names its own provider, which Codex's own login runs through.
-  grep -qE '^reviewer: x \(codex\) through .*; its login works$' <<<"$out" && [ -s "$STUB/codex-called" ] || fail "doctor did not call Codex on its own login: $out"
+  grep -qxF "reviewer: x (codex) through https://example.com/v1, Codex's model_provider own, key in no variable; its login works" <<<"$out" && [ -s "$STUB/codex-called" ] || fail "doctor did not call Codex on its own login: $out"
   jq '.claudeProxy = {kind: "subscription"}' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json"
   out=$(loop doctor 2>&1)
   grep -qxF "builder: m (claude) on the subscription login; its login fails (Not logged in · Please run /login)" <<<"$out" || fail "doctor did not call Claude on its own login: $out"

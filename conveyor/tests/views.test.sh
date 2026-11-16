@@ -120,7 +120,13 @@ t_snapshotdeploy() { snapshotstart
   jq -c 'map(select(.labels | any(.name == "awaiting-deploy") | not))' "$STUB/issues.json" > "$STUB/issues.none" && mv "$STUB/issues.none" "$STUB/issues.json"
   [ "$(loop snapshot | jq -c .awaitingDeploy)" = '[]' ] || fail "awaitingDeploy with no such issue is not an empty list"
   mkdir "$STUB/tmp"; TMPDIR=$STUB/tmp loop snapshot >/dev/null 2>&1; [ -z "$(ls -A "$STUB/tmp")" ] || fail "a snapshot left its copy of the records behind: $(ls -A "$STUB/tmp")"
-  echo junk >> "$S/cards.jsonl"; loop snapshot >/dev/null 2>&1 && fail "a snapshot was given over records that do not check"; :
+  # A line that does not check (#157): the snapshot is still given, with every card it gave before. The line is set
+  # aside in quarantined.jsonl, and the snapshot's health names it. Bug: one bad line stopped every snapshot.
+  local before after; before=$(loop snapshot | jq -c '[.landed, .awaitingDeploy]')
+  echo junk >> "$S/cards.jsonl"; after=$(loop snapshot 2>/dev/null) || fail "a snapshot stopped on a line that does not check"
+  [ "$(jq -c '[.landed, .awaitingDeploy]' <<<"$after")" = "$before" ] && [ "$(jq -c '.health.quarantined | map(.field)' <<<"$after")" = '["(not JSON)"]' ] \
+    || fail "the snapshot did not give the rest of the records, or its health does not name the line set aside: $(jq -c '[.landed, .health.quarantined]' <<<"$after")"
+  ! grep -qx junk "$S/cards.jsonl" && [ "$(jq -sc 'map(.record)' "$S/quarantined.jsonl")" = '["junk"]' ] || fail "the snapshot did not set the bad line aside: $(cat "$S/quarantined.jsonl" 2>&1)"
 }
 # #4042: card 12, landed 10 days ago, is in pushedCards once its push is recorded today (t_snapshot: not before).
 t_snapshotpushed() { snapshotstart; card 12 "$d" 'pushed:ok:{"sha":"abd","sec":5,"head":"abd"}'

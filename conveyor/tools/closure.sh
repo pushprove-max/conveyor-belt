@@ -39,6 +39,8 @@ HOOKS=(git-safety bash-guardrails bash-write-rules file-size-cop dependency-addi
   bugfix-test-lock suite-rerun-guard literal-secret-warning adversarial-review-gate)
 # The plugin's hooks: hooks/hooks.json runs each one through shim.sh, so both ship, and so does every hook it names.
 ENTRY+=(shim.sh hooks/hooks.json)
+# The /units fetch (hooks/units.tsx runs it), which the engine's Board cases run from the install too.
+ENTRY+=(hooks/units-fetch.sh)
 # Foreman mode: the hooks its setup writes run its scripts through the shim, and they reach one another through
 # lib.sh's FHERE, which is not followed, so the whole folder ships, with the plugin commands that set it up (its test
 # checks them for private names).

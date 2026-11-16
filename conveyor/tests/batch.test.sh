@@ -115,6 +115,10 @@ if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$ST
 else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
 EOF
   echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; printf "%s\n" "== clash.test" "-- FAIL clash.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }' >> "$STUB/test-cmd"
+  # The run of #7 on top of #8 ends only once #9 has its red test line. Without this wait nothing kept that order: the
+  # stub run ended and #8 and #7 landed first, so #9 found main moved and ran its failure again there before its fix.
+  echo 'case $PWD in *-7) grep -qx nine a.txt || ! grep -qx eight a.txt || while [ -d "$STUB" ]; do
+  jq -e "select(.issue == 9 and .step == \"test\" and .result == \"fail\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
   # The two red runs (all, #8 #9) each run once more before they count as red (tests()). #8 alone on main runs no

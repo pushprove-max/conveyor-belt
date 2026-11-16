@@ -44,6 +44,10 @@ t_set() {
     | sed 's|^${CLAUDE_PLUGIN_ROOT}"*/||' | sort -u > "$T/plugin-hooks"
   grep -qxF shim.sh "$T/plugin-hooks" || fail "read no shim.sh from hooks/hooks.json"
   while IFS= read -r f; do grep -qxF "$f" "$SET" || fail "the set misses $f, which hooks/hooks.json runs"; done < "$T/plugin-hooks"
+  # Bug (#166): /units (hooks/units.tsx) runs its fetch script by a path built at run time, which the set missed, so
+  # the Board's readers failed from the install with "units-fetch.sh: No such file or directory".
+  f=$(sed -n "s/^const FETCH = '\([^']*\)'.*/\1/p" "$TOP/hooks/units.tsx"); [ -n "$f" ] || fail "read no fetch script from hooks/units.tsx"
+  grep -qxF "$f" "$SET" || fail "the set misses $f, which hooks/units.tsx runs"
   ! grep -E '^(src|web|shared|lambdas|infra|ml)/' "$SET" || fail "the set holds product code"
   # The pack's hooks: a fixture checkout (the set, the test pack's hooks.json as its pack's, each hook it names beside
   # the release-1 hooks), never this repo's .conveyor/, whose pack may name no hooks.
