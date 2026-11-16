@@ -260,7 +260,21 @@ window.DASH_APP.panel({
       else if (age) { chip = ctx.chip('Old reading', 'warn'); next = AGAIN; }
       check(label, chip, meter, pct, of, age).next = next;
     });
-    if (!limits.length && !api) check('Usage limit', ctx.chip('Not read', 'warn'), 'no reading').next = AGAIN;
+    // A record whose every role runs on an API route (its routes' subscription roles are none; routesnow() in
+    // conveyor/lib/control.sh) has no usage limit: it is billed per token. Its row is a fine check, with the cost the
+    // session logs give for today (limit.today) in place of a reading. limit.today counts only the sessions of the
+    // Board's own project (dashboard_limit.py build reads its main and workspaces), the record on the host's main
+    // (steered), so it is shown on that record's row alone, and only on one machine (host.local): with a build
+    // machine apart, the cards ran there and this machine's logs do not hold their cost.
+    const viaApi = (Array.isArray(d.records) ? d.records : []).filter((r) => r && r.routes && r.routes.subscription
+      && Array.isArray(r.routes.subscription.roles) && !r.routes.subscription.roles.length);
+    const today = lim && lim.today && typeof lim.today.spentUsd === 'number' ? lim.today.spentUsd : null;
+    viaApi.forEach((r) => {
+      check(limits.length || viaApi.length > 1 ? `Usage limit of ${r.repo}` : 'Usage limit', ctx.chip('Fine', 'ok'), 'API route: no usage limit (billed per token)',
+        d.host.local !== true || r.steered !== true ? null : today === null ? `the session logs give no cost today for ${r.repo}`
+          : `${ctx.money(today)} spent today on ${r.repo} on this machine, from the session logs`);
+    });
+    if (!limits.length && !api && !viaApi.length) check('Usage limit', ctx.chip('Not read', 'warn'), 'no reading').next = AGAIN;
     // Codex's quota is its own reading: it shows whether or not Claude's was read.
     if (lim && lim.codex && typeof lim.codex.usedPct === 'number') check('Codex limit', ctx.chip(`${Math.round(lim.codex.usedPct)}% used`, lim.codex.usedPct >= 90 ? 'warn' : 'quiet')).next =
       "Pick another reviewer on the Rules tab, or wait for Codex's reset.";

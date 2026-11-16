@@ -82,7 +82,7 @@
 #           or owner), why, built (the issue "File as issue" filed for it, else null), dismissed ({time, by}, else null),
 #           round and findings (the review the judge declined it in and that review's findings as the judge numbered
 #           them, [{n, finding}], else null), as the snapshot's declined gives them; rest: every other line, so, as its declinedRest gives them.
-#   health  host {name, reachable, error}, records (each record's loop, state (running, paused, stopped, as
+#   health  host {name, reachable, error}, records (each record's steered (the host answer's), loop, state (running, paused, stopped, as
 #           its control record says; a loop not meant to run is off, not a fault), newest line, stuck cards, pushes,
 #           cycles: the dependency cycles, flaky: the snapshot's flaky cases {case, count, issue, files, url}, null from a snapshot
 #           without them, slowOff: the snapshot's test files kept off card test steps, each with its issue's url, null
@@ -634,14 +634,18 @@ PANELS_JQ='
       + [($a.host.accounts // [])[] | . as $x | row($a.host.name) + ((if $R == null then null else
           [$R[] | (.snap.control // {}) as $c | .repo as $p | (.snap.inFlight // []) as $f
             | (.snap.modelSettings.reviewer.agent == "claude") as $cl
+            # A role on an API route uses no account (billed per token): only the roles on the subscription login now
+            # (the record'"'"'s routes, routesnow() in conveyor/lib/control.sh) use one.
+            | (.snap.health.routes.subscription.roles // ["builder", "reviewer"]) as $on
+            | ($on | index("builder") != null) as $bs | ($on | index("reviewer") != null) as $rs
             # A name is a host file account (the listedAs of a row), never a display name: an unlisted folder, the
             # default login too, may be shown under the name of a listed account, and no record naming that runs on it.
             | def mine($n): if $n == null then $x.default == true else any($x.listedAs[]?; . == $n) end;
-              mine($c.account) as $b | ($cl and mine($c.reviewAccount // $c.account)) as $r
+              ($bs and mine($c.account)) as $b | ($rs and $cl and mine($c.reviewAccount // $c.account)) as $r
             | (if $b then "cards of \($p): build and fix" else empty end),
               (if $r then "cards of \($p): reviews" else empty end),
-              (if ($b | not) and any($f[]; mine(.account)) then "cards in flight of \($p): build and fix" else empty end),
-              (if ($r | not) and any($f[]; if .reviewAccount != null then mine(.reviewAccount) else $cl and mine(.account) end) then "cards in flight of \($p): reviews" else empty end)] end) as $u
+              (if $bs and ($b | not) and any($f[]; mine(.account)) then "cards in flight of \($p): build and fix" else empty end),
+              (if $rs and ($r | not) and any($f[]; if .reviewAccount != null then mine(.reviewAccount) else $cl and mine(.account) end) then "cards in flight of \($p): reviews" else empty end)] end) as $u
         # cards: a card of a record runs on it (null: the records were not read); others: the Rules tab can move its
         # work to another account (the default login, for one that is not it, or a host file name it is not listed as).
         # On one machine (the host named by no name: accounts()) this machine'"'"'s accounts are the host'"'"'s, and its Foreman too.
@@ -814,7 +818,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, lastPushAt} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

@@ -176,24 +176,32 @@ cardaccts() { # <control record>
 # on it uses (cardaccts), so an account at its limit holds back every card that would use it. Asked for (reading)
 # with ask, else from the readings file alone (lastread). Nothing when none of them has a reading. The weekly limit is
 # Claude's: an OpenCode or Codex builder runs on no Claude account, so its account is not read (with a Codex reviewer,
-# none is, and Claude's limit holds no card back).
+# none is, and Claude's limit holds no card back). Nor is the account of a role on an API route (subroles()): it is
+# billed per token and has no usage limit, so with every role on one the loop asks for no reading before a pick.
 guardread() { # <control record> [ask]
   local a b
   b=$(seat builder "${1:-null}" | jq -r .agent 2>/dev/null)
-  # cardaccts' first line is the builder's account.
-  cardaccts "$1" | { [ "$b" = claude ] || read -r _; cat; } | sort -u | while IFS= read -r a; do if [ -n "${2:-}" ]; then ACCT=$a reading; else ACCT=$a lastread; fi; done \
+  subaccts "$1" "$b" | cut -d ' ' -f 2- | sort -u | while IFS= read -r a; do if [ -n "${2:-}" ]; then ACCT=$a reading; else ACCT=$a lastread; fi; done \
     | jq -cs 'max_by(.pct) // empty'
+}
+# The accounts of cardaccts() whose usage limit is read, each line as "<build|review> <account>": the builder's (the
+# first line) when the builder runs on Claude, and the reviewer's (the second line, only for a Claude reviewer), each
+# while its role runs on the subscription login (subroles()).
+subaccts() { # <control record> <builder's agent>
+  local a on; on=$(subroles)
+  cardaccts "$1" | {
+    IFS= read -r a; if [ "$2" = claude ] && grep -qx builder <<<"$on"; then printf 'build %s\n' "$a"; fi
+    if IFS= read -r a && grep -qx reviewer <<<"$on"; then printf 'review %s\n' "$a"; fi
+  }
 }
 # Each account guardread reads for the control record, for the Board's limit panel: [{account (null: the default
 # login), uses (build, review: what a card started on the record runs on it), pct and readAt (its reading, as
 # lastread gives it; null for none), email (the login of its folder on this machine, null when that names none)}].
 # The email goes to the Board alone, in the snapshot: never into a record.
 guardaccts() { # <control record>
-  local a b s i=0 f e r
+  local a b s f e r
   b=$(seat builder "${1:-null}" | jq -r .agent 2>/dev/null)
-  cardaccts "$1" | while IFS= read -r a; do
-    i=$((i + 1)); s=review
-    [ "$i" -gt 1 ] || { [ "$b" = claude ] || continue; s=build; }
+  subaccts "$1" "$b" | while read -r s a; do
     # The default login's metadata is ~/.claude.json, not ~/.claude/.claude.json (dashboard_limit.py config_folders()).
     if [ -n "$a" ]; then f=$(acctdir "$a")/.claude.json || f=''; else f=$HOME/.claude.json; fi
     [ "$f" != "$HOME/.claude/.claude.json" ] || f=$HOME/.claude.json

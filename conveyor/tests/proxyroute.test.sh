@@ -190,3 +190,39 @@ t_pxcheck() {
   pxone 'startcheck "{\"seat\": \"reviewer\", \"cli\": \"claude\", \"model\": \"m\", \"account\": \"\"}"' || fail "the check session failed: $(cat "$T/$CASE/out")"
   pxtwice "the check session"
 }
+
+# Issue 151. A role on an API route (proxy or api) is billed per token and has no usage limit. Bug: the guard read
+# the subscription limit of every role's account all the same, so Health warned for ever that it was not read, and the
+# loop asked for a reading before each pick. One issue, a guard at 90 and a Claude builder and reviewer, each on the
+# routes <roles> sets; each usage reading notes the folder it read in $STUB/limit-dirs.
+pxlimit() { # <roles JSON>
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.limitTtl = 0'
+  echo 'echo "${CLAUDE_CONFIG_DIR:-none}" >> "$STUB/limit-dirs"; echo "{\"seven_day\": {\"utilization\": 50}}"' > "$STUB/limitcmd"
+  export CONVEYOR_LIMIT_CMD='. "$STUB/limitcmd"'
+  loop control guard 90 >/dev/null 2>&1 && loop control reviewer claude claude-opus-5-5 >/dev/null 2>&1 || fail "the guard or the Claude reviewer was not set"
+  tune --arg b "$PXURL" --argjson r "$1" '.models.claudeProxy = {baseUrl: $b, roles: $r}'
+}
+# Every role on an API route: no reading is asked for (health asks as the loop does before a pick: guardread ask),
+# none is given, and the snapshot gives the Board no account to read and no role on the subscription.
+t_pxnolimit() {
+  pxlimit '{"builder": "proxy", "reviewer": "proxy"}'
+  [ "$(loop health | jq -c '[.guard.reading, .routes.subscription.roles]')" = '[null,[]]' ] || fail "health read a limit for roles on an API route: $(loop health | jq -c '[.guard, .routes]')"
+  [ ! -e "$STUB/limit-dirs" ] || fail "a usage reading was asked for with every role on an API route: $(cat "$STUB/limit-dirs")"
+  [ "$(loop snapshot | jq -c .limits)" = '[]' ] || fail "the snapshot gives the Board an account to read: $(loop snapshot | jq -c .limits)"
+}
+# Mixed routes: the builder on the API, the reviewer on the subscription. Only the reviewer's account is read.
+t_pxmixedlimit() {
+  pxlimit '{"builder": "proxy", "reviewer": "subscription"}'
+  [ "$(loop health | jq -c '[.guard.reading, .routes.subscription.roles]')" = '[50,["reviewer"]]' ] || fail "health did not read the reviewer's limit alone: $(loop health | jq -c '[.guard, .routes]')"
+  [ "$(loop snapshot | jq -c '.limits | map(.uses)')" = '[["review"]]' ] || fail "the snapshot does not give the reviewer's account alone: $(loop snapshot | jq -c .limits)"
+}
+# A role on fallback starts each session on the subscription (proxyroute()), and its reviewer on proxy never does:
+# the builder's account alone is read. Bug caught: a login that failed once (routes.json "expired") dropped the
+# fallback builder from the guard, though its next session runs on the subscription again once the user signs in.
+t_pxfallbacklimit() {
+  pxlimit '{"builder": "fallback", "reviewer": "proxy"}'
+  mkdir -p "$ST" && echo '{"subscription": {"state": "expired", "at": "2026-01-01T00:00:00Z"}}' > "$ST/routes.json"
+  [ "$(loop health | jq -c '[.guard.reading, .routes.subscription.roles]')" = '[50,["builder"]]' ] && [ -s "$STUB/limit-dirs" ] \
+    || fail "the fallback builder's account was not read after a failed login: $(loop health | jq -c '[.guard, .routes]')"
+  [ "$(loop snapshot | jq -c '.limits | map(.uses)')" = '[["build"]]' ] || fail "the snapshot does not give the fallback builder's account alone: $(loop snapshot | jq -c .limits)"
+}

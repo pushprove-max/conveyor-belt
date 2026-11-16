@@ -232,6 +232,57 @@ test('Health: a builder account and a reviewer account each show their own readi
   assert.equal(panel(w, 'health').querySelector('dt[data-check="Usage limit"]'), null, 'no row without its account');
 });
 
+// Issue 151. Bug: on a machine whose every role runs on an API route (billed per token, no subscription), Health warned
+// for ever that the usage limit was not read and that the default account, used by no card, had a pause from the usage
+// server. The record's routes name no role on the subscription, the engine reads no account for it (limits empty), and
+// the Usage limit row is a fine check that gives the day's cost from the session logs. That cost (limit.today) counts
+// the Board's own project's sessions alone, so it was wrong to give it as the machine's: it shows, named for its
+// project, on the row of the record on the host's main (steered) only, and each record on the API has its own row.
+test('Health: with every role on an API route, no usage or account warning, and a fine Usage limit row with the cost', () => {
+  const data = full(), hd = data.panels.health.data;
+  const routes = { subscription: { state: 'not used', roles: [] }, proxy: { state: 'works', baseUrl: 'http://192.0.2.1:4141', roles: { builder: 'proxy', reviewer: 'proxy' }, route: 'proxy' } };
+  hd.records = [{ ...hd.records[0], steered: true, routes }, { ...hd.records[0], repo: 'widgetshop', steered: false, routes }];
+  hd.limits = [];
+  hd.limit.today = { spentUsd: 4.25 };
+  hd.host.local = true;
+  hd.accounts ={ error: null, list: [{ machine: null, name: 'default', email: 'noreply@example.com', usedPct: null, fiveHourPct: null, resetsAt: null,
+    readAt: null, error: 'rate limited (429)', usedFor: ["this machine's Foreman"], cards: false, others: false }] };
+  const w = boot();
+  deliver(w, data);
+  assert.deepEqual(failingRows(w), [], 'no warning');
+  assert.match(dd(w, 'Usage limit of sample').textContent, /^FineAPI route: no usage limit \(billed per token\)\$4\.25 spent today on sample on this machine, from the session logs$/);
+  assert.equal(dd(w, 'Usage limit of widgetshop').textContent, 'FineAPI route: no usage limit (billed per token)');
+});
+
+// Issue 151. Bug: the API row gave this machine's cost (limit.today, read from its own session logs) once for every
+// record on an API route, even with the cards built on a build machine apart, whose cost those logs do not hold. The
+// record on the host's main, on a build machine: a fine row, and no cost.
+test('Health: an API route on a build machine apart gives a fine row and not this machine\'s cost', () => {
+  const data = full(), hd = data.panels.health.data;
+  hd.records[0].steered = true;
+  hd.records[0].routes = { subscription: { state: 'not used', roles: [] }, proxy: { state: 'works', baseUrl: 'http://192.0.2.1:4141', roles: { builder: 'proxy', reviewer: 'proxy' }, route: 'proxy' } };
+  hd.limits = [];
+  hd.limit.today = { spentUsd: 4.25 };
+  const w = boot();
+  deliver(w, data);
+  assert.deepEqual(failingRows(w), [], 'no warning');
+  assert.equal(dd(w, 'Usage limit').textContent, 'FineAPI route: no usage limit (billed per token)');
+  assert.doesNotMatch(panel(w, 'health').textContent, /spent today/);
+});
+
+// Issue 151: with mixed routes (the builder on the API, the reviewer on a subscription), the subscription role's
+// reading is the only Usage limit row: no API row stands beside it, and a missing reading of it still warns.
+test('Health: with mixed routes, only the subscription role\'s usage limit shows', () => {
+  const data = full(), hd = data.panels.health.data;
+  hd.records[0].routes = { subscription: { state: 'works', roles: ['reviewer'] }, proxy: { state: 'works', baseUrl: 'http://192.0.2.1:4141', roles: { builder: 'proxy', reviewer: 'subscription' }, route: 'proxy' } };
+  hd.limits = [{ repo: 'sample', account: 'second', uses: ['review'], pct: null, readAt: null, email: null }];
+  const w = boot();
+  deliver(w, data);
+  assert.deepEqual(failingRows(w), ['Usage limit']);
+  assert.match(dd(w, 'Usage limit').textContent, /^Not readno reading yetaccount second, no email recorded: reviewsNext:/);
+  assert.doesNotMatch(panel(w, 'health').textContent, /API route/);
+});
+
 // Issue 515. Bug: a project whose test command prints no `TESTRUN sec` lines recorded no test times on any card, and
 // Health said nothing. The record's untimed (the last card test runs with no times) is a warning row that names the
 // README section on how to add them; 0 shows no row.

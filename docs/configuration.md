@@ -272,6 +272,11 @@ it, and shows the result: the CLI's own login, the proxy through the CLI, or the
 
 The card's record and its timeline on the Board say which route each step used. The Board's Health shows each Claude
 route, the subscription login and the second route, with its state: works, expired, not set, fails, or not checked.
+A role on the second route is billed per token and has no usage limit. Conveyor does not read the usage limit of its
+account, and it does not wait for one before a pick. A `fallback` role's account is read, because each of its sessions
+starts on the CLI's own login. When no role runs on the subscription, the Usage limit row in Health says `API route: no
+usage limit (billed per token)`. Each such project has its own row. When Conveyor runs on the Board's machine, the
+row of the Board's own project also gives that project's cost today on that machine, from the session logs.
 [Setup](setup.md#setup) finds the routes this machine can use and writes `claudeProxy` and `codexProxy` for you.
 
 ## Models

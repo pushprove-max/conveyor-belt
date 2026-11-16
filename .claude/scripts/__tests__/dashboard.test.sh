@@ -139,6 +139,9 @@ q '.panels.cost.data.cards | .todayUsd == 0 and .weekUsd == 0 and .perLandedUsd 
 q '.panels.declined == {error: null, data: {lines: [], rest: []}}' "no declined finding (a snapshot from before it carried the list, too) is an empty list, not a failed part"
 q '.panels.health.data | .host == {name: "devbox", local: false, reachable: true, error: null} and (.records | length) == 2 and (has("cpuCap") | not)' "the host answered: reachable, both records, and no CPU cap (dropped)"
 q '.panels.health.data.records | .[0].lastPushAt == (1794000000 | todate) and .[1].lastPushAt == null and all(.[]; .loop == true and .gh == true)' "each record carries its last push; none recorded is null"
+# Issue 151: Health gives today's cost (the Board's own project's sessions alone) on the row of the record on the
+# host's main only; without steered on each record it could not tell that record from the others.
+q '[.panels.health.data.records[] | .steered] == [true, false]' "each record says whether it is the one on the host's main"
 q '.panels.board.data | .repo == "sample" and .control == null and .modelSettings == null and .held == null and .queue == null and (.issuesError | test("did not list"))
   and ([.building, .review, .waiting, .blocked, .landed] | all(. == []))' "a snapshot from before the control record: the Board says the queue was not listed, and its cards are measured empty lists"
 q '.panels.rules.data | .repo == "sample" and .control == null and .queue == null and (.issuesError | test("did not list")) and .building == 0 and .forecast == null' "a snapshot from before the control record: the Rules part has no record, no queue and no forecast"
@@ -172,6 +175,16 @@ q '.panels.health.data.accounts.list | map(select(.machine == null)) | length > 
 # The default login, with no host file name beside its own, has no other account to move to; the second has the default.
 q '[.panels.health.data.accounts.list[] | select(.machine == "devbox") | [.cards, .others]] == [[true, false], [true, true]]' \
   "the default login with no other account listed has none to move its work to; a listed account has the default"
+# Issue 151. Bug: a role on an API route (no subscription, billed per token) still marked the account its record names
+# as used, so Health warned for ever that the account was not read. A record's routes name the roles on the
+# subscription now: sample's on none (both on the API), widgetshop's on its reviewer alone (mixed). Only that
+# reviewer's account is used; the default login is used by no card, so Health gives it no warning.
+answer "$(snap '{"control":{"account":null,"reviewAccount":"second"},"modelSettings":{"reviewer":{"agent":"claude"}},"health":{"routes":{"subscription":{"roles":[]}}}}')" "$P_URL" 0 \
+  "$(snap '{"control":{"account":null,"reviewAccount":"second"},"modelSettings":{"reviewer":{"agent":"claude"}},"health":{"routes":{"subscription":{"roles":["reviewer"]}}}}')" "$C_URL" 0
+run
+q '[.panels.health.data.accounts.list[] | select(.machine == "devbox") | [.usedFor, .cards]]
+    == [[["not used by the Conveyor"], false], [["cards of widgetshop: reviews"], true]]' \
+  "a role on an API route uses no account: only a subscription role's account is used"
 # A card in flight keeps the account it started on: widgetshop's record now names none, but a card of it still
 # runs on the second (the snapshot's inFlight), so the second is not shown as unused.
 answer "$(snap '{"control":{"account":null,"reviewAccount":null},"modelSettings":{"reviewer":{"agent":"codex"}}}')" "$P_URL" 0 \
