@@ -42,24 +42,25 @@ inflight() { cat "$@" 2>/dev/null | jq -s '[group_by(.card)[] | select(all(.step
 # wakes the other's Foreman.
 t_machinecap() {
   SH=$T/$CASE/shared; mkdir -p "$SH"; export XDG_CONFIG_HOME=$T/$CASE/config # the machine's folder is the case's own
-  project alpha "[$(issue 1 2026-01-01), $(issue 2 2026-01-02), $(issue 3 2026-01-03), $(issue 4 2026-01-04)]"
+  project alpha "[$(issue 1 2026-01-01), $(issue 2 2026-01-02), $(issue 3 2026-01-03)]"
   project beta '[]'
   dispatch; watchturns
   local A=$P_alpha B=$P_beta MS=$XDG_CONFIG_HOME/conveyor/machine
   mkdir -p "$XDG_CONFIG_HOME/conveyor"
-  jq -n --arg a "$A" --arg b "$B" '{records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}], cap: 3}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  # A machine cap of 2, the least that one project can fill and the other still share: each card more costs seconds.
+  jq -n --arg a "$A" --arg b "$B" '{records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}], cap: 2}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   ( cd "$A" && CONVEYOR_MAIN=$A exec bash "$SRC/conveyor.sh" machine > "$SH/machine.out" 2>&1 ) & mp=$!
   trap 'kill -TERM $mp $wp 2>/dev/null; wait $mp 2>/dev/null' EXIT
   # The most cards in flight at once, sampled all along.
   ( while :; do inflight "$A/conveyor/state/cards.jsonl" "$B/conveyor/state/cards.jsonl" >> "$SH/inflight"; sleep 0.1; done ) & wp=$! # sleep: the pause between two samples
   out() { cat "$SH/machine.out"; }
-  wait_until '[ "$(ls "$SH/run" | wc -l)" = 3 ]' || fail "alpha did not build 3 cards: $(out)"
+  wait_until '[ "$(ls "$SH/run" | wc -l)" = 2 ]' || fail "alpha did not build 2 cards: $(out)"
   loop() { CONVEYOR_MAIN=$1 bash "$SRC/conveyor.sh" "${@:2}"; }
-  # alpha's loop says its 4th card waits for a slot; a whole turn later it still has not started it.
-  slotsaid() { loop "$A" health | jq -e '.repo == "alpha" and (.room.reason | test("waiting for a machine slot: 3 of the machine cap 3 in use"))'; }
+  # alpha's loop says its 3rd card waits for a slot; a whole turn later it still has not started it.
+  slotsaid() { loop "$A" health | jq -e '.repo == "alpha" and (.room.reason | test("waiting for a machine slot: 2 of the machine cap 2 in use"))'; }
   wait_until slotsaid || fail "alpha's health does not say its card waits for a machine slot: $(loop "$A" health | jq -c '{repo, room}')"
   turns 2 "$A"
-  ! picked alpha 4 "$A" || fail "alpha's 4th card started past the machine cap of 3 (alpha's own cap is 5): $(out)"
+  ! picked alpha 3 "$A" || fail "alpha's 3rd card started past the machine cap of 2 (alpha's own cap is 5): $(out)"
   # beta gets work while alpha holds every slot and still has work: the next slot is beta's.
   echo "[$(issue 21 2026-01-01), $(issue 22 2026-01-02)]" > "$B/../stub/issues.json"
   wait_until 'jq -e .wants "$MS/slots/beta.json" >/dev/null 2>&1' || fail "beta's card never waited for a slot: $(cat "$MS"/slots/*.json) $(out)"
@@ -67,21 +68,21 @@ t_machinecap() {
   [ "$(ls "$MS"/*.json)" = "$MS/loop.json" ] || fail "a project's slot file is beside the machine's loop.json: $(ls "$MS")"
   : > "$SH/go-alpha-1"
   wait_until 'picked beta 21 "$B"' || fail "beta never got a slot: $(out)"
-  ! picked alpha 4 "$A" || fail "alpha took the freed slot though beta waited and alpha had the last one"
-  # A pause of alpha leaves beta running: alpha's cards in flight end, and their slots go to beta alone.
+  ! picked alpha 3 "$A" || fail "alpha took the freed slot though beta waited and alpha had the last one"
+  # A pause of alpha leaves beta running: alpha's card in flight ends, and its slot goes to beta alone.
   loop "$A" control pause >/dev/null || fail "alpha's pause was refused"
-  : > "$SH/go-alpha-2"; : > "$SH/go-alpha-3"
+  : > "$SH/go-alpha-2"
   wait_until 'picked beta 22 "$B"' || fail "beta stopped picking while alpha was paused: $(out)"
-  turns 2 "$A"; ! picked alpha 4 "$A" || fail "the paused alpha picked a card"
+  turns 2 "$A"; ! picked alpha 3 "$A" || fail "the paused alpha picked a card"
   # beta's next card is blocked (its build fails); all the rest land.
   echo "[$(issue 21 2026-01-01), $(issue 22 2026-01-02), $(issue 23 2026-01-03)]" > "$B/../stub/issues.json"
   : > "$SH/go"
-  wait_until '[ "$(jq -s "map(select(.step == \"landed\")) | length" "$A/conveyor/state/cards.jsonl")" = 3 ] && [ "$(jq -s "map(select(.step == \"landed\")) | length" "$B/conveyor/state/cards.jsonl")" = 2 ] && jq -e "select(.step == \"blocked\" and .issue == 23)" "$B/conveyor/state/cards.jsonl" >/dev/null' \
+  wait_until '[ "$(jq -s "map(select(.step == \"landed\")) | length" "$A/conveyor/state/cards.jsonl")" = 2 ] && [ "$(jq -s "map(select(.step == \"landed\")) | length" "$B/conveyor/state/cards.jsonl")" = 2 ] && jq -e "select(.step == \"blocked\" and .issue == 23)" "$B/conveyor/state/cards.jsonl" >/dev/null' \
     || fail "the cards did not end: $(out)"
   kill $wp 2>/dev/null
-  [ "$(sort -n "$SH/inflight" | tail -1)" -le 3 ] || fail "more than 3 cards were in flight at once: $(sort -n "$SH/inflight" | uniq -c)"
+  [ "$(sort -n "$SH/inflight" | tail -1)" -le 2 ] || fail "more than 2 cards were in flight at once: $(sort -n "$SH/inflight" | uniq -c)"
   # Each project's records, kept work and pushes are its own.
-  [ "$(jq -sc 'map(.issue) | unique' "$A/conveyor/state/cards.jsonl")" = '[1,2,3]' ] && [ "$(jq -sc 'map(.issue) | unique' "$B/conveyor/state/cards.jsonl")" = '[21,22,23]' ] \
+  [ "$(jq -sc 'map(.issue) | unique' "$A/conveyor/state/cards.jsonl")" = '[1,2]' ] && [ "$(jq -sc 'map(.issue) | unique' "$B/conveyor/state/cards.jsonl")" = '[21,22,23]' ] \
     || fail "a project's records hold another's cards"
   jq -se 'all(.repo == "alpha")' "$A/conveyor/state/cards.jsonl" >/dev/null && jq -se 'all(.repo == "beta")' "$B/conveyor/state/cards.jsonl" >/dev/null \
     || fail "a record line does not name its project"
@@ -89,7 +90,7 @@ t_machinecap() {
     && jq -se 'all(.card | test("^c[0-9]{8}T[0-9]{6}-beta-[0-9]+$"))' "$B/conveyor/state/cards.jsonl" >/dev/null \
     || fail "a card id does not name its project, so two projects' cards of one issue and second share it: $(jq -sc 'map(.card) | unique' "$A/conveyor/state/cards.jsonl" "$B/conveyor/state/cards.jsonl")"
   [ -d "$B/conveyor/state/kept" ] && [ ! -e "$A/conveyor/state/kept" ] || fail "beta's blocked card's work was not kept in beta's own state folder"
-  wait_until '[ "$(git -C "$T/$CASE/alpha/origin" ls-tree --name-only main | grep "^f" | tr "\n" " ")" = "f1.txt f2.txt f3.txt " ]' \
+  wait_until '[ "$(git -C "$T/$CASE/alpha/origin" ls-tree --name-only main | grep "^f" | tr "\n" " ")" = "f1.txt f2.txt " ]' \
     && wait_until '[ "$(git -C "$T/$CASE/beta/origin" ls-tree --name-only main | grep "^f" | tr "\n" " ")" = "f21.txt f22.txt " ]' \
     || fail "a push went to another project's repo: $(git -C "$T/$CASE/alpha/origin" ls-tree --name-only main) / $(git -C "$T/$CASE/beta/origin" ls-tree --name-only main)"
   # beta's blocked card wakes beta's Foreman, never alpha's.
@@ -112,23 +113,24 @@ t_machinecap() {
 }
 
 # Bugs: a project's loop killed with its cards still building frees their machine slots, so another project starts
-# cards past the machine cap beside them; once they end, the slots are never freed.
+# cards past the machine cap beside them; once they end, the slots are never freed. One card under a machine cap of 1:
+# a card run costs a case seconds, and more of them free no other slot.
 t_machinekill() {
   SH=$T/$CASE/shared; mkdir -p "$SH"; export XDG_CONFIG_HOME=$T/$CASE/config # the machine's folder is the case's own
-  project alpha "[$(issue 1 2026-01-01), $(issue 2 2026-01-02), $(issue 3 2026-01-03)]"
+  project alpha "[$(issue 1 2026-01-01)]"
   project beta '[]'
   dispatch; watchturns
   local A=$P_alpha B=$P_beta; mkdir -p "$XDG_CONFIG_HOME/conveyor"
-  jq -n --arg a "$A" --arg b "$B" '{records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}], cap: 3}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  jq -n --arg a "$A" --arg b "$B" '{records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}], cap: 1}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   ( cd "$A" && CONVEYOR_MAIN=$A exec bash "$SRC/conveyor.sh" machine > "$SH/machine.out" 2>&1 ) & mp=$!
   trap 'kill -TERM $mp 2>/dev/null; wait $mp 2>/dev/null' EXIT
   out() { cat "$SH/machine.out"; }
-  wait_until '[ "$(ls "$SH/run" | wc -l)" = 3 ]' || fail "alpha did not build 3 cards: $(out)"
+  wait_until '[ -e "$SH/run/alpha-1" ]' || fail "alpha did not build its card: $(out)"
   kill -KILL "$(jq -r .pid "$A/conveyor/state/loop.json")" || fail "alpha's loop was not there to kill"
   echo "[$(issue 21 2026-01-01)]" > "$B/../stub/issues.json"
   turns 2 "$B" # a whole turn of beta's loop with its issue there
-  ! picked beta 21 "$B" || fail "beta started a card past the machine cap while alpha's 3 cards still built: $(out)"
-  [ "$(ls "$SH/run" | wc -l)" = 3 ] || fail "alpha's cards did not go on building after its loop was killed"
+  ! picked beta 21 "$B" || fail "beta started a card past the machine cap while alpha's card still built: $(out)"
+  [ -e "$SH/run/alpha-1" ] || fail "alpha's card did not go on building after its loop was killed"
   : > "$SH/go"
   wait_until 'picked beta 21 "$B"' || fail "beta never got a slot once alpha's cards ended: $(out)"
 }
@@ -225,9 +227,9 @@ t_machinestray() {
   grep -qx "ok: one Conveyor loop on this machine: the machine's Conveyor (pid $mp)" <<<"$out" || fail "doctor counted a loop of another host file: $out"
 }
 
-# Bugs: a card starts while the machine's load is above maxLoad, or its free memory below minFreeMemMB; the Board does
-# not say why the next card waits; a card already running is stopped by the reading; once the reading is back under the
-# limit the next card never starts; with neither set, a reading holds a card back.
+# Bugs: a card starts while the machine's load is above maxLoad; the Board does not say why the next card waits; a
+# card already running is stopped by the reading; once the reading is back under the limit the next card never starts.
+# The loop's own pick, under its machine's Conveyor; the gate's other readings are t_machinegate's.
 t_machineroom() {
   SH=$T/$CASE/shared; mkdir -p "$SH"; export XDG_CONFIG_HOME=$T/$CASE/config # the machine's folder is the case's own
   project solo "[$(issue 1 2026-01-01)]"
@@ -254,43 +256,57 @@ t_machineroom() {
     || fail "the Board's queue row of #2 does not say why it waits: $(loop snapshot | jq -c .queue.order)"
   : > "$SH/go-solo-1"
   wait_until 'jq -e "select(.step == \"landed\" and .issue == 1)" "$S/conveyor/state/cards.jsonl" >/dev/null' || fail "#1 did not land under the load: $(out)"
-  # Memory low, load fine: still held, and said.
-  echo '0.5 500' > "$SH/room"
-  wait_until 'roomsaid "waiting for machine room: 500 MB free is below minFreeMemMB 1000"' || fail "health does not say the memory holds #2: $(loop health | jq -c .room)"
-  turns 2 "$S"
-  ! picked solo 2 "$S" || fail "#2 started with the free memory below minFreeMemMB"
-  # Back under both limits: #2 starts.
+  # Back under the limit: #2 starts.
   echo '0.5 4000' > "$SH/room"
   wait_until 'picked solo 2 "$S"' || fail "#2 did not start once the machine had room again: $(out)"
   loop health | jq -e '.room == null' >/dev/null || fail "health still says a card waits: $(loop health | jq -c .room)"
-  : > "$SH/go-solo-2"
-  # Neither set: only the caps apply, whatever the reading.
-  jq 'del(.maxLoad, .minFreeMemMB)' "$XDG_CONFIG_HOME/conveyor/host.json" > "$SH/h" && mv "$SH/h" "$XDG_CONFIG_HOME/conveyor/host.json"
-  echo '99 1' > "$SH/room"; echo "[$(issue 1 2026-01-01), $(issue 2 2026-01-02), $(issue 3 2026-01-03)]" > "$S/../stub/issues.json"
-  wait_until 'picked solo 3 "$S"' || fail "#3 was held back with no machine room set: $(out)"
-  # The host file cut short under the running loop: the machine's cap, pause and room are not known, so no card starts.
-  cp "$XDG_CONFIG_HOME/conveyor/host.json" "$SH/h"; : > "$XDG_CONFIG_HOME/conveyor/host.json"
-  echo "[$(issue 1 2026-01-01), $(issue 2 2026-01-02), $(issue 3 2026-01-03), $(issue 4 2026-01-04)]" > "$S/../stub/issues.json"
-  wait_until 'jq -e ".issue == 4 and (.reason | test(\"the host file could not be read\"))" "$S/conveyor/state/room.json" >/dev/null 2>&1' \
-    || fail "the loop did not say #4 waits on a host file it cannot read: $(cat "$S/conveyor/state/room.json" 2>&1) $(out)"
-  turns 2 "$S"; ! picked solo 4 "$S" || fail "#4 started with the host file unreadable, past every machine gate"
-  cp "$SH/h" "$XDG_CONFIG_HOME/conveyor/host.json"
-  wait_until 'picked solo 4 "$S"' || fail "#4 did not start once the host file read again: $(out)"
-  # The host file a link to settings that are taken away under the running loop: it is there and does not read, not
-  # absent, so the machine's gates are not known and no card starts (read as absent, every gate would be passed).
-  mv "$XDG_CONFIG_HOME/conveyor/host.json" "$SH/settings.json"; ln -s "$SH/settings.json" "$XDG_CONFIG_HOME/conveyor/host.json"
-  rm "$SH/settings.json"; : > "$SH/go-solo-3" # #3 ends, so the project's own cap has room for #5
-  echo "[$(issue 1 2026-01-01), $(issue 2 2026-01-02), $(issue 3 2026-01-03), $(issue 4 2026-01-04), $(issue 5 2026-01-05)]" > "$S/../stub/issues.json"
-  wait_until 'jq -e ".issue == 5 and (.reason | test(\"the host file could not be read\"))" "$S/conveyor/state/room.json" >/dev/null 2>&1' \
-    || fail "the loop did not say #5 waits on a host file whose link leads nowhere: $(cat "$S/conveyor/state/room.json" 2>&1) $(out)"
-  turns 2 "$S"; ! picked solo 5 "$S" || fail "#5 started with the host file a link that leads nowhere, past every machine gate"
-  cp "$SH/h" "$SH/settings.json"
-  wait_until 'picked solo 5 "$S"' || fail "#5 did not start once the host file's link led to its settings again: $(out)"
-  : > "$SH/go"
   # A card id holds its project's name in letters, digits and hyphens only: with a dot or an underscore in it, the
   # reader of the card a card resumes (jq/rows.jq, from) cuts the id short and the time of its earlier tries is lost.
   jq -se 'length > 0 and all(.card | test("^c[0-9]{8}T[0-9]{6}-so-lo-1-[0-9]+$")) and all(.repo == "so_lo.1")' "$S/conveyor/state/cards.jsonl" >/dev/null \
     || fail "a card id carries the project's name as written: $(jq -sc 'map(.card) | unique' "$S/conveyor/state/cards.jsonl")"
+}
+
+# Bugs: a card starts while the machine's free memory is below minFreeMemMB; with neither maxLoad nor minFreeMemMB set,
+# a reading holds a card back; a host file cut short, or a link to settings that are taken away (there, and not
+# reading, so not absent), reads as no host file, and the card passes every machine gate; once it reads again, the card
+# is still held. room(), as the loop's pick asks it for its next card with none running (t_machineroom runs that pick).
+t_machinegate() {
+  export XDG_CONFIG_HOME=$T/$CASE/config # the machine's folder is the case's own
+  setup '[]'
+  local H=$XDG_CONFIG_HOME/conveyor/host.json M=$T/$CASE/room why; mkdir -p "${H%/*}"
+  jq -n --arg r "$R" '{records: [{repo: "solo", main: $r}], maxLoad: 2, minFreeMemMB: 1000}' > "$H"
+  # The engine as a loop holds it: read once, while the host file reads (one started while it does not cannot name its
+  # state folder), the machine room as $M holds it. gate <issue>: room()'s yes (0), or its no (1) with why in $why.
+  export CONVEYOR_MAIN=$R CONVEYOR_ROOM_CMD="cat $M"; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || fail "the engine could not be read"
+  # shellcheck disable=SC2034 # RUNNING is read by room(), from lib/pick.sh, read by the eval
+  RUNNING=0 # the loop's count of its cards running, as run() sets it before a pick
+  gate() { why=$(room "$1"); }
+  held() { # <issue> <why>: room() says no, with that why, and keeps it for health and the Board
+    ! gate "$1" && [ "$why" = "$2" ] && [ "$(jq -c '[.issue, .reason]' "$R/conveyor/state/room.json")" = "$(jq -cn --argjson n "$1" --arg r "$2" '[$n, $r]')" ]
+  }
+  # Memory low, load fine: held, and said.
+  echo '0.5 500' > "$M"
+  held 2 "waiting for machine room: 500 MB free is below minFreeMemMB 1000" || fail "#2 was not held by the free memory below minFreeMemMB: $why $(cat "$R/conveyor/state/room.json" 2>&1)"
+  echo '0.5 4000' > "$M"
+  gate 2 && [ ! -e "$R/conveyor/state/room.json" ] || fail "#2 was held with room on the machine, or the reason was kept: $why"
+  # Neither set: only the caps apply, whatever the reading.
+  jq 'del(.maxLoad, .minFreeMemMB)' "$H" > "$M.h" && mv "$M.h" "$H"
+  echo '99 1' > "$M"
+  gate 3 || fail "#3 was held back with no machine room set: $why"
+  # The host file cut short: the machine's cap, pause and room are not known, so no card starts.
+  cp "$H" "$M.h"; : > "$H"
+  held 4 "waiting for machine room: the host file could not be read, so the machine's cap, pause and room are not known" \
+    || fail "#4 was not held by a host file that cannot be read: $why"
+  cp "$M.h" "$H"
+  gate 4 || fail "#4 was held once the host file read again: $why"
+  # The host file a link to settings that are taken away: it is there and does not read, not absent, so the machine's
+  # gates are not known and no card starts (read as absent, every gate would be passed).
+  mv "$H" "$M.settings"; ln -s "$M.settings" "$H"; rm "$M.settings"
+  held 5 "waiting for machine room: the host file could not be read, so the machine's cap, pause and room are not known" \
+    || fail "#5 was not held by a host file whose link leads nowhere: $why"
+  cp "$M.h" "$M.settings"
+  gate 5 || fail "#5 was held once the host file's link led to its settings again: $why"
 }
 
 # Bugs: two projects whose checkouts sit in one folder share one cards folder, so a card of one can take the other's
@@ -570,6 +586,8 @@ t_machinecheckout() {
   wait_until '[ "$(ran "$A" checkout)" -ef "$A/conveyor" ] && [ "$(ran "$A" commit)" = "$h" ]' \
     || fail "alpha, run from its own checkout, does not run that checkout's code: $(cat "$A/conveyor/state/loop.json" 2>/dev/null) $(cat "$SH/machine.out")"
   wait_until '[ "$(ran "$B" checkout)" -ef "$SRC" ]' || fail "beta does not run the machine's own code: $(cat "$B/conveyor/state/loop.json" 2>/dev/null)"
+  # beta has shown it; its loop stops, so it does not take its turns through the rest (alpha's record is as it was).
+  jq 'del(.records[1])' "$H" > "$SH/h" && mv "$SH/h" "$H"
   # The checkout moves on: alpha's loop restarts on its new code, as a `serve` from a checkout does.
   git -C "$A" commit -q --allow-empty -m next && h=$(git -C "$A" rev-parse HEAD)
   wait_until '[ "$(ran "$A" commit)" = "$h" ] && [ "$(ran "$A" checkout)" -ef "$A/conveyor" ]' \
