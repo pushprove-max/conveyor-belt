@@ -5,7 +5,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 [inputs] | to_entries[] | select(.value | (try (fromjson
       | (keys - ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
           "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-          "wait", "run", "slotsFree", "selected", "ended", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
+          "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route"]) ==["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
         and ([.card, .result, .sha, .reason] | all(type == "string")) and (.issue | type == "number")
         and (.time | fromdate | type == "number") and (.tokens | keys == ["claude", "codex"] and all(type == "number"))
         and (.step | IN("picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"))
@@ -40,6 +40,10 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
         and ([.wait, .run, .slotsFree] | all(. == null or type == "number"))
         and (.selected // {files: null, filesOf: null, cases: null, casesOf: null} | type == "object" and keys - ["kept"] == ["cases", "casesOf", "files", "filesOf"] and all(. == null or type == "number"))
         and (.ended // "passed" | IN("passed", "failed", "killed", "timed out", "nothing selected"))
+        # How a test step's first run picked its files (testlist(), testrun.sh): the whole suite and why, or the
+        # changed tests, how many and by what (the test map or names), with the map's age when known.
+        and (.list // {mode: "whole", why: ""} | type == "object" and ((.mode == "whole" and (.why | type == "string"))
+          or (.mode == "changed" and (.files | type == "number") and (.by | type == "string") and (.age // 0 | type == "number"))))
         # The test files over the CPU budget (slowtests()): before and finding only of a file the card changed; no cpu
         # on a line written while the budget was clock seconds, which the records still hold.
         and (.slow // [] | type == "array" and all(type == "object" and (.file | type == "string") and ([.sec, .budget, .cpu // 0] | all(type == "number"))
