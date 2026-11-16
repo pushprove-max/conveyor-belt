@@ -8,7 +8,7 @@
 # the same file when its turn comes.
 # A main-red fix card (issue 0, redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing.
-retry() { # <issue, or the card id of a main-red fix card>
+retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a
   check || return 1
   if [[ $1 =~ ^[0-9]+$ ]]; then
@@ -35,10 +35,27 @@ retry() { # <issue, or the card id of a main-red fix card>
   ends=$(jq -rs 'group_by(.card)[] | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.)
       | "\(.pid)\t\(.started // "")"' <<<"$l" | while IFS=$'\t' read -r p t; do ! p_alive "$p" "$t" || printf ' %s' "$p"; done) || return 1
   [ -z "$ends" ] || { echo "conveyor: $what has a blocked card whose process is still ending (pid$ends); nothing changed: retry once it has ended" >&2; return 1; }
+  # fresh (`retry <issue> --fresh`): the kept work of every blocked card of the issue, this one's and those of earlier
+  # retries (prior() reads them all), moves to a dated folder under the state folder, not deleted: its kept folder and
+  # a review left beside its worktree. With none of it left, the next card builds from nothing. Done before the lines
+  # move out: a move that fails leaves the card blocked.
+  if [ -n "${2:-}" ]; then
+    local c f d moved=''
+    d=$ST/kept-dropped/$(date -u +%Y%m%dT%H%M%SZ)-$n
+    ends=$({ printf '%s\n' "$l"; stdb ask issue retried "$n"; } | jq -r 'select(.step == "blocked") | .card' | sort -u) || return 1
+    for c in $ends; do
+      for f in "$ST/kept/$c" "$CARDS/$c.review"; do
+        [ -e "$f" ] || continue
+        mkdir -p "$d" && mv "$f" "$d/" || { echo "conveyor: $f could not be moved to $d; $what is still blocked" >&2; return 1; }
+        moved=1
+      done
+    done
+  fi
   # The blocked line carries when the owner gave the card back (retriedAt): the wait ends there, not at the next pick.
   MOVETAG='if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} else . end' moveout "$k" "${a[@]}" || return 1
   echo "conveyor: $what can be picked again; its old lines are in $RETRIED"
   [ "$k" = '.issue == $n' ] || return 0
+  [ -z "${2:-}" ] || { echo "conveyor: its next card builds from nothing; $([ -n "$moved" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
   ends=$(prior "$n" | jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"')
   [ -z "$ends" ] || [ ! -s "$ends" ] || echo "conveyor: its next card starts from the kept patch $ends: applied if it still applies to main, brought onto main by a session if not"
 }

@@ -444,6 +444,25 @@ t_keptunread() {
     && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] || fail "a kept patch that cannot be read was not given up for a build from nothing: $(st 'select(.issue == 12) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
 }
 
+# Bug (#93): after the owner turned a card's change down, the only way to have its next card build from nothing was
+# to move its kept folder aside by hand, and the kept patch of an earlier retry was then taken up (mode=stale). Here
+# #13 blocks twice, the second card resumed from the first's patch: `retry 13 --fresh` moves both cards' kept work to
+# one dated folder and says so, and the next card starts with no change staged and no resume line.
+t_keptfresh() {
+  local k d out
+  setup "[$(issue 13 2026-01-01)]"; echo 'echo thirteen >> w.txt; exit 3' > "$STUB/build"
+  loop run >/dev/null; loop retry 13 >/dev/null && loop run >/dev/null
+  k=$(st 'select(.issue == 13 and .step == "blocked") | .card'); [ -n "$k" ] && [ -s "$ST/kept/$k/$k.patch" ] || fail "#13 was not blocked again with a kept patch: $(st 'select(.issue == 13) | .step' | tr '\n' ,)"
+  out=$(loop retry 13 --fresh) || fail "retry 13 --fresh exited non-zero: $out"
+  d=$(ls -d "$ST"/kept-dropped/*-13 2>/dev/null)
+  [ -n "$d" ] && [ "$(ls "$d" | wc -l)" = 2 ] && [ -s "$d/$k/$k.patch" ] && [ -z "$(ls -A "$ST/kept")" ] && grep -q "^conveyor: its next card builds from nothing; its kept work is in $d$" <<<"$out" \
+    || fail "retry --fresh did not move both blocked cards' kept work to one dated folder: $out $(ls -R "$ST/kept" "$ST/kept-dropped" 2>&1)"
+  echo "$GO" > "$STUB/review.1"; echo 'git diff --cached --name-only > "$STUB/fresh-with"; echo fresh > w.txt' > "$STUB/build"
+  loop run >/dev/null || fail "run of #13 after retry --fresh exited non-zero"
+  [ "$(st 'select(.issue == 13 and .step == "worktree") | .reason' | tail -n 1)" = '' ] && [ ! -s "$STUB/fresh-with" ] && [ "$(cat "$R/w.txt")" = fresh ] \
+    || fail "the card after retry --fresh did not build from nothing: $(st 'select(.issue == 13 and .step == "worktree") | .reason') staged: $(cat "$STUB/fresh-with" 2>&1)"
+}
+
 # A blocked line written before kept work moved under the state folder names its folder by an absolute path,
 # which the engine no longer reads. Bugs: such work, unused, lets the move land and is lost: a retry alone, another card
 # of the issue landing (a retry takes up only the last kept patch), or a card that found the patch unreadable, does
