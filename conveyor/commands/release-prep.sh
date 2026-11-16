@@ -14,7 +14,7 @@
 # state, success, as the suite's pass on the commit it releases. The suite runs only when that head holds
 # docs/releases/<version>.md in the release notes style (tools/notes-check.sh): `release` releases the commit with the
 # notes. When the head has no notes, release-prep has a model write a draft of them in that style (relnotes()), from
-# the issues landed and the commits since the newest vX.Y.Z tag, to <state>/release/<version>.md, prints its path and
+# the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md, prints its path and
 # stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
 # pushed runs the suite. It tags and releases nothing.
 # Exit 0: passed and posted; 1: the suite failed (failure posted), the head has no notes yet (draft written, nothing
@@ -72,31 +72,45 @@ names || exit 1
 RELHELP="Only the owner decides a release: the Foreman runs conveyor.sh release only after the owner says yes in chat."
 RELNOTES_TIMEOUT=600
 # The style of the release notes, docs/releases.md (Release notes); tools/notes-check.sh checks its mechanical rules.
+RELRULES='- No file, script or function names, no paths, no issue or pull request numbers, no commit hashes, no "Closes", no
+  internal unit names. Names a person types or sees (a slash command, a setup question, a setting, a button) are
+  allowed.'
 RELNOTES='Write the release notes of a new release of this project, from the issues that landed since the last release and
 the subjects of its commits, given below. They are for the people who use the project, not for its developers.
 - Begin with the line "# VERSION", then one sentence that says what this release is about.
 - Then "## " sections named for what a user does or sees (for example: Cards, The Board, In Claude Code, Setup). No
   "###" headings.
 - Plain-English bullets about the effect for the user, one change per bullet.
-- No file, script or function names, no paths, no issue or pull request numbers, no commit hashes, no "Closes", no
-  internal unit names. Names a person types or sees (a slash command, a setup question, a setting, a button) are
-  allowed.
+'"$RELRULES"'
 - Leave out changes that only touch tests, refactors or tooling, or put them in one plain line if they change nothing
   a user sees.
+Answer with the notes alone, in Markdown, and nothing else.'
+# The first release (no vX.Y.Z tag yet) has no changes to list: its notes are an overview of the project (relfirst()).
+RELFIRST='Write the release notes of the first release of this project: an overview of what it does, from its README and
+its docs, given below. There is no earlier release, so list no changes. They are for the people who use the project,
+not for its developers.
+- Begin with the line "# VERSION", then one sentence that says what the project is.
+- Then "## " sections, one for each area of the project, named as the README names its sections. No "###" headings.
+- Plain-English bullets, each about one thing a user can do or see. Say nothing the README and the docs do not say.
+'"$RELRULES"'
 Answer with the notes alone, in Markdown, and nothing else.'
 # The notes draft (<file>), written by a model (askmodel) from the issues the commits since <last tag> up to <commit>
 # name ("(#N)" at a subject's end, or a "Closes #N" line: their titles and bodies, as gh reads them) and those commits'
 # subjects, merges left out, each with its trailing (#N) taken off. An issue gh cannot read is left out, with a
-# warning; its commit's subject is still given. Fails, with why on stdout, when the model gives no notes.
+# warning; its commit's subject is still given. With no last tag (the first release): from <commit>'s README and docs
+# alone (relfirst()), no commit or issue. Fails, with why on stdout, when the model gives no notes.
 relnotes() { # <version> <last tag, or empty> <commit> <file>
   local subj ns n j iss='[]' p d rc s c
-  subj=$(git log --no-merges --format=%s "${2:+$2..}$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "${2:+$2..}$3") || { echo "the commits could not be read"; return 1; }
-  for n in $(grep -oE '(\(#[0-9]+\)$|^Closes #[0-9]+)' <<<"$ns" | grep -oE '[0-9]+' | sort -un); do
-    j=$(timeout 60 gh issue view "$n" --json number,title,body < /dev/null 2>/dev/null) && iss=$(jq -c --argjson i "$j" '. + [$i]' <<<"$iss" 2>/dev/null) \
-      || echo "conveyor: release-prep: issue #$n could not be read; the notes are written without it" >&2
-  done
-  p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
-    + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
+  if [ -z "$2" ]; then p=$(relfirst "$1" "$3")
+  else
+    subj=$(git log --no-merges --format=%s "$2..$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "$2..$3") || { echo "the commits could not be read"; return 1; }
+    for n in $(grep -oE '(\(#[0-9]+\)$|^Closes #[0-9]+)' <<<"$ns" | grep -oE '[0-9]+' | sort -un); do
+      j=$(timeout 60 gh issue view "$n" --json number,title,body < /dev/null 2>/dev/null) && iss=$(jq -c --argjson i "$j" '. + [$i]' <<<"$iss" 2>/dev/null) \
+        || echo "conveyor: release-prep: issue #$n could not be read; the notes are written without it" >&2
+    done
+    p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
+      + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
+  fi
   c=$(ctl 2>/dev/null) || c=''
   d=$(mktemp -d) || { echo "no scratch folder"; return 1; }
   s=$(askmodel "$d" "$RELNOTES_TIMEOUT" medium "$c" "$p"); rc=$?
@@ -104,6 +118,16 @@ relnotes() { # <version> <last tag, or empty> <commit> <file>
   [ "$rc" = 0 ] && [ -n "$(tr -d '[:space:]' < "$d/answer" 2>/dev/null)" ] && cp "$d/answer" "$4" \
     || { rm -rf "$d"; echo "the model gave no notes (exit $rc; 124 is the ${RELNOTES_TIMEOUT}s timeout)"; return 1; }
   rm -rf "$d"
+}
+# The prompt of the first release's notes: the overview style, then <commit>'s README.md (its first 12000 bytes) and
+# each Markdown page directly in docs/ (its first 6000), each under a "# <path>" heading.
+relfirst() { # <version> <commit>
+  local f p=${RELFIRST//VERSION/$1}
+  p+=$'\n\n# README.md\n\n'$(git show "$2:README.md" 2>/dev/null | head -c 12000)
+  while IFS= read -r f; do
+    p+=$'\n\n# '"$f"$'\n\n'$(git show "$2:$f" | head -c 6000)
+  done < <(git ls-tree --name-only "$2" docs/ 2>/dev/null | grep '\.md$')
+  printf '%s\n' "$p"
 }
 # The release lock, held until the command ends. 1: it could not be made; 2: another run holds it.
 rellock() { # <command name>
@@ -260,7 +284,8 @@ releaseprep() { # <version>
   d=${STATE%/*}/release/$v.md
   mkdir -p "${d%/*}" && rm -f "$d" && out=$(relnotes "$v" "$last" "$sha" "$d") || { echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
   out=$("$HERE/tools/notes-check.sh" "$d") || out=" The draft breaks the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)."
-  echo "conveyor: release-prep: the notes draft, from the issues and commits since ${last:-the first commit}, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
+  local from="from the issues and commits since $last"; [ -n "$last" ] || from='an overview from the README and docs, as no release is tagged yet'
+  echo "conveyor: release-prep: the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
   return 1
 }
 release() { # <version>

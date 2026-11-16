@@ -8,8 +8,9 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# relsetup <full-cmd> [nonotes|<notes text>]: main's pack names a whole suite (test.full: $STUB/full-cmd, which notes
-# the commit it ran on); origin has the release v1.0.0 (its commit names issue #1) and two commits after it, the first
+# relsetup <full-cmd> [nonotes|<notes text>] [notag]: main's pack names a whole suite (test.full: $STUB/full-cmd, which
+# notes the commit it ran on); origin has the release v1.0.0 (its commit names issue #1 and adds a README with the
+# sections Cards and The Board; with notag, that commit is not tagged) and two commits after it, the first
 # naming issue #5 in its subject, the second issue #7 in a Closes line and adding docs/releases/1.1.0.md (not with
 # nonotes; with <notes text>, that text); main has one more commit origin lacks. gh records each call, and `gh issue
 # view <n>` prints issue n of the fixture issues (#1, #5, #7). A case that drafts notes writes the model, the stub
@@ -20,11 +21,13 @@ relsetup() {
   printf 'git rev-parse HEAD > "$STUB/full-at"\n%s\n' "$1" > "$STUB/full-cmd"
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$STUB/gh-calls"' \
     '[ "$1 $2" != "issue view" ] || jq -c --argjson n "$3" ".[] | select(.number == \$n)" "$STUB/issues.json"' > "$STUB/gh"
-  git -C "$R" commit -q --allow-empty -m 'fix: before the release (#1)' && git -C "$R" tag v1.0.0
-  git -C "$R" commit -q --allow-empty -m 'feat(engine): A new thing (#5)' || fail "the fixture could not be made"
+  printf '# Fixture\n\nREADME-INTRO\n\n## Cards\n\n- A card waits.\n\n## The Board\n\n- A page.\n' > "$R/README.md" && git -C "$R" add README.md \
+    && git -C "$R" commit -q -m 'fix: before the release (#1)' && { [ "${3:-}" = notag ] || git -C "$R" tag v1.0.0; } \
+    && git -C "$R" commit -q --allow-empty -m 'feat(engine): A new thing (#5)' || fail "the fixture could not be made"
   [ "${2:-}" = nonotes ] || { mkdir -p "$R/docs/releases" && printf '%s\n' "${2:-- A fix}" > "$R/docs/releases/1.1.0.md" && git -C "$R" add docs; } || fail "the fixture could not be made"
   git -C "$R" commit -q --allow-empty -m 'fix: A fix' -m 'Closes #7'
-  git -C "$R" push -q origin main && git -C "$R" push -q origin v1.0.0 && git -C "$R" tag -d v1.0.0 > /dev/null || fail "the fixture could not be made"
+  git -C "$R" push -q origin main && { [ "${3:-}" = notag ] || { git -C "$R" push -q origin v1.0.0 && git -C "$R" tag -d v1.0.0 > /dev/null; }; } \
+    || fail "the fixture could not be made"
   git -C "$R" commit -q --allow-empty -m 'feat: Not pushed yet'
   O=$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)
 }
@@ -62,6 +65,21 @@ t_relnonotes() {
     && grep -qx 'feat(engine): A new thing' "$STUB/notes-prompt" \
     && grep -q '^- Begin with the line "# 1.1.0"' "$STUB/notes-prompt" && ! grep -q BEFORE-BODY "$STUB/notes-prompt" \
     || fail "the model was not given the issues and subjects since v1.0.0 alone, and the style: $(cat "$STUB/notes-prompt" 2>&1)"
+}
+# Bug: a project's first release (no tag) is drafted from every commit ever made, an engineering log, rather than as an
+# overview of what the project does, in sections from its README. The model here copies its whole prompt into the
+# draft, so a commit subject or an issue given to it would show in the draft.
+t_relfirst() {
+  local O out s
+  relsetup true nonotes notag; printf '#!/usr/bin/env bash\ntee "$STUB/notes-prompt"\n' > "$STUB/claude"
+  out=$(loop release-prep 1.0.0 2>&1); [ $? = 1 ] && grep -qF "the notes draft, an overview from the README and docs, as no release is tagged yet, is $ST/release/1.0.0.md. " <<<"$out" \
+    || fail "release-prep did not draft an overview for a project with no release: $out"
+  [ "$(grep '^## ' "$ST/release/1.0.0.md")" = $'## Cards\n## The Board' ] && grep -q README-INTRO "$ST/release/1.0.0.md" \
+    && grep -q '^- Begin with the line "# 1.0.0"' "$ST/release/1.0.0.md" || fail "the draft's sections are not the README's: $(cat "$ST/release/1.0.0.md" 2>&1)"
+  while IFS= read -r s; do
+    ! grep -qF "${s% (#*}" "$ST/release/1.0.0.md" || fail "the draft takes a line from the commit subject '$s': $(cat "$ST/release/1.0.0.md")"
+  done < <(git -C "$R" log --format=%s "$O")
+  ! grep -qE 'BODY|^issue ' "$ST/release/1.0.0.md" "$STUB/gh-calls" 2>/dev/null || fail "issues were read for a first release: $(cat "$STUB/gh-calls" 2>&1)"
 }
 # Bug: a draft that breaks the style is shown as if it were ready to commit.
 t_reldraftstyle() {

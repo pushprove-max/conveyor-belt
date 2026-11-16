@@ -19,7 +19,9 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    comment above the table. Commit the change on `main`.
 2. On the build machine, run `conveyor.sh release-prep <version>`. A model writes a draft of the release notes in
    the [release notes style](#release-notes). It reads the issues that landed since the last tag, their
-   titles and text, and the commit subjects. The command prints the path of the draft, and says if the draft breaks
+   titles and text, and the commit subjects. When the project has no release tag yet, the draft lists no changes:
+   it is an overview of what the project does, in sections by area, from the README and the pages in `docs/`, and
+   it reads no commit or issue. The command prints the path of the draft, and says if the draft breaks
    a rule of the style. The head of `main` on GitHub has no notes yet, so it stops there.
 3. Read the draft and change what you need. Commit it as `docs/releases/<version>.md` on `main`, and push it.
 4. You can run `conveyor.sh release-prep <version>` again. It runs the whole test suite (`test.full` in the pack, the
