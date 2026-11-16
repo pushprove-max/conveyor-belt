@@ -164,3 +164,22 @@ test('Tests: a new snapshot keeps the table\'s sideways scroll', () => {
   assert.notEqual(wide(), was, 'the table is built new');
   assert.equal(wide().scrollLeft, 240);
 });
+
+// #152. Bug: a file timed only by its test runner's report (clock seconds, no CPU seconds) showed "Not timed yet", so
+// a project whose runner gives no CPU time had no times on the page. Its row shows its clock time, empty CPU columns
+// and "Wall only".
+test('Tests: a file with clock times only shows its last run\'s clock time and Wall only, not Not timed yet', () => {
+  const w = boot({ tab: 'tests' });
+  const d = full();
+  d.panels.tests.data.tests.files.push({ runs: [{ cpu: null, sec: 4.2, card: 'c1-509', time: d.updatedAt, issue: 509, repo: 'sample', url: `${P}/509` }],
+    file: 'src/a.test.ts', cpu: null, median: null, change: null, lastRun: { sec: 4.2, cpu: null, clockPerCpu: null }, timedRuns: 0, failedSteps: 0, flaky: 0,
+    issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, over: false, usual: null, slower: false });
+  deliver(w, d);
+  const row = rowOf(w, 'src/a.test.ts');
+  assert.ok(row, 'the file has a row');
+  assert.doesNotMatch(row.textContent, /Not timed yet/);
+  assert.deepEqual(cells(row).slice(1, 4), ['—', '—', '—'], 'no CPU seconds');
+  assert.equal(cells(row)[7], '4 s', 'its last run took');
+  assert.match(cells(row).at(-1), /Wall only/);
+  assert.doesNotMatch(cells(rowOf(w, MERGE)).at(-1), /Wall only/, 'a file with CPU times is not Wall only');
+});

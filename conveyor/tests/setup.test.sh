@@ -251,6 +251,12 @@ t_setuptestlist() {
     || fail "setup did not ask to set test.list for jest before changing anything: $out"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-list yes --test-map no 2>&1) && jq -e '.test.list == "args"' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --test-list yes did not write test.list args: $out"
+  # #152. Bug: setup did not find how to read the runner's report, so no card recorded test times unless the owner
+  # changed the test command. Jest (an npm script) with no report option: the pack's test.report has Conveyor add the
+  # option after `--` at each run, and setup says so.
+  jq -e '.test.report == {runner: "jest", format: "jest-json", args: "-- --json --outputFile=<file>"}' "$S/.conveyor/project.json" >/dev/null \
+    && grep -qF "conveyor: wrote the pack's test.report: the test command runs jest, and Conveyor reads each test file's clock seconds from its report (jest-json, which Conveyor asks it for at each run)" <<<"$out" \
+    || fail "setup did not write the pack's test.report for jest: $(jq -c .test.report "$S/.conveyor/project.json") $out"
 }
 # #150. Bug: a new install had no test map, so a card's tests were only guessed by name. Setup of a Node project asks
 # before the whole suite runs under coverage, naming the tool and its cost; no writes test.map off; yes makes the map,
@@ -450,6 +456,15 @@ t_doctoruntimed() {
   out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times: $out"
   grep -qxF 'warning: the last 2 card test runs recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, The CPU budget of a test file, says how to add them' <<<"$out" \
     || fail "doctor did not warn that the last card test runs recorded no test times: $out"
+}
+# #152. Bug: doctor's warning did not say which runner setup found or which report option gives the times.
+t_doctorreport() {
+  local X out; doctordone
+  doctortests '{}'
+  jq '.test.report = {runner: "go test", option: "-json"}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times: $out"
+  grep -qF 'recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, The CPU budget of a test file, says how to add them; the test command runs go test, whose report option -json would give them' <<<"$out" \
+    || fail "doctor did not name the runner and its report option: $out"
 }
 t_doctormissing() {
   local X out; doctordone

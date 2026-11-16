@@ -190,6 +190,16 @@ setup() { # as SETUP_USAGE
       || { rm -f "$PACK.new"; echo "conveyor: the pack's test.map could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's test.map: off; a card's tests are found by name"
   fi
+  # How Conveyor reads the test times from the runner's own report (test.report, reportguess()), while the pack names
+  # no format: written again each run, so a report option added to the test command since is found.
+  if ! jq -e '.test.report.format' "$PACK" >/dev/null 2>&1 && packget test.command x && x=$(reportguess "$x") && [ -n "$x" ] \
+    && ! jq -e --argjson r "$x" '.test.report == $r' "$PACK" >/dev/null 2>&1; then
+    jq --argjson r "$x" '.test.report = $r' "$PACK" > "$PACK.new" && "$HERE/lib/pack.sh" check "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pack's test.report could not be written" >&2; return 1; }
+    jq -r '"conveyor: wrote the pack'"'"'s test.report: the test command runs \(.runner), "
+      + if .format then "and Conveyor reads each test file'"'"'s clock seconds from its report (\(.format), \(if .env or .args then "which Conveyor asks it for at each run" else .path // "its output" end))"
+        else "whose output gives no test times Conveyor can read; its option \(.option) would" end' <<<"$x"
+  fi
   packget plugin.commit p plugin.follow f || return 1
   if [ -z "$p$f" ] && [ -n "$pin" ]; then
     p=$(git -C "$HERE" rev-parse HEAD 2>/dev/null) || { echo "conveyor: the pin could not be written: $HERE is in no git checkout, so its commit cannot be read" >&2; return 1; }
@@ -307,6 +317,76 @@ timinghint() {
     echo "    ./testtime.sh \"\$f\" -- <the file's command> > \"\$out\" 2>&1; rc=\$?; cat \"\$out\"; grep '^TESTRUN sec' \"\$out\" >> \"\$CONVEYOR_TEST_LOG/<its log>\""
     echo "  conveyor/README.md, The CPU budget of a test file, says more."
   done
+}
+# The pack's test.report for a test command (setup()), as JSON: {runner, format, path} when the command already has
+# its runner write a report tools/testreport.py reads (path: the report's file, from the checkout's root; none for
+# the command's own output), {runner, format, env} or {runner, format, args} when Conveyor asks the runner for one
+# at each run (below), else {runner, option}: the runner's option that would. Nothing for a runner it does not
+# know. A command that runs a package.json script (npm, yarn, pnpm or bun) is read as that script, as testrunner() reads it.
+reportguess() { # <test command>
+  local s=$1 r='' f='' p='' o='' e='' pm='' i w v ws=() rs=()
+  if [[ $1 =~ ^(npm|yarn|pnpm|bun)[[:space:]]+(run[[:space:]]+)?([A-Za-z0-9:_-]+)[[:space:]]*$ ]]; then
+    pm=${BASH_REMATCH[1]}; s=$(jq -r --arg n "${BASH_REMATCH[3]}" '.scripts[$n] | strings' "$MAIN/package.json" 2>/dev/null) || return 0
+  fi
+  if [[ $s =~ (^|[;&|[:space:]])(node([[:space:]]+-[^[:space:]]+)*[[:space:]]+--test|vitest|jest|mocha|pytest|rspec|go[[:space:]]+test|cargo[[:space:]]+test)([[:space:]]|$) ]]; then
+    r=${BASH_REMATCH[2]}; [[ $r != node* ]] || r='node --test'; [[ $r != go* ]] || r='go test'; [[ $r != cargo* ]] || r='cargo test'
+    # node's options may come before --test: its words are kept.
+    w=${s#*"${BASH_REMATCH[0]}"}; [ "$r" = 'node --test' ] && s="${BASH_REMATCH[0]} $w" || s=$w
+  else return 0; fi
+  # The runner's words to the end of its command, quotes taken off; an --option=<value> as the option and its value.
+  read -ra ws <<<"${s%%[;&|)]*}"
+  declare -A a=()
+  for ((i = 0; i < ${#ws[@]}; i++)); do
+    w=${ws[i]//[\"\']/}; v=${ws[i + 1]:-}; v=${v//[\"\']/}
+    if [[ $w == -*=* ]]; then a[${w%%=*}]+=" ${w#*=}"; elif [[ $w == -* && $v != -* ]]; then a[$w]+=" $v"; else a[$w]+=' '; fi
+  done
+  case $r in
+    # Each --test-reporter writes to the --test-reporter-destination in the same place.
+    'node --test') read -ra ws <<<"${a[--test-reporter]:-}"; read -ra rs <<<"${a[--test-reporter-destination]:-}"
+      for i in "${!ws[@]}"; do [ "${ws[i]}" != junit ] || [[ ${rs[i]:-stdout} =~ ^std(out|err)$ ]] || { p=${rs[i]}; f=junit; }; done
+      o='--test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=<file>' ;;
+    vitest) if [[ " ${a[--reporter]:-} " == *' json '* ]]; then p=${a[--outputFile.json]:-${a[--outputFile]:-}}; f=jest-json
+      elif [[ " ${a[--reporter]:-} " == *' junit '* ]]; then p=${a[--outputFile.junit]:-${a[--outputFile]:-}}; f=junit; fi
+      o='--reporter=default --reporter=json --outputFile.json=<file>' ;;
+    jest) [ -n "${a[--json]+x}" ] && p=${a[--outputFile]:-} && f=jest-json; o='--json --outputFile=<file>' ;;
+    mocha) [[ " ${a[--reporter]:-}${a[-R]:-} " == *' xunit '* ]] && p=${a[--reporter-option]:-${a[--reporter-options]:-}} && [[ $p == *output=* ]] && p=${p##*output=} && f=junit
+      o='--reporter xunit --reporter-option output=<file>' ;;
+    pytest) p=${a[--junitxml]:-${a[--junit-xml]:-}}
+      if [ -n "$p" ]; then f=junit; elif [ "${a[--durations]:-}" = ' 0' ]; then f=pytest-durations; fi
+      o='--junitxml=<file>' ;;
+    'go test') if [ -n "${a[-json]+x}" ]; then f=go-json; elif [ -n "${a[-v]+x}" ]; then f=go-text; fi ;;
+    # cargo's own output names each test target and gives its seconds, with libtest's JSON format or without.
+    'cargo test') f=cargo ;;
+    rspec) [[ " ${a[--format]:-}${a[-f]:-} " == *' json '* ]] && p=${a[--out]:-${a[-o]:-}} && f=rspec-json
+      o='--format progress --format json --out <file>' ;;
+  esac
+  p=${p# }; p=${p##* }; p=${p#./}
+  # A report named by a variable or a pattern, or one a report file is needed for and none is named, is not read.
+  [[ $p != *[\$*?\{]* ]] || f=''; [ -n "$p" ] || [[ $f =~ ^(go-json|go-text|cargo|pytest-durations)$ ]] || f=''
+  # A runner whose report the command does not ask for: Conveyor asks for it at each card run (testrun.sh reportask()),
+  # so the test command stays as it is: by environment variables (env: {variable: its words}), or, for vitest and
+  # jest when their words end the command, by their options added at its end (args; after `--` for an npm script).
+  # <file> is the report file Conveyor names. A command that names a report or reporter of its own is not given
+  # another: its own option would win over Conveyor's, or (node) pair with Conveyor's destinations. Go is asked for
+  # -v (GOFLAGS), whose output still gives the failures, not -json, which would take its place; mocha is given
+  # Conveyor's timer (tools/mochatimes.cjs), which leaves its reporter as it is.
+  if [ -z "$f" ]; then
+    case $r in
+      'node --test') [ -n "${a[--test-reporter]+x}" ] || { f=junit; e=$(jq -cn --arg o "$o" '{NODE_OPTIONS: $o}'); } ;;
+      pytest) [ -n "${a[--junitxml]+x}${a[--junit-xml]+x}" ] || { f=junit; e=$(jq -cn --arg o "$o" '{PYTEST_ADDOPTS: $o}'); } ;;
+      rspec) [ -n "${a[--out]+x}${a[-o]+x}" ] || { f=rspec-json; e=$(jq -cn --arg o "$o" '{SPEC_OPTS: $o}'); } ;;
+      'go test') f=go-text; e='{"GOFLAGS":"-v"}' ;;
+      mocha) f=mocha-times; e='{"NODE_OPTIONS":"--require <mochatimes>","CONVEYOR_MOCHA_REPORT":"<file>"}' ;;
+      vitest|jest) [ "${s%%[;&|)]*}" != "$s" ] || [ -n "${a[--json]+x}${a[--reporter]+x}${a[--outputFile]+x}${a[--outputFile.json]+x}" ] \
+        || { f=jest-json; [ "$pm" != npm ] || o="-- $o"; } ;;
+    esac
+    if [ -n "$f" ]; then
+      jq -cn --arg r "$r" --arg f "$f" --argjson e "${e:-null}" --arg o "$o" '{runner: $r, format: $f} + if $e == null then {args: $o} else {env: $e} end'
+      return
+    fi
+  fi
+  if [ -n "$f" ]; then jq -cn --arg r "$r" --arg f "$f" --arg p "$p" '{runner: $r, format: $f} + if $p == "" then {} else {path: $p} end'
+  else jq -cn --arg r "$r" --arg o "$o" '{runner: $r, option: $o}'; fi
 }
 # The tracked files the test command names (docs/configuration.md, How test files are found): each word of it with a
 # * or ? in it (quotes taken off; of an --option=<value>, the value) read as a glob of paths from the checkout's root,
@@ -752,9 +832,12 @@ doctor() {
     elif [ -n "$p" ] && [ "$p" != "$c" ]; then echo "warning: the running loop started on Conveyor commit $c, and the pack pins $p: it runs old code until it restarts"; fi
   fi
   # The project's last card test runs recorded no test times (UNTIMED, lib/views.sh): its test command prints no
-  # `TESTRUN sec` lines. A warning: the cards still run, held to no CPU budget.
+  # `TESTRUN sec` lines and Conveyor read no report of its runner. A warning: the cards still run, held to no CPU
+  # budget. When setup found a runner whose report Conveyor cannot read now (test.report with no format), it names the
+  # runner and its option that would give them.
   e=$(stdb ask lines cards 2>/dev/null | jq -s "$UNTIMED"' untimed' 2>/dev/null) || e=0
-  [[ ! $e =~ ^[1-9][0-9]*$ ]] || echo "warning: the last $e card test run$([ "$e" = 1 ] || echo s) recorded no test times: the test command prints no \`TESTRUN sec\` lines; conveyor/README.md, The CPU budget of a test file, says how to add them"
+  t=$(jq -r '.test.report | objects | select(.format == null and .option) | "; the test command runs \(.runner), whose report option \(.option) would give them"' "$PACK" 2>/dev/null) || t=''
+  [[ ! $e =~ ^[1-9][0-9]*$ ]] || echo "warning: the last $e card test run$([ "$e" = 1 ] || echo s) recorded no test times: the test command prints no \`TESTRUN sec\` lines; conveyor/README.md, The CPU budget of a test file, says how to add them$t"
   if packget privacy.mode e && [ "$e" = public ]; then
     if t=$(termsfile); then ok "the terms file $t"
     elif termsnamed; then no "a readable terms file (the host file $HOST names one, or does not read, and the pack's privacy.mode is public)" "make the file it names readable, or take \"terms\" out of $HOST"

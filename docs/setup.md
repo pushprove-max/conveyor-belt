@@ -113,6 +113,18 @@ the run took. No sets `test.map` to `off` in the pack, and setup does not ask ag
 this list, or if the tool is not installed, setup tells you and does not ask. Your cards then find their tests by
 name.
 
+From the same runner, setup finds how to read the times of each test file from the runner's own report. It does not
+ask. When the test command already writes a report that Conveyor can read, for example `pytest --junitxml=report.xml`
+or `go test -json ./...`, setup writes `test.report` in the pack with the report's `format` and `path`. Conveyor then
+records each test file's clock seconds after each card test run. When the command writes no report, for example
+`npm test` that runs `node --test`, jest, mocha or go test, setup has Conveyor ask the runner for one at each card
+test run, and your test command stays as it is. cargo test needs no report: its usual output gives the times. When
+Conveyor cannot ask for a report, for example for jest followed by another command, setup writes the runner and the
+report option that would give one (`option`). The Board's Health shows "Test times: Not recorded" with that option. Add the option to your test command and run setup
+again. For a runner that setup does not know, set `test.report` yourself, for example
+`{"runner": "make test", "format": "junit", "path": "reports"}` for JUnit XML files in the folder `reports`. The
+section "The CPU budget of a test file" in `conveyor/README.md` lists each runner, its report option and its format.
+
 Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
 the lane, or keeps the lane that is already there.
 

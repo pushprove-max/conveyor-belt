@@ -270,6 +270,18 @@ test('Health: a card record line set aside names its line and the field the chec
   assert.equal(panel(at([]), 'health').querySelector('dt[data-check="Records set aside"]'), null, 'nothing set aside shows no row');
 });
 
+// #152. Bug: on a project whose runner setup found (the record's report, the pack's test.report) but whose output
+// Conveyor cannot read, the row said only to print TESTRUN lines. It names the runner and the report option to add.
+test('Health: no test times from a runner Conveyor cannot read names the runner and its report option', () => {
+  const data = full();
+  Object.assign(data.panels.health.data.records[0], { untimed: 5, report: { runner: 'jest', option: '--json --outputFile=<file>' } });
+  const w = boot();
+  deliver(w, data);
+  const row = dd(w, 'Test times');
+  assert.match(row.textContent, /the last 5 card test runs recorded no test times; the test command runs jest, and Conveyor cannot read its output/);
+  assert.match(row.textContent, /Next: Add the report option --json --outputFile=<file> to the test command, then run setup again/);
+});
+
 // Issue 629. Bug: Health told the owner to "Move this account's work to another on the Rules tab" for a 92% account
 // no card runs on, and for one the cards use when the host file listed no other account to move to; a failed read
 // showed "HTTP 401". Each fixture is one Claude account on the build machine.

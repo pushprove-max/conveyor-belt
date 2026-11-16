@@ -160,8 +160,9 @@ testrec() { # <worktree> <exit> <seconds>
 # Written to <worktree>.slow, a JSON array ([] when no file is over); the times of each test file the change adds or
 # modifies, {file, sec, cpu}, to <worktree>.timed, for its test line (timed); and the CPU seconds of every file the run
 # timed, {file: cpu}, to <worktree>.cpus, for its test line (times), where a later card finds them once this one has
-# landed; and the clock seconds of those files, {file: sec}, to <worktree>.clocks, for its test line (clocks: the
-# snapshot's tests part, testspart()). A file whose line gives no CPU seconds (cpu null) is held to no budget.
+# landed; and the clock seconds of every file the run timed, {file: sec}, to <worktree>.clocks, for its test line
+# (clocks: the snapshot's tests part, testspart()), a file timed by the clock only (a runner's report, reported())
+# among them. A file whose line gives no CPU seconds (cpu null) is held to no budget.
 slowtests() { # <worktree>
   local b o c m f t x y
   rm -f "$1.slow" "$1.timed" "$1.cpus" "$1.clocks"
@@ -170,7 +171,7 @@ slowtests() { # <worktree>
     | jq -cRs 'split("\u0000") | . as $a | [range(0; length - 1; 2) | {key: $a[. + 1], value: $a[.]}] | from_entries') || return 1
   t=$(timed "$1") || return 1
   jq -c --argjson c "$c" '[to_entries[] | select($c[.key] != null) | {file: .key} + .value]' <<<"$t" > "$1.timed" || return 1
-  { IFS= read -r x && IFS= read -r y; } < <(jq -c 'with_entries(select(.value.cpu != null)) | map_values(.cpu), map_values(.sec)' <<<"$t") \
+  { IFS= read -r x && IFS= read -r y; } < <(jq -c '(with_entries(select(.value.cpu != null)) | map_values(.cpu)), map_values(.sec)' <<<"$t") \
     && printf '%s\n' "$x" > "$1.cpus" && printf '%s\n' "$y" > "$1.clocks" || return 1
   f=$(jq -c --argjson b "$b" --argjson o "$o" --argjson c "$c" 'to_entries | map(($o[.key] // {}) as $own
     | select(.value.cpu != null and $own.slowOnPurpose == null) | ($own.budget // $b) as $b | select(.value.cpu > $b)
@@ -181,25 +182,26 @@ slowtests() { # <worktree>
     else . end)' <<<"$f" > "$1.slow"
 }
 # The files a run in <worktree> timed, {file: {sec, cpu}} (cpu null when the line gives none): its runners'
-# `TESTRUN sec` lines, those of the run before a run again (<worktree>.times, tests()) first, the last line of a file
-# counting.
+# `TESTRUN sec` lines, those of the run before a run again (<worktree>.times, tests()) first, then those read from the
+# runner's own report (<worktree>.reported, reported()), the last line of a file counting: a runner's own line wins.
 timed() { # <worktree>
   local l logs=()
   mapfile -t logs < <(testlogs "$1")
-  { cat "$1.times" 2>/dev/null; for l in "${logs[@]}"; do printf '\n'; cat "$l" 2>/dev/null; done; } \
+  { cat "$1.times" "$1.reported" 2>/dev/null; for l in "${logs[@]}"; do printf '\n'; cat "$l" 2>/dev/null; done; } \
     | jq -cRn '[inputs | capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
       | {key: .f, value: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}] | from_entries'
 }
 # A whole-suite run's files, for the Tests page (the snapshot's tests part, testspart() of lib/testfiles.sh): a line
 # for the run appended to $SUITERUNS, {time, how (full: the Board's full test suite, lib/fulltest.sh; release:
 # release-prep's, commands/release-prep.sh), sha, files: {<file>: {result: ok or fail (its `-- ok|FAIL <file>` line;
-# null with none), sec, cpu (its last `TESTRUN sec` line's; null with none)}}}, read from the logs the run in <worktree>
-# wrote (testlogs()) and its output (<worktree>.test). A run that names no file adds no line.
+# null with none), sec, cpu (its last `TESTRUN sec` line's; null with none)}}}, read from the times its runner's own
+# report gave (<worktree>.reported, reported()), then the logs the run in <worktree> wrote (testlogs()) and its output
+# (<worktree>.test), so a runner's own line wins. A run that names no file adds no line.
 SUITERUNS=${STATE%/*}/suiteruns.jsonl
 suiterec() { # <worktree> <full | release> <commit>
   local logs=()
   mapfile -t logs < <(testlogs "$1")
-  cat "${logs[@]}" "$1.test" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | jq -cRn --arg t "$(clock)" --arg h "$2" --arg s "$3" '
+  { [ ! -f "$1.reported" ] || cat "$1.reported"; cat "${logs[@]}" "$1.test"; } 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | jq -cRn --arg t "$(clock)" --arg h "$2" --arg s "$3" '
     reduce (inputs | (capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
         | {f, v: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}),
       (capture("^-- (?<r>ok|FAIL) (?<f>.+)$") | {f, v: {result: (if .r == "ok" then "ok" else "fail" end)}})) as $x ({}; .[$x.f] += $x.v)
@@ -227,11 +229,11 @@ beforetimes() { # <worktree>
     | group_by(.file) | map(max_by(.at) | {key: .file, value: {cpu, from}}) | from_entries'
 }
 # Its test line's part: {timed: <worktree>.timed} when the run timed a test file the change adds or modifies,
-# {times: <worktree>.cpus, clocks: <worktree>.clocks} when it timed any file's CPU seconds, and {slow: <worktree>.slow}
-# when a file is over, else {}.
+# {times: <worktree>.cpus, clocks: <worktree>.clocks} when it timed any file (times is {} when each was timed by the
+# clock only), and {slow: <worktree>.slow} when a file is over, else {}.
 slowrec() { # <worktree>
   jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile s "$1.slow" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
-    + (if $c[0] | length > 0 then {times: $c[0], clocks: $k[0]} else {} end) + if $s[0] | length > 0 then {slow: $s[0]} else {} end' 2>/dev/null || echo '{}'
+    + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end) + if $s[0] | length > 0 then {slow: $s[0]} else {} end' 2>/dev/null || echo '{}'
 }
 # The slow-test record: {filed: [{file, issue, ...why}]}, the "Slow test" issue last filed for each file, by the filing
 # that the test rules replaced (lib/testrules.sh). Nothing writes it now; a file it names whose issue no card has landed
@@ -383,13 +385,14 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
-  mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.times"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
+  mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
   # either goes.
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
-  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
+  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then listcmd "$1" "$cmd" 2>"$1.test" || return 1; cmd=$LISTCMD; fi
+  REPORT_ENV=(); if [ -z "${2:-}" ]; then reportask "$1"; [ -z "$REPORT_ARGS" ] || cmd="$cmd $REPORT_ARGS"; fi
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)
     b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); t=$(git -C "$1" write-tree 2>/dev/null)
@@ -430,7 +433,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
     jq -c --argjson rc "$rc" '{exit: $rc, failures: del(.passed, .okcases, .passcases)}' <<<"$f" > "$1.first"
     # The files the first run timed, which the run again does not run, after those of the runs before it (slowtests()).
-    mapfile -t l < <(testlogs "$1"); { [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } >> "$1.times" 2>/dev/null
+    mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } >> "$1.times" 2>/dev/null
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
       [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
     else rc=1; fi
@@ -1119,16 +1122,46 @@ mainwait() { # <worktree> <main's commit> <the cases, as one text>
 }
 # One run of the command <cmd> in the worktree, on the slot tests() holds.
 testonce() { # <worktree> <cmd>
-  local pid clock rc r=''
+  local pid clock rc r='' t0
   [ ! -s "$1.rerun" ] || r=$1.rerun
-  (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
+  t0=$(date +%s)
+  (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
     CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" & clock=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock 2>/dev/null; wait $clock 2>/dev/null; rm -f "$1.turnwait"
+  reported "$1" "$t0"
   # timeout made the command a process group of its own ($pid): a process left of it that closed the slot's
   # descriptor still keeps the slot (slot_left).
   [ -n "$SLOT_HOME" ] || slot_left "$pid"; return $rc
+}
+# What a card's run (tests()) asks the runner for so that it writes its report, with no change to the test command
+# (the pack's test.report env and args, setup.sh reportguess()), its <file> made <worktree>.report: REPORT_ENV, each
+# variable as `<name>=<value>`, the words after the variable's own (testonce() exports them), <file> and <mochatimes>
+# (Conveyor's mocha timer, tools/mochatimes.cjs) in double quotes, as an option in NODE_OPTIONS takes a path;
+# REPORT_ARGS, words for the command's end, the file quoted for the shell. Both empty when the pack names neither.
+REPORT_ENV=()
+reportask() { # <worktree>
+  local e a q
+  REPORT_ENV=(); REPORT_ARGS=''; rm -f "$1.report"
+  packget test.report.env e test.report.args a 2>/dev/null || return 0
+  printf -v q '%q' "$1.report"; REPORT_ARGS=${a//<file>/$q}
+  [ -z "$e" ] || mapfile -t REPORT_ENV < <(jq -r --arg f "\"$1.report\"" --arg m "\"$HERE/tools/mochatimes.cjs\"" 'objects | to_entries[]
+    | select((.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) and (.value | type == "string"))
+    | "\(.key)=\(env[.key] // "" | if . == "" then "" else . + " " end)\(.value | gsub("<file>"; $f) | gsub("<mochatimes>"; $m) | gsub("\n"; " "))"' <<<"$e")
+}
+# The times the runner's own report gives (the pack's test.report: format, and path, a file or folder from the
+# worktree, else <worktree>.report when its env or args has <file> (reportask()), else the run's output, <worktree>.test
+# (go test -v's, which env GOFLAGS asks for);
+# conveyor/README.md, The CPU budget of a test file), as `TESTRUN sec` lines with clock seconds only
+# (tools/testreport.py), in <worktree>.reported: of the report files written since <start>, so one an earlier run left
+# is not read. None when the pack names no format.
+reported() { # <worktree> <the run's start, epoch seconds>
+  local f p e a
+  rm -f "$1.reported"
+  packget test.report.format f test.report.path p test.report.env e test.report.args a 2>/dev/null && [ -n "$f" ] || return 0
+  if [[ $e$a == *'<file>'* ]]; then p=$1.report; elif [ -z "$p" ]; then p=$1.test; elif [[ $p != /* ]]; then p=$1/$p; fi
+  python3 -I "$HERE/tools/testreport.py" "$f" "$1" "$2" "$p" > "$1.reported" 2>/dev/null || rm -f "$1.reported"
 }
 # What the next run of the card need not run again (tests()), in <worktree>.rerun: a line `change\t<id>` (the hash of
 # the staged diff), `base\t<HEAD>` and `tree\t<the index's tree>` (what rerunsince() compares), then `pass\t<file>` for

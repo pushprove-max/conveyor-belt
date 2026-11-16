@@ -11,7 +11,7 @@
 #   list of the last pass (testrulespass()), {time, on, matches, burst}, null before the first, and log: the last
 #   TESTRULES_SHOWN lines of the rules' log ($TESTRULESLOG), newest first; null when the pack cannot be read;
 # files: each test file main's checkout tracks (a name with `.test.` in it), and each other file with a run on record:
-#   a card's test line (times) or a whole-suite run ($SUITERUNS, suiterec() of lib/testrun.sh); the highest CPU seconds
+#   a card's test line (times, and clocks: a file timed by the clock only, from its runner's report, has cpu null) or a whole-suite run ($SUITERUNS, suiterec() of lib/testrun.sh); the highest CPU seconds
 #   now first, a file with none last: file, cpu (its newest run's that has CPU seconds; null with none), median (of
 #   every run on record with CPU seconds), change (cpu against median, as a share: 0.5 is 50% over; null when the
 #   median is 0 or null), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
@@ -260,8 +260,9 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | (reduce ($ls[] | select(.result == "fail" and (.card | type == "string")) | ($ch[0][$land[.card] | strings] // null) as $d | select($d != null)
         | failedfiles[] | [., IN($d[])]) as [$f, $ed] ({}; if $ed then .[$f].changed += 1 else .[$f].caught += 1 end)) as $catch
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
-    | [($ls[] | . as $l | .times | objects | to_entries[] | select(.value | type == "number") | .key as $f
-        | {file: $f, cpu: .value, sec: (($l.clocks | objects | .[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
+    | [($ls[] | . as $l | (.times | objects) as $t | ($l.clocks | objects // {}) as $k | $t + $k | keys[] as $f
+        | select(($t[$f] | type) == "number" or ($k[$f] | type) == "number")
+        | {file: $f, cpu: (($t[$f] | numbers) // null), sec: (($k[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
        ($su[] | . as $w | .files | objects | to_entries[] | select(.value | type == "object")
         | {file: .key, cpu: ((.value.cpu | numbers) // null), sec: ((.value.sec | numbers) // null), card: null, time: $w.time, whole: true,
            result: ((.value.result | strings) // null)}),

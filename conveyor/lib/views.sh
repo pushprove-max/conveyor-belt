@@ -171,7 +171,9 @@ cards() {
 # {since, sha}, while the loop's push job runs, else null; a landing during it waits for the next push); gh (signed in); diskFreeKb (free space
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
-# untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; routes: each
+# untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; report: the
+# pack's test.report ({runner, format, path, env, args, option}: the runner setup found and how its times are read), null with
+# none; routes: each
 # Claude route, subscription and proxy, with its state (routesnow()); quarantined (line, field, time): each line of the
 # card records the check set aside ($QUARANTINE, check()), until the owner removes it from that file. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it: the card has no issue (issue 0) to be shown by.
@@ -220,14 +222,15 @@ aways() { # each card that gave way (giveway()): {to: the issue it gave way to, 
 # length of it passes the kernel's limit on one argument), since (when the issue was opened), lowest number first.
 # null when gh did not list the open issues.
 # untimed (on records slurped): the project's last card test runs that recorded no test times, so its test command
-# prints no `TESTRUN sec` lines (README.md, The CPU budget of a test file): of the last 5 card test runs that ran tests
-# (pass or fail; no batch's reused line, no refused full run, none that selected no file), how many, when none of them
-# recorded a file's CPU seconds (times); 0 when one did, or there is none. health and doctor say so.
+# prints no `TESTRUN sec` lines and no report of its runner was read (README.md, The CPU budget of a test file): of the
+# last 5 card test runs that ran tests (pass or fail; no batch's reused line, no refused full run, none that selected
+# no file), how many, when none of them recorded a file's times (times, an object even when each file was timed by
+# the clock only); 0 when one did, or there is none. health and doctor say so.
 UNTIMED='def untimed: [.[] | select(.step == "test" and (.result | IN("pass", "fail")) and .reused != true and (.refused | type) != "string"
     and .ended != "nothing selected" and (.selected.files // 1) > 0)] | .[-5:]
   | if length > 0 and all(.[]; .times | type != "object") then length else 0 end;'
 health() {
-  local loop=true gh=false free a not=() lv c r=null cap cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld
+  local loop=true gh=false free a not=() lv c r=null cap cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld tr
   check && lv=${LIVEJSON:-$(live)} || return 1
   gone=$(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
       | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.) | "\(.card)\t\(.pid)\t\(.started // "")"] | .[]' "$READ" \
@@ -261,6 +264,8 @@ health() {
   rm=null; [ "$loop" != true ] || rm=$(jq -ce 'select((.issue | type == "number") and (.reason | type == "string"))' "$ROOMF" 2>/dev/null) || rm=null
   free=$(df -Pk "$CARDS" 2>/dev/null | awk 'NR == 2 { print $4 }'); [[ $free =~ ^[0-9]+$ ]] || free=null
   mc=$(mhost); mc=${mc:-null}
+  # How the test times are read from the runner's report (the pack's test.report, written by setup), for untimed.
+  tr=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || tr=null
   # The machine now, for the Board's Load limit: its cores and 1-minute load (roomnow(), as the room reads it); null for one not read.
   read -r ld _ <<<"$(roomnow)"; mn=$(jq -cn --arg c "$(getconf _NPROCESSORS_ONLN 2>/dev/null)" --arg l "${ld:-}" '{cores: ($c | tonumber? // null), load: ($l | tonumber? // null)}')
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
@@ -268,7 +273,7 @@ health() {
   done
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
-    --argjson cap "$cap" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" \
+    --argjson cap "$cap" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" \
     --slurpfile old "$READ_OLD" --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
@@ -332,6 +337,6 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, diskFreeKb: $free, builderCap: $cap, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed, routes: $routes, quarantined: $qt}
+       untimed: untimed, report: $report, routes: $routes, quarantined: $qt}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"
 }

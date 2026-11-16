@@ -297,8 +297,9 @@ budget, slower than usual or that wait, and the table shows those files only, as
 The table shows every test file of the project: each file's CPU seconds, its median, its last runs, the clock time of
 its newest run (Last run took; point at it to see when that run was) and its status (Over budget, Slower than usual,
 Waits, Flaky and others). A file with an issue shows a link to it, "#NN". The runs are those of card Test steps and of
-whole-suite runs (Run full test suite, Push landed, and the suite of a release). A file with no CPU time yet shows
-"Not timed yet" in place of its figures and comes after the timed files. A file that only whole-suite runs run
+whole-suite runs (Run full test suite, Push landed, and the suite of a release). A file with no time yet shows
+"Not timed yet" in place of its figures and comes after the timed files. A file with clock times only shows "Wall
+only": its test runner's report gives no CPU seconds, so its CPU columns are empty and no budget holds it. A file that only whole-suite runs run
 (`wholeOnly` in the pack's `test.files`) shows "Whole suite only". Such a file starts other test files, and each of
 them has its own budget, so the file itself has no budget. It shows "Runs other test files" in place of a budget. It
 never shows Over budget, Slower than usual or Waits, and you cannot optimize it, set its budget or mark it slow on

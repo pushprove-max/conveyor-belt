@@ -14,9 +14,9 @@
 // the clock time its newest run took (Last run took, with that run's date and time on hover), Caught (#75: the card test
 // steps it failed whose landed change left it as it was; the times it was edited until it passed, on hover), and its status
 // (chips; its issue as a link, "#NN"; Runs other test files, Whole suite only and, for a file with NEVER runs on
-// record or more and no catch, Never caught anything as grey text). A file with no CPU time on
+// record or more and no catch, Never caught anything as grey text). A file with no CPU or clock time on
 // record shows "Not timed yet" in place of its figures and comes after the timed files (by name, it sorts as any
-// other). Each column heading has a hint on hover and on focus. A file the pack marks wholeOnly (a runner that starts
+// other); one with clock times only (its runner's report gives no CPU time) shows "Wall only". Each column heading has a hint on hover and on focus. A file the pack marks wholeOnly (a runner that starts
 // other test files whole, each of them with its own budget) is held to no budget: it has "Runs other test files" in
 // place of a budget, is never Over budget, Slower than usual or Waits, and has no Optimize. A search box over it keeps
 // the rows whose path holds its text (any case); filter chips, each with its count, show one status alone; the two
@@ -113,7 +113,8 @@
     ['waits', 'Waits', 'info', true], ['flaky', 'Flaky', 'warn', true], ['fails', 'Fails often', 'bad', true],
     ['hollow', 'Hollow', 'warn', false],
     ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false],
-    ['runner', 'Runs other test files', 'quiet', false], ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false]];
+    ['runner', 'Runs other test files', 'quiet', false], ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false],
+    ['wall', 'Wall only', 'quiet', false]];
   const S = { el: null, ctx: null, d: null, read: null, repo: undefined, filter: 'all', open: new Set(), busy: false,
     sort: null,          // the column the table is sorted by, {key, dir: asc | desc}; null: rows that need a look first, then the highest CPU s
     edits: 'weakened',   // the filter of Test edits by cards: weakened (any count above zero) or all
@@ -179,12 +180,15 @@
       over: f.over === true && !f.slowOnPurpose, slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
       fails: (num(f.failedSteps) || 0) >= FAILS, hollow: hollowOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
-      runner, whole: runner, never: !list(f.runs).length,
+      runner, whole: runner, never: !list(f.runs).length, wall: wallOnly(f),
     })[k]);
   }
   const look = (f) => marks(f).some((m) => m[3]);
-  // A file is timed when a run of it on record has a CPU time; one that is not shows "Not timed yet" and comes last.
-  const timed = (f) => list(f.runs).some((r) => obj(r) && num(r.cpu) !== null);
+  // A file is timed when a run of it on record has a CPU time or a clock time; one that is not shows "Not timed yet"
+  // and comes last. One with clock times only (its runner's report gives no CPU time) is Wall only: its CPU columns are empty.
+  const cpuTimed = (f) => list(f.runs).some((r) => obj(r) && num(r.cpu) !== null);
+  const timed = (f) => cpuTimed(f) || list(f.runs).some((r) => obj(r) && num(r.sec) !== null);
+  const wallOnly = (f) => !cpuTimed(f) && timed(f);
   // The clock time of a run: "48 s", "8 min 7 s".
   const clockTook = (s) => { if (num(s) === null) return '—'; const r = Math.round(s); return r < 60 ? `${r} s` : `${Math.floor(r / 60)} min ${r % 60} s`; };
   // The table's columns: key, heading, the value a sort by it reads (null sorts last both ways; a file not timed is
@@ -1473,7 +1477,7 @@
       if (S.filter !== 'all' && !counts[S.filter]) S.filter = 'all';
       parts.push(figures(files, counts));
       parts.push(files.length ? table(files, counts) : S.ctx.state('empty', 'No file times for this project',
-        'Conveyor records the CPU time of each test file when the test command prints a "TESTRUN sec" line for it. The helper conveyor/tools/testtime.sh prints this line. The table starts when the first card with file times runs its tests.'));
+        'Conveyor records the times of each test file from the test runner\'s own report (the pack\'s test.report), or when the test command prints a "TESTRUN sec" line for it. The helper conveyor/tools/testtime.sh prints this line. The table starts when the first card with file times runs its tests.'));
       parts.push(editsSection(files));
       if (gone.length) parts.push(removed(gone));
       if (S.sel.size) parts.push(selBar(files));

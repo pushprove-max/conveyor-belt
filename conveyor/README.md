@@ -504,10 +504,51 @@ beside it and wraps each file's run, putting the helper's line in that log befor
 cat "$out"; grep '^TESTRUN sec' "$out" >> "$CONVEYOR_TEST_LOG/<its log>"
 ```
 
+**Times from the runner's own report.** A project needs no `TESTRUN sec` lines when its test runner writes a
+report Conveyor can read. The pack's `test.report` says how: `format`, and `path`, the report file or a folder of
+report files, from the repository root (no `path`: the command's own output). After each test run, Conveyor reads
+the report files written during that run and records each test file's clock seconds. A report gives no CPU seconds,
+so these files are "Wall only" on the Board's Tests page, and no CPU budget holds them. When the runner's log also
+has a `TESTRUN sec` line for a file, that line wins.
+
+| Runner | Report option in the test command | `format` | `path` |
+| --- | --- | --- | --- |
+| `node --test` | `--test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=<file>` | `junit` | the file |
+| vitest | `--reporter=default --reporter=json --outputFile.json=<file>`, or the `junit` reporter | `jest-json` or `junit` | the file |
+| jest | `--json --outputFile=<file>` | `jest-json` | the file |
+| pytest | `--junitxml=<file>`, or `--durations=0` | `junit`, or `pytest-durations` | the file, or none |
+| go test | `-json`, or `-v` | `go-json`, or `go-text` | none |
+| cargo test | none: its usual output gives the times | `cargo` | none |
+| mocha | `--reporter xunit --reporter-option output=<file>` | `junit` | the file |
+| rspec | `--format progress --format json --out <file>` | `rspec-json` | the file |
+| any other | JUnit XML files written to a folder | `junit` | the folder |
+
+`go test` gives a time for each test. Conveyor adds it to the `_test.go` file that declares the test. `setup` finds
+the runner in the test command (or in the `package.json` script that `npm test` runs) and writes `test.report`, with
+`format` and `path` when the command already writes a report. When the command writes no report, Conveyor asks for
+one at each card test run, and the test command stays as it is:
+
+- `node --test`, pytest and rspec: `test.report` has `env`, the environment variable Conveyor sets for the run
+  (`NODE_OPTIONS`, `PYTEST_ADDOPTS` or `SPEC_OPTS`). Conveyor adds the report option after the variable's own value.
+- go test: `test.report` has `env` `GOFLAGS` set to `-v`, and Conveyor reads the times from the output (`go-text`).
+  The output still shows the failures.
+- mocha: `test.report` has `env` `NODE_OPTIONS` with `--require <mochatimes>`, Conveyor's helper
+  `conveyor/tools/mochatimes.cjs`. It records the time of each test to the file in `CONVEYOR_MOCHA_REPORT` (`mocha-times`). Mocha's reporter
+  stays as it is.
+- vitest and jest, when they are the last command of the test command: `test.report` has `args`, the report option
+  Conveyor adds at the end of the test command (after `--` for an npm script).
+
+`<file>` in `env` or `args` is the report file Conveyor names, and `<mochatimes>` is the path of that helper. A command that
+names a report or reporter of its own gets no second one. cargo test needs nothing: its usual output gives the time of
+each test target. When Conveyor cannot ask for a report, for example for jest followed by another command,
+`test.report` has `runner` and `option`, the report option to add to the test command. Set `test.report` by hand for
+a runner that `setup` does not know, such as one that writes JUnit XML to a folder.
+
 `setup` says so, with the path of the helper, when the pack's test command runs a shell script of the project that has
 no `TESTRUN sec` and no `testtime.sh` in it; it never changes the script. `doctor` warns, and the Board's Health shows
 a "Test times" warning, when the project's last card test runs (up to 5 that ran tests) recorded no test times
-(`health`'s `untimed`: how many), each naming this section.
+(`health`'s `untimed`: how many), each naming this section. When `test.report` names a runner with no `format`, the
+warning names the runner and the report option to add to the test command.
 
 **The test results cache.** A runner can also give, for each test file it runs whole, the files that the test file
 reads: `TESTRUN inputs<TAB><file><TAB><input file>...` in its log (the test file's imports; for an engine case file,
