@@ -553,6 +553,28 @@ jq -n '{plugin: {commit: 7}}' > "$T/gamma/.conveyor/project.json"
 askg > /dev/null 2>&1 && fail "a numeric pin was accepted"
 }
 
+t_ask_self() {
+CASE=ask-self
+ready
+unset CONVEYOR_FOREMAN_ASK
+# Bug caught (issue 40): a record whose pack has no plugin key (the plugin's own checkout, which runs the engine from
+# itself) had no engine the Foreman could run, so it read as unreachable and its cards never woke the Foreman. alpha
+# follows an install here; beta runs its own conveyor/conveyor.sh, with card 7 blocked.
+mkdir -p "$XDG_DATA_HOME/conveyor/versions/$PIN2/conveyor" "$T/beta/conveyor"
+jq -n '{plugin: {follow: "main"}}' > "$M/.conveyor/project.json" && jq -n --arg c "$PIN2" '{commit: $c}' > "$M/.git/conveyor-engine.json"
+jq 'del(.plugin)' "$T/beta/.conveyor/project.json" > "$T/p" && mv "$T/p" "$T/beta/.conveyor/project.json"
+belt() { jq -c --argjson i "$1" --arg t "$2" '.belt = [{card: "c\($i)", issue: $i, step: "build", title: $t}]'; }
+snap '[]' '[]' | belt 5 "an alpha page" > "$T/snap-alpha"; snap '[]' '[7]' | belt 8 "a beta page" > "$T/snap-beta"
+for e in "$XDG_DATA_HOME/conveyor/versions/$PIN2:alpha" "$T/beta:beta"; do
+  printf '#!/usr/bin/env bash\n[ "$1" = snapshot ] && cat %q\n' "$T/snap-${e##*:}" > "${e%:*}/conveyor/conveyor.sh"
+done
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1)
+grep -qxF "alpha: 1 on the belt" <<<"$out" && grep -qF "#5 build" <<<"$out" || fail "status did not read the record that follows an install: $out"
+grep -qxF "beta: 1 on the belt" <<<"$out" && grep -qF "#8 build" <<<"$out" || fail "status did not read the record that runs its own engine: $out"
+bash "$SRC/watch-conveyor.sh" --once || fail "no wake for the blocked card of the record that runs its own engine"
+grep -qF "beta: #7 is blocked" "$FD"/pending/*.wake || fail "the wake does not name beta's blocked card: $(cat "$FD"/pending/*.wake)"
+}
+
 t_session() {
 CASE=session
 # The Foreman named Ada (as launch names it), the records' snapshots of the case wake, and each record command noted.
@@ -1048,7 +1070,7 @@ bash "$SRC/../privacy/check.sh" --terms "$TERMS" "$SRC"/* "$SRC/../../commands/"
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin session reopen projects projects_filing projects_groups remote words auto privacy)
+cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin ask_self session reopen projects projects_filing projects_groups remote words auto privacy)
 # (A case's own variables, as its loops' c, are its own: the case's name is in one none of them uses.)
 for one_case in "${cases[@]}"; do
   (CASE=${one_case//_/-}; fixture "$one_case"; "t_$one_case"; : > "$B/$one_case.passed") > "$B/$one_case.out" 2>&1 &
