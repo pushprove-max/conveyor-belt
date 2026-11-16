@@ -45,6 +45,12 @@ t_host() {
   read -r u t <<<"$(p p_mem)"; [[ $u =~ ^[0-9]+$ && $t =~ ^[0-9]+$ ]] && [ "$u" -le "$t" ] || fail "memory: $(p p_mem)"
   printf abc > "$T/f"; touch -d @1700000000 "$T/f"
   [ "$(p p_stat "$T/f" "$T/none")" = "3 1700000000" ] || fail "stat: $(p p_stat "$T/f" "$T/none")"
+  # The state store's answers are kept while this key is unchanged (stdb, records.sh): a file written again to the same
+  # size and the same mtime gives another key, and a file not there gives none.
+  k=$(p p_filekey "$T/f") && [ -n "$k" ] || fail "no key of a file: $k"
+  printf xyz > "$T/f"; touch -d @1700000000 "$T/f"
+  [ "$(p p_filekey "$T/f")" != "$k" ] || fail "a file written again to the same size and mtime kept its key: $k"
+  ! p p_filekey "$T/none" >/dev/null || fail "a file not there has a key"
   [ "$(TZ=UTC p p_date 2026-11-10 +%s)" = 1794268800 ] || fail "date: $(TZ=UTC p p_date 2026-11-10 +%s)"
   p p_newer "$T/f" 60 && fail "a file changed long ago is new"
   touch "$T/f"; p p_newer "$T/f" 60 || fail "a file changed now is not new"

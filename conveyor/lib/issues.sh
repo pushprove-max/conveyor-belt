@@ -76,10 +76,10 @@ reopened() { # <open issues, a json list>
   local n t
   while read -r n; do
     t=$(timeout 20 gh issue view "$n" --json closed 2>/dev/null | jq -r '.closed' 2>/dev/null) || t=''
-    [ "$t" != false ] || locked retry "$n" || true
+    [ "$t" != false ] || { locked retry "$n"; stdbkeeps; } || true
   done < <(jq -rs --arg shut "$SHUT" --argjson open "$1" 'map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and (.step != "closed" or .reason == $shut)))
-    | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(stdb ask lines cards) 2>/dev/null)
+    | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(turncards) 2>/dev/null)
 }
 # Under the lock: the lines the jq test picks (asked of each record, with the jq arguments given) move from the card
 # records to the retried file; MOVETAG, when set, is a jq filter each moved line goes through ($at: now).

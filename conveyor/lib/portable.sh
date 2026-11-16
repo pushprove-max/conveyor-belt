@@ -52,6 +52,9 @@ p_mem() {
 p_stat() { stat -c '%s %Y' "$@" 2>/dev/null; } # <file>...
 # "<mtime epoch> <path>" of each file, one line each; a file that is not there gives no line.
 p_mtimes() { stat -c '%Y %n' "$@" 2>/dev/null; } # <file>...
+# "<size> <mtime> <ctime> <inode> <path>" of a file, the times to the nanosecond: a file written since, even to the same
+# size within the same second, gives another line. Fails, with no line, when the file is not there.
+p_filekey() { stat -c '%s %.9Y %.9Z %i %n' -- "$1" 2>/dev/null; } # <file>
 
 # <date> (as GNU date -d reads it: "6 days ago", "2026-11-10") in <format>.
 p_date() { date -d "$1" "$2"; } # <date> <+format>

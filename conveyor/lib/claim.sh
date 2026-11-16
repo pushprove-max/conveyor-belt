@@ -259,6 +259,8 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     [ -z "$waited" ] || waitsec=$((wb + SECONDS - ws))
     # A change a session changed here is reviewed again before it lands: no batch takes it till then (gather()).
     [ $moved = 0 ] || rm -f "$3.ready"
+    # The card records kept in this shell (stdb, lib/records.sh): a look that finds them unchanged asks no database.
+    stdb ask lines cards >/dev/null 2>&1 || :
     w=$(locked claim "$1" "$3" "$me") || { block "$1" "$2" "$3" "$5: the engine could not write the claim on the files of the card"; return 1; }
     # Taken into a batch (gather()): it waits for the card that took it, which lands it (3) or finds it breaks the
     # batch's tests (4). A batch whose card is gone takes it no more.

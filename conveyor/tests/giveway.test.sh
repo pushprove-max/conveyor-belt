@@ -225,7 +225,7 @@ t_givewaypast() {
   # claim() and ready() as the engine has them, and what they call, run from main's checkout.
   eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p' "$SRC/lib/claim.sh")"
   # The card records are read through the state helper (state.py), as the engine reads them.
-  eval "$(sed -n '/^stdb() {/p' "$SRC/lib/records.sh")"
+  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
   local HERE=$SRC
   ctl() { cat "$ST/control.json"; }

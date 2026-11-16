@@ -80,7 +80,7 @@ machined() { grep -qE '^(cmd machine |  machine\) )' "$1" 2>/dev/null; }
 # would never be picked. A card that waited once and went on holds its slot for work, and starts nothing past the cap.
 # A run with --only takes only the listed ones.
 urgent() {
-  live | jq -c --slurpfile s <(stdb ask lines cards) --argjson only "${ONLY:-null}" '[$s[] | select(.step == "picked") | .card] as $on
+  live | jq -c --slurpfile s <(turncards) --argjson only "${ONLY:-null}" '[$s[] | select(.step == "picked") | .card] as $on
     | [$s[] | select(.step | IN("landed", "closed", "blocked")) | .card] as $ended
     | [to_entries[] | select((.key | IN($on[])) and (.key | IN($ended[]) | not)) | .value.waits.on // empty
       | select(IN($on[]) | not) | capture("-(?<n>[0-9]+)$").n | tonumber | select($only == null or IN($only[]))] | unique | select(. != [])' 2>/dev/null
@@ -93,7 +93,7 @@ urgent() {
 # again. The machine's cap and room apply as to any card (redpick(): room()).
 redfix() { # <the loop's own cards in progress, card ids one a line>
   [ -z "${ONLY:-}" ] && [ -s "$MAINRED" ] || return 0
-  jq -r --slurpfile s <(stdb ask lines cards) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" \
+  jq -r --slurpfile s <(turncards) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" \
     '[.reds[]?.card | strings] as $fix | select(any($own[]; IN($fix[])) | not) | [$s[].card] as $taken
     | first(.reds[]? | select(.card == null or (.card | IN($taken[]) | not)) | .sha)' "$MAINRED" 2>/dev/null
 }
@@ -135,10 +135,11 @@ revive() { # <the loop's own cards, one a line>
       echo "conveyor: card $c had an open record and its process was gone; it is blocked, its work kept, and issue #$n is given back"
       locked retry "$n"
     fi
+    stdbkeeps
   done < <(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
       | (last | if .step == "start" then .of else .step end) as $s
       | map(select(.step == "worktree" and (.pid | type) == "number" and (.started | type) == "string")) | last | select(.)
-      | [.card, .issue, .pid, .started, $s] | @tsv] | .[]' < <(stdb ask lines cards) 2>/dev/null)
+      | [.card, .issue, .pid, .started, $s] | @tsv] | .[]' < <(turncards) 2>/dev/null)
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
@@ -165,6 +166,7 @@ run() { # [max-cards] [serve]
   [ -n "$OWN" ] || [ -z "$RAN" ] || FOLLOW=$serve
   if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
   while :; do
+    stdbkeeps # the turn's readers, and the cards it starts, find the records kept until they change (lib/records.sh)
     [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || { pusher=''; rm -f "$PUSHING"; }
     # The script a `serve` restarts on, once no push runs: the pinned commit's install, or the checkout's own (its
     # new code); no push starts then, as the restart would wait for it (the new loop makes the push).
@@ -225,7 +227,7 @@ run() { # [max-cards] [serve]
       k=$(while read -r p t; do [ -n "$p" ] && p_alive "$p" "$t" && echo "$p $t"; done <<<"$k")
       kill -KILL $(while read -r p t; do [ -z "$p" ] || freeze "$p"; done <<<"$k") 2>/dev/null
       while read -r p t; do while [ -n "$p" ] && p_alive "$p" "$t"; do sleep 0.1; done; done <<<"$k"
-      ( block "$c" "$n" "$CARDS/$c" "its process ended without a result" ); echo "conveyor: card $c ended without a result; it is blocked, and \`retry $n\` takes issue #$n again"
+      ( block "$c" "$n" "$CARDS/$c" "its process ended without a result" ); stdbkeeps; echo "conveyor: card $c ended without a result; it is blocked, and \`retry $n\` takes issue #$n again"
     done
     # Any other open card whose process is gone (revive()): blocked, its work kept, and picked again.
     revive "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)"
@@ -239,6 +241,7 @@ run() { # [max-cards] [serve]
         locked moveout '.card == $c' --arg c "$c" && echo "conveyor: stopped card $c; issue #$n is back in the queue" \
           || echo "conveyor: stopped card $c, but its lines could not be moved out of the card records: retry #$n by hand" >&2
       done < <(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done | locked halt)
+      stdbkeeps
     fi
     # The whole test on main (maintest()), looked at once a minute: a job beside the cards, never counted as one, and
     # given no run lock (fd 8), so a loop that ends while it runs leaves the checkout free for the next loop.
@@ -317,12 +320,12 @@ run() { # [max-cards] [serve]
     done < <(jq -rs 'map(select(.step != "push")) | group_by(.card)[]
       | select((map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | . as $e
           | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last | .step) == "blocked")
-      | .[0].issue' < <(stdb ask lines cards) 2>/dev/null | sort -un)
+      | .[0].issue' < <(turncards) 2>/dev/null | sort -un)
     if [ ${#shuts[@]} != 0 ]; then
       t=$(printf '%s\n' "${!shuts[@]}" | jq -cs .)
       [ -z "$issues" ] || issues=$(jq -c --argjson s "$t" 'map(select(.number | IN($s[]) | not))' <<<"$issues")
       [ ! -s "$ISSUES" ] || { jq -c --argjson s "$t" 'map(select(.number | IN($s[]) | not))' "$ISSUES" > "$ISSUES.new" && mv -f "$ISSUES.new" "$ISSUES"; } 2>/dev/null
-      ! locked shut "$t" || shuts=()
+      ! locked shut "$t" || shuts=(); stdbkeeps
     fi
     # A shut card's issue opened again is given back as `retry` gives it, before this turn's pick reads the open list.
     [ "$asking" != 1 ] || [ -z "$issues" ] || reopened "$issues"

@@ -215,7 +215,7 @@ NONE'
 overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL to the open issues, with the lines it added
   local all n belt ans d f
   OVL=$1
-  [ -n "$1" ] && all=$(stdb ask lines cards 2>/dev/null) && [ -n "$all" ] || return 0
+  [ -n "$1" ] && all=$(turncards 2>/dev/null) && [ -n "$all" ] || return 0
   belt=$(jq -cs '[group_by(.card)[] | select(.[0].issue != 0 and any(.step == "picked") and all(.step | IN("landed", "closed", "blocked") | not)) | .[0].issue] | unique' <<<"$all" 2>/dev/null) || return 0
   [ "$belt" != '[]' ] || return 0
   while n=$(READ=<(printf '%s\n' "$all") upnext "$OVL" "$2" '' "$3" 2>/dev/null | jq -r '.[0].number // empty') && [ -n "$n" ]; do

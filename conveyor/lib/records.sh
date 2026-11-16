@@ -26,7 +26,45 @@ locked() { ( flock 9 && "$@" ) 9>>"$STATE"; }
 # through it, to its table and its file both; every reader asks it, but check() (views.sh), which checks the card
 # records file's own bytes.
 # -S: it imports the standard library alone, and the site start-up was a fifth of each call's time.
-stdb() { python3 -S "$HERE/state.py" "${STATE%/*}" "$@"; }
+#
+# The answer to one question (`ask <question> <arg>...`, no -o) is kept in the shell that asked (ASKED_V, by the
+# question) while the files of the tables it reads are unchanged since (ASKED_K: p_filekey of each, or that it is not
+# there, read before the database was asked): each append and rewrite goes to the file too, and the database takes its
+# lines from the files alone, so unchanged files get the same answer. A file that changed is asked again; an answer
+# that failed is kept no more. A subshell finds what its shell kept: the loop keeps what its turn and its cards read
+# most (stdbkeeps, run()), a card its issue's retried lines (card()), and a waiting card the card records before each
+# look (settle()), so their readers, in subshells, ask the database once between two writes, not once each.
+declare -A ASKED_K=() ASKED_V=()
+stdb() {
+  local q k='' t v rc
+  if [ "${1:-}" = ask ] && [ $# -ge 2 ] && [ "$2" != -o ] && [[ " $* " != *" -- "* ]]; then
+    case $2 in lines|issue|tail) t=${3:-} ;; pushes) t='cards retried' ;; samples|limit) t=$2 ;; *) t=cards ;; esac
+    for t in $t; do
+      [[ $t =~ ^(cards|retried|declined|samples|limit)$ ]] || { k=''; break; }
+      k+=$(p_filekey "${STATE%/*}/$t.jsonl" || echo "none ${STATE%/*}/$t.jsonl")$'\n'
+    done
+  fi
+  [ -n "$k" ] || { python3 -S "$HERE/state.py" "${STATE%/*}" "$@"; return; }
+  printf -v q '%q ' "${@:2}"
+  # A table whose file is not there, or empty, holds no line (the database takes its lines from the file): its lines,
+  # an issue's, its tail, its readings and its samples are none, asked of no database, and no older answer is kept.
+  if [[ $k == 0\ * || $k == none\ * ]]; then
+    case $2:$# in lines:3|limit:3|samples:2) unset 'ASKED_K[$q]' 'ASKED_V[$q]'; return 0 ;;
+      issue:4|tail:4) [[ $4 =~ ^[0-9]+$ ]] && { unset 'ASKED_K[$q]' 'ASKED_V[$q]'; return 0; } ;; esac
+  fi
+  if [ "$k" != "${ASKED_K[$q]:-}" ]; then
+    v=$(python3 -S "$HERE/state.py" "${STATE%/*}" "$@" && echo .) || { rc=$?; unset 'ASKED_K[$q]' 'ASKED_V[$q]'; printf '%s' "$v"; return "$rc"; }
+    ASKED_K[$q]=$k ASKED_V[$q]=${v%.}
+  fi
+  printf '%s' "${ASKED_V[$q]}"
+}
+# The answers the loop's turn and the cards it starts read: kept in this shell (stdb, above).
+stdbkeeps() { { stdb ask lines cards; stdb ask lines retried; stdb ask lines declined; stdb ask tail limit 400; } >/dev/null 2>&1; return 0; }
+# The card records as the loop's turn kept them (stdbkeeps, run()): read once a turn and passed on to the turn's own
+# readers (run(), reopened(), overlap(), checkheld(); only the loop calls them), as one reading for the whole turn. The
+# loop keeps them again after each line it writes in the turn, so those readers see the loop's own lines. Asked anew
+# when none are kept.
+turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_V[lines cards ]}"; else stdb ask lines cards; fi; }
 # What the readers read (READ, READ_OLD): the state database's whole lines of the card records and of the retried
 # lines, or the copy a snapshot or another folder gave in their place. A dry pick (DRYPICK, drypick()) reads the
 # files themselves even when its folder is the state folder: the helper would write the database there.

@@ -168,7 +168,7 @@ hookfailed() { # <trace2 event file>
 checkheld() {
   local tip
   tip=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || return 1
-  stdb ask lines cards 2>/dev/null | jq -Rne --arg s "$tip" 'last(inputs | fromjson? | objects | select(.step == "push")) | .result == "fail" and .kind == "check" and .sha == $s' >/dev/null 2>&1
+  turncards 2>/dev/null | jq -Rne --arg s "$tip" 'last(inputs | fromjson? | objects | select(.step == "push")) | .result == "fail" and .kind == "check" and .sha == $s' >/dev/null 2>&1
 }
 # Has the pack's remote this commit? Yes when the last push that worked to its branch, or that branch as last seen
 # here, holds it.

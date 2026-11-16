@@ -32,6 +32,8 @@ card() { # <card> <issue> [<branch> <tip>]
   # (in its kept folder, or beside its worktree when it could not be moved there).
   # A patch that no longer applies is still used: its session brings it onto main. Only one git cannot
   # parse is given up: that card is built from nothing.
+  # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
+  [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
   if [ -z "$br" ] && [ "$n" != 0 ] && prev=$(prior "$n") && [ -n "$prev" ]; then
     from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
     [ -z "$rev" ] || cp "$rev" "$wt.review"
