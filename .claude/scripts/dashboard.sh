@@ -129,7 +129,8 @@
 #           (their issues), beltSteps (every card on the belt, landed ones too: issue, step, landed; the waiting list
 #           says where each issue a card waits on is), blocked (the blocked cards), forecast
 #           (the snapshot's: cards, usd, perCard {usd, pct}, guard, reading, pausesAt; null from a snapshot without one;
-#           no time), prices (the snapshot's: the built-in model prices and the pack's overrides, for Model prices; null
+#           no time), prices (the snapshot's: the built-in model prices, the pack's prices, added models and aliases,
+#           each model's display name and the model IDs seen in 30 days, for Model prices and the Board's model names; null
 #           from a snapshot without them) and open (as the Board's: every held issue with its labels and reasons, and
 #           every open issue).
 #   tests   the Tests page, of the same record (repo null when none is; repos and others as the Board's): tests (the
@@ -466,7 +467,8 @@ limit() {
   cached claude-usage python3 "$HERE/dashboard_limit.py" fetch "$now_in_use" "$CACHE" > /dev/null
   st=$(cat "$RUN/st-claude-usage")
   acc=$(accounts) || acc=null
-  # The pack's model price overrides win over the built-in table here too (use_prices); a pack that does not read has none.
+  # The pack's model prices, added models and aliases win over the built-in table here too (use_prices); a pack that
+  # does not read has none.
   if out=$(PP_SCRATCH=$PP_SCRATCH PP_PRICES=$(jq -c '.prices // {}' "$PP_MAIN/.conveyor/project.json" 2>/dev/null) python3 "$HERE/dashboard_limit.py" build "$st" "$CACHE/claude-usage" "$NOW" "$CACHE" "$HOME/.claude/projects" "$cx" "$PP_MAIN" ${PP_WORKSPACES:+"$PP_WORKSPACES"} 2>"$RUN/err-limit") \
       && jq -e 'objects' >/dev/null 2>&1 <<<"$out"; then
     jq -c --arg st "$st" --rawfile why "$RUN/why-claude-usage" --argjson acc "$acc" 'del(.history) | (.codex | objects) |= del(.history)

@@ -54,6 +54,9 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { font-family: var(--font); font-size: 16px; line-height: 1.45; color: var(--text); background: var(--bg); }
+/* The page's head (.top) stays at the top of the window: a part the page scrolls to (a field focused, a link to a
+   panel) stops below it (--head-h, its height, app.js), so the head never covers it. */
+html { scroll-padding-top: calc(var(--head-h, 64px) + var(--sp-2)); }
 body { margin: 0; min-height: 100vh; font-size: var(--fs-md); }
 h1, h2, h3, p, ul, ol, dl, dd, fieldset { margin: 0; padding: 0; border: 0; }
 ul, ol { list-style: none; }
@@ -635,6 +638,26 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-add { flex: 1 1 22ch; }
 .rules-field { flex: 1 1 12ch; min-height: 32px; }
 .rules-field.rules-load { flex: 0 1 10ch; }
+/* Model prices: the search and Add model on one line, groups of model rows, a fast mode as its row's second line,
+   and a row open in Edit with its fields in place. */
+.rules-prices-top { margin-bottom: var(--sp-3); }
+.rules-price-search { flex: 2 1 24ch; }
+.rules-price-group, .rules-prices-unpriced, .rules-price-addform { margin-bottom: var(--sp-4); }
+.rules-price-title { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); font-weight: 700; }
+.rules-prices-unpriced { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warn); border-left-width: 4px; border-radius: var(--radius-sm); }
+.rules-prices-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.rules-prices-table th, .rules-prices-table td { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--surface-2); text-align: left; vertical-align: top; }
+.rules-prices-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rules-price-family th { padding-top: var(--sp-3); font-size: var(--fs-xs); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.rules-price-name .chip { margin-left: var(--sp-1); }
+.rules-price-fastline { color: var(--muted); font-size: var(--fs-xs); }
+.rules-price-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.rules-price-editform { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) 0; }
+.rules-price-field { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.rules-price-field .rules-field { flex: 0 1 9ch; min-width: 7ch; }
+.rules-price-unit { color: var(--muted); font-size: var(--fs-xs); }
+.rules-price-ids { flex-basis: 100%; }
+.rules-price-alias { padding: 0 var(--sp-1); border-radius: var(--radius-sm); background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-xs); }
 .rules-tog { min-height: 32px; border-radius: 999px; }
 .rules-tog[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 /* A Build choice armed for its second click (it would skip queued issues). */

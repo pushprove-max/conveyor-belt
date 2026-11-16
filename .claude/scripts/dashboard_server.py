@@ -169,7 +169,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
 # or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`),
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
-# or prices (the Rules tab's Model prices: one model's price override set or cleared: `conveyor.sh prices`),
+# or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
+# or an alias: `conveyor.sh prices`),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
@@ -377,9 +378,13 @@ def control_ok(body):
         return (n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)) or (n == 2 and v[0] == 'prep' and VERSION.fullmatch(v[1]) is not None)
     if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's budget or mark
         return test_settings_ok(v)
-    if a == 'prices':  # the Rules tab's Model prices: one model's override set (input, output, cache read) or cleared
-        return ((n == 5 and v[0] == 'set' and all(PRICE.fullmatch(x) for x in v[2:])) or (n == 2 and v[0] == 'clear')) \
-            and MODEL.fullmatch(v[1]) is not None and not v[1].startswith('opencode:')
+    if a == 'prices':  # the Rules tab's Model prices: one model's price, added model, display name or alias
+        return n >= 2 and MODEL.fullmatch(v[1]) is not None and (
+            (n in (5, 6) and v[0] == 'set' and all(PRICE.fullmatch(x) for x in v[2:]))
+            or (n == 2 and v[0] in ('clear', 'remove'))
+            or (n in (7, 8) and v[0] == 'add' and v[2] in PROVIDERS and NAME.fullmatch(v[3]) is not None and all(PRICE.fullmatch(x) for x in v[4:]))
+            or (n in (2, 3) and v[0] == 'name' and all(NAME.fullmatch(x) for x in v[2:]))
+            or (n == 4 and v[0] == 'alias' and v[2] in ('add', 'remove') and MODEL.fullmatch(v[3]) is not None))
     if a == 'testaction':  # the Tests page: judge, explain or run one test file or a list of them, or stop one action by its id
         return (2 <= n <= 1 + TEST_FILES_MAX and v[0] in ('judge', 'explain', 'run') and all(TEST_FILE.fullmatch(x) for x in v[1:])) \
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
@@ -429,6 +434,10 @@ BUDGET = re.compile(r'[1-9][0-9]{0,5}(\.[0-9]{1,3})?')
 # A price as typed, one word: `conveyor.sh prices set` checks it is $ per million tokens and says why it is not, so the
 # Rules tab shows the refusal (a negative or a word) in the engine's own words.
 PRICE = re.compile(r'\S{1,40}')
+# A model's display name (`conveyor.sh prices name` and add): 1 to 60 characters with no control character; and the
+# group an added model shows in.
+NAME = re.compile(r'[^\x00-\x1f\x7f]{1,60}')
+PROVIDERS = frozenset({'claude', 'openai', 'opencode', 'other'})
 
 
 def test_settings_ok(v):

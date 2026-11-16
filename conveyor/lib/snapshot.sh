@@ -148,7 +148,10 @@
 # tests: each test file's figures, the test settings of the pack and the totals of the card test steps
 #   (lib/testfiles.sh testspart() says what it holds); null when the pack cannot be read.
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
-#   in $ per million tokens) and overrides (the pack's prices, which win over it); null when the table cannot be run.
+#   cacheWrite, in $ per million tokens), overrides (the pack's prices, added models and aliases, which win over it),
+#   names (each model's display name) and seen (each model ID the steps of the last 30 days ran: model, sessions,
+#   routes, as: the model it is priced as, or null) and research (the pack's research lane model, or null); null when the
+#   table cannot be run.
 # checkRun: the check run the pack's checks.progress prints, as checkrun() below says; no such field without one.
 # cost: usd of the steps that ended today and in the 7 days to today, those of a blocked card that `retry` moved
 #   to the retried file among them (the money was spent; such a card is in no other part of the record); over the
@@ -364,13 +367,18 @@ snapshot() (
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
       | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, turns, last, usage, files, tests, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))}' "$d/rows" > "$d/all" || exit 1
-  # The pack's model price overrides (prices) win over the built-in table; a pack that does not read has none.
+  # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
+  # has none. The models the steps of the last 30 days ran are counted from since (seen).
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
-  jq -c --argjson p "$pp" '.prices = $p' "$d/all" | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards > "$d/pricedall" 2>/dev/null \
+  packget lanes.research.model rmodel 2>/dev/null || rmodel=''
+  jq -c --argjson p "$pp" '.prices = $p | .since = ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate)' "$d/all" \
+    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards > "$d/pricedall" 2>/dev/null \
     && jq -ce .cards "$d/pricedall" > "$d/priced" 2>/dev/null && pricedok=true \
     || { pricedok=false; jq -c '.cards | map(.usd = null | .steps |= map(.usd = null) | if .live then .live.usd = null else . end)' "$d/all" > "$d/priced"; } || exit 1
-  # prices: the Rules tab's Model prices, the built-in rows and the pack's overrides; null when the table cannot be run.
-  { $pricedok && jq -c --argjson o "$pp" '{builtIn: (.table | to_entries | map({model: .key, input: .value[0], output: .value[1], cacheRead: .value[2]})), overrides: $o}' "$d/pricedall"; } > "$d/prices" 2>/dev/null \
+  # prices: the Rules tab's Model prices, the built-in rows, the pack's entries, each model's display name and the
+  # model IDs seen in 30 days, and the research lane's model for its mark; null when the table cannot be run.
+  { $pricedok && jq -c --argjson o "$pp" --arg rm "$rmodel" '{builtIn: (.table | to_entries | map({model: .key, input: .value[0], output: .value[1], cacheRead: .value[2],
+      cacheWrite: (.value[3] // (.value[0] * 1.25))})), overrides: $o, names, seen, research: (if $rm == "" then null else $rm end)}' "$d/pricedall"; } > "$d/prices" 2>/dev/null \
     && [ -s "$d/prices" ] || echo null > "$d/prices"
   echo null > "$d/issues"; echo null > "$d/upall"
   if [ -n "$issues" ]; then

@@ -107,6 +107,28 @@
     if (typeof v !== 'number' || !Number.isFinite(v)) return 'not priced';
     return `$${v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
   }
+  // A model ID as the Board shows it: an alias in a project's pack (Rules, Model prices) is the display name of the
+  // model it means, and a model the pack gives a display name has that name; ":fast" stays on. Any other ID is shown
+  // as it is. Read from the Rules part's prices, the project steered first, then each other project's.
+  function allPrices() {
+    const r = last && last.panels && last.panels.rules && last.panels.rules.data;
+    return r && typeof r === 'object' ? [r.prices].concat(Object.values(r.others && typeof r.others === 'object' ? r.others : {}).map((o) => o && o.prices)) : [];
+  }
+  const namesKey = () => JSON.stringify(allPrices().map((p) => (p && typeof p === 'object' ? [p.overrides, p.names] : null)));
+  function modelName(id) {
+    if (typeof id !== 'string') return id;
+    const all = allPrices();
+    const fast = id.endsWith(':fast'), base = fast ? id.slice(0, -5) : id, tail = fast ? ':fast' : '';
+    for (const p of all) {
+      if (!p || typeof p !== 'object' || !p.overrides || typeof p.overrides !== 'object') continue;
+      const over = p.overrides, names = p.names && typeof p.names === 'object' ? p.names : {};
+      const named = (m) => (over[m] && typeof over[m].name === 'string' && over[m].name ? over[m].name : null);
+      const to = Object.keys(over).find((m) => over[m] && Array.isArray(over[m].aliases) && over[m].aliases.includes(base));
+      if (to) return `${named(to) || (typeof names[to] === 'string' ? names[to] : to)}${tail}`;
+      if (named(base)) return `${named(base)}${tail}`;
+    }
+    return id;
+  }
   // A review's findings by level, "1 P1, 2 P2"; one recorded with no counts shows its verdict alone: ''.
   function findings(r) {
     const c = r && r.counts;
@@ -1529,7 +1551,7 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, modelName, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
@@ -1562,7 +1584,8 @@
     // A panel with older entries is drawn whole when a newer history has come, or when it is time to read it again.
     if (typeof p.mod.older === 'function' && (p.hist !== histVer || histDue())) p.json = undefined;
     p.hist = histVer;
-    const json = JSON.stringify(part === undefined ? null : part);
+    // The model names (modelName) are part of what a panel shows: a new alias or name draws it again.
+    const json = JSON.stringify(part === undefined ? null : part) + namesKey();
     if (p.json === json) {
       if (p.state === 'ready' && !p.note && typeof p.mod.same === 'function') {
         try { p.mod.same(p.body, shownData(p.mod, part.data), p.ctx); } catch (e) { /* the next part that differs draws the panel whole */ }

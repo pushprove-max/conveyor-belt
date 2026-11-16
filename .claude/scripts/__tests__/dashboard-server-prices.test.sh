@@ -4,7 +4,8 @@
 # record's main: here the host is this machine and its main a fixture checkout with a pack of its own, so the case
 # reads the override back from the pack the engine wrote. A bad value (negative, a word) is refused with the engine's
 # message and leaves the pack as it was; a shape the engine does not take is refused by the server and runs nothing.
-# Bug each case catches: an override that never reaches the pack, or a bad price saved, or refused with no reason.
+# Bug each case catches: an override, added model, display name or alias that never reaches the pack, or a bad price
+# saved, or refused with no reason.
 # The server runs in this process, over plain HTTP, from this device (no login: dashboard-server-local.test.sh).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -68,13 +69,23 @@ with open(PACK) as f:
     if f.read() != before:
         fail('bad_price_refused_with_why', 'a refused price changed the pack: %s' % prices())
 n = len(RAN)
-for bad in (('set', 'claude-new-9', '3', '15'), ('set', 'opencode:p/m', '1', '2', '3'), ('set', '-x', '1', '2', '3'), ('clear', 'claude-new-9', 'x')):
+for bad in (('set', 'claude-new-9', '3', '15'), ('set', '-x', '1', '2', '3'), ('clear', 'claude-new-9', 'x'),
+            ('add', 'm', 'gemini', 'M', '1', '2', '3'), ('add', 'm', 'other', 'a\nb', '1', '2', '3'), ('name', 'm', 'x' * 61),
+            ('alias', 'm', 'rename', 'x'), ('alias', 'm', 'add', '-x'), ('remove', 'm', 'x')):
     r = control(*bad)
     if r[0] != 400 or len(RAN) != n:
         fail('shape_refused_by_the_server', '%s answered %s, ran %s' % (bad, r, RAN[n:]))
 r = control('clear', 'claude-new-9')
 if r[0] != 200 or prices() is not None:
     fail('override_cleared', '%s, the pack holds %s' % (r, prices()))
+# The Model prices panel's other changes reach the pack: Add model, a display name, an alias (This is…), Remove.
+for args in (('add', 'my-model', 'other', 'My model', '1', '2', '0.1', '1.5'), ('name', 'claude-opus-5-5', 'Opus (proxy)'),
+             ('alias', 'claude-opus-5-5', 'add', 'proxy/opus'), ('remove', 'my-model')):
+    r = control(*args)
+    if r[0] != 200:
+        fail('model_changes_saved_in_the_pack', '%s answered %s' % (args, r))
+if prices() != {'claude-opus-5-5': {'name': 'Opus (proxy)', 'aliases': ['proxy/opus']}}:
+    fail('model_changes_saved_in_the_pack', 'the pack holds %s' % prices())
 srv.shutdown()
-print('PASS: dashboard-server-prices (4 checks)')
+print('PASS: dashboard-server-prices (5 checks)')
 EOF

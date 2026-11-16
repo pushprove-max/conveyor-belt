@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# The pack's model price overrides (prices) on the Board's request costs (dashboard_limit.py build, the top strip's cost
+# The pack's model price overrides, added models and aliases (prices) on the Board's request costs (dashboard_limit.py build, the top strip's cost
 # today and the limit card): an override wins over a model's built-in row, its fast mode and its long-prompt rate.
 # Bug caught: overrides that priced card steps but never the requests, so "today" stayed at the built-in price.
 set -euo pipefail
@@ -21,6 +21,17 @@ got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dash
 d.use_prices({m: {'input': 1, 'output': 5, 'cacheRead': 0.1} for m in ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'gpt-6-astra:fast')})
 print(json.dumps([d.price([0, m, 1000000, 0, 0, 0, 0]) for m in ('claude-sonnet-5-5:fast', 'claude-opus-5-5:fast', 'claude-haiku-5-5', 'claude-haiku-5-5:fast', 'gpt-6-astra:fast', 'gpt-6-astra')]))")
 [ "$got" = '[2.0, 2.0, 1.0, 2.0, 1.0, 20.0]' ] || fail "the overridden request prices: $got"
+
+# Aliases and an added model on a request, 1M tokens each: proxy/sonnet is Sonnet 5.5 ($2 input), and its fast mode
+# Sonnet 5.5's fast row ($4); claude-opus-5-5 named as an alias is a model of its own and keeps its price ($4);
+# my-model, added with a cache write price of $3, prices a 5-minute cache write at that and a 1-hour one at twice its
+# $1 input; an ID that is no model and no alias stays unpriced. Bug caught: a session through a proxy whose model ID
+# differs priced at nothing, or an alias that re-prices a real model.
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+d.use_prices({'claude-sonnet-5-5': {'aliases': ['proxy/sonnet', 'claude-opus-5-5']}, 'my-model': {'input': 1, 'output': 2, 'cacheRead': 0.1, 'cacheWrite': 3}})
+print(json.dumps([d.price(r) for r in ([0, 'proxy/sonnet', 1000000, 0, 0, 0, 0], [0, 'proxy/sonnet:fast', 1000000, 0, 0, 0, 0], [0, 'claude-opus-5-5', 1000000, 0, 0, 0, 0],
+  [0, 'my-model', 0, 1000000, 0, 0, 0], [0, 'my-model', 0, 0, 1000000, 0, 0], [0, 'proxy/other', 1000000, 0, 0, 0, 0])]))")
+[ "$got" = '[2.0, 4.0, 4.0, 3.0, 2.0, null]' ] || fail "the aliased and added request prices: $got"
 
 # Through the Board's collect: the pack's override reaches the cost today. One request today, 1M input tokens of
 # Sonnet 5.5 in fast mode: $4 at the built-in price, $2 at the pack's $1 override.

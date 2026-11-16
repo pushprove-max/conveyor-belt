@@ -113,7 +113,7 @@
           cost = h('span', 'live-cost');
           cost.append(ctx.number(`usd:${c.card}`, c.usd, ctx.money), h('span', null, tok !== null ? ` · ${count(tok)} tokens so far` : typeof c.usd === 'number' ? ' so far' : ''));
         }
-        meta.replaceChildren(ctx.tag(c.repo),h('span', null, c.model || (c.step === 'tests' ? 'running tests' : 'no AI model in this step')), cost);
+        meta.replaceChildren(ctx.tag(c.repo),h('span', null, ctx.modelName(c.model) || (c.step === 'tests' ? 'running tests' : 'no AI model in this step')), cost);
         const t = c.track && typeof c.track === 'object' ? c.track : null;
         track.hidden = !ctx.track(track, t);
         // The step in progress, measured: how long it has run, how far a running test run has got (its tests, else

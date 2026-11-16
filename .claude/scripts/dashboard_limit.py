@@ -20,7 +20,7 @@
       With the Codex sessions folder it adds `codex`: Codex's own 7-day
       reading, never summed with Claude's. With project folders, `today`
       counts only the sessions run in them; every other figure is the account's. The env PP_PRICES holds
-      the pack's model price overrides (its `prices`, as JSON), put over the built-in table (use_prices).
+      the pack's model prices, added models and aliases (its `prices`, as JSON), put over the built-in table (use_prices).
   dashboard_limit.py cards  < {cards: [...]}
       Conveyor's cards with each finished session, review and test run priced at list price (conveyor.sh snapshot).
 
@@ -542,21 +542,63 @@ LONG_AT.update({m + UNKNOWN_TIER: n for m, n in list(LONG_AT.items()) if ":" not
 
 
 OVERRIDDEN = set()  # the models use_prices() priced from the pack's overrides
+ALIASES = {}  # another model ID that means a model (the pack's aliases), and that model (use_prices, canon)
+PRICE_KEYS = ("input", "output", "cacheRead")
+
+
+def canon(m):
+    """The model an ID is priced as: an alias's model, keeping the alias's :fast or unknown-tier mark; else the ID."""
+    if not isinstance(m, str):
+        return m
+    if m in ALIASES:
+        return ALIASES[m]
+    for tail in (":fast", UNKNOWN_TIER):
+        if m.endswith(tail) and m[:-len(tail)] in ALIASES:
+            return ALIASES[m[:-len(tail)]] + tail
+    return m
+
+
+def display(m):
+    """The display name a model ID has when the pack gives it none: one made from a built-in ID (claude-opus-5-5 is
+    "Opus 5.5", gpt-6.1-sol is "GPT-6.1 Sol"), else the ID itself."""
+    c = re.fullmatch(r"claude-([a-z]+)-(\d+(?:-\d+)?)", m)
+    if c:
+        return f"{c.group(1).capitalize()} {c.group(2).replace('-', '.')}"
+    g = re.fullmatch(r"gpt-([\d.]+)-([a-z]+)", m)
+    return f"GPT-{g.group(1)} {g.group(2).capitalize()}" if g else m
+
+
+def write_rate(p):
+    """The 5-minute cache write price of a row: its own fourth price, else 1.25 times its input price."""
+    return p[3] if len(p) > 3 else p[0] * 1.25
 
 
 def use_prices(prices):
-    """The pack's model price overrides (its `prices`: {model: {input, output, cacheRead}}, $ per million tokens) put
-    over the table above, for card_costs and build: an override wins over the model's built-in row, over its fast
-    mode (estimated at twice the override, unless the override names the :fast model itself) and over its long-prompt
-    rate: it is one rate for every prompt size. An entry whose rates are not three numbers of 0 or more is left out:
-    its model keeps its built-in row, or stays unpriced. So is one of an OpenCode model: its steps keep the cost
-    OpenCode reports."""
-    for m, p in sorted(prices.items() if isinstance(prices, dict) else []):
-        rate = [p.get(k) for k in ("input", "output", "cacheRead")] if isinstance(p, dict) else None
-        if not m or m.startswith("opencode:") or rate is None or any(isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0 for x in rate):
+    """The pack's model prices (its `prices`: {model: {input, output, cacheRead, cacheWrite, name, aliases}}, $ per
+    million tokens) put over the table above, for card_costs and build. A model with the three prices (cacheWrite is
+    optional: with none, a 5-minute cache write is 1.25 times input; a 1-hour one is always twice input) is priced at
+    them: one the table has not got (an added model) as a built-in one. An override wins over the model's built-in
+    row, over its fast mode (estimated at twice the override, unless the override names the :fast model itself) and
+    over its long-prompt rate: it is one rate for every prompt size. An entry whose rates are not numbers of 0 or more
+    prices nothing: its model keeps its built-in row, or stays unpriced. An OpenCode model (opencode:<provider>/<model>)
+    with prices is priced at them, in place of the cost OpenCode reports (card_costs).
+    name is the model's display name, which the Board shows over its own (display). aliases are other model IDs that mean the model (a proxy's or another
+    provider's ID for it): a request or step with one is priced as the model (canon). An alias that is a model itself,
+    priced by the table or named in the pack, is left out: an alias never re-prices a model."""
+    num = lambda x: not isinstance(x, bool) and isinstance(x, (int, float)) and x >= 0
+    entries = prices if isinstance(prices, dict) else {}
+    for m, p in sorted(entries.items()):
+        if not m or not isinstance(p, dict):
             continue
-        PRICES[m] = tuple(rate)
-        OVERRIDDEN.add(m)
+        rate, w = [p.get(k) for k in PRICE_KEYS], p.get("cacheWrite")
+        if all(num(x) for x in rate) and (w is None or num(w)):
+            PRICES[m] = tuple(rate) + (() if w is None else (w,))
+            OVERRIDDEN.add(m)
+        for a in p.get("aliases") if isinstance(p.get("aliases"), list) else []:
+            if isinstance(a, str) and a and a != m:
+                ALIASES.setdefault(a, m)
+    for a in [a for a in ALIASES if a in PRICES or a in entries]:
+        del ALIASES[a]
     for m in OVERRIDDEN:
         modes = [m] if ":" in m else [m, m + ":fast", m + UNKNOWN_TIER]
         for x in modes:
@@ -569,26 +611,27 @@ def use_prices(prices):
 
 def estimated(row):
     """Whether this request, or an advisor call inside it, is priced by estimate()."""
-    return any(x[1] not in PRICES and estimate(x[1]) is not None for x in [row] + row[7:])
+    return any(canon(x[1]) not in PRICES and estimate(canon(x[1])) is not None for x in [row] + row[7:])
 
 
 def price(row):
-    p = PRICES.get(row[1]) or estimate(row[1])
+    m = canon(row[1])
+    p = PRICES.get(m) or estimate(m)
     if p is None:
         # Every count present and 0 costs $0 at any price; a missing count is unknown, so it stays unpriced.
         return 0.0 if row[2:7] == [0, 0, 0, 0, 0] and not row[7:] else None
     # A count the usage lacks is unknown, not 0: the request is unpriced, for every model.
     if any(not isinstance(n, (int, float)) for n in row[2:7]):
         return None
-    if row[1] in LONG_PRICES and sum(row[2:6]) > LONG_AT.get(row[1], LONG_PROMPT):
-        p = LONG_PRICES[row[1]]
-    inp, out, read = p
+    if m in LONG_PRICES and sum(row[2:6]) > LONG_AT.get(m, LONG_PROMPT):
+        p = LONG_PRICES[m]
+    inp, out, read = p[:3]
     i, w5, w1, r, o = row[2:7]
     # An advisor row with no price leaves the whole request unpriced: a partial total would read as complete.
     advisors = [price(a) for a in row[7:]]
     if None in advisors:
         return None
-    return (i * inp + w5 * inp * 1.25 + w1 * inp * 2 + r * read + o * out) / 1e6 + sum(advisors)
+    return (i * inp + w5 * write_rate(p) + w1 * inp * 2 + r * read + o * out) / 1e6 + sum(advisors)
 
 
 def card_costs(part):
@@ -626,18 +669,24 @@ def card_costs(part):
 
     A session OpenCode ran (model opencode:<provider>/<model>) is priced at the dollars OpenCode reported for it
     (usage.cost, the sum of its calls' costs): no list price here names its model, and none is guessed. One whose usage
-    holds no cost (a call reported none) is unpriced.
+    holds no cost (a call reported none) is unpriced. One whose model the pack prices, or names as an alias of a
+    model, is priced at that price instead, from its token split.
 
-    The part's `prices` (the pack's overrides) are put over the table first (use_prices), and taken out of the part.
-    A step priced at a model an override prices has override: true. The part gets `table`, the built-in rows as they
-    were before ({model: [input, output, cache read]}), for the Rules tab's Model prices.
+    The part's `prices` (the pack's prices, added models and aliases) are put over the table first (use_prices), and
+    taken out of the part; a step whose model is an alias is priced, and named (pricedAs, pricedBy), as the model it
+    means. A step priced at a model an override prices has override: true. The part gets `table`, the built-in rows as
+    they were before ({model: [input, output, cache read]}), and `names`, the display name each model of the table or
+    the pack has when the pack gives it none (display), for the Rules tab's Model prices. With `since` (a time as the steps' lines write it), it
+    gets `seen` too: each model ID the steps of that time or later ran ({model, sessions: how many steps, routes: the
+    routes their lines name (proxy, subscription), as: the model it is priced as, null when none prices it}), the most
+    used first.
     """
     def known(m):
         if not isinstance(m, str):
             return None
         for c in (m, re.sub(r"\[[^]]*\]$", "", m), re.sub(r"-\d{8}$", "", re.sub(r"\[[^]]*\]$", "", m))):
-            if c in PRICES:
-                return c
+            if canon(c) in PRICES:
+                return canon(c)
         return None
 
     def ran(step):
@@ -661,7 +710,7 @@ def card_costs(part):
         return None if n is None or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in n) else n
 
     def split(n, p):
-        return (n[0] * p[0] + n[1] * p[0] * 1.25 + n[2] * p[0] * 2 + n[3] * p[2] + n[4] * p[1]) / 1e6
+        return (n[0] * p[0] + n[1] * write_rate(p) + n[2] * p[0] * 2 + n[3] * p[2] + n[4] * p[1]) / 1e6
 
     def usd(step, models):
         """(dollars, the model priced at, why it is unpriced, {model: {usd, tokens}}); dollars None when the step
@@ -677,6 +726,10 @@ def card_costs(part):
         if n is None:
             return None, None, "a token count is not a number", None
         m = step.get("model")
+        if isinstance(m, str) and m.startswith("opencode:") and known(m) is not None:
+            k = known(m)
+            d = round(split(n, PRICES[k]), 4)
+            return d, k, None, {k: {"usd": d, "tokens": n[0] + n[1] + n[2] + n[4]}}
         if isinstance(m, str) and m.startswith("opencode:"):
             c = u.get("cost")
             if isinstance(c, bool) or not isinstance(c, (int, float)) or c < 0:
@@ -724,12 +777,19 @@ def card_costs(part):
         return d, known(m), None, {known(m): {"usd": d, "tokens": n[0] + n[1] + n[2] + n[4]}}
 
     table = {m: list(p) for m, p in PRICES.items()}
-    use_prices(part.pop("prices", None))
+    pack = part.pop("prices", None)
+    use_prices(pack)
     part["table"] = table
+    part["names"] = {m: display(m) for m in [*table, *(pack if isinstance(pack, dict) else {})] if m}
+    since, seen = part.pop("since", None), {}
     for card in part["cards"]:
         steps = [s for s in card.get("steps") or [] if isinstance(s, dict)]
         models = card.get("models") if isinstance(card.get("models"), dict) else {}
         for s in steps:
+            if isinstance(since, str) and s.get("step") != "test" and isinstance(s.get("time"), str) and s["time"] >= since:
+                for x in {x for x in ((s.get("step") != "review" and ran(s)) or [s.get("model")]) if isinstance(x, str) and x}:
+                    k, ways = seen.get(x, (0, set()))
+                    seen[x] = (k + 1, ways | ({s["route"]} if isinstance(s.get("route"), str) and s["route"] else set()))
             s["usd"], m, why, by = usd(s, None)
             s.pop("pricedAs", None)
             s.pop("pricedBy", None)
@@ -746,6 +806,9 @@ def card_costs(part):
         card["usd"] = None if any(s["usd"] is None for s in steps) else round(sum(s["usd"] for s in steps), 4)
         if isinstance(card.get("live"), dict):
             card["live"]["usd"] = usd(card["live"], models)[0]
+    if isinstance(since, str):
+        part["seen"] = [{"model": x, "sessions": k, "routes": sorted(ways), "as": known(x)}
+                        for x, (k, ways) in sorted(seen.items(), key=lambda t: (-t[1][0], t[0]))]
     return part
 
 
@@ -1226,7 +1289,7 @@ def api_week(limit, rows, now, codex_rows=None, codex_partial=False, since=None)
     out.update(requests=len(week), unpricedRequests=len(week) - len(priced),
                complete=rows is not None and codex_rows is not None and not codex_partial and len(week) == len(priced),
                unpricedModels=sorted({x[1] for r, _, c in costs if c is None for x in [r] + r[7:]
-                                      if x[1] not in PRICES and estimate(x[1]) is None}))
+                                      if canon(x[1]) not in PRICES and estimate(canon(x[1])) is None}))
     if week and not priced:
         return out
     spent, hist = 0.0, []

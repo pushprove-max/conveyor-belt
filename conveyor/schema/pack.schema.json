@@ -187,15 +187,19 @@
       }
     },
     "prices": {
-      "description": "Model price overrides, by model name, in $ per million tokens: each wins over the Board's built-in price of that model (cache writes follow the built-in multipliers). Set on the Board (Rules, Model prices) or with conveyor.sh prices.",
+      "description": "Your model prices, added models and aliases, by model ID. Prices are $ per million tokens: input, output and cacheRead together, and cacheWrite (a 5-minute cache write; with none, 1.25 times input); they win over the Board's built-in price of that model, and price a model it has not got. name is the model's display name, provider the group an added model shows in, aliases the other model IDs that mean the model. Set on the Board (Rules, Model prices) or with conveyor.sh prices.",
       "type": "object",
       "default": {},
       "additionalProperties": {
-        "type": "object", "additionalProperties": false, "required": ["input", "output", "cacheRead"],
+        "type": "object", "additionalProperties": false,
         "properties": {
           "input": { "type": "number", "minimum": 0 },
           "output": { "type": "number", "minimum": 0 },
-          "cacheRead": { "type": "number", "minimum": 0 }
+          "cacheRead": { "type": "number", "minimum": 0 },
+          "cacheWrite": { "type": "number", "minimum": 0 },
+          "name": { "type": "string", "minLength": 1 },
+          "provider": { "type": "string", "enum": ["claude", "openai", "opencode", "other"] },
+          "aliases": { "type": "array", "items": { "type": "string", "minLength": 1 } }
         }
       }
     },

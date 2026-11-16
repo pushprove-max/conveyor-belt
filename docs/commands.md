@@ -92,8 +92,13 @@ Tests:
   `mutate ask <test file>...` puts files at the front of that queue and starts no check (the Board's Mutation check).
 - `test-settings` saves a test setting in the pack: the budget of all files or of one, a "slow on purpose" mark, and
   whether slow files file issues (`conveyor/README.md`, The test files in the snapshot).
-- `prices set <model> <input> <output> <cache read>` saves your price of one model in the pack, and
-  `prices clear <model>` removes it ([Configuration](configuration.md#the-pack)).
+- `prices` changes the model prices in the pack ([Configuration](configuration.md#the-pack)):
+  - `prices set <model> <input> <output> <cache read> [<cache write>]` saves your price of one model, and
+    `prices clear <model>` removes it.
+  - `prices add <model> <claude|openai|opencode|other> <name> <input> <output> <cache read> [<cache write>]` adds a
+    model that the Board does not know, and `prices remove <model>` removes it.
+  - `prices name <model> [<name>]` sets or removes the model's display name.
+  - `prices alias <model> add|remove <id>` adds or removes another model ID for the model.
 - `testrules` sets the test rules that file issues about test files (`conveyor/README.md`, Test rules).
 
 Declined findings:

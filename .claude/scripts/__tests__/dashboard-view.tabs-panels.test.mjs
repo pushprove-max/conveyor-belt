@@ -44,7 +44,7 @@ test('Rules: the tab is five panels in the order the docs give, Model prices its
   for (const [sel, id] of Object.entries(home)) {
     assert.deepEqual(order(w).filter((x) => panel(w, x).querySelector(sel)), [id], `${sel} is in ${id} alone`);
   }
-  assert.ok(act(panel(w, 'rules-prices'), 'price-save'), 'Model prices keeps its form');
+  assert.ok(act(panel(w, 'rules-prices'), 'price-add'), 'Model prices keeps its Add model');
   // Each panel has its own line, for what an action in it did.
   assert.deepEqual(order(w).filter((x) => panel(w, x).querySelector('.rules-note')), order(w));
 });
@@ -58,8 +58,9 @@ test('Rules: what an action did shows in the panel it was done in, and no other'
   deliver(w, d);
   // Each Rules panel whose line says something: [its id, the line].
   const said = () => order(w).map((x) => [x, panel(w, x).querySelector('.rules-note').textContent]).filter(([, t]) => t);
-  act(panel(w, 'rules-prices'), 'price-save').click();
-  assert.deepEqual(said(), [['rules-prices', 'Give the model and its three prices.']]);
+  act(panel(w, 'rules-prices'), 'price-add').click();
+  act(panel(w, 'rules-prices'), 'price-add-save').click();
+  assert.deepEqual(said(), [['rules-prices', 'Give the model ID, as sessions report it.']]);
   const area = act(panel(w, 'rules'), 'area-name');
   area.value = 'two words'; area.dispatchEvent(new w.Event('input'));
   act(panel(w, 'rules'), 'area-off').click();
@@ -109,6 +110,7 @@ test('the live feed: a new Rules part redraws each Rules panel, Model prices too
   const part = clone(full().panels.rules);
   part.data.prices = { builtIn: [{ model: 'claude-new-9', input: 3, output: 15, cacheRead: 0.3 }], overrides: {} };
   es.emit('panel', { id: 'rules', part, updatedAt: iso(T0 + 60000) });
-  const models = Array.from(panel(w, 'rules-prices').querySelectorAll('.rules-price'), (r) => r.dataset.model);
+  // The models it prices; the OpenCode ones are the build machine's, the same in every part.
+  const models = Array.from(panel(w, 'rules-prices').querySelectorAll('.rules-price'), (r) => r.dataset.model).filter((m) => !m.startsWith('opencode:'));
   assert.deepEqual(models, ['claude-new-9']);
 });

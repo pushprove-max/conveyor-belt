@@ -30,8 +30,8 @@
 // one, sending depends), Next up (the next five in pick order, each
 // ready or "waits on #N"), the queue's dollar forecast as one line,
 // the guard's warning when the forecast says it pauses the loop before the queue ends, and the skipped issues.
-// Model prices: the built-in prices and the pack's overrides, each override set or removed
-// here (pricesSection). Held by you or a label: the issues held by you (the control record) or by a label (awaiting-deploy),
+// Model prices: the built-in prices and the pack's prices, added models and aliases, grouped, searched and each
+// changed in its row here (pricesSection). Held by you or a label: the issues held by you (the control record) or by a label (awaiting-deploy),
 // one line a group (by area by default, or by priority or holding label): its name, count and how
 // many a label holds. Groups start closed, largest first; one opens to five issues, then "Show 5 more"
 // and "Show all (M)" (the page's shared long list). Queue releases an issue the record holds; on one a label holds it removes the label
@@ -74,7 +74,11 @@
   const S = { d: null, ctl: null, ctlAt: null, was: {}, guessed: false, floor: null, read: null, turned: false, refused: null,
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, unlabeled: new Set(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
-    drafts: null, price: null };  // price: the Model prices form as typed (pricesSection); drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them
+    drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set() };
+  // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
+  // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
+  // search typed; priceSaved, the pack's prices as the changes saved here left them, until the next snapshot;
+  // priceThis, the model picked for each ID's This is…; priceOpen, the folded groups opened.
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -183,7 +187,7 @@
     if (action === 'dep-guard') return `dependency guard ${a[0]}`;
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
     if (action === 'depends') return `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`;
-    if (action === 'prices') return a[0] === 'set' ? `price of ${a[1]}: $${a[2]} input, $${a[3]} output, $${a[4]} cache read` : `price override of ${a[1]} removed`;
+    if (action === 'prices') return priceWords(a);
     return action;
   }
 
@@ -270,6 +274,8 @@
       return post(action, args, repo).then((res) => {
         if (!res.ok) { back(res.said, res.at); tell(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
         put({ guessed: false });
+        // A model price saved shows at once (pricesSection), its Undo's too.
+        if (action === 'prices' && repo === S.d.repo) S.priceSaved = { for: S.d.prices, over: applied(pricesShown(), list(args)) };
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
         // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
         const at = repo === S.d.repo ? S : S.kept.get(repo), now = res.rec || (guess && guess[0]);
@@ -1337,54 +1343,379 @@
     return p;
   }
 
-  // Model prices: every model the built-in table or the pack's overrides price (the part's prices), with its price in $
-  // per million tokens and where it is from; an override wins over the built-in row, and over the built-in row of its
-  // fast mode. Change fills the form with a
-  // row's model and price; Save sends `prices set` (the host checks each value and says why it refuses one), and
-  // Remove override sends `prices clear`. Each has Undo, which puts back the override it replaced, or takes it off.
-  const PRICE_KEYS = [['input', 'Input'], ['output', 'Output'], ['cacheRead', 'Cache read']];
+  // Model prices (pricesSection): every model the built-in table or the pack prices, from the part's prices: builtIn
+  // (the built-in rows), overrides (the pack's entries: prices, name, provider, aliases), names (each model's own
+  // display name) and seen (each model ID this project's steps ran in 30 days, with the model it is priced as). Prices
+  // are $ per million tokens. Top to bottom: a search box (an ID, name or alias: the rows that do not match hide as it
+  // is typed) and Add model; Seen but not priced (an ID no model and no alias prices: This is… adds it as an alias of
+  // the model picked, the likely one picked first; Add as new model fills the Add model form); In use by this project
+  // (a model a role or the research lane runs, or its steps ran, each with its marks); Claude, OpenAI and Other, by
+  // family, newest first, the older versions folded; then OpenCode (its models on the build machine, by provider/model,
+  // those not in use and not priced folded; one added in the pack is a model's row). A model's fast mode is its row's
+  // second line, with its own Edit :fast and Reset :fast. Edit opens the row in place: display name, other
+  // IDs and the four prices; Save sends what changed (`prices set`, `name`, `alias`), Cancel drops it. A row priced
+  // from the pack says so and has Reset to built-in (`prices clear`); an added model has Remove. Every change has Undo,
+  // which puts back what it replaced, and shows at once, until the next snapshot (priceSaved).
+  const PRICE_KEYS = [['input', 'Input'], ['output', 'Output'], ['cacheRead', 'Cache read'], ['cacheWrite', 'Cache write']];
+  const RATES = ['input', 'output', 'cacheRead'];
+  const FAMILIES = ['fable', 'mythos', 'opus', 'sonnet', 'haiku'];
+  const PROVIDERS = [['claude', 'Claude'], ['openai', 'OpenAI'], ['other', 'Other'], ['opencode', 'OpenCode']];
+  const priced = (e) => !!e && RATES.every((k) => num(e[k]) !== null);
+  const providerOf = (m, e) => (e && PROVIDERS.some(([k]) => k === e.provider) ? e.provider : m.startsWith('opencode:') ? 'opencode'
+    : /^claude-/.test(m) ? 'claude' : /^gpt-/.test(m) ? 'openai' : 'other');
+  // The line a model is a version of (opus, sonnet; sol, astra), and its version as numbers, for newest first.
+  const lineOf = (m) => { const x = /^claude-([a-z]+)-/.exec(m) || /^gpt-[\d.]+-([a-z]+)/.exec(m); return x ? x[1] : m; };
+  const versionOf = (m) => (/^(?:claude-[a-z]+-|gpt-)([\d.-]+)/.exec(m) || [null, ''])[1].split(/[.-]/).filter(Boolean).map(Number);
+  function newer(a, b) { // below 0 when a is newer than b
+    const x = versionOf(a), y = versionOf(b);
+    for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+      const d = (y[i] === undefined ? -1 : y[i]) - (x[i] === undefined ? -1 : x[i]);
+      if (d) return d;
+    }
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  const familyRank = (m) => { const i = FAMILIES.indexOf(lineOf(m)); return i < 0 ? FAMILIES.length : i; };
+  const byFamily = (a, b) => familyRank(a) - familyRank(b) || newer(a, b);
+  const usd = (v) => (num(v) !== null ? `$${+v.toFixed(6)}` : '—');
+  const writeOf = (r) => (num(r.cacheWrite) !== null ? r.cacheWrite : num(r.input) !== null ? r.input * 1.25 : null);
+  // The pack's prices as shown: as the changes saved here left them, until a new snapshot comes.
+  const pricesShown = () => (S.priceSaved && S.priceSaved.for === S.d.prices ? S.priceSaved.over
+    : S.d.prices && S.d.prices.overrides && typeof S.d.prices.overrides === 'object' ? S.d.prices.overrides : {});
+  // The pack's prices after `prices <a>`, as the engine writes them (conveyor/commands/prices.sh).
+  function applied(o, a) {
+    const r = JSON.parse(JSON.stringify(o)), m = a[1], e = r[m] || {};
+    if (a[0] === 'set') { delete e.cacheWrite; RATES.forEach((k, i) => { e[k] = Number(a[2 + i]); }); if (a[5] !== undefined) e.cacheWrite = Number(a[5]); }
+    if (a[0] === 'clear') PRICE_KEYS.forEach(([k]) => { delete e[k]; });
+    if (a[0] === 'name') { if (a[2]) e.name = a[2]; else delete e.name; }
+    if (a[0] === 'alias') {
+      const l = list(e.aliases).filter((x) => x !== a[3]).concat(a[2] === 'add' ? [a[3]] : []);
+      if (l.length) e.aliases = l; else delete e.aliases;
+    }
+    r[m] = a[0] !== 'add' ? e : Object.assign({ name: a[3], provider: a[2] }, ...RATES.map((k, i) => ({ [k]: Number(a[4 + i]) })), a[7] !== undefined ? { cacheWrite: Number(a[7]) } : {});
+    if (a[0] === 'remove' || !Object.keys(r[m]).length) delete r[m];
+    return r;
+  }
+  // The steps that put back what `prices <a>` replaces, from the pack's prices o before it.
+  function inverse(o, a) {
+    const m = a[1], e = o[m] || {}, rates = (x) => RATES.map((k) => String(x[k])).concat(num(x.cacheWrite) !== null ? [String(x.cacheWrite)] : []);
+    if (a[0] === 'set' || a[0] === 'clear') return [['prices', priced(e) ? ['set', m, ...rates(e)] : ['clear', m]]];
+    if (a[0] === 'add') return [['prices', ['remove', m]]];
+    if (a[0] === 'name') return [['prices', e.name ? ['name', m, e.name] : ['name', m]]];
+    if (a[0] === 'alias') return [['prices', ['alias', m, a[2] === 'add' ? 'remove' : 'add', a[3]]]];
+    return [['prices', ['add', m, providerOf(m, e), e.name || m, ...rates(e)]], ...list(e.aliases).map((x) => ['prices', ['alias', m, 'add', x]])];
+  }
+  function priceWords(a) {
+    const m = a[1], cw = (x) => (x !== undefined ? `, $${x} cache write` : '');
+    if (a[0] === 'set') return `price of ${m}: $${a[2]} input, $${a[3]} output, $${a[4]} cache read${cw(a[5])}`;
+    if (a[0] === 'clear') return `${m} back to its built-in price`;
+    if (a[0] === 'add') return `added ${a[3]} (${m}): $${a[4]} input, $${a[5]} output, $${a[6]} cache read${cw(a[7])}`;
+    if (a[0] === 'remove') return `removed ${m}`;
+    if (a[0] === 'name') return a[2] ? `${m} shown as ${a[2]}` : `${m} shown by its own name`;
+    return a[2] === 'add' ? `${a[3]} is ${m}` : `${a[3]} is no longer ${m}`;
+  }
+  // Changes of the pack's prices sent as one, with the Undo that puts back what they replace; done when all are saved.
+  function priceRun(changes, done) {
+    let o = pricesShown();
+    const undo = [];
+    changes.forEach((a) => { undo.unshift(...inverse(o, a)); o = applied(o, a); });
+    return run(changes.map((a) => ['prices', a]), changes.map(priceWords).join('; '), done, undo);
+  }
+
   function pricesSection() {
     const h = S.ctx.h, p = S.d.prices && typeof S.d.prices === 'object' ? S.d.prices : null, el = h('section', 'rules-prices');
     el.append(h('h3', 'board-head', 'Model prices'));
     if (!p) { el.append(h('p', 'unknown', 'The model prices were not read.')); return el; }
-    const over = p.overrides && typeof p.overrides === 'object' ? p.overrides : {};
+    const over = pricesShown(), names = p.names && typeof p.names === 'object' ? p.names : {};
     const built = new Map(list(p.builtIn).filter((x) => x && typeof x.model === 'string').map((x) => [x.model, x]));
-    const restore = (m) => (over[m] ? ['prices', ['set', m, ...PRICE_KEYS.map(([k]) => String(over[m][k]))]] : ['prices', ['clear', m]]);
-    el.append(h('p', null, 'Dollars per million tokens. Cache writes follow the built-in multipliers. Your override is saved in the pack (.conveyor/project.json) and wins over the built-in price.'),
-      h('p', null, 'OpenCode steps keep the cost OpenCode reports.'));
-    const table = h('table', 'rules-prices-table'), top = h('tr', null);
-    ['Model', ...PRICE_KEYS.map(([, t]) => t), 'Price from', ''].forEach((t) => top.append(h('th', null, t)));
-    table.append(top);
-    [...new Set([...built.keys(), ...Object.keys(over)])].sort().forEach((m) => {
-      // A fast mode the pack does not override, of a model it does, costs twice that override (use_prices and
-      // estimate in dashboard_limit.py): its built-in row is no longer used.
-      const base = m.endsWith(':fast') ? m.slice(0, -5) : null, twice = !over[m] && base && !base.includes(':') && over[base]
-        ? Object.fromEntries(PRICE_KEYS.map(([k]) => [k, num(over[base][k]) !== null ? 2 * over[base][k] : null])) : null;
-      const r = over[m] || twice || built.get(m), tr = h('tr', 'rules-price');
-      tr.dataset.model = m;
-      tr.append(h('td', null, m), ...PRICE_KEYS.map(([k]) => h('td', 'num', num(r[k]) !== null ? `$${r[k]}` : '—')), h('td', null, over[m] ? 'your override' : twice ? `twice your override of ${base}` : 'built in'));
-      const acts = h('td', null);
-      acts.append(button('Change', 'btn-quiet', 'price-edit', `Change the price of ${m}`, () => {
-        S.price = { model: m, ...Object.fromEntries(PRICE_KEYS.map(([k]) => [k, num(r[k]) !== null ? String(r[k]) : ''])) }; draw();
-      }));
-      if (over[m]) acts.append(button('Remove override', 'btn-quiet', 'price-clear', `Remove your price of ${m}`, () => send('prices', ['clear', m], null, restore(m))));
-      tr.append(acts);
-      table.append(tr);
+    const nameOf = (m) => (over[m] && typeof over[m].name === 'string' && over[m].name) || (typeof names[m] === 'string' && names[m]) || m;
+    // The model each other ID means (the pack's aliases); the model an ID is priced as (with no date or [1m] on it).
+    const aliasTo = new Map();
+    Object.keys(over).forEach((m) => list(over[m] && over[m].aliases).forEach((x) => { if (typeof x === 'string' && !aliasTo.has(x)) aliasTo.set(x, m); }));
+    const canon = (id) => { const b = String(id).replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, ''); return aliasTo.get(b) || b; };
+    // The models: each built-in one (its fast mode is its second line) and each the pack prices or adds.
+    const isModel = (m) => built.has(m) || priced(over[m]) || !!(over[m] && over[m].provider);
+    const models = [...new Set([...built.keys(), ...Object.keys(over)])].filter((m) => !m.endsWith(':fast') && isModel(m));
+    const rateOf = (m) => (priced(over[m]) ? over[m] : built.get(m) || null);
+    // In use: a model a role runs (its marks) or this project's steps ran in 30 days (how many).
+    const ms = S.d.modelSettings && typeof S.d.modelSettings === 'object' ? S.d.modelSettings : {}, c = ctl() || {};
+    const roles = new Map(), sessions = new Map(), raw = new Set();
+    const role = (id, t) => { raw.add(id); const m = canon(id), l = roles.get(m) || []; if (!l.includes(t)) l.push(t); roles.set(m, l); };
+    ROLES.forEach((k) => { const s = ms[k]; if (s && typeof s.model === 'string' && s.model) role(s.model, k); });
+    const ts = c.tests && typeof c.tests === 'object' && typeof c.tests.model === 'string' ? c.tests : null;
+    if (ts) role(ts.cli === 'opencode' && !ts.model.startsWith('opencode:') ? `opencode:${ts.model}` : ts.model, 'Tests');
+    if (typeof p.research === 'string' && p.research) role(p.research, 'research lane');
+    const seen = list(p.seen).filter((x) => x && typeof x.model === 'string' && num(x.sessions) !== null);
+    seen.forEach((x) => {
+      raw.add(x.model);
+      const m = typeof x.as === 'string' ? x.as.replace(/:fast$/, '') : canon(x.model);
+      sessions.set(m, (sessions.get(m) || 0) + x.sessions);
     });
-    const f = S.price || (S.price = { model: '', input: '', output: '', cacheRead: '' }), form = h('div', 'rules-add rules-price-form');
-    [['model', 'Model', 'claude-opus-5-5'], ...PRICE_KEYS.map(([k, t]) => [k, t, '0'])].forEach(([k, t, hint]) => {
+    const inUse = (m) => roles.has(m) || sessions.has(m);
+    // Seen but not priced: an ID of the steps that no model and no alias prices (an OpenCode one keeps OpenCode's cost).
+    const unpriced = seen.filter((x) => x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
+    const known = models.filter((m) => providerOf(m, over[m]) !== 'opencode').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    const norm = (s) => s.toLowerCase().replace(/\./g, '-');
+    const likely = (id) => {
+      const t = norm(id.replace(/^.*\//, '').replace(/^(?:[a-z0-9-]+\.)*anthropic\./i, ''));
+      return known.filter((m) => t.includes(norm(m))).sort((a, b) => b.length - a.length)[0] || '';
+    };
+
+    // ---- a row and its parts ----
+    const field = (act, label, value, set, hint) => {
       const x = h('input', 'field rules-field');
-      x.type = 'text'; x.placeholder = hint; x.dataset.act = `price-${k}`; x.value = f[k];
-      x.setAttribute('aria-label', k === 'model' ? 'The model to price' : `${t} price, dollars per million tokens`);
-      x.addEventListener('input', () => { f[k] = x.value; });
-      form.append(h('label', null, t), x);
+      x.type = 'text'; x.dataset.act = act; x.value = value; x.setAttribute('aria-label', label);
+      if (hint) x.placeholder = hint;
+      x.addEventListener('input', () => set(x.value));
+      return x;
+    };
+    // A price field: $, the box, "/ M tokens".
+    const money = (act, t, value, set, hint) => {
+      const w = h('label', 'rules-price-field');
+      w.append(h('span', null, t), h('span', 'rules-price-unit', '$'), field(act, `${t} price, dollars per million tokens`, value, set, hint), h('span', 'rules-price-unit', '/ M tokens'));
+      return w;
+    };
+    // This is…: the model an ID means, the likely one picked first, then a button that adds the ID as its alias.
+    function thisIs(id) {
+      const sel = h('select', 'field board-select');
+      sel.dataset.act = 'price-this-model'; sel.setAttribute('aria-label', `The model ${id} is`);
+      const pick = S.priceThis.has(id) ? S.priceThis.get(id) : likely(id);
+      [['', 'Pick a model'], ...known.map((m) => [m, nameOf(m)])].forEach(([v, t]) => { const o = h('option', null, t); o.value = v; o.selected = v === pick; sel.append(o); });
+      const go = button(pick ? `This is ${nameOf(pick)}` : 'This is…', 'btn-quiet', 'price-this', `Price ${id} as the model picked`, () => {
+        const m = sel.value;
+        if (!m) { say(`Pick the model ${id} is.`); return; }
+        priceRun([['alias', m, 'add', id]], () => { S.priceThis.delete(id); });
+      });
+      sel.addEventListener('change', () => { S.priceThis.set(id, sel.value); go.textContent = sel.value ? `This is ${nameOf(sel.value)}` : 'This is…'; });
+      return [sel, go];
+    }
+    const findOf = (m, more) => [m, nameOf(m), ...list(over[m] && over[m].aliases), ...(more || [])].join('\n').toLowerCase();
+    const marks = (m) => [...(roles.get(m) || []).map((t) => S.ctx.chip(t, 'info')),
+      ...(sessions.has(m) ? [S.ctx.chip(`${plural(sessions.get(m), 'session', 'sessions')} in 30 days`, 'quiet')] : [])];
+    // The row open in Edit: display name and other IDs (not for an OpenCode model's own price), the four prices, and
+    // Save, Cancel and Reset to built-in.
+    function editRow(m, tr) {
+      const ed = S.priceEdit, e = over[m] || {}, b = built.get(m), box = h('div', 'rules-price-editform');
+      if (!ed.ratesOnly) {
+        box.append(h('label', 'rules-price-field', 'Display name'), field('price-name', `Display name of ${m}`, ed.name, (v) => { ed.name = v; }, names[m] || m));
+        const ids = h('div', 'rules-item rules-price-ids');
+        ids.append(h('span', null, 'Other IDs:'));
+        ed.aliases.forEach((x) => ids.append(h('span', 'rules-price-alias', x), button('×', 'btn-quiet', 'price-alias-drop', `${x} is not ${m}`, () => { ed.aliases = ed.aliases.filter((y) => y !== x); draw(); })));
+        ids.append(field('price-alias-new', `Another model ID that is ${m}`, ed.alias, (v) => { ed.alias = v; }, 'proxy/model-id'), button('+ add', 'btn-quiet', 'price-alias-add', `Add the ID typed as ${m}`, () => {
+          const x = ed.alias.trim(), to = aliasTo.get(x);
+          const why = !MODEL.test(x) ? `"${x}" is not a model ID.` : x === m ? 'A model is not an alias of itself.' : isModel(x) ? `${x} is a model of its own.`
+            : to && to !== m ? `${x} is already ${nameOf(to)}.` : null;
+          if (why) { say(why); return; }
+          if (!ed.aliases.includes(x)) ed.aliases.push(x);
+          ed.alias = ''; draw();
+        }));
+        box.append(ids);
+      }
+      PRICE_KEYS.forEach(([k, t]) => box.append(money(`price-${k}`, t, ed[k], (v) => { ed[k] = v; }, k === 'cacheWrite' ? '1.25 × input' : '0')));
+      box.append(button('Save', 'btn-quiet', 'price-save', `Save ${m}`, () => {
+        const v = PRICE_KEYS.map(([k]) => String(ed[k]).trim()), shown = rateOf(m) || {}, changes = [];
+        const same = RATES.every((k, i) => v[i] === (num(shown[k]) !== null ? String(shown[k]) : '')) && v[3] === (priced(e) && num(e.cacheWrite) !== null ? String(e.cacheWrite) : '');
+        if (!same) {
+          if (v.slice(0, 3).some((x) => !x)) { say('Give the input, output and cache read prices.'); return; }
+          changes.push(['set', m, ...v.slice(0, 3), ...(v[3] ? [v[3]] : [])]);
+        }
+        if (!ed.ratesOnly) {
+          const n = ed.name.trim(), had = typeof e.name === 'string' ? e.name : '', want = n && n !== (names[m] || m) ? n : '';
+          if (want !== had) changes.push(want ? ['name', m, want] : ['name', m]);
+          const was = list(e.aliases);
+          ed.aliases.filter((x) => !was.includes(x)).forEach((x) => changes.push(['alias', m, 'add', x]));
+          was.filter((x) => !ed.aliases.includes(x)).forEach((x) => changes.push(['alias', m, 'remove', x]));
+        }
+        if (!changes.length) { S.priceEdit = null; draw(); return; }
+        priceRun(changes, () => { S.priceEdit = null; });
+      }), button('Cancel', 'btn-quiet', 'price-cancel', `Close ${m} with nothing saved`, () => { S.priceEdit = null; draw(); }));
+      if (priced(e) && b) box.append(resetButton(m, b));
+      const td = h('td', null);
+      td.colSpan = 7; td.append(h('strong', null, nameOf(m)), h('span', 'board-from', ` ${m}`), box);
+      tr.classList.add('rules-price-editing');
+      tr.append(td);
+      return tr;
+    }
+    const resetButton = (m, b) => button(`${m.endsWith(':fast') ? 'Reset :fast' : 'Reset'} to built-in (${['input', 'output', 'cacheRead'].map((k) => usd(b[k])).join(' / ')} / ${usd(writeOf(b))})`, 'btn-quiet', m.endsWith(':fast') ? 'price-fast-reset' : 'price-reset',
+      `Put ${m} back to its built-in price`, () => priceRun([['clear', m]], () => { if (S.priceEdit && S.priceEdit.model === m) S.priceEdit = null; }));
+    // from: the prices the fields start at, for a fast mode the pack does not price (its row's second line).
+    const openEdit = (m, ratesOnly, from) => {
+      const e = over[m] || {}, r = (ratesOnly ? (priced(e) ? e : from) : rateOf(m)) || {};
+      S.priceEdit = { model: m, ratesOnly, name: typeof e.name === 'string' ? e.name : '', aliases: list(e.aliases).slice(), alias: '',
+        ...Object.fromEntries(RATES.map((k) => [k, num(r[k]) !== null ? String(r[k]) : ''])), cacheWrite: priced(e) && num(e.cacheWrite) !== null ? String(e.cacheWrite) : '' };
+      draw();
+    };
+    // A model's row: its name (bold), marks, ID and other IDs; its prices and where they are from; Edit, and Reset to
+    // built-in for a price from the pack or Remove for an added model. Its fast mode is the second line of each cell.
+    function row(m) {
+      const tr = h('tr', 'rules-price');
+      tr.dataset.model = m; tr.dataset.group = `price:${m}`; tr.dataset.find = findOf(m); tr.dataset.family = lineOf(m);
+      if (S.priceEdit && S.priceEdit.model === m) return editRow(m, tr);
+      if (S.priceEdit && S.priceEdit.model === `${m}:fast`) return editRow(`${m}:fast`, tr);
+      const e = over[m] || {}, b = built.get(m), mine = priced(e), r = rateOf(m), added = !b && isModel(m);
+      const fo = over[`${m}:fast`], fb = built.get(`${m}:fast`);
+      // A fast mode the pack does not price, of a model it does, costs twice that price (use_prices in dashboard_limit.py).
+      const fast = priced(fo) ? [fo, 'Saved, from the pack'] : mine && fb ? [Object.fromEntries(PRICE_KEYS.map(([k]) => [k, 2 * writeOrRate(e, k)])), 'twice your price'] : fb ? [fb, 'built in'] : null;
+      const two = (main, second) => { const td = h('td', null); td.append(h('div', null, main)); if (fast) td.append(h('div', 'rules-price-fastline', second)); return td; };
+      const name = h('td', 'rules-price-name');
+      name.append(h('strong', null, nameOf(m)), ...(added ? [S.ctx.chip('added', 'quiet')] : []), ...marks(m),
+        h('div', 'board-from', `${m}${list(e.aliases).length ? ` · also: ${list(e.aliases).join(', ')}` : ''}`));
+      if (fast) name.append(h('div', 'rules-price-fastline', ':fast'));
+      tr.append(name, ...PRICE_KEYS.map(([k]) => {
+        const td = two(r ? usd(k === 'cacheWrite' ? writeOf(r) : r[k]) : '—', fast ? usd(k === 'cacheWrite' ? writeOf(fast[0]) : fast[0][k]) : '');
+        td.className = 'num'; return td;
+      }), two(mine || (added && r) ? 'Saved, from the pack' : r ? 'built in' : 'not priced', fast ? fast[1] : ''));
+      const acts = h('td', 'rules-price-acts');
+      acts.append(button('Edit', 'btn-quiet', 'price-edit', `Edit ${m}`, () => openEdit(m, false)));
+      if (mine && b) acts.append(resetButton(m, b));
+      // The fast mode's own price: Edit :fast saves it under <model>:fast; one from the pack has its own Reset.
+      if (fast) acts.append(button('Edit :fast', 'btn-quiet', 'price-fast-edit', `Edit the fast mode price of ${m}`, () => openEdit(`${m}:fast`, true, fast[0])));
+      if (priced(fo)) {
+        acts.append(fb ? resetButton(`${m}:fast`, fb) : button('Remove :fast price', 'btn-quiet', 'price-fast-reset', `Take the fast mode price of ${m} off`,
+          () => priceRun([['clear', `${m}:fast`]], () => { if (S.priceEdit && S.priceEdit.model === `${m}:fast`) S.priceEdit = null; })));
+      }
+      if (added) acts.append(button('Remove', 'btn-quiet', 'price-remove', `Remove ${m}`, () => priceRun([['remove', m]])));
+      tr.append(acts);
+      return tr;
+    }
+    const writeOrRate = (r, k) => (k === 'cacheWrite' ? writeOf(r) : r[k]);
+    // An OpenCode model: priced as OpenCode reports (the default), at your price, or as the model it is marked as.
+    function ocRow(id) {
+      const tr = h('tr', 'rules-price rules-price-oc');
+      tr.dataset.model = id; tr.dataset.group = `price:${id}`; tr.dataset.find = findOf(id, [id.replace(/^opencode:/, '')]);
+      if (S.priceEdit && S.priceEdit.model === id) return editRow(id, tr);
+      const to = aliasTo.get(id), e = over[id], r = to ? rateOf(to) : priced(e) ? e : null;
+      const name = h('td', 'rules-price-name');
+      name.append(h('strong', null, id.replace(/^opencode:/, '')), ...(raw.has(id) ? [S.ctx.chip('in use', 'info')] : []));
+      tr.append(name, ...PRICE_KEYS.map(([k]) => h('td', 'num', r ? usd(writeOrRate(r, k)) : '—')),
+        h('td', null, to ? `${nameOf(to)}'s price` : priced(e) ? 'your price' : 'as OpenCode reports'));
+      const acts = h('td', 'rules-price-acts');
+      if (to) acts.append(button(`Not ${nameOf(to)}`, 'btn-quiet', 'price-oc-unalias', `Price ${id} as OpenCode reports again`, () => priceRun([['alias', to, 'remove', id]])));
+      else if (priced(e)) acts.append(button('Back to OpenCode\'s', 'btn-quiet', 'price-oc-back', `Price ${id} as OpenCode reports again`, () => priceRun([['clear', id]])));
+      else acts.append(button('Set my price', 'btn-quiet', 'price-oc-set', `Set your price of ${id}`, () => openEdit(id, true)), ...thisIs(id));
+      tr.append(acts);
+      return tr;
+    }
+    function tableOf(rows, heads) {
+      const t = h('table', 'rules-prices-table'), top = h('tr', null);
+      ['Model', ...PRICE_KEYS.map(([, x]) => x), 'Price from', ''].forEach((x) => top.append(h('th', null, x)));
+      t.append(top);
+      let fam = null;
+      rows.forEach((tr) => {
+        // A family's head (Opus, GPT) before its first row, in a group by provider.
+        if (heads && tr.dataset.family !== fam) {
+          fam = tr.dataset.family;
+          const hr = h('tr', 'rules-price-family'), th = h('th', null, heads(tr.dataset.model));
+          th.colSpan = 7; hr.dataset.family = fam; hr.append(th); t.append(hr);
+        }
+        t.append(tr);
+      });
+      return t;
+    }
+    function group(key, title, rows, older, olderTitle, heads) {
+      const g = h('div', 'rules-price-group');
+      g.dataset.priceGroup = key;
+      g.append(h('h4', 'rules-price-title', title));
+      if (rows.length) g.append(tableOf(rows, heads));
+      if (older.length) {
+        const d = h('details', 'rules-price-older');
+        d.open = S.priceOpen.has(key);
+        d.addEventListener('toggle', () => { if (d.open) S.priceOpen.add(key); else S.priceOpen.delete(key); });
+        d.append(h('summary', null, `${olderTitle} (${older.length})`), tableOf(older, heads));
+        g.append(d);
+      }
+      return g;
+    }
+
+    // ---- the section ----
+    const top = h('div', 'rules-add rules-prices-top'), find = h('input', 'field rules-field rules-price-search');
+    find.type = 'search'; find.dataset.act = 'price-search'; find.placeholder = 'Search a model or alias'; find.value = S.priceFind;
+    find.setAttribute('aria-label', 'Search the models by ID, name or alias');
+    find.addEventListener('input', () => { S.priceFind = find.value; filter(); });
+    top.append(find, button('+ Add model', 'btn-quiet', 'price-add', 'Add a model the table has not got', () => { S.priceAdd = S.priceAdd || addDraft(''); draw(); }),
+      h('span', 'board-from', '$ per million tokens. Saved in the pack.'));
+    el.append(top);
+    function addDraft(id) {
+      return { model: id, name: id, provider: providerOf(id, null), input: '', output: '', cacheRead: '', cacheWrite: '' };
+    }
+    if (S.priceAdd) {
+      const f = S.priceAdd, form = h('div', 'rules-price-editform rules-price-addform');
+      form.dataset.group = 'price:add';
+      const prov = h('select', 'field board-select');
+      prov.dataset.act = 'price-add-provider'; prov.setAttribute('aria-label', 'Provider of the model');
+      PROVIDERS.forEach(([k, t]) => { const o = h('option', null, t); o.value = k; o.selected = k === f.provider; prov.append(o); });
+      prov.addEventListener('change', () => { f.provider = prov.value; });
+      const same = h('select', 'field board-select');
+      same.dataset.act = 'price-add-same'; same.setAttribute('aria-label', 'Same price as a model the table has');
+      [['', 'Same price as…'], ...models.filter((m) => rateOf(m)).sort((a, b) => nameOf(a).localeCompare(nameOf(b))).map((m) => [m, nameOf(m)])]
+        .forEach(([v, t]) => { const o = h('option', null, t); o.value = v; same.append(o); });
+      same.addEventListener('change', () => {
+        const r = same.value ? rateOf(same.value) : null;
+        if (!r) return;
+        RATES.forEach((k) => { f[k] = String(r[k]); });
+        f.cacheWrite = num(r.cacheWrite) !== null && r.cacheWrite !== r.input * 1.25 ? String(r.cacheWrite) : '';
+        draw();
+      });
+      form.append(h('strong', null, 'Add model'), field('price-add-model', 'Model ID, as sessions report it', f.model, (v) => { f.model = v; }, 'Model ID, as sessions report it'),
+        field('price-add-name', 'Display name', f.name, (v) => { f.name = v; }, 'Display name'), prov,
+        ...PRICE_KEYS.map(([k, t]) => money(`price-add-${k}`, t, f[k], (v) => { f[k] = v; }, k === 'cacheWrite' ? '1.25 × input' : '0')), same,
+        button('Save', 'btn-quiet', 'price-add-save', 'Save this model in the pack', () => {
+          const m = f.model.trim(), n = f.name.trim(), v = PRICE_KEYS.map(([k]) => f[k].trim());
+          const why = !MODEL.test(m) ? 'Give the model ID, as sessions report it.' : isModel(m) || aliasTo.has(m) ? `${m} is priced already: use Edit on its row.`
+            : !n || n.length > 60 ? 'Give a display name of up to 60 characters.' : v.slice(0, 3).some((x) => !x) ? 'Give the input, output and cache read prices.' : null;
+          if (why) { say(why); return; }
+          priceRun([['add', m, f.provider, n, ...v.slice(0, 3), ...(v[3] ? [v[3]] : [])]], () => { S.priceAdd = null; });
+        }),
+        button('Cancel', 'btn-quiet', 'price-add-cancel', 'Close Add model with nothing saved', () => { S.priceAdd = null; draw(); }));
+      el.append(form);
+    }
+    if (unpriced.length) {
+      const box = h('div', 'rules-prices-unpriced');
+      box.append(h('h4', 'rules-price-title', 'Seen but not priced'));
+      unpriced.forEach((x) => {
+        const line = h('div', 'rules-item rules-unpriced');
+        line.dataset.model = x.model; line.dataset.group = `price:${x.model}`; line.dataset.find = x.model.toLowerCase();
+        line.append(h('span', null, `${x.model} (${plural(x.sessions, 'session', 'sessions')}${list(x.routes).includes('proxy') ? ', through the API proxy' : ''})`),
+          ...thisIs(x.model), button('Add as new model', 'btn-quiet', 'price-new', `Add ${x.model} as a model of its own`, () => { S.priceAdd = addDraft(x.model); draw(); }));
+        box.append(line);
+      });
+      el.append(box);
+    }
+    const own = models.filter((m) => providerOf(m, over[m]) !== 'opencode');
+    const used = own.filter(inUse).sort((a, b) => PROVIDERS.findIndex(([k]) => k === providerOf(a, over[a])) - PROVIDERS.findIndex(([k]) => k === providerOf(b, over[b])) || byFamily(a, b));
+    if (used.length) el.append(group('use', 'In use by this project', used.map(row), [], ''));
+    // Older: a built-in model with a newer one of its line (Opus 4.8 after Opus 5.5).
+    const older = (m) => built.has(m) && own.some((x) => x !== m && built.has(x) && providerOf(x, over[x]) === providerOf(m, over[m]) && lineOf(x) === lineOf(m) && newer(x, m) < 0);
+    [['claude', 'Claude', (m) => lineOf(m).replace(/^./, (x) => x.toUpperCase())], ['openai', 'OpenAI', () => 'GPT'], ['other', 'Other', null]].forEach(([k, t, heads]) => {
+      const all = own.filter((m) => providerOf(m, over[m]) === k && !inUse(m)).sort(byFamily);
+      if (!all.length) return;
+      el.append(group(k, t, all.filter((m) => !older(m)).map(row), all.filter(older).map(row), `Older ${t} models`, heads));
     });
-    form.append(button('Save', 'btn-quiet', 'price-save', 'Save this model price as your override', () => {
-      const v = ['model', ...PRICE_KEYS.map(([k]) => k)].map((k) => f[k].trim());
-      if (v.some((x) => !x)) { say('Give the model and its three prices.'); return; }
-      send('prices', ['set', ...v], null, restore(v[0])).then((ok) => { if (ok) { S.price = null; draw(); } });
-    }));
-    el.append(table, form);
+    // OpenCode: the models OpenCode can run on the build machine, and every OpenCode ID the pack or the steps name.
+    const oc = new Set(models.filter((m) => providerOf(m, over[m]) === 'opencode'));
+    ROLES.forEach((k) => { const s = ms[k], o = s && s.clis && s.clis.opencode; list(o && o.models).forEach((x) => { if (typeof x === 'string' && x) oc.add(`opencode:${x}`); }); });
+    [...Object.keys(over), ...aliasTo.keys(), ...raw].forEach((x) => { if (typeof x === 'string' && x.startsWith('opencode:')) oc.add(x); });
+    if (oc.size) {
+      const ids = [...oc].sort(), shown = (x) => raw.has(x) || priced(over[x]) || aliasTo.has(x) || isModel(x);
+      // A model added in the pack (it has a provider) is a model's row, with its name, Edit and Remove; an OpenCode ID
+      // with only your price is an OpenCode row.
+      const asModel = (x) => isModel(x) && (!x.startsWith('opencode:') || !!(over[x] && over[x].provider));
+      const g = group('opencode', 'OpenCode', ids.filter(shown).map((x) => (asModel(x) ? row(x) : ocRow(x))),
+        ids.filter((x) => !shown(x)).map(ocRow), 'All OpenCode models');
+      g.append(h('p', 'board-from', 'An OpenCode step is priced as OpenCode reports, unless you set your price or mark its model as a known one.'));
+      el.append(g);
+    }
+    el.append(h('p', 'board-from', 'With no cache write price, a 5-minute cache write costs 1.25 times the input price. A 1-hour cache write costs twice the input price.'));
+    // The search: the rows, groups and family heads with no match hide; a folded group with a match opens.
+    function filter() {
+      const q = S.priceFind.trim().toLowerCase();
+      el.querySelectorAll('[data-find]').forEach((r) => { r.hidden = !!q && !r.dataset.find.includes(q); });
+      el.querySelectorAll('.rules-price-family').forEach((r) => {
+        r.hidden = !!q && !Array.from(r.closest('table').querySelectorAll(`.rules-price[data-family="${r.dataset.family}"]`)).some((x) => !x.hidden);
+      });
+      el.querySelectorAll('.rules-price-group, .rules-prices-unpriced').forEach((g) => { g.hidden = !!q && !g.querySelector('[data-find]:not([hidden])'); });
+      if (q) el.querySelectorAll('details.rules-price-older').forEach((d) => { if (d.querySelector('[data-find]:not([hidden])')) d.open = true; });
+    }
+    filter();
     return el;
   }
 

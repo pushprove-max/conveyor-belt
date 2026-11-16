@@ -28,10 +28,19 @@ Some pack settings that this site names:
   example `npm ci`. Use it in place of `linkFromMain` when a card can change a lockfile. When it fails, the card is
   blocked with the end of its output.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
-- `prices`: your model prices, by model name, each `{"input": 3, "output": 15, "cacheRead": 0.3}` in dollars per
-  million tokens. Each one wins over the Board's built-in price of that model. Set them on the Board's Rules tab
-  (Model prices, [The Board](board.md#rules)) or with `conveyor.sh prices set <model> <input> <output> <cache read>`
-  and `conveyor.sh prices clear <model>`.
+- `prices`: your model prices, added models and aliases, by model ID. Set them on the Board's Rules tab (Model
+  prices, [The Board](board.md#rules)) or with `conveyor.sh prices` ([Commands](commands.md)). Each entry can have:
+  - `input`, `output` and `cacheRead`, together, and `cacheWrite`: prices in dollars per million tokens. They win
+    over the Board's built-in price of that model. A model with no built-in price is priced at them. With no
+    `cacheWrite`, a 5-minute cache write costs 1.25 times `input`. An OpenCode model
+    (`opencode:<provider>/<model>`) with prices uses them, not the cost that OpenCode reports.
+  - `name`: the display name on the Board. The ID does not change.
+  - `provider`: `claude`, `openai`, `opencode` or `other`, the group of an added model on the Board.
+  - `aliases`: other model IDs for the same model, for example a proxy's ID. A session with one of these IDs is priced
+    as this model and shows its display name.
+
+  For example: `{"claude-sonnet-4-6": {"aliases": ["anthropic/claude-sonnet-4-6"]}, "my-model": {"name": "My model",
+  "provider": "other", "input": 1, "output": 2, "cacheRead": 0.1}}`.
 
 ## The host file
 

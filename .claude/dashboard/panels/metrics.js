@@ -62,7 +62,7 @@
       };
       const byModel = (t) => {
         const m = Object.entries((t && t.perLanded && t.perLanded.byModel) || {});
-        return m.length ? m.map(([k, v]) => `${k} ${money(v.usd)}${left(v.leftOut)}, ${tokens(v.tokens)} tokens${unreadOut(v.tokensLeftOut)}`).join('; ') : NONE;
+        return m.length ? m.map(([k, v]) => `${ctx.modelName(k)} ${money(v.usd)}${left(v.leftOut)}, ${tokens(v.tokens)} tokens${unreadOut(v.tokensLeftOut)}`).join('; ') : NONE;
       };
       const ROWS = [
         ['Cards ended', (t) => (t ? `${t.cards} (${t.landed} landed, ${t.blocked} blocked)` : NONE)],
@@ -227,7 +227,8 @@
       }
       // What a landed card cost, by the model that ran it, the costliest first.
       function models(r) {
-        const m = Object.entries((r.week && r.week.perLanded && r.week.perLanded.byModel) || {}).filter(([, x]) => x && num(x.usd)).sort((a, b) => b[1].usd - a[1].usd);
+        const m = Object.entries((r.week && r.week.perLanded && r.week.perLanded.byModel) || {}).filter(([, x]) => x && num(x.usd)).sort((a, b) => b[1].usd - a[1].usd)
+          .map(([k, x]) => [ctx.modelName(k), x]);
         if (!m.length) return figure('models', 'Cost per landed card, by model', none());
         const W = 300, row = 22, H = m.length * row, x0 = 140, room = 100, most = Math.max(...m.map(([, x]) => x.usd)) || 1;
         const svg = chart(`Cost per landed card by model: ${m.map(([k, x]) => `${k} ${ctx.money(x.usd)}`).join(', ')}`, W, H);
@@ -372,7 +373,7 @@
             // A review's verdict in words ("review: changes asked"), never its code.
             const result = st.step === 'review' && /^(NO-)?GO$/.test(st.result) ? `: ${ctx.verdictSaid(st.result)}` : st.result && st.result !== 'ok' ? ` ${st.result}` : '';
             const parts = [st.step + result, sec(st.sec), `${tokens(st.tokens)} tokens`, num(st.usd) ? `${ctx.money(st.usd)}${st.override === true ? ' (priced from your override)' : ''}` : `not priced: ${st.unpriced || 'no reason given'}`];
-            if (st.model) parts.push(st.model + (st.effort ? ` ${st.effort}` : ''));
+            if (st.model) parts.push(ctx.modelName(st.model) + (st.effort ? ` ${st.effort}` : ''));
             // The route of a Claude session when a proxy is set (route): through the proxy, or on the subscription login.
             if (st.route === 'proxy') parts.push('through the API proxy');
             else if (st.route === 'subscription') parts.push('on the subscription login');
@@ -388,7 +389,7 @@
               parts.push(`tool calls ${tools === null ? NONE : tools.length ? tools.map(([k, v]) => `${k} ${v}`).join(', ') : 'none'}`);
               if (!review) {
                 parts.push(`${int(ss.refused)} refused`, `cache hits ${pct(ss.cacheHit)}`);
-                parts.push(`ran ${Array.isArray(ss.models) ? ss.models.join(', ') || 'none' : NONE}`);
+                parts.push(`ran ${Array.isArray(ss.models) ? ss.models.map(ctx.modelName).join(', ') || 'none' : NONE}`);
               }
             }
             t.textContent = parts.join(' · ');

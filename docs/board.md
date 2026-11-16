@@ -125,13 +125,40 @@ The Rules tab holds the settings:
 
 A setting changed there shows its new value at once. A value the host refuses goes back, with the refusal beside it.
 
-**Model prices** lists the price of each model the Board knows, in dollars per million tokens: input, output and
-cache read. Cache writes follow the built-in multipliers. Each release updates the built-in prices. To price a model
-that is newer than your release, or to change a price, type the model and its three prices and press Save. Change
-on a row fills in its model and prices. Your price is an override: it is saved in the pack (`prices` in
-`.conveyor/project.json`), so you commit it with the project. It wins over the built-in price of that model for every
-prompt size, in step costs and in the cost of the day. Fast mode then costs twice your price. A step priced from an override says "priced from your override" on its cost line. Remove override puts
-back the built-in price. OpenCode steps keep the cost that OpenCode reports.
+**Model prices** lists the price of each model the Board knows, in dollars per million tokens: input, output, cache
+read and cache write. Each release updates the built-in prices. With no cache write price, a 5-minute cache write
+costs 1.25 times the input price. A 1-hour cache write costs twice the input price.
+
+- **Search** finds a model by its ID, its display name or one of its other IDs.
+- **Seen but not priced** lists each model ID that this project's sessions used in the last 30 days and that no
+  model or alias prices, with its session count. **This is…** marks the ID as a known model: pick the model (the Board
+  picks the likely one first). **Add as new model** opens Add model with the ID filled in.
+- **In use by this project** comes first. Each row has a mark: builder, reviewer, judge, Tests or research lane, or the
+  number of sessions that used it in the last 30 days.
+- Then **Claude**, **OpenAI** and **Other**, by family, newest first. Older versions fold under "Older Claude models".
+  A model's fast mode is the second line of its row.
+- **OpenCode** lists the models that OpenCode can run on the build machine. Each says where its price comes from:
+  "as OpenCode reports" (the default), "your price" (**Set my price**; **Back to OpenCode's** undoes it), or the
+  price of a known model, when you mark the ID with **This is…**. Those not in use and not priced fold under "All
+  OpenCode models". An OpenCode model you add with **Add model** has a row like any added model.
+
+**Edit** opens a row in place: the display name, other IDs, and the four prices. **Save** saves the changes and
+**Cancel** drops them. A row with your price says "Saved, from the pack" and has **Reset to built-in**, which puts back
+the built-in price. Your price wins over the built-in price for every prompt size, in step costs and in the cost of
+the day. Fast mode then costs twice your price, until you give it a price of its own with **Edit :fast**.
+**Reset :fast to built-in** puts back its built-in price. A step priced from your price says "priced from your
+override" on its cost line.
+
+**+ Add model** adds a model that the Board does not know: its ID as sessions report it, a display name, a provider,
+and its prices. "Same price as…" copies the prices of a known model. An added model is priced like a built-in one, has
+an "added" mark, and has **Remove**.
+
+Other IDs (aliases) are for a model that comes back under another ID, for example through a proxy or another
+provider (`anthropic/claude-sonnet-4-6`). A session with an alias is priced as its model and shows the model's display
+name on the Board. A new display name does not change the model's ID.
+
+Your prices, added models and aliases are saved in the pack (`prices` in `.conveyor/project.json`), so you commit them
+with the project. Each change has Undo.
 
 **Visible changes need your yes** is a switch per project, Off by default. On, a card whose change customers or staff
 will see stops until its issue has a `Visible change approved:` line. Off, the tab says "off: visible changes land

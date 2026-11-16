@@ -125,7 +125,8 @@ OpenCode's events fill the same live record as Claude's: turns (each `step_finis
 action (the tool that ran last and what it names, or writing, or thinking), the last output, and usage: input, cache
 writes and reads, output (reasoning counted in it) and cost, the dollars OpenCode reports. OpenCode reports no
 1-hour cache writes (0) and no effort; once a step reports no cost, cost is left out and the Board leaves the step
-unpriced. The Board prices an OpenCode step at the cost OpenCode reported, never at a list price. A stall is found
+unpriced. The Board prices an OpenCode step at the cost OpenCode reported, never at a list price, unless the pack
+prices its model or names it as an alias of a known model (`prices`, docs/configuration.md). A stall is found
 as for Claude, from the output lines and the worktree.
 
 Claude accounts (`control account`) and the weekly limit apply to Claude sessions only: an OpenCode session runs on
