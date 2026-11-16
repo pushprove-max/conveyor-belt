@@ -34,6 +34,11 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # The question "Set the pack's test.list?": answered by --test-list yes|no, and asked (exit 2, nothing written) while
 # the pack sets no test.list and the test command runs a runner listguess() knows, naming it; yes writes what
 # listguess() offers (args, or none for a runner that takes no list of files) as the pack's test.list.
+# The question "Make the test map?": answered by --test-map yes|no, and asked (exit 2, nothing written) while the pack
+# sets no test.map, there is no made map and the project's language has a coverage tool the map knows (lib/testmap.sh
+# maptool()), naming the tool and what the run may cost (mapcost()); yes runs the whole suite under coverage and
+# writes the map (mapbuild()), no writes test.map off. With no such tool, setup says so: a card's tests are found by
+# name.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -61,9 +66,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no]--fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla=''
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw=''
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -73,6 +78,7 @@ setup() { # as SETUP_USAGE
       --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
       --test-patterns) tpa=${2-}; [[ $tpa == yes || $tpa == no ]] || { set -- x; break; } ;;
       --test-list) tla=${2-}; [[ $tla == yes || $tla == no ]] || { set -- x; break; } ;;
+      --test-map) tma=${2-}; [[ $tma == yes || $tma == no ]] || { set -- x; break; } ;;
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
       --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
@@ -129,6 +135,13 @@ setup() { # as SETUP_USAGE
       fi
     fi
   fi
+  # The test map, while the pack sets no test.map and there is none (lib/testmap.sh): asked, naming the coverage tool
+  # and what the run may cost (mapcost()); a project whose language has no tool the map knows is told so.
+  if [ "$tma" != no ] && ! jq -e '.test.map' "$PACK" >/dev/null 2>&1 && [ ! -s "$(mappath)" ]; then
+    if tmt=$(maptool "$(maplang "$MAIN")" "$MAIN"); then
+      [ -n "$tma" ] || need+=("--test-map <yes or no: run the whole suite once with $tmt to make the test map (which test files cover which source files), so a card runs only the tests that cover its change? $(mapcost)>")
+    else tmw=$tmt; tmt=''; fi
+  fi
   if [ -e "$PACK" ]; then
     [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
     [ ${#need[@]} = 0 ] || { printf 'conveyor: setup needs:%s\n' "$(printf ' %s;' "${need[@]}")" >&2; return 2; }
@@ -166,6 +179,15 @@ setup() { # as SETUP_USAGE
     jq --arg l "${tl%% *}" '.test.list = $l' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's test.list could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's test.list: ${tl%% *} (the test command runs ${tl#* })"
+  fi
+  # Yes runs the whole suite under coverage now and writes the map, saying what it mapped and how long it took; a run
+  # that fails says so, and the cards' tests are found by name. No writes test.map off, so it is not asked again.
+  [ -z "$tmw" ] || echo "conveyor: no test map: $tmw; a card's tests are found by name"
+  if [ "$tma" = yes ] && [ -n "$tmt" ]; then mapbuild "$MAIN" || :
+  elif [ "$tma" = no ] && ! jq -e '.test.map' "$PACK" >/dev/null 2>&1; then
+    jq '.test.map = "off"' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pack's test.map could not be written" >&2; return 1; }
+    echo "conveyor: wrote the pack's test.map: off; a card's tests are found by name"
   fi
   packget plugin.commit p plugin.follow f || return 1
   if [ -z "$p$f" ] && [ -n "$pin" ]; then

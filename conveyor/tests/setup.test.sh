@@ -249,8 +249,26 @@ t_setuptestlist() {
   was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
     && grep -qF -- "--test-list <yes or no: the test command runs jest, which takes test files as arguments; set the pack's test.list to args," <<<"$out" \
     || fail "setup did not ask to set test.list for jest before changing anything: $out"
-  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-list yes 2>&1) && jq -e '.test.list == "args"' "$S/.conveyor/project.json" >/dev/null \
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-list yes --test-map no 2>&1) && jq -e '.test.list == "args"' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --test-list yes did not write test.list args: $out"
+}
+# #150. Bug: a new install had no test map, so a card's tests were only guessed by name. Setup of a Node project asks
+# before the whole suite runs under coverage, naming the tool and its cost; no writes test.map off; yes makes the map,
+# which sends src/a.js to test/a.test.js alone, and says what it mapped and how long it took.
+t_setuptestmap() {
+  local X out was; setupdone
+  mkdir -p "$S/src" "$S/test" && echo '{}' > "$S/package.json" && echo 'module.exports = 1;' > "$S/src/a.js" && echo 'module.exports = 2;' > "$S/src/b.js" \
+    && echo "require('../src/a.js');" > "$S/test/a.test.js" && echo "require('../src/b.js');" > "$S/test/b.test.js" \
+    && git -C "$S" add -A && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -qm node || fail "the Node files"
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] && [ ! -e "$S/.conveyor/test-map.json" ] \
+    && grep -qF -- "--test-map <yes or no: run the whole suite once with V8 coverage to make the test map (which test files cover which source files), so a card runs only the tests that cover its change? Its time is not known (no whole-suite run is recorded)" <<<"$out" \
+    || fail "setup did not ask before making the test map: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-map no 2>&1) && jq -e '.test.map == "off"' "$S/.conveyor/project.json" >/dev/null \
+    || fail "setup --test-map no did not write test.map off: $out"
+  jq 'del(.test.map)' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the pack"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-map yes 2>&1) \
+    && grep -qE '^conveyor: wrote the test map .*/test-map\.json with V8 coverage: 2 source files, 2 test files, in [0-9]+s$' <<<"$out" \
+    && jq -e '.sources["src/a.js"] == ["test/a.test.js"]' "$S/.conveyor/test-map.json" >/dev/null || fail "setup --test-map yes did not make the map: $out"
 }
 # Bug: setup made no lane, so the owner had to know to run `lane fast create` and `lane research create` by hand. It
 # asks for both on every run, before it changes anything, and no to both makes neither.

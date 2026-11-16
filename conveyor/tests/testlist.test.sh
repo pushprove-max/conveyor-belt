@@ -47,7 +47,7 @@ t_testlistargs() {
   listsetup args
   listrun 'echo y >> lib/cartsum.js; echo x > lib/new.test.js; echo d > notes.md'
   listgot 'args:lib/cartsum.test.js lib/new.test.js|env:' 'the test of the changed file and the new test, as arguments'
-  listrec '{"mode":"changed","files":2}'
+  listrec '{"mode":"changed","files":2,"by":"name"}'
 }
 
 # The same change with test.list env: no argument, and CONVEYOR_TEST_FILES holds the two paths, one a line.

@@ -244,3 +244,21 @@ t_maintestalone() {
   [ "$(rec '[.pass, .fail.cases]')" = "[\"$B\",[\"solid\"]]" ] || fail "the failure kept is not of the case that failed alone: $(rec .)"
 }
 
+# #150. Bug it catches: a test map made long ago kept sending changes to the tests of code that had since moved. The
+# next whole test on main that passes makes it again, on main's commit, once it is more commits old than test.mapAge,
+# from that run's own coverage: the test file runs once (its line in ran), not again in a second run of the suite.
+t_maintestmap() {
+  maintest_start; local B
+  mkdir -p "$R/src" "$R/test" && echo '{}' > "$R/package.json" && echo 'module.exports = 1;' > "$R/src/a.js" \
+    && printf "require('../src/a.js'); require('node:fs').appendFileSync('%s', 'a\\\\n');\n" "$T/$CASE/ran" > "$R/test/a.test.js" \
+    && git -C "$R" add -A && git -C "$R" commit -qm node || fail "the Node files"
+  tune '.test.mapAge = 1 | .test.main = ". \"$STUB/main-cmd\""'; echo 'node --max-old-space-size=4096 --test test/a.test.js' > "$STUB/main-cmd"
+  jq -n --arg c "$A" --arg cmd "$(jq -r .test.command "$R/.conveyor/project.json")" '{commit: $c, command: $cmd, language: "node", tests: [], sources: {}}' \
+    > "$R/.conveyor/test-map.json" || fail "the old map"
+  move "move b" > /dev/null; B=$(move "move c")
+  mt $T0 > "$T/$CASE/mt.out" 2>&1 || fail "the whole test failed: $(cat "$T/$CASE/mt.out")"
+  jq -e --arg b "$B" '.commit == $b and .sources == {"src/a.js": ["test/a.test.js"]}' "$R/.conveyor/test-map.json" >/dev/null \
+    || fail "the whole test did not make the old map again on main's commit: $(cat "$R/.conveyor/test-map.json" "$T/$CASE/mt.out")"
+  [ "$(cat "$T/$CASE/ran")" = a ] || fail "the test file did not run once, in the whole test alone: $(cat "$T/$CASE/ran" 2>&1)"
+}
+

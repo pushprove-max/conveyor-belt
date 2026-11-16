@@ -549,12 +549,16 @@
   }
   // A running test run's progress, from its track: its cases ("142 of 205 tests · 2 failed") when its command gave a
   // count (tests), else its files ("3 of 6 test files"); null when the track has neither (no test run in progress).
-  // Before it, the list of tests the run was given (the track's list): "changed: 7 files · 3 test files" (3 of them
-  // ran), or "whole suite · ...".
+  // Before it, the list of tests the run was given (the track's list) and how its tests were found: "changed: 7 files
+  // (map) · 3 test files" (3 of them ran), "changed: 7 files (by name)", or "whole suite: <why> · ..."; with the made
+  // test map's age, "· map 12 commits old".
   function testProgress(t) {
     const c = t && t.tests && typeof t.tests === 'object' ? t.tests : null, f = t && t.files && typeof t.files === 'object' ? t.files : null;
     const l = t && t.list && typeof t.list === 'object' ? t.list : null;
-    const mode = l && l.mode === 'changed' && num(l.files) ? `changed: ${l.files} ${l.files === 1 ? 'file' : 'files'}` : l && l.mode === 'whole' ? 'whole suite' : null;
+    const by = l && l.by === 'map' ? ' (map)' : l && l.by === 'name' ? ' (by name)' : '';
+    const age = l && num(l.age) ? ` · map ${l.age} ${l.age === 1 ? 'commit' : 'commits'} old` : '';
+    const mode = l && l.mode === 'changed' && num(l.files) ? `changed: ${l.files} ${l.files === 1 ? 'file' : 'files'}${by}${age}`
+      : l && l.mode === 'whole' ? `whole suite${typeof l.why === 'string' && l.why ? `: ${l.why}` : ''}` : null;
     let prog = null;
     if (c && num(c.done) && num(c.of)) prog = `${c.done} of ${c.of} tests${num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : ''}`;
     else if (f && num(f.run)) prog = `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;

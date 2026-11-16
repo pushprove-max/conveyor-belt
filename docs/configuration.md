@@ -132,19 +132,66 @@ The list holds:
 - each test file that the change adds or changes;
 - for each other changed file, the test files that `.conveyor/test-links.json` links to it, if your project has that
   file (`{"<file>": ["<test file>", ...]}`);
+- else, the test files that the [test map](#the-test-map) says cover that file;
 - else, the test files whose name holds the name of that file, from the nearest folders. For example, a change to
   `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
 
 A change to a document (`.md`, `.txt`, `.rst`) adds no test. When the change touches one of the files below, the
 command gets no list and runs the whole suite:
 
-- a file at the root of the repository, such as `package.json`;
-- a config file (`.json`, `.yaml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.lock`, or a name with `config`);
+- a file that the test map marks as shared: more than half of the mapped tests read it;
+- a file at the root of the repository, such as `package.json`, if the test map does not cover it;
+- a config file (`.json`, `.yaml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.lock`, or a name with `config`), if the test
+  map does not cover it;
 - a shared test file: a helper, setup, fixture or mock file, or a file in a folder of that name;
 - a file that has no test that Conveyor can find.
 
 A link in `.conveyor/test-links.json` wins over these rules. `test.full` is not changed: it always runs the whole
-suite. The Board and `/units` show the mode of a card's test run: `changed: 7 files` or `whole suite`.
+suite. The Board shows the mode of a card's test run and how its tests were found: `changed: 7 files (map)`,
+`changed: 7 files (by name)` or `whole suite: <why>`. With a made test map, it adds the age of the map, for example
+`map 12 commits old`. `/units` shows `changed: 7 files` or `whole suite`.
+
+## The test map
+
+The test map tells which test files cover which source files. With it, a card runs the tests that cover its change,
+not only the tests with a matching name. The map works only with `test.list` set.
+
+Setup makes the map. It runs your whole suite once with the coverage tool of your language, and it asks you first:
+
+| Language | Tool | How it runs |
+|---|---|---|
+| Node | V8 coverage (`NODE_V8_COVERAGE`) | one test file at a time |
+| Python | coverage.py with dynamic contexts | the whole suite once, one context for each test function |
+| Go | `go test -coverprofile` | one package at a time |
+| Rust | `cargo llvm-cov` | one test binary at a time |
+| Ruby | SimpleCov | one spec file at a time |
+
+Setup finds the language from the files at the root of the repository: `go.mod`, `Cargo.toml`, `Gemfile` or `.rspec`,
+`package.json`, then `pyproject.toml`, `setup.py`, `setup.cfg`, `pytest.ini` or `tox.ini`. For Node and Ruby, each
+test file runs with `test.fileCommand`, or with `test.command` and the file as `test.list` gives it. Without these,
+Node uses `node --test` and Ruby uses `rspec`.
+
+Setup writes the map to `.conveyor/test-map.json`, with the commit and the test command that it was made on. Setup
+then shows how many source files and test files it mapped, and how long the run took. If your language has no tool
+in the table, or if the run fails, setup tells you. Your cards then find their tests by name.
+
+The map stays current in these ways:
+
+- When a card's test run passes, Conveyor maps each test file that the change adds and the map does not hold yet.
+- The whole test on main (`test.main`) and the release check (`release-prep`) make the map again when the map is due.
+  The map is due when it is more commits behind than `test.mapAge`, or when it was made with another test command.
+  Coverage is then on for that run: `NODE_V8_COVERAGE` for Node, and coverage.py in each Python process for Python.
+  If the run passes, Conveyor makes the map from the coverage of that run. It does not run the suite a second time.
+  A Go, Rust or Ruby run cannot collect coverage in this way. For these languages, if the run passes, Conveyor runs
+  the tests a second time with the tool that setup uses, and makes the map from that run.
+- A source file that the map does not cover gets its tests by name. If no test has a matching name, the card runs
+  the whole suite and the Board says why.
+
+To turn the map off, set `test.map` to `off` in the pack. Cards then find their tests by name. To use a map that your
+project keeps, set `test.map` to its path from the root of the repository. Conveyor reads it in each card's worktree
+and does not make it again. The file can be a JSON object (`{"<source file>": ["<test file>", ...]}`) or lines of
+areas in the form of this project's `.conveyor/engine-areas.json`. A test file named without a folder is the tracked
+test file of that name. The files of an area whose tests are `"all"` run the whole suite.
 
 ## The host file
 

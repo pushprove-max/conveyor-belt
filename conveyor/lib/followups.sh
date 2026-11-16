@@ -63,13 +63,15 @@ maintest() {
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) \
     || { echo "conveyor: the whole test on main did not run: its worktree could not be made: $out" >&2; return 1; }
   out=$(slot_pool 2>&1) || { echo "conveyor: the whole test on main did not run: $out" >&2; return 1; }
-  tests "$wt" test.main; rc=$?
+  # A test map that is due is made again from this run's coverage (lib/testmap.sh mapcovon(), maprefresh()).
+  mapcovon "$wt" || :; tests "$wt" test.main; rc=$?; mapcovoff
   ran=$(sed 's/\x1b\[[0-9;]*m//g' "$wt.test" 2>/dev/null | grep -c '^ok ') || ran=0
   full=$(jq -r '.full | numbers' <<<"$was")
   if [ $rc = 0 ] && [ -n "$full" ] && [ $((ran * 10)) -lt $((full * 9)) ]; then
     short="ran $ran of about $full cases"
     tail=$(sed 's/\x1b\[[0-9;]*m//g' "$wt.test" 2>/dev/null | tail -n 20); cases='["a short run: under 90% of the cases of its last full run"]'
   elif [ $rc = 0 ]; then
+    maprefresh "$wt" || :
     git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
     mainput "$(jq -c --arg s "$sha" --argjson r "$ran" '. + {sha: $s, pass: $s, fail: null, full: $r}' <<<"$was")"; return
   else

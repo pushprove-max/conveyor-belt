@@ -257,12 +257,14 @@ all=
 # dashboard-server (--restart, and the standalone Board), named after dashboard_limit.py and dashboard_server.py.
 # The engine's foreman command (conveyor/commands/foreman.sh, outside the map: it starts conveyor/foreman/foreman.sh)
 # is run by the Foreman's test. The /units mod's views (hooks/units.tsx) are drawn by sources.ts with elements.ts, so
-# units.test.tsx tests them too; its two-project fixture is the fetch's test's and the views' tests'.
+# units.test.tsx tests them too; its two-project fixture is the fetch's test's and the views' tests'. The area map and
+# the engine's map reader (conveyor/lib/testmap.sh) are checked against each other by test-map-areas.test.sh (#150).
 declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests__/dashboard-view.needs.test.mjs
   [.claude/scripts/dashboard.sh]=".claude/scripts/__tests__/dashboard-limit.test.sh .claude/scripts/__tests__/dashboard-server.test.sh"
   [conveyor/commands/foreman.sh]=conveyor/foreman/foreman.test.sh
   [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
-  [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx")
+  [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx"
+  [.conveyor/engine-areas.json]=.conveyor/test-map-areas.test.sh [conveyor/lib/testmap.sh]=.conveyor/test-map-areas.test.sh)
 # The test links (issue 598): a test that broke main without the card running it is run by later cards that change
 # the files of the landing that broke it. .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, written
 # by the engine (conveyor/lib/testrun.sh brokeby(), testlinks()) and committed by the main-red fix card. LINKS holds
@@ -931,6 +933,22 @@ fi
 allcases() { sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u; }
 pick "${changed[@]}"
 for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
+# The tests the engine chose for the change (#150): with the pack's test.list env, a card's run is given them in
+# CONVEYOR_TEST_FILES, one path a line (conveyor/lib/testrun.sh testsel(), reading .conveyor/engine-areas.json through
+# conveyor/lib/testmap.sh mapread(), as a user's card reads its map). Each runs: an engine case file as all its cases,
+# through the runner; another file whole. The selection above adds the tests it finds and the engine does not
+# (TESTS_OF, NAMED, the coverage map's parts), so no case it ran is lost. With no list (a session's run, or a change
+# the engine sends to the whole suite) the selection above is the run's.
+while IFS= read -r t; do
+  case $t in
+    '') ;;
+    conveyor/tests/*.test.sh)
+      [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || continue
+      cases=$({ tr ' ' '\n' <<<"$cases"; sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t"; } | grep . | sort -u | tr '\n' ' ')
+      run[conveyor/conveyor.test.sh]=1 ;;
+    *) run[$t]=1; twhole[$t]=1 ;;
+  esac
+done <<<"${CONVEYOR_TEST_FILES:-}"
 # The whole selection, before what passed is taken out of it (the cases kept as passed: kept, below).
 declare -A full=()
 for t in "${!run[@]}"; do full[$t]=1; done; fullcases=$cases

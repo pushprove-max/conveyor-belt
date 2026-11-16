@@ -30,13 +30,14 @@ First install the requirements, then sign in, before step 1:
   which CLI is not signed in, and go on.
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
-   - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--test-patterns`, `--test-list`, `--fast-lane`,
+   - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--test-patterns`, `--test-list`, `--test-map`, `--fast-lane`,
      `--research-lane`, `--link`, `--builder-route`, `--reviewer-route`, `--fallback-route`, `--claude-proxy`,
      `--codex-proxy`, `--claude-key`, `--codex-key`, `--claude-proxy-key`, `--codex-proxy-key`), ask
      the user for exactly those, and nothing else: whose yes a change customers or staff will
      see needs; the path prefixes of product code; the command that runs a change's tests; "Run a first test-speed
      survey now?" (yes / no); "Write these test-file patterns in the pack?" (yes / no), with the patterns and the count
-     of tracked files that setup named; "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
+     of tracked files that setup named; "Run the whole suite once under coverage to make the test map?" (yes / no), with
+     the tool and the time that setup named; "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
      research lane (a read-only sandboxed worktree)?" (yes / no); "Link these dependency folders into each card's
      worktree?", showing the folders and the lockfiles setup named (yes / no / install them in each worktree with a
      command instead, such as `npm ci`: then pass `--worktree-setup <command>` in place of `--link`); "Which route does the builder use?" and "Which route
@@ -52,7 +53,7 @@ First install the requirements, then sign in, before step 1:
      `anthropic.key` (or `openai.key`, `claude-proxy.key`, `codex-proxy.key`) in it with the Write tool, then run `chmod 600` on that file. Never put the key
      in a command, and never show it. Then run it again
      with the answers, each `--product` once per path, `--survey yes` or `--survey no`, `--test-patterns yes` or
-     `--test-patterns no`, `--test-list yes` or `--test-list no`, `--fast-lane yes` or
+     `--test-patterns no`, `--test-list yes` or `--test-list no`, `--test-map yes` or `--test-map no`, `--fast-lane yes` or
      `--fast-lane no`, `--research-lane yes` or `--research-lane no`, `--link yes`, `--link no` or
      `--worktree-setup <command>`, `--builder-route` and `--reviewer-route` each
      `fallback`, `proxy`, `api` or `subscription`, `--fallback-route proxy` or `--fallback-route api`,

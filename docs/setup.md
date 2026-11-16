@@ -103,6 +103,16 @@ reads the script in `package.json`. For node --test, vitest, jest, mocha, pytest
 set `test.list` to `none`. These runners do not take a list of test files, so each card runs the whole suite. The
 answer is `--test-list yes|no`. If your pack already sets `test.list`, setup does not ask.
 
+Setup then offers to make the test map ([The test map](configuration.md#the-test-map)). The map tells which test
+files cover which source files, so a card runs only the tests that cover its change. To make it, setup runs your
+whole suite once with the coverage tool of your language: V8 coverage for Node, coverage.py for Python,
+`go test -coverprofile` for Go, `cargo llvm-cov` for Rust, or SimpleCov for Ruby. Before the run, setup names the
+tool and the time of your last whole-suite run, if it knows it. The answer is `--test-map yes|no`. Yes runs the
+suite and writes `.conveyor/test-map.json`, then shows how many source files and test files it mapped and how long
+the run took. No sets `test.map` to `off` in the pack, and setup does not ask again. If your language has no tool in
+this list, or if the tool is not installed, setup tells you and does not ask. Your cards then find their tests by
+name.
+
 Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
 the lane, or keeps the lane that is already there.
 
@@ -191,7 +201,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

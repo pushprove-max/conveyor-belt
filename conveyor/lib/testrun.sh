@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# The test map (which tests cover which source files), which a card's list of tests reads: lib/testmap.sh.
+. "${BASH_SOURCE[0]%/*}/testmap.sh" || return 1
 # What a failed test run says went wrong: the failing test files, never the passing ones or their `ok` lines. Which
 # files ran and which failed is read from the logs the runner wrote (testlogs), never from the output, where a test's
 # own lines could pass for the runner's: `== <file>` as a file begins (the whole line: a name may have spaces),
@@ -375,7 +377,8 @@ cacheoff() { # <worktree>
 # The field test.fileCommand runs one test file: the run (filecmd()) gives it each file its list names `fail`.
 # A card's run (test.command, not alone) with the pack's test.list set gives the command the tests its change touches
 # (testsel()), in the form test.list names (listcmd()), and <worktree>.testlist says which (the live record's and the
-# test line's list).
+# test line's list). Such a run that passes adds the test files of its change that the test map lacks to it (mapnew(),
+# lib/testmap.sh).
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist"
@@ -443,6 +446,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # A pass on re-run goes to the flaky-test record now, before a later run (a batch's) clears <worktree>.first; so do
   # the cases of a run again that failed which passed in it (f: its failures).
   if [ -e "$1.first" ]; then if [ $rc = 0 ]; then flakyrun "$1"; else flakyrun "$1" "${f:-}"; fi; fi
+  # A card's run that passed maps the test files its change adds or changes that the test map does not hold yet.
+  [ $rc != 0 ] || [ -n "${2:-}" ] || [ "${3:-}" = alone ] || mapnew "$1" >> "$1.test"
   return $rc
 }
 # The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
@@ -451,10 +456,10 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # path a line: TEST_FILES, which testonce() gives the command) or none (the command takes no list). A run of the whole
 # suite (none, testsel()'s whole, placeholder with no `{files}` in the command, or args with a command that already
 # names the test files its runner runs, testrunner(), which paths added at its end would not narrow) adds no path. <worktree>.testlist
-# says which: {mode: "changed", files: <count>} or {mode: "whole", why}. With no test.list, the command is as it is
-# and no file is written.
+# says which: {mode: "changed", files: <count>, by: "map" or "name", age: the commits the made test map is behind
+# (only with one)} or {mode: "whole", why}. With no test.list, the command is as it is and no file is written.
 listcmd() { # <worktree> <command>
-  local lm s why='' q='' fs=()
+  local lm s why='' q='' fs=() by
   LISTCMD=$2; TEST_FILES=''
   packget test.list lm || return 1
   [ -n "$lm" ] || return 0
@@ -463,9 +468,9 @@ listcmd() { # <worktree> <command>
   elif [ "$lm" = args ] && s=$(testrunner "$2" "$1") && [[ $s == named* ]]; then
     why="test.list is args, and test.command already names the tests it runs (${s##* }): use placeholder"
   elif ! s=$(testsel "$1"); then why=$s
-  else mapfile -t fs <<<"$s"; fi
+  else mapfile -t fs <<<"${s#*$'\n'}"; by=${s%%$'\n'*}; fi
   if [ -n "$why" ]; then jq -cn --arg w "$why" '{mode: "whole", why: $w}' > "$1.testlist"
-  else jq -cn --argjson n ${#fs[@]} '{mode: "changed", files: $n}' > "$1.testlist"; fi || return 1
+  else jq -cn --argjson n ${#fs[@]} --argjson b "$by" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end' > "$1.testlist"; fi || return 1
   [ ${#fs[@]} = 0 ] || q=$(printf '%q ' "${fs[@]}"); q=${q% }
   case $lm in
     args) [ -z "$q" ] || LISTCMD="$2 $q" ;;
@@ -473,15 +478,20 @@ listcmd() { # <worktree> <command>
     env) [ ${#fs[@]} = 0 ] || TEST_FILES=$(printf '%s\n' "${fs[@]}") ;;
   esac
 }
-# The tests a card's change touches (its staged change against HEAD), one path a line: of each changed file, a
-# document (.md, .txt, .rst) selects none; the test files .conveyor/test-links.json links to it (the project's own
-# map, those still there), and a test file (testpaths()) itself, while it is there; else, a test file that is gone
-# selects none, and one that is shared (shared(), below) selects the whole suite, as does any other file at the root,
+# The tests a card's change touches (its staged change against HEAD), one path a line after a first line that says how
+# they were found, {by: "map" or "name", age} (age: the commits the made test map is behind, lib/testmap.sh mapread(),
+# with one; else null): of each changed file, a document (.md, .txt, .rst) selects none; the test files
+# .conveyor/test-links.json links to it (the project's own links, those still there), and a test file (testpaths())
+# itself, while it is there; else, a test file that is gone selects none; a source the test map marks as shared by
+# most tests selects the whole suite, and the tests the map says cover it (those still there) are its tests (by map);
+# else a test file that is shared (shared(), below) selects the whole suite, as does any other file at the root,
 # shared or with a config extension; else the test files whose name holds its name (no extension) as a word, the
 # nearest by folder (those that share the most leading folders with it). A file of which none of these finds a test,
-# or a change that selects none, runs the whole suite: it fails then, and prints why in place of the list.
+# a change that selects none, or a test map that cannot be read, runs the whole suite: it fails then, and prints why
+# in place of the list.
 testsel() { # <worktree>
-  local out
+  local out tm
+  tm=$(mapread "$1") || { printf '%s\n' "$tm"; return 1; }
   out=$(jq -rn "$RX"'def ls: split("\n") | map(select(. != ""));
       def base: split("/")[-1]; def dir: split("/")[:-1];
       def stem: base | sub("\\.[^.]*$"; "");
@@ -493,18 +503,23 @@ testsel() { # <worktree>
       def common($a; $b): [range([$a, $b] | map(length) | min) | select($a[.] != $b[.])] | first // ([$a, $b] | map(length) | min);
       ($ch | ls) as $ch | ($ct | ls | INDEX(.)) as $ct | ($all | ls) as $all | ($all | INDEX(.)) as $have
       | ($map[0] // {} | if type == "object" then . else {} end) as $map
+      | ($tm.shared // [] | INDEX(.)) as $sh
       | [$ch[] | . as $p
          | ([$map[$p] | arrays[] | strings | select($have[.])]) as $m
          | if test("\\.(md|txt|rst)$"; "i") then []
            elif $ct[$p] and $have[$p] and (shared | not) then [$p] + $m
            elif $m != [] then $m
            elif $ct[$p] and ($have[$p] | not) then []
+           elif $sh[$p] then {whole: "\($p): shared by most tests (map)"}
+           elif [$tm.sources[$p] // [] | .[] | select($have[.])] != [] then {map: [$tm.sources[$p][] | select($have[.])]}
            elif $ct[$p] or (contains("/") | not) or shared or config then {whole: "\($p): shared setup or config"}
            else (stem | rx) as $s | dir as $d
              | [$all[] | select($s != "" and (base | test("(^|[._-])" + $s + "([._-]|[A-Z]|$)"))) | {t: ., n: common(dir; $d)}]
              | if . == [] then {whole: "\($p): no test found for it"} else (map(.n) | max) as $n | map(select(.n == $n) | .t) end end]
-      | (map(objects) | first) as $w
-      | if $w then error($w.whole) else [.[][]] | unique | if . == [] then error("the change touches no test") else .[] end end' \
+      | (map(objects | select(.whole)) | first) as $w | . as $l
+      | if $w then error($w.whole) else [.[] | if type == "array" then .[] else .map[] end] | unique
+        | if . == [] then error("the change touches no test") else {by: (if any($l[]; type == "object") then "map" else "name" end), age: $tm.age} as $b
+          | ($b | tojson), .[] end end' --argjson tm "${tm:-null}" \
     --rawfile ch <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null) \
     --rawfile ct <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | testpaths) \
     --rawfile all <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) \

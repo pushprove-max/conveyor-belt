@@ -418,8 +418,15 @@ named failed cases alone) is given the test files its change touches, as argumen
 runs](../docs/configuration.md#which-tests-a-card-runs) says which files. A change that touches shared setup or
 config, or a file with no test found for it, `none`, and `args` with a command that already names the tests its runner
 runs (such as `node --test checks/*.js`), give no list: the command runs the whole suite. The live
-record and the test line hold `list`: `{"mode": "changed", "files": <count>}` or `{"mode": "whole", "why": "..."}`.
-The Board and `/units` show it with the test step (`changed: 7 files`, `whole suite`).
+record and the test line hold `list`: `{"mode": "changed", "files": <count>, "by": "map" or "name", "age": <commits>}`
+(`age`, the commits the made test map is behind, only with one) or `{"mode": "whole", "why": "..."}`. The Board shows
+it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed: 7 files (by name)`,
+`whole suite: <why>`); `/units` shows `changed: 7 files` or `whole suite`.
+The test map (`lib/testmap.sh`, [The test map](../docs/configuration.md#the-test-map)) is read before the names: the
+tests it says cover a changed file are its tests, and a file more than half the mapped tests read runs the whole
+suite. A card's run that passes maps the test files its change adds that the map lacks; the whole test on main and
+`release-prep` make the map again when it is due (`test.mapAge`, or another test command), from the coverage that the
+run collects (Node and Python), with no second run of the suite.
 
 ### When a full test run is allowed
 

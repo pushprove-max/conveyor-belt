@@ -125,7 +125,7 @@
          reason: $why,
          files: (if $kind == "test" then ($c.live // {} | .files // null) else null end),
          tests: (if $kind == "test" then ($c.live // {} | .tests // null) else null end),
-         # The list of tests the run was given (tests()): {mode: "changed", files} or {mode: "whole", why}.
+         # The list of tests the run was given (tests()): {mode: "changed", files, by, age} or {mode: "whole", why}.
          list: (if $kind == "test" then ($c.live // {} | .list // null) else null end),
          # The 17 steps the track once had, each with its seconds added up.
          detail: ($detail | if $c.x.shut == true and .[15].state == "failed" then .[15].state = "done" else . end), detailAt: $at,

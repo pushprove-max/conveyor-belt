@@ -42,5 +42,12 @@ got=$(listed conveyor/x.sh lib/s.sh)
 # An "all" area's file selects the whole engine: the runner, though whole-only, and every case file.
 got=$(listed conveyor/core.sh)
 [ "$got" = "conveyor/conveyor.test.sh conveyor/tests/a.test.sh conveyor/tests/b.test.sh " ] || no "a change to an \"all\" area's file does not list the runner and every case file: '$got'"
+# #150. Bug it catches: the tests the engine's map reader chose (the pack's test.list env: CONVEYOR_TEST_FILES) were
+# not run, so this project's cards did not test through the path a user's card takes. An engine case file it names
+# runs (through the runner), as does any other file, beside what the script's own selection finds.
+printf '%s\n' '#!/usr/bin/env bash' 'echo e >> "$(dirname "$0")/../ran"' > "$R/lib/e.test.sh"
+got=$(CONVEYOR_TEST_FILES=$'conveyor/tests/b.test.sh\nlib/e.test.sh' listed lib/s.sh)
+[ "$got" = "conveyor/tests/b.test.sh lib/e.test.sh lib/s.test.sh " ] || no "the engine's list was not run beside the script's own selection: '$got'"
+rm -f "$R/lib/e.test.sh"
 
 [ $fails = 0 ] && echo "ok - test-changed list" || exit 1

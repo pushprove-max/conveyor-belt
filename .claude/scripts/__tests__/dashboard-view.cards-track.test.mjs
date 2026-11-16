@@ -160,8 +160,26 @@ test('a card in its Test step shows whether it runs the changed tests or the who
   const whole = clone(data);
   whole.panels.belt.data.cards[0].track.list = { mode: 'whole', why: 'package.json: shared setup or config' };
   next(w, whole);
-  assert.match(live(), /whole suite · 2 test files/, `the whole suite: ${live()}`);
+  assert.match(live(), /whole suite: package\.json: shared setup or config · 2 test files/, `the whole suite and why: ${live()}`);
   assert.doesNotMatch(live(), /changed:/);
+});
+
+// Bug it catches (#150): the Board did not say whether a card's tests came from the test map or were guessed by name,
+// nor how old the map was, so a card that ran too few tests read like any other. The list's by and age say so.
+test('a card in its Test step says whether its tests came from the test map or by name, and the map\'s age', () => {
+  const w = boot();
+  const data = full(), c = data.panels.belt.data.cards[0];
+  Object.assign(c, { step: 'tests', model: null, live: { turns: 0, lastOutputAt: iso(T0 - 4000), action: null } });
+  c.track = trackOf('++-+..', 'tests', { at: 3, files: { run: 2, of: null }, tests: null, list: { mode: 'changed', files: 3, by: 'map', age: 12 } });
+  c.track.steps[3].state = 'now';
+  deliver(w, data);
+  const live = () => panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] .track-now').textContent;
+  assert.match(live(), /changed: 3 files \(map\) · map 12 commits old · 2 test files/, `from the map, with its age: ${live()}`);
+  const byName = clone(data);
+  byName.panels.belt.data.cards[0].track.list = { mode: 'changed', files: 1, by: 'name' };
+  next(w, byName);
+  assert.match(live(), /changed: 1 file \(by name\) · 2 test files/, `by name: ${live()}`);
+  assert.doesNotMatch(live(), /map/);
 });
 
 // Bug: the running card's "now:" text wrapped onto a second and third line as the action streamed, so the card, the

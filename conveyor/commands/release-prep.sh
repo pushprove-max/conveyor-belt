@@ -213,7 +213,9 @@ relsuite() { # <command name> <commit>
     if [ $rc = 0 ]; then
       echo "conveyor: $n: reruns the files that failed or changed since the suite run on $(jq -r '.sha[0:12]' <<<"$l") ($(wc -l < "$wt.files") listed) and reuses its other passes"
       CONVEYOR_SUITE_FILES=$wt.files tests "$wt" test.full; rc=$?
-    else l=''; tests "$wt" test.full; rc=$?; fi
+    # A whole run (not a rerun of some files) makes a test map that is due again from its coverage (lib/testmap.sh
+    # mapcovon(), maprefresh()).
+    else l=''; mapcovon "$wt" || :; tests "$wt" test.full; rc=$?; mapcovoff; fi
     suiterec "$wt" release "$sha"
     u=$(suitekeep "$wt" "$sha" "$rc" "$n" "$l") && [ -n "$u" ] || u=null
     # A run with some files only whose results could not be kept proves nothing of the others: it is no pass.
@@ -230,6 +232,7 @@ relsuite() { # <command name> <commit>
   relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" \
     '. + $p | .moved = $mv | .state = $st'
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
+  if [ $rc = 0 ]; then maprefresh "$wt" || :; else rm -rf "$wt.mapcov"; fi
   git worktree remove --force "$wt" 2>/dev/null
   if [ $rc = 0 ] && [ "$u" != null ] && [ "$(jq '.ran | length' <<<"$u")" = 0 ]; then
     state=success desc=$(jq -r '"The whole suite (test.full) passed on the build machine: reused the green run of \(.time) on \(.sha[0:12])"' <<<"$u")

@@ -37,6 +37,8 @@
       "conveyor/conveyor.test.sh"
     ],
     "changed": ".conveyor/test-changed.sh",
+    "list": "env",
+    "map": ".conveyor/engine-areas.json",
     "slowIssues": false,
     "files": {
       "conveyor/tools/closure.test.sh": {
