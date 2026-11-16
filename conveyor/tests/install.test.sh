@@ -445,3 +445,49 @@ t_shimmain() {
   out=$(shim CONVEYOR_MAIN="$o") && [ "$(held "$o")" = '[1]' ] \
     || fail "the shim did not keep the caller's CONVEYOR_MAIN: $out"
 }
+
+# Bugs: from a marketplace install, the engine runs from a folder in no git checkout (Claude Code's plugin copy, which
+# setup runs) or from a version folder; the main checkout was looked up there for every command but a few, so git
+# printed `fatal: not a git repository` and the empty answer became the folder `/` (`mkdir: cannot create directory
+# '//conveyor'`): retry queued no card. Every command run from the plugin copy also printed it, reading the commit it
+# runs. The fixture: the project's main checkout, a verified install of the commit it pins, and the plugin copy, with
+# shim.sh at its top and no .git, apart from both.
+t_shimmarket() {
+  service_start; tune --arg c "$A" '.plugin.commit = $c'
+  local p=$T/$CASE/plugins/cache/m/conveyor-belt/1.1.1 n=$T/$CASE/nogit x i=6 err=$T/$CASE/err out
+  mkdir -p "$p" "$n" && cp -a "$SRC" "$p/conveyor" && ln -s "$SRC/../.claude" "$p/.claude" && cp "$SRC/../shim.sh" "$p/" \
+    && ! git -C "$p" rev-parse --git-dir >/dev/null 2>&1 && ! git -C "$n" rev-parse --git-dir >/dev/null 2>&1 \
+    || fail "the plugin copy, in no git checkout, could not be made"
+  for x in 7 8 9; do
+    jq -cn --argjson i "$x" '{card: "c\($i)", issue: $i, step: "blocked", time: "2026-03-01T00:02:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "build: failed"}' >> "$ST/cards.jsonl"
+  done
+  # run <folder> <conveyor.sh, or shim.sh and its path> <arg>...: the command as a user runs it there, its stderr in $err.
+  run() { (cd "$1" && exec env -u CLAUDE_PROJECT_DIR -u CONVEYOR_CARDS -u CONVEYOR_MAIN HOME="$T/$CASE/home" bash "${@:2}" 2>"$err"); }
+  # The plugin's shim, the plugin copy's conveyor.sh (as /conveyor-belt:setup runs it) and the install's (docs/setup.md).
+  for x in "$p/shim.sh conveyor/conveyor.sh" "$p/conveyor/conveyor.sh" "$V/$A/conveyor/conveyor.sh"; do
+    i=$((i + 1))
+    # shellcheck disable=SC2086 # the shim and its path are two words
+    out=$(run "$R" $x retry "$i") && jq -se --argjson i "$i" 'any(.issue == $i)' "$ST/retried.jsonl" >/dev/null \
+      || fail "retry $i through $x did not queue the card: $out $(cat "$err")"
+    ! grep -q 'not a git repository' "$err" || fail "retry through $x ran git outside the project's checkout: $(cat "$err")"
+  done
+  # Each command the plugin's setup runs from the plugin copy; their outcomes here (no virtualenv, no answers) are not
+  # what is tested, only that none reads git outside a checkout.
+  for x in setup doctor install-service board; do
+    run "$R" "$p/conveyor/conveyor.sh" "$x" >/dev/null
+    ! grep -q 'not a git repository' "$err" || fail "$x from the plugin copy ran git outside the project's checkout: $(cat "$err")"
+  done
+  # The plugin copy has no commit to pin and no origin to clone: each says so, naming its folder, with no git error.
+  tune 'del(.plugin)'; x=$(cd "$p/conveyor" && pwd -P) # the engine's folder as it names itself, its links followed
+  run "$R" "$p/conveyor/conveyor.sh" setup --fast-lane no --research-lane no --survey no --pin >/dev/null && fail "setup --pin from the plugin copy did not fail"
+  [ "$(cat "$err")" = "conveyor: the pin could not be written: $x is in no git checkout, so its commit cannot be read" ] \
+    || fail "setup --pin from the plugin copy did not say why it wrote no pin: $(cat "$err")"
+  run "$R" "$p/conveyor/conveyor.sh" install "$B" >/dev/null && fail "install from the plugin copy did not fail"
+  [ "$(cat "$err")" = "conveyor: $x is in no git checkout with an origin to clone" ] \
+    || fail "install from the plugin copy did not say why it cloned nothing: $(cat "$err")"
+  tune --arg c "$A" '.plugin.commit = $c'
+  # Called in a folder in no git checkout, the lookup has no answer: the command stops at once and names that folder.
+  run "$n" "$V/$A/conveyor/conveyor.sh" retry 7 >/dev/null && fail "retry in a folder in no git checkout did not fail"
+  [ "$(cat "$err")" = "conveyor: the project's main checkout cannot be found: $(cd "$n" && pwd) is in no git checkout; run conveyor.sh in the project's checkout, or name it in CONVEYOR_MAIN" ] \
+    || fail "the empty lookup did not stop with its message alone: $(cat "$err")"
+}

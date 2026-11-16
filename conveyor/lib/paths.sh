@@ -1,16 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
-# `setup`, `doctor`, `foreman`, `lane`, `take` and `board` are for the project they are called in: the plugin copy runs them
-# before the project has an engine, and `board` runs from an install, read-only, in the project's checkout.
-# Called in the fast lane, `lane` acts for that lane's main checkout. `auto` and `wording`, which the plugin's
-# commands run, are for the project too.
-MAIN=${CONVEYOR_MAIN:-$(cd "$(git -C "$([[ ${1:-} =~ ^(setup|doctor|foreman|lane|take|board|auto|wording)$ ]] && pwd || echo "$HERE")" rev-parse --path-format=absolute --git-common-dir)/.." && pwd -P)}
 # The installs (plan section 7): `install <commit>` clones that commit into VERSIONS/<commit>, read-only. OWN is the
 # commit this process runs: its version folder's name when it runs from an install, empty when it runs from a checkout.
 # A loop that runs from an install restarts on the commit the pack pins; a `serve` run from a checkout restarts on the
 # checkout's code once its HEAD moves (stale(), below). RAN is the commit this process runs: OWN, or the checkout's
 # HEAD read here, before bash reads the rest of this file, so a commit that lands while the engine is read is newer
-# than RAN and restarts the loop; FOLLOW is set for a `serve` run from a checkout (run()).
+# than RAN and restarts the loop. RAN is empty when the engine's folder is in no git checkout. FOLLOW is set for a
+# `serve` run from a checkout (run()).
 VERSIONS=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions; OWN=''; RAN=''; FOLLOW=''
+up=${HERE%/*}; [ "$(cd "$VERSIONS" 2>/dev/null && pwd -P)" != "${up%/*}" ] || [ -z "${up%/*}" ] || OWN=${up##*/}
+RAN=$OWN; [ -n "$OWN" ] || RAN=$(git -C "$HERE" rev-parse -q --verify HEAD 2>/dev/null) || RAN=''
+# The main checkout is CONVEYOR_MAIN when it is set. If not, it is the checkout of the folder the command is called in
+# for these commands: `setup`, `doctor`, `foreman`, `lane`, `take` and `board`, which are for the project they are
+# called in (the plugin copy runs them before the project has an engine, `board` runs from an install, read-only, in
+# the project's checkout, and `lane` called in the fast lane acts for that lane's main checkout), and `auto` and
+# `wording`, which the plugin's commands run. It is that checkout for every command too when the engine runs from an
+# install, or from a folder in no git checkout (RAN empty), such as the plugin copy that Claude Code installs from a
+# marketplace. Any other command is for the checkout the engine is in. When the folder looked in is in no git
+# checkout, the command stops and names that folder: no path is made from an empty name.
+mainat=$HERE
+[[ ${1:-} =~ ^(setup|doctor|foreman|lane|take|board|auto|wording)$ ]] || [ -n "$OWN" ] || [ -z "$RAN" ] && mainat=$(pwd)
+MAIN=${CONVEYOR_MAIN:-}
+[ -n "$MAIN" ] || { MAIN=$(git -C "$mainat" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && [ -n "$MAIN" ] && MAIN=$(cd "$MAIN/.." && pwd -P) && [ -n "$MAIN" ]; } \
+  || { echo "conveyor: the project's main checkout cannot be found: $mainat is in no git checkout; run conveyor.sh in the project's checkout, or name it in CONVEYOR_MAIN" >&2; exit 1; }
 # A project whose pack follows the plugin's main or its releases (plugin.follow) has its current engine on this machine
 # in ENGINE, in the main checkout's git folder, so no worktree, card or commit carries it: {commit: the newest commit
 # taken, release: its tag (following releases), taken: the commits taken here, oldest first, refused: {commit,
@@ -24,8 +35,6 @@ USES=${VERSIONS%/*}/uses
 BOARD_VENV=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv
 BOARD_REQ=$HERE/../.claude/scripts/requirements.txt
 BOARD_PKGS='pyotp segno cryptography'
-up=${HERE%/*}; [ "$(cd "$VERSIONS" 2>/dev/null && pwd -P)" != "${up%/*}" ] || [ -z "${up%/*}" ] || OWN=${up##*/}
-RAN=$OWN; [ -n "$OWN" ] || RAN=$(git -C "$HERE" rev-parse -q --verify HEAD) || RAN=''
 # The state folder and the cards folder (plan section 12): the one place either is resolved. Every other reader asks
 # `conveyor.sh state-dir`. A blocked card's kept work is under the state folder, in kept/<card>; its blocked line
 # names that folder relative to the state folder. The state folder is the host file's stateDir for the checkout the

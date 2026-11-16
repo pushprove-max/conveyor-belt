@@ -41,7 +41,7 @@ install() { # <commit> [<repository>]
     installed "$c" || { echo "conveyor: $d is there and is not commit $c as it was cloned" >&2; return 1; }
     chmod -R a-w "$d" && echo "conveyor: $c is installed in $d, read-only"; return
   fi
-  [ -n "$src" ] || src=$(git -C "$HERE" remote get-url origin) || { echo "conveyor: the checkout at $HERE has no origin to clone" >&2; return 1; }
+  [ -n "$src" ] || src=$(git -C "$HERE" remote get-url origin 2>/dev/null) || { echo "conveyor: $HERE is in no git checkout with an origin to clone" >&2; return 1; }
   mkdir -p "$VERSIONS" || return 1
   # Cloned beside its place and moved in once read-only, so a version folder is never there half made.
   [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || return 1

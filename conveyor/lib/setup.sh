@@ -75,7 +75,8 @@ setup() { # [--owner <name>] [--product <path>]... [--test <command>] [--survey 
   fi
   packget plugin.commit p plugin.follow f || return 1
   if [ -z "$p$f" ] && [ -n "$pin" ]; then
-    p=$(git -C "$HERE" rev-parse HEAD) && jq --arg c "$p" '.plugin = {commit: $c}' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    p=$(git -C "$HERE" rev-parse HEAD 2>/dev/null) || { echo "conveyor: the pin could not be written: $HERE is in no git checkout, so its commit cannot be read" >&2; return 1; }
+    jq --arg c "$p" '.plugin = {commit: $c}' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pin could not be written" >&2; return 1; }
     echo "conveyor: pinned Conveyor commit $p"
   elif [ -z "$p$f" ]; then
