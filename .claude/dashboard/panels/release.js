@@ -208,7 +208,7 @@
     const relFailed = !relDone && run && run.ended !== null && run.step === 'release' && run.version === v && why[2].length > 0;
     const s3 = step(h, 'Release', relDone ? 'done' : relFailed ? 'failed' : 'todo',
       relDone ? `${m.tag || `v${run.version}`} is tagged and on GitHub` : `The tag v${v} and the GitHub release`, reasonsList(h, why[2]));
-    // What Release does with the suite: uses the pass, or runs it first (about as long as the last run took).
+    // What Release does with the suite: uses the green suite run, or runs it first (about as long as the last run took).
     let suiteSaid = '';
     if (notes && s.passed) {
       const c = s.cur, took = Date.parse(c.ended) - Date.parse(c.since);
@@ -220,8 +220,8 @@
     }
     const steps = h('ol', 'rows numbered compact release-steps');
     steps.append(s1, s2, s3);
-    // The version and the one button: its label follows the state. Release sends release-run <version> (the suite's
-    // pass, or the suite first, then the tag and the GitHub release); the others send release-run prep <version>, which
+    // The version and the one button: its label follows the state. Release sends release-run <version> (the green
+    // suite run, or the suite first, then the tag and the GitHub release); the others send release-run prep <version>, which
     // releases nothing.
     const go = h('div', 'release-go'), input = h('input', 'release-version');
     input.type = 'text'; input.setAttribute('aria-label', 'Version to release'); input.dataset.field = 'version';

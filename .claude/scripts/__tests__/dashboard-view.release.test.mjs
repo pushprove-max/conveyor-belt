@@ -137,7 +137,7 @@ test('#35: a passed release-prep on main\'s head: step 2 and Release\'s confirm 
   act(card(w), 'release').click();
   assert.match(act(card(w), 'release').textContent, /^Click again to release 1\.0\.0\. Uses the suite that passed at .+ on bbbbbbbbbbbb\.$/);
 });
-// Bug this guards (#35): a release refused after the pass is no release-prep pass, so release-run runs the suite first;
+// Bug this guards (#35): a release refused after the green suite run is no green release-prep run, so release-run runs the suite first;
 // the panel must not say it reuses one.
 test('#35: a refused release on main\'s head: step 2 and Release\'s confirm say "Runs the suite first (about 25 min)"', async () => {
   const w = boot();
