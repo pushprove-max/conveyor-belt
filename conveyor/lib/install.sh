@@ -60,23 +60,46 @@ enginepin() { # <commit variable> [<follow variable>]
   [ -z "$ep_f" ] || ep_c=$(jq -r '.commit | strings | select(test("^[0-9a-f]{40}$"))' "$ENGINE" 2>/dev/null) || ep_c=''
   printf -v "$1" %s "$ep_c"; [ -z "${2:-}" ] || printf -v "$2" %s "$ep_f"
 }
+# The plugin's repository as its manifest names it, for a plugin folder that is no clone of its own (a marketplace
+# install runs from Claude Code's plugin cache, a copy with no .git; one inside a repository kept above it, such as a
+# config folder in git, is no clone either): plugin.json's repository, else the marketplace entry's source.repo for
+# that plugin, as https://github.com/<owner>/<repo>. When neither names one on GitHub, says which sources it read.
+manifestrepo() {
+  local p=${HERE%/*} m r
+  m=$p/.claude-plugin
+  r=$(jq -r '.repository | if type == "object" then .url else . end | strings' "$m/plugin.json" 2>/dev/null)
+  [ -n "$r" ] || r=$(jq -r --arg n "$(jq -r '.name | strings' "$m/plugin.json" 2>/dev/null)" \
+    '[.plugins[]? | select(.name == $n) | .source | objects | select(.source == "github") | .repo | strings][0] // empty' "$m/marketplace.json" 2>/dev/null)
+  r=${r%/}; r=${r%.git}
+  if [[ $r =~ ^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$ ]]; then
+    echo "https://github.com/${BASH_REMATCH[2]}"
+  else
+    echo "conveyor: the plugin's repository could not be found: $p is no clone with an origin, and neither $m/plugin.json (repository) nor $m/marketplace.json (the plugin's source.repo) names one on GitHub" >&2
+    return 1
+  fi
+}
+# Whether the plugin folder this engine is in is a clone of its own (not a copy inside a repository kept above it).
+ownclone() { [ "$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" = "${HERE%/*}" ]; }
 # The plugin's <branch> as pushed: "<repository> TAB <commit>". The repository is the remote that branch follows in the
 # plugin checkout this engine was installed from (an install's origin; run from a checkout, that checkout), or that
-# checkout itself when the branch follows none there.
+# checkout itself when the branch follows none there; for a plugin folder that is no clone, or an install with no
+# origin, the one its manifest names (manifestrepo).
 mainof() { # <branch>
   local src r h
-  if [ -n "$OWN" ]; then src=$(git -C "$HERE" remote get-url origin); else src=$(git -C "$HERE" rev-parse --show-toplevel); fi 2>/dev/null || return 1
+  if ownclone && [ -z "$OWN" ]; then src=${HERE%/*}
+  else { ownclone && src=$(git -C "$HERE" remote get-url origin 2>/dev/null); } || src=$(manifestrepo) || return 1; fi
   r=$(git -C "$src" config "branch.$1.remote" 2>/dev/null) && [ "$r" != . ] && r=$(git -C "$src" remote get-url "$r" 2>/dev/null) && src=$r
   h=$(timeout 60 git ls-remote "$src" "refs/heads/$1" 2>/dev/null) && h=${h%%[[:space:]]*} && [[ $h =~ ^[0-9a-f]{40}$ ]] || return 1
   printf '%s\t%s\n' "$src" "$h"
 }
 # The plugin's newest release: "<repository> TAB <commit> TAB <tag>". The repository is the origin of the plugin
-# checkout this engine was installed from (an install's origin; run from a checkout, that checkout's origin); the
+# checkout this engine was installed from (an install's origin; run from a checkout, that checkout's origin), or, for
+# a plugin folder that is no clone or has no origin, the one its manifest names (manifestrepo); the
 # release is the newest vX.Y.Z tag whose GitHub release is published (neither a draft nor a prerelease), never main;
 # the commit is the one that tag names on the repository.
 releaseof() {
   local src t h
-  src=$(git -C "$HERE" remote get-url origin 2>/dev/null) || return 1
+  { ownclone && src=$(git -C "$HERE" remote get-url origin 2>/dev/null); } || src=$(manifestrepo) || return 1
   t=$(timeout 60 gh release list -R "$src" --limit 100 --json tagName,isDraft,isPrerelease 2>/dev/null \
     | jq -r '[.[] | select((.isDraft or .isPrerelease) | not) | .tagName | strings | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))]
         | max_by(ltrimstr("v") | split(".") | map(tonumber)) // empty' 2>/dev/null) && [ -n "$t" ] || return 1

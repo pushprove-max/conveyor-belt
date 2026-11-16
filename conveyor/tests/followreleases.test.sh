@@ -61,3 +61,52 @@ t_followreleaserefuse() {
   out=$(reldoctor "$A"); grep -qx "ok: the project follows the plugin's releases: it runs Conveyor commit $A, release v1.0.1; a newer release is published: v1.2.0 (commit $E)" <<<"$out" \
     || fail "doctor did not say a newer release is published: $out"
 }
+
+# The plugin's repository, $G, as https://github.com/example-owner/plugin (git reads that address from $G:
+# url.insteadOf), holding its manifest and engine folder, with one published release, v1.0.0 at $H, and main past it
+# at $M. gh answers `release list` with v1.0.0 only for the repository in $GHREPO. plugrel/plugmain run
+# releaseof/mainof for the plugin folder <folder>, as an engine there would. Names no other case file uses: the runner
+# sources every case file into one shell.
+plugfixture() {
+  local c=$T/$CASE w=$T/$CASE/w
+  G=$c/plugin.git U=https://github.com/example-owner/plugin; mkdir -p "$c/bin" || fail "the case folder was not made"
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.$G.insteadOf GIT_CONFIG_VALUE_0=$U
+  printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2 $3 $4" = "release list -R $GHREPO" ] || exit 1' \
+    "echo '[{\"tagName\": \"v1.0.0\", \"isDraft\": false, \"isPrerelease\": false}]'" > "$c/bin/gh" && chmod +x "$c/bin/gh" \
+    || fail "the gh stub was not written"
+  git init -q --bare -b main "$G" && git clone -q "$G" "$w" 2>/dev/null && mkdir -p "$w/.claude-plugin" "$w/conveyor" \
+    && jq -n --arg u "$U" '{name: "plugin", repository: $u}' > "$w/.claude-plugin/plugin.json" && touch "$w/conveyor/x" \
+    && git -C "$w" add -A && git -C "$w" commit -qm one && git -C "$w" tag v1.0.0 && H=$(git -C "$w" rev-parse HEAD) \
+    && git -C "$w" commit -q --allow-empty -m two && M=$(git -C "$w" rev-parse HEAD) && git -C "$w" push -q origin main v1.0.0 \
+    || fail "the plugin's repository was not made"
+}
+plugrel() { (HERE=$1/conveyor OWN=''; PATH=$T/$CASE/bin:$PATH; export GHREPO; . "$SRC/lib/install.sh"; releaseof); } # <folder>
+# shellcheck disable=SC2034 # HERE and OWN are read by mainof, from the sourced lib/install.sh
+plugmain() { (HERE=$1/conveyor OWN=''; . "$SRC/lib/install.sh"; mainof main); } # <folder>
+
+# Bugs: a plugin installed from its marketplace runs from a copy with no .git, so it has no origin and its releases
+# (and main) could not be read; one in a config folder kept in git reads that repository's origin as the plugin's; when
+# no source names the repository, the message does not say which sources were read.
+t_releasecache() {
+  plugfixture; GHREPO=$U; local c=$T/$CASE P=$T/$CASE/cache/plugin/1.0.0
+  # The cache copy sits in a repository of its own whose origin is not the plugin's.
+  git init -q -b main "$c" && git -C "$c" remote add origin "$c/other.git" && mkdir -p "$P" \
+    && git -C "$c/w" archive v1.0.0 | tar -x -C "$P" || fail "the cache copy was not made"
+  [ "$(plugrel "$P")" = "$U"$'\t'"$H"$'\t'v1.0.0 ] || fail "the release was not read from the repository plugin.json names: $(plugrel "$P" 2>&1)"
+  [ "$(plugmain "$P")" = "$U"$'\t'"$M" ] || fail "main was not read from the repository plugin.json names: $(plugmain "$P" 2>&1)"
+  # No repository in plugin.json: the marketplace entry for the plugin names it, as owner/repo.
+  jq -n '{name: "plugin"}' > "$P/.claude-plugin/plugin.json" \
+    && jq -n '{plugins: [{name: "other", source: {source: "github", repo: "example-owner/other"}}, {name: "plugin", source: {source: "github", repo: "example-owner/plugin"}}]}' \
+      > "$P/.claude-plugin/marketplace.json" || fail "the manifests were not written"
+  [ "$(plugrel "$P")" = "$U"$'\t'"$H"$'\t'v1.0.0 ] || fail "the release was not read from the repository the marketplace entry names: $(plugrel "$P" 2>&1)"
+  rm "$P/.claude-plugin/marketplace.json"
+  out=$(plugrel "$P" 2>&1) && fail "a release was read with no source naming the repository: $out"
+  grep -qF "$P is no clone with an origin, and neither $P/.claude-plugin/plugin.json (repository) nor $P/.claude-plugin/marketplace.json (the plugin's source.repo) names one on GitHub" <<<"$out" \
+    || fail "the message did not say which sources were read: $out"
+}
+
+# Bug: a plugin clone reads its repository from its manifest, not from its origin, where its releases are.
+t_releaseclone() {
+  plugfixture; GHREPO=$G
+  [ "$(plugrel "$T/$CASE/w")" = "$G"$'\t'"$H"$'\t'v1.0.0 ] || fail "the clone did not read its release from its origin: $(plugrel "$T/$CASE/w" 2>&1)"
+}
