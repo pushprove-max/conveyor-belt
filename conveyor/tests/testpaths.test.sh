@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: which paths are a project's test files (testpaths(), the pack's tests.patterns), and how setup and
-# doctor find the project's convention (#137).
+# doctor find the project's convention (#137); which product files a change's inline tests are in (the pack's
+# tests.inline, #140).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -81,4 +82,16 @@ t_testcheck() {
   [[ $out == "missing: tests.patterns that match the 1 file the test command names, such as checks/one.js; fix: "* ]] || fail "the command's files line: $out"
   out=$(tuned '.test.command = "node --test checks/*.js" | .tests.patterns = ["checks/", "*.test.*"]' tpeng testcheck) && [ "$out" = 'ok: the pack'"'"'s tests.patterns match 2 tracked files' ] \
     || fail "patterns that match the project's tests were not ok: $out"
+}
+
+# #140. Bug it catches: the kinds of inline tests were fixed in the engine, so a project with another kind could not
+# add it. The pack's tests.inline adds a kind (go) and replaces a default one (python, here for *.pyx files alone); the
+# defaults it does not name (rust) are kept, and a test file (a_test.go) is never taken for a file with inline tests.
+t_inlinekinds() {
+  setup '[]'; tune '.tests.inline = {go: {files: ["*.go"], start: "^func Example", end: "braces"}, python: {files: ["*.pyx"], start: "\"\"\"", end: "\"\"\""}}'
+  local f out; for f in a.go a_test.go b.py c.rs d.pyx; do echo x > "$R/$f"; done
+  git -C "$R" add -- a.go a_test.go b.py c.rs d.pyx || fail "the change"
+  out=$(tpeng 'inlinekinds "$R" | tr "\0" "\n" | paste - - | while IFS=$'"'\t'"' read -r p k; do echo "$p $(jq -r ".files | join(\",\")" <<<"$k")"; done') \
+    || fail "inlinekinds failed: $out"
+  [ "$out" = $'a.go *.go\nc.rs *.rs\nd.pyx *.pyx' ] || fail "the pack's tests.inline did not add to and replace the default kinds: $out"
 }

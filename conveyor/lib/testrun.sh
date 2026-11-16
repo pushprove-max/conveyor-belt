@@ -504,7 +504,10 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # fix: in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.unfixed, holding those
 # files alone, staged, on a test slot, with the card's own command (test.command), which selects them as that change's
 # tests; or, when the pack sets test.fileCommand, each of them alone with that command (tests()). At least one must
-# fail there: a test that passes without the fix does not prove it. Writes the result in
+# fail there: a test that passes without the fix does not prove it. A product file whose change adds or changes tests
+# written inside it (the pack's tests.inline: inlinekinds(), inlinesplit()) is one of those files, staged with its
+# test lines changed and the rest of its change (the fix) taken out; when such a test shares a changed line with the
+# fix and the change has no other test, the check fails with that reason (SHARED), unrun. Writes the result in
 # <worktree>.unfixed, which the review is shown, and fails when the check does not hold: the change adds or changes no
 # test file, or no test failed in their run on main (it passed, or only its runner failed it). BUGWHY is the reason,
 # which card() gives the build session and the block: "the new tests pass without the fix" (UNFIXED) only when its
@@ -545,8 +548,90 @@ bugrun() { # <worktree> <field> [<file>...]
   [ $# != 0 ] || { tests "$w" "$f"; return; }
   printf 'fail\t%s\n' "$@" > "$w.rerun" && tests "$w" "$f" alone
 }
+# Tests inside product files (#140): the pack's tests.inline (the schema's default kinds, with the pack's added; one of
+# the same name replaces the default's). Of the staged change's added or changed files that are not test files
+# (testpaths()), each that a kind's files match, as <path> NUL <kind json> NUL. Fails when the pack cannot be read.
+inlinekinds() { # <worktree>
+  local t
+  packget tests.inline t || return 1
+  git -C "$1" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | testpaths -vz \
+    | jq -jRs --argjson t "$t" --argjson d "$(jq -c '.properties.tests.properties.inline.default' <<<"$SCHEMA_T")" "$GLOBRX"'
+      ($d + $t) as $k | split("\u0000")[] | select(. != "") as $f
+      | first($k[] | (.files | globsrx) as $r | select($f | test($r))) | ($f, tojson) | . + "\u0000"'
+}
+# Each line of a file (stdin) as T (in a test block of the kind IS, IE, IH: start, end and has), N (not in one) or S (in
+# one, and holding code outside it: before its start or after its end). A block starts at IS's match; with IE
+# "braces" it ends where the brackets opened after the start close, or at a ; before any opens; else it ends at IE's
+# match. A block none of whose lines match IH (when set) is no test. Brackets inside strings are counted too.
+# shellcheck disable=SC2016 # awk's own $0 and fields
+INLINEMARKS='BEGIN { s = ENVIRON["IS"]; e = ENVIRON["IE"]; h = ENVIRON["IH"]; br = (e == "braces") }
+function shut(last, tail,   i, t) {
+  t = (h == "" || hit) ? "T" : "N"; for (i = b; i <= last; i++) c[i] = t
+  if (t == "T" && (lead || tail)) { c[b] = (lead ? "S" : c[b]); if (tail) c[last] = "S" }
+  inb = 0
+}
+{ c[NR] = "N"
+  if (!inb) {
+    if (!match($0, s)) next
+    inb = 1; b = NR; hit = 0; d = 0; op = 0
+    lead = (substr($0, 1, RSTART - 1) ~ /[^[:space:]]/); rest = substr($0, RSTART + RLENGTH)
+  } else rest = $0
+  if (h != "" && $0 ~ h) hit = 1
+  if (br) {
+    for (i = 1; i <= length(rest); i++) {
+      ch = substr(rest, i, 1)
+      if (ch == "{") { d++; op = 1 } else if (ch == "}") d--
+      if ((op && d <= 0) || (ch == ";" && !op)) { t = substr(rest, i + 1); shut(NR, t ~ /[^[:space:]]/ && t !~ /^[[:space:]]*\/\//); next }
+    }
+  } else if (match(rest, e)) shut(NR, substr(rest, RSTART + RLENGTH) ~ /[^[:space:]]/)
+}
+END { if (inb) shut(NR, 0); for (i = 1; i <= NR; i++) print c[i] }'
+# The staged file <path> of <worktree> with the fix taken out. Each line of main's file (HEAD) and of the staged one is
+# marked (INLINEMARKS, by <kind json>). The fix is the diff of main's code lines (N) to the staged code lines; the
+# staged file with that diff undone keeps the change's test lines and none of its code. Exit 0 when the change adds or
+# changes a test line (T), printing that file; 1 when it changes none (or a file cannot be read); 3, printing nothing,
+# when a line it changes is shared by a test block and code (S): the fix cannot be taken out alone.
+inlinesplit() { # <worktree> <path> <kind json>
+  local w=$1 f=$2 d k=() rc
+  mapfile -d '' -t k < <(jq -j '.start, .end, (.has // "") | . + "\u0000"' <<<"$3") && [ ${#k[@]} = 3 ] && d=$(mktemp -d) || return 1
+  { git -C "$w" show "HEAD:$f" 2>/dev/null || :; } > "$d/old" && git -C "$w" show ":$f" > "$d/new" 2>/dev/null \
+    && IS=${k[0]} IE=${k[1]} IH=${k[2]} awk "$INLINEMARKS" < "$d/old" > "$d/old.m" \
+    && IS=${k[0]} IE=${k[1]} IH=${k[2]} awk "$INLINEMARKS" < "$d/new" > "$d/new.m" || { rm -rf "$d"; return 1; }
+  # Which kinds of line the change touches: a test line it adds or changes, a shared line it adds, changes or removes.
+  # A diff --no-index exits 1 when the files differ, which under pipefail would fail the pipe: only a higher exit does.
+  { git diff --no-index --no-color --no-ext-diff -U"$(( $(wc -l < "$d/old") + $(wc -l < "$d/new") + 1 ))" -- "$d/old" "$d/new"; [ $? -le 1 ]; } \
+    | awk 'FILENAME == ARGV[1] { o[FNR] = $0; next } FILENAME == ARGV[2] { n[FNR] = $0; next }
+      /^@@/ { h = 1; next } !h || /^\\/ { next }
+      { t = substr($0, 1, 1) } t == " " { oi++; ni++ } t == "-" { if (o[++oi] == "S") sh = 1 }
+      t == "+" { ni++; if (n[ni] == "S") sh = 1; else if (n[ni] == "T") nt++ }
+      END { exit sh ? 3 : nt ? 0 : 1 }' "$d/old.m" "$d/new.m" -
+  rc=$?
+  if [ $rc = 0 ]; then
+    awk 'FILENAME == ARGV[1] { m[FNR] = $0; next } m[FNR] == "N"' "$d/old.m" "$d/old" > "$d/old.c"
+    awk 'FILENAME == ARGV[1] { m[FNR] = $0; next } m[FNR] == "N"' "$d/new.m" "$d/new" > "$d/new.c"
+    # Each hunk of the fix (-U0: staged code lines c to c+n-1 were main's lines, or main's lines go after line c when n
+    # is 0) undone in the staged file, its test lines kept where they are.
+    { git diff --no-index --no-color --no-ext-diff -U0 -- "$d/old.c" "$d/new.c"; [ $? -le 1 ]; } \
+      | awk 'function put(x,   i) { for (i = 1; i <= on[x]; i++) print ol[x, i] }
+        FILENAME == ARGV[1] { m[FNR] = $0; next } FILENAME == ARGV[2] { nl[FNR] = $0; nn = FNR; next }
+        /^@@/ { split($3, p, ","); h++; hs[h] = substr(p[1], 2) + 0; hd[h] = (p[2] == "" ? 1 : p[2] + 0); next }
+        h && /^-/ { ol[h, ++on[h]] = substr($0, 2) }
+        END {
+          for (x = 1; x <= h; x++) if (hd[x]) { for (j = hs[x]; j < hs[x] + hd[x]; j++) rep[j] = x } else ins[hs[x]] = x
+          if (0 in ins) put(ins[0])
+          j = 0
+          for (i = 1; i <= nn; i++) {
+            if (m[i] != "N") { print nl[i]; continue }
+            j++
+            if (j in rep) { if (!(rep[j] in done)) { done[rep[j]] = 1; put(rep[j]) } } else print nl[i]
+            if (j in ins) put(ins[j])
+          }
+        }' "$d/new.m" "$d/new" - || rc=1
+  fi
+  rm -rf "$d"; return $rc
+}
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() nf=() fl=() f out rc fx held='' sha='' why nr='' fc='' fld alone=''
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh=''
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -560,7 +645,17 @@ bugproof() { # <card> <worktree> <issue json>
       echo 'Judge whether each test it changes still checks what it was written to check.'; } > "$2.unfixed"
     return 0
   fi
-  mapfile -d '' -t fs < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | testpaths -z)
+  mapfile -d '' -t tf < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | testpaths -z)
+  # Product files whose change adds or changes inline tests (inlinekinds(), inlinesplit()) run too, with only their
+  # test lines changed: the fix taken out. One whose test shares a changed line with the fix cannot be run so; when the
+  # change has no other test to run, that is the reason (SHARED), and no run is made.
+  while IFS= read -r -d '' f && IFS= read -r -d '' k; do
+    inlinesplit "$2" "$f" "$k" > /dev/null; case $? in 0) ins+=("$f") iks+=("$k") ;; 3) sh=${sh:-$f} ;; esac
+  done < <(inlinekinds "$2" 2>/dev/null)
+  fs=("${tf[@]}" "${ins[@]}")
+  if [ ${#fs[@]} = 0 ] && [ -n "$sh" ]; then
+    BUGWHY=${SHARED//'<file>'/"$sh"}; printf '%s.\nIts inline tests were not run on main'"'"'s code.\n' "${BUGWHY^}" > "$2.unfixed"; return 1
+  fi
   [ ${#fs[@]} != 0 ] || { [ -n "${TESTGLOBS:-}" ] || names 2>/dev/null; BUGWHY=${NOTEST//'<patterns>'/"${TESTGLOBS:-}"}; }
   # A per-file command (test.fileCommand) runs each test file alone, whatever its language, as the list names it.
   packget test.fileCommand fc 2>/dev/null || fc=''
@@ -568,7 +663,11 @@ bugproof() { # <card> <worktree> <issue json>
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
-      && { [ ${#fs[@]} = 0 ] || git -C "$2" diff --cached --binary --no-renames HEAD -- "${fs[@]/#/:(literal)}" | git -C "$mwt" apply --index; }; } 2>&1 < /dev/null); then
+      && { [ ${#tf[@]} = 0 ] || git -C "$2" diff --cached --binary --no-renames HEAD -- "${tf[@]/#/:(literal)}" | git -C "$mwt" apply --index; } \
+      && for k in "${!ins[@]}"; do
+           mkdir -p "$(dirname "$mwt/${ins[k]}")" && inlinesplit "$2" "${ins[k]}" "${iks[k]}" > "$mwt/${ins[k]}" \
+             && git -C "$mwt" add -- ":(literal)${ins[k]}" || exit 1
+         done; } 2>&1 < /dev/null); then
     if [ ${#fs[@]} = 0 ]; then
       printf '%s.\n' "${BUGWHY^}" > "$2.unfixed"
     else
@@ -587,7 +686,8 @@ bugproof() { # <card> <worktree> <issue json>
       { [ -z "$nr" ] || printf 'the proof run on main gave no result for %s: %s\n' "$nr" \
           "$(tail -n 5 "$mwt.test" 2>/dev/null | tr -d '\000\r' | sed 's/\x1b\[[0-9;]*m//g' | awk 'NF { sub(/^[ \t]+/, ""); s = s (s == "" ? "" : " / ") $0 } END { print substr(s, 1, 300) }')"
         [ -z "$alone" ] || printf '%s\n' "$NOTALONE"
-        printf 'Its test files, %s on main'"'"'s code at %s without the fix:\n' "$([ -n "$alone" ] && echo 'given to the test command' || echo run)" "$sha"; printf -- '- %s\n' "${fs[@]}"
+        printf 'Its test files, %s on main'"'"'s code at %s without the fix:\n' "$([ -n "$alone" ] && echo 'given to the test command' || echo run)" "$sha"
+        [ ${#tf[@]} = 0 ] || printf -- '- %s\n' "${tf[@]}"; [ ${#ins[@]} = 0 ] || printf -- '- %s (its inline tests, with the rest of its change taken out)\n' "${ins[@]}"
         if [ -n "$alone" ]; then echo "The command selected none of them, so none ran without the fix."
         elif [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
         elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."

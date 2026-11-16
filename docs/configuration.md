@@ -76,6 +76,42 @@ Setup suggests patterns when the default misses your test files ([Setup](setup.m
 shows a `missing:` line when the patterns match no tracked file, or when they miss test files that your test command
 names.
 
+## Tests inside product files
+
+Some tests are in the same file as the code that they test, for example a Rust `#[cfg(test)]` module or a Python
+doctest. For a bug card, Conveyor finds new tests of this type in the product files that the card changes. It runs
+your test command on main's code with these tests and without the rest of the change. At least one test must fail
+there. When you set `test.fileCommand`, Conveyor gives it each such product file.
+
+Conveyor knows these kinds of test:
+
+| Kind | Files | A test block |
+|---|---|---|
+| `rust` | `*.rs` | `#[cfg(test)]` or `#[test]` and the item after it, up to the bracket that closes the item |
+| `python` | `*.py` | a `"""` or `'''` string with a `>>>` line in it |
+| `elixir` | `*.ex`, `*.exs` | a `@doc """` or `"""` string with an `iex>` line in it |
+
+To add a kind, add an entry to `tests.inline` in `.conveyor/project.json`. An entry has these fields:
+
+- `files`: the globs of the files, as in `tests.patterns`.
+- `start`: a POSIX extended regular expression. A test block starts where it matches.
+- `end`: `braces` or a regular expression. With `braces`, the block ends where the brackets that open after `start`
+  close. A `;` before the first bracket also ends it. With a regular expression, the block ends where it matches.
+- `has`: a regular expression. This field is optional. When you set it, a block is a test only if one of its lines
+  matches it.
+
+```json
+"tests": {"inline": {"zig": {"files": ["*.zig"], "start": "^[[:space:]]*test[[:space:]]", "end": "braces"}}}
+```
+
+Conveyor adds your entries to the kinds in the table. An entry with the name of a kind in the table replaces that
+kind. Conveyor also counts the brackets inside strings.
+
+A new test and the fix can be on the same line. Then Conveyor cannot take out the fix alone, and the card goes back
+to its build. If they are still on the same line after the build, the card is blocked with the reason
+`the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone`. Put the test on
+lines of its own, then retry the card.
+
 ## The host file
 
 The host file, `~/.config/conveyor/host.json`, holds this machine's settings: the terms file, the projects (`records`),

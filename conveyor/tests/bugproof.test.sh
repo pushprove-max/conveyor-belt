@@ -159,6 +159,64 @@ t_bugfilecommand() {
     || fail "the card proved through test.fileCommand did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
+# A bug card of #7 whose build writes <card> into the product file <file>, which holds <main> on main: its fix and its
+# new test are both in that file, and it adds no test file. Its test command is <runner>, on main's code (the check)
+# and on the card (its test step, which must pass for it to land); each run on main notes in $STUB/mainran its staged
+# files and <file> as it is there. The reviewer's prompt is kept in $STUB/asked; one GO review.
+inlinecard() { # <file> <main> <card> <runner>
+  setup "[$(issue 7 2026-01-01 bug)]"
+  mkdir -p "$(dirname "$R/$1")" && printf '%s\n' "$2" > "$R/$1" && git -C "$R" add "$1" && git -C "$R" commit -qm 'a product file' \
+    && git -C "$R" push -q origin main || fail "main's file"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
+  echo "$GO" > "$STUB/review.1"
+  printf '%s\n' "$3" > "$STUB/card-file"; echo "cp \"\$STUB/card-file\" '$1'" > "$STUB/build"
+  { echo "{ git diff --cached --name-only; cat '$1'; } >> \"\$STUB/mainran\""; printf '%s\n' "$4"; } > "$STUB/mainrun-cmd"
+  printf '%s\n' "$4" > "$STUB/test-cmd"
+  loop run >/dev/null || fail "run exited non-zero"
+}
+# A Rust file, src/lib.rs, whose f() returns 1 on main. The runner stands in for cargo test (no Rust toolchain is
+# needed): the file's test passes when f() returns the number its assert_eq! asks for.
+RUSTMAIN=$'pub fn f() -> i32 {\n    1\n}'
+RUSTRUN='w=$(sed -n "s/.*assert_eq!([a-z:]*f(), \([0-9]*\)).*/\1/p" src/lib.rs); [ -z "$w" ] || grep -Eq "^ *(pub fn f\(\) -> i32 \{ )?$w( \}.*)?$" src/lib.rs'
+
+# #140 D1. Bug it catches: a bug card whose only new test is a Rust #[test] inside the product file it fixes had no
+# test file to run without the fix, and was blocked. The check stages src/lib.rs on main's code with the new test
+# module and without the fix: the test fails there, it passes on the card, and the card lands with one build.
+t_buginlinerust() {
+  inlinecard src/lib.rs "$RUSTMAIN" $'pub fn f() -> i32 {\n    2\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn two() {\n        assert_eq!(super::f(), 2);\n    }\n}' "$RUSTRUN"
+  [ "$(cat "$STUB/mainran" 2>&1)" = "src/lib.rs"$'\n'"$RUSTMAIN"$'\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn two() {\n        assert_eq!(super::f(), 2);\n    }\n}' ] \
+    || fail "the run on main was not of main's f() with the new test module alone: $(cat "$STUB/mainran" 2>&1)"
+  grep -qxF -- '- src/lib.rs (its inline tests, with the rest of its change taken out)' "$STUB/asked" && grep -q '^The run failed there (exit 1)' "$STUB/asked" \
+    || fail "the review was not shown that the inline test fails without the fix: $(cat "$STUB/asked" 2>&1)"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "the card proved by its inline test did not land with one build: $(st 'select(.step | IN("build", "blocked", "landed"))')"
+}
+
+# #140 D1. Bug it catches: a Python doctest added to the docstring of the function a bug card fixes was no test the
+# check could run. The real doctest runner, on main's code with the new docstring and without the fix, fails; on the
+# card it passes, and the card lands with one build.
+t_buginlinedoctest() {
+  inlinecard lib.py $'def double(x):\n    return x * 3' $'def double(x):\n    """\n    >>> double(2)\n    4\n    """\n    return x * 2' \
+    'PYTHONDONTWRITEBYTECODE=1 python3 -m doctest lib.py'
+  [ "$(cat "$STUB/mainran" 2>&1)" = $'lib.py\ndef double(x):\n    """\n    >>> double(2)\n    4\n    """\n    return x * 3' ] \
+    || fail "the run on main was not of main's double() with the new doctest alone: $(cat "$STUB/mainran" 2>&1)"
+  grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "the card proved by its doctest was not reviewed as proven and landed: $(st 'select(.step | IN("build", "blocked", "landed"))'; cat "$STUB/asked" 2>&1)"
+}
+
+# #140 D2. Bug it catches: a new test written on the same line as the fix cannot be run without the fix, and the card
+# was blocked as "no test file found" or as "the new tests pass without the fix", though nothing ran. It goes back to
+# its build, then is blocked, each time with the reason that names the file; it is never run on main or reviewed.
+t_buginlineshared() {
+  inlinecard src/lib.rs 'pub fn f() -> i32 { 1 }' 'pub fn f() -> i32 { 2 } #[test] fn two() { assert_eq!(f(), 2); }' "$RUSTRUN"
+  local why='the new test and the fix are in the same lines of src/lib.rs; bugproof cannot take out the fix alone'
+  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|$why|" ] && grep -qxF "# Back to the build: $why" "$STUB/brief" \
+    || fail "the card did not go back to its build with the shared-lines reason: $(st 'select(.step == "build")')"
+  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: $why" ] && ! st 'select(.step == "blocked") | .reason, .tail' | grep -q 'pass' \
+    || fail "the card was not blocked with the shared-lines reason alone: $(st 'select(.step == "blocked")')"
+  [ ! -e "$STUB/mainran" ] && [ ! -e "$STUB/asked" ] || fail "a fix it could not take out was run on main or reviewed: $(cat "$STUB/mainran" 2>&1)"
+}
+
 # A bug card of #7 whose build only rewords a comment of s.sh (`# an old word` becomes `# a new word`), on a main that
 # holds s.sh and w.test.sh holding <test>; its issue's body is <body>. The run on main runs each file its
 # CONVEYOR_TEST_RERUN list names as `fail`; with none, it selects nothing (its log says files=0), as a runner does for a

@@ -396,6 +396,7 @@ there, or does not show the line holds) is a finding, written as any finding is.
 line gives that is not in the worktree: judge whether that line'"'"'s evidence still holds.'
 # The bug-card check (bugproof(), card()): the reasons a bug card goes back to its build session or is blocked (UNFIXED
 # only when its test files ran without the fix; NOTEST when the change has none, <patterns> the pack's tests.patterns;
+# SHARED when its only new tests are inline tests that share lines with the fix in <file>;
 # NOTALONE when the test command ran none of them; NOTBACK when main's code could not be put back for the run), what
 # that session is told after the brief (<why>: the reason; the check's result follows it), and what the review is told
 # before that result.
@@ -404,18 +405,22 @@ UNFIXED='the new tests pass without the fix, so they do not prove it'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTEST='no test file found in the change (patterns: <patterns>); set tests.patterns in .conveyor/project.json'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
+SHARED='the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone'
+# shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTALONE='test files were found in the change, but the test command, given them, selected none of them, so they did not run without the fix; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTBACK='main'"'"'s code could not be put back, so the test files did not run without the fix'
 # shellcheck disable=SC2034 # used in lib/card.sh
 BUGBUILD='# Back to the build: <why>
 This issue is a bug, so at least one test case your change adds or changes must fail on main'"'"'s code without your
-fix (your test files alone are run in a worktree of main), and none does. Add or change a test case that fails on
+fix (your test files alone, and the inline tests of your product files without the rest of their change, are run
+in a worktree of main), and none does. Add or change a test case that fails on
 main'"'"'s code without the fix and passes with it, and keep the fix. The check'"'"'s result:'
 # shellcheck disable=SC2034 # used in lib/card.sh
 BUGREVIEW='# The bug-card check
 This issue is a bug: after the build, the test cases the change adds or changes were run on main'"'"'s code without the
-fix (its test files alone, in a worktree of main). At least one must fail there. A change to test files alone is not
+fix (its test files alone, and the inline tests of its product files without the rest of their change, in a
+worktree of main). At least one must fail there. A change to test files alone is not
 run, as it has no fix to take out. A change that selects no test of its own (comments only) is proved by the test
 files its issue'"'"'s Done-when names instead, and is not checked when it names none. Its result:'
 # What the review of a speed-up card (speedproof(), card()) is told before the check's result.
