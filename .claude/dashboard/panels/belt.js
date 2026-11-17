@@ -119,7 +119,9 @@
           cost = h('span', 'live-cost');
           cost.append(ctx.number(`usd:${c.card}`, c.usd, ctx.money), h('span', null, tok !== null ? ` · ${count(tok)} tokens so far` : typeof c.usd === 'number' ? ' so far' : ''));
         }
-        meta.replaceChildren(ctx.tag(c.repo),h('span', null, ctx.modelName(c.model) || (c.step === 'tests' ? 'running tests' : 'no AI model in this step')), cost);
+        // A proof run that waits for a test slot (its live action, testrun.sh) runs no tests yet.
+        const slotWait = c.step === 'proof' && c.live && typeof c.live.action === 'string' && c.live.action.startsWith('waiting for a test slot');
+        meta.replaceChildren(ctx.tag(c.repo),h('span', null, ctx.modelName(c.model) || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step')), cost);
         const t = c.track && typeof c.track === 'object' ? c.track : null;
         track.hidden = !ctx.track(track, t);
         // The step in progress, measured: how long it has run, how far a running test run has got (its tests, else

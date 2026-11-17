@@ -145,6 +145,34 @@ test('a card in its Test step shows its tests run of how many and those failed, 
   assert.deepEqual(detail(), [], 'a card in no test run says nothing of tests');
 });
 
+// Bug it catches (#281): while a bug card's new tests ran on main's code without its fix (mainrun/<card>.unfixed.live),
+// the Board named the review that comes after it ("Review 1 of 3", its Codex model) and no review ran. The snapshot
+// gives that card as conveyor/tests/snapshot.test.sh t_snapproof checks: step proof, no review, its track on Build,
+// labelled "proof run", with the run's files; the card says that step, its count and that tests run, not a review.
+test("a bug card's proof run shows as its own step with its files run, not as a review", () => {
+  const w = boot();
+  const data = full(), c = data.panels.belt.data.cards[0];
+  Object.assign(c, { step: 'proof', review: null, of: 3, model: null, live: null });
+  c.track = trackOf('>.....', 'proof run', { at: 0, files: { run: 297, of: 1161 }, tests: null });
+  c.track.detail[5].state = 'now'; c.track.detailAt = 5;
+  deliver(w, data);
+  const row = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]');
+  const head = row.querySelector('.row-main').textContent, live = row.querySelector('.track-now').textContent;
+  assert.match(head, /Proof run/, `the card names its step: ${head}`);
+  assert.doesNotMatch(head, /Review/, `no review is named while none runs: ${head}`);
+  assert.match(live, /297 of 1161 test files/, `the step says how far the run has got: ${live}`);
+  assert.match(row.querySelector('.row-meta').textContent, /running tests/, 'the card runs tests, not an AI model');
+  // Bug it catches (#281 review): a proof run that waits for a test slot (testrun.sh: its live action, files run 0)
+  // read "running tests" though none ran. The snapshot gives that action as the card's live action.
+  const wait = clone(data), wc = wait.panels.belt.data.cards[0];
+  wc.live = { turns: 0, lastOutputAt: null, action: 'waiting for a test slot (2 of 2 in use)', at: iso(T0 - 4000) };
+  wc.track.files = { run: 0, of: null };
+  next(w, wait);
+  const waiting = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]');
+  assert.match(waiting.querySelector('.track-now').textContent, /now: waiting for a test slot \(2 of 2 in use\)/, 'the card says it waits for a slot');
+  assert.doesNotMatch(waiting.querySelector('.row-meta').textContent, /running tests/, `no tests run while it waits: ${waiting.querySelector('.row-meta').textContent}`);
+});
+
 // Bug it catches (#147): a card's test step ran the whole suite or only the tests its change touched, and the Board
 // did not say which, so a 20-minute step read as stuck. The live line gives the list the run was given (track.list:
 // "changed: 7 files", "whole suite") and how many test files ran.

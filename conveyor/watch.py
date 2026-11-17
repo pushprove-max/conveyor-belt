@@ -60,6 +60,7 @@ GITHUB_EVERY = float(os.environ.get('CONVEYOR_WATCH_GITHUB') or 60)
 GITHUB_FIRST = float(os.environ.get('CONVEYOR_WATCH_GITHUB_FIRST') or 10)
 REFRESH = float(os.environ.get('CONVEYOR_WATCH_REFRESH') or 30)
 LIVE_EVERY = 1.0
+PROOF_LIVE = '.unfixed.live'  # mainrun/<card>.unfixed.live: the live record of a bug card's proof run (testrun.sh)
 POLL = 0.5
 SNAPSHOT_LIMIT = 120  # a snapshot that hangs is killed, and the next change tries again
 STATE_FILES = {'cards.jsonl': 'record', 'retried.jsonl': 'record', 'pushed': 'record', 'limit.jsonl': 'record', 'maintest.json': 'record', 'control.json': 'control',
@@ -299,6 +300,24 @@ class Stream:
             if not isinstance(live, dict) or live.get('step') != done.get('step'):
                 continue  # a live record counts only while the card's last line is the start of that step
             out[card] = self.lay(live, done, models)
+        # A bug card's proof run (testrun.sh bugproof()) has a live record of its own, in mainrun/<card>.unfixed.live;
+        # it counts while the last snapshot shows that card's proof (snapshot.sh: no step started, the record there).
+        try:
+            names = [n for n in os.listdir(os.path.join(self.cards, 'mainrun')) if n.endswith(PROOF_LIVE)]
+        except OSError:
+            names = []
+        for name in names:
+            card = name[:-len(PROOF_LIVE)]
+            entry = belt.get(card)
+            if not entry or entry.get('step') != 'proof' or card in out:
+                continue
+            try:
+                with open(os.path.join(self.cards, 'mainrun', name)) as f:
+                    live = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(live, dict):
+                out[card] = self.lay(dict(live, usage=None), entry.get('done') or {}, models)  # it runs no model
         return out
 
     @staticmethod
@@ -339,7 +358,9 @@ class Stream:
         os.makedirs(self.cards, exist_ok=True)
         files.add(self.state, 'state', lambda n: n in STATE_FILES)
         files.add(self.cards, 'cards', lambda n: n.endswith('.live'))
+        files.add(os.path.join(self.cards, 'mainrun'), 'proof', lambda n: n.endswith(PROOF_LIVE))
         files.read()  # what is there now is no change
+        proofs = {n for k, n in files.seen if k == 'proof'}  # the proof runs' live records there now
         threading.Thread(target=self.snapshots, daemon=True).start()
         threading.Thread(target=self.githubs, daemon=True).start()
         # The first snapshot waits for GitHub's first answer (a snapshot without it has no queue) for at most
@@ -368,6 +389,10 @@ class Stream:
                 else:
                     if not self.started:
                         self.start()  # a running step's fields go now, in the live line right after the first snapshot
+                    elif kind == 'proof' and ((kind, name) in files.seen) != (name in proofs):
+                        self.ask('record')  # a proof run began or ended: the belt's step changes, which only a snapshot says
+                    if kind == 'proof':
+                        proofs = {n for k, n in files.seen if k == 'proof'}
                     live_due = True
             self.check_loop(False)  # a loop whose process ended changes no file
             now = time.monotonic()

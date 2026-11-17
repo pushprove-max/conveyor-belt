@@ -217,6 +217,14 @@ live() { # every live record there is, as one object by card
   for f in "$CARDS"/*.live; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.live}" '{($c): .}' "$f" 2>/dev/null)$'\n'; done
   if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
 }
+# The live record of each bug-card check that runs now (testrun.sh bugproof(): its run on main's code without the fix,
+# in $CARDS/mainrun/<card>.unfixed), as one object by card. That run is no step of the card's records: between its build
+# line and its review's start line, the card's own live record is gone.
+proofs() {
+  local f c o=''
+  for f in "$CARDS"/mainrun/*.unfixed.live; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.unfixed.live}" '{($c): .}' "$f" 2>/dev/null)$'\n'; done
+  if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
+}
 aways() { # each card that gave way (giveway()): {to: the issue it gave way to, fixing: for the fix of its failed tests}, as one object by card
   local f c o=''
   for f in "$CARDS"/*.claim; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.claim}" 'select(.away == true and (.to | type) == "number") | {($c): {to, fixing: (.fixing == true)}}' "$f" 2>/dev/null)$'\n'; done

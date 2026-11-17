@@ -5,7 +5,7 @@
           fixed: ($log[$e.key + 1:($rv[$i + 1].key // ($log | length))] | any(.step == "fix" or (.step == "start" and .of == "fix")))}];
     # Where a step of this kind is drawn, from the state the card is in: after failed tests (tfix) the fix, its review
     # and the tests again are the tests step; from a rebuild on, everything is the landing step.
-    def place($kind): if $kind == "file" then 16 elif $kind == "rebase" then 12 elif $kind == "land" or .phase == "rebuild" then 13 elif $kind == "build" then 5
+    def place($kind): if $kind == "file" then 16 elif $kind == "rebase" then 12 elif $kind == "land" or .phase == "rebuild" then 13 elif $kind == "build" or $kind == "proof" then 5
       elif .phase == "tfix" or $kind == "test" then 11 elif $kind == "review" then [6, 8, 10][[.nrev, 2] | min] else [7, 9][[.nfix, 1] | min] end;
     def track($of; $perr): . as $c | .x.log as $log
       | ["queued", "picked", "worktree ready", "dependencies linked", "brief written", "building", "review 1", "fix 1", "review 2", "fix 2", "review 3",
@@ -43,7 +43,8 @@
             | if $l.stop == "deps" and .s[2].state == "todo" then .s[2].state = "done" else . end
           else . end)) as $t
       | ($log | last) as $last
-      | (if $c.result != "" then null elif $last.step == "start" then $last.of
+      # A bug card's proof run (snapshot.sh: .proof) is drawn on Build, the step whose change it checks, never as the review after it.
+      | (if $c.result != "" then null elif $last.step == "start" then $last.of elif $c.proof then "proof"
          else {build: "build", review: "review", fix: "fix", tests: "test", landing: "land"}[$c.x.at] // null end) as $kind
       | ($c.x.after // null) as $after
       # wait: landed, not pushed, with push off: no step runs until the owner presses Push landed.
@@ -54,7 +55,7 @@
       | ([$log[] | select(.step == "fix")] | length + 1) as $f
       | (if $after == "wait" then "Landed, waiting for Push landed" elif $at == null then "" elif $after then {push: "pushing", pushfail: "push failed; it is tried again", pushheld: "push failed its check; tried again once main moves",issue: "waiting for GitHub to close the issue", issuefail: "GitHub did not close the issue"}[$after]
          elif $kind == null then ["making the worktree", "linking dependencies", "writing the brief"][$at - 2]
-         elif $kind == "file" then "filing follow-ups" elif $kind == "rebase" then "rebuilding after a conflict" elif $kind == "land" then "landing" elif $kind == "build" then "building"
+         elif $kind == "file" then "filing follow-ups" elif $kind == "rebase" then "rebuilding after a conflict" elif $kind == "land" then "landing" elif $kind == "build" then "building" elif $kind == "proof" then "proof run"
          elif $kind == "fix" and $t.phase != "main" then "fix after failed tests"
          elif $t.phase == "rebuild" then (if $kind == "review" then "review \($r) after the rebuild" else "tests after the rebuild" end)
          elif $t.phase == "tfix" then (if $kind == "review" then "review \($r) after the test fix" else "tests again" end)
@@ -103,7 +104,7 @@
             | if $l.stop == "yes" then . else .s[$i].sec = (.s[$i].sec // 0) + ($l.took // 0) | .s[$i].state = "failed" end
           else . end | .prev = $l)) as $u
       | (if $after == "wait" then null elif $after then 5 elif $c.result != "" then null elif $kind == null then 0 elif $kind == "fix" and $u.rc then $u.cur
-         else {build: 0, review: 1, fix: 2, test: 3}[$kind] // 4 end) as $six
+         else {build: 0, proof: 0, review: 1, fix: 2, test: 3}[$kind] // 4 end) as $six
       # Push is done once main is pushed and the issue is closed: by GitHub (an issue line that is ok), or found closed
       # (x.shut) after GitHub did not close it, closed by hand; it stays failed only while the issue is open.
       | ($u.s | .[5].state = (if $u.closed or ($u.pushed and ($u.issue == "ok" or $c.issue == 0 or $c.x.shut == true)) then "done"
@@ -122,12 +123,12 @@
           + (if $i == 1 then {n: ($u.rev + (if $six == 1 then 1 else 0 end)), of: $of} elif $i == 2 then {n: ($u.fix + (if $six == 2 and ($u.rc | not) then 1 else 0 end))}
              elif $i == 3 then (if .wait != null then {wait, run} else {} end) + (if .rerun == true and .state == "done" then {rerun: true} else {} end)
              elif $i == 5 and $u.filed != null then {followups: $u.filed} else {} end)],
-         at: $six, label: $label, since: (if $at == null then null else $last.time end),
+         at: $six, label: $label, since: (if $at == null then null elif $kind == "proof" then ($c.proof.at | strings) // $last.time else $last.time end),
          reason: $why,
-         files: (if $kind == "test" then ($c.live // {} | .files // null) else null end),
-         tests: (if $kind == "test" then ($c.live // {} | .tests // null) else null end),
+         files: (if $kind == "test" then ($c.live // {} | .files // null) elif $kind == "proof" then $c.proof.files else null end),
+         tests: (if $kind == "test" then ($c.live // {} | .tests // null) elif $kind == "proof" then $c.proof.tests else null end),
          # The list of tests the run was given (tests()): {mode: "changed", files, by, age} or {mode: "whole", why}.
-         list: (if $kind == "test" then ($c.live // {} | .list // null) else null end),
+         list: (if $kind == "test" then ($c.live // {} | .list // null) elif $kind == "proof" then $c.proof.list else null end),
          # The 17 steps the track once had, each with its seconds added up.
          detail: ($detail | if $c.x.shut == true and .[15].state == "failed" then .[15].state = "done" else . end), detailAt: $at,
          # Every recorded step, one for each line of the card in the order they were written, with its own seconds

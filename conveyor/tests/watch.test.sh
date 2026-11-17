@@ -88,6 +88,26 @@ t_watchlive() {
   kill $pid; wait $pid 2>/dev/null; :
 }
 
+# Bug (#281): a bug card's proof run (its live record mainrun/<card>.unfixed.live, testrun.sh bugproof()) was in no
+# live line, so the reader dropped its action ("waiting for a test slot") and its files run after each snapshot, and
+# the Board said "running tests"; and the run's start waited for the next refresh to show the card's step as proof.
+t_watchproof() {
+  watchstart; rec c1 1 build; mkdir -p "$CD/mainrun"
+  stream 90 "$T/$CASE/watch5.out" CONVEYOR_WATCH_GITHUB=1 CONVEYOR_WATCH_REFRESH=600
+  trap 'kill $pid 2>/dev/null' EXIT
+  come '.type == "snapshot" and .why == "start" and .snap.belt[0].step == "review"' "the first snapshot, the build done"
+  jq -cn --arg t "$(date -u +%FT%TZ)" '{step: "test", at: $t, last: null, turns: 0, files: {run: 0, of: null}, tests: null,
+    action: "waiting for a test slot (2 of 2 in use)"}' > "$CD/mainrun/c1.unfixed.live.tmp" && mv "$CD/mainrun/c1.unfixed.live.tmp" "$CD/mainrun/c1.unfixed.live"
+  come '.type == "snapshot" and .why == "record" and .snap.belt[0].step == "proof"' "a snapshot when the proof run began"
+  come '.type == "live" and .cards.c1.live.action == "waiting for a test slot (2 of 2 in use)"' "the proof run's action in a live line"
+  jq -cn --arg t "$(date -u +%FT%TZ)" '{step: "test", at: $t, last: null, turns: 0, files: {run: 297, of: 1161}, tests: null, action: null}' \
+    > "$CD/mainrun/c1.unfixed.live.tmp" && mv "$CD/mainrun/c1.unfixed.live.tmp" "$CD/mainrun/c1.unfixed.live"
+  come '.type == "live" and .cards.c1.files == {run: 297, of: 1161}' "the proof run's files run in a live line"
+  rm "$CD/mainrun/c1.unfixed.live"
+  come '.type == "snapshot" and .why == "record" and .snap.belt[0].step != "proof"' "a snapshot when the proof run ended"
+  kill $pid; wait $pid 2>/dev/null; :
+}
+
 # A stream that connects (or reconnects) while GitHub is slow: a record appended at once is not held up by the
 # wait for GitHub's first answer. That wait is longer than the stream lasts, so a record held up by it never comes;
 # and the record is written at the stream's first beat, which says the stream is looking for changes.
