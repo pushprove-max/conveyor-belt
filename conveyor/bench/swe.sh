@@ -24,6 +24,8 @@
 # What is kept, under the state folder's bench/swe: tasks.<revision>.jsonl (the ordered list), results/<key>/<task>.json
 # (key: the engine commit, or solo-<model>; resolved, sessions, tokens, minutes, the card's records) and .patch, a
 # line a run in runs.jsonl, the run in progress in live.json, and board.json, what the Board's Benchmarks part shows.
+# The dataset's rows (each task's reference fix and hidden tests) are never kept: the card's sessions have a shell as
+# this account, so the harness reads them into a cache of its own that it removes, for the task list and each grade.
 # A result of the same key and task is reused, never run again. A task whose image cannot be fetched or built, or that
 # the harness could not grade, is not run: no result is kept, and the run names it apart from the failed ones.
 SWE_CONF=$HERE/bench/swe.json
@@ -42,10 +44,12 @@ swe_h() {
 swe_conf() { jq -r "$1" "$SWE_CONF"; }
 swe_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 swe_put() { printf '%s\n' "$2" > "$1.$$" && mv -f "$1.$$" "$1"; } # <file> <text>: written whole
-# The pinned task list, made once a revision: the harness's list, put in the seed's order.
+# The pinned task list, made once a revision: the harness's list, put in the seed's order. The dataset's rows that an
+# earlier harness kept beside it (raw.<revision>.jsonl, with the reference fixes and hidden tests) are removed first.
 swe_tasks() {
   local rev f; rev=$(swe_conf .revision); f=$SWE_DIR/tasks.$rev.jsonl
-  [ -s "$f" ] && [ -s "$SWE_DIR/raw.$rev.jsonl" ] && { printf '%s\n' "$f"; return; }
+  rm -f "$SWE_DIR"/raw.*.jsonl
+  [ -s "$f" ] && { printf '%s\n' "$f"; return; }
   mkdir -p "$SWE_DIR" && swe_h tasks "$(swe_conf .dataset)" "$rev" "$SWE_DIR/raw.$rev" >&2 \
     || { echo "conveyor: the SWE-bench task list could not be read (the harness needs Python with the swebench package, in $SWE_VENV: docs/benchmarks.md)" >&2; return 1; }
   python3 -I -c 'import hashlib, json, sys
@@ -191,9 +195,9 @@ swe_build() { # <task json> <sb> <eng>
 }
 # One task given to Claude alone: one session on the issue in the sandbox's main, its change the patch. The session
 # has the sandbox's gh and no other way out: no shell and no web tools, its file tools only, edits only in the
-# sandbox's main and, in dontAsk mode, no read outside it (the dataset's rows, with the reference patches and hidden
-# tests, and the results are denied by name as well); no settings file or MCP server of the host is read. It runs on
-# the builder's account (`control account`), the one the usage guard reads (swe_guarded), never on an inherited login.
+# sandbox's main and, in dontAsk mode, no read outside it (the task lists and the results are denied by name as well);
+# no settings file or MCP server of the host is read. It runs on the builder's account (`control account`), the one
+# the usage guard reads (swe_guarded), never on an inherited login.
 swe_solo() { # <task json> <sb> <model>
   local sb=$2 t0 base acct; base=$(jq -r .base <<<"$1"); t0=$(date +%s)
   ctlread 2>/dev/null || { echo "the control record could not be read"; return 1; }
@@ -220,7 +224,7 @@ swe_task() { # <task json> <arm> <key> <eng or model>
   [ "$2" = solo ] || jq -e '.steps | any(.step == "build")' <<<"$b" > /dev/null \
     || { echo "not run: the engine built no card: $(tail -n 3 "$sb/loop.log" 2>/dev/null | tr '\n' ' ' | head -c 400)"; return; }
   if [ ! -s "$sb/patch" ]; then g='{"resolved":false}'
-  else g=$(swe_h grade "$SWE_DIR/raw.$(swe_conf .revision).jsonl" "$id" "$sb/patch" "$sb/grade" 2>/dev/null); rc=$?
+  else g=$(swe_h grade "$(swe_conf .dataset)" "$(swe_conf .revision)" "$id" "$sb/patch" "$sb/grade" 2>/dev/null); rc=$?
     [ "$rc" = 0 ] && jq -e '.resolved | type == "boolean"' <<<"$g" > /dev/null 2>&1 || {
       if [ "$rc" = 3 ]; then echo "not run: the harness could not fetch or build its image"; else echo "not run: the harness could not grade it (exit $rc)"; fi; return; }
   fi

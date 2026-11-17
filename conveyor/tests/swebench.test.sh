@@ -53,10 +53,10 @@ EOF
 shift # the harness script's path
 case $1 in
   tasks) for t in proj__a-1 proj__b-2; do jq -nc --arg t "$t" --arg u "file://$SWE_FX/task.git" --arg b "$(git -C "$SWE_FX/task.git" rev-parse main)" \
-      '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", test: "true"}'; done | tee "$4" > "$4.jsonl" ;;
+      '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", test: "true"}'; done > "$4" ;;
   image) [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
-  grade) echo "$2 $3" >> "$SWE_FX/graded"
-    if grep -q fixed "$4" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$3" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
+  grade) echo "$2 $3 $4" >> "$SWE_FX/graded"
+    if grep -q fixed "$5" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$4" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
 esac
 EOF
   chmod +x "$F/py"
@@ -100,6 +100,16 @@ t_swepresets() {
   # A run whose process was killed with no end written is not shown running for good.
   jq -c '.live.state = "running" | .live.pid = 2147483646' "$B/board.json" > "$B/b.new" && mv "$B/b.new" "$B/board.json"
   [ "$(loop snapshot | jq -r .bench.live.state)" = stopped ] || fail "a run whose process is gone is shown running"
+}
+
+# Bug: the dataset's rows an earlier harness kept (raw.<revision>.jsonl, with the reference fixes and hidden tests)
+# stayed in the state folder, readable by a card's sessions, when the task list of that revision was already made.
+t_sweoldraw() {
+  swe; local rev out; rev=$(jq -r .revision "$SRC/bench/swe.json")
+  mkdir -p "$B" && "$SWE_FX/py" - tasks d r "$B/tasks.$rev.jsonl" && echo REFFIX > "$B/raw.$rev.jsonl" && echo REFFIX > "$B/raw.older.jsonl" \
+    || fail "the earlier run's files were not made"
+  out=$(loop bench swe 3 2>&1); [ $? = 2 ] || fail "an n past the task list was not refused: $out"
+  [ -z "$(ls "$B"/raw.*.jsonl 2>/dev/null)" ] || fail "the dataset's rows an earlier harness kept are still in the state folder: $(ls "$B")"
 }
 
 # Bug: a task whose Docker image cannot be fetched or built is counted as failed (or stops the run) instead of being
@@ -222,8 +232,7 @@ t_swesologuard() {
 }
 
 # Bugs: a graded patch the harness found unresolved was reported as not run and kept no result, so the next run built
-# it again; the grade was given the dataset's rows in a file the official harness cannot load (it reads a local dataset
-# only from .json, .jsonl or .parquet); the worst case left out the judge's sessions, and the fix of a failed test
+# it again; the grade was not told which dataset and revision hold the task; the worst case left out the judge's sessions, and the fix of a failed test
 # step with its review and judge; and with one task a complete
 # flip was called within the noise.
 t_swewrong() {
@@ -237,8 +246,47 @@ t_swewrong() {
   grep -q "1/1 $first: unresolved$" <<<"$out" && jq -e '.resolved == false' "$B/results/$EB/$first.json" > /dev/null \
     || fail "an unresolved grade was not kept as unresolved: $out"
   out=$(loop bench swe 1 2>&1) && grep -q "1/1 $first: unresolved (reused)" <<<"$out" || fail "the unresolved task was built again: $out"
-  [ "$(cut -d ' ' -f 1 "$SWE_FX/graded" | sort -u)" = "$B/raw.$(jq -r .revision "$SRC/bench/swe.json").jsonl" ] && [ -s "$(head -n 1 "$SWE_FX/graded" | cut -d ' ' -f 1)" ] \
-    || fail "the grade was not given the dataset's rows as a .jsonl file: $(cat "$SWE_FX/graded")"
+  [ "$(sort -u "$SWE_FX/graded")" = "$(jq -r '"\(.dataset) \(.revision)"' "$SRC/bench/swe.json") $first" ] \
+    || fail "the grade was not told the pinned dataset and revision to read the task's row from: $(cat "$SWE_FX/graded")"
   out=$(loop bench swe diff v1.0.0 main --json 2>&1) && [ "$(jq -c '[.tasks, (.flipped | length), .withinNoise]' <<<"$out")" = '[1,1,false]' ] \
     || fail "a complete flip of one task was called within the noise: $out"
+}
+
+# Bug: the harness kept every dataset row (each task's reference fix and hidden tests) in the state folder and in
+# Hugging Face's cache, where a card's sessions, a shell as the same account, could read them while they built the
+# task. The real swe_harness.py runs here on stand-in datasets and swebench modules: the stand-in load_dataset keeps
+# its download in the cache it is given, as the real one does, and nothing holding a reference fix or hidden test may
+# stay once tasks or grade ends; the grade still reads the one task's row, from a .jsonl file (the only local form
+# the official harness loads besides .json and .parquet).
+t_sweharness() {
+  local C=$T/$CASE M=$T/$CASE-mods out
+  mkdir -p "$C/tmp" "$C/home" "$M/datasets" "$M/swebench/harness" || fail "the case's folders were not made"
+  printf '%s\n' 'import json, os' 'def load_dataset(name, split, revision):' \
+    '    rows = [{"instance_id": "o__p-%d" % i, "repo": "o/p", "version": "1", "base_commit": "c%d" % i, "problem_statement": "issue %d" % i,' \
+    '             "patch": "REFFIX-%d" % i, "test_patch": "HIDDENTEST-%d" % i} for i in (1, 2)]' \
+    '    d = os.path.join(os.environ.get("HF_DATASETS_CACHE") or os.path.join(os.environ["HF_HOME"], "datasets"), name); os.makedirs(d, exist_ok=True)' \
+    '    open(os.path.join(d, revision + ".json"), "w").write(json.dumps(rows))' \
+    '    return rows' > "$M/datasets/__init__.py"
+  : > "$M/swebench/__init__.py"; : > "$M/swebench/harness/__init__.py"
+  echo 'MAP_REPO_VERSION_TO_SPECS = {"o/p": {"1": {"test_cmd": "pytest"}}}' > "$M/swebench/harness/constants.py"
+  printf '%s\n' 'import json, os, sys, time' 'a = dict(zip(sys.argv[1::2], sys.argv[2::2]))' \
+    'if os.environ.get("SWE_HOLD"):' '    open(os.environ["SWE_HOLD"] + ".pid", "w").write(str(os.getppid()))' \
+    '    while os.path.exists(os.environ["SWE_HOLD"]): time.sleep(0.1)' 'rows = [json.loads(l) for l in open(a["--dataset_name"])]' \
+    'pred = json.loads(open(a["--predictions_path"]).read())' \
+    'ok = a["--dataset_name"].endswith(".jsonl") and [r["instance_id"] for r in rows] == [a["--instance_ids"]] and "fixed" in pred["model_patch"]' \
+    'open("conveyor.%s.json" % a["--run_id"], "w").write(json.dumps({"resolved_ids": [a["--instance_ids"]] if ok else []}))' > "$M/swebench/harness/run_evaluation.py"
+  h() { env PYTHONPATH="$M" TMPDIR="$C/tmp" HOME="$C/home" HF_HOME="$C/home/hf" HF_DATASETS_CACHE="$C/home/hf/ds" python3 "$SRC/bench/swe_harness.py" "$@"; }
+  h tasks o/ds rev1 "$C/list" || fail "tasks failed"
+  [ "$(jq -r .id "$C/list" | tr '\n' ' ')" = 'o__p-1 o__p-2 ' ] || fail "the task list is not the dataset's tasks: $(cat "$C/list")"
+  ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the task list was made"
+  echo fixed > "$C/patch"
+  out=$(h grade o/ds rev1 o__p-2 "$C/patch" "$C/grade") && [ "$out" = '{"resolved": true}' ] \
+    || fail "the grade did not give the official harness the task's own row as a .jsonl file: $out"
+  ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the grade"
+  h grade o/ds rev1 o__p-9 "$C/patch" "$C/grade9" > /dev/null; [ $? = 3 ] || fail "a task missing from the dataset was not reported as one the harness could not run"
+  # Bug: `bench swe stop` sends SIGTERM to the grade, which then ended without removing its cache and the row in it.
+  : > "$C/hold"; SWE_HOLD=$C/hold h grade o/ds rev1 o__p-1 "$C/patch" "$C/gradestop" > /dev/null 2>&1 &
+  wait_until "[ -s '$C/hold.pid' ]" || { rm -f "$C/hold"; fail "the stopped grade did not reach the official harness"; }
+  kill -TERM "$(cat "$C/hold.pid")"; wait $!; rm -f "$C/hold"
+  [ -z "$(ls -A "$C/tmp")" ] && ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a grade stopped with SIGTERM left its cache, with the reference fix and hidden tests, on disk"
 }

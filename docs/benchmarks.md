@@ -97,8 +97,10 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
 - A task's tests run in the task's Docker image, which holds the repository's own environment. A project whose build
   makes compiled parts can fail there for reasons other than the change.
 - The minutes are those of this machine and depend on the other work on it.
-- Conveyor's sessions run on a task as on any card, with a shell on this machine. The task list on this machine holds
-  each task's reference fix and hidden tests, so a session that looks for them can find them.
+- Conveyor's sessions run on a task as on any card, with a shell on this machine. While a card builds, no file on
+  this machine holds the reference fixes and hidden tests from Conveyor: it reads them only to make the task list and
+  to grade a patch, and then removes them. A copy of the dataset that you keep, for example in the Hugging Face cache,
+  stays, and a session that looks for it can find it.
 
 ## Drift watch
 

@@ -7,21 +7,27 @@ swebench, which brings datasets) and a Docker it can use; swe.sh starts it with 
 Usage:
   swe_harness.py tasks <dataset> <revision> <out>
       every task of the dataset at that revision, one JSON line each, in the dataset's order, to <out>:
-      {id, repo, url, base, issue, image, test}; the dataset's own rows to <out>.jsonl (what grade reads: the
-      official harness loads a local dataset only from a file named .json, .jsonl or .parquet).
+      {id, repo, url, base, issue, image, test}: no reference fix and no hidden test.
   swe_harness.py image <image>
       fetches the task's image; exit 3 when it cannot be fetched.
-  swe_harness.py grade <raw dataset> <id> <patch file> <folder>
+  swe_harness.py grade <dataset> <revision> <id> <patch file> <folder>
       grades the patch with the official harness (its run_evaluation, its Docker images, FAIL_TO_PASS and
-      PASS_TO_PASS) in <folder>; prints {"resolved": true|false}; exit 3 when the harness could not run the task
-      (its image could not be fetched or built, or the run erred).
+      PASS_TO_PASS) in <folder>, given the task's own dataset row read again; prints {"resolved": true|false};
+      exit 3 when the harness could not run the task (the task is not in the dataset, its image could not be
+      fetched or built, or the run erred).
+A dataset row holds the task's reference fix and hidden tests, and a card's sessions have a shell as this same
+account: tasks and grade read the dataset into a cache folder of their own (private_cache()) and remove it when they
+end or are stopped (SIGTERM or SIGHUP), so no copy of a row is on disk while a card builds.
 """
 import glob
 import json
 import os
 import shlex
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 
 
 def image_of(instance):
@@ -29,13 +35,22 @@ def image_of(instance):
     return 'swebench/sweb.eval.x86_64.%s:latest' % instance.lower().replace('__', '_1776_')
 
 
+# A new folder as Hugging Face's whole cache (the dataset's download and its rows), for this process and the official
+# harness it starts; the caller removes it.
+def private_cache():
+    d = tempfile.mkdtemp(prefix='conveyor-swe-')
+    os.environ['HF_HOME'] = d
+    for k in ('HF_DATASETS_CACHE', 'HF_HUB_CACHE', 'HUGGINGFACE_HUB_CACHE', 'HF_XET_CACHE', 'HF_ASSETS_CACHE'):
+        os.environ.pop(k, None)
+    return d
+
+
 def tasks(dataset, revision, out):
     from datasets import load_dataset
     from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS
     rows = load_dataset(dataset, split='test', revision=revision)
-    with open(out, 'w') as f, open(out + '.jsonl', 'w') as raw:
+    with open(out, 'w') as f:
         for r in rows:
-            raw.write(json.dumps(dict(r)) + '\n')
             cmd = MAP_REPO_VERSION_TO_SPECS[r['repo']][r['version']]['test_cmd']
             if isinstance(cmd, list):
                 cmd = ' && '.join(cmd)
@@ -51,7 +66,15 @@ def image(name):
     return 0 if subprocess.run(['docker', 'pull', '-q', name], stdout=subprocess.DEVNULL).returncode == 0 else 3
 
 
-def grade(raw, instance, patch, folder):
+def grade(dataset, revision, instance, patch, folder, cache):
+    from datasets import load_dataset
+    rows = [dict(r) for r in load_dataset(dataset, split='test', revision=revision) if r['instance_id'] == instance]
+    if not rows:
+        return 3
+    # The official harness loads a local dataset only from a file named .json, .jsonl or .parquet.
+    raw = os.path.join(cache, 'task.jsonl')
+    with open(raw, 'w') as f:
+        f.write(json.dumps(rows[0]) + '\n')
     os.makedirs(folder, exist_ok=True)
     preds = os.path.join(folder, 'preds.jsonl')
     with open(patch) as p, open(preds, 'w') as f:
@@ -72,13 +95,18 @@ def grade(raw, instance, patch, folder):
 
 
 def main(a):
-    if len(a) == 4 and a[0] == 'tasks':
-        return tasks(*a[1:]) or 0
     if len(a) == 2 and a[0] == 'image':
         return image(a[1])
-    if len(a) == 5 and a[0] == 'grade':
-        return grade(*a[1:])
-    sys.stderr.write('usage: swe_harness.py tasks <dataset> <revision> <out> | image <image> | grade <raw> <id> <patch> <folder>\n')
+    if (len(a) == 4 and a[0] == 'tasks') or (len(a) == 6 and a[0] == 'grade'):
+        # `bench swe stop` ends the run with SIGTERM: exit through the finally below, so the cache is removed then too.
+        for s in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s, lambda n, _: sys.exit(128 + n))
+        cache = private_cache()
+        try:
+            return (tasks(*a[1:]) or 0) if a[0] == 'tasks' else grade(*a[1:], cache)
+        finally:
+            shutil.rmtree(cache, ignore_errors=True)
+    sys.stderr.write('usage: swe_harness.py tasks <dataset> <revision> <out> | image <image> | grade <dataset> <revision> <id> <patch> <folder>\n')
     return 2
 
 
