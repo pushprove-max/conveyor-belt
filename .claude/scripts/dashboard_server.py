@@ -617,10 +617,12 @@ def control_script(action, args, main, today, record=None, user=None):
     if action == 'bench':
         if args[0] == 'run':
             # A run takes hours: it starts on the host and goes on after the answer. One the engine refuses at once (a
-            # run already going, the usage guard reached, a version it cannot take) answers its refusal.
+            # run already going, the usage guard reached, a version it cannot take) answers its refusal on stderr, the
+            # stream the handler reads when a script fails; one that ends well at once (all its results saved before)
+            # answers its summary on stdout, the stream the handler reads when a script succeeds.
             return ('l=$(mktemp) || exit 1; %s bench swe %s > "$l" 2>&1 < /dev/null & p=$!; sleep 3; '
                     'if kill -0 "$p" 2>/dev/null; then rm -f "$l"; echo "conveyor: the SWE-bench run started"; '
-                    'else wait "$p"; r=$?; cat "$l"; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in args[1:]))
+                    'else wait "$p"; r=$?; if [ "$r" = 0 ]; then cat "$l"; else cat "$l" >&2; fi; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in args[1:]))
         return '%s bench swe %s' % (conv, ' '.join(q(x) for x in args))
     if action in ('testaction', 'testrules', 'testmap'):
         # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's;
