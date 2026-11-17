@@ -17,6 +17,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # together, so they would not wait on #7: each other card takes away the patch #7's claim keeps once #7 holds a.txt,
 # and waits on it as on a card whose change cannot be read (together()), so #7 is among the cards of the batch it
 # makes. With $STUB/overlap the patch stays: the cards that wait on #7 are those whose change does not apply with its.
+# Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
+# worktree removed): a card that takes another path fails the case rather than hanging it.
 # A live record every second (the pack's default), not the test pack's 0.2 s: a card waiting at its claim, or on the
 # card whose batch took it, looks again each `live` seconds, and these cases' cards wait a lot; at 0.2 s those looks
 # were 10 to 17% of each case's instructions. The cases wait on what the cards do, not on those seconds.
@@ -25,14 +27,15 @@ batchsetup() { # <issues json>
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   cat > "$STUB/review-cmd" <<'EOF'
 n=${PWD##*-}
-[ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done
+[ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
   [ -e "$STUB/overlap" ] || rm -f ../*-7.cpatch
-  [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; sleep 0.1; done; }
+  [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; }
 EOF
   cat > "$STUB/hold" <<'EOF'
 case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
-  w=1; for n in $(cat "$STUB/ready"); do jq -e .tested ../*-$n.ready >/dev/null 2>&1 && jq -e '.held == false' ../*-$n.claim >/dev/null 2>&1 || w=''; done
-  [ -z "$w" ] || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
+  w=1 g=''; for n in $(cat "$STUB/ready"); do ls -d ../*-$n >/dev/null 2>&1 || g=1
+    jq -e .tested ../*-$n.ready >/dev/null 2>&1 && jq -e '.held == false' ../*-$n.claim >/dev/null 2>&1 || w=''; done
+  [ -z "$w$g" ] || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
 EOF
   echo '8 9' > "$STUB/ready"; tune --arg h "$STUB/hold" '.checks = [$h]'
 }
@@ -155,7 +158,6 @@ if grep -q '^# The changed tests fail' "$STUB/brief"; then sed -i 's/^nine$/nine
 elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven/ a.txt
 else case $PWD in *-7) sed -i '10s/.*/seven/;20s/.*/seven/' a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
 EOF
-  echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; exit 1; }' >> "$STUB/test-cmd"
   echo "$NOSTACK" >> "$STUB/review-cmd"
   echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; printf "%s\n" "== clash.test" "-- FAIL clash.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
@@ -311,20 +313,26 @@ t_batchalone() {
 
 # The batch's card holds the files of every card it took while the batch is tested. #8 changes a.txt and b.txt; #6,
 # picked before it, changes the line of b.txt after the one #8 changes, so its change does not apply with the batch's,
-# and ends its review during the batch's run: it waits on #7 for b.txt, and lands after the batch, brought onto main
-# as the batch left it, never past what the batch was tested on.
+# and ends its review during the batch's run: it is told to wait on #7 for b.txt, which #7 itself does not change. With
+# batches on it is stacked on #7 in place of that wait (stackto(), #223), onto main plus the change #7's claim keeps,
+# the whole batch's: its line 2 then meets #8's line 1 there, so a session fits it (stacked onto #7's own change alone,
+# it would apply as it is). It lands after the batch, brought onto main as the batch left it, never past what the
+# batch was tested on.
 t_batchhold() {
   batchsetup "[$(issue 6 2025-12-31),$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"
   echo 'case $PWD in *-6) sed -i 2s/.*/six/ b.txt ;; *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt; sed -i 1s/.*/eight/ b.txt ;; esac' > "$STUB/build"
-  echo '[ "$n" != 6 ] || [ -e "$STUB/rev6" ] || { : > "$STUB/rev6"; while [ -d "$STUB" ]; do [ -e "$STUB/inbatch" ] && break; sleep 0.1; done; }' >> "$STUB/review-cmd"
+  echo '[ "$n" != 6 ] || [ -e "$STUB/rev6" ] || { : > "$STUB/rev6"; while [ -d "$STUB" ]; do [ -e "$STUB/inbatch" ] && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done; }' >> "$STUB/review-cmd"
+  # The batch's run goes on once #6 holds nothing (stacked or waiting), or is gone (it held b.txt beside the batch and landed).
   cat >> "$STUB/test-cmd" <<'EOF'
 if grep -qx seven a.txt && grep -qx eight b.txt && [ ! -e "$STUB/inbatch" ]; then : > "$STUB/inbatch"
-  while [ -d "$STUB" ]; do jq -e '.held == false' ../*-6.claim >/dev/null 2>&1 && break; sleep 0.1; done; fi
+  while [ -d "$STUB" ]; do jq -e '.held == false' ../*-6.claim >/dev/null 2>&1 && break; ls -d ../*-6 >/dev/null 2>&1 || break; sleep 0.1; done; fi
 EOF
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c6=$(cardof 6); c7=$(cardof 7); c8=$(cardof 8)
-  grep -q "card $c6 waits on card $c7, which changes the same files: b.txt" <<<"$out" || fail "#6 did not wait on the batch's card for b.txt: $out"
+  grep -q "card $c6 is stacked on card $c7, which changes the same files" <<<"$out" \
+    && st "select(.issue == 6 and .step == \"fix\") | .reason" | grep -q "^stacked on card $c7, " \
+    || fail "#6 was not stacked on the batch's card for b.txt, onto the batch's change: $(st 'select(.issue == 6) | "\(.step) \(.reason)"' | tr '\n' ,) $out"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 6 " ] && [ "$(st 'select(.step == "landed" and .issue != 6) | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] \
     || fail "#6 did not land after the batch of #8 and #7: $(st 'select(.step == "landed")')"
   [ "$(sed -n '1p;2p' "$R/b.txt" | tr '\n' ' ')" = "eight six " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/b.txt")"
@@ -479,4 +487,22 @@ EOF
     && [ "$(git -C "$R" log --reverse --format=%s HEAD~2..HEAD | tr '\n' ,)" = "feat(product): title 7 (#7),feat(product): title 8 (#8)," ] \
     || fail "#7 and #8 did not land as one batch, #7 first: $(st 'select(.step == "landed")')"
   [ "$(tail -n 2 "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold both changes, or a mark is left: $(cat "$R/a.txt"; ls "$T/$CASE/cards")"
+}
+
+# Bug: a batch that did not land left its card's claim keeping the whole batch's change (gather()). #8, out of the
+# batch and waiting on #7, was stacked (stackto()) onto main plus that change, #8's own change in it already: it went
+# to a session to fit a change that was there, gave way for it, and #9 went past it. unmate() makes the change #7's
+# claim keeps #7's own again, and takes the batch's marks away; with no batch it leaves that change as it is.
+t_unmatecpatch() {
+  setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  local CARDS=$T/$CASE/cards wt mates
+  mkdir -p "$CARDS"; wt=$CARDS/c7-7; git -C "$R" worktree add -q "$wt" -b card-7 main
+  echo seven >> "$wt/a.txt"; git -C "$wt" add -A
+  echo 'the batch of #7 and #8' > "$wt.cpatch"; : > "$CARDS/c8-8.batch"
+  eval "$(sed -n '/^unbatch() {/p; /^unmate() {/,/^}/p' "$SRC/lib/claim.sh")"
+  mates=(c8-8 c7-7); unmate
+  git -C "$wt" diff --cached --binary --no-renames | cmp -s - "$wt.cpatch" && [ ! -e "$CARDS/c8-8.batch" ] && [ ${#mates[@]} = 0 ] \
+    || fail "#7's claim still keeps the batch's change, or a batch mark is left: $(cat "$wt.cpatch"; ls "$CARDS")"
+  echo 'as its claim kept it' > "$wt.cpatch"; unmate
+  [ "$(cat "$wt.cpatch")" = 'as its claim kept it' ] || fail "with no batch, unmate() changed the change #7's claim keeps: $(cat "$wt.cpatch")"
 }

@@ -48,8 +48,10 @@ case $PWD in *-7) if [ ! -e "$STUB/moved" ]; then cp ../*-7.claim "$STUB/firstte
 esac
 EOF
 }
-# The rebase session's wait for #8 to land.
-GWLANDED='while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"landed\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done'
+# The rebase session's wait for #8 to land. It gives up once #8 is gone (blocked: its worktree removed), or when #7
+# kept its claim through the session (it did not give way), where #8 can only wait on #7: the case then fails, not hangs.
+GWLANDED='while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"landed\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break
+  ls -d ../*-8 >/dev/null 2>&1 || break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done'
 
 # #8 landed first, then #7 from the new main, never both holding a.txt at once, and nothing is left. #7 ran its tests
 # after the rebase on a main without #8: fitted onto #8's main unchanged, it lands on those tests, with no second run
@@ -254,16 +256,18 @@ if grep -q '^# The changed tests fail' "$STUB/brief"; then
   rm -f broken; sed -i 20s/.*/20/ a.txt
 else case $PWD in
   *-7) sed -i '1s/.*/seven/;20s/.*/seven-20/' a.txt; : > broken ;;
-  *) grep -q '^# Stacked\|^# Main moved' "$STUB/brief" || while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done
+  *) grep -q '^# Stacked\|^# Main moved' "$STUB/brief" || while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
     echo eight >> a.txt ;;
 esac; fi
 EOF
+  # A failed run writes the runner's log naming its file, as a runner does: one that names only the test command is no
+  # result (voidrun()), run again and never sent to a fix.
   cat >> "$STUB/test-cmd" <<'EOF'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held == true and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
 case $PWD in *-7) n=$(($(cat "$STUB/runs7" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/runs7"
   cp "$PWD.claim" "$STUB/testclaim.$n"; tail -n 1 a.txt > "$STUB/testlast.$n"; [ $n != 1 ] || . "$STUB/firsttest" ;;
 esac
-[ ! -e broken ] || { echo "FAIL broken.test"; exit 1; }
+[ ! -e broken ] || { echo "FAIL broken.test"; printf "%s\n" "== broken.test" "-- FAIL broken.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }
 EOF
   echo : > "$STUB/firsttest"
 }
@@ -278,8 +282,12 @@ EOF
 # #8's main, tests there and lands: both changes are on main. Never two cards hold a.txt at once.
 t_givewayfix() {
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
-  echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break; sleep 0.1; done' > "$STUB/firsttest"
-  echo "$GWLANDED"'; while [ -d "$STUB" ]; do jq -e .gaveWay "$PWD.live" >/dev/null 2>&1 && break; sleep 0.1; done' > "$STUB/fixing"
+  # #7's first tests end once #8 waits stacked and red, or once #8 took another path: tested (not stacked, or its tests
+  # passed on #7's change) or gone. #7's fix session waits for #8 to land, then for its live record to name #8, unless #7
+  # kept its claim (it did not give way). Each then fails the case below rather than hanging it.
+  echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break
+    jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done' > "$STUB/firsttest"
+  echo "$GWLANDED"'; while [ -d "$STUB" ]; do jq -e .gaveWay "$PWD.live" >/dev/null 2>&1 && break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done' > "$STUB/fixing"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(jq -c .held "$STUB/testclaim.1" 2>/dev/null)" = true ] || fail "#7 did not hold a.txt through its first tests: $(cat "$STUB/testclaim.1" 2>/dev/null)"
   [ "$(jq -c '[.held, .away, .gave, .to, .fixing]' "$STUB/fixclaim" 2>/dev/null)" = '[false,true,1,8,true]' ] \

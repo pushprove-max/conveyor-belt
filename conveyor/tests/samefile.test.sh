@@ -235,23 +235,25 @@ if grep -q '^# The changed tests fail' "$STUB/brief"; then :
 elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
 else case $PWD in
   *-7) echo seven >> a.txt ;;
-  *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; sleep 0.1; done; echo eight >> a.txt ;;
+  *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done; echo eight >> a.txt ;;
 esac; fi
 EOF
   # #7's review ends once #8 holds a.txt; #8's first tests fail once #7 waits on it; #7's tests end once #8 waits on
-  # it at #8's next claim.
+  # it at #8's next claim. Each wait gives up once the card it waits on is gone (a card that holds a.txt lands or is
+  # blocked, its worktree removed), so a change in who waits fails the case below rather than hanging it. A failed run
+  # writes the runner's log naming its file: one that names only the test command is no result (voidrun()).
   cat > "$STUB/review-cmd" <<'EOF'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
 case $PWD in
   *-7) : > "$STUB/inreview.7"; git -C "$R" log --format=%s > "$STUB/main-at-7"
-       while [ -d "$STUB" ]; do jq -e .held ../*-8.claim >/dev/null 2>&1 && break; sleep 0.1; done ;;
+       while [ -d "$STUB" ]; do jq -e .held ../*-8.claim >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
 esac
 EOF
   cat >> "$STUB/test-cmd" <<'EOF'
 case $PWD in *-8) echo x >> "$STUB/failed.8"; [ "$(wc -l < "$STUB/failed.8")" -gt 2 ] || { # its first run and its run again (tests()) fail
-  while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; sleep 0.1; done
-  echo "FAIL a.test"; exit 1; } ;;
-  *-7) [ -e "$STUB/waitlive8" ] || while [ -d "$STUB" ]; do grep -q waiting ../*-8.live 2>/dev/null && { cp ../*-8.live "$STUB/waitlive8"; break; }; sleep 0.1; done ;;
+  while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
+  echo "FAIL a.test"; printf "%s\n" "== a.test" "-- FAIL a.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;;
+  *-7) [ -e "$STUB/waitlive8" ] || while [ -d "$STUB" ]; do grep -q waiting ../*-8.live 2>/dev/null && { cp ../*-8.live "$STUB/waitlive8"; break; }; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
 esac
 EOF
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
@@ -285,7 +287,7 @@ else case $PWD in
 esac; fi
 EOF2
   # #7's first review ends once #8 holds a.txt, with a NO-GO: its fix adds a.txt. #8's first tests fail once #7 waits
-  # on it; #7's tests end once #8 waits on it at #8's next claim.
+  # on it; #7's tests end once #8 waits on it at #8's next claim. A failed run writes the runner's log, as above.
   cat > "$STUB/review-cmd" <<'EOF2'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
 case $PWD in
@@ -299,7 +301,7 @@ EOF2
   cat >> "$STUB/test-cmd" <<'EOF2'
 case $PWD in *-8) echo x >> "$STUB/failed.8"; [ "$(wc -l < "$STUB/failed.8")" -gt 2 ] || { # its first run and its run again (tests()) fail
   while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; sleep 0.1; done
-  echo "FAIL a.test"; exit 1; } ;;
+  echo "FAIL a.test"; printf "%s\n" "== a.test" "-- FAIL a.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;;
   *-7) while [ -d "$STUB" ]; do grep -q waiting ../*-8.live 2>/dev/null && { cp ../*-8.live "$STUB/waitlive8"; break; }; sleep 0.1; done ;;
 esac
 EOF2

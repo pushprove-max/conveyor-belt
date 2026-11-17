@@ -12,7 +12,8 @@
 # Cards (#7, #8 and, when named, #9) with batches on, each GO. Each changes a.txt and a file of its own: #7 x.txt, #8
 # y.txt, #9 z.txt; #7 and #8 change b.txt too. #7 first holds a.txt; each other card's review ends only once it does
 # (its change then waits on #7's), #9's only once #8 is ready. A product check holds #7 before its own tests until #8
-# waits, ready, at its claim, so #7's batch takes it; $STUB/held-then, when there is one, runs once there.
+# waits, ready, at its claim, so #7's batch takes it; $STUB/held-then, when there is one, runs once there. That check
+# gives up once #8 is gone (it held its files beside #7 and landed, or was blocked), failing the case, not hanging it.
 # The test command selects the test files $STUB/map names for the files the change touches (`<file> <test file>`),
 # each of the cases $STUB/cases gives it (`<test file> <case>...`), and does what CONVEYOR_TEST_RERUN asks: a file
 # listed `pass` does not run, a case listed `ok` does not run (unless its file is named in $STUB/whole: a file
@@ -32,7 +33,8 @@ EOF
   cat > "$STUB/hold" <<'EOF'
 case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
   jq -e .tested ../*-8.ready >/dev/null 2>&1 && jq -e '.held == false' ../*-8.claim >/dev/null 2>&1 \
-    && { : > "$STUB/held"; [ ! -f "$STUB/held-then" ] || . "$STUB/held-then"; exit 0; }; sleep 0.1; done ;; esac
+    && { : > "$STUB/held"; [ ! -f "$STUB/held-then" ] || . "$STUB/held-then"; exit 0; }
+  ls -d ../*-8 >/dev/null 2>&1 || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
 EOF
   tune --arg h "$STUB/hold" '.checks = [$h]'
   cat > "$STUB/test-cmd" <<'EOF'

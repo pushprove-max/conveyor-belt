@@ -1084,7 +1084,7 @@ history() {
 work() {
   local host main engine target recs why remote cmd
   hostof || { echo "dashboard: no work reading: $why" >&2; return 1; }
-  cmd=$(jq -er --arg e "$engine/conveyor/conveyor.sh" '.[0].main | strings | "CONVEYOR_MAIN=\(@sh) bash \($e | @sh) work --json"' <<<"$recs") \
+  cmd=$(jq -er --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | .main | @sh | "CONVEYOR_MAIN=\(.) bash \($e | @sh) work --json")' <<<"$recs") \
     || { echo "dashboard: no work reading: the host file names no record" >&2; return 1; }
   RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
   onhost "$cmd" > "$RUN/work" 2>"$RUN/err-work" \
@@ -1102,8 +1102,8 @@ work() {
 older() {
   local host main engine target recs why remote cmd
   hostof || { echo "dashboard: no older runs: $why" >&2; return 1; }
-  cmd=$(jq -er --arg r "$1" --arg f "$2" --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | select(.repo == $r) | .main | strings)
-      | "CONVEYOR_MAIN=\(@sh) bash \($e | @sh) history test \($f | @sh) && { git -C \(@sh) remote get-url origin 2>/dev/null || echo; }"' <<<"$recs") \
+  cmd=$(jq -er --arg r "$1" --arg f "$2" --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | select(.repo == $r) | .main | @sh)
+      | "CONVEYOR_MAIN=\(.) bash \($e | @sh) history test \($f | @sh) && { git -C \(.) remote get-url origin 2>/dev/null || echo; }"' <<<"$recs") \
     || { echo "dashboard: no older runs: the host file names no record $1" >&2; return 1; }
   RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
   onhost "$cmd" > "$RUN/older" 2>"$RUN/err-older" \

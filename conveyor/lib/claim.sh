@@ -508,7 +508,15 @@ gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batc
   done
 }
 unbatch() { local m; for m in "$@"; do rm -f "$CARDS/$m.batch"; done; } # <card>...: out of the batch; each waits on at its claim, as before
-unmate() { unbatch "${mates[@]}"; mates=(); } # card()'s batch, its cards out of it (the card itself has no mark)
+# card()'s batch, its cards out of it (the card itself has no mark). The change the card's claim keeps is its own again,
+# not the batch's (gather()): a card stacked on it now (stackto()) is fitted onto main plus this card's change, never
+# onto one that holds the stacked card's own change already (it was then sent to a session to fit a change already
+# there, and went away while a later card went past it).
+unmate() {
+  [ ${#mates[@]} = 0 ] || { git -C "$wt" diff --cached --binary --no-renames > "$wt.cpatch.new" && mv -f "$wt.cpatch.new" "$wt.cpatch"; } \
+    || rm -f "$wt.cpatch" "$wt.cpatch.new"
+  unbatch "${mates[@]}"; mates=()
+}
 # land()'s five of each card of card()'s batch (mates), in order: the card's own as given, each other's from its
 # <worktree>.ready; with skip, the card's own left out. A NUL after each.
 fives() { # <card> <issue> <worktree> <commit message> <extra json> [skip]
