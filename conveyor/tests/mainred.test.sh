@@ -119,16 +119,20 @@ t_mainfixedcaught() {
   loop run 1 > /dev/null || fail "run exited non-zero"
   caughtland
 }
-# Main fails the case too: the card waits for main to change, and main changes the same line.
+# Main fails the case too: the card waits for main to change, and main changes the same line. Its landed line's
+# waitSec counts that wait (at least the 1 s slept here). Bug it catches: the drift watch (bench/drift.sh) had no
+# minutes a card waited for main, as no line recorded them.
 t_mainredcaught() {
   caughtsetup 'main fail one'
   local lp
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until 'grep -qs "waiting for main to change" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' || fail "the card did not wait for main: $(cat "$STUB/run.out")"
+  sleep 1 # sleep: the card waits for main a whole second at least, so its waitSec is 1 or more
   sed -i '/^main /d' "$STUB/plan"
   echo main2 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "main moves again"; git -C "$R" rev-parse HEAD > "$STUB/m2"
   wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
   caughtland
+  [ "$(st 'select(.step == "landed") | .waitSec >= 1')" = true ] || fail "the landed line does not count the wait for main: $(st 'select(.step == "landed") | .waitSec')"
 }
 
 # Issue 598. Bug it catches: a landing broke a test its card did not run, and nothing linked the test to the files it

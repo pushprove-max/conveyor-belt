@@ -38,7 +38,7 @@ case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
   w=1 g=''; for n in $(cat "$STUB/ready"); do
     if ls -d ../*-$n >/dev/null 2>&1; then : > "$STUB/seen.$n"; elif [ -e "$STUB/seen.$n" ]; then g=1; fi
     jq -e .tested ../*-$n.ready >/dev/null 2>&1 && jq -e '.held == false' ../*-$n.claim >/dev/null 2>&1 || w=''; done
-  [ -z "$w$g" ] || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
+  [ -z "$w$g" ] || { [ ! -e "$STUB/holdsec" ] || sleep 1; : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac # sleep: #8 and #9 must have waited a second on #7
 EOF
   echo '8 9' > "$STUB/ready"; tune --arg h "$STUB/hold" '.checks = [$h]'
 }
@@ -52,9 +52,10 @@ batchruns() { grep -c "tests a batch of" <<<"$out"; } # the batch test runs the 
 # The owner (2026-11-12): eight cards that shared files landed one after another, each on its own 10 to 25 minute
 # test run. Three ready cards sharing a file land together: one test run, then one move of main with each card's own
 # commit and message, in the order they became ready (#7, whose turn it is, last), and each card's own landed line,
-# as if it landed alone, naming the batch; one push carries them.
+# as if it landed alone, naming the batch; one push carries them. #7's check holds a second more once #8 and #9 wait
+# ($STUB/holdsec), so each has waited a second at least when the batch lands it.
 t_batchland() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
+  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; : > "$STUB/holdsec"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac' > "$STUB/build"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
@@ -68,6 +69,10 @@ t_batchland() {
     [ "$(git -C "$R" log -1 --format=%s "$s" 2>/dev/null)" = "feat(product): title $n (#$n)" ] || fail "#$n's landed line does not name its own commit: $s"
     [ "$(st "select(.issue == $n and .step == \"landed\") | .batch | join(\" \")")" = "$c8 $c9 $c7" ] \
       || fail "#$n's landed line does not name the batch, in order: $(st "select(.issue == $n and .step == \"landed\")")"
+    # Bug it catches: a card a batch landed (#8, #9) had no waitSec, or none of its wait on #7, so the drift watch had
+    # no wait for it.
+    [ "$(st "select(.issue == $n and .step == \"landed\") | .waitSec | type == \"number\" and ($n == 7 or . >= 1)")" = true ] \
+      || fail "#$n's landed line has no waitSec, or not its wait on #7: $(st "select(.issue == $n and .step == \"landed\")")"
     [ "$(st "select(.issue == $n and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
       || fail "steps of #$n: $(st "select(.issue == $n) | .step" | tr '\n' ' ')"
   done

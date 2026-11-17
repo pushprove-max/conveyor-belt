@@ -67,6 +67,8 @@ The loop:
   (`conveyor/README.md`, Why the machine is busy).
 - `bench responsiveness` times a short command start and a 10 ms CPU task beside card work, with Card work yields to
   you on and off by turns, and prints the median and p90 of each.
+- `bench drift [<engine commit>]` compares the cards that ran on an engine commit with the cards that ran on the
+  commit before it: tokens, minutes, reviews to land, fix rounds, blocks and waits (the [drift watch](benchmarks.md#drift-watch)).
 - `install-service` installs `machine` as the machine's service.
 - `board` installs the [Board](board.md#install-the-board) as a user service, for the project of the checkout it runs in.
 

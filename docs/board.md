@@ -300,7 +300,11 @@ issue number, as a link, and the issue title.
 ## Tests page
 
 The Tests tab shows, from top to bottom: the Test map, the figures, the table of test files, Test edits by cards,
-Removed by Optimize, Recent actions, and Settings.
+Removed by Optimize, Recent actions, Benchmarks, and Settings.
+
+The Benchmarks part shows the latest [drift watch](benchmarks.md#drift-watch): the cards of the latest engine commit
+against the cards of the commit before it, with the number of cards in each group. It says when a group is too small
+to mean anything.
 
 The Test map part shows the state of the [test map](configuration.md#the-test-map). A made map shows how many source
 files and test files it maps, how many commits it is behind main, when it was made and how long its run took. The

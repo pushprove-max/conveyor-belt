@@ -233,9 +233,12 @@ clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdraw
 # A reason's first line is the sentence (what failed, what landed): the line's reason. What follows it is the end of
 # the output that failed (tests, a check, a session's errors): the line's tail, its newlines kept (line() keeps the
 # last 60 lines of it), so the Board shows the sentence and the output apart. SPEEDCHECKED, when set, is the version
-# of the speed check that blocks the card (SPEEDCHECK, lib/testrun.sh): the line's speedcheck.
+# of the speed check that blocks the card (SPEEDCHECK, lib/testrun.sh): the line's speedcheck. Called in card(), the
+# line's waitSec is the seconds the card waited on other cards and for main to change (card()'s waitsec and mainsec),
+# as on its landed line, for the drift watch (bench/drift.sh); outside card() it has none.
 block() { # <card> <issue> <worktree> <reason> [post the reason on the issue whatever the review holds]
-  local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err
+  local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null
+  [ -z "${waitsec+x}" ] || ws=$((waitsec + ${mainsec:-0}))
   [[ $4 != *$'\n'* ]] || tail=$(tail -n 60 <<<"${4#*$'\n'}")
   # Its claim on its files goes first: a card waiting on them goes on now, not after the comment and the evidence.
   rm -f "$3.claim" "$3.claim.new" "$3.cpatch" "$3.cpatch.new"
@@ -288,8 +291,8 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   sp=$(jq -ce 'objects' "$3.spent" 2>/dev/null) || sp=null; rm -f "$3.spent"
   reading fresh >/dev/null 2>&1
   # The tail comes on stdin: it can be more than one argument can hold.
-  record "$1" "$2" blocked blocked "$(printf '%s' "$tail" | jq -cRs --arg r "$reason" --arg k "${kept:+kept/$1}" --argjson d "$size" --argjson e "$(ending)" --argjson sp "$sp" --argjson p "${named:-null}" --arg sc "${SPEEDCHECKED:-}" '. as $t | {reason:$r,kept:$k} + (if $t == "" then {} else {tail: $t} end)
-    + (if $sc == "" then {} else {speedcheck: ($sc | tonumber)} end) + (if $d == null then {} else {diff: $d} end) + (if $p == null then {} else {paths: $p} end) + $e
+  record "$1" "$2" blocked blocked "$(printf '%s' "$tail" | jq -cRs --arg r "$reason" --arg k "${kept:+kept/$1}" --argjson d "$size" --argjson e "$(ending)" --argjson sp "$sp" --argjson p "${named:-null}" --arg sc "${SPEEDCHECKED:-}" --argjson ws "$ws" '. as $t | {reason:$r,kept:$k} + (if $t == "" then {} else {tail: $t} end)
+    + (if $sc == "" then {} else {speedcheck: ($sc | tonumber)} end) + (if $ws == null then {} else {waitSec: $ws} end) + (if $d == null then {} else {diff: $d} end) + (if $p == null then {} else {paths: $p} end) + $e
     + (if $sp == null then {} else {spent: $sp, tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)}} end)
     + (if ($sp.stalls // 0) > 0 then {stalls: $sp.stalls} else {} end)')"
 }

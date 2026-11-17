@@ -304,8 +304,12 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
   ! jq -e '.away == true and (.to | type) == "number"' "$3.claim" >/dev/null 2>&1 || caught=''
   while :; do
     # In a wait, what the card has waited is brought up to date each time round, the last one of the wait too: a wait
-    # that ends between two looks counts whole.
-    [ -z "$waited" ] || waitsec=$((wb + SECONDS - ws))
+    # that ends between two looks counts whole. A ready card's <worktree>.ready carries it too (extra.waitSec, with
+    # card()'s mainsec): a batch that lands it writes its landed line from that extra (fives()), for the drift watch.
+    if [ -n "$waited" ]; then
+      waitsec=$((wb + SECONDS - ws))
+      [ ! -e "$3.ready" ] || { jq -c --argjson w "$((waitsec + ${mainsec:-0}))" '.extra.waitSec = $w' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready.new"
+    fi
     # A change a session changed here is reviewed again before it lands: no batch takes it till then (gather()).
     [ $moved = 0 ] || rm -f "$3.ready"
     # The card records kept in this shell (stdb, lib/records.sh): a look that finds them unchanged asks no database.

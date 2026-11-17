@@ -157,3 +157,87 @@ t_benchsimulate() {
   out=$("$SRC/bench/simulate.sh" "$f.bad" proposal:1:0:1 2>&1) && fail "a call with no pass field was read: $out"
   [[ $out == *"a call lacks case, pass"* ]] || fail "a call with no pass field was not refused as one: $out"
 }
+
+# The drift watch's fixture records: engine commit A (written first) ran 5 ended cards, a1 to a4 landed (10 minutes,
+# 1200 tokens, 1 review, waited 60 s; a4's landed line has no waitSec) and a5 blocked (30 minutes, 1800 tokens, 2
+# reviews, 1 fix, waited 360 s; its issue closed 200 minutes after it began, which does not end it again); engine
+# commit B ran b1 and b2 landed (20 minutes, 3000 tokens, 2 reviews, 1 fix, waited 300 s) and b3, still open, which
+# does not count.
+DRIFTA=aaaaaaaa11111111111111111111111111111111 DRIFTB=bbbbbbbb22222222222222222222222222222222
+driftrecs() {
+  local c
+  dc() { # <card> <engine> <first minute> <end step> <minutes> <reviews> <fixes> <claude tokens> [waitSec]
+    jq -nc --arg c "$1" --arg e "$2" --argjson m "$3" --arg end "$4" --argjson d "$5" --argjson r "$6" --argjson f "$7" --argjson k "$8" --argjson w "${9:-null}" '
+      def t($x): 1794787200 + ($m + $x) * 60 | todate; def l($s; $x): {card: $c, issue: 1, step: $s, time: t($x), tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""};
+      l("picked"; 0), (l("worktree"; 0) + {engine: $e}), (l("build"; 1) | .tokens.claude = $k),
+      (range($r) | l("review"; 2) | .tokens.codex = 100), (range($f) | l("fix"; 3) | .tokens.claude = 400),
+      if $end == "" then empty else l($end; $d) + (if $end == "landed" then {sha: "0123abcd", product: true} else {} end)
+        + (if $w == null then {} else {waitSec: $w} end) end'
+  }
+  for c in 1 2 3; do dc "a$c" "$DRIFTA" "$c" landed 10 1 0 1100 60; done
+  dc a4 "$DRIFTA" 4 landed 10 1 0 1100
+  dc a5 "$DRIFTA" 5 blocked 30 2 1 1200 360
+  jq -nc '{card: "a5", issue: 1, step: "closed", time: (1794787200 + 205 * 60 | todate), tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}'
+  dc b1 "$DRIFTB" 100 landed 20 2 1 2400 300; dc b2 "$DRIFTB" 101 landed 20 2 1 2400 300; dc b3 "$DRIFTB" 102 '' 0 1 0 5000
+}
+# Bugs: a card is counted on the wrong engine commit, or before it ended; a mean takes in a card it should not (reviews
+# to land a blocked card's, minutes waited a card with no waitSec: A's would be 1.8, not 2.3); a group of 2 cards is
+# shown as if it meant something, or the group of 5 is called too small; an engine commit with nothing before it is
+# compared with nothing; a blocked card whose issue is closed later counts as closed, its minutes to the close (a5's
+# would be 200); a blocked card's wait is left out (A's would be 1); an engine commit whose cards all still run (C) is skipped, so the latest
+# change is compared as B against A, and `drift.sh <C>` is refused.
+t_benchdrift() {
+  local f=$T/$CASE/recs.jsonl out
+  mkdir -p "$T/$CASE" && driftrecs > "$f"
+  out=$("$SRC/bench/drift.sh" "$f") || fail "the drift watch failed: $out"
+  [ "$out" = "Figure                 before aaaaaaaa  after bbbbbbbb
+Cards                  5                2
+Landed                 4                2
+Blocked                1                0
+Tokens a card          1320             3000
+Minutes a card         14               20
+Reviews to land        1                2
+Fix rounds a card      0.2              1
+Minutes waited a card  2.3              5
+The after group holds 2 cards: too small to mean anything (fewer than 5 cards)." ] || fail "the drift table is not the expected one: $out"
+  [ "$("$SRC/bench/drift.sh" --json "$f" bbbbbbbb | jq -c '[.before.engine, .after.engine, .small]')" = "[\"$DRIFTA\",\"$DRIFTB\",[\"after\"]]" ] \
+    || fail "the drift watch of engine commit B is not A against B: $("$SRC/bench/drift.sh" --json "$f" bbbbbbbb)"
+  out=$("$SRC/bench/drift.sh" "$f" aaaaaaaa 2>&1) && fail "engine commit A, the first, was compared: $out"
+  [ "$out" = "drift: no card ran on an engine commit before aaaaaaaa" ] || fail "the first engine commit was not refused as one: $out"
+  # Engine commit C: its one card still runs. It is the latest change, compared with B, its group empty.
+  jq -nc '{card: "c1", issue: 3, step: "worktree", time: (1794787200 + 300 * 60 | todate), tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "", engine: "cccccccc33333333333333333333333333333333"}' >> "$f"
+  for out in "$("$SRC/bench/drift.sh" --json "$f" 2>&1)" "$("$SRC/bench/drift.sh" --json "$f" cccc 2>&1)"; do
+    [ "$(jq -c '[.before.engine[:8], .before.cards, .after.engine[:8], .after.cards, .small]' <<<"$out" 2>/dev/null)" = '["bbbbbbbb",2,"cccccccc",0,["before","after"]]' ] \
+      || fail "engine commit C, whose card still runs, was not compared with B: $out"
+  done
+}
+# Bugs: `conveyor.sh bench drift` does not read the retried file (a5's lines are there, as `retry` moved them); the
+# snapshot does not carry the latest drift watch, or keeps a stale one once the records change.
+t_benchdriftsnap() {
+  setup '[]'
+  local out
+  driftrecs | grep -v '"card":"a5"' > "$ST/cards.jsonl"; driftrecs | grep '"card":"a5"' > "$ST/retried.jsonl"
+  recok "$ST/cards.jsonl" "the drift fixture"
+  out=$(loop bench drift) || fail "bench drift failed: $out"
+  [ "$out" = "$("$SRC/bench/drift.sh" <(driftrecs))" ] || fail "bench drift did not compare the records and the retried file: $out"
+  [ "$(loop snapshot | jq -c '.drift | [.before.cards, .after.cards, .after.engine]')" = "[5,2,\"$DRIFTB\"]" ] || fail "the snapshot has no drift watch of the records: $(loop snapshot | jq -c .drift)"
+  jq -c '.card = "b4" | .issue = 2' <(grep '"card":"b1"' "$ST/cards.jsonl") >> "$ST/cards.jsonl"
+  [ "$(loop snapshot | jq -c .drift.after.cards)" = 3 ] || fail "the snapshot kept the drift watch of the records before the change: $(loop snapshot | jq -c .drift)"
+  # A card starts on a new engine commit (only its worktree line): the snapshot's drift is that commit against B.
+  jq -c '.card = "c1" | .issue = 3 | .engine = "cccccccc33333333333333333333333333333333" | .time = "2026-11-17T00:00:00Z"' <(grep '"card":"b1","issue":1,"step":"worktree"' "$ST/cards.jsonl") >> "$ST/cards.jsonl"
+  [ "$(loop snapshot | jq -c '.drift | [.before.engine[:8], .after.engine[:8], .after.cards]')" = '["bbbbbbbb","cccccccc",0]' ] \
+    || fail "the snapshot kept the drift watch from before a card started on a new engine commit: $(loop snapshot | jq -c .drift)"
+}
+# Bugs: a blocked line had no waitSec, so the drift watch had no wait for a blocked card; block() outside card() (the
+# loop blocking a card whose process ended) wrote a wait it did not know. In card(), waitsec and mainsec are its waits.
+t_blockwaitsec() {
+  setup "[$(issue 5 2026-01-01)]"
+  local c=c20260101T000000-x-5 out
+  # shellcheck disable=SC2034 # waitsec and mainsec are read by block(), as card()'s locals are
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards c; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
+    && incard() { local waitsec=90 mainsec=30; block "$c" 5 "$CARDS/$c" "build: it failed"; } && incard \
+    && block "$c-2" 5 "$CARDS/$c-2" "build: it failed" ) 2>&1) || fail "block() failed: $out"
+  [ "$(st 'select(.step == "blocked") | [.card, .waitSec] | tojson' | tr '\n' ' ')" = "[\"$c\",120] [\"$c-2\",null] " ] \
+    || fail "the blocked lines do not carry the card's waits, or one outside card() carries one: $(st 'select(.step == "blocked")')"
+}

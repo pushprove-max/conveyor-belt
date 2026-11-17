@@ -1993,6 +1993,24 @@
     return el;
   }
 
+  // Benchmarks: the latest drift watch of the project (`conveyor.sh bench drift`, the snapshot's drift): the ended cards
+  // of the latest engine commit against those of the one before, a mean a card of each figure, and a group of fewer
+  // than 5 cards called too small to mean anything.
+  function benchPart(dr) {
+    const h = S.ctx.h, el = h('section', 'tests-bench'), b = obj(dr.before) || {}, a = obj(dr.after) || {};
+    const v = (x) => (typeof x === 'number' ? String(x) : '-');
+    const sha = (g) => String(g.engine || '').slice(0, 8);
+    const figs = [['tokens a card', 'tokens'], ['minutes a card', 'minutes'], ['reviews to land', 'reviews'], ['fix rounds a card', 'fixes'],
+      ['blocked', 'blocked'], ['minutes waited a card', 'waits']].map(([n, k]) => `${n} ${v(b[k])} to ${v(a[k])}`);
+    const cards = (g) => `${v(g.cards)} ${g.cards === 1 ? 'card' : 'cards'}`;
+    el.append(h('h3', 'board-head', 'Benchmarks'),
+      h('p', 'tests-drift', `Drift watch, engine ${sha(b)} (${cards(b)}) against ${sha(a)} (${cards(a)}): ${figs.join(', ')}.`));
+    (Array.isArray(dr.small) ? dr.small : []).filter((k) => k === 'before' || k === 'after').forEach((k) => {
+      el.append(h('p', 'warn-note', `The ${k} group holds ${cards(k === 'before' ? b : a)}: too small to mean anything (fewer than 5 cards).`));
+    });
+    return el;
+  }
+
   function draw() {
     const el = S.el, h = S.ctx.h;
     if (S.d.repo === null) {
@@ -2035,6 +2053,7 @@
       parts.push(recent(files, gone));
       set.append(actionsHead(), limits(), autofile());
     }
+    if (obj(S.d.drift)) parts.push(benchPart(S.d.drift));
     parts.push(set);
     const note = h('p', 'board-note tests-note');
     note.setAttribute('aria-live', 'polite');

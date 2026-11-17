@@ -578,7 +578,7 @@ answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .hea
     optimize: [{issue: 70, time: "2026-11-01T00:00:00Z", state: "landed", sha: "abc1234", fix: "sped up", into: [], before: 10, after: 4, since: 3.5, sinceRuns: 2},
       {issue: 71, state: "open"}, {issue: 72, state: "open"}]}]} | .open.issues = [{issue: 71}]
   | .testActions = {limit: 900, actions: [{id: "0123456789ab", action: "judge", file: "a.test.sh", state: "running", text: "first words"}], allowed: {claude: ["m1", "m2"]}}
-  | .control.tests = {cli: "claude", model: "m1", effort: "high"} | .testMap = {state: "none", tool: "V8 coverage", build: null}
+  | .control.tests = {cli: "claude", model: "m1", effort: "high"} | .testMap = {state: "none", tool: "V8 coverage", build: null} | .drift = {before: {cards: 5}, after: {cards: 2}, small: ["after"]}
   | .modelSettings = {judge: {clis: {claude: {models: ["m1"], efforts: ["high"]}}}}' <<<"$P")")" "$P_URL" 1794000000 "$(with_machine "$ML" "$C3")" "$C_URL" 0
 run
 # Bug (#462): the Board could not show the machine's load limit, nor its cores and load beside it. They are the
@@ -615,6 +615,9 @@ q '.panels.tests.data | (.testActions.actions | map([.id, .text])) == [["0123456
 # Bug (#178): the Tests page had no test map to show, nor a tool to build it with. Each project's own reaches it.
 q '.panels.tests.data | .testMap == {state: "none", tool: "V8 coverage", build: null} and .others.widgetshop.testMap == null' \
   "the Tests part holds its project's test map part"
+# Bug (#237): the Board had no drift watch to show beside the benchmark results. Each project's own reaches its Tests part.
+q '.panels.tests.data | .drift == {before: {cards: 5}, after: {cards: 2}, small: ["after"]} and .others.widgetshop.drift == null' \
+  "the Tests part holds its project's latest drift watch"
 q '.panels.rules.data | has("machine") | not' "the Rules part no longer carries the load limit: the Tests page has it"
 q '.panels.machine.data | .state == "running" and .cap == 5 and .used == 4 and (.projects | map([.repo, .state, .mode, .used, .cap])) == [["sample", "paused", "pause", 1, 3], ["widgetshop", "running", "run", 3, 2]]' \
   "one machine head: 4 of 5, the slots of both projects (3 and 2) under the machine's 10; sample's own pause leaves widgetshop and the machine running"

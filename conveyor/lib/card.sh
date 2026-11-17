@@ -51,6 +51,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
+  local mainsec=0 mw # mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' ob='' # kw: keptway()'s answer for a kept patch; ob: the budget of its own its build proposes (ownbudget())
@@ -491,8 +492,9 @@ card() { # <card> <issue> [<branch> <tip>]
     # its tests passed, it takes the ready cards that share them, and one run judges them all (batch()). Tests that
     # passed while it waited on what its worktree still holds are not run again (testedhere()). A card that files a
     # last NO-GO's follow-ups keeps its pass there too, marked alone: no batch takes it or is taken by it.
-    rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$([ -n "$last" ] && echo true || echo false)" \
-      '{issue: $i, msg: $m, extra: (if $y then {yesFrom: $y} else {} end)} + (if $a then {alone: true} else {} end)' > "$wt.ready"
+    # Its extra's waitSec is what it has waited so far; settle() keeps it up to date while it waits (a batch lands it).
+    rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$([ -n "$last" ] && echo true || echo false)" --argjson w "$((waitsec + mainsec))" \
+      '{issue: $i, msg: $m, extra: ({waitSec: $w} + if $y then {yesFrom: $y} else {} end)} + (if $a then {alone: true} else {} end)' > "$wt.ready"
     # Back from the landing rebuild with its change outside documentation the one that passed its tests (docpass): it
     # lands on that run, with only its product checks run again.
     [ -z "$docpass" ] || { [ "$docpass" != "$(cardpatch "$wt" ':(exclude)*.md')" ] || tested "$wt"; docpass=''; }
@@ -621,7 +623,8 @@ card() { # <card> <issue> [<branch> <tip>]
         elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
           echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
           rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-          mainwait "$wt" "$(jq -r .mainRun.sha <<<"$t")" "$(jq -r '[.verdicts[] | select(.verdict == "main") | .case] | join(", ")' <<<"$t")"; held=1
+          mw=$SECONDS; mainwait "$wt" "$(jq -r .mainRun.sha <<<"$t")" "$(jq -r '[.verdicts[] | select(.verdict == "main") | .case] | join(", ")' <<<"$t")"; held=1
+          mainsec=$((mainsec + SECONDS - mw))
         fi
         if [ -n "$held" ]; then
           unmate; away=''; caught=''
@@ -716,7 +719,10 @@ card() { # <card> <issue> [<branch> <tip>]
         # A case that joined during its last test run stages its links before it lands (redbrief()).
         began "$c" "$n" land; redbrief "$c" "$n" "$br"
         reading fresh >/dev/null 2>&1 # the after reading of the landed line, asked for outside the lock
-        extra=$left; [ -z "$yesfrom" ] || extra=$(jq -c --argjson f "$yesfrom" '. + {yesFrom: $f}' <<<"${left:-"{}"}")
+        # waitSec: the seconds it waited on other cards (settle()) and for main to change (mainwait()), for the drift
+        # watch (bench/drift.sh).
+        extra=$(jq -c --argjson w "$((waitsec + mainsec))" '. + {waitSec: $w}' <<<"${left:-"{}"}") || extra=$left
+        [ -z "$yesfrom" ] || extra=$(jq -c --argjson f "$yesfrom" '. + {yesFrom: $f}' <<<"${extra:-"{}"}")
         if [ ${#mates[@]} != 0 ]; then mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" "$extra"); else t5=("$c" "$n" "$wt" "$cmsg" "$extra"); fi
         # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
         t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "follow-up of a follow-up" <<<"$dec" \

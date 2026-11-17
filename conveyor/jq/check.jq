@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -38,6 +38,8 @@ def ok: . as $r | (keys - known) == need
         and (.retriedAt // "2000-01-01T00:00:00Z" | fromdate | type == "number")
         # speedcheck: the version of the speed check that blocked the card; retriedWhy: why the loop retried it itself.
         and (.speedcheck // 0 | type == "number") and (.retriedWhy // "" | type == "string")
+        # waitSec: the seconds a landed or blocked card waited on other cards and for main to change (card(), block()).
+        and (.waitSec // 0 | type == "number")
         # cost: the dollars an OpenCode review's own usage report gave (OCREVIEWREAD).
         and (.sec // 0 | type == "number") and (.cost // 0 | type == "number") and (.limit // 0 | type == "number") and (.depth // 0 | type == "number") and (.yesFrom // 0 | type == "number") and (.stalls // 0 | type == "number")
         and (.paths // [] | type == "array" and all(type == "string")) and (.batch // [] | type == "array" and all(type == "string"))

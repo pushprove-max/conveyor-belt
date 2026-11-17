@@ -28,7 +28,8 @@
 #   moved, reasons}: the release
 #   record of commands/release-prep.sh, its cases counted as the suite runs; the full test's run under way, else its
 #   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, written,
-#   head, releases}, null when main cannot be read. The
+#   head, releases}, null when main cannot be read. drift is the latest drift watch (driftof(), bench/drift.sh --json):
+#   the ended cards of the latest engine commit a card ran on against those of the one before, null while there are not two. The
 #   first two carry reviews
 #   and track, as below: a blocked card is off the belt, and its track is where the step it stopped in is failed,
 #   with the seconds that step ran.
@@ -349,6 +350,18 @@ releasemain() {
     '{tag: (if $t == "" then null else $t end), count: $c, commits: [split("\n")[] | select(. != "") | split("\t") | {sha: .[0], subject: (.[1:] | join("\t"))}],
       next: $n, notes: $nt, written: [$w | split("\n")[] | select(. != "")], head: $h, releases: $rel}'
 }
+# The drift watch of the snapshot's copy of the records (bench/drift.sh --json), else null. It reads the worktree lines
+# (the engine commits, in order) and the cards that ended, and a card writes no line that it reads after its end line:
+# it is kept in $STATE.drift beside the sum of the worktree and end lines (landed, closed, blocked) it was made of, and
+# made again only when they changed.
+driftof() { # <scratch folder>
+  local k v
+  k=$(grep -hE '"step":"(worktree|landed|closed|blocked)"' -- "$1/${STATE##*/}" "$1/${RETRIED##*/}" 2>/dev/null | cksum) || { echo null; return; }
+  if [ "$(head -n 1 "$STATE.drift" 2>/dev/null)" = "$k" ] && v=$(sed -n 2p "$STATE.drift") && [[ $v == null || $v == \{* ]]; then printf '%s\n' "$v"; return; fi
+  v=$(cat -- "$1/${STATE##*/}" "$1/${RETRIED##*/}" 2>/dev/null | "$HERE/bench/drift.sh" --json /dev/stdin 2>/dev/null) || v=null
+  { printf '%s\n%s\n' "$k" "$v" > "$STATE.drift.$$" && mv -f "$STATE.drift.$$" "$STATE.drift"; } 2>/dev/null || rm -f "$STATE.drift.$$"
+  printf '%s\n' "$v"
+}
 checkrun() { # <scratch folder>; prints {} when the pack names no progress command, else {checkRun: ...}
   local cmd f=${STATE%/*}/checkrun.json out rc v
   cmd=''; ! packget checks cmd 2>/dev/null || cmd=$(jq -r 'objects | .progress // empty' <<<"$cmd" 2>/dev/null)
@@ -518,14 +531,14 @@ snapshot() (
   ft=$({ tail -n 1 "$FULLTEST" 2>/dev/null || :; } | jq -cs --arg ft "$ft" --argjson r "$fr" '{command: ($ft != ""),
       why: (if $ft == "" then "the pack names no full test suite (test.full)" else null end), running: $r, last: (map(objects) | last)}' 2>/dev/null) || ft=null
   # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).
-  su=$(suites) || su='[]'; rl=$(releasemain) || rl=null
+  su=$(suites) || su='[]'; rl=$(releasemain) || rl=null; dr=$(driftof "$d")
   packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
-  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --argjson q "$queue" --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -705,6 +718,7 @@ snapshot() (
        fullTest: $ft,
        suites: $su,
        release: $rl,
+       drift: $dr,
        flaky: $fl,
        slowOff: $so,
        belt: [($c[] | select(.result == "")), ($c[] | select(.x.after != null and .x.after != "wait")) | sofar as $s | (.x.after != null) as $landed

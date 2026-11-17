@@ -86,7 +86,7 @@ for your yes and push errors. Set it up with `/conveyor-belt:setup --foreman` ([
 
 [Setup](docs/setup.md) · [How a card goes](docs/cards.md) · [Commands](docs/commands.md) · [Configuration](docs/configuration.md) ·
 [The Board](docs/board.md) · [Foreman](docs/foreman.md) · [Lanes](docs/lanes.md) · [/units](docs/units.md) ·
-[Releases](docs/releases.md) · [Credits](docs/credits.md) ·
+[Releases](docs/releases.md) · [Benchmarks](docs/benchmarks.md) · [Credits](docs/credits.md) ·
 [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md)
 
 ## License
