@@ -336,7 +336,10 @@ The host file holds the machine's settings. Each is unset by default:
   waiting take the free slots in turn.
 - `maxLoad` and `minFreeMemMB`: no new card starts while the 1-minute load is above `maxLoad`, or the free memory (MB)
   is below `minFreeMemMB`. The Board shows the next card as "waiting for machine room". The Board's Tests page sets
-  `maxLoad` as **Load limit** (`conveyor.sh machine load <number | off>`).
+  `maxLoad` as **Load limit** (`conveyor.sh machine load <number | off>`). With neither set, the machine's pressure
+  holds new cards and tests back.
+- `pressure`: the thresholds of the machine's states, Steady, Busy and Strained
+  ([The machine room](configuration.md#the-machine-room)).
 - `"mode": "pause"` pauses every project. `conveyor.sh machine pause` and `machine resume` write it, and so does the
   Board's machine head.
 - `testSlots`: the size of the machine's pool of test slots, one core each (`conveyor/README.md`, Test slots).

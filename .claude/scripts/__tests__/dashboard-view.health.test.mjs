@@ -426,3 +426,30 @@ test("Health: the machine's Conveyor on an older commit that refuses the pack na
   deliver(ok, full());
   assert.equal(panel(ok, 'health').querySelector('dt[data-check="Conveyor\'s version"]'), null, 'no row while the machine reads the pack');
 });
+// Issue 195. Bugs it catches: Health did not show the machine's pressure, so a card held for the machine room had no
+// figure to show why; a Strained machine was a fine row. The row shows the state, the PSI figures and the wake delay,
+// with the figure that set the state; Strained is a warning with what it holds back; Steady folds with the fine rows.
+test('Health: the machine room row shows the pressure state, its figures and the figure that set it; Strained is a warning', () => {
+  const w = boot();
+  const data = full();
+  data.panels.health.data.records[0].pressure = { state: 'Strained', cpu: 85.5, memory: 1.5, wakeMs: 0.2, freeMB: null, why: 'CPU pressure 85.5% is at or above 80%', gates: true };
+  deliver(w, data);
+  assert.ok(failingRows(w).includes('Machine room'), 'a Strained machine is a failing row');
+  const row = dd(w, 'Machine room');
+  assert.equal(row.querySelector(':scope > .chip.chip-warn').textContent, 'Strained');
+  assert.match(row.textContent, /CPU pressure 85\.5%, memory pressure 1\.5%, wake delay 0\.2 ms.*CPU pressure 85\.5% is at or above 80%/);
+  assert.match(row.querySelector('.check-next').textContent, /^Next: No new card starts and no new test takes a slot until the pressure goes down\./);
+  const ok = boot();
+  const steady = full();
+  steady.panels.health.data.records[0].pressure = { state: 'Steady', cpu: null, memory: null, wakeMs: 0.3, freeMB: 4000, why: null };
+  deliver(ok, steady);
+  assert.ok(!failingRows(ok).includes('Machine room'), 'a Steady machine is a fine row');
+  assert.match(dd(ok, 'Machine room').textContent, /^Steady.*wake delay 0\.3 ms, 4000 MB free$/);
+  assert.equal(dd(ok, 'Machine room').querySelector('.check-next'), null);
+  // Bug: with maxLoad set (gates false) the pressure holds nothing, yet the row said no card or test would start.
+  const off = boot();
+  const loadSet = full();
+  loadSet.panels.health.data.records[0].pressure = { ...data.panels.health.data.records[0].pressure, gates: false };
+  deliver(off, loadSet);
+  assert.match(dd(off, 'Machine room').querySelector('.check-next').textContent, /^Next: This state holds no card or test back: the host file sets maxLoad or minFreeMemMB/);
+});

@@ -69,7 +69,8 @@ export type Track = { steps: Step[]; at: number | null; label: string; since: nu
 // live: the running step as it streams: what it is doing now, its turns so far and when it last printed.
 export type Live = { action: string; turns: number | null; lastOutputAt: number | null }
 export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null }
-export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null }
+// room: why the machine holds it back ("waiting for machine room: Strained (...)"), "" when it does not.
+export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; room: string }
 // An open issue that depends on one still open: not picked until each of waitsFor has closed.
 export type Waiting = Ref & { waitsFor: number[] }
 // An open issue labelled awaiting-deploy: built and merged, waiting for your PROD deploy. since: when it got the label.
@@ -88,8 +89,10 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // declined, from every record's declined list, each line once. suites: each record's whole-suite runs (the snapshot's
 // suites: a release's suite, the full test), under way (ended null) or ended. building and waiting: the running
 // loop's cards counted against its builder cap (cap; null with no cap) at its last turn, and its cards left out of that
-// count as they only wait on another card; null when no loop runs or the snapshot does not say.
-export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null }
+// count as they only wait on another card; null when no loop runs or the snapshot does not say. pressure: the
+// machine's pressure (Steady, Busy or Strained, with its figures and the one that set it), null when not said.
+export type Pressure = { state: string; cpu: number | null; memory: number | null; wakeMs: number | null; freeMB: number | null; why: string }
+export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; pressure: Pressure | null }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
 export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
@@ -198,6 +201,9 @@ const trackOf = (v: any): Track | null => {
 const timesOf = (x: any): Times => ({ start: time(x.start) ?? time(x.pickedAt), pickedAt: time(x.pickedAt), priorSec: num(x.priorSec) ?? 0, totalSec: num(x.totalSec) })
 const parentOf = (x: any) => { const n = num(x.parent); return n !== null && n > 0 ? n : null }
 
+// state "" when no figure could be read.
+const pressureOf = (v: any): Pressure | null => (v && typeof v === 'object'
+  ? { state: one(v.state), cpu: num(v.cpu), memory: num(v.memory), wakeMs: num(v.wakeMs), freeMB: num(v.freeMB), why: one(v.why) } : null)
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
 type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[] }
@@ -210,13 +216,13 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
-    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waitingCount), cap: num(j.health?.builderCap) },
+    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waitingCount), cap: num(j.health?.builderCap), pressure: pressureOf(j.health?.pressure) },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
       ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
     ],
     belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live) })),
-    queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x) })),
+    queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), room: one(x.room) })),
     // A record whose loop does not give the list (from an older engine, or GitHub did not list the issues) has none.
     waits: (Array.isArray(j.queue.waiting) ? j.queue.waiting : []).filter((x: unknown) => x && typeof x === 'object')
       .map((x: any): Waiting => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), waitsFor: Array.isArray(x.waitsFor) ? x.waitsFor.filter((n: unknown): n is number => num(n) !== null) : [] }))
@@ -664,6 +670,15 @@ const capText = (snap: Snap): string => {
   const ls = snap.loops.filter(l => l.building !== null && l.cap !== null)
   return ls.map(l => `${snap.loops.length > 1 ? `${l.repo} ` : ''}building ${l.building} of the cap ${l.cap}${l.waiting ? `, ${l.waiting} waiting not counted` : ''}`).join(' · ')
 }
+// The machine's pressure, the same in every record (the first that says): `machine room Busy · CPU pressure 45.5% ·
+// memory pressure 1.5% · wake delay 0.2 ms · CPU pressure 45.5% is at or above 40%`. Nothing when no record says.
+const roomText = (snap: Snap): string => {
+  const p = snap.loops.map(l => l.pressure).find(x => x)
+  if (!p) return ''
+  const fig = (v: number | null, say: (n: number) => string) => (v === null ? [] : [say(v)])
+  return [`machine room ${p.state || 'not read'}`, ...fig(p.cpu, n => `CPU pressure ${n}%`), ...fig(p.memory, n => `memory pressure ${n}%`),
+    ...fig(p.wakeMs, n => `wake delay ${n} ms`), ...fig(p.freeMB, n => `${n} MB free`), ...(p.why ? [p.why] : [])].join(' · ')
+}
 // Last on a line that is cut at its end, so the counts before it are kept on a narrow screen.
 const capTail = (snap: Snap): string => (capText(snap) ? ` · ${capText(snap)}` : '')
 const loopSegs = (snap: Snap): Seg[] => (loopText(snap) ? [{ t: ' · ' }, { t: loopText(snap), c: C.you, b: true }] : [])
@@ -748,6 +763,7 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
 export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   head('ON THE BELT', snap.belt.length),
   ...(capText(snap) ? [[{ t: `  ${capText(snap)}`, d: true }]] : []),
+  ...(roomText(snap) ? [fitWidth([{ t: `  ${roomText(snap)}`, d: true }], w)] : []),
   ...(snap.belt.length ? [] : [empty('the belt is empty')]),
   ...snap.belt.flatMap((b, i): Line[] => {
     const all = overallOf(b, s.now)
@@ -787,9 +803,11 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
   return [
     [{ t: 'QUEUE', c: C.head, b: true }, ...(next.length ? [{ t: more ? `  next ${next.length} of ${all}${snap.queueMore ? '+' : ''}` : `  ${next.length}`, d: true }] : [])],
     ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? [] : [empty('the queue is empty')]),
-    ...next.map((q, i): Line => titled(q, [{ t: ` ${i + 1} `, d: true }],
+    ...next.flatMap((q, i): Line[] => [titled(q, [{ t: ` ${i + 1} `, d: true }],
       [{ t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') },
-        ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false)),
+        ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false),
+      // The one the machine holds back says why, with the figure that held it.
+      ...(q.room ? [fitWidth([{ t: `    ${q.room}`, d: true }], w)] : [])]),
     // The issues that wait on another: not in the pick order, each with what it waits for.
     ...snap.waits.slice(0, NEXT).map((x): Line => titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [{ t: `Waits for ${x.waitsFor.map(n => `#${n}`).join(', ')}`, d: true }], w, false)),
     ...(snap.waits.length > NEXT ? [empty(`and ${snap.waits.length - NEXT} more waiting`)] : []),

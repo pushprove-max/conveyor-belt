@@ -220,7 +220,7 @@ test file of that name. The files of an area whose tests are `"all"` run the who
 ## The host file
 
 The host file, `~/.config/conveyor/host.json`, holds this machine's settings: the terms file, the projects (`records`),
-the machine's `cap` and pause, `maxLoad`, `minFreeMemMB`, `testSlots`, `steer`, the Claude accounts and the Foreman's
+the machine's `cap` and pause, `maxLoad`, `minFreeMemMB`, `pressure`, `testSlots`, `steer`, the Claude accounts and the Foreman's
 groups. Setup writes it. [Setup](setup.md#the-host-file) lists its keys, and [Run](setup.md#run) says what each
 machine setting does.
 
@@ -246,6 +246,45 @@ stays the same.
 `steer` is on when the host file does not set it. To turn it off, set **Card work yields to you** to Off on the Board's
 Rules tab, or run `conveyor.sh machine steer off`. Card work then runs at normal priority, as your own work does.
 `conveyor.sh doctor` shows the setting and what Conveyor lowers on this machine.
+
+## The machine room
+
+Before a new card starts, and before a new test takes a test slot, Conveyor reads how hard pressed the machine is.
+It gives the machine one state: Steady, Busy or Strained.
+
+- Strained: no new card starts, and no new test takes a test slot.
+- Busy: a new card starts only if, with it, no more than half of the host file's `cap` is in use. With no `cap`, Busy
+  holds no card back.
+- Steady: only the caps apply.
+
+Cards and tests that already run do not stop.
+
+Conveyor reads these figures:
+
+- On Linux, the CPU pressure and the memory pressure: the "some avg10" of `/proc/pressure/cpu` and
+  `/proc/pressure/memory`. Each is the percent of the last 10 seconds in which a task waited for the CPU, or for
+  memory.
+- On every system, the wake delay: how late a 10 ms sleep wakes, in ms. A test that waits for a slot reads the
+  state again every few seconds.
+- Where Conveyor cannot read the memory pressure, as on macOS, the free memory in MB.
+
+The state is Strained when a figure gets to its Strained threshold. If not, it is Busy when a figure gets to its Busy
+threshold. If not, it is Steady. Set the thresholds in the host file's `pressure`. These are the defaults:
+
+```json
+"pressure": {"busy": {"cpu": 40, "memory": 5, "wakeMs": 5, "freeMB": 2048},
+             "strained": {"cpu": 80, "memory": 20, "wakeMs": 20, "freeMB": 512}}
+```
+
+`cpu` and `memory` are percents. A figure gets to its threshold when it is at or above it; the free memory gets to its
+threshold when it is below it. A threshold that the host file does not set keeps its default.
+
+When the host file sets `maxLoad` or `minFreeMemMB`, those settings hold new cards back, and the state holds no card
+and no test back.
+
+The Board's Health panel shows a Machine room row with the state and its figures. `/units` shows them under ON THE
+BELT. A card that waits for the machine room says which figure holds it, for example "waiting for machine room:
+Strained (memory pressure 25.5% is at or above 20%)".
 
 ## The control record
 

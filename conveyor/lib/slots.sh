@@ -30,7 +30,8 @@ slot_cpus() {
   for x in "${r[@]}"; do [[ $x =~ ^[0-9]+(-[0-9]+)?$ ]] || continue; for ((l = 10#${x%-*}; l <= 10#${x#*-}; l++)); do echo "$l"; done; done
 }
 
-# Sets SLOT_DIR (the pool's folder), SLOT_N (its size), SLOT_CPUS (the cores of its slots: slot_cpus) and, inside a run that holds
+# Sets SLOT_DIR (the pool's folder), SLOT_N (its size), SLOT_CPUS (the cores of its slots: slot_cpus), SLOT_HOSTF, SLOT_PSI
+# and SLOT_WAKE (the host file and pressure seams it was read under, for slot_strained) and, inside a run that holds
 # a slot, SLOT_HOME (the descriptor that holds it), SLOT_HOME_K (the slot's number) and SLOT_TURN (the turns already
 # taken on it, above this runner); SLOT_HOME is empty outside one. SLOT_ONE is CONVEYOR_TEST_ONESLOT, read here (slot_take).
 # Where the host file names no testSlotsDir, CONVEYOR_TEST_POOL (<size>:<folder>) names the pool instead: the engine's
@@ -45,6 +46,7 @@ slot_pool() {
   mapfile -t c < <(slot_cpus); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(nproc --all)
   # A pool larger than the cores would put two slots on one core: it is the cores.
   SLOT_N=${p:-$(jq -er '.testSlots | numbers | floor | select(. >= 1)' "$host" 2>/dev/null)} && [ "$SLOT_N" -le "$n" ] || SLOT_N=$n
+  SLOT_HOSTF=$host SLOT_PSI=${CONVEYOR_PSI_DIR:-} SLOT_WAKE=${CONVEYOR_WAKE_CMD:-}
   mkdir -p "$SLOT_DIR" || { echo "conveyor: the test slots folder $SLOT_DIR cannot be made: no test can take a slot" >&2; return 1; }
   for ((f = 1; f <= SLOT_N; f++)); do
     [ -e "$SLOT_DIR/$f" ] || : >> "$SLOT_DIR/$f" || { echo "conveyor: the test slot $SLOT_DIR/$f cannot be made: no test can take a slot" >&2; return 1; }
@@ -57,9 +59,29 @@ slot_pool() {
   done
 }
 
+. "${BASH_SOURCE[0]%/*}/pressure.sh" || return 1
+# Whether the machine is Strained (lib/pressure.sh), so no new test takes a slot, where the host file sets neither
+# maxLoad nor minFreeMemMB (those keep the machine room as they set it); no host file, or one that does not read,
+# holds no test back. The reading is kept in $SLOT_DIR/pressure ("<epoch> <state>") for 3 s, so the workers that
+# wait share one reading every few seconds.
+# The host file and the pressure's seams are those slot_pool read the pool under (SLOT_HOSTF, SLOT_PSI, SLOT_WAKE), not
+# the environment's now: the engine's test runner names a host file and a Steady pressure of the cases' own after it
+# reads the pool (tests/lib.sh), and its own slots kept the machine's gate only so.
+slot_strained() {
+  local kf=$SLOT_DIR/pressure at='' s=''
+  jq -e 'objects | [.maxLoad, .minFreeMemMB] | map(numbers) | length == 0' "${SLOT_HOSTF:-}" >/dev/null 2>&1 || return 1
+  { read -r at s < "$kf"; } 2>/dev/null
+  if ! [[ $at =~ ^[0-9]+$ ]] || [ $((EPOCHSECONDS - at)) -ge 3 ] || [ "$at" -gt "$EPOCHSECONDS" ]; then
+    s=$(CONVEYOR_PSI_DIR=${SLOT_PSI:-} CONVEYOR_WAKE_CMD=${SLOT_WAKE:-} pressure "$SLOT_HOSTF" | jq -r '.state // ""')
+    { echo "$EPOCHSECONDS $s" > "$kf.$BASHPID" && mv -f "$kf.$BASHPID" "$kf"; } 2>/dev/null
+  fi
+  [ "$s" = Strained ]
+}
+
 # Takes a slot of the pool that is free now: SLOT_FD is the descriptor that holds it, SLOT_K its number. 1 when none is
-# free, or when a push waits for one (slot_yield).
+# free, when the machine is Strained (slot_strained), or when a push waits for one (slot_yield).
 slot_try() {
+  ! slot_strained || return 1
   for ((SLOT_K = 1; SLOT_K <= SLOT_N; SLOT_K++)); do
     { exec {SLOT_FD}>>"$SLOT_DIR/$SLOT_K"; } 2>/dev/null || continue
     if flock -n "$SLOT_FD"; then
@@ -72,8 +94,9 @@ slot_try() {
 }
 
 # Waits up to [seconds] (1) for one slot of the pool, picked at random, so a waiting worker costs no busy loop. 1 when
-# it has none yet, or a push waits for one (slot_yield): the caller asks again.
+# it has none yet, the machine is Strained (slot_strained), or a push waits for one (slot_yield): the caller asks again.
 slot_wait() {
+  if slot_strained; then sleep "${1:-1}"; return 1; fi
   SLOT_K=$((RANDOM % SLOT_N + 1))
   { exec {SLOT_FD}>>"$SLOT_DIR/$SLOT_K"; } 2>/dev/null || { sleep "${1:-1}"; return 1; }
   if flock -w "${1:-1}" "$SLOT_FD"; then

@@ -66,6 +66,22 @@ test('/units gives the cards building against the cap and leaves out those waiti
   expect(summaryLine(board({ belt: BELT, health: { loop: true, building: 2, waitingCount: 0, builderCap: null } }))).toBe('conveyor: 2 on the belt · 0 landed · today $0.00')
 })
 
+// Issue 195. Bugs it catches: /units did not show the machine's pressure (its state, PSI figures and wake delay), and a
+// card the machine held back did not say which figure held it.
+test('/units shows the machine room state with its PSI figures and wake delay, and the held card says which figure held it', () => {
+  const room = 'waiting for machine room: Strained (memory pressure 25.5% is at or above 20%)'
+  const s = board({ queue: { next: [{ ...queued(1)[0], room }], held: {} },
+    health: { pressure: { state: 'Strained', cpu: 12.5, memory: 25.5, wakeMs: 0.2, freeMB: null, why: 'memory pressure 25.5% is at or above 20%' } } })
+  const text = tableText(s, 200)
+  expect(section(text, 'ON THE BELT').split('\n')[1].trimEnd())
+    .toBe('  machine room Strained · CPU pressure 12.5% · memory pressure 25.5% · wake delay 0.2 ms · memory pressure 25.5% is at or above 20%')
+  expect(section(text, 'QUEUE').split('\n')[2].trimEnd()).toBe(`    ${room}`)
+  // No pressure said, no line; a queued card the machine does not hold has no line under it.
+  const none = tableText(board({ queue: { next: queued(1), held: {} } }), 200)
+  expect(section(none, 'ON THE BELT')).not.toMatch(/machine room/)
+  expect(section(none, 'QUEUE').split('\n').length).toBe(2)
+})
+
 // Bug: a release's whole suite (about 15 minutes) runs and /units shows nothing of it, so the owner asks the Foreman
 // whether it runs, how far it is and whether anything failed; or a run long over stays on the board.
 const SUITE = { kind: 'release', version: '1.2.0', step: 'release-prep', sha: 'a1b2c3d4e5f6a7b8', since: ago(12), ended: null, state: 'running', done: 140, failed: 2, cases: ['x: a', 'y: b'], moved: false, reasons: [] }

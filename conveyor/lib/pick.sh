@@ -47,8 +47,9 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
 # One Conveyor per machine (docs/setup.md, Run): the machine's settings are the host file's, over every project's loop.
 # cap is the most cards building, reviewing or testing at once on this machine across every project (each project's
 # own cap, its control record's, is its most at once on top); maxLoad and minFreeMemMB are the machine room: no new
-# card starts while the 1-minute load is above maxLoad or the available memory is below minFreeMemMB (MB); mode
-# "pause" pauses every project. Unset, each sets nothing: only the projects' own caps apply. Cards already running are
+# card starts while the 1-minute load is above maxLoad or the available memory is below minFreeMemMB (MB), and with
+# neither set the machine's pressure is (room()); mode "pause" pauses every project. Unset, each other sets nothing:
+# only the projects' own caps apply. Cards already running are
 # never stopped by any of them.
 # MACH holds, under MACH/lock, one file per project loop that asked (MACH/slots/<project>.json, a folder of their own,
 # so no project's name takes the machine loop's own file, MACH/loop.json): {pid, started, running, wants, last}: its cards
@@ -69,11 +70,8 @@ mhost() {
        minFreeMemMB: (.minFreeMemMB | if type == "number" then . else null end), paused: (.mode == "pause")}
     | select(.cap != null or .maxLoad != null or .minFreeMemMB != null or .paused) end' "$HOST" 2>/dev/null) && echo "$h" || echo '{"unread":true}' # jq prints for no input, then fails
 }
-# The machine room now, "<1-minute load> <available MB>"; CONVEYOR_ROOM_CMD prints it in its place (the tests' seam).
-roomnow() {
-  if [ -n "${CONVEYOR_ROOM_CMD:-}" ]; then bash -c "$CONVEYOR_ROOM_CMD" 2>/dev/null 8>&- 9>&-; return; fi
-  printf '%s %s\n' "$(p_load)" "$(p_mem | awk '{printf "%d", ($2 - $1) / 1024}')"
-}
+# The machine room now: roomnow (the load and free memory) and pressure (Steady, Busy or Strained).
+. "${BASH_SOURCE[0]%/*}/pressure.sh" || return 1
 # <running> <wants> [<last>]: this loop's slot file, written under the machine lock; last is kept unless given.
 slotput() {
   local l=${3:-}; [ -n "$l" ] || l=$(jq -r '.last // 0' "$MSLOT" 2>/dev/null) || l=0
@@ -83,15 +81,19 @@ slotput() {
 mlocked() { mkdir -p "$MACH/slots" && ( flock -w 30 4 || exit 1; "$@" ) 4>>"$MACH/lock"; }
 # The loop's turn: its cards running now, and no card waiting for a slot when it does not ask for one (asking empty).
 slotturn() { # <running> [asking]
-  [ -n "$(mhost)" ] || { rm -f "$MSLOT" "$ROOMF"; return 0; }
+  ! nohost || { rm -f "$MSLOT" "$ROOMF"; return 0; }
   [ -n "${2:-}" ] || rm -f "$ROOMF"
   mlocked slotput "$1" "$([ -n "${2:-}" ] && jq -r '.wants // false' "$MSLOT" 2>/dev/null || echo false)"
 }
 # The machine's yes to one more card of this project, for <issue>: 0 and its slot taken, or 1 with why on stdout
 # (kept in ROOMF for health and the Board). The order: the machine paused, the room, the cap, then the turn: among
-# the projects with a card waiting for a slot, the one that got its last slot longest ago goes first.
+# the projects with a card waiting for a slot, the one that got its last slot longest ago goes first. The room is
+# maxLoad and minFreeMemMB where the host file sets either, else the machine's pressure (lib/pressure.sh): Strained
+# starts no new card, and Busy none past half the machine's cap (with no cap, Busy holds none back). A host file
+# that sets none of the machine's settings still has the pressure; no host file has no room.
 room() { # <issue>
-  local h; [ -n "$RUNNING" ] && h=$(mhost) && [ -n "$h" ] || { rm -f "$ROOMF"; return 0; }
+  local h; [ -n "$RUNNING" ] && ! nohost || { rm -f "$ROOMF"; return 0; }
+  h=$(mhost); [ -n "$h" ] || h='{"cap":null,"maxLoad":null,"minFreeMemMB":null,"paused":false}'
   # The machine's lock not taken: no gate was read, so no card starts.
   local why; why=$(mlocked roomed "$h") || why=${why:-"waiting for a machine slot: the machine's lock could not be taken"}
   if [ -z "$why" ]; then rm -f "$ROOMF"; return 0; fi
@@ -100,7 +102,7 @@ room() { # <issue>
   echo "$why"; return 1
 }
 roomed() { # <machine settings>; under the machine lock: prints why not, else takes the slot
-  local h=$1 r load free why='' used s p t mine f
+  local h=$1 r load free why='' used s p t mine f st='' pw c
   if [ "$(jq -r .unread <<<"$h")" = true ]; then why="waiting for machine room: the host file could not be read, so the machine's cap, pause and room are not known"
   elif [ "$(jq -r .paused <<<"$h")" = true ]; then why="the machine's Conveyor is paused (the host file's mode)"
   elif [ "$(jq -r '.maxLoad != null or .minFreeMemMB != null' <<<"$h")" = true ]; then
@@ -110,8 +112,13 @@ roomed() { # <machine settings>; under the machine lock: prints why not, else ta
         elif $h.maxLoad != null and $l > $h.maxLoad then "waiting for machine room: load \($l) is above maxLoad \($h.maxLoad)"
         elif $h.minFreeMemMB != null and $f < $h.minFreeMemMB then "waiting for machine room: \($f) MB free is below minFreeMemMB \($h.minFreeMemMB)"
         else "" end')
+  else
+    IFS=$'\037' read -r st pw <<<"$(pressure "$HOST" | jq -r '[.state // "", .why // ""] | join("\u001f")')"
+    if [ -z "$st" ]; then why="waiting for machine room: ${pw:-the machine room could not be read}"
+    elif [ "$st" = Strained ]; then why="waiting for machine room: Strained ($pw)"; fi
   fi
-  if [ -z "$why" ] && [ "$(jq -r .cap <<<"$h")" != null ]; then
+  c=$(jq -r .cap <<<"$h")
+  if [ -z "$why" ] && [ "$c" != null ]; then
     # The other loops alive: "<running> <wants> <last> <name>" each. A loop gone whose cards still run (each holds its
     # project's run lock, run() says why) keeps its slots until they end, and no card of it waits.
     s=$(for f in "$MACH"/slots/*.json; do
@@ -125,7 +132,8 @@ roomed() { # <machine settings>; under the machine lock: prints why not, else ta
     done)
     used=$(( RUNNING + $(awk '{s += $1} END {print s + 0}' <<<"$s") ))
     mine=$(jq -r '.last // 0' "$MSLOT" 2>/dev/null) || mine=0; mine=${mine:-0}; t=${MSLOT##*/}; t=${t%.json}
-    if [ "$used" -ge "$(jq -r .cap <<<"$h")" ]; then why="waiting for a machine slot: $used of the machine cap $(jq -r .cap <<<"$h") in use"
+    if [ "$used" -ge "$c" ]; then why="waiting for a machine slot: $used of the machine cap $c in use"
+    elif [ "$st" = Busy ] && [ $(( (used + 1) * 2 )) -gt "$c" ]; then why="waiting for machine room: Busy ($pw), and $used of the machine cap $c in use: no new card past its half"
     else
       p=$(awk -v m="$mine" -v t="$t" '$2 == "true" && ($3 < m || ($3 == m && $4 < t)) {print $4; exit}' < <(sort -n -k3 <<<"$s"))
       [ -z "$p" ] || why="waiting for a machine slot: $p got its last slot before this project and goes first"

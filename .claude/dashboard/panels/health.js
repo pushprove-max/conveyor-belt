@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
+// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack, pressure: {state, cpu, memory, wakeMs, freeMB, why, gates: whether it holds cards and tests back (false: maxLoad or minFreeMemMB does)} | null: the machine's pressure), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -200,6 +200,20 @@ window.DASH_APP.panel({
       if (typeof r.diskFreeKb === 'number' && r.diskFreeKb < 10485760) check(`Disk${of}`, ctx.chip('Low', 'warn'), `${(r.diskFreeKb / 1048576).toFixed(1)} GB free for cards`).next =
         'Free space on the disk that holds the cards folder.';
     });
+    // The machine's pressure (Steady, Busy or Strained), the same in every record: its figures and the one that set it.
+    const pr = (d.records || []).map((r) => r.pressure).find((p) => p && typeof p === 'object');
+    if (pr) {
+      const num = (v, say) => (typeof v === 'number' ? say(v) : null);
+      const figures = [num(pr.cpu, (v) => `CPU pressure ${v}%`), num(pr.memory, (v) => `memory pressure ${v}%`),
+        num(pr.wakeMs, (v) => `wake delay ${v} ms`), num(pr.freeMB, (v) => `${v} MB free`)].filter(Boolean).join(', ');
+      const kind = { Steady: 'ok', Busy: 'quiet' }[pr.state] || 'warn';
+      const room = check('Machine room', ctx.chip(pr.state || 'Not read', kind), figures || 'no figure read', pr.why);
+      // Only a pressure that gates (a host file that reads and sets neither maxLoad nor minFreeMemMB) holds work back.
+      if (kind === 'warn') room.next = pr.state !== 'Strained' ? 'The Board reads it again in about a minute.'
+        : pr.gates === true
+          ? `No new card starts and no new test takes a slot until the pressure goes down. Stop other heavy work on ${ctx.machine} to make it go down.`
+          : "This state holds no card or test back: the host file sets maxLoad or minFreeMemMB, or no host file reads.";
+    }
     const lim = d.limit;
     // The bar is drawn with a scale, so its change is a transform.
     const bar = (pct, says) => {
