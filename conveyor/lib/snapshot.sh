@@ -151,6 +151,8 @@
 #   null when the pack does not read).
 # tests: each test file's figures, the test settings of the pack and the totals of the card test steps
 #   (lib/testfiles.sh testspart() says what it holds); null when the pack cannot be read.
+# testMap: the Tests page's Test map part: the map's state, its coverage tool, the last whole-suite run's seconds and
+#   the last build by hand (lib/testmap.sh mapboard() says what it holds); null when the pack cannot be read.
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
 #   cacheWrite, in $ per million tokens), overrides (the pack's prices, added models and aliases, which win over it),
 #   names (each model's display name) and seen (each model ID the steps and the research lane's sessions of the last
@@ -754,8 +756,10 @@ snapshot() (
   # the actions' records it lists, running and kept, newest first (testacts(), lib/testaction.sh). tests: the test files'
   # figures, settings and totals (testspart(), lib/testfiles.sh), null when the pack cannot be read.
   testspart "$since" > "$d/tests" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
-  jq -c --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0]
-    | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | def since: . + {since: $mv[.issue | tostring].at};
+  # testMap: the Test map part (mapboard(), lib/testmap.sh).
+  mapboard "$MAIN" > "$d/testmap" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
+  jq -c --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0]
+    | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1
   # The lists whole go to HISTORY, by a file of their own beside it and one rename, so a reader never sees half of one;

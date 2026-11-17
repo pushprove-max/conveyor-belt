@@ -100,7 +100,7 @@ cmd github github.sh -
 cmd main-test main-test.sh -
 cmd survey survey.sh -
 cmd declined declined.sh -
-cmd testmap testmap.sh -
+cmd testmap testmap.sh 'testmap [build | stop]'
 unset -f cmd
 [ -n "$CMD_RUN" ] || { echo "usage: conveyor.sh $CMD_USAGE" >&2; exit 2; }
 # shellcheck disable=SC1090 # the script is the table's, named at run time

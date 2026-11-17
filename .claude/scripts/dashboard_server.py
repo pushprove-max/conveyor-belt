@@ -171,6 +171,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
+# or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
@@ -205,7 +206,7 @@ VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
-                   'testaction': 60, 'test-close': 60, 'test-issue': 60}  # testaction stop waits up to 40 s for the end
+                   'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60}  # testaction and testmap stop wait up to 40 s for the end
 DEPENDS_MAX = 20  # the issues one `control depends` names
 # The condition the owner gives with their yes, or why they say no: one line of plain text.
 MAX_SAID = 300
@@ -385,6 +386,8 @@ def control_ok(body):
     if a == 'testaction':  # the Tests page: judge, explain or run one test file or a list of them, or stop one action by its id
         return (2 <= n <= 1 + TEST_FILES_MAX and v[0] in ('judge', 'explain', 'run') and all(TEST_FILE.fullmatch(x) for x in v[1:])) \
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
+    if a == 'testmap':  # the Tests page's Build the test map, or its Stop
+        return v in (['build'], ['stop'])
     if a == 'mutate':  # the Tests page's Mutation check: one test file or a list of them, to the front of the idle queue
         return 1 <= n <= TEST_FILES_MAX and all(TEST_FILE.fullmatch(x) for x in v)
     if a == 'testrules':  # the Tests page's Auto-file: the switch, a guard, or one setting of a rule
@@ -579,8 +582,9 @@ def control_script(action, args, main, today, record=None, user=None):
     if action in ('test-settings', 'prices'):
         # The record's pack (.conveyor/project.json of its main), changed by the engine's own command, which checks it.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))
-    if action in ('testaction', 'testrules'):
-        # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's.
+    if action in ('testaction', 'testrules', 'testmap'):
+        # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's;
+        # a build of the test map starts on the host and returns (conveyor.sh testmap build), or is stopped.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))
     if action == 'mutate':
         # One ask for all the files (conveyor.sh mutate ask): it starts no check; the idle job does, when no card needs a slot.
@@ -1471,6 +1475,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_error(400)
         if not (machine_ok(body) if machine else control_ok(body)):
             return self.send_error(400)
+        # The test map's build runs the whole suite on the build machine: an admin's to start or stop.
+        if not machine and body['action'] == 'testmap' and role_of(read_store(), user) != 'admin':
+            return self.reply(403, 'only an admin builds the test map')
         # A Tests page action on a list of files is answered one result a file; only it may be over MAX_CONTROL_BODY.
         files = None if machine else test_files(body['action'], body['args'])
         if int(length) > MAX_CONTROL_BODY and not files:

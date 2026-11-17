@@ -287,8 +287,16 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows, from top to bottom: the figures, the table of test files, Test edits by cards, Removed by
-Optimize, Recent actions, and Settings.
+The Tests tab shows, from top to bottom: the Test map, the figures, the table of test files, Test edits by cards,
+Removed by Optimize, Recent actions, and Settings.
+
+The Test map part shows the state of the [test map](configuration.md#the-test-map). A made map shows how many source
+files and test files it maps, how many commits it is behind main, when it was made and how long its run took. The
+other states are "Not made yet", "Off" and "Failed", with the reason. An admin can click **Build the test map** to
+make the map now. Before you click, the part names the coverage tool and the time of the last whole-suite run. The
+build runs your whole suite once on the build machine, on a test slot. While it runs, a bar shows how many test files
+have run, and **Stop** ends the build. When the build ends, the part shows its result. The Board refuses the button to
+a member. When the map is off, when `test.map` names a map that your project keeps itself, or when your language has no coverage tool, the part tells you and shows no button.
 
 The figures count the timed files, the files over budget, the files slower than usual and the files that wait more
 than they work, and give the slot wait and run time of the card Test steps of 7 days. Click the figure of files over

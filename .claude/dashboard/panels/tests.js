@@ -2,7 +2,7 @@
 // The Tests page (#520; the owner chose mockup A, with mockup B's column "against its own median"): a tab of its own,
 // after Rules. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
 // on the Rules tab, and the heading names it ("Tests: sample").
-// The page, top to bottom (#73, #74): the figures, the table with its search and filters, Test edits by cards (#76),
+// The page, top to bottom (#73, #74, #178): the Test map part, the figures, the table with its search and filters, Test edits by cards (#76),
 // Removed by Optimize, the bar of the files selected, Recent actions, and one section "Settings", collapsed until
 // opened, with the Tests model, Test limits and Auto-file.
 // The figures: Timed files, files over budget, files slower than usual, files that wait more than they work (their
@@ -96,7 +96,14 @@
 // with its optimize issues, each with its url, and removed), slower, edits, totals; null from a snapshot without it),
 // machine ({maxLoad, unread, cores, load}), testActions ({limit, actions, allowed:
 // the pack's models by CLI, offered for a CLI that lists none}), control (the control record: its tests, the Tests model),
-// clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), repos, others}.
+// clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), testMap
+// (conveyor/lib/testmap.sh mapboard(): state, as the map page shows it, with made and seconds; tool or toolWhy; suiteSec; build,
+// the last build by hand's record; null from a snapshot without it, and the part is not shown), repos, others}.
+// The Test map part (#178): the map's state (made: the source and test files mapped, the commits behind main, when it
+// was made and how long it took; not made yet; off; failed with its reason). Build the test map (POST control {action:
+// testmap, args: [build]}, an admin's alone: the server refuses a member) names the coverage tool and the last
+// whole-suite run's time before the click. While a build waits for its test slot or runs, a bar (test files done of
+// all) and Stop (testmap stop); at its end, its result in place.
 (function () {
   'use strict';
   const LOAD = /^[0-9]{1,6}(\.[0-9]{1,3})?$/;  // a load limit, as dashboard_server.py's LOAD and `conveyor.sh machine load` take it (1 or more)
@@ -138,6 +145,8 @@
     sel: new Set(),      // the files selected, for the bar's actions
     answers: null,       // the bar's last action: {what, kind: act | mutate | issue, pending (sent, no answer yet), lines: [{file, ok, text}], left, note}
     menu: null,          // the file whose More menu is open
+    mapSent: null,       // Build the test map, answered yes, until a snapshot names a build begun since: {was: the last build's start then}
+    mapRefused: null,    // why the last Build the test map was refused
     edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|budget` or `${dk(file)}|mark`
     mutAsked: new Map(), // the files a Mutation check was asked for here, by dk(file): the time asked, until the snapshot names them
     settingsOpen: false };  // the Settings section is open
@@ -1443,6 +1452,68 @@
     return el;
   }
 
+  // ---- the Test map part (#178), at the top of the page ----
+  const MAPS = { made: 'Made', failed: 'Failed', stopped: 'Stopped' };
+  const at = (sec) => (num(sec) === null ? null : new Date(sec * 1000).toISOString());
+  const mapLive = (b) => b && (b.state === 'running' || b.state === 'waiting');
+  // The map's state, as the map page shows it; while a run makes it, a bar of its test files done of all; the last build by
+  // hand's result; and Build the test map (with the tool and the last whole-suite run's time named), or Stop.
+  function mapPart(m) {
+    const h = S.ctx.h, el = h('section', 'tests-map'), b = obj(m.build), live = mapLive(b);
+    el.append(h('h3', 'board-head', 'Test map'));
+    // A Build sent here shows as starting until a snapshot names a build begun since.
+    if (S.mapSent && (live || (b && b.start !== S.mapSent.was))) S.mapSent = null;
+    const line = h('p', 'tests-map-state');
+    if (m.state === 'running') {
+      line.append(progress(`Test map: ${m.done} of ${m.of} test files`, num(m.done) || 0, num(m.of) || 0),
+        h('span', null, ` Being made: ${m.done} of ${m.of} test files run${num(m.started) === null ? '' : `, ${mmss(S.ctx.now() / 1000 - m.started)} so far`}.`));
+    } else if (live) {
+      line.append(progress('Test map: waiting for a test slot'), h('span', null, ' Waiting for a test slot on the build machine.'));
+    } else if (S.mapSent) {
+      line.append(progress('Test map: starting'), h('span', null, ` Starting: ${SENDING}`));
+    } else if (m.state === 'made') {
+      const age = num(m.age) === null ? '' : m.age ? ` · ${m.age} ${m.age === 1 ? 'commit' : 'commits'} behind main` : ' · up to date with main';
+      const when = typeof m.made === 'string' ? ` · made ${S.ctx.when(m.made)}` : '';
+      const took = num(m.seconds) === null ? '' : `, in ${mmss(m.seconds)}`;
+      line.append(S.ctx.chip('Made', 'ok'), ` ${m.sources} source files and ${m.tests} test files mapped${age}${when}${took}.`);
+    } else if (m.state === 'off') {
+      line.append(S.ctx.chip('Off', 'quiet'), ' The pack\'s test.map is "off": a card\'s tests are found by name. To turn it on, remove test.map from the pack, then build the map here or run setup.');
+    } else if (m.state === 'failed') {
+      line.append(S.ctx.chip('Failed', 'bad'), ` ${m.why || 'no reason given'}`);
+    } else {
+      line.append(S.ctx.chip('Not made yet', 'warn'), ' A card\'s tests are found by name until the map is made.');
+    }
+    el.append(line);
+    // The last build's result, in place, once it has ended.
+    if (b && !live && MAPS[b.state]) {
+      const said = [num(b.start) !== null && num(b.end) !== null ? `in ${mmss(b.end - b.start)}` : null,
+        num(b.end) !== null ? S.ctx.when(at(b.end)) : null, typeof b.reason === 'string' && b.reason ? b.reason : null].filter(Boolean).join(' · ');
+      const res = h('p', 'tests-map-result');
+      res.append(S.ctx.chip(`Last build: ${MAPS[b.state]}`, b.state === 'made' ? 'ok' : b.state === 'failed' ? 'bad' : 'quiet'), h('span', 'board-from', ` ${said}`));
+      el.append(res);
+    }
+    const ctl = h('div', 'tests-act-row');
+    if (live) {
+      ctl.append(button('Stop', 'btn-quiet', 'map-stop', 'Stop the build of the test map', () => send('testmap', ['stop'], (t) => `Stop sent: the build of the test map. ${t}`)));
+    } else if (m.state !== 'running' && m.state !== 'off' && !S.mapSent) {
+      if (m.tool) {
+        ctl.append(button('Build the test map', 'btn-primary', 'map-build', 'Build the test map', () => {
+          S.mapRefused = null;
+          const was = b ? b.start : null;
+          send('testmap', ['build'], (t) => `Started: ${t.replace(/^conveyor: /, '')}`, () => { S.mapSent = { was }; }, (why) => { S.mapRefused = why; });
+        }));
+        ctl.append(h('span', 'board-from', `Runs the whole suite once with ${m.tool}. ${num(m.suiteSec) === null
+          ? 'No whole-suite run is recorded: it takes about as long as the whole suite, or more.'
+          : `The last whole-suite run took ${mmss(m.suiteSec)}: it takes about that long, or more.`} Admins only.`));
+      } else {
+        ctl.append(h('span', 'board-from', `No test map can be made: ${m.toolWhy || 'no coverage tool'}.`));
+      }
+    }
+    if (ctl.childNodes.length) el.append(ctl);
+    if (S.mapRefused) { const no = h('p', 'rules-refused', `Not started: ${S.mapRefused}`); no.setAttribute('role', 'alert'); el.append(no); }
+    return el;
+  }
+
   function draw() {
     const el = S.el, h = S.ctx.h;
     if (S.d.repo === null) {
@@ -1459,6 +1530,7 @@
     S.sel.forEach((x) => { if (!files.some((f) => f.file === x)) S.sel.delete(x); });
     if (!S.sel.size) { S.answers = null; if (asking('many')) S.ask = null; }
     const parts = [];
+    if (obj(S.d.testMap)) parts.push(mapPart(S.d.testMap));
     // Settings: the Tests model, Test limits and Auto-file, collapsed until opened; it stays as it was from one draw to
     // the next.
     const wasSet = el.querySelector('.tests-settings');
@@ -1517,7 +1589,7 @@
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Tests: ${view.repo}` : null);
     if (S.repo !== undefined && view.repo !== S.repo) {
       S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null;
-      S.sel.clear(); S.answers = null; S.menu = null; S.edit.clear();
+      S.sel.clear(); S.answers = null; S.menu = null; S.edit.clear(); S.mapSent = null; S.mapRefused = null;
     }
     Object.assign(S, { el, ctx, d: view, read, repo: view.repo });
     if (view.repo !== null) {

@@ -3,7 +3,8 @@
 # `install`, `install-service`, `board`, `setup` and `doctor` make none either: they run before a project has one,
 # install-service and board for the project they were called from. (Setup's label creation goes through gh_write, which makes the
 # folder's privacy/ for its record of what it checked.) `state-dir` names the folder and makes nothing: the review gate
-# asks it on a machine Conveyor may not run on. `testmap` only reads, for /units, which writes nothing. `lane research`
+# asks it on a machine Conveyor may not run on. `testmap` only reads, for /units, which writes nothing; `testmap build` and `stop` write only beside the pack
+# (lib/testmap.sh). `lane research`
 # makes only the lane's own folder in it. CALLED is the folder it was called from.
 CALLED=$PWD
 # Keeps the cards folder's name, and takes the name kept. One command at a time (the flock) keeps the name it chose

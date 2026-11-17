@@ -22,8 +22,9 @@ mapput() { # <jq arguments>...
   local f t; f=$(mapprogpath); t=$f.$BASHPID
   jq -c "$@" > "$t" 2>/dev/null && mv -f "$t" "$f" || { rm -f "$t"; return 1; }
 }
-# A run's progress that cannot be written never fails the run.
-mapstart() { mapput -n --argjson p "$$" --argjson of "$1" '{pid: $p, started: (now | floor), done: 0, of: $of}' || :; } # <of>
+# A run's progress that cannot be written never fails the run. Its pid is the engine process's ($$), or MAPPID: a
+# build by hand runs in a subshell of a process that has ended by then (maprunbuild()).
+mapstart() { mapput -n --argjson p "${MAPPID:-$$}" --argjson of "$1" '{pid: $p, started: (now | floor), done: 0, of: $of}' || :; } # <of>
 mapstep() { mapput -e --argjson d "$1" 'select(.pid) | .done = $d' "$(mapprogpath)" || :; } # <done>: only while the file is a run's
 # Why a run failed, in one line: the first of its <stderr file> (mapfail()'s, without the output it introduces); exit 1
 # with none.
@@ -215,9 +216,10 @@ mapwrite() { # <dir> <pairs file> <language> <seconds> [<test file>...]
 }
 # What the run that makes the map may cost, as setup asks before it: the time of the last whole-suite run recorded
 # (its files' seconds added up: suiterec(), lib/testrun.sh), or that none is recorded.
+mapsuitesec() { jq -rs '[.[] | objects | select(.files | type == "object")] | last | select(.) | [.files[].sec | numbers] | add // empty | round' "${STATE%/*}/suiteruns.jsonl" 2>/dev/null; }
 mapcost() {
   local s
-  s=$(jq -rs '[.[] | objects | select(.files | type == "object")] | last | select(.) | [.files[].sec | numbers] | add // empty | round' "${STATE%/*}/suiteruns.jsonl" 2>/dev/null)
+  s=$(mapsuitesec)
   if [ -n "$s" ]; then echo "It takes about ${s}s or more: the last whole-suite run took ${s}s."
   else echo "Its time is not known (no whole-suite run is recorded): about as long as the whole suite, or more."; fi
 }
@@ -240,6 +242,94 @@ mapbuild() { # <dir>
     echo "conveyor: no test map: the run with $tool failed after ${sec}s; a card's tests are found by name: $(cat "$tmp/err")" >&2; rc=1
   fi
   rm -rf "$tmp"; return $rc
+}
+# A build by hand (`conveyor.sh testmap build`, the Board's Build the test map): mapbuild() on the main checkout, in
+# the background, on one of the machine's test slots as a test run takes one (tests(), lib/testrun.sh). Its record is
+# test-map.build.json beside the map (mapbuildpath()): {pid (its runner, while it runs), start, end (seconds since
+# 1970; end null while it runs), state (waiting for a test slot, running, made, failed or stopped), reason (failed or
+# stopped: why), tool (the coverage tool)}. One build at a time: the runner holds an flock on test-map.lock
+# (maplockpath()) from the ask to its end, and a whole run on main does not collect coverage meanwhile (mapcovon()).
+mapbuildpath() { echo "${PACK%/*}/test-map.build.json"; }
+maplockpath() { echo "${PACK%/*}/test-map.lock"; }
+mapheld() { [ -e "$(maplockpath)" ] && ! flock -n "$(maplockpath)" true 2>/dev/null; }
+maprec() { jq -c "$@" > "$(mapbuildpath).new" && mv -f "$(mapbuildpath).new" "$(mapbuildpath)" || { rm -f "$(mapbuildpath).new"; return 1; }; } # <jq arguments>...
+# The ask: refused (exit 2, nothing started, saying why) with test.map off (and how to turn it on), a map the project
+# keeps itself, a language with no coverage tool or the tool not installed (maptool()), a build already running or a
+# whole run on main making the map. Else the runner starts (maprunbuild()), and the ask returns once its record is written.
+mapask() {
+  local m lang tool fd i
+  packget test.map m || { echo "conveyor: the pack's test.map could not be read; nothing started" >&2; return 1; }
+  [ "$m" != off ] || { echo "conveyor: the test map is off (the pack's test.map is \"off\"), so a card's tests are found by name. To turn it on, remove test.map from $PACK, then run setup with --test-map yes, or run this command again; nothing started" >&2; return 2; }
+  [ -z "$m" ] || { echo "conveyor: the pack's test.map names a map the project keeps itself ($m): Conveyor does not make it; nothing started" >&2; return 2; }
+  lang=$(maplang "$MAIN"); tool=$(maptool "$lang" "$MAIN") || { echo "conveyor: no test map can be made: $tool; a card's tests are found by name; nothing started" >&2; return 2; }
+  { exec {fd}>>"$(maplockpath)"; } 2>/dev/null || { echo "conveyor: the test map's lock $(maplockpath) could not be made; nothing started" >&2; return 1; }
+  flock -n "$fd" || { exec {fd}>&-; echo "conveyor: a build of the test map is running; nothing started" >&2; return 2; }
+  [ "$(mapstate "$MAIN" | jq -r .state)" != running ] || { exec {fd}>&-; echo "conveyor: a whole run on main is making the test map; nothing started" >&2; return 2; }
+  rm -f "$(mapbuildpath)"
+  # The runner holds the lock (its copy of fd) and no other descriptor of this process's: the Board's ssh ends with this
+  # process, not with it.
+  ( trap - TERM; trap '' HUP; [ -z "${LOGFD:-}" ] || exec {LOGFD}>&-; maprunbuild "$tool" ) > /dev/null 2>&1 < /dev/null 8>&- &
+  exec {fd}>&-
+  for ((i = 0; i < 100; i++)); do [ ! -s "$(mapbuildpath)" ] || { echo "conveyor: the test map is being built with $tool"; return 0; }; sleep 0.1; done
+  echo "conveyor: the build of the test map did not start" >&2; return 1
+}
+# The runner of a build by hand: its record first (waiting, then running once it has a test slot), mapbuild() in a
+# subshell pinned to the slot's core (slot_mine()) whose pid the run's progress names (MAPPID), and its record last,
+# with how it ended. A TERM (mapquit()) ends the build with each process it started (taend(), lib/testaction.sh): its
+# progress file goes, so the map there (or none) is shown as it was, and the record says stopped.
+maprunbuild() { # <tool>
+  local me=$BASHPID stopped='' bp rc=0 tmp st why=null
+  trap 'stopped=1' TERM
+  maprec -n --argjson p "$me" --arg t "$1" '{pid: $p, start: (now | floor), end: null, state: "waiting", reason: null, tool: $t}' || return 1
+  if slot_pool && { [ -n "$SLOT_HOME" ] || until [ -n "$stopped" ] || slot_try || slot_wait; do :; done; } && [ -z "$stopped" ]; then
+    maprec '.state = "running"' "$(mapbuildpath)"
+    tmp=$(mktemp -d) || tmp=''
+    ( [ -n "$SLOT_HOME" ] || slot_mine || exit 1; MAPPID=$BASHPID TMPDIR=${tmp:-${TMPDIR:-/tmp}} mapbuild "$MAIN" ) > /dev/null 2> "${tmp:-/tmp}/err.$me" & bp=$!
+    [ -n "$stopped" ] || { wait "$bp"; rc=$?; }
+    if [ -n "$stopped" ]; then trap '' TERM; taend "$bp"; wait "$bp" 2>/dev/null; mapend; st=stopped why='"stopped by hand"'
+    elif [ "$rc" = 0 ]; then st=made
+    else st=failed; why=$(jq -c '.failed | strings' "$(mapprogpath)" 2>/dev/null | grep . || jq -Rc . < <(mapwhy "${tmp:-/tmp}/err.$me" || echo 'the build failed'))
+    fi
+    [ -n "$SLOT_HOME" ] || slot_free
+    rm -rf "${tmp:-/tmp}/err.$me" ${tmp:+"$tmp"}
+  elif [ -n "$stopped" ]; then st=stopped why='"stopped by hand, before it had a test slot"'
+  else st=failed why='"the machine'\''s test slots could not be read"'; fi
+  maprec --arg s "$st" --argjson w "$why" '. + {end: (now | floor), state: $s, reason: $w} | del(.pid)' "$(mapbuildpath)"
+}
+# `testmap stop`: TERM to the running build's runner, again every 2 s while its record names it, for up to 40 s;
+# prints how it ended. None running is refused (exit 2), and nothing is stopped.
+mapquit() {
+  local f p i
+  f=$(mapbuildpath)
+  p=$(jq -er '.pid | numbers' "$f" 2>/dev/null) && kill -0 "$p" 2>/dev/null || { echo "conveyor: no build of the test map is running; nothing stopped" >&2; return 2; }
+  for ((i = 0; i < 400; i++)); do
+    [ $((i % 20)) != 0 ] || kill -TERM "$p" 2>/dev/null
+    jq -e 'has("pid")' "$f" > /dev/null 2>&1 || { echo "conveyor: the build of the test map is $(jq -r .state "$f" 2>/dev/null)"; return 0; }
+    sleep 0.1
+  done
+  echo "conveyor: the build of the test map did not end within 40 s of its stop" >&2; return 1
+}
+# The Tests page's Test map part (the snapshot's testMap, lib/snapshot.sh): mapstate() of <dir>, with made and seconds
+# for a made map (when it was made, and how long its run took; null for a map the project keeps itself); tool (the
+# coverage tool, else null) and toolWhy (why there is none, else null) unless it is off; a map the project keeps
+# itself has no tool, as a build of it is refused (mapask()), and toolWhy says so; suiteSec (the seconds of the
+# last whole-suite run recorded, mapsuitesec(), else null); and build (the last build by hand's record, else null; one
+# whose runner is gone, or no longer holds the lock, as after a restart, is failed, saying so). Exit 1 when the pack
+# cannot be read.
+mapboard() { # <dir>
+  local s st m lang t='' tw='' b p
+  s=$(mapstate "$1") && packget test.map m || return 1
+  st=$(jq -r .state <<<"$s")
+  if [ "$st" = off ]; then :
+  elif [ -n "$m" ]; then tw="the pack's test.map names a map the project keeps itself ($m): Conveyor does not make it"
+  else lang=$(maplang "$1"); if t=$(maptool "$lang" "$1"); then tw=''; else tw=$t; t=''; fi; fi
+  b=$(jq -ce 'objects' "$(mapbuildpath)" 2>/dev/null) || b=null
+  if [ "$b" != null ] && p=$(jq -er '.pid | numbers' <<<"$b") && { ! kill -0 "$p" 2>/dev/null || ! mapheld; }; then
+    b=$(jq -c '. + {state: "failed", reason: "its run stopped before it ended"} | del(.pid)' <<<"$b")
+  fi
+  jq -c --arg t "$t" --arg tw "$tw" --arg sec "$(mapsuitesec)" --argjson b "$b" --slurpfile m <(if [ "$st" = made ] && [ -z "$m" ]; then cat "$(mappath)" 2>/dev/null; fi) '.
+    + (if .state == "made" then {made: ($m[0].made // null), seconds: ($m[0].seconds // null)} else {} end)
+    + {tool: (if $t == "" then null else $t end), toolWhy: (if $tw == "" then null else $tw end), suiteSec: ($sec | tonumber? // null), build: $b}' <<<"$s"
 }
 # The test files of the change staged in <worktree> that the made map does not hold yet, after a card's run that
 # passed (tests()): each run alone under coverage and added to the map (mapwrite()), so the next card that changes
@@ -274,7 +364,8 @@ mapdue() { # <dir>
 # (mapdue()), coverage is turned on for the run itself, into <worktree>.mapcov, through its environment, saying why:
 # Node's V8 coverage (NODE_V8_COVERAGE), or Python's coverage.py started in each Python process with dynamic contexts
 # (COVERAGE_PROCESS_START, read by a sitecustomize put first on PYTHONPATH; a Python with no coverage module runs as
-# it would). maprefresh() makes the map from it after a pass; mapcovoff() turns it off. A Go, Rust or Ruby run cannot
+# it would). maprefresh() makes the map from it after a pass; mapcovoff() turns it off. While a build by hand runs
+# (mapheld()), it collects none, saying so. A Go, Rust or Ruby run cannot
 # collect coverage a test file at a time so: after it passes, maprefresh() runs its tests again under the language's
 # tool, as setup does (mapcollect()), and the run says so. A pack whose test.map is set (off, or a map of its own) has
 # none to refresh. A Node or Python run says how far it is (mapstart(), maptick()) at once and then every 2 seconds,
@@ -283,6 +374,7 @@ mapcovon() { # <worktree>
   local m why lang n c=$1.mapcov
   rm -rf "$c"; packget test.map m && [ -z "$m" ] || return 0
   why=$(mapdue "$1") || return 0
+  ! mapheld || { echo "conveyor: test map: due, as $why, but a build of it by hand runs (testmap build): this run collects no coverage"; return 0; }
   lang=$(jq -r '.language // ""' "$(mappath)")
   case $lang in
     node) mkdir -p "$c/v8" || return 1; export NODE_V8_COVERAGE=$c/v8 ;;

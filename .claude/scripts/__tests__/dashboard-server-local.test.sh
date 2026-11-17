@@ -153,6 +153,15 @@ to_login('this_device_sent_to_login_after', req('GET', '/'))
 audit = [json.loads(l) for l in open(ds.AUDIT)]
 check('setting_change_audited', [(a['by'], a['action'], a['on']) for a in audit if a['action'] == 'no-login-here']
       == [('max', 'no-login-here', False), ('max', 'no-login-here', True), ('this device', 'no-login-here', False)], audit)
+# Build the test map (#178) is an admin's: a member's ask is refused (403) and nothing runs on the host; an admin's runs
+# conveyor.sh testmap build there. Bug it catches: a member started a whole-suite run on the build machine.
+n = len(RAN)
+r = req('POST', '/control', cookie=ana, body={'action': 'testmap', 'args': ['build'], 'repo': 'project'}, **other)
+check('member_cannot_build_the_test_map', r[0] == 403 and b'only an admin' in r[2] and len(RAN) == n, r)
+r = req('POST', '/control', cookie=mx, body={'action': 'testmap', 'args': ['build'], 'repo': 'project'}, **other)
+check('admin_builds_the_test_map', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh testmap build'"), (r, RAN[-1:]))
+r = req('POST', '/control', cookie=mx, body={'action': 'testmap', 'args': ['delete'], 'repo': 'project'}, **other)
+check('test_map_takes_build_or_stop', r[0] == 400 and len(RAN) == n + 1, r)
 srv.shutdown()
 print('PASS: dashboard-server-local (%d checks)' % passed[0])
 EOF
