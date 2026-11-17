@@ -332,8 +332,9 @@ its row and click **Make it run alone**. The issue asks a card to make the file 
 into test files that the runner can list, and to keep what it tests. Before the card goes to review, Conveyor checks
 two things. The pack must no longer mark the file `wholeOnly`. The file must pass when it runs alone with the change,
 on a test slot, and Conveyor gives it to the test command as the pack's `test.list` says. When the change removes
-the file, Conveyor runs the test files that the change adds. When a check fails, the card is blocked, and the reason
-says why. After the card lands, the row no longer shows Whole suite only, and a card's Test step can run the file.
+the file, Conveyor runs the test files that the change adds or changes. When a check fails, the card is blocked, and
+the reason says why. After the card lands, the row no longer shows Whole suite only, and a card's Test step can run
+the file.
 
 The Caught column shows how often a test file caught a real bug. Conveyor counts it from the card records: a card
 Test step failed in the file, the card landed, and its landed change did not change the file. So the fix went into

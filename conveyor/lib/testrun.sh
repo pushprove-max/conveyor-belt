@@ -1503,15 +1503,15 @@ alonefile() { # <issue json>
 # test command is given the file as test.list says (args: its path at the end; placeholder: in place of {files}; env:
 # in CONVEYOR_TEST_FILES; runner: its package or test target, runnercmd()). The run must pass and name the file: what
 # it passed (testfails()) or timed (timed()) names it. A change that removes the file (its runs moved into other test
-# files) runs the test files the change adds in its place. Writes the result in <worktree>.unfixed, the reason first
-# when it does not hold, and fails then.
+# files) runs the test files the change adds or changes in its place. Writes the result in <worktree>.unfixed, the
+# reason first when it does not hold, and fails then.
 aloneproof() { # <card> <worktree> <test file>
   local mwt=$CARDS/mainrun/$1.alone f=$3 sha out='' rc=0 why='' cmd lm q x tl='' fs=() ok pp=$2/.conveyor/project.json
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
   if [ -e "$2/$f" ]; then fs=("$f")
-  else mapfile -t fs < <(git -C "$2" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null | testpaths); fi
+  else mapfile -t fs < <(git -C "$2" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD 2>/dev/null | testpaths); fi
   # The pack the change leaves; main's own when the project does not track it (no card changes it then). Its test
   # command and test.list are the ones the run below uses: a card that sets test.list to make the file run alone is
   # checked with that setting, not main's.
@@ -1519,7 +1519,7 @@ aloneproof() { # <card> <worktree> <test file>
   { IFS= read -r -d '' cmd && IFS= read -r -d '' lm; } < <(jq -j '(.test.command // ""), "\u0000", (.test.list // ""), "\u0000"' "$pp" 2>/dev/null) || { cmd=''; lm=''; }
   if jq -e --arg f "$f" '.test.files[$f].wholeOnly == true' "$pp" > /dev/null 2>&1; then
     why="the change leaves the test file $f marked whole-only (test.files.\"$f\".wholeOnly in .conveyor/project.json): a Make it run alone card takes the mark off"
-  elif [ ${#fs[@]} = 0 ]; then why="the change removes the test file $f and adds no test file to run what it ran"
+  elif [ ${#fs[@]} = 0 ]; then why="the change removes the test file $f and adds or changes no test file to run what it ran"
   else
     q=$(printf '%q ' "${fs[@]}"); q=${q% }
     case $lm in

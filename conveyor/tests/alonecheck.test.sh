@@ -87,3 +87,10 @@ t_alonemoved() {
   fx_in '[ "$(alonefile "{\"number\": 7, \"title\": \"Make the test file w.test.sh run alone\"}")" = w.test.sh ] && ! alonefile "{\"number\": 7, \"title\": \"Make the test file w.test.sh run\"}"'
   [ "$RC" = 0 ] || fail "alonefile read the titles wrong: $(cat "$T/$CASE/run.out")"
 }
+
+# Bug it catches (#246): a change that moved the file's checks into an existing test file and removed it was blocked
+# as adding no test file, as only added files were run. The changed file runs alone in its place.
+t_alonemerged() {
+  alonerun "$UNMARK; git rm -q w.test.sh; echo 'exit 0 # merged' > other.test.sh" args
+  [ "$RC" = 0 ] && [ "$(cat "$STUB/alone-args")" = 'other.test.sh' ] || fail "the changed file did not run in place of the removed one: $RC $WHY $(cat "$STUB/alone-args" 2>&1)"
+}

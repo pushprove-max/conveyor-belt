@@ -1224,8 +1224,9 @@ cards either; each has a check of its own, and the review is shown its result:
   file `wholeOnly`. Then the file runs alone with the change, on a test slot, given to the test command as the pack's
   `test.list` says: at its end (`args`), in place of `{files}` (`placeholder`), in `CONVEYOR_TEST_FILES` (`env`), or
   as its package or test target (`runner`). It must pass, and the run's log lines or its runner's report must name
-  it. A change that removes the file runs the test files it adds in its place. The card is blocked when the mark
-  stays, when `test.list` is not set or cannot give the file alone, or when the run fails or does not run the file.
+  it. A change that removes the file runs the test files it adds or changes in its place. The card is blocked when
+  the mark stays, when `test.list` is not set or cannot give the file alone, or when the run fails or does not run
+  the file.
 
 The checks of Fix hollow cases, Fix the waiting, Delete it and Make it run alone run again before each later review when a fix or rebase
 session changed the card. When a check no longer holds, the card is blocked with its reason.
