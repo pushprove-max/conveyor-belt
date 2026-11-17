@@ -9,8 +9,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/pushprove-max/conveyor-belt.git",
-        "ref": "v1.3.0",
-        "sha": "0ba9d9e63139239909324c869d70a42a6ec2200a"
+        "ref": "v1.4.0"
       },
       "description": "Issue-to-merged-commit automation for Claude Code: one issue becomes one card, built in a fresh worktree, reviewed, tested, landed, and pushed when you choose."
     }
