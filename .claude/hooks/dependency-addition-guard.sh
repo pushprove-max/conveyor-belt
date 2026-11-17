@@ -61,7 +61,8 @@ owner_approved() {
 # that is only another command's argument is read as an install: a false block, never a missed one.
 # False when it names none, so a form it cannot read still blocks. In an npm command a
 # valued flag's value is not a package (pnpm's -w is a switch). A version is not part of the name: lodash@4,
-# @types/node@20 and requests>=2 are lodash, @types/node and requests.
+# @types/node@20 and requests>=2 are lodash, @types/node and requests. The cut list starts with ] and ends with [, as
+# a "[=" in it opens an equivalence class that gawk refuses.
 # Its limit, accepted: it recognises plain install commands of the package managers. An unusual argument shape (for
 # example a directory argument named like a package manager) may be read wrongly, and is out of scope.
 cmd_approved() {
@@ -73,7 +74,7 @@ cmd_approved() {
           if (git && !mgr && $i ~ /^-/) { skip = ($i ~ /^(-C|--git-dir|--work-tree|--namespace)$/); continue }
           if (npm && $i ~ /^(--prefix|--workspace|-w|-C|--registry|--loglevel|--cache|--userconfig)$/) { skip = 1; continue }
           if (f) { if ($i !~ /^-/) { n = substr($i, 2); sub(/@.*/, "", n); n = substr($i, 1, 1) n
-                     sub(/[][=<>!~;].*/, "", n); print n } }
+                     sub(/[]=<>!~;[].*/, "", n); print n } }
           else if ($i ~ /(^|\/)git$/) git = 1
           else if ($i ~ /(^|[\/!])npm$/) npm = mgr = 1
           else if ($i ~ /(^|[\/!])(yarn|pnpm|pip3?|uv)$/) mgr = 1

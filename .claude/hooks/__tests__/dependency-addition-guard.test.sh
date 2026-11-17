@@ -68,6 +68,19 @@ check "yarn add blocks"                         2 "$(run "$(bash_p "$ADD lodash"
 check "a lockfile-driven install passes"        0 "$(run "$(bash_p "npm ci")")"
 check "an approved install passes"              0 \
   "$(run "$(bash_p "CONVEYOR_DEP_APPROVED=1 $INSTALL lodash")")"
+# The name trim, run under the system awk with owner_approved stubbed to print each name. Bug: a cut list holding
+# "[=" is an equivalence class to gawk, which prints "invalid collating element" and trims nothing.
+eval "$(sed -n '/^cmd_approved() {/,/^}/p' "$HOOK")"
+owner_approved() { printf '%s ' "$1"; }
+check "the name trim cuts a pip spec at = [ > ; with no awk error" "pkg pkg pkg pkg ||" \
+  "$(cmd_approved "pip install pkg==1.0 pkg[extra] pkg>=2 pkg;python_version" 2>&1)||"
+check "and at ] < ! ~" "a b c d ||" "$(cmd_approved "pip install a]x b<1 c!=2 d~=3" 2>&1)||"
+# The system awk may be mawk, which accepts "[="; gawk and busybox awk refuse it as gawk does, so run under them too.
+for A in gawk "busybox awk"; do
+  command -v "${A%% *}" >/dev/null || continue
+  check "the name trim under $A" "pkg pkg pkg a b ||" \
+    "$(awk() { $A "$@"; }; cmd_approved "pip install pkg==1.0 pkg[extra] pkg>=2 a]x b~=3" 2>&1)||"
+done
 check "a second install after an approved one blocks" 2 \
   "$(run "$(bash_p "CONVEYOR_DEP_APPROVED=1 $INSTALL lodash && $INSTALL sneaky")")"
 
