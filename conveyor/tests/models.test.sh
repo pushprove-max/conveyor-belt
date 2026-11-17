@@ -12,7 +12,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # An engine function called alone in the engine shell, as `conveyor.sh <command>` loads it (the libraries
 # commands/<command>.sh sources), with no loop run: a case about one function (the review, a session's route, doctor's
 # route lines) pays for that function, not for a whole card around it.
-engine() { # <run|doctor> <the engine command>
+modelsengine() { # <run|doctor> <the engine command>
   mkdir -p "$T/$CASE/cards"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/$1.sh")" && names && eval "$2" )
@@ -20,7 +20,7 @@ engine() { # <run|doctor> <the engine command>
 # reviewed() alone, as a card's review step calls it, on a worktree of main (cards/c<n>) with the build's change
 # staged: what it prints, then a last line of its exit and the verdict it left (rc=<exit> <verdict>).
 rvcall() { # <n>
-  engine run "w=\$CARDS/c$1"' && git -C "$MAIN" worktree add -q --detach "$w" && echo two >> "$w/a.txt" && git -C "$w" add a.txt \
+  modelsengine run "w=\$CARDS/c$1"' && git -C "$MAIN" worktree add -q --detach "$w" && echo two >> "$w/a.txt" && git -C "$w" add a.txt \
     && { reviewed "$w" "# Issue: body of the issue"; echo "rc=$? $(verdict "$w.review" 2>/dev/null)"; }'
 }
 
@@ -266,10 +266,10 @@ proxy_start() { # <issue>: a main with that one issue, the stub proxy serving, C
   # Doctor's route lines, from its routes() alone; and in doctor's own output, among its checks of this machine (some of
   # which this case's machine fails), where a key's variable may meet doctor's own (t_proxykeys). Then the Anthropic
   # variables a card session gets from proxyenv(), called alone as the session's subshell calls it before claude starts.
-  routes() { { engine doctor routes || :; } | grep -E '^(builder|reviewer):'; }
+  routes() { { modelsengine doctor routes || :; } | grep -E '^(builder|reviewer):'; }
   doctorroutes() { { loop doctor || :; } | grep -E '^(builder|reviewer):'; }
   # Fails when the call does, so a direct session's empty list is never a call that did not run.
-  pxenv() { local o; o=$(engine run 'proxyenv && env') || return 1; grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ENABLE_TOOL_SEARCH)=' <<<"$o" | sort; return 0; }
+  pxenv() { local o; o=$(modelsengine run 'proxyenv && env') || return 1; grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ENABLE_TOOL_SEARCH)=' <<<"$o" | sort; return 0; }
   unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ENABLE_TOOL_SEARCH
   echo "$GO" > "$STUB/review.1"; sed -i '2i echo " $* " >> "$STUB/codex-args"' "$STUB/codex"
   # The stub proxy: GET .../models answers $STUB/models; each request logs its Authorization header and, while the
