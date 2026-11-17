@@ -49,6 +49,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
+  local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' ob='' # kw: keptway()'s answer for a kept patch; ob: the budget of its own its build proposes (ownbudget())
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
@@ -528,11 +529,24 @@ card() { # <card> <issue> [<branch> <tip>]
           || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
         rm -f "$wt.lent" # its worktree holds its own change again (batch())
       fi
+      voidrun "$wt" "$rc" > /dev/null || voids=0 # a run with a result, a pass too, starts the count of runs with none again
       if [ $rc != 0 ]; then
         # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's
         # setup, not the change, and no run on main or fix session mends it. The card is blocked saying so, with no
         # test failures.
         t=$(depsmissing "$wt"); [ -z "$t" ] || { block "$c" "$n" "$wt" "$(depsreason "$t")"; return; }
+        # A run with no result (voidrun(): killed by a signal, as by the service stopping or restarting, also under a
+        # loop that adopted the card) proves nothing: nothing of it runs on main, goes to the main-red record, a wait
+        # for main or a fix session. Its test line says so, and the test step runs again; the third such run in a row
+        # blocks the card (a run with a result, a pass too, starts the count again: above).
+        if t=$(voidrun "$wt" "$rc"); then
+          voids=$((voids + 1))
+          record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --arg r "no result: $t" \
+            'sub("\n+$"; "") as $t | $x + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
+          [ "$voids" -lt 3 ] || { block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
+          echo "conveyor: card $c: its test run gave no result ($t): the test step runs again"
+          continue
+        fi
         out=$(testfails "$wt.test" "$rc")
         # What still did not pass runs on main first (verdicts()): each failure's verdict goes on the test line.
         t=$(verdicts "$c" "$wt" "${out:-null}") || t='{"verdicts":[]}'

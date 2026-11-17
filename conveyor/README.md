@@ -346,6 +346,15 @@ run's as well as a run again's, says why each file ran in `why`, `{"<file>": [re
 <file>`, `the card changed <file>` or `did not pass`; from the command's log lines
 `TESTRUN why<TAB><file><TAB><reason>`.
 
+A test step whose run gives no result proves nothing. This is a run that a signal stopped (for example, the service
+stopped or restarted), a run whose time ran out with no test file running, or a run that wrote logs in
+`CONVEYOR_TEST_LOG` that name no test (no `TESTRUN`, `== ` or `-- ` line). It is also a failed run that logged no
+test file and whose output names no failing case, so its only failure is the test command itself. Nothing of that run goes to main, to
+`mainred.json`, to a wait for main or to a fix session. The step's `test` line has the reason `no result: <why>`, and
+the test step runs again. This is also true for a card that a restarted loop adopted. After the third such run in a
+row, the card is blocked with the reason "the changed tests gave no result 3 times in a row". A run that gives a
+result starts the count again.
+
 Before a failure goes to the fix session, what still did not pass after the run again runs on main (a fix session cannot repair main or the
 machine): in a worktree of main's commit as it is now, on a test
 slot, with the pack's `test.command`, its `CONVEYOR_TEST_RERUN` list naming every other file of the card's runs as
@@ -353,7 +362,8 @@ passed and, of each failing file, its failing cases (a file that failed naming n
 `fail` line with no case: the command runs it whole, since nothing else selects it on main's clean tree). Each
 failure gets a verdict:
 
-- **main**: the same case failed on main too (a timeout or a kill there says nothing of the case). Conveyor files no
+- **main**: the same case failed on main too (a timeout or a kill there says nothing of the case). The test command
+  itself is never a case and gets no verdict: it names no test. Conveyor files no
   GitHub issue: the case goes to the fix card of main's commit, a card of issue 0 that the
   loop picks ahead of the queue, one per broken main commit. The loop picks it whatever the priority switches say
   (`control rules P0=off` to `P3=off` included), by design: held, every card that meets the red main would wait for

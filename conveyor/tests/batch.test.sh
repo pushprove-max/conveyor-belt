@@ -85,7 +85,7 @@ t_batchmask() {
 if grep -q '^# The changed tests fail' "$STUB/brief"; then rm -f needs-b
 else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt; : > needs-b ;; *) echo eight >> a.txt; : > supplied-by-b ;; esac; fi
 EOF
-  echo '[ ! -e needs-b ] || [ -e supplied-by-b ] || { echo "FAIL needs.test: needs-b without supplied-by-b"; exit 1; }' >> "$STUB/test-cmd"
+  echo '[ ! -e needs-b ] || [ -e supplied-by-b ] || { echo "FAIL needs.test: needs-b without supplied-by-b"; printf "%s\n" "== needs.test" "-- FAIL needs.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }' >> "$STUB/test-cmd"
   # #7's tests after its fix end only once #8 has landed: #8, at its claim, looks again each `live` second, and #7's
   # stubbed fix is faster than that, so without this wait #8 could land before those tests start or after they end.
   echo 'case $PWD in *-7) [ -e needs-b ] || while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"landed\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
@@ -157,6 +157,7 @@ else case $PWD in *-7) sed -i '10s/.*/seven/;20s/.*/seven/' a.txt ;; *-8) echo e
 EOF
   echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; exit 1; }' >> "$STUB/test-cmd"
   echo "$NOSTACK" >> "$STUB/review-cmd"
+  echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; printf "%s\n" "== clash.test" "-- FAIL clash.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
   grep -q "card $c8 waits on card $c7, which changes the same files: a.txt" <<<"$out" && grep -q "card $c9 waits on card $c7, which changes the same files: a.txt" <<<"$out" \

@@ -586,7 +586,8 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # case (the command runs it whole: on main's clean tree nothing else selects it). Each failure's
 # verdict, as notpassed() names it:
 # - main: the same case (or the same file failing naming no case) failed on main too. A timeout or a kill on main says
-#   nothing of the case.
+#   nothing of the case. The test command itself (testfails()'s name for a run that logged no file) gets no verdict:
+#   it names no test (a card's run whose only failure it is gave no result: voidrun()).
 # - card: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
 #   select it): the card's to fix, as before.
 # - flaky: it failed on the first run and passed on the run again (PASSEDAGAIN; flakyrun() records it).
@@ -594,10 +595,12 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # seconds main's run took, its wait for a slot included), exit}. Each case whose verdict is main goes to the fix card of main's commit (mainred()).
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local mwt=$CARDS/mainrun/${2##*/} sha='' u m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE
-  # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of time.
-  u=$(jq -c '[.files[] | .file as $f | if .cases == [] then {file: $f, case: null} else .cases[] | {file: $f, case: .name} end]
-    + [.timeout.file // empty | {file: ., case: null}] | unique' <<<"$3" 2>/dev/null) || u='[]'
+  local mwt=$CARDS/mainrun/${2##*/} sha='' u m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd=''
+  packget test.command cmd 2>/dev/null || cmd=''
+  # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
+  # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
+  u=$(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | if .cases == [] then {file: $f, case: null} else .cases[] | {file: $f, case: .name} end]
+    + [.timeout.file // empty | {file: ., case: null}] | unique | map(select(.case != null or .file != $cmd))' <<<"$3" 2>/dev/null) || u='[]'
   if [ "$u" != '[]' ]; then
     if sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
       && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -1183,6 +1186,29 @@ noresult() { # <worktree> <exit> <file>...
   done
   return 1
 }
+# A card's test run that failed with no result (card(): it proves nothing, so none of it runs on main, goes to the
+# main-red record, a wait for main or a fix session; the test step runs again): it was killed by a signal (an exit
+# over 128: the service stopping or restarting), or its time ran out with no test file begun and not ended (the runner
+# itself, not a test, ran out of time), or its runner wrote logs that name nothing it ran (no `TESTRUN`, `== ` or `-- `
+# line), or its only failure is the test command itself (testfails()'s name for a run that logged no file, when its
+# output names no failing case either): the command names no test. The loop's own file in the log folder (cache:
+# cacheoff()) is none of the runner's. Prints why; fails when the run passed or gave a result.
+voidrun() { # <worktree> <exit>
+  local l=() f cmd
+  [ "$2" != 0 ] || return 1
+  [ "$2" -le 128 ] || { echo "exit $2: the run was killed by a signal"; return 0; }
+  mapfile -t l < <(testlogs "$1" | grep -v '/cache$')
+  if [ "$2" = 124 ]; then
+    f=$(testfails "$1.test" 124 | jq -r '.timeout.file // empty' 2>/dev/null)
+    [ -n "$f" ] && [ ${#l[@]} -gt 0 ] && grep -qxF -- "== $f" "${l[@]}" 2>/dev/null \
+      || { echo "exit 124: the run's time ran out with no test file running"; return 0; }
+  fi
+  [ ${#l[@]} -gt 0 ] && ! grep -qE '^(TESTRUN |== |-- )' "${l[@]}" 2>/dev/null \
+    && { echo "exit $2: the runner's logs name no test it ran"; return 0; }
+  packget test.command cmd 2>/dev/null && [ -n "$cmd" ] && testfails "$1.test" "$2" \
+    | jq -e --arg c "$cmd" '.files != [] and all(.files[]; .file == $c and .cases == [])' > /dev/null 2>&1 || return 1
+  echo "exit $2: the run named no test that failed, only the test command"
+}
 # A case that fails on main (verdicts()) goes to the fix card of main's commit, a card with no GitHub issue (issue 0;
 # the owner, 2026-11-15: 13 issues filed in 9 hours, three by one landing): one card per broken main commit, holding
 # every case that fails there. $MAINRED keeps {reds: [{sha, cases: [{case, file, by, files, last}], card}]}: by, the
@@ -1198,8 +1224,11 @@ noresult() { # <worktree> <exit> <file>...
 # is the case its case file names now.
 MAINRED=${STATE%/*}/mainred.json
 mainred() { # <card> <case> <its file> <main's commit>
-  local lock rec c t k re f fs by same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
+  local lock rec c t k re f fs by cmd='' same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
   [ -n "$4" ] || return 1
+  # The test command itself (what testfails() names a run that wrote no log) is no case: it names no test to fix.
+  ! { packget test.command cmd 2>/dev/null && [ "$2" = "$cmd" ]; } \
+    || { echo "conveyor: main is red: the test command itself is no case, so it goes to no fix card" >&2; return 1; }
   k=${2#"$3: "}; [ "$k" != "$2" ] || k=''
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null || { echo "conveyor: the main-is-red record could not be locked; $2 goes to no fix card" >&2; return 1; }
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be locked; $2 goes to no fix card" >&2; return 1; }

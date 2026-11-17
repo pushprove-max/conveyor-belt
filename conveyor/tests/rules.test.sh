@@ -29,7 +29,7 @@ if grep -q '^# Landing conflict' "$STUB/brief"; then printf 'ONE\ntwo\n' > a.txt
 elif [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt
 else wc -l < "$STUB/sessions" > fixed.txt; fi
 EOS
-  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] || { echo "FAIL widget.test.ts"; exit 1; }; [ "$(wc -l < "$STUB/tests")" != 3 ] || { echo ONE > "$R/a.txt"; git -C "$R" commit -qam other; }' > "$STUB/test-cmd"
+  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] || { echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }; [ "$(wc -l < "$STUB/tests")" != 3 ] || { echo ONE > "$R/a.txt"; git -C "$R" commit -qam other; }' > "$STUB/test-cmd"
   echo "$NOGO" > "$STUB/review.1"; for i in 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
   loop run 1 >/dev/null || fail "run exited non-zero"
   [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start test start fix start review start test start start rebase start review start test start landed pushed issue " ] \
@@ -133,7 +133,7 @@ t_tests() {
   loop check || fail "the record check refuses a test line"; count "1 1 1"
   # Tests fail once (the second run and its run again, tests()): one fix session handed the last 200 lines of the output, one review, a second run, landed.
   echo 'echo two >> a.txt' > "$STUB/build"
-  echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 2|3) seq 300 | sed "s/^/out line /"; echo "FAIL widget.test.ts"; exit 1 ;; esac' > "$STUB/test-cmd"
+  echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 2|3) seq 300 | sed "s/^/out line /"; echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1 ;; esac' > "$STUB/test-cmd"
   loop run 1 >/dev/null || fail "second run exited non-zero"
   [ "$(tl 8)" = "picked worktree deps brief start build start review start test start fix start review start test start landed pushed issue " ] || fail "steps of a card whose tests fail once: $(tl 8)"
   [ "$(st 'select(.issue == 8 and .step == "test") | .result' | tr '\n' ' ')" = "fail pass " ] && st 'select(.issue == 8 and .step == "test" and .result == "fail") | .tail' | grep -q 'FAIL widget.test.ts' \
@@ -146,7 +146,7 @@ t_tests() {
   # A line is kept whole, however long: a cap on its length loses what it says after the cut, and makes lines that
   # differ only there fold as identical on the Board. Lines that long, 60 of them, are more than one command argument can
   # hold: the line is written all the same, its sentence and its output.
-  echo 'echo x >> "$STUB/tests"; seq 100; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; exit 1' > "$STUB/test-cmd"; head=$(git -C "$R" rev-parse HEAD)
+  echo 'echo x >> "$STUB/tests"; seq 100; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; printf "%s\n" "== gadget.test.ts" "-- FAIL gadget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"; head=$(git -C "$R" rev-parse HEAD)
   loop run 1 >/dev/null || fail "third run exited non-zero"
   [ "$(tl 9)" = "picked worktree deps brief start build start review start test start fix start review start test blocked " ] || fail "steps of a card whose tests fail twice: $(tl 9)"
   [ "$(st 'select(.issue == 9 and .step == "blocked") | .reason')" = "the changed tests failed again after their one fix round (exit 1); nothing landed." ] \
@@ -162,7 +162,7 @@ t_tests() {
   [ "$(tl 10)" = "picked worktree deps brief start build start review start fix start review start fix start review start test start filed start landed pushed issue " ] && [ -e "$STUB/tested-first" ] || fail "a card landing on a NO-GO did not run its tests first: $(tl 10)"
   [ "$(st 'select(.issue == 10 and .step == "landed") | [.sha, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",[100101]]" ] || fail "the NO-GO card did not land with its follow-up"; count "8 8 9"
   # The last review says NO-GO and the tests fail twice: blocked, with no follow-up filed.
-  echo 'echo x >> "$STUB/tests"; echo "FAIL again"; exit 1' > "$STUB/test-cmd"; head=$(git -C "$R" rev-parse HEAD)
+  echo 'echo x >> "$STUB/tests"; echo "FAIL again"; printf "%s\n" "== again.test" "-- FAIL again.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"; head=$(git -C "$R" rev-parse HEAD)
   loop run --only 11 1 >/dev/null || fail "fifth run exited non-zero"
   [ "$(tl 11)" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test blocked " ] || fail "steps of a NO-GO card whose tests fail twice: $(tl 11)"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ "$(wc -l < "$STUB/filed")" = 1 ] && [ ! -e "$STUB/closed" ] || fail "a card whose tests failed twice landed or filed a follow-up"
@@ -293,7 +293,7 @@ EOF
 }
 
 # Bug: a test command that writes no runner log (a pack that runs one test file itself) had its failing cases under
-# no file, and a timeout that named none: the Board could not say what failed. Such a run is one file, the command.
+# no file: the Board could not say what failed. Such a run is one file, the command.
 t_testnolog() {
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
@@ -303,8 +303,9 @@ t_testnolog() {
   f() { st 'select(.step == "test" and .result == "fail") | tojson' | sed -n "$1p" | jq -c --arg c "$cmd" "$2"; }
   [ "$(f 1 '.failures | [.timeout, (.files == [{file: $c, cases: [{name: "views", line: "FAIL [views]: wrong"}]}])]')" = '[null,true]' ] \
     || fail "a failing case of a command with no runner log is not under the command: $(f 1 .failures)"
-  [ "$(f 2 '.failures | [(.timeout == {sec: 2, file: $c}), (.files == [{file: $c, cases: []}])]')" = '[true,true]' ] \
-    || fail "a timed-out command with no runner log does not name the command as what was running: $(f 2 .failures)"
+  # Its time running out is the runner's, not a test's (issue 218): that run gave no result, and says so.
+  [ "$(f 2 '[.failures, .reason]')" = "[null,\"no result: exit 124: the run's time ran out with no test file running\"]" ] \
+    || fail "a timed-out command with no runner log is not a run with no result: $(f 2 '[.failures, .reason]')"
 }
 
 # Bug: two runners each wrote a log, and the files' order was read from the logs joined by name: the runner whose log

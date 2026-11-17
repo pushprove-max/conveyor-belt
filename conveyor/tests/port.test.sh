@@ -55,7 +55,7 @@ t_portfix() {
   loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "#8 was not blocked on its landing conflict: $(steps 8)"
   echo "$GO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"
   # The third run fails, and its run again too (tests()), so the test fix starts.
-  echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 3|4) echo "FAIL widget.test.ts"; exit 1 ;; esac' > "$STUB/test-cmd"
+  echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 3|4) echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1 ;; esac' > "$STUB/test-cmd"
   loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the retried #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test fail,fix ok,review GO,test pass,landed ok," ] \
     && [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] \

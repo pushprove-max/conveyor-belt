@@ -14,7 +14,7 @@ t_branchtests() {
   # A failing changed test blocks the landing: one fix round, one more review, a second failure, blocked. Nothing lands.
   # Each failed run is run once more before it counts as failed (tests()): four runs, two test steps.
   lane fast-two e.txt eee; at=$(git -C "$R" rev-parse main); echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
-  echo 'echo x >> "$STUB/tests"; echo "FAIL widget.test.ts"; exit 1' > "$STUB/test-cmd"
+  echo 'echo x >> "$STUB/tests"; echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"
   out=$(loop land-branch fast-two) && fail "a branch whose changed tests fail exited zero: $out"
   c=$(newest); count "1 2 4"
   [ "$(steps "$c")" = "picked worktree deps brief start review start test start fix start review start test blocked " ] && [ "$(git -C "$R" rev-parse main)" = "$at" ] && [ ! -e "$R/e.txt" ] \
