@@ -61,6 +61,12 @@ The loop:
 - `machine` runs the machine's one Conveyor, a loop for every record of the host file. `machine pause` and
   `machine resume` pause and resume every project. `machine steer on` and `machine steer off` turn
   [Card work yields to you](configuration.md#card-work-yields-to-you) on and off.
+- `why <pid | name>` names a process, its parents, and the card, step and project it belongs to, or says that no card
+  owns it. `work` lists the busy processes by card and step, the heaviest first, then the busy work that no card
+  owns. A closed card's processes show as left over, with the command that stops them. Both take `--json`
+  (`conveyor/README.md`, Why the machine is busy).
+- `bench responsiveness` times a short command start and a 10 ms CPU task beside card work, with Card work yields to
+  you on and off by turns, and prints the median and p90 of each.
 - `install-service` installs `machine` as the machine's service.
 - `board` installs the [Board](board.md#install-the-board) as a user service, for the project of the checkout it runs in.
 

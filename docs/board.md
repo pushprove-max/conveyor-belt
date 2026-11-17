@@ -109,6 +109,11 @@ Click the button, then click it again. The text next to the button shows that th
   when there is one.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
+- **Work now**, at the foot of Health, shows what keeps the Conveyor machine busy now. Open it to read the machine.
+  Each card's busy processes come first, grouped by card and step, the heaviest CPU first. Then come the busy
+  processes that no card owns, such as another program or a stray test process. A closed card that still runs
+  processes shows **closed: left over**, with the command that stops them. **Read again** reads the machine again.
+  It is the same list as `conveyor.sh work`.
 - A blocked landing in the Fast lane shows its reason on one line. Its log is under **Show output**, as plain text,
   with **Copy output**.
 

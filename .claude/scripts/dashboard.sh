@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history] -- the collector of the Conveyor dashboard (the
+# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work] -- the collector of the Conveyor dashboard (the
 # strip-down to Conveyor). It writes one file, data.js in dashboard/ of the state folder (`conveyor.sh state-dir`)
 # (`window.DASH = {...};`), which the static page in .claude/dashboard/ reads, through the page server's /events as it
 # changes, or every 15 s when that stream is not open. No model call, ever.
@@ -1076,6 +1076,24 @@ history() {
     && mv -f "$RUN/out" "$f" && cat "$f"
 }
 
+# --work: the Health panel's Work now, what keeps the Conveyor host busy now: `conveyor.sh work --json` of the first
+# record, which reads every record's cards, in one command to the host (hostof, onhost), as one {host, groups, other}:
+# every record's busy cards (its groups), the heaviest first, and the busy processes no record's card owns. Each
+# command is cut to 200 characters. The page server gives it at GET /work, which the page asks for when the owner
+# opens Work now or reads it again; never kept.
+work() {
+  local host main engine target recs why remote cmd
+  hostof || { echo "dashboard: no work reading: $why" >&2; return 1; }
+  cmd=$(jq -er --arg e "$engine/conveyor/conveyor.sh" '.[0].main | strings | "CONVEYOR_MAIN=\(@sh) bash \($e | @sh) work --json"' <<<"$recs") \
+    || { echo "dashboard: no work reading: the host file names no record" >&2; return 1; }
+  RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
+  onhost "$cmd" > "$RUN/work" 2>"$RUN/err-work" \
+    || { echo "dashboard: $host gave no work reading: $(tail -n 1 "$RUN/err-work" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
+  jq -ce --arg h "$host" '{host: $h, groups: (.groups | sort_by(-.cpu) | map(.processes |= map(.command |= .[:200]))),
+       other: (.other | map(.command |= .[:200]))}' "$RUN/work" 2>"$RUN/err-work" \
+    || { echo "dashboard: $host gave no work reading" >&2; return 1; }
+}
+
 # view_files -- the page's files, relative to .claude/dashboard: the page, its core, its tab icon and one file per panel.
 view_files() { (cd "$VIEW_SRC" && find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.svg' \) | sed 's|^\./||' | LC_ALL=C sort); }
 # copy_view -- copy each page file from the primary checkout into $OUT, skipping one that is already the same. Each
@@ -1304,8 +1322,10 @@ case "${1:-}" in
              republish || { echo "dashboard: publishing the live feed FAILED; data.js keeps the last snapshot" >&2; exit 1; } ;;
   --history) mkdir -p "$CACHE" || exit 1
              history || exit 1 ;;
+  --work) mkdir -p "$OUT" || exit 1
+          work || exit 1 ;;
   --check) check || exit 1 ;;
   "") mkdir -p "$OUT" || exit 1
       render || { echo "dashboard: collection FAILED; data.js keeps the last snapshot" >&2; exit 1; } ;;
-  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--check]" >&2; exit 2 ;;
+  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--check]" >&2; exit 2 ;;
 esac

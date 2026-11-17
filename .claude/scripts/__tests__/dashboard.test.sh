@@ -317,6 +317,28 @@ rm "$OUT/cache/history.json"; echo 255 > "$T/ssh-rc"
 h=''; ! h=$(hrun 2>/dev/null) && [ -z "$h" ] || fail "a host that gave no history was passed off as one: $h"
 ) & started history
 
+# --- --work (#197): the Health panel's Work now, the first record's `conveyor.sh work --json`, which reads every
+# record's cards, in one host command. Bugs: each record was asked for its work and the answers merged, so one card
+# showed once a record; the groups are not the heaviest first; a long command line reaches the page whole; a host
+# that gives no reading is passed off as an idle machine ---
+( fresh work
+long=$(printf 'x%.0s' $(seq 300))
+jq -cn --arg l "node $long" '{groups: [{card: "c20261117T000001-sample-5", project: "sample", step: "test", closed: false, cpu: 40,
+    stop: null, processes: [{pid: 10, cpu: 40, command: $l}]}, {card: "c20261117T000002-widgetshop-6", project: "widgetshop", step: null,
+    closed: true, cpu: 60, stop: "kill 30", processes: [{pid: 30, cpu: 50, command: "node b.js"}]}],
+    other: [{pid: 20, cpu: 90, command: "firefox", test: false}]}' > "$T/ssh-out"
+: > "$T/ssh-calls"
+wrun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" \
+  CONVEYOR_DASHBOARD_DIR="$OUT" timeout 20 bash "$DASH" --work; }
+w=$(wrun) || fail "--work exited non-zero"
+[ "$(jq -c '[.host, [.groups[].card[-1:]], [.other[].pid], (.groups[1].processes[0].command | length)]' <<<"$w")" = '["devbox",["6","5"],[20],200]' ] \
+  || fail "--work does not give every record's cards, the heaviest first, and the work no card owns: $(cut -c1-600 <<<"$w")"
+[ "$(grep -o "work --json" "$T/ssh-calls" | wc -l)" = 1 ] && grep -q "CONVEYOR_MAIN='/srv/main' bash .*conveyor.sh' work --json" "$T/ssh-calls" \
+  || fail "--work does not ask the host once, for the first record: $(cat "$T/ssh-calls")"
+: > "$T/ssh-out"
+w=''; ! w=$(wrun 2>/dev/null) && [ -z "$w" ] || fail "a host that gave no work reading was passed off as an idle machine: $w"
+) & started work
+
 # --- cards on both records: every row names its repo and links to that repo's issue ---
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
@@ -1218,7 +1240,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 RETIRED='\b([u]nits?|[s]eats?|[p]ass(es)?|[m]erge queue|[c]hain)\b'

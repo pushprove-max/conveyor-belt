@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# The page server's work for each open page (issue 566), by function: GET /events and GET /history called on a
+# The page server's work for each open page (issue 566), by function: GET /events, GET /history and GET /work called on a
 # stand-in request, with no server, socket or login. Every open page did again work one could do for all: each /events
 # connection serialised every panel of data.js (about 1.1 MB) on each update, and each GET /history started bash,
 # every 60 s a page, though dashboard.sh kept the answer for 60 s.
@@ -117,6 +117,21 @@ ds.Handler.history(stale)
 check(len(started) == 1 and stale.code == 200 and json.loads(stale.out.getvalue())['updatedAt'] == 'built',
       'history: a cache older than HISTORY_TTL runs dashboard.sh --history and gives its answer: %r %s' % (started, stale.code))
 subprocess.Popen = real_popen
+
+# D3 (#197). Bugs: GET /work served no reading, or a kept one, of what keeps the host busy; a failed reading reached
+# the page as an empty machine. Each ask runs dashboard.sh --work and gives its JSON; a failure is a 502 with its reason.
+started.clear()
+ds.run_script = lambda *a, **k: (started.append(a[0]), subprocess.CompletedProcess(a[0], 0, '{"host":"devbox","groups":[],"other":[]}\n', ''))[1]
+for _ in range(2):
+    work = Page()
+    ds.Handler.work(work)
+check(len(started) == 2 and started[-1][-1] == '--work' and work.code == 200 and json.loads(work.out.getvalue())['host'] == 'devbox',
+      'work: each ask runs dashboard.sh --work and gives its answer: %r %s' % (started, work.code))
+ds.run_script = lambda *a, **k: subprocess.CompletedProcess(a[0], 1, '', 'dashboard: devbox gave no work reading: refused\n')
+bad = Page()
+ds.Handler.work(bad)
+check(bad.code == 502 and 'gave no work reading' in bad.text and bad.out.getvalue() == b'',
+      'work: a failed reading is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
 
 for f in fail:
     print('FAIL: ' + f, file=sys.stderr)

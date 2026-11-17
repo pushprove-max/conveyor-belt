@@ -154,6 +154,12 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       w.historyAsks += 1;
       return Promise.resolve(w.historyBody ? { ok: true, status: 200, json: () => Promise.resolve(w.historyBody) } : { ok: false, status: 404 });
     }
+    // The Health panel's Work now (GET work): w.workReply is the server's answer ({ok, status, json, text}); w.workAsks counts the asks.
+    if (url === 'work') {
+      assert.equal(opt, undefined, 'the work now is read with a plain GET');
+      w.workAsks = (w.workAsks || 0) + 1;
+      return Promise.resolve(w.workReply || { ok: false, status: 404, text: () => Promise.resolve('no work reading') });
+    }
     assert.ok(['answer', 'restart', 'control', 'machine'].includes(url), `the page writes to nothing but its own answer, restart, control and machine addresses: ${url}`);
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');

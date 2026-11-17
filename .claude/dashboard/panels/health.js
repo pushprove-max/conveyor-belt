@@ -379,6 +379,7 @@ window.DASH_APP.panel({
       det.open = Boolean(was && was.open);
       out.push(det);
     }
+    out.push(healthWorkView(ctx));
     el.replaceChildren(...out);
   },
   tick(el, ctx) {
@@ -398,6 +399,51 @@ window.DASH_APP.panel({
     });
   },
 });
+// Work now: what keeps the Conveyor host busy now, as the page server reads it (GET work: `conveyor.sh work` of each
+// record): the busy processes by card and step, the heaviest first, a closed card's marked left over with the command
+// that stops them, then the busy work no card owns. Read when the owner first opens it and on "Read again", never with
+// the live feed; what was read, and whether it is open, are kept here through the panel's redraws.
+const healthWork = { open: false, busy: false, data: null, error: null };
+function healthWorkView(ctx) {
+  const h = ctx.h, w = healthWork;
+  const read = () => {
+    if (w.busy) return;
+    w.busy = true; w.error = null;
+    ctx.redraw();
+    window.fetch('work').then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(new Error(String(t).trim() || `the server answered ${r.status}`)))))
+      .then((x) => { w.data = x && typeof x === 'object' ? x : null; }, (e) => { w.error = e && e.message ? e.message : 'no answer'; w.data = null; })
+      .then(() => { w.busy = false; ctx.redraw(); });
+  };
+  const det = h('details', 'work-now');
+  det.open = w.open;
+  det.addEventListener('toggle', () => { w.open = det.open; if (det.open && !w.data && !w.error) read(); });
+  det.append(h('summary', null, 'Work now'));
+  const pct = (n) => `${Number(n) || 0}% of a core`;
+  const procs = (list) => {
+    const ul = h('ul', 'work-procs');
+    (Array.isArray(list) ? list : []).forEach((x) => ul.append(h('li', null, `${pct(x.cpu)}  ${x.pid}  ${String(x.command || '')}${x.test ? '  (in a card test run\'s slice)' : ''}`)));
+    return ul;
+  };
+  if (w.busy) det.append(h('p', 'work-state', 'Reading what keeps the machine busy…'));
+  else if (w.error) det.append(h('p', 'work-state', `The Board could not read the work now: ${w.error}`));
+  else if (w.data) {
+    const groups = Array.isArray(w.data.groups) ? w.data.groups : [], other = Array.isArray(w.data.other) ? w.data.other : [];
+    if (!groups.length && !other.length) det.append(h('p', 'work-state', 'Nothing is busy.'));
+    groups.forEach((g) => {
+      const div = h('div', g.closed ? 'work-group work-left' : 'work-group');
+      div.append(h('p', 'work-head', `Card ${g.issue ? `#${g.issue}` : g.card} (${g.project}), ${g.closed ? 'closed: left over' : `${g.step || 'unknown'} step`}: ${pct(g.cpu)}`), procs(g.processes));
+      if (g.stop) { const p = h('p', 'work-stop', 'Stop them: '); p.append(h('code', null, g.stop)); div.append(p); }
+      det.append(div);
+    });
+    if (other.length) { const div = h('div', 'work-group work-other'); div.append(h('p', 'work-head', 'No card owns'), procs(other)); det.append(div); }
+  }
+  const again = h('button', 'btn btn-quiet', 'Read again');
+  again.type = 'button';
+  again.disabled = w.busy;
+  again.addEventListener('click', read);
+  det.append(again);
+  return det;
+}
 // A row's place: 0 a fault (its chip bad), 1 a warning, 2 fine (ok, quiet, or no chip).
 function healthRank(dd) {
   const c = dd.querySelector(':scope > .chip');

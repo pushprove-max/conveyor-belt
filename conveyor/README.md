@@ -286,6 +286,31 @@ pre-push hook, holding a test slot, on the slot's core and in its box, as a test
 waits (`slot_first`): a unit that takes a slot while a push waits gives it back. The push's time limit starts when it
 has its slot.
 
+## Why the machine is busy
+
+When the machine is slow, these commands show which card, if any, is the cause. They read the processes of the
+machine, and the card worktrees and card records of every project in the host file.
+
+- `conveyor.sh why <pid | name>` names the process, or each process of that program, and its parents. It then names
+  the card, step and project that the process belongs to, or says that no card owns it. A process belongs to a card
+  when it, or a process above it, works in the card's worktree or in a test worktree of the card. A card's process
+  is in the step that the card is in. A process in a card test run's systemd slice that no card owns is in the Test
+  step. A process of a closed card (landed, closed, blocked, or its loop has stopped) is left over, and
+  `why` gives the command that stops what the card left.
+- `conveyor.sh work` lists the processes that used 5% of one core or more over one second. The processes of each
+  card and step come first, as a group, the heaviest group first. Then come the busy processes that no card owns. A
+  group of a closed card says "closed: left over" and gives the command that stops all of the card's processes.
+  The Board's Health panel shows the same list under **Work now** (docs/board.md).
+
+Both take `--json`.
+
+`conveyor.sh bench responsiveness` measures what the host file's `steer` (Card work yields to you,
+docs/configuration.md) gives you. It starts card work, one busy process a core, as a card test run starts. Then it
+times a short command start (`sh -c :`) and a CPU task that takes 10 ms on the machine with no card work. It does
+this in turns: card work steered in one turn, not steered in the next. Then it prints the median and the 90th
+percentile (p90) of each measure, steered and not steered. It needs no model, runs no card and does not change the
+host file. For the most even figures, run it while no cards run.
+
 ## The test step
 
 Each run of a card's changed tests writes one `test` line to the card records, `pass` or `fail`, holding:

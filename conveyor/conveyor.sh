@@ -43,7 +43,7 @@ git() { command git "$@" 8>&-; }
 # The engine, one file a concern under lib/. Every command runs these two first: the main checkout, the installs, the
 # host file, the state and cards folders, the accounts (paths.sh); the state folder made, the move into the main
 # checkout, the record lines (records.sh). The command's script (commands/, below) then sources the other engine files
-# it uses, each in this order, into this one shell: slots, prompts, control, views, snapshot, issues, pick, session,
+# it uses, each in this order, into this one shell: slots, busy, prompts, control, views, snapshot, issues, pick, session,
 # review, testrun, claim, push, followups, flaky, fulltest, testaction, testfiles, mutate, testrules, survey, card, lane, run,
 # machine, install, setup, requires.
 . "$HERE/lib/paths.sh" || exit 1
@@ -77,6 +77,9 @@ cmd take take.sh 'take [stale]'
 cmd install-service install-service.sh 'install-service'
 cmd board board.sh 'board [--password-file <file>]'
 cmd machine machine.sh 'machine [pause | resume | load <number | off> | steer <on | off>]'
+cmd why why.sh 'why <pid | name> [--json]'
+cmd work work.sh 'work [--json]'
+cmd bench bench.sh 'bench responsiveness'
 cmd setup setup.sh 'setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--pin] [--foreman]'
 cmd setup setup.sh 'setup pack-commit [yes | no]'
 cmd doctor doctor.sh 'doctor'

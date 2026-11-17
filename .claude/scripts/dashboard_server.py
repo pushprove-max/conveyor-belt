@@ -27,6 +27,8 @@ every 0.2 s by one thread for every client. At most MAX_FOLLOWERS are open at on
 back to reading data.js every 15 s while it has none.
 `GET /history`, behind the login too, gives the older entries data.js no longer carries (dashboard.sh --history):
 the page asks for it when its Landed, Metrics, Cost or Declined panel is drawn, at most once a minute.
+`GET /work`, behind the login too, gives what keeps the Conveyor host busy now (dashboard.sh --work): the Health
+panel asks for it when the owner opens Work now or reads it again.
 
 The login: users in dashboard-auth.json beside the ruling log (env CONVEYOR_DASHBOARD_AUTH), each with a name, a
 role (admin or member), an scrypt hash, when it was created and last logged in, its MFA state and its trusted
@@ -100,6 +102,7 @@ MAX_ANSWER_BODY = 4096
 RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because the restart kills this server
 HISTORY_TTL = 60       # GET /history serves dashboard.sh's copy while it is this young, with no process (its HISTORY_TTL)
 HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
+WORK_LIMIT = 90        # GET /work: dashboard.sh --work's one ssh command (its SSH_LIMIT, 60 s) and the merge
 ANSWER_KEYS = {'id', 'answer', 'askedAt', 'repo'}
 DECISION_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$')
 ASKED_AT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
@@ -1586,6 +1589,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.events()
         if path == '/history':
             return self.history()
+        if path == '/work':
+            return self.work()
         if path in ('/me', '/users'):
             return self.users_get(path)
         if path == '/me/qr':
@@ -1779,6 +1784,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if run.returncode != 0:
                 return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
             body = run.stdout.encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def work(self):
+        """GET /work: the Health panel's Work now, what keeps the Conveyor host busy now: dashboard.sh --work's JSON,
+        read afresh on each ask (the page asks when the owner opens Work now or reads it again). 502 with the reason
+        when it gives none."""
+        if not self.authed():
+            return self.reply(401, 'log in to see what keeps the machine busy')
+        try:
+            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--work'], WORK_LIMIT)
+        except subprocess.TimeoutExpired:
+            return self.reply(502, 'the work reading did not come in %d s' % WORK_LIMIT)
+        except OSError as e:
+            return self.reply(502, 'could not start dashboard.sh: %s' % e)
+        if run.returncode != 0:
+            return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
+        body = run.stdout.encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Cache-Control', 'no-store')

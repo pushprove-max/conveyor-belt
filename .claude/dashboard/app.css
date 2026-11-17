@@ -483,6 +483,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .checks-fine { margin-top: var(--sp-2); font-size: var(--fs-sm); }
 .checks-fine > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .checks-fine > .checks { margin-top: var(--sp-2); }
+.work-now { margin-top: var(--sp-2); font-size: var(--fs-sm); }
+.work-now > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.work-head { margin: var(--sp-2) 0 0; font-weight: 600; }
+.work-procs { margin: 0; padding-left: var(--sp-3); overflow-wrap: anywhere; }
+.work-stop code { overflow-wrap: anywhere; }
 .detail { color: var(--muted); overflow-wrap: anywhere; }
 .meter { flex: 1 1 100%; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
 .meter-fill { display: block; height: 100%; background: var(--accent); transform-origin: left center; transition: transform 280ms var(--ease); }
