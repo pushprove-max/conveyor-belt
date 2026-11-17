@@ -191,8 +191,9 @@ echo "401 Unauthorized"; exit 1
 EOF
   chmod +x "$STUB/claude" "$STUB/codex"
   # A Codex that, as the real one does, prints its banner before it sends the call, and that a proxy refuses for a
-  # key (bug: the route check kept only the banner, so doctor did not see the 401 and printed no missing: line).
-  mkdir -p "$d/refuse"; printf '#!/usr/bin/env bash\ncat > /dev/null; echo "OpenAI Codex v0.169.0"; echo "--------"; echo "ERROR: unexpected status 401 Unauthorized"; exit 1\n' > "$d/refuse/codex"; chmod +x "$d/refuse/codex"
+  # key (bug: the route check kept only the banner, so doctor did not see the 401 and printed no missing: line), after
+  # its retry line, which has no status (bug: the check kept that line, and doctor again printed no missing: line).
+  mkdir -p "$d/refuse"; printf '#!/usr/bin/env bash\ncat > /dev/null; echo "OpenAI Codex v0.169.0"; echo "--------"; echo "ERROR: Reconnecting... 1/5"; echo "ERROR: unexpected status 401 Unauthorized"; exit 1\n' > "$d/refuse/codex"; chmod +x "$d/refuse/codex"
   out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$d/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     echo "claude session: $(PROXY_ROLE=builder proxyenv &&claude -p < /dev/null)"
     echo "codex session: $(PROXY_ROLE=reviewer codexargs &&codex exec "${CODEX_PX[@]}" - < /dev/null)"

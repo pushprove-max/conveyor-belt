@@ -390,7 +390,7 @@ codexpx() { # <base URL> [key variable]
 # session is: Claude's proxy as a Bearer token (ANTHROPIC_AUTH_TOKEN), its API (kind api) as ANTHROPIC_API_KEY;
 # Codex's in the variable keyEnv names, through its provider settings (codexpx()). The key goes in the call's
 # environment, never on a command line. A proxy (not kind api) with no key is sent the stand-in key (NOKEY), as a
-# session is (proxyenv(), codexargs()). Prints "works", else "fails (<the first line it wrote that reads as an error, else its first line>)", with the key and what
+# session is (proxyenv(), codexargs()). Prints "works", else "fails (<the first line it wrote with an authentication status, else that reads as an error and is not a retry, else its first line>)", with the key and what
 # looks like a credential left out, and fails. A progress line on stderr first, as the call can take up to 120 s.
 routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route JSON> <key>]
   local d o rc k='' v=${4:-}
@@ -411,8 +411,10 @@ routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route 
   rm -rf "$d"
   [ $rc != 0 ] || { echo works; return 0; }
   [ -z "${4:-}" ] || o=${o//"$4"/[left out]}
-  # The first line that reads as an error, else the first line: Codex prints its banner before it sends the call.
-  o=$({ grep -m 1 -iE 'error|unauthori|forbidden|\b40[13]\b' <<<"$o" || grep -m 1 '[^[:space:]]' <<<"$o"; } | sed -E 's/[A-Za-z0-9_-]{24,}/[left out]/g; s/;/,/g' | cut -c 1-200)
+  # The first line that gives an authentication status, else the first other line that reads as an error and is not a
+  # retry, else the first line: Codex prints its banner before it sends the call, and "ERROR: Reconnecting... 1/5"
+  # (no status) before its last error, so routecheck() can read a 401.
+  o=$({ grep -m 1 -iE 'unauthori|forbidden|\b40[13]\b' <<<"$o" || grep -iE 'error' <<<"$o" | grep -m 1 -viE 'reconnecting' || grep -m 1 '[^[:space:]]' <<<"$o"; } | sed -E 's/[A-Za-z0-9_-]{24,}/[left out]/g; s/;/,/g' | cut -c 1-200)
   echo "fails (${o:-exit $rc})"; return 1
 }
 # Codex's: the top-level model_provider of Codex's config.toml and that provider's base_url and env_key, as
