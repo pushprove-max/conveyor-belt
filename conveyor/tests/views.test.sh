@@ -191,12 +191,12 @@ t_snapshotlate() { latestart
   grep -q '"card":"c5".*"landed"' "$S/cards.jsonl" || fail "the test's late landing was not written"
   [ "$(q '[(.belt | map(.card) | index("c5") != null), (.landed | map(.card)), (.health.unpushed | map(.card)), .health.newest[11:16]]')" = '[true,["c10","c9","c13"],["c10"],"00:05"]' ] \
     || fail "a card that landed while the snapshot was built is in part of it: $out"
-  out=$(loop snapshot 2>/dev/null); [ "$(q '[(.landed | map([.card, .pushed])), (.health.unpushed | map(.card))]')" = '[[["c5",false],["c10",false],["c9",true],["c13",null]],["c10","c5"]]' ] \
+  out=$(loop snapshot 2>"$STUB/err"); ! grep -qF 'made anew' "$STUB/err" || fail "a snapshot whose summary was kept said it is made anew (#282): $(cat "$STUB/err")"; [ "$(q '[(.landed | map([.card, .pushed])), (.health.unpushed | map(.card))]')" = '[[["c5",false],["c10",false],["c9",true],["c13",null]],["c10","c5"]]' ] \
     || fail "the next snapshot does not hold the landed card whole: $out"
   # A blocked card given back with `retry` leaves the views; what it cost stays in today's and the week's dollars.
   [ "$(q '.cost | [.today, .week]')" = '[31,37]' ] || fail "cost before the retry: $(q .cost)"
-  loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"
-  out=$(loop snapshot 2>/dev/null) || fail "snapshot after a retry exited non-zero"
+  loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"; echo '{ grep -c "made anew" "$STUB/err" || :; } >> "$STUB/said"' > "$STUB/status-cmd" # what the snapshot had said when health asked gh
+  out=$(loop snapshot 2>"$STUB/err") || fail "snapshot after a retry exited non-zero"; [ "$(sort -u "$STUB/said")" = 1 ] || fail "the snapshot after a retry rewrote the card records did not say it is made anew before health's long work, so a reader that stops it waits with no reason (#282): $(tr '\n' ' ' < "$STUB/said"), $(cat "$STUB/err")"
   [ "$(q '[(.cost | del(.cards)), .needsYou.blocked, (.health.blocked | length), ([.belt[], .landed[]] | map(.card) | index("c8")), (.cost.cards[] | select(.card == "c8") | [.state, .today, .week])]')" \
     = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[]},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
   # The rest of a landed card's track. Cards 10 and 5 landed and are not at origin: both are on the belt, pushing.

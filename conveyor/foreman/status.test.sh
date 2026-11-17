@@ -160,8 +160,29 @@ poll || fail "no wake for an engine stopped 2 minutes: $(cat "$T/err")"
 grep -qF 'alpha: no snapshot for 2 minutes (the engine is stopped' "$FD"/pending/*.wake || fail "the wake does not name the outage:$(cat "$FD"/pending/*.wake)"
 }
 
+# Issue 282: after `control resume` put back a card a sign-in failure blocked, its retry rewrote the card records,
+# and the next snapshot, made anew from the whole history, ran past the ask's wait (its timeout exit, 124). Bug it
+# catches: the status printed "alpha: no snapshot ()" for a minute, as if the engine had failed. The engine says
+# first that the snapshot is made anew, and the status line gives that; a stopped read that said nothing is named too.
+nosnap() { # <what the ask does>
+  export CONVEYOR_FOREMAN_ASK="$1"
+  out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+  ! grep -qF '()' <<<"$out" || fail "the status has an empty reason: $out"
+}
+t_nosnapanew() {
+CASE=nosnapanew; fixture nosnapanew
+nosnap "echo 'conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer' >&2; exit 124"
+grep -qxF 'alpha: no snapshot (conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer)' <<<"$out" \
+  || fail "the status does not say the snapshot is being made anew: $out"
+}
+t_nosnapquiet() {
+CASE=nosnapquiet; fixture nosnapquiet
+nosnap "exit 124"
+grep -qxF 'alpha: no snapshot (it took over 45 s and was stopped)' <<<"$out" || fail "the status does not say the read was stopped at its wait: $out"
+}
+
 cases=(status wake suite mainred building slowlive slowdown)
-cases=(status wake suite suitedead mainred building)
+cases=(status wake suite suitedead mainred building nosnapanew nosnapquiet)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

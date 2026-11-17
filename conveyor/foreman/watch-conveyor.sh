@@ -166,7 +166,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 # building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
-# above), each "needs you: <text>". <project> names one record of mine; with none, every one of them. Last, the Foreman's
+# above), each "needs you: <text>". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
+# never empty. <project> names one record of mine; with none, every one of them. Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
@@ -185,8 +186,14 @@ if [ "${1:-}" = --status ]; then
   while IFS=$'\t' read -r repo main; do
     [ -z "${2:-}" ] || [ "$repo" = "$2" ] || continue
     n=$((n + 1))
-    if ! rec=$(ask "$repo" "$main" snapshot 2>"$errf") || ! jq -e objects <<<"$rec" >/dev/null 2>&1; then
-      echo "$repo: no snapshot ($(tr -s '[:space:]' ' ' < "$errf" | tail -c 200))"; continue
+    rec=$(ask "$repo" "$main" snapshot 2>"$errf"); rc=$?
+    if [ "$rc" != 0 ] || ! jq -e objects <<<"$rec" >/dev/null 2>&1; then
+      # Why, never an empty "()": what the engine said (a snapshot made anew says so before its long work), else
+      # the ask's wait it ran past (a killed run says nothing), else its exit.
+      why=$(tr -s '[:space:]' ' ' < "$errf" | tail -c 200 | sed 's/^ *//; s/ *$//')
+      [ -n "$why" ] || if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then why="it took over ${ASK_LIMIT:-45} s and was stopped"
+        elif [ "$rc" = 0 ]; then why="the answer is not a snapshot"; else why="exit $rc, with nothing said"; fi
+      echo "$repo: no snapshot ($why)"; continue
     fi
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
     jq -r --argjson push -1 --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null \

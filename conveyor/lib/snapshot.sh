@@ -400,6 +400,10 @@ snapcopy() { # [<open issues json>]
 # kept. The summary is made anew from the whole file when it is missing, has another key, or its bytes are no longer
 # the file's first bytes: `retry` rewrote the card records, shorter, or grown past the offset again since. Making
 # every row from the whole file, on each line the loop wrote, was a fifth of a snapshot's work and grew every day.
+# A summary made anew from a whole file that is not empty is said on stderr first, before that long work: card
+# records rewritten (a retry, as `control resume` makes for the cards a sign-in failure blocked) or a new engine
+# leave it to be made anew, and on a long history the snapshot then runs past a reader's wait (the Foreman's 45 s),
+# which has only a killed run that said nothing.
 snaprows() { # <records file> <kept> <to>
   local k size h1 h2 o s n=-1 src=$1
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
@@ -410,6 +414,7 @@ snaprows() { # <records file> <kept> <to>
   { read -r h1 h2 o s && [ "$h1 $h2" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] && [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; } < "$3.sum" && n=$o
   if [ "$n" = "$size" ]; then tail -n +2 "$3.sum" > "$3.rows" || return 1
   else
+    [ "$n" -ge 0 ] || [ "$size" = 0 ] || echo "conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer" >&2
     : > "$3.kept"
     if [ "$n" -ge 0 ]; then
       # The cards the new lines name (as JSON strings), their lines, and the kept rows of the other cards. A row line
@@ -436,7 +441,10 @@ snapshot() (
   if ctlread 2>/dev/null; then control=$CTL_V; else control=null; fi
   # A plain assignment inside the subshell, never a prefix on the call: a prefix would put the whole issue list in the
   # environment of every command health runs, and past the kernel limit each one fails with "Argument list too long".
-  h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" && snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
+  # The rows before health: health's summaries of the records go stale with the rows' one, and snaprows says so first.
+  snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
+  # shellcheck disable=SC2034 # read by health (lib/views.sh), which conveyor.sh sources beside this file
+  h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
   snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
   # A snapshot that reads GitHub itself (no `watch` feed, GITHUB unset: the Board's ssh path) reads the CLIs' models
   # too, as github() does for the feed, when the host's report is missing or CLI_TTL old; else a host the loop has

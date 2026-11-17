@@ -101,7 +101,11 @@ t_snapsumshort() {
   snapsum_snap cards.jsonl rows
   # Shorter: the lines of c1 are gone.
   grep -v '"card":"c1"' "$ST/cards.jsonl" > "$D/short" && mv "$D/short" "$ST/cards.jsonl"
-  : > "$D/rows"; snapsum_snap cards.jsonl rows
+  # #282: snaprows says the summary is made anew before rows.jq's long run on the whole file, so a reader that stops
+  # a slow snapshot (the Foreman's 45 s wait) has the reason; said after that run, a stopped one says nothing.
+  rows() { { grep -c 'the snapshot is being made anew' "$D/err" || :; } >> "$D/said"; echo "${1##*/} $(wc -l < "$1")" >> "$D/rows"; snapsum_realrows "$@"; }
+  : > "$D/rows"; snaprows "$ST/cards.jsonl" "$ST/cards.jsonl.rows" "$D/d/rows" 2>"$D/err" || fail "snaprows failed on the shorter file: $(cat "$D/err")"
+  [ "$(cat "$D/said")" = 1 ] || fail "snaprows did not say the summary is made anew before it made the rows: $(cat "$D/said"), $(cat "$D/err")"
   [ "$(cat "$D/rows")" = "cards.jsonl 393" ] && [ "$(snapsum_offset "$ST/cards.jsonl")" = "$(wc -c < "$ST/cards.jsonl")" ] \
     || fail "the summary of a file rewritten shorter was not made anew from the whole file: $(tr '\n' ' ' < "$D/rows"), offset $(snapsum_offset "$ST/cards.jsonl")"
   [ "$(jq -c '[(map(select(.step == "landed")) | length), any(.card == "c1")]' "$D/d/rows")" = '[78,false]' ] \
