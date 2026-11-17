@@ -123,7 +123,7 @@
           + (if $i == 1 then {n: ($u.rev + (if $six == 1 then 1 else 0 end)), of: $of} elif $i == 2 then {n: ($u.fix + (if $six == 2 and ($u.rc | not) then 1 else 0 end))}
              elif $i == 3 then (if .wait != null then {wait, run} else {} end) + (if .rerun == true and .state == "done" then {rerun: true} else {} end)
              elif $i == 5 and $u.filed != null then {followups: $u.filed} else {} end)],
-         at: $six, label: $label, since: (if $at == null then null elif $kind == "proof" then ($c.proof.at | strings) // $last.time else $last.time end),
+         at: $six, label: $label, since: (if $at == null then null elif $kind == "proof" then ($c.proof.at | strings) // $last.time else ($c.live.at | strings) // $last.time end),
          reason: $why,
          files: (if $kind == "test" then ($c.live // {} | .files // null) elif $kind == "proof" then $c.proof.files else null end),
          tests: (if $kind == "test" then ($c.live // {} | .tests // null) elif $kind == "proof" then $c.proof.tests else null end),

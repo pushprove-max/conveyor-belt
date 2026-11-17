@@ -2,7 +2,7 @@
 // The dashboard page's Board, on the Control tab: the host's answer against the snapshots, and every open issue in its
 // column, Held with its reasons and filters, and a long column. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, clone, boot, deliver, next, later, settle, P, CONTROL, full, board, loopP, pushP, bcard, column, inCol, act, note, record, dragTo, OPEN, withOpen, moreText, rulesP, groupEl, rowsOf, heldMany, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, deliver, next, later, settle, P, CONTROL, full, board, loopP, pushP, bcard, column, inCol, act, note, record, dragTo, OPEN, withOpen, moreText, rulesP, groupEl, rowsOf, heldMany, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -328,4 +328,22 @@ test('the Board and Rules: a page shown while a change is out has its controls o
   assert.ok(rowsOf(groupEl(r, 'web')).length > 5);
   const on = Array.from(groupEl(r, 'web').querySelectorAll('.rules-held-row button, .rules-held-row input, .rules-held-row select')).filter((b) => !b.disabled && b.dataset.act !== 'held-link');
   assert.deepEqual(on.map((b) => b.dataset.act), [], 'no held-row control is on after Show 5 more while the change is out');
+});
+
+// Bug (#320): a card whose test run had ended and whose live record said fix was shown in Building as "testing", timed
+// from the build's end. The card reads the step the snapshot names (the live record's: snapshot.test.sh t_snapfixlive)
+// and times it from that step's start; a test run says how far it has got (its files and tests reach the Board from
+// the track: dashboard.test.sh, "a card in Building carries its test run's files and tests from its track").
+test("Building shows a fix after failed tests as fixing, timed from the fix's start, and a test run's progress", () => {
+  const w = boot({ tab: 'control' });
+  const data = full();
+  Object.assign(data.panels.board.data.building[0], { step: 'fix', stepAt: iso(T0 - 2 * 60000), files: { run: 6, of: 6 }, tests: null });
+  deliver(w, data);
+  const meta = () => bcard(w, 5).querySelector('.row-meta');
+  assert.equal(meta().firstChild.textContent, 'fixing', 'a fix is no test run, and shows no test files');
+  assert.equal(meta().querySelector('time.since').dateTime, iso(T0 - 2 * 60000), "its time counts from the fix's own start");
+  const testing = clone(data);
+  Object.assign(testing.panels.board.data.building[0], { step: 'tests', stepAt: iso(T0 - 60000), files: { run: 4, of: 6 } });
+  next(w, testing);
+  assert.equal(meta().firstChild.textContent, 'testing, 4 of 6 test files');
 });

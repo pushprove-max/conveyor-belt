@@ -805,9 +805,12 @@ q '(.panels.belt.data.cards | map(.issue) | (index(7) == null and index(99) != n
 # Issue 423: its records' names and times too (and nothing else of them), so its lane shows it went back a step.
 T3='{"steps": [{"name": "Build", "state": "done", "sec": 30}], "at": 3, "since": "'"$(ago 120)"'", "label": "tests", "tests": {"done": 142, "of": 205, "failed": 0}, "files": {"run": 1, "of": 2}, "detail": [],
   "records": [{"name": "review 1 (NO-GO)", "state": "done", "sec": 60, "at": "'"$(ago 600)"'", "output": "a long review"}, {"name": "tests", "state": "now", "sec": null}]}'
-answer "$(jq -c --argjson t "$T3" '.belt[0] += {track: $t, live: {turns: 7, lastOutputAt: null}}' <<<"$P")" "$P_URL" 1794000000 "$C" "$C_URL" 0
+answer "$(jq -c --argjson t "$T3" '.belt[0] += {step: "tests", track: $t, live: {turns: 7, lastOutputAt: null}}' <<<"$P")" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
 q '.panels.belt3d.data.belt | .[0] | .turns == 7 and .track == ('"$T3"' | del(.label, .detail) | .records |= map({name, at: (.at // null)}))' "Belt 3D's belt card carries its track's steps, step, tests, files and records' times, and its turns"
+# Bug (#320): the Board's Building card said "testing" with no progress; its track's files and tests reach it, so it
+# can say "testing, 1 of 2 test files".
+q '.panels.board.data.building | map(select(.issue == 801)) | .[0] | .files == {run: 1, of: 2} and .tests == {done: 142, of: 205, failed: 0}' "a card in Building carries its test run's files and tests from its track"
 # Bug: a landed card's details showed six steps done with no times; its track (a skipped Fix, a push still to go) and
 # the steps' times reach Belt 3D.
 answer "$(jq -c --argjson t "$T3" '.landed[0] += {track: $t}' <<<"$P")" "$P_URL" 1794000000 "$C" "$C_URL" 0

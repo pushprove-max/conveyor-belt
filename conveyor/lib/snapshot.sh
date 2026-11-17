@@ -35,12 +35,12 @@
 #   with the seconds that step ran.
 # belt: every open card, then every card that has landed and is not yet pushed with its issue closed (landed true;
 #   its step is push or issue, and it takes no builder slot; with the rule "Push when a card lands" off, a card whose
-#   commit is not pushed is not among them: landed lists it, its track labelled "Landed, waiting for Push landed"): step (brief, build, review, fix, tests, landing: the one in progress; proof while a bug card's new tests run on main's code without its fix, proofs(); waiting while it waits
+#   commit is not pushed is not among them: landed lists it, its track labelled "Landed, waiting for Push landed"): step (brief, build, review, fix, tests, landing: the one in progress, the one its live record names while that runs; proof while a bug card's new tests run on main's code without its fix, proofs(); waiting while it waits
 #   on a same-file card, never the landing it waits to begin), waitsOn (that card's {card, issue, state}, else null), gaveWay (the issue
 #   of the card it gave up its land turn to while it is fitted, reviewed, fixed or tested again: giveway(); else null),
 #   gaveWayFixing (it gave that turn up for the fix of its failed tests), review (the number of
 #   the review in progress, else null; it can pass `of`, the 3 of the review rule, after a landing conflict or a test
-#   fix), stepAt (when the step began), model (the one running the step: a session's or a review's, else null),
+#   fix), stepAt (when the step began: its live record's at while it runs), model (the one running the step: a session's or a review's, else null),
 #   tokens (fresh, so far) and usd so far: the finished steps and the live record of the running one. reading is
 #   false, and usd null, while neither a finished session or review nor the live record holds a token: "no reading
 #   yet", never $0. live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
@@ -61,7 +61,7 @@
 #   the issue (followups: how many were filed). at is the place of the step in progress (null on a card that has
 #   ended), label what it is doing ("review 2 of 3", "fix after review 1", "filing follow-ups", "rebuilding after a
 #   conflict", and after the landing "pushing", "push failed; it is tried again", "waiting for GitHub to close the
-#   issue"; "Landed, waiting for Push landed", at null, while push is off and its commit is not pushed), since when that began, reason why Push failed (the push's error, or the issue left open), files a test
+#   issue"; "Landed, waiting for Push landed", at null, while push is off and its commit is not pushed), since when that began (the live record's at while it runs), reason why Push failed (the push's error, or the issue left open), files a test
 #   run's {run, of}, tests its cases {done, of, failed} (null when its command said no count: a line
 #   `TESTRUN cases=N`; done and failed are the cases its runner named as ended, session.sh watch()), list the list of
 #   tests it was given ({mode: "changed", files, by: "map" or "name", age: the made test map's commits behind} or
@@ -734,13 +734,17 @@ snapshot() (
        flaky: $fl,
        slowOff: $so,
        belt: [($c[] | select(.result == "")), ($c[] | select(.x.after != null and .x.after != "wait")) | sofar as $s | (.x.after != null) as $landed
-         | (if $landed then (if .x.after | IN("issue", "issuefail") then "issue" else "push" end) elif .live.waits.on then "waiting" elif .proof then "proof" else .x.at end) as $step
+         # The live record of a running step names it and when it began (#320): a fix session after a GO or a failed
+         # test run is Fix from its own start, though the last step line of the card is still that review or test run.
+         | (if $landed then (if .x.after | IN("issue", "issuefail") then "issue" else "push" end) elif .live.waits.on then "waiting" elif .proof then "proof"
+            else {build: "build", review: "review", fix: "fix", test: "tests", rebase: "landing", land: "landing"}[.live.step // ""] // .x.at end) as $step
+         | ((.live.at | strings) // .stepAt) as $stepAt
          # A card waiting on a same-file card: that card, its issue, and where it is (its step on the belt, blocked,
          # landed, closed, queued: `retry` gave its issue back, or gone: in no record).
          | (.live.waits.on // null | if . == null then null else . as $w | ([$all[0][] | select(.card == $w)] | last) as $r
              | {card: $w, issue: ($r.issue // ($w | capture("-(?<n>[0-9]+)$").n | tonumber? ) // null),
                 state: (if $r == null then "gone" elif $r.x.retried then "queued" elif $r.result == "" then $r.x.at else $r.step end)} end) as $won
-         | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $landed or $step == "proof" then null else .x.review end), of: $max, stepAt, landed: $landed,
+         | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $step == "review" then .x.review // (.reviews + 1) else null end), of: $max, stepAt: $stepAt, landed: $landed,
          model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), tokens: $s.tokens, usd: $s.usd, reading: $s.reading,
          # A proof run gives what it does now, "waiting for a test slot (2 of 2 in use)" while the slots are full (testrun.sh).
          live: (if .live then {turns: .live.turns, lastOutputAt: .live.last, action: (.live.action // null), at: (.live.at // null)}

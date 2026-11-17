@@ -50,3 +50,33 @@ t_snapproof() {
   s=$(loop snapshot | jq -c '.belt[0] | [.step, .review, .track.label, .track.files]')
   [ "$s" = '["review",1,"review 1 of 3",null]' ] || fail "a proof record left behind is shown over the review: $s"
 }
+
+# Bug (#320): the Board showed a card as testing for 46 minutes while a fix session ran. A card's step and its time came
+# from its last step line (start lines left out): a test run after a GO was timed from the review's end, a fix after a
+# failed test run from that run's end, and a session that fits a card onto main after its GO (claim.sh settle(), no
+# test line) was shown as its tests. While its step runs, the live record names that step and when it began.
+t_snapfixlive() {
+  local s a=c20261117T100000-r-8 b=c20261117T100000-r-9
+  setup "[]"
+  # A line of the card's records: <card> <step> <result> <time of 2026-11-17T, hh:mm> [extra json].
+  snapfixlive_line() { jq -cn --arg c "$1" --arg s "$2" --arg r "$3" --arg t "2026-11-17T$4:00Z" --argjson x "${5:-{\}}" \
+    '{card: $c, issue: ($c | ltrimstr("c20261117T100000-r-") | tonumber), step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: "", repo: "r"} * $x'; }
+  # Built, reviewed with a GO, then its changed tests.
+  snapfixlive_go() { snapfixlive_line "$1" picked ok 10:00 '{"title": "t", "created": "2026-11-17T09:59:00Z"}'; snapfixlive_line "$1" worktree ok 10:01
+    snapfixlive_line "$1" deps ok 10:01; snapfixlive_line "$1" brief ok 10:02; snapfixlive_line "$1" start ok 10:02 '{"of": "build"}'
+    snapfixlive_line "$1" build ok 10:05; snapfixlive_line "$1" start ok 10:05 '{"of": "review"}'; snapfixlive_line "$1" review GO 10:28
+    snapfixlive_line "$1" start ok 10:28 '{"of": "land"}'; }
+  { snapfixlive_go "$a"; snapfixlive_line "$a" start ok 10:30 '{"of": "test"}'; } > "$ST/cards.jsonl"
+  mkdir -p "$T/$CASE/cards"
+  echo '{"step": "test", "at": "2026-11-17T10:30:07Z", "last": null, "turns": 0, "files": {"run": 4, "of": 6}, "tests": null}' > "$T/$CASE/cards/$a.live"
+  s=$(loop snapshot | jq -c --arg a "$a" '.belt[] | select(.card == $a) | [.step, .stepAt, .track.since, .track.files]')
+  [ "$s" = '["tests","2026-11-17T10:30:07Z","2026-11-17T10:30:07Z",{"run":4,"of":6}]' ] || fail "a test run after a GO: $s"
+  # Its test run failed and its fix runs; card b's session fits it onto main after its GO, with no test run.
+  { snapfixlive_line "$a" test fail 11:13; snapfixlive_line "$a" start ok 11:14 '{"of": "fix"}'
+    snapfixlive_go "$b"; snapfixlive_line "$b" start ok 10:41 '{"of": "fix"}'; } >> "$ST/cards.jsonl"
+  echo '{"step": "fix", "at": "2026-11-17T11:14:11Z", "last": null, "turns": 2, "model": "claude-x"}' > "$T/$CASE/cards/$a.live"
+  echo '{"step": "fix", "at": "2026-11-17T10:41:05Z", "last": null, "turns": 1, "model": "claude-x"}' > "$T/$CASE/cards/$b.live"
+  s=$(loop snapshot | jq -c '[.belt[] | [.card[-1:], .step, .stepAt, .track.since, .review]]')
+  [ "$s" = '[["8","fix","2026-11-17T11:14:11Z","2026-11-17T11:14:11Z",null],["9","fix","2026-11-17T10:41:05Z","2026-11-17T10:41:05Z",null]]' ] \
+    || fail "a fix after failed tests, and one that fits a card onto main after its GO: $s"
+}

@@ -715,7 +715,10 @@
       // A card that let another land first reads "Waiting behind #N"; what it does meanwhile is on hover and tap.
       const behind = num(item.gaveWay) !== null ? ctx.tip(h('span', null, `Waiting behind #${item.gaveWay}`),
         `It let #${item.gaveWay} land first. While it waits, it ${item.gaveWayFixing ? 'fixes its failed tests' : 'fits its change onto main'}.`) : null;
-      meta.append(behind || h('span', null, col === 'review' ? `review ${item.review || '?'} of ${item.of || 3}` : (item.step === 'waiting' ? waitsOn(item.waitsOn) : (STEP[item.step] || item.step || 'in progress'))), ctx.since(item.stepAt, ''),
+      // A running test run says how far it has got ("testing, 4 of 6 test files": ctx.testProgress).
+      const prog = col === 'building' && item.step === 'tests' ? ctx.testProgress({ files: item.files, tests: item.tests }) : null;
+      meta.append(behind || h('span', null, col === 'review' ? `review ${item.review || '?'} of ${item.of || 3}`
+        : (item.step === 'waiting' ? waitsOn(item.waitsOn) : (STEP[item.step] || item.step || 'in progress')) + (prog ? `, ${prog}` : '')), ctx.since(item.stepAt, ''),
         h('span', null, item.reading === false ? 'no reading yet' : ctx.money(item.usd)));
       el.append(meta);
       // A main-red fix the loop started with the cap reached takes one slot beyond it: the Board says so.
