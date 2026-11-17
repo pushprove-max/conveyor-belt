@@ -388,9 +388,14 @@ cacheoff() { # <worktree>
 # (testsel()), in the form test.list names (listcmd()), and <worktree>.testlist says which (the live record's and the
 # test line's list). Such a run that passes adds the test files of its change that the test map lacks to it (mapnew(),
 # lib/testmap.sh).
+# While the rule Whole suite in a card is off (listcmd()), a card's run never runs the whole suite: a change linked to
+# no test file runs nothing and passes, its output saying so (NONELINKED); one whose list the command cannot be given,
+# with no test.fileCommand, does not run and fails with <worktree>.stop saying why; and a run that reports over ten
+# test files for each it was given (TEST_GIVEN: watch() stops it, <worktree>.wide) does not run again and fails the
+# same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw=''
-  TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist"
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw='' LISTNONE='' TEST_GIVEN=${TEST_GIVEN:-}
+  TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
@@ -398,7 +403,12 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
-  if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then listcmd "$1" "$cmd" 2>"$1.test" || return 1; cmd=$LISTCMD; fi
+  if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then
+    listcmd "$1" "$cmd" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
+    cmd=$LISTCMD
+    # The rule Whole suite in a card off, and no test file linked to the change: nothing runs, and its output says so.
+    [ -z "$LISTNONE" ] || { printf 'conveyor: %s\n' "$NONELINKED" > "$1.test"; TEST_WAIT=0; TEST_RUN=0; return 0; }
+  fi
   # The check of a Make it run alone card (aloneproof()) gives the command itself, in TEST_CMD: the test command given
   # one file as the pack's test.list says.
   [ -z "${TEST_CMD:-}" ] || cmd=$TEST_CMD
@@ -441,7 +451,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # case or file kept off that its list would otherwise select (a case of the runner that did not finish).
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
   testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
-  if [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t" \
+  if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t" \
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
     # Its output's end (the last 60 lines, as a failed test line's tail, card()) goes with them: the run again
     # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
@@ -455,6 +465,12 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
   TEST_RUN=$((SECONDS - w))
+  # Given TEST_GIVEN files, a run reported far more (watch() stopped it, <worktree>.wide): it does not run again, and
+  # <worktree>.stop says why.
+  if [ -s "$1.wide" ]; then
+    narrowstop "the test command, given $TEST_GIVEN test file(s), reported $(<"$1.wide") test files: it runs test files it is not given, so its run was stopped" > "$1.stop"
+    cat "$1.stop" >> "$1.test"; [ -n "$SLOT_HOME" ] || slot_free; slot_unask; return 1
+  fi
   if [ $rc = 0 ] && [ -n "$p" ]; then
     passlist "$1" || rm -f "$1.passed"
     { f=$(testfails "$1.test" 0) && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
@@ -478,27 +494,67 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # runnercmd() cannot give) adds no path. <worktree>.testlist
 # says which: {mode: "changed", files: <count>, by: "map" or "name", age: the commits the made test map is behind
 # (only with one)} or {mode: "whole", why}. With no test.list, the command is as it is and no file is written.
+# All of that holds while the control record's rule "Whole suite in a card" (rules.wholeSuite, wholerule()) is on.
+# Off (the default), a card never runs the whole suite: the list is testsel()'s narrow one, every test file the test
+# map and the links give the changed files, however many, test.list set or not. A list of none runs nothing (LISTNONE
+# set; the list, {mode: "changed", files: 0, by, why}, says so). A command that can take the list (listwhy() names no
+# reason) is given it as above, and TEST_GIVEN is how many files it got (watch() stops a run that reports far more:
+# tests()); else, with test.fileCommand set, that command runs each file alone (filecmd() files); else nothing runs,
+# <worktree>.stop says why (NARROW) and it fails.
 listcmd() { # <worktree> <command>
-  local lm s why='' q='' fs=() by
-  LISTCMD=$2; TEST_FILES=''
+  local lm s why='' fs=() by fc
+  LISTCMD=$2; TEST_FILES=''; LISTNONE=''
   packget test.list lm || return 1
+  if ! wholerule; then
+    s=$(testsel "$1" narrow) || { narrowstop "the list of the card's tests could not be made: $s" > "$1.stop"; return 1; }
+    by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
+    jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
+      + if $n == 0 then {why: $w} else {} end' > "$1.testlist" || return 1
+    [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
+    why=$(listwhy "$1" "$2" "$lm")
+    if [ -z "$why" ] && [ "$lm" = runner ] && ! LISTCMD=$(runnercmd "$2" "$1" "${fs[@]}"); then why=$LISTCMD; LISTCMD=$2; fi
+    if [ -z "$why" ]; then listput "$2" "$lm" "${fs[@]}"; TEST_GIVEN=${#fs[@]}; return 0; fi
+    packget test.fileCommand fc || return 1
+    if [ -n "$fc" ]; then LISTCMD=$(filecmd "$fc" files); TEST_FILES=$(printf '%s\n' "${fs[@]}"); return 0; fi
+    narrowstop "the test command cannot be given the card's ${#fs[@]} test file(s): $why" > "$1.stop"; return 1
+  fi
   [ -n "$lm" ] || return 0
-  if [ "$lm" = none ]; then why='test.list is none: the test command takes no list'
-  elif [ "$lm" = placeholder ] && [[ $2 != *'{files}'* ]]; then why='test.list is placeholder, and test.command has no {files}'
-  elif [ "$lm" = args ] && s=$(testrunner "$2" "$1") && [[ $s == named* ]]; then
-    why="test.list is args, and test.command already names the tests it runs (${s##* }): use placeholder"
+  why=$(listwhy "$1" "$2" "$lm")
+  if [ -n "$why" ]; then :
   elif ! s=$(testsel "$1"); then why=$s
   else mapfile -t fs <<<"${s#*$'\n'}"; by=${s%%$'\n'*}
     if [ "$lm" = runner ] && ! LISTCMD=$(runnercmd "$2" "$1" "${fs[@]}"); then why=$LISTCMD; LISTCMD=$2; fs=(); fi
   fi
   if [ -n "$why" ]; then jq -cn --arg w "$why" '{mode: "whole", why: $w}' > "$1.testlist"
   else jq -cn --argjson n ${#fs[@]} --argjson b "$by" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end' > "$1.testlist"; fi || return 1
-  [ ${#fs[@]} = 0 ] || q=$(printf '%q ' "${fs[@]}"); q=${q% }
+  listput "$2" "$lm" "${fs[@]}"
+}
+# Why <command> cannot be given a list of test files in the form test.list <form> names (listcmd()): no test.list,
+# none, placeholder with no `{files}` in the command, or args with a command that already names the test files its
+# runner runs (testrunner()). Nothing when it can (runner's own reasons are runnercmd()'s).
+listwhy() { # <worktree> <command> <form>
+  local s
+  if [ -z "$3" ]; then echo 'test.list is not set, so the test command takes no list'
+  elif [ "$3" = none ]; then echo 'test.list is none: the test command takes no list'
+  elif [ "$3" = placeholder ] && [[ $2 != *'{files}'* ]]; then echo 'test.list is placeholder, and test.command has no {files}'
+  elif [ "$3" = args ] && s=$(testrunner "$2" "$1") && [[ $s == named* ]]; then
+    echo "test.list is args, and test.command already names the tests it runs (${s##* }): use placeholder"
+  fi
+}
+# LISTCMD (and TEST_FILES, for env) for <command> given the test files <file>... in the form test.list <form> names
+# (listcmd()); runner's LISTCMD is runnercmd()'s, made before.
+listput() { # <command> <form> [<file>...]
+  local c=$1 lm=$2 q=''; shift 2
+  [ $# = 0 ] || q=$(printf '%q ' "$@"); q=${q% }
   case $lm in
-    args) [ -z "$q" ] || LISTCMD="$2 $q" ;;
-    placeholder) LISTCMD=${2//\{files\}/"$q"} ;;
-    env) [ ${#fs[@]} = 0 ] || TEST_FILES=$(printf '%s\n' "${fs[@]}") ;;
+    args) [ -z "$q" ] || LISTCMD="$c $q" ;;
+    placeholder) LISTCMD=${c//\{files\}/"$q"} ;;
+    env) [ $# = 0 ] || TEST_FILES=$(printf '%s\n' "$@") ;;
   esac
+}
+# The reason a card stops at its test step, or its bug-card check fails, while the rule is off (NARROW), with <why>.
+narrowstop() { # <why>
+  printf '%s\n' "${NARROW//'<why>'/"$1"}"
 }
 # The command of a card's run with test.list runner (listcmd()): <command> given the test files <file>... in the form
 # its runner (testrunner()) takes: go test, the package (folder) of each, as ./<folder> or ., in place of the word
@@ -540,9 +596,14 @@ runnercmd() { # <command> <worktree> <file>...
 # test files whose name holds its name (no extension) as a word, the nearest by folder (those that share the most leading folders with it). A file of which none of these finds a test,
 # a change that selects none, or a test map that cannot be read, runs the whole suite: it fails then, and prints why
 # in place of the list.
-testsel() { # <worktree>
+# With narrow (the rule Whole suite in a card off, listcmd()), nothing selects the whole suite: a file that would
+# selects the tests the test map and its links give it (none for a file they give none), a document selects the test
+# files the test map and its links name (with the rule on, a change of documents alone runs the whole suite), a map that cannot be read
+# is read as no map (the links and the names still give tests), and a change that selects none prints the first line
+# alone.
+testsel() { # <worktree> [narrow]
   local out tm
-  tm=$(mapread "$1") || { printf '%s\n' "$tm"; return 1; }
+  tm=$(mapread "$1") || { [ "${2:-}" = narrow ] || { printf '%s\n' "$tm"; return 1; }; tm=null; }
   out=$(jq -rn "$RX"'def ls: split("\n") | map(select(. != ""));
       def base: split("/")[-1]; def dir: split("/")[:-1];
       def stem: base | sub("\\.[^.]*$"; "");
@@ -558,9 +619,9 @@ testsel() { # <worktree>
       | [$ch[] | . as $p
          | ([$map[$p] | arrays[] | strings | select($have[.])]) as $m
          | ([$tm.sources[$p] // [] | .[] | select($have[.])]) as $c
-         | if test("\\.(md|txt|rst)$"; "i") then []
+         | if test("\\.(md|txt|rst)$"; "i") then (if ($nw | not) then [] elif $c != [] then {map: ($m + $c)} else $m end)
            elif $ct[$p] and $have[$p] and (shared | not) then [$p] + $m
-           elif $sh[$p] then {whole: "\($p): shared by most tests (map)"}
+           elif $sh[$p] then {whole: "\($p): shared by most tests (map)", map: ($m + $c)}
            elif $c != [] then {map: ($m + $c)}
            elif $m != [] then $m
            elif $ct[$p] and ($have[$p] | not) then []
@@ -569,9 +630,10 @@ testsel() { # <worktree>
              | [$all[] | select($s != "" and (base | test("(^|[._-])" + $s + "([._-]|[A-Z]|$)"))) | {t: ., n: common(dir; $d)}]
              | if . == [] then {whole: "\($p): no test found for it"} else (map(.n) | max) as $n | map(select(.n == $n) | .t) end end]
       | (map(objects | select(.whole)) | first) as $w | . as $l
-      | if $w then error($w.whole) else [.[] | if type == "array" then .[] else .map[] end] | unique
-        | if . == [] then error("the change touches no test") else {by: (if any($l[]; type == "object") then "map" else "name" end), age: $tm.age} as $b
-          | ($b | tojson), .[] end end' --argjson tm "${tm:-null}" \
+      | if $w and ($nw | not) then error($w.whole) else [.[] | if type == "array" then .[] else (.map // [])[] end] | unique
+        | if . == [] and ($nw | not) then error("the change touches no test")
+          else {by: (if any($l[]; type == "object" and (.map // []) != []) then "map" else "name" end), age: $tm.age} as $b
+          | ($b | tojson), .[] end end' --argjson tm "${tm:-null}" --argjson nw "$([ "${2:-}" = narrow ] && echo true || echo false)" \
     --rawfile ch <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null) \
     --rawfile ct <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | testpaths) \
     --rawfile all <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) \
@@ -753,7 +815,7 @@ repairholder() {
 # (cleanrun()). Sets REPAIRED: what the runs showed.
 # shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
 repairproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN=''
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.command cmd 2>/dev/null; then REPAIRED="the pack's test.command could not be read"
@@ -772,8 +834,11 @@ repairproof() { # <card> <worktree>
       REPAIRED="$cs still failed with the change in a clean harness"
     elif ! testfails "$mwt.test" 0 | jq -e --argjson c "$cj" '.passed as $p | all($c[]; IN($p[]))' >/dev/null 2>&1; then
       REPAIRED="the run with the change passed, but its logs do not say that $cs passed in it"
-    elif ! { listcmd "$2" "$cmd" 2>"$2.test" && cleanrun "$2" "$LISTCMD"; }; then
-      REPAIRED="$cs failed on main's code at ${sha:0:12} without the change and passed with it, but the card's changed tests failed in a clean harness"
+    # With the rule Whole suite in a card off (listcmd()), a change linked to no test file runs none, and one whose
+    # list cannot be given stops with why (<worktree>.stop).
+    elif ! { rm -f "$2.stop"; listcmd "$2" "$cmd" 2>"$2.test" && { [ -n "$LISTNONE" ] || cleanrun "$2" "$LISTCMD"; }; }; then
+      if [ -s "$2.stop" ]; then REPAIRED="$cs failed on main's code at ${sha:0:12} without the change and passed with it, but the card's changed tests did not run: $(<"$2.stop")"
+      else REPAIRED="$cs failed on main's code at ${sha:0:12} without the change and passed with it, but the card's changed tests failed in a clean harness"; fi
     else
       REPAIRED="repair lane: $cs failed on main's code at ${sha:0:12} without the change and passed with it, and the card's changed tests passed, each in a clean harness"; rc=0
     fi
@@ -816,7 +881,10 @@ cleanrun() { # <worktree> <command> [<list>]
 # selected none of (its run ended "nothing selected") could not be run alone: the check fails with exit 2 and says
 # so (NOTALONE), as a build session cannot change the pack. Test files test.command, given them, ran with far more
 # test files (widerun()) are named in the result (WIDE), and the card gets a bugproof line (result wide) that doctor
-# reads; the check goes on as before. A failed run on main
+# reads; the check goes on as before. While the rule Whole suite in a card is off (wholerule()), test.command is given
+# its files as test.list says (proofcmd()), and is not run when it cannot be given them; a run of it that reports over
+# ten test files for each it was given is stopped as it runs (watch()). Either way the check fails
+# with exit 2, the result's first line the reason (NARROW), as a build session cannot change the pack. A failed run on main
 # that gave no result for one of those files (noresult(): no pass and no fail of it) proves nothing either way: it runs
 # once more, and when that run gives none either, the result's first line is "the proof run on main gave no result for
 # <file>: <the run's last lines>" and the check fails with exit 2 (the card is blocked, as a build session cannot
@@ -836,14 +904,25 @@ cleanrun() { # <worktree> <command> [<list>]
 # `fail`, in order, runs alone with that command, the file's path added as its last argument and in CONVEYOR_TEST_FILE.
 # It logs each as a runner does (`== <file>`, then `-- ok <file>` or `-- FAIL <file>`, and `TESTRUN files=<n>`), so the
 # run is read as any other (testfails()); it fails when a file fails.
-filecmd() { # <the pack's test.fileCommand>
+# With files (a card's run while the rule Whole suite in a card is off, listcmd()), the files are those
+# CONVEYOR_TEST_FILES names, one a line, but for each the list keeps as passed (a `pass` line): a run again after a
+# failure runs only the files that did not pass. A list with a `changed` or `main` line (rerunsince(): a fix or main
+# changed code since those passes) keeps none: every file runs, as any of them may test that code.
+filecmd() { # <the pack's test.fileCommand> [files]
   local q; q=$(printf %q "$1")
-  printf '%s\n' 'n=0 r=0; l=$CONVEYOR_TEST_LOG/files' \
-    'while IFS=$'"'"'\t'"'"' read -r k f _; do' \
-    '  [ "$k" = fail ] || continue; n=$((n + 1)); echo "== $f" | tee -a "$l"' \
-    "  if CONVEYOR_TEST_FILE=\$f bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null; then echo \"-- ok \$f\" | tee -a \"\$l\"; else echo \"-- FAIL \$f\" | tee -a \"\$l\"; r=1; fi" \
-    'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"' \
-    'echo "TESTRUN files=$n" >> "$l"; exit $r'
+  if [ "${2:-}" = files ]; then
+    printf '%s\n' 'n=0 r=0 t=$'"'"'\t'"'"' c=; l=$CONVEYOR_TEST_LOG/files' \
+      '! grep -qE "^(changed|main)$t" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null || c=1' \
+      'while IFS= read -r f; do' \
+      '  [ -n "$f" ] && { [ -n "$c" ] || ! grep -qxF "pass$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null; } || continue; n=$((n + 1)); echo "== $f" | tee -a "$l"'
+  else
+    printf '%s\n' 'n=0 r=0; l=$CONVEYOR_TEST_LOG/files' \
+      'while IFS=$'"'"'\t'"'"' read -r k f _; do' \
+      '  [ "$k" = fail ] || continue; n=$((n + 1)); echo "== $f" | tee -a "$l"'
+  fi
+  printf '%s\n' "  if CONVEYOR_TEST_FILE=\$f bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null; then echo \"-- ok \$f\" | tee -a \"\$l\"; else echo \"-- FAIL \$f\" | tee -a \"\$l\"; r=1; fi"
+  if [ "${2:-}" = files ]; then printf '%s\n' 'done <<< "${CONVEYOR_TEST_FILES:-}"'; else printf '%s\n' 'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"'; fi
+  printf '%s\n' 'echo "TESTRUN files=$n" >> "$l"; exit $r'
 }
 # The test files a run of the bug-card check in <worktree> ran (testprogress(): its live record's files.run), when that
 # is far more than the <n> test files it was given: over ten for each. Nothing when it ran no more.
@@ -859,6 +938,19 @@ bugrun() { # <worktree> <field> [<file>...]
   local w=$1 f=$2; shift 2
   [ $# != 0 ] || { tests "$w" "$f"; return; }
   printf 'fail\t%s\n' "$@" > "$w.rerun" && tests "$w" "$f" alone
+}
+# The bug-card check's command while the rule Whole suite in a card is off (bugproof()): test.command given the test
+# files <file>... as test.list says (listwhy(), runnercmd(), listput(); env's paths exported in the command itself), in
+# LISTCMD. Fails when it cannot be given them, PROOFSTOP the reason (NARROW): the command is not run then.
+proofcmd() { # <worktree> <file>...
+  local w=$1 c lm why; shift
+  PROOFSTOP=''
+  packget test.command c test.list lm 2>/dev/null || { PROOFSTOP=$(narrowstop "the pack's test.command and test.list could not be read"); return 1; }
+  why=$(listwhy "$w" "$c" "$lm"); LISTCMD=$c; TEST_FILES=''
+  if [ -z "$why" ] && [ "$lm" = runner ]; then LISTCMD=$(runnercmd "$c" "$w" "$@") || why=$LISTCMD
+  elif [ -z "$why" ]; then listput "$c" "$lm" "$@"; fi
+  [ -z "$why" ] || { PROOFSTOP=$(narrowstop "the test command cannot be given the card's $# test file(s): $why"); return 1; }
+  [ -z "$TEST_FILES" ] || LISTCMD="export CONVEYOR_TEST_FILES=$(printf %q "$TEST_FILES"); $LISTCMD"
 }
 # Tests inside product files (#140): the pack's tests.inline (the schema's default kinds, with the pack's added; one of
 # the same name replaces the default's). Of the staged change's added or changed files that are not test files
@@ -943,7 +1035,7 @@ inlinesplit() { # <worktree> <path> <kind json>
   rm -rf "$d"; return $rc
 }
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh='' wide='' wc
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh='' wide='' wc stop='' gv pc
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -985,31 +1077,42 @@ bugproof() { # <card> <worktree> <issue json>
     if [ ${#fs[@]} = 0 ]; then
       printf '%s.\n' "${BUGWHY^}" > "$2.unfixed"
     else
-      bugrun "$mwt" "$fld" "${fl[@]}"; rc=$?
-      ! testfailed "$mwt" "$rc" || held=1
+      # The rule Whole suite in a card off (wholerule()): a run of test.command that reports far more test files than
+      # it was given is stopped (watch(), tests(): <worktree>.stop), and the check fails with that reason (exit 2), as
+      # a build session cannot change the pack. Its files are given to test.command as test.list says (proofcmd()); one
+      # that cannot be given them is not run, and the check fails the same way.
+      gv='' pc=''; [ "$fld" != test.command ] || wholerule || { gv=${#fs[@]}; if proofcmd "$mwt" "${fs[@]}"; then pc=$LISTCMD; else stop=$PROOFSTOP; fi; }
+      if [ -n "$stop" ]; then rc=''
+      else TEST_CMD=$pc TEST_GIVEN=$gv bugrun "$mwt" "$fld" "${fl[@]}"; rc=$?; fi
+      [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
+      [ -n "$stop" ] || ! testfailed "$mwt" "$rc" || held=1
       # A failed run that proved nothing and gave no result for a file it was given (noresult()) says nothing either
       # way: it runs once more, and when that run gives none either the card is blocked with that reason (exit 2).
-      if [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
-        bugrun "$mwt" "$fld" "${fl[@]}"; rc=$?
-        ! testfailed "$mwt" "$rc" || held=1
-        [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
+      if [ -z "$stop" ] && [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
+        TEST_CMD=$pc TEST_GIVEN=$gv bugrun "$mwt" "$fld" "${fl[@]}"; rc=$?
+        [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
+        [ -n "$stop" ] || ! testfailed "$mwt" "$rc" || held=1
+        [ -z "$stop" ] && [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
       fi
+      [ -z "$stop" ] || BUGWHY=$stop
       # A run given the files that selected none of them did not run them: it is no run without the fix, and the
       # reason is the result's first line, as the block (card()) shows it.
-      [ "$rc" != 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" != 'nothing selected' ] || { alone=1; BUGWHY=$NOTALONE; }
+      [ -n "$stop" ] || [ "$rc" != 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" != 'nothing selected' ] || { alone=1; BUGWHY=$NOTALONE; }
       # Given the test files, test.command ran far more (widerun()): the result names it, and the card's bugproof line
       # (result wide) is what doctor warns of while the pack's test.command is still that one.
-      if [ "$fld" = test.command ] && wide=$(widerun "$mwt" ${#fs[@]}) && [ -n "$wide" ]; then
+      if [ -z "$stop" ] && [ "$fld" = test.command ] && wide=$(widerun "$mwt" ${#fs[@]}) && [ -n "$wide" ]; then
         packget test.command wc 2>/dev/null || wc=''
         record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof wide "$(jq -cn --argjson n ${#fs[@]} --argjson r "$wide" --arg c "$wc" '{wide: {given: $n, ran: $r, command: $c}}')"
         wide=$(widewhy ${#fs[@]} "$wide" "$2")
       fi
-      { [ -z "$nr" ] || printf 'the proof run on main gave no result for %s: %s\n' "$nr" \
+      { [ -z "$stop" ] || printf '%s\n' "$stop"
+        [ -z "$nr" ] || printf 'the proof run on main gave no result for %s: %s\n' "$nr" \
           "$(tail -n 5 "$mwt.test" 2>/dev/null | tr -d '\000\r' | sed 's/\x1b\[[0-9;]*m//g' | awk 'NF { sub(/^[ \t]+/, ""); s = s (s == "" ? "" : " / ") $0 } END { print substr(s, 1, 300) }')"
         [ -z "$alone" ] || printf '%s\n' "$NOTALONE"
         printf 'Its test files, %s on main'"'"'s code at %s without the fix:\n' "$([ -n "$alone" ] && echo 'given to the test command' || echo run)" "$sha"
         [ ${#tf[@]} = 0 ] || printf -- '- %s\n' "${tf[@]}"; [ ${#ins[@]} = 0 ] || printf -- '- %s (its inline tests, with the rest of its change taken out)\n' "${ins[@]}"
         if [ -n "$alone" ]; then echo "The command selected none of them, so none ran without the fix."
+        elif [ -n "$stop" ]; then echo "The run was stopped there, so it proves nothing either way."
         elif [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
         elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."
         elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
@@ -1020,10 +1123,15 @@ bugproof() { # <card> <worktree> <issue json>
     # Does the change select any test of its own? Asked only when its test files proved nothing and selected nothing
     # (a run that selected a test that passed says the change is not one that selects none). Asked alone with no list,
     # so no file is kept off as passed before (cacheoff()): a code change whose tests were all kept off would select none.
-    if [ -z "$held" ] && [ -z "$nr" ] && { [ ${#fs[@]} = 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; } \
+    # With the rule Whole suite in a card off, the change selects none when the test map and the links give it no test
+    # file (testsel() narrow, as its card's run); else the command is asked as above, a run that reports over ten test
+    # files for each of those stopped (TEST_GIVEN), as its runner may still select none (a change to comments alone).
+    if [ -z "$held" ] && [ -z "$nr" ] && [ -z "$stop" ] && { [ ${#fs[@]} = 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; } \
       && git -C "$mwt" reset -q --hard && rm -f "$mwt.rerun" \
       && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>/dev/null \
-      && { tests "$mwt" test.command alone; rc=$?; [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; }; then
+      && if wholerule; then tests "$mwt" test.command alone; rc=$?; [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]
+         else out=$(testsel "$mwt" narrow) && { [[ $out != *$'\n'* ]] \
+           || { TEST_GIVEN=$(($(wc -l <<<"$out") - 1)) tests "$mwt" test.command alone; rc=$?; [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" = 'nothing selected' ]; }; }; fi; then
       # The files the issue names are the proof now, and its result replaces that of the change's own test files.
       alone=''; BUGWHY=$UNFIXED
       mapfile -t nf < <(jq -r '[.body // "" | splits("\r?\n")] as $l
@@ -1039,13 +1147,23 @@ bugproof() { # <card> <worktree> <issue json>
         record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof skipped "$(jq -cn --arg r "$why" '{reason: $r}')"
       else
         # With the fix (staged above), then without it: the named files alone, each a `fail` line of the list.
-        bugrun "$mwt" "$fld" "${nf[@]}"; fx=$?
+        # The rule off, test.command is given them as test.list says or not run, and a run of it that reports far more
+        # files than it was given is stopped, as above.
+        gv='' pc=''; [ "$fld" != test.command ] || wholerule || { gv=${#nf[@]}; if proofcmd "$mwt" "${nf[@]}"; then pc=$LISTCMD; else stop=$PROOFSTOP; fi; }
+        if [ -n "$stop" ]; then fx=''
+        else TEST_CMD=$pc TEST_GIVEN=$gv bugrun "$mwt" "$fld" "${nf[@]}"; fx=$?; fi
+        [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
         # Main's code put back fails the check (rc empty): the logs left are those of the run with the fix.
-        if git -C "$mwt" reset -q --hard; then bugrun "$mwt" "$fld" "${nf[@]}"; rc=$?; else rc=''; fi
-        [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" || held=1
-        { printf 'The change selects no test of its own (every changed line is a comment, or it touches no code the test command knows), so the test files its issue'"'"'s Done-when names were run alone on main'"'"'s code at %s, with the fix and without it:\n' "$sha"
+        if [ -n "$stop" ]; then rc=''
+        elif git -C "$mwt" reset -q --hard; then TEST_CMD=$pc TEST_GIVEN=$gv bugrun "$mwt" "$fld" "${nf[@]}"; rc=$?; [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
+        else rc=''; fi
+        [ -z "$stop" ] || BUGWHY=$stop
+        [ -n "$stop" ] || [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" || held=1
+        { [ -z "$stop" ] || printf '%s\n' "$stop"
+          printf 'The change selects no test of its own (every changed line is a comment, or it touches no code the test command knows), so the test files its issue'"'"'s Done-when names were run alone on main'"'"'s code at %s, with the fix and without it:\n' "$sha"
           printf -- '- %s\n' "${nf[@]}"
-          if [ "$fx" != 0 ]; then echo "They failed with the fix (exit $fx): $UNFIXED."
+          if [ -n "$stop" ]; then echo "A run was stopped, so it proves nothing either way."
+          elif [ "$fx" != 0 ]; then echo "They failed with the fix (exit $fx): $UNFIXED."
           elif [ -z "$rc" ]; then BUGWHY=$NOTBACK; echo "Main's code could not be put back without the fix, so they did not run without it."
           elif [ "$rc" = 0 ]; then echo "They all passed without the fix: $UNFIXED."
           elif [ -z "$held" ]; then echo "The run without the fix failed (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
@@ -1060,7 +1178,7 @@ bugproof() { # <card> <worktree> <issue json>
     held=1
   fi
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
-  [ -z "$nr$alone" ] || return 2
+  [ -z "$nr$alone$stop" ] || return 2
   [ -n "$held" ]
 }
 # The bug-card check of a main-red fix card (bugproof(): a card its entry in $MAINRED names, mainred()). Its proof is

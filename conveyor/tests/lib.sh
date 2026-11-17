@@ -113,10 +113,11 @@ tuned() { # <jq filter> <command...>
 # The control record, the only home of the cap and the two seats' models: as setup seeds it (seed), or with one
 # seat's model changed and its effort kept (seatset). The judge off, visible changes waiting for the owner's yes and
 # a push after each landing are set here, not left to control-defaults.json (judge on, visible off, push off): a case
-# turns them as it needs.
+# turns them as it needs. So is the rule Whole suite in a card, on (its default is off): the cases of a card's test
+# step test a run that may be the whole suite; those of the rule (narrow.test.sh) turn it off.
 seed() {
   mkdir -p "$ST"
-  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
+  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"wholeSuite":true,"never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
     > "$ST/control.json"
 }
 # The loop's turns, for a check that something did not happen: a case waits for turns the loop takes, not for seconds

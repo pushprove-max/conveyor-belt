@@ -358,6 +358,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
           trc=1; [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ] || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
         else began "$1" "$2" test; tests "$3"; trc=$?; fi
         sec=$((SECONDS - sec))
+        # Its run did not run or was stopped with the rule Whole suite in a card off (tests(): <worktree>.stop): blocked
+        # with that reason, as at its turn (card()).
+        [ "$trc" = 0 ] || [ ! -s "$3.stop" ] || { block "$1" "$2" "$3" "test: $(<"$3.stop")"; return 1; }
         if [ "$trc" != 0 ] && [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then
           echo "conveyor: card $1: its checks or tests failed on main with the change of card $(jq -r .on "$3.stack"), which has not passed its own yet: it waits on, and runs them again after that card"
           jq -c '. + {stackred: true}' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready" || rm -f "$3.ready"

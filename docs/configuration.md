@@ -173,6 +173,32 @@ suite. The Board shows the mode of a card's test run and how its tests were foun
 `changed: 7 files (by name)` or `whole suite: <why>`. With a made test map, it adds the age of the map, for example
 `map 12 commits old`. `/units` shows `changed: 7 files` or `whole suite`.
 
+### Whole suite in a card
+
+The rule **Whole suite in a card** on the Rules tab sets if a card can run the whole suite. It is Off by default.
+`conveyor.sh control rules wholeSuite=on` or `wholeSuite=off` also sets it. With the rule On, a card runs its tests
+as this section says above.
+
+With the rule Off, a card never runs the whole suite. The whole suite runs only in a release. The rule does not
+change the runs of a release or of the full test suite. A card runs these test files:
+
+- the test files of the list above;
+- for a change that would run the whole suite, the test files that the test map and `.conveyor/test-links.json` link
+  to the changed files, however many there are;
+- for a changed document, the test files that the test map and `.conveyor/test-links.json` link to it.
+
+If no test file is linked to the change, the card runs no test. The card's test line says so, and the release's run
+covers the change.
+
+A card can give its test files to your command only through `test.list`. If the pack has no `test.list`, has `none`,
+or has a list form that the command cannot take, the card runs each test file alone with `test.fileCommand`. If the
+pack sets neither, the card stops at its test step, and Needs you shows the reason. The reason names the settings that
+fix it. `conveyor.sh doctor` shows a `warning:` line for a pack that sets neither `test.list` nor `test.fileCommand`.
+
+A command can ignore the list that it gets. If a card's run reports more than ten test files for each file that it
+gets, Conveyor stops the run. The card stops at its test step with a reason of the same kind. The check of a bug
+card on main's code follows the same rule.
+
 ## The test map
 
 The test map tells which test files cover which source files. With it, a card runs the tests that cover its change,
@@ -322,7 +348,7 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - the number of cards at once (`conveyor.sh control cap`, or Cards at once on the Rules tab),
 - the usage at which no new card starts,
 - the builder, reviewer and judge, each a CLI, a model and an effort,
-- the rules: P0 to P3, follow-ups, push, visible changes and the dependency guard,
+- the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card and the dependency guard,
 - where new issues start.
 
 A card that only waits on another card does not take one of the cards at once: for example, a card that waits to land

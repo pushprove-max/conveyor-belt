@@ -94,7 +94,7 @@ holds() { # <worktree>: when it last changed, epoch seconds: the newest of its f
     | awk -v n="$EPOCHSECONDS" '{t = int($1)} t <= n && t > m {m = t} END {print m + 0}' # a time after now is a wrong clock, not progress
 }
 watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase]
-  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false
+  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
@@ -126,6 +126,13 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
         | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: {run, of},
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
+      # A run given TEST_GIVEN test files (the rule Whole suite in a card off: tests(), bugrun()) that reports far
+      # more, over ten for each (the files it says it selected, or those it ran), is stopped: <worktree>.wide holds
+      # that count.
+      if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run, .files.of // 0] | max' <<<"$st" 2>/dev/null) \
+        && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt $((TEST_GIVEN * 10)) ]; then
+        echo "$wn" > "$wt.wide"; kill "$pid" 2>/dev/null
+      fi
       continue
     fi
     # A Codex review's, or a Codex session's: its running total, from the session file Codex keeps.

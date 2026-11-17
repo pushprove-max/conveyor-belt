@@ -541,7 +541,7 @@ card() { # <card> <issue> [<branch> <tip>]
         # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
         began "$c" "$n" test
         [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
-        sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''
+        sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
         # A test file its own run found over the time budget (slowtests()) is a note on its test line (slow), never a
         # finding: the card goes on with the pass. Only a test rule files an issue about it (testrulespass(), after the
         # test line is recorded).
@@ -571,6 +571,10 @@ card() { # <card> <issue> [<branch> <tip>]
           || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
         rm -f "$wt.lent" # its worktree holds its own change again (batch())
       fi
+      # The rule Whole suite in a card off, its run did not run, or was stopped, as it would have run more than the
+      # tests of its change (tests(): <worktree>.stop): no run on main and no fix session, as a session cannot change
+      # the pack. The card is blocked with that reason, which names the setting that fixes it.
+      [ ! -s "$wt.stop" ] || { block "$c" "$n" "$wt" "test: $(<"$wt.stop")"; return; }
       voidrun "$wt" "$rc" > /dev/null || voids=0 # a run with a result, a pass too, starts the count of runs with none again
       if [ $rc != 0 ]; then
         # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's

@@ -2,7 +2,8 @@
 # The control record, whole: the file's keys over CTL0's, so a record written before a key existed still reads.
 # mode is run, pause or stop; cap and guard are a number or null; held and order are issue numbers; rules.never is
 # the area labels never built, rules.push whether a card that lands is pushed (off: land only, owed()), rules.visible whether a visible change
-# needs the owner's yes (yesrule()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
+# needs the owner's yes (yesrule()), rules.wholeSuite whether a card's test step may run the whole suite (wholerule(),
+# lib/testrun.sh); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
 # a model of the pack's models.allowed, whose program it is (seatnow()); tests (the Tests seat, the test actions'
 # sessions: testaction(), lib/testaction.sh) is null or {cli, model, effort}, always with its CLI;
@@ -34,7 +35,8 @@ CTL_K=()
 # medium effort (an OpenCode builder at none: it is given no effort, seatnow). The dependency guard is on: no issue is
 # picked while an issue it depends on is open; nothing is forced past it. A card that lands is not pushed (rules.push
 # off: land only, owed()): it waits for the Board's Push landed, or for the owner to turn the rule on. A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
-# `Visible change approved:` line, yesrule()). No Tests seat is set: no test action starts (testaction()). Empty when
+# `Visible change approved:` line, yesrule()). A card never runs the whole suite (rules.wholeSuite off: it runs the
+# test files of its change alone, listcmd()). No Tests seat is set: no test action starts (testaction()). Empty when
 # the file cannot be read, or there is no jq (doctor says so): then no record is read.
 CTL0=$(jq -c . "$HERE/lib/control-defaults.json" 2>/dev/null) || CTL0=
 ctl() { local CTL_V; ctlread || return 1; printf '%s\n' "$CTL_V"; }
@@ -54,7 +56,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.start | IN("queue", "held")) and (.startSeen | type == "array" and all(type == "number"))
       and (.startHeld | type == "array" and all(type == "object" and keys == ["from", "to"] and (.from | type == "number") and (.to == null or (.to | type == "number"))))
       and ((.start == "held") == (.startHeld | length > 0 and (last.to == null)))
-      and (.rules | (.never | type == "array" and all(type == "string")) and ([.P0, .P1, .P2, .P3, .followups, .push, .visible] | all(type == "boolean")))
+      and (.rules | (.never | type == "array" and all(type == "string")) and ([.P0, .P1, .P2, .P3, .followups, .push, .visible, .wholeSuite] | all(type == "boolean")))
       and ([.model, .reviewer, .judge, .tests] | all(. == null or (type == "object" and (keys - ["effort", "cli"]) == ["model"] and (.model | type == "string")
         and (.effort == null or (.effort | type == "string")) and (.cli == null or (.cli | IN("claude", "codex", "opencode"))))))
       and (.tests == null or .tests.cli != null)
@@ -747,7 +749,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -769,9 +771,9 @@ control() { # [action [arguments]]
       f='.forced = (.forced + ($v | map(tonumber)) | unique)' ;;
     rules) [ $# != 0 ] || { bad; return; }
       # An area rule is the pack's area prefix and a name; push is whether a card that lands is pushed, visible whether
-      # a change customers or staff will see needs the owner's yes.
+      # a change customers or staff will see needs the owner's yes, wholeSuite whether a card may run the whole suite.
       packget labels.areaPrefix p || return 1
-      for x; do [[ $x =~ ^(P[0-3]|followups|push|visible)=(on|off)$ ]] || { [[ $x == "$p"* ]] && [[ ${x#"$p"} =~ ^[^=[:space:]]+=(on|off)$ ]]; } || { bad; return; }; done
+      for x; do [[ $x =~ ^(P[0-3]|followups|push|visible|wholeSuite)=(on|off)$ ]] || { [[ $x == "$p"* ]] && [[ ${x#"$p"} =~ ^[^=[:space:]]+=(on|off)$ ]]; } || { bad; return; }; done
       f='reduce ($v[] | capture("^(?<k>.*)=(?<o>on|off)$")) as $r (.; if $r.k | startswith($p) | not then .rules[$r.k] = ($r.o == "on")
            elif $r.o == "off" then .rules.never = (.rules.never + [$r.k] | unique) else .rules.never -= [$r.k] end)' ;;
     # The judge's on or off and the finding kinds it always accepts (no kind clears them) are the record's too. The

@@ -180,6 +180,11 @@ with the project. Each change has Undo.
 will see stops until its issue has a `Visible change approved:` line. Off, the tab says "off: visible changes land
 without your yes".
 
+**Whole suite in a card** is a switch per project, Off by default. Off, a card runs only the test files linked to its
+change, and the whole suite runs only in a release. The tab says "off: a card runs only the test files linked to its
+change, and the whole suite runs only in a release". On, a card runs the whole suite when it cannot find the tests of
+its change ([Whole suite in a card](configuration.md#whole-suite-in-a-card)).
+
 ## Held issues and dependencies
 
 An issue that is not being built is in Held for one of four reasons: **Held by you**, **Held by a label**,

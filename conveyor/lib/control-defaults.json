@@ -12,6 +12,7 @@
     "followups": true,
     "push": false,
     "visible": false,
+    "wholeSuite": false,
     "never": []
   },
   "model": {

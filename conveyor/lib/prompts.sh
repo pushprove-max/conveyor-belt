@@ -132,6 +132,12 @@ tunables() {
 yesrule() { # [the control record, when the caller has read it]
   [ "$(jq -r '.rules.visible' <<<"${1:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]
 }
+# May a card run the whole suite? The control record's rule "Whole suite in a card" (rules.wholeSuite), off by default
+# (lib/control-defaults.json), and off when the record cannot be read: a card's run (listcmd(), lib/testrun.sh) and
+# its bug-card check (bugproof()) never run the whole suite then. The release's runs (test.full, test.main) do not read it.
+wholerule() {
+  [ "$(ctl 2>/dev/null | jq -r '.rules.wholeSuite' 2>/dev/null)" = true ]
+}
 # The fixed header of a brief; its dependencies sentence names the pack's linkFromMain, and is left out when that is
 # empty. Its last lines, on the owner's yes to a visible change, are left out with "off" (yesrule()).
 header() { # [off]
@@ -437,6 +443,14 @@ NOTALONE='test files were found in the change, but the test command, given them,
 # What the check's result and doctor say of a test command that, given <n> test files, ran <ran> (widewhy(), lib/issues.sh).
 # shellcheck disable=SC2034 # used in lib/issues.sh
 WIDE='the test command, given <n> test file(s), ran <ran> test files: it runs test files it is not given, so the bug-card check runs all of them; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
+# Why a card's test run, or its bug-card check, did not run or was stopped while the rule "Whole suite in a card"
+# (rules.wholeSuite) is off (narrowstop(), lib/testrun.sh): <why> says what happened, and the rest names the settings
+# that fix it.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NARROW='the rule Whole suite in a card is off, and <why>; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file'
+# What a card's test step says when, with that rule off, no test file is linked to its change (listcmd()).
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTBACK='main'"'"'s code could not be put back, so the test files did not run without the fix'
 # shellcheck disable=SC2034 # used in lib/card.sh

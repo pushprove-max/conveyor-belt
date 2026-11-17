@@ -41,8 +41,11 @@ its own, and the Board's Rules tab sets them in its Judge row.
   not picked without one. Off, no card or issue waits for that line: the build brief and the review do not ask for it,
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
+- `wholeSuite`: whether a card's test step may run the whole suite (Whole suite in a card). Off, a card runs only
+  the test files linked to its change, and the whole suite runs only in a release
+  ([Which tests a card runs](../docs/configuration.md#whole-suite-in-a-card)). On, a card runs its tests as before.
 
-Every rule is on by default, except `push` and `visible`, which are off. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule as on.
 
 `conveyor.sh control dep-guard on|off` sets the dependency guard (`depGuard` in the record; a record saved before it
@@ -515,6 +518,13 @@ record and the test line hold `list`: `{"mode": "changed", "files": <count>, "by
 (`age`, the commits the made test map is behind, only with one) or `{"mode": "whole", "why": "..."}`. The Board shows
 it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed: 7 files (by name)`,
 `whole suite: <why>`); `/units` shows `changed: 7 files` or `whole suite`.
+All of this holds while the rule `wholeSuite` is on. Off (the default), a card's run never gets `mode: "whole"`: a
+change that would run the whole suite runs the test files the test map and the links give its files; one with none
+runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why": "..."}`; a list the command cannot be
+given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
+test step with a reason that names `test.list` and `test.fileCommand`. A run that reports more than ten test files for
+each it is given is stopped, and the card is blocked the same way; so is the bug-card check's run of `test.command`
+([Whole suite in a card](../docs/configuration.md#whole-suite-in-a-card)).
 The test map (`lib/testmap.sh`, [The test map](../docs/configuration.md#the-test-map)) is read before the names: the
 tests it says cover a changed file are its tests, and a file more than half the mapped tests read runs the whole
 suite. A card's run that passes maps the test files its change adds that the map lacks; the whole test on main and

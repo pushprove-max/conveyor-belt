@@ -744,6 +744,14 @@ widewarn() {
     | select(. != null and .wide.command == $c) | "\(.wide.given) \(.wide.ran)"' 2>/dev/null) && [ -n "$e" ] || return 0
   echo "warning: $(widewhy "${e% *}" "${e#* }" "$MAIN")"
 }
+# Doctor's warning of a pack whose cards cannot be narrowed to the test files of their change while the rule Whole
+# suite in a card is off (wholerule(); listcmd(), lib/testrun.sh): it sets neither test.list nor test.fileCommand, so
+# every card whose change is linked to a test file stops at its test step.
+narrowwarn() {
+  local lm fc
+  ! wholerule && packget test.list lm test.fileCommand fc 2>/dev/null && [ -z "$lm$fc" ] || return 0
+  echo "warning: the rule Whole suite in a card is off, and the pack sets neither test.list nor test.fileCommand, so a card whose change has tests stops at its test step; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file"
+}
 doctor() {
   local bad=0 p e t c h f
   ok() { echo "ok: $1"; }; no() { echo "missing: $1; fix: $2"; bad=1; }
@@ -947,6 +955,7 @@ doctor() {
   t=$(jq -r '.test.report | objects | select(.format == null and .option) | "; the test command runs \(.runner), whose report option \(.option) would give them"' "$PACK" 2>/dev/null) || t=''
   [[ ! $e =~ ^[1-9][0-9]*$ ]] || echo "warning: the last $e card test run$([ "$e" = 1 ] || echo s) recorded no test times: the test command prints no \`TESTRUN sec\` lines; conveyor/README.md, The CPU budget of a test file, says how to add them$t"
   widewarn
+  narrowwarn
   if packget privacy.mode e && [ "$e" = public ]; then
     if t=$(termsfile); then ok "the terms file $t"
     elif termsnamed; then no "a readable terms file (the host file $HOST names one, or does not read, and the pack's privacy.mode is public)" "make the file it names readable, or take \"terms\" out of $HOST"

@@ -11,7 +11,8 @@
 // accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
 // card lands (On or Off; disabled the same way for a record with no rules.push), Visible changes need your yes (On or
-// Off; disabled the same way for a record with no rules.visible), Card work yields to you (On or Off, the machine's
+// Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
+// way for a record with no rules.wholeSuite), Card work yields to you (On or Off, the machine's
 // steer, sent as POST /machine; disabled the same way when the snapshot does not say it), Cores kept for you (shown,
 // not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores), one row a standing kind of
@@ -245,7 +246,7 @@
   // A change in words, for the head.
   function words(action, args) {
     const a = list(args);
-    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k} ${o}`; }).join(', ');
+    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'wholeSuite' ? 'Whole suite in a card' : k} ${o}`; }).join(', ');
     if (action === 'cap') return a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`;
     if (action === 'guard') return a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`;
     if (action === 'model' || action === 'reviewer') return `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
@@ -278,7 +279,7 @@
         const never = list(r.rules.never).filter((y) => y !== key);
         r.rules.never = o === 'off' ? never.concat([key]) : never;
       });
-      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' ? k : 'build'];
+      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'wholeSuite' ? k : 'build'];
     }
     if (action === 'cap' || action === 'guard') { r[action] = a[0] === 'off' ? null : Number(a[0]); return [r, action]; }
     if (action === 'judge' && (a[0] === 'on' || a[0] === 'off')) { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
@@ -898,6 +899,14 @@
     yOn.disabled = yOff.disabled = !yesKnown;
     el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
       yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
+    // Whole suite in a card: Off (the default; a record without it reads as Off) runs only the test files of a card's
+    // change, and the whole suite only in a release; On lets a card run the whole suite when its tests cannot be found.
+    const wholeOn = r.wholeSuite === true, wholeKnown = typeof r.wholeSuite === 'boolean';
+    const wOn = choice('On', 'whole-suite-on', 'Whole suite in a card: on', wholeOn, () => { if (!wholeOn) send('rules', ['wholeSuite=on'], null, ['rules', ['wholeSuite=off']]); });
+    const wOff = choice('Off', 'whole-suite-off', 'Whole suite in a card: off', !wholeOn, () => { if (wholeOn) send('rules', ['wholeSuite=off'], null, ['rules', ['wholeSuite=on']]); });
+    wOn.disabled = wOff.disabled = !wholeKnown;
+    el.append(row('wholeSuite', 'Whole suite in a card', 'a card may run every test file when it cannot find the tests of its change',
+      wOn, wOff, wholeKnown ? offLine(wholeOn, 'a card runs only the test files linked to its change, and the whole suite runs only in a release') : newer(wholeKnown)));
     // Card work yields to you: the machine's (the host file's steer, every project's alike), sent as POST /machine.
     // On (the default) runs card sessions at lowered priority and card test runs at idle priority; Off runs them at
     // normal priority. Undo sends the other value.
