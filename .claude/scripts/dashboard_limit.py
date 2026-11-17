@@ -516,10 +516,16 @@ PRICES = {
     "gpt-6.1-sol:fast": (4.0, 20.0, 0.20),
     "gpt-6-astra": (10.0, 50.0, 1.00),
     "gpt-6-astra:fast": (20.0, 100.0, 2.00),
+    "gpt-6.2-sol": (2.0, 10.0, 0.10),
+    "gpt-6.2-sol:fast": (4.0, 20.0, 0.20),
+    "gpt-6.2-astra": (8.0, 40.0, 0.40),
+    "gpt-6.2-astra:fast": (16.0, 80.0, 0.80),
 }
 LONG_PRICES = {"claude-haiku-5-5": (0.50, 2.50, 0.05),
                "gpt-6.1-sol": (4.0, 15.0, 0.20), "gpt-6.1-sol:fast": (8.0, 30.0, 0.40),
-               "gpt-6-astra": (20.0, 75.0, 2.00), "gpt-6-astra:fast": (40.0, 150.0, 4.00)}
+               "gpt-6-astra": (20.0, 75.0, 2.00), "gpt-6-astra:fast": (40.0, 150.0, 4.00),
+               "gpt-6.2-sol": (4.0, 15.0, 0.20), "gpt-6.2-sol:fast": (8.0, 30.0, 0.40),
+               "gpt-6.2-astra": (16.0, 60.0, 0.80), "gpt-6.2-astra:fast": (32.0, 120.0, 1.60)}
 LONG_PROMPT = 100_000
 LONG_AT = {m: 272_000 for m in LONG_PRICES if m.startswith("gpt-")}
 

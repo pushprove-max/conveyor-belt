@@ -33,6 +33,17 @@ print(json.dumps([d.price(r) for r in ([0, 'proxy/sonnet', 1000000, 0, 0, 0, 0],
   [0, 'my-model', 0, 1000000, 0, 0, 0], [0, 'my-model', 0, 0, 1000000, 0, 0], [0, 'proxy/other', 1000000, 0, 0, 0, 0])]))")
 [ "$got" = '[2.0, 4.0, 4.0, 3.0, 2.0, null]' ] || fail "the aliased and added request prices: $got"
 
+# The gpt-6.2 rows, short and over 272K input, standard and fast, each a published price (not an estimate).
+# Sol: $2 in, $0.10 cached, $10 out; long $4 in, $0.20 cached. Astra: $8 in, $0.40 cached, $40 out; long $16 in,
+# $0.80 cached (twice the short rate, as OpenAI publishes), $60 out; fast twice each. Bugs caught: a review on 6.2
+# that showed its tokens with no cost on the Board; a long Astra request whose cached tokens cost twice the published rate.
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+print(json.dumps([[round(d.price(r), 9), d.estimated(r)] for r in ([0, 'gpt-6.2-sol', 100000, 0, 0, 100000, 100000], [0, 'gpt-6.2-sol', 172001, 0, 0, 100000, 0],
+  [0, 'gpt-6.2-sol:fast', 1000000, 0, 0, 0, 0], [0, 'gpt-6.2-astra', 100000, 0, 0, 100000, 100000], [0, 'gpt-6.2-astra', 200000, 0, 0, 100000, 100000],
+  [0, 'gpt-6.2-astra:fast', 0, 0, 0, 0, 1000000], [0, 'gpt-6.2-astra:fast', 200000, 0, 0, 100000, 100000])]))")
+[ "$got" = '[[1.21, false], [0.708004, false], [8.0, false], [4.84, false], [9.28, false], [80.0, false], [18.56, false]]' ] \
+  || fail "the gpt-6.2 request prices: $got"
+
 # Through the Board's collect: the pack's override reaches the cost today. One request today, 1M input tokens of
 # Sonnet 5.5 in fast mode: $4 at the built-in price, $2 at the pack's $1 override.
 MAIN=$T/main BIN=$T/bin OUT=$T/out H=$T/home
