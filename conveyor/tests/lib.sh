@@ -35,8 +35,10 @@ export CONVEYOR_LIMIT_CMD=false
 # `serve` asks which models have no price (noprice(), lib/control.sh): here the answer fails, so no loop files an issue
 # for the stub models the test pack lists; a case of that look sets its own.
 export CONVEYOR_NOPRICE_CMD=false
-# Codex's models cache (climodels(), lib/control.sh) is never this machine's own: a case writes its own there.
-export CODEX_HOME=$T/codex-home
+# Codex's models cache (climodels(), lib/control.sh) is never this machine's own. The shared one is read-only: a case
+# that writes a cache exports its own CODEX_HOME under $T/$CASE, as cases run side by side and one case's cache there
+# changed the models another case's snapshot read (clis.test.sh).
+export CODEX_HOME=$T/codex-home; mkdir -p "$CODEX_HOME"; chmod a-w "$CODEX_HOME"
 # The same-file check before a pick (overlap(), lib/pick.sh) is never a model call here: it fails, so each issue is
 # picked as it is. A case of that check sets its own (deps.test.sh).
 export CONVEYOR_OVERLAP_CMD=false

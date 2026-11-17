@@ -73,7 +73,7 @@ t_nopricenojudge() {
 # names it, so a look that skipped family names, and did not resolve them, files no issue for it.
 t_nopricefamily() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
-  mkdir -p "$CODEX_HOME" && echo '{"models":[{"slug":"gpt-6.2-sol","visibility":"list"},{"slug":"gpt-6.3-sol","visibility":"hide"}]}' > "$CODEX_HOME/models_cache.json"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME" && echo '{"models":[{"slug":"gpt-6.2-sol","visibility":"list"},{"slug":"gpt-6.3-sol","visibility":"hide"}]}' > "$CODEX_HOME/models_cache.json"
   tune '.models.allowed.codex = ["sol"]'
   jq '.reviewer = {model: "sol", effort: "medium"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   looks '[ "$(seat reviewer | jq -r .model)" = sol ] && noprice'
