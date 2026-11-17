@@ -77,7 +77,7 @@ def ok: . as $r | (keys - known) == need
         and (.kind // "transport" | IN("check", "transport")) and (.check // "" | type == "string")
         and (.failures // {of: null, files: [], timeout: null} | fails)
         # Each failure's verdict (verdicts()), and the run of the failing cases on main.
-        and (.verdicts // [] | type == "array" and all(type == "object" and keys == ["case", "verdict"] and (.case | type == "string") and (.verdict | IN("card", "main", "flaky"))))
+        and (.verdicts // [] | type == "array" and all(type == "object" and keys == ["case", "verdict"] and (.case | type == "string") and (.verdict | IN("card", "main", "machine", "flaky"))))
         and (.mainRun // {sha: "", sec: 0, exit: 0} | type == "object" and keys == ["exit", "sec", "sha"] and (.sha | type == "string") and ([.sec, .exit] | all(type == "number")))
         # A run that went again (tests()): the first run's exit and failures, and the end of its output.
         and (.rerun // {exit: 1, failures: {of: null, files: [], timeout: null}} | type == "object" and (keys - ["tail"]) == ["exit", "failures"] and (.exit | type == "number") and (.failures | fails)

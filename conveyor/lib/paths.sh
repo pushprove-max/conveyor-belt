@@ -263,6 +263,8 @@ SAMPLES=${STATE%/*}/samples.jsonl # the loop's and the host's samples, one a min
 PUSHED=${STATE%/*}/pushed         # the last push that worked: "<commit> <remote> <branch>"
 PUSHING=${STATE%/*}/pushing       # the push in progress: {pid, since, sha}, while the loop's push job runs
 MAINTEST=${STATE%/*}/maintest.json # the whole test on main (maintest()): its last run, its last pass and what fails now
+# shellcheck disable=SC2034 # read by lib/testrun.sh and lib/views.sh, which conveyor.sh sources beside this file
+MACHINEHOLD=${STATE%/*}/machinehold.json # the machine hold (machinehold(), lib/testrun.sh), while one stands
 # `watch` runs each snapshot with this set to a folder where a slower timer keeps GitHub's answers (`github`):
 # the open issues, when the awaiting-deploy labels were added, and whether gh is signed in. Read from there, a slow
 # GitHub never holds up a card's snapshot; nor does a weekly limit reading, which such a snapshot never asks for.

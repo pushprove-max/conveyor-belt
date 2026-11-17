@@ -30,6 +30,9 @@
   ],
   "test": {
     "command": "bash .conveyor/test-changed.sh",
+    "control": [
+      "conveyor/lib/portable.test.sh"
+    ],
     "full": "bash .conveyor/test-full.sh",
     "main": "bash .conveyor/test-full.sh",
     "mainAt": "01:00",

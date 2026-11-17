@@ -27,6 +27,12 @@ Some pack settings that this site names:
   ([Foreman](foreman.md#standing-yes)).
 - `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.mainAt`: a time of day, `"HH:MM"` in the machine's local time, after which the whole test on main runs once a day; unset, it runs at most once an hour. `test.survey`: the monthly test-speed survey.
   `test.firstSurvey`: the answer to setup's survey question.
+- `test.control`: test files, as paths from the top of your checkout, that tell a broken machine from a broken main.
+  When a card's failing cases fail on main too, the ones of these that passed before with main's content run beside
+  them. When no test passed before with main's content, as with a test command that records no passes, all of
+  these run. When none of them passes, the machine is at fault: no "Main is red" card opens, and the loop picks no
+  card until the failing files pass again ([Cards](cards.md#tests)). Empty by default. When it is empty, no control
+  runs, and a failure on main is main's unless its test file passed before with the same inputs.
 - `linkFromMain`: the folders, as paths from the top of your checkout, that each card's worktree links from your
   checkout, such as `node_modules`. These are the dependencies its build and tests need. Setup fills it from the
   ignored dependency folders it finds, when you answer yes ([Setup](setup.md#setup)).

@@ -82,7 +82,7 @@ machined() { grep -qE '^(cmd machine |  machine\) )' "$1" 2>/dev/null; }
 # A run with --only takes only the listed ones.
 # How many of the loop's cards in progress only wait now: alive, with <worktree>.idle standing. A card stands it while
 # it sleeps out a wait on a same-file card or on the batch card that took it (settle()), or for main to change on a
-# red main (mainwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
+# red main (mainwait()), or for the machine hold to go (holdwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
 # against the cap: the rest count, so the loop does not start card after card while the old ones pile up waiting.
 idle() { # <the loop's own cards in progress, "<pid> <card>" one a line>
   local p c n=0
@@ -182,6 +182,7 @@ revive() { # <the loop's own cards, one a line>
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
+  local mhold htold='' prober='' htried=-1000000
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
   # kids: an adopted card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
   # before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's first turn still
@@ -217,6 +218,10 @@ run() { # [max-cards] [serve]
     # is said when it changes, never at every turn: a loop held for hours has said it once.
     nopack=''; names 2>/dev/null || { nopack=$(names 2>&1) || :; nopack=${nopack:-conveyor pack: $PACK could not be read}; }
     [ "$nopack" = "$told" ] || { told=$nopack; [ -z "$nopack" ] || printf '%s\n' "$nopack" >&2; }
+    # The machine hold (machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
+    # changes, as above.
+    mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)
+    [ "$mhold" = "$htold" ] || { htold=$mhold; [ -z "$mhold" ] || echo "conveyor: $mhold" >&2; }
     # A pack that follows the plugin's main or its releases: its pushed main, or newest release, is looked at once every IDLE seconds (take(),
     # lib/install.sh), a job beside the cards, never counted as one and given no run lock; a commit it takes is
     # restarted on at a later turn (stale()).
@@ -297,11 +302,18 @@ run() { # [max-cards] [serve]
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
       stried=$SECONDS; survey 8>&- < /dev/null
     fi
-    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}") + ${#took[@]})); waits=''
+    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}") + ${#took[@]})); waits=''
     # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
     # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
     idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)"); [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
     building=$((running - idles))
+    # The machine hold's look (machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
+    # while the hold stands: a job beside the cards, never counted as one, and given no run lock; a `run` does not end
+    # while it runs (below). Once its files pass on main the hold goes, so the next turn picks again and the cards on
+    # hold test again.
+    if [ -n "$mhold" ] && [ $((SECONDS - htried)) -ge "$POLL" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then
+      htried=$SECONDS; ( machineprobe ) 8>&- < /dev/null & prober=$!
+    fi
     if [ -z "$old" ] && stale; then
       old=1; enginepin p f 2>/dev/null || f=''
       if [ -n "$FOLLOW" ]; then echo "conveyor: the checkout has moved on from this loop's $RAN; nothing new is picked, and the loop restarts on the checkout's new code once its push is done"
@@ -352,7 +364,7 @@ run() { # [max-cards] [serve]
     urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
     red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
     # While a session's API-side error is fresh (session()), no card is picked: its session would meet the same outage.
-    asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ]; then
+    asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
       if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
     fi
     # The machine's count of this project's cards (room()), the waiting ones left out as here, and no card of it
@@ -413,7 +425,7 @@ run() { # [max-cards] [serve]
       fi
     fi
     # A card that landed after this turn's push check is owed a push no turn has tried: one more turn makes it.
-    if [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ]; then
+    if [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then
       [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || continue
       break
     fi
@@ -429,6 +441,7 @@ run() { # [max-cards] [serve]
   elif [ "$started" = 0 ] && [ -z "$tried" ]; then
     if [ "$cap" = 0 ]; then echo "conveyor: $why; nothing recorded" >&2; exit 1
     elif [ -n "$nocli" ]; then echo "conveyor: $nocli; nothing recorded" >&2; exit 1
+    elif [ -n "$mhold" ]; then echo "conveyor: the machine hold stands; nothing recorded" >&2; exit 1
     elif [ "$now" = running ]; then echo "conveyor: no issue qualifies; nothing recorded"
     else echo "conveyor: the loop is $now (the control record); nothing recorded"; fi
   fi

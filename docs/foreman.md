@@ -53,6 +53,8 @@ it up:
   it gives that card's step and last action. For main, it gives each main-red fix card that is open, with its step
   and last action, or blocked, with its reason. Each wait wakes the Foreman once. If the wait goes on for the same
   time again, the next wake says "still waiting".
+- The machine fails test files on main, and no change to main explains it: the wake names those files. The loop
+  picks no card until they pass again ([Cards](cards.md#tests)).
 
 On a wake for a waiting card, the Foreman does more than report it. It finds why the card waits: it reads the log of
 the card it waits on, the main-red record and the test log. Then it fixes the cause. If the belt is blocked and your

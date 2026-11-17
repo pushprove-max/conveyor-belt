@@ -18,8 +18,9 @@
           elif $l.step == "build" then put(5; "done")
           elif $l.step == "review" then put(place("review"); main("done")) | .nrev += 1
           elif $l.step == "fix" then put(place("fix"); main("done")) | if .phase == "main" then .nfix += 1 else . end
-          elif $l.step == "test" then place("test") as $i | put($i; if $l.result != "pass" then "failed" elif $i == 11 then "done" else null end)
-            | if $l.result != "pass" and .phase == "main" then .phase = "tfix" else . end
+          # A held test line (card(): the machine's failures, issue 221) is no failure: the step is neither failed nor done.
+          elif $l.step == "test" then place("test") as $i | put($i; if $l.result == "fail" then "failed" elif $l.result == "pass" and $i == 11 then "done" else null end)
+            | if $l.result == "fail" and .phase == "main" then .phase = "tfix" else . end
           # The landing that met the conflict ran until the rebuild began: those seconds stay with the landing. The
           # seconds of the rebuild session, from its start line to its rebase line, are those of the rebuild step.
           elif $l.step == "start" and $l.of == "rebase" then put(13; null) | .phase = "rebuild" | .cur = 12
@@ -140,13 +141,13 @@
               | {name: (if $l.step == "picked" then "picked" elif $l.step == "worktree" then "worktree ready" elif $l.step == "deps" then "dependencies linked"
                   elif $l.step == "brief" then "brief written" elif $l.step == "build" then "building"
                   elif $l.step == "review" then "review \($nth)" + (if ($l.result // "") == "" then "" else " (\($l.result))" end)
-                  elif $l.step == "fix" then "fix \($nth)" elif $l.step == "test" then "tests " + (if $l.result == "pass" then "passed" else "failed" end)
+                  elif $l.step == "fix" then "fix \($nth)" elif $l.step == "test" then "tests " + (if $l.result == "pass" then "passed" elif $l.result == "held" then "held: the machine" else "failed" end)
                   elif $l.step == "start" then "landing (met a conflict)" elif $l.step == "rebase" then "rebuild" elif $l.step == "landed" then "landing"
                   elif $l.step == "closed" then "landing (issue closed)" elif $l.step == "pushed" then "pushed"
                   elif $l.step == "push" then (if $l.result == "ok" then "push" else "push failed" end)
                   elif $l.step == "issue" then (if $l.result == "ok" then "issue closed" else "issue not closed" end)
                   elif $l.step == "filed" then "follow-ups filed" elif $l.step == "blocked" then "stopped" else $l.step end),
-                 state: (if ($l.step == "test" and $l.result != "pass") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
+                 state: (if ($l.step == "test" and $l.result == "fail") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
                    or ($l.step == "blocked" and $l.stop != "yes") then "failed" else "done" end),
                  sec: (if $l.step == "picked" then null else $l.took // null end), at: $l.time}
                 + (if $l.step == "filed" then {n: ($l.n // 0)} elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}

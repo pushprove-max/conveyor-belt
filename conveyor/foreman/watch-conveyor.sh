@@ -22,6 +22,7 @@
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
+#   the machine hold (health's machineHold: the engine's machinehold()), once a hold, naming the controls that fail
 #   every other entry of the Board's Needs you: .claude/scripts/dashboard_needs.json is the one list of its kinds,
 #     which the Board reads too, each with the snapshot field it is read from (the whole test failing on main, an engine
 #     update not taken, test issues held, a pipeline change held for the owner, a dependency that cannot be read,
@@ -106,6 +107,9 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
           ["push", "push failing", "", "the push has failed since \(.pushFailingSince): \(.pushError.reason // "" | one)"]
         else empty end),
     (.refused | arrays | .[] | objects | ["refused:\(.card):\(.since)", "full test run refused", ref, "\(ref): the test step \(.reason | one)"]),
+    # The machine hold (health machineHold, conveyor/lib/testrun.sh machinehold()): once a hold, by when it began.
+    (.machineHold | objects | ["machine:\(.since)", "machine held", "",
+      "the machine fails \(.controls | arrays | map(tostring) | join(", ")) on main, with no change to main that explains it: the loop picks no card until they pass again (found by \(.card // "a card"))" | one]),
     # A card records line the check set aside (health quarantined, conveyor/lib/views.sh check()).
     (.quarantined | arrays | .[] | objects | ["quarantined:\(.line):\(.time)", "record set aside", "",
       "the card records line \(.line) is set aside in quarantined.jsonl: the record check refused its field \(.field | one)"]),

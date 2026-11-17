@@ -362,7 +362,9 @@ passed and, of each failing file, its failing cases (a file that failed naming n
 `fail` line with no case: the command runs it whole, since nothing else selects it on main's clean tree). Each
 failure gets a verdict:
 
-- **main**: the same case failed on main too (a timeout or a kill there says nothing of the case). The test command
+- **main**: the same case failed on main too (a timeout or a kill there says nothing of the case), an input of its
+  file changed since its last recorded pass, and a control passed beside it or no control could run (see
+  **machine**). The test command
   itself is never a case and gets no verdict: it names no test. Conveyor files no
   GitHub issue: the case goes to the fix card of main's commit, a card of issue 0 that the
   loop picks ahead of the queue, one per broken main commit. The loop picks it whatever the priority switches say
@@ -397,6 +399,24 @@ failure gets a verdict:
   hold no build slot while they wait (Control, above), but the waiting cards past the cap still hold theirs, so the
   loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap,
   `maxLoad` and `minFreeMemMB` apply as to any card. The Board shows that card as "beyond the cap: main is red".
+- **machine**: the same case failed on main too, but the machine is at fault, not main. This is so when the case's
+  file passed before with the same inputs (the test results cache holds a pass of it with main's content), or when
+  every control failed beside it. The controls are the test files of the pack's `test.control` that have a recorded
+  pass with main's content, and are not among the failing files. When the cache holds no pass with main's content
+  at all, as with a runner that logs no `TESTRUN inputs` lines, the controls are all those files that are not among
+  the failing files. They run in the same run on main as the failing cases, so on the same slot. With no control to
+  run, nothing tells the machine from main: a case whose inputs changed is main's. A
+  machine verdict opens no main-red entry, no fix card and no wait for main, and the card does not go to its fix
+  session. Its test line has the result `held`, not `fail`: the Board shows the step as "tests held: the machine", not
+  as failed. `machinehold.json` in the state folder holds the hold: when it began, the card and commit that found it,
+  the files that must pass again (the controls that failed, and the failing files that passed before with the same
+  inputs) and the cases. While it stands, the loop picks no card
+  and says why once: "the machine fails <files> on main, with no change to main that explains it". At
+  most once every `tunables.poll` seconds the loop runs those files on main as it is now, on a test slot. When they
+  all pass, the hold goes and the loop picks again. A card with a machine verdict and no card verdict gives way and
+  waits in its Test step, its live record saying "waiting for the machine", and holds no build slot. When the hold
+  goes, it is fitted onto main as it is now and its test step runs again. `health` shows the hold as `machineHold`,
+  and the Foreman gets one wake for each hold that names the failing files.
 - **card**: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
   select it). The card goes to its fix session.
 - **flaky**: it failed on the first run and passed on the run again (Flaky tests, below).
@@ -411,8 +431,8 @@ to change is brought onto current main in the same way before its test runs agai
 
 The test line keeps them: `verdicts` (`[{case, verdict}]`) and, when the cases ran on main, `mainRun` (`{sha, sec,
 exit}`: main's commit, the seconds that run took, its slot wait included, and its exit). A pass on re-run's line has a
-flaky verdict for each case that had not passed. The Board's Metrics (All numbers, "Test failures") count them by
-verdict, with the seconds spent running them on main.
+flaky verdict for each case that had not passed. The Board's Metrics (All numbers, "Test failures") count the card,
+main and flaky verdicts, with the seconds spent running them on main.
 
 The card's test line records both runs: `rerun` holds the first run's exit and failing files and cases, and a pass on
 re-run has the reason `passed on re-run: <file>: <case>, ...`. The Board draws such a card's Test step as "Test passed

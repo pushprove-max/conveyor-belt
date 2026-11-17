@@ -73,6 +73,16 @@ A card's tests run before it lands. When some cases fail, they run once more bef
 re-run passes goes on with no fix, and the Board shows its Test step as "passed on re-run" (`conveyor/README.md`, The
 test step).
 
+A case that fails again runs on main. When it fails there too, Conveyor checks whether main or the machine is at
+fault. Main is at fault only when an input of the case's test file changed since its last recorded pass, and a
+control passed in the same run or no control could run. The controls are the test files that the pack's
+`test.control` names. Otherwise the
+machine is at fault: no "Main is red" card opens, and the loop picks no new card. The Foreman gets one wake that names
+the files that fail. The cards with that failure wait in their Test step, "waiting for the machine". The Board shows
+that step as "tests held: the machine", not as failed. When those files
+pass on main again, the loop picks again and the waiting cards run their tests again (`conveyor/README.md`, The test
+step).
+
 A case that failed and then passed goes on the flaky-test record. `conveyor.sh flaky add <case> <source> <note>` adds
 an entry from outside a card. A case with entries from three sources within seven days gets one issue, "Flaky test:
 <case> fails at random". Until that issue closes, card test steps keep the case off. The full test suite still runs

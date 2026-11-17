@@ -178,7 +178,9 @@ cards() {
 # card records the check set aside ($QUARANTINE, check()), until the owner removes it from that file; serviceOld
 # (commit: the commit the machine's Conveyor runs, refused: the pack fields its schema does not name, or its check's
 # lines, project: the project's commit, or null): the machine's Conveyor on another commit refuses this pack, so it
-# does not serve the project (machinerefuses(), lib/install.sh); null when it reads it. Every object of it that names a main-red fix card
+# does not serve the project (machinerefuses(), lib/install.sh); null when it reads it; machineHold ({since, card, sha,
+# controls, cases}): the machine hold while it stands (machinehold(), lib/testrun.sh: the loop picks no card), else
+# null, for the Foreman's watcher. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it: the card has no issue (issue 0) to be shown by.
 # A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
@@ -286,7 +288,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson steer "$sr" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$READ_OLD" --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
+    --slurpfile old "$READ_OLD" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
@@ -349,6 +351,6 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed, report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold}
+       untimed: untimed, report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"
 }

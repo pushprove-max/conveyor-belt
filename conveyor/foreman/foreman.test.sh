@@ -247,6 +247,15 @@ grep -qF 'beta: #40: the test step refused full run: no list of what the last ru
 rm -f "$FD"/pending/*.wake
 bash "$SRC/watch-conveyor.sh" --once && fail "a refused run already reported woke again: $(cat "$FD"/pending/*.wake)"
 rm -f "$FD"/pending/*.wake; jq -c '.health.refused = []' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
+# Issue 221: the machine hold (the loop picks no card while it stands) wakes the Foreman once, naming the failing
+# control. Bug it catches: a hold the owner never heard of left the loop idle for good.
+jq -c '.health.machineHold = {since: "2026-11-11T11:55:00Z", card: "c41", sha: "0123456789abcdef", controls: ["tests/control.test.sh"], cases: ["tests/a.test.sh: one"]}' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
+bash "$SRC/watch-conveyor.sh" --once || fail "no wake for the machine hold"
+grep -qF 'beta: the machine fails tests/control.test.sh on main, with no change to main that explains it: the loop picks no card until they pass again' "$FD"/pending/*.wake \
+  || fail "the machine hold's wake does not name the failing control: $(cat "$FD"/pending/*.wake)"
+rm -f "$FD"/pending/*.wake
+bash "$SRC/watch-conveyor.sh" --once && fail "a machine hold already reported woke again: $(cat "$FD"/pending/*.wake)"
+rm -f "$FD"/pending/*.wake; jq -c '.health.machineHold = null' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
 }
 
 # Bug: a push that failed its check woke the Foreman only after 10 minutes, as one git or the remote failed does,

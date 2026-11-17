@@ -50,6 +50,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
+  local held # held: its test step waited for main or the machine (mainwait(), holdwait())
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' ob='' # kw: keptway()'s answer for a kept patch; ob: the budget of its own its build proposes (ownbudget())
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
@@ -558,7 +559,10 @@ card() { # <card> <issue> [<branch> <tip>]
         out=$(testfails "$wt.test" "$rc")
         # What still did not pass runs on main first (verdicts()): each failure's verdict goes on the test line.
         t=$(verdicts "$c" "$wt" "${out:-null}") || t='{"verdicts":[]}'
-        record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson f "${out:-null}" --arg rc "$rc" --argjson r "$(firstrun "$wt")" --argjson v "$t" \
+        # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: its test line is `held`,
+        # not `fail` (the card's test step is not counted as failed), and it waits for the machine hold (below).
+        held=''; jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$t" >/dev/null && held=machine
+        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson f "${out:-null}" --arg rc "$rc" --argjson r "$(firstrun "$wt")" --argjson v "$t" \
           'sub("\n+$"; "") as $t | $x + {
              reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
            + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v')"
@@ -567,10 +571,19 @@ card() { # <card> <issue> [<branch> <tip>]
         # files (no fix session, no block) until main changes; then it is fitted onto main and tested again, as a card
         # whose main moved during its tests is. It is not put back on its old commit (#582): caught is cleared, so a
         # change that no longer applies there is brought onto main by a session, even after the landing's rebuild.
-        if jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
+        # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: no fix session, no
+        # block and no wait for main. The card waits, holding no files, until the machine hold goes (holdwait()), then
+        # is fitted onto main as it is then and tested again, as after a wait for main.
+        if [ "$held" = machine ]; then
+          echo "conveyor: card $c: a case it still fails is the machine's, not main's: it waits until the machine passes its controls again"
+          rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
+          holdwait "$wt"; held=1
+        elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
           echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
           rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-          mainwait "$wt" "$(jq -r .mainRun.sha <<<"$t")" "$(jq -r '[.verdicts[] | select(.verdict == "main") | .case] | join(", ")' <<<"$t")"
+          mainwait "$wt" "$(jq -r .mainRun.sha <<<"$t")" "$(jq -r '[.verdicts[] | select(.verdict == "main") | .case] | join(", ")' <<<"$t")"; held=1
+        fi
+        if [ -n "$held" ]; then
           unmate; away=''; caught=''
           redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
           [ $rc != 1 ] || return
