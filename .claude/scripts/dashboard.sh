@@ -874,10 +874,12 @@ PANELS_JQ='
       | {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null} else boardOf(.) end) + $runs
           + {repos: [$R[].repo], others: ([$R[] | select(.steered | not) | {key: .repo, value: (boardOf(.) + $runs)}] | from_entries)})} end),
    # steer: whether card work yields to the user, the machine'"'"'s, the same in every record'"'"'s health (null from a
-   # snapshot from before it said).
+   # snapshot from before it said); cores: the cores kept for the user and the test slots left, the machine'"'"'s too
+   # (health'"'"'s cores, null from a snapshot from before it said).
    rules: (if $R == null then {error: $cerr, data: null} else
       {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null} else rulesOf(.) end)
-          + {repos: [$R[].repo], steer: ([$R[].snap.health.steer | booleans] | if length == 0 then null else .[0] end), others: ([$R[] | select(.steered | not) | {key: .repo, value: rulesOf(.)}] | from_entries)})} end),
+          + {repos: [$R[].repo], steer: ([$R[].snap.health.steer | booleans] | if length == 0 then null else .[0] end),
+             cores: ([$R[].snap.health.cores | objects][0] // null), others: ([$R[] | select(.steered | not) | {key: .repo, value: rulesOf(.)}] | from_entries)})} end),
    # The Tests page, of the same records (repo null when none is steered; repos and others as the Board'"'"'s): each
    # record'"'"'s tests (its snapshot'"'"'s, testspart() of conveyor/lib/testfiles.sh; null from a snapshot without it or
    # whose pack does not read) and the machine'"'"'s Load limit (mload), the same in every record'"'"'s. Each run of a

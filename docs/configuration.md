@@ -220,7 +220,7 @@ test file of that name. The files of an area whose tests are `"all"` run the who
 ## The host file
 
 The host file, `~/.config/conveyor/host.json`, holds this machine's settings: the terms file, the projects (`records`),
-the machine's `cap` and pause, `maxLoad`, `minFreeMemMB`, `pressure`, `testSlots`, `steer`, the Claude accounts and the Foreman's
+the machine's `cap` and pause, `maxLoad`, `minFreeMemMB`, `pressure`, `testSlots`, `steer`, `reserveCores`, the Claude accounts and the Foreman's
 groups. Setup writes it. [Setup](setup.md#the-host-file) lists its keys, and [Run](setup.md#run) says what each
 machine setting does.
 
@@ -246,6 +246,26 @@ stays the same.
 `steer` is on when the host file does not set it. To turn it off, set **Card work yields to you** to Off on the Board's
 Rules tab, or run `conveyor.sh machine steer off`. Card work then runs at normal priority, as your own work does.
 `conveyor.sh doctor` shows the setting and what Conveyor lowers on this machine.
+
+## Cores kept for you
+
+The host file's `reserveCores` keeps cores out of all card work, so that your terminal and apps always have free
+cores. It is 0 when the host file does not set it.
+
+- A number keeps that many cores: the highest-numbered cores of the machine. `"reserveCores": 2` on a machine with
+  16 cores keeps cores 14 and 15.
+- A list of core numbers keeps those cores. `"reserveCores": [0, 1]` keeps cores 0 and 1.
+
+No test slot is on a kept core, and the pool of test slots is never larger than the cores that are left. Card build,
+fix and review sessions and card test runs start with `taskset` on the cores that are left. Where Conveyor puts a run
+into a systemd scope, the scope's `AllowedCPUs` is the cores that are left too. Conveyor always leaves one core for
+card work: a setting that keeps every core leaves the lowest of them.
+
+`conveyor.sh doctor` and the **Cores kept for you** row on the Board's Rules tab show the kept cores and the number
+of test slots that are left. To change the setting, edit the host file.
+
+macOS cannot keep a process off a core, so the setting is not available there. Doctor and the Rules tab say so, with
+the reason. On Linux, the setting needs `taskset` (util-linux).
 
 ## The machine room
 

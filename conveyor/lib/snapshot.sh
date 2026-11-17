@@ -80,7 +80,10 @@
 #   machine's readings now ({cores, load: the 1-minute load}, each null when not read) for the Board's Load limit, its
 #   pressure the machine's pressure now (lib/pressure.sh: {state, cpu, memory, wakeMs, freeMB, why,
 #   gates: whether it holds cards and tests back}), and
-#   its steer whether card work yields to the user (the host file's steer, steer_on), for the Board's Rules tab.
+#   its steer whether card work yields to the user (the host file's steer, steer_on), for the Board's Rules tab, and
+#   its cores the cores kept for the user (lib/slots.sh slot_reserved) for the Rules tab too: {reserved: the core
+#   numbers, slots: the test-slot pool's size on the cores left (null when not read), unavailable: why this machine
+#   cannot keep cores (slot_reserve_why), else null}.
 # queue: next (the first 10 issues pick would take, in its order: issue, title, priority, followup, retried, and room:
 #   why the machine holds it back, on the one it holds; one forced past its wait also has forced: true and waitsFor:
 #   the open issues it waits on, in order too, so it keeps its dependency tag); and, from the

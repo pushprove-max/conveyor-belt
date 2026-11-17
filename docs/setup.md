@@ -346,6 +346,9 @@ The host file holds the machine's settings. Each is unset by default:
 - `steer`: on when unset. Card sessions and test runs run at a low priority, so that the machine stays quick for you.
   `"steer": false` turns it off. The Board's Rules tab sets it as **Card work yields to you**
   (`conveyor.sh machine steer <on | off>`; [Card work yields to you](configuration.md#card-work-yields-to-you)).
+- `reserveCores`: 0 when unset. The cores that card work never uses, so that you always have free cores. A number
+  keeps that many of the highest-numbered cores, and a list of core numbers keeps those cores
+  ([Cores kept for you](configuration.md#cores-kept-for-you)).
 
 None of these stops a card that already runs. While the host file is there and cannot be read, no new card starts.
 `conveyor.sh doctor` names a second loop that runs beside the machine's.

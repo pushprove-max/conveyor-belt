@@ -3,7 +3,8 @@
 # The machine's test slots. Sourced, never run.
 # One pool for the machine, shared by every Conveyor on it (each checkout the host file names, and a test runner started
 # by hand): the folder /tmp/conveyor-test-slots, the same whatever the user's environment names, holding one file per
-# slot, 1 to N. N is the host file's testSlots, never more than the machine's cores, which it is with none. (The host file's testSlotsDir, else
+# slot, 1 to N. N is the host file's testSlots, never more than the machine's cores less those kept for the user
+# (slot_reserved), which it is with none. (The host file's testSlotsDir, else
 # CONVEYOR_TEST_POOL, names another folder: a pool of the engine's own tests; slot_pool.) A test worker (the loop's test run of a card, one engine case, one unit of
 # the closure test) holds a slot while it runs: an flock on the slot's file, through a descriptor the worker and
 # everything it starts inherit, so the slot is held until the last process of the worker has ended, however each ends,
@@ -21,13 +22,52 @@
 
 # The cores the machine lets a test use, one a line, in order: asked of a process that first asks for every core, so
 # a runner pinned to its own slot's core still names them all, and a machine that keeps its tests to some of its cores
-# names only those. Nothing where taskset is not (macOS): no worker is pinned there.
+# names only those. The cores kept for the user (slot_reserved) are left out, unless they are all the test may use.
+# Nothing where taskset is not (macOS): no worker is pinned there.
 slot_cpus() {
-  local l r x
+  local l r x k kl a=() c=()
   command -v taskset >/dev/null || return 0
   l=$(taskset -cp "0-$(( $(nproc --all) - 1 ))" "$BASHPID" >/dev/null 2>&1; taskset -cp "$BASHPID" 2>/dev/null)
   l=${l##*: }; IFS=, read -ra r <<<"$l"
-  for x in "${r[@]}"; do [[ $x =~ ^[0-9]+(-[0-9]+)?$ ]] || continue; for ((l = 10#${x%-*}; l <= 10#${x#*-}; l++)); do echo "$l"; done; done
+  mapfile -t kl < <(slot_reserved); k=" ${kl[*]} "
+  for x in "${r[@]}"; do [[ $x =~ ^[0-9]+(-[0-9]+)?$ ]] || continue; for ((l = 10#${x%-*}; l <= 10#${x#*-}; l++)); do a+=("$l"); [[ $k == *" $l "* ]] || c+=("$l"); done; done
+  [ ${#c[@]} -gt 0 ] || c=("${a[@]}")
+  [ ${#c[@]} = 0 ] || printf '%s\n' "${c[@]}"
+}
+
+# The cores kept for the user (the host file's reserveCores; docs/configuration.md, Cores kept for you), one a line:
+# no test slot is on one (slot_cpus), and no card session or test run may run on one (steer_words, slot_box), so the
+# user's terminal and apps always have free cores. A number keeps that many of the machine's highest-numbered cores; a
+# list of core numbers keeps those. One core is always left for card work: a number of every core keeps all but
+# core 0, and a list that names every core keeps all but its lowest. None where taskset is not (slot_reserve_why).
+slot_reserved() {
+  local n
+  command -v taskset >/dev/null || return 0
+  n=$(nproc --all) || return 0
+  jq -r --argjson n "$n" '.reserveCores
+    | if type == "number" then floor | select(. > 0) | [range([$n - ., 1] | max; $n)]
+      elif type == "array" then map(numbers | floor | select(. >= 0 and . < $n)) | unique | if length >= $n then .[1:] else . end
+      else empty end | .[]' "${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json" 2>/dev/null
+}
+
+# The cores left for card work, as taskset and systemd's AllowedCPUs take them ("0,1,2"), when the host file keeps
+# cores for the user (slot_reserved); fails when it keeps none.
+slot_keep() {
+  local k kl c=() i n
+  mapfile -t kl < <(slot_reserved); [ ${#kl[@]} -gt 0 ] || return 1
+  k=" ${kl[*]} "; n=$(nproc --all) || return 1
+  for ((i = 0; i < n; i++)); do [[ $k == *" $i "* ]] || c+=("$i"); done
+  local IFS=,; echo "${c[*]}"
+}
+
+# Why this machine cannot keep cores for the user, empty where it can: no program can keep a process off a core
+# on macOS, and Linux needs taskset (util-linux) for it.
+slot_reserve_why() {
+  if command -v taskset >/dev/null; then return 0; fi
+  case $OSTYPE in
+    darwin*) echo "macOS lets no program keep a process off a core" ;;
+    *) echo "taskset (util-linux) is not installed" ;;
+  esac
 }
 
 # Sets SLOT_DIR (the pool's folder), SLOT_N (its size), SLOT_CPUS (the cores of its slots: slot_cpus), SLOT_HOSTF, SLOT_PSI
@@ -284,11 +324,13 @@ slot_mine() {
 # beside it, outside its limit. Called once, after slot_pool: it tries a box (about 10 ms). Inside a steered card test
 # run (steer_words: CONVEYOR_STEER_SLICE) each box goes in the run's slice, so it stays lowered with the run.
 slot_box() {
-  local m s=()
+  local m s=() k
   SLOT_BOX=()
   [ -z "${CONVEYOR_TEST_BOX:-}" ] && command -v systemd-run >/dev/null 2>&1 || return 0
   m=$(awk -v n="$SLOT_N" '/^MemTotal:/ { printf "%d", $2 / 1024 / n }' /proc/meminfo 2>/dev/null) && [ "${m:-0}" -gt 0 ] || return 0
   [[ ! ${CONVEYOR_STEER_SLICE:-} =~ ^conveyor_steer_[0-9]+\.slice$ ]] || s=(--slice="$CONVEYOR_STEER_SLICE")
+  # The cores kept for the user are out of the box too (slot_keep).
+  k=$(slot_keep) && s+=(-p "AllowedCPUs=$k")
   SLOT_BOX=(systemd-run --user --scope --quiet --collect --expand-environment=no "${s[@]}" -p CPUQuota=100% -p "MemoryMax=${m}M" -- env CONVEYOR_TEST_BOX=1)
   timeout 10 "${SLOT_BOX[@]}" true >/dev/null 2>&1 </dev/null || SLOT_BOX=()
 }
@@ -355,7 +397,9 @@ slot_used() {
 
 # Sets STEER to the words put before a command of <kind> (session or test) to start it lowered ("${STEER[@]}"
 # <command>), STEER_HOW to what they lower, in words (doctor names it; steer_set reads it), and STEER_SLICE to the
-# systemd slice a test run is put in, else empty. All empty with steer off.
+# systemd slice a test run is put in, else empty. All empty with steer off, but where the host file keeps cores for the
+# user (slot_keep): STEER then also starts the command on the cores left (taskset -c), steer on or off, and a test run's slice
+# scope has them as its AllowedCPUs: a session or test run never runs on a kept core. STEER_HOW names only the lowering.
 # macOS (taskpolicy): a session at the utility clamp (-c utility), a test run in the background (-b: idle CPU and
 # disk). Linux: a session at nice 10. A test run: in a slice of the user's systemd of its own, conveyor_steer_<pid>,
 # whose CPUWeight and IOWeight are 1 (of the default 100), set before the run starts; a test slot's box made inside
@@ -364,6 +408,12 @@ slot_used() {
 # again (steer_set up; a move back from nice 19 or SCHED_IDLE needs a privilege most users lack): a lowering that
 # could not be undone could starve a test file until its timeout.
 steer_words() { # <session | test>
+  local k
+  k=$(slot_keep) || k=''
+  steer_prio "$1" "$k"
+  [ -z "$k" ] || STEER=(taskset -c "$k" "${STEER[@]}")
+}
+steer_prio() { # <session | test> <the cores left, else empty>
   local u b
   STEER=(); STEER_HOW=''; STEER_SLICE=''
   steer_on || return 0
@@ -378,6 +428,7 @@ steer_words() { # <session | test>
     # as when it ran in the service's own group. Only a unit of the user's systemd: a login's scope is the system's.
     u=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null); b=()
     [[ $u != */user@*.service/* || ! ${u##*/} =~ ^[A-Za-z0-9:_.@-]+\.(service|scope)$ ]] || b=(-p "BindsTo=${u##*/}" -p "After=${u##*/}")
+    [ -z "$2" ] || b+=(-p "AllowedCPUs=$2")
     STEER=(systemd-run --user --scope --quiet --collect --expand-environment=no --slice="$STEER_SLICE" "${b[@]}" -- env CONVEYOR_STEER_SLICE="$STEER_SLICE")
     if timeout 10 systemctl --user set-property --runtime "$STEER_SLICE" CPUWeight=1 IOWeight=1 >/dev/null 2>&1 </dev/null \
       && timeout 10 "${STEER[@]}" true >/dev/null 2>&1 </dev/null; then STEER_HOW='systemd CPUWeight=1 IOWeight=1'; return 0; fi

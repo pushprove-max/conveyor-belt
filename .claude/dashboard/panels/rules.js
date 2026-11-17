@@ -12,7 +12,9 @@
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
 // card lands (On or Off; disabled the same way for a record with no rules.push), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Card work yields to you (On or Off, the machine's
-// steer, sent as POST /machine; disabled the same way when the snapshot does not say it), one row a standing kind of
+// steer, sent as POST /machine; disabled the same way when the snapshot does not say it), Cores kept for you (shown,
+// not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
+// cores), one row a standing kind of
 // routine yes the Foreman takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release
 // check, Fixed block, each On or Off; disabled the same way for a snapshot with no standing), Held by you (the count, a
 // link to the list below)
@@ -87,9 +89,10 @@
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
-    steer: null, steerSent: null };
+    steer: null, steerSent: null, cores: null };
   // steer: the machine's Card work yields to you as the snapshot says (null: an engine that does not say); steerSent:
-  // the value the host took from here, shown until a snapshot says it.
+  // the value the host took from here, shown until a snapshot says it. cores: the machine's cores kept for the user as
+  // the snapshot says ({reserved, slots, unavailable}; null: an engine that does not say).
   // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
   // search typed; priceSaved, the pack's prices as the changes saved here left them, until the next snapshot;
@@ -897,6 +900,12 @@
     sOn.disabled = sOff.disabled = !steerKnown;
     el.append(row('steer', 'Card work yields to you', 'card sessions and tests run at low priority on the build machine, for every project',
       sOn, sOff, steerKnown ? offLine(steerOn, 'card work runs at normal priority, beside yours') : newer(steerKnown)));
+    // Cores kept for you: the machine's (the host file's reserveCores), shown here and set in the host file.
+    const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';
+    el.append(row('cores', 'Cores kept for you', 'card sessions and tests never run on these cores, for every project (the host file\'s reserveCores)',
+      !co ? newer(false)
+        : h('span', 'board-from rules-cores', co.unavailable ? `not available on this machine: ${co.unavailable}`
+          : co.reserved.length ? `cores ${co.reserved.join(', ')}; ${slots} left` : `none; ${slots}`)));
 
     // Done without asking: one row a standing kind of routine yes, On or Off. Off (each kind's setting from setup)
     // sends each such step to you. A Conveyor whose snapshot has no standing is sent neither choice.
@@ -1908,6 +1917,7 @@
     // The machine's steer, whichever project is drawn (only the part's top names it); null from an older engine.
     S.steer = d && typeof d.steer === 'boolean' ? d.steer : null;
     if (S.steerSent === S.steer) S.steerSent = null;
+    S.cores = d && d.cores && typeof d.cores === 'object' && Array.isArray(d.cores.reserved) ? d.cores : null;
     if (S.d && view.repo !== S.d.repo) {
       S.picked.clear(); S.open.clear(); S.armed = null; S.asking = null; S.turned = false; S.dep = null;
       const pin = !S.ctl && S.floor !== null ? ctl() : null;

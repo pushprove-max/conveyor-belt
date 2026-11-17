@@ -799,6 +799,13 @@ doctor() {
   else steer_words session; s=${STEER_HOW:-normal priority}; steer_words test; steer_end
     ok "card work yields to you (the host file's steer is on): card sessions run at $s, card test runs at ${STEER_HOW:-normal priority, as nothing on this machine can lower them and raise them again}"
   fi
+  # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved), and the test slots left.
+  local sl='the test-slot pool cannot be read'
+  ! slot_pool >/dev/null 2>&1 || sl="the test-slot pool has $SLOT_N slots"
+  s=$(slot_reserve_why)
+  if [ -n "$s" ]; then ok "cores kept for you (the host file's reserveCores): not available on this machine, as $s"
+  elif s=$(slot_keep); then ok "cores kept for you (the host file's reserveCores): cores $(slot_reserved | paste -sd, -); card sessions and test runs run on cores $s, and $sl"
+  else ok "no cores kept for you (the host file's reserveCores is 0): $sl"; fi
   # A Conveyor service whose conveyor.sh is gone (an install removed under it): its loop may run now, on code it moved
   # to, but a restart or a reboot does not start it.
   while IFS=$'\t' read -r t c; do
