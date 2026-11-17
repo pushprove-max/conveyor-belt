@@ -11,19 +11,22 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Bugs: a kind turned on in the Rules tab is not in the pack, or not in what the Foreman is told (auto rules); an act
+# Bugs: a kind turned on in the Rules tab is not in the pack, or not in what the Foreman is told (auto standing); an act
 # under a kind that is on is not logged in the ruling log with its kind and source "standing", or gives the owner no
 # line; an act under a kind that is off is logged, so the Foreman takes a step the owner never said yes to.
 t_standing() {
   local out id; setup '[]'; export CONVEYOR_RULING_LOG=$T/$CASE/rulings.jsonl
-  out=$(cd "$R" && loop auto rules) && [ -z "$out" ] || fail "auto rules with no kind on and auto off: $out"
+  out=$(cd "$R" && loop auto standing) && [ -z "$out" ] || fail "auto standing with no kind on: $out"
   out=$(cd "$R" && loop auto standing fixed-block on && loop auto standing asked-fix on && loop auto standing asked-fix on) || fail "standing on failed: $out"
   [ "$(jq -c .auto.standing "$R/.conveyor/project.json")" = '["asked-fix","fixed-block"]' ] || fail "the pack's kinds: $(jq -c .auto "$R/.conveyor/project.json")"
   # The Rules tab reads the kinds from the snapshot: one it is not given shows the owner the wrong switch.
   [ "$(cd "$R" && loop snapshot | jq -c .standing)" = '["asked-fix","fixed-block"]' ] || fail "the snapshot's kinds: $(cd "$R" && loop snapshot | jq -c .standing)"
-  out=$(cd "$R" && loop auto rules)
+  out=$(cd "$R" && loop auto standing)
   grep -qF -- '- asked-fix: ' <<<"$out" && grep -qF -- '- fixed-block: ' <<<"$out" && ! grep -qF -- '- release-check: ' <<<"$out" \
-    && grep -qF -- '- Still ask the owner, whatever the kind: ' <<<"$out" || fail "auto rules does not list the kinds on, with their limits: $out"
+    && grep -qF -- '- Still ask the owner, whatever the kind: ' <<<"$out" || fail "auto standing does not list the kinds on, with their limits: $out"
+  # auto rules is this machine's auto mode only: the kinds of this checkout's pack in it would overrule those of the
+  # host's pack, which the Foreman's start asks for (foreman.sh), in the setup where the belt runs on another host.
+  out=$(cd "$R" && loop auto rules) && [ -z "$out" ] || fail "auto rules with auto off names this checkout's kinds: $out"
   out=$(cd "$R" && loop auto act asked-fix 'filed #12 as the owner asked, and released it') || fail "act failed: $out"
   id=$(jq -r 'select(.source == "standing" and .kind == "asked-fix" and .answer == "filed #12 as the owner asked, and released it") | .id' "$CONVEYOR_RULING_LOG")
   [[ $id == *-s-* ]] && [ "$out" = "Done without asking (asked-fix): filed #12 as the owner asked, and released it; logged as $id." ] \

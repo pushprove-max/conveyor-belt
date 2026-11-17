@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh auto on | narrow | off | status | band | rules | decide | standing <kind> on|off | act <kind> <what>`:
+# `conveyor.sh auto on | narrow | off | status | band | rules | decide | standing [<run> | <kind> on|off] | act <kind> <what>`:
 # /conveyor-belt:auto, for the project it is called in. While it is on, the Foreman decides the owner's open decisions for them, by the owner's recorded way of
 # deciding, and logs each with its reasons; what the pack reserves (auto.reserved) is never decided and waits for the
 # owner. Sourced by conveyor.sh.
@@ -9,9 +9,13 @@
 #   gave in their latest ruling on the same question (in the ruling log). Each starts a log,
 #   <state folder>/auto/<date>-<time>.md: "## Summary", "## Decisions", "## Waiting for the owner". off ends it.
 # - status: one line for the owner. band: {scope: full|narrow|off, since, count} for the plugin's band (hooks/auto.tsx).
-#   rules: what the Foreman is told while it is on, then the standing kinds of routine yes the pack turns on
-#   (lib/standing.sh), which hold whether auto is on or off; nothing while auto is off and no kind is on.
-# - standing <kind> on|off: the Board's Rules tab turns one standing kind on or off in the pack (auto.standing).
+#   rules: what the Foreman is told while it is on; nothing while it is off.
+# - standing: the standing kinds of routine yes this checkout's pack turns on (lib/standing.sh), which hold whether
+#   auto is on or off; nothing when no kind is on. The Foreman's start asks each of its records for them (foreman.sh),
+#   on the host that has the record, as the Board turns them on or off there. <run>: how the rules name the engine to
+#   run their commands with (default: this engine); the Foreman's start gives `foreman.sh ask <repo>`, which reaches
+#   the record from the Foreman's machine.
+#   standing <kind> on|off: the Board's Rules tab turns one standing kind on or off in the pack (auto.standing).
 #   act <kind> <what>: the Foreman logs one act under a kind that is on (the ruling log, source "standing") and gets the
 #   line it tells the owner; a kind that is off is refused, so the step goes to the owner.
 # - decide: one pass over the ledger's open decisions (the Board's, .claude/scripts/decision.sh list). Each decided
@@ -23,9 +27,10 @@
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/testfiles.sh" || exit 1
 . "$HERE/lib/standing.sh" || exit 1
-{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide)$ ]]; } \
+{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide|standing)$ ]]; } \
+  || { [ $# = 3 ] && [ "$2" = standing ] && [[ $3 == *[![:space:]]* ]]; } \
   || { [ $# = 4 ] && [[ " ${STANDING_KINDS[*]} " == *" $3 "* ]] && { { [ "$2" = standing ] && [[ $4 =~ ^(on|off)$ ]]; } || { [ "$2" = act ] && [[ $4 == *[![:space:]]* ]]; }; }; } \
-  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | standing <kind> on|off | act <kind> <what> (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
+  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | standing [<run> | <kind> on|off] | act <kind> <what> (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
 AD=$ST/auto MODE=$ST/auto/mode.json LAST=$ST/auto/last.json DECISION=$HERE/../.claude/scripts/decision.sh
 die() { echo "conveyor: auto: $*" >&2; exit 1; }
 # The mode while on, as JSON: {scope, since, log}; fails while off.
@@ -78,12 +83,9 @@ case $2 in
     if [ -n "$m" ]; then jq -cn --arg s "$scope" --arg t "$since" --argjson n "$(logged "$log")" '{scope: $s, since: $t, count: $n}'
     else jq -cn --argjson n "$(jq -r '.count // 0 | numbers' "$LAST" 2>/dev/null || echo 0)" '{scope: "off", since: null, count: $n}'; fi ;;
   rules)
+    [ -n "$m" ] || exit 0
     r=$(reserved) || exit 1
-    # The standing kinds hold whether auto is on or off: alone while it is off, after auto's own rules while it is on.
-    eng="bash $(printf %q "$HERE/conveyor.sh")"
-    if [ -z "$m" ]; then standingrules "$eng" "$r"; exit; fi
-    sr=$(standingrules "$eng" "$r") || exit 1
-    run="$eng auto decide"
+    run="bash $(printf %q "$HERE/conveyor.sh") auto decide"
     if [ "$scope" = full ]; then
       cat <<EOF
 # AUTO IS ON (since $since, /conveyor-belt:auto on)
@@ -107,9 +109,9 @@ The owner is here. Decide only the formalities; ask them everything else as usua
 - Tell the owner each one in one line in your next reply: "Decided without asking: <what>, because <why>; say 'reverse <id>' to undo."
 - Never decide: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings. When unsure, ask the owner.
 EOF
-    fi
-    [ -z "$sr" ] || printf '\n%s\n' "$sr" ;;
+    fi ;;
   standing)
+    if [ $# != 4 ]; then r=$(reserved) || exit 1; standingrules "${3:-bash $(printf %q "$HERE/conveyor.sh")}" "$r"; exit; fi
     # The pack's list as it was, with the kind added or taken out; each kind once, in STANDING_KINDS' order.
     packset --arg k "$3" --argjson on "$([ "$4" = on ] && echo true || echo false)" --argjson all "$(jq -cn '$ARGS.positional' --args "${STANDING_KINDS[@]}")" \
       '.auto.standing = ((.auto.standing // []) - [$k] + (if $on then [$k] else [] end) | . as $s | $all | map(select(IN($s[]))))' || exit 1

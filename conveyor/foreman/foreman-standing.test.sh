@@ -4,24 +4,37 @@
 # The Foreman's start (foreman.sh, its claim's context) names each standing kind of routine yes the pack turns on
 # (auto.standing, conveyor/lib/standing.sh), with its limits, and no kind that is off.
 # Bug it catches: the kinds were only in one project's own Foreman notes, so no other install's Foreman acted on them,
-# and a kind the owner turned off was still acted on.
+# and a kind the owner turned off was still acted on; and the start read the kinds from the Foreman's own checkout, not
+# from the record's pack on the host that runs its belt, where the Board turns them on or off.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 B=$(mktemp -d) || exit 1
 trap 'rm -rf "$B"' EXIT
 cd "$B" || exit 1
 unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_LAUNCH CONVEYOR_CARD CONVEYOR_LANE CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR CONVEYOR_MACHINE_ID
-export CLAUDE_PLUGIN_OPTION_boardAutoOpen=false CONVEYOR_FOREMAN_ASK='exit 3'
+export CLAUDE_PLUGIN_OPTION_boardAutoOpen=false ENG=$SRC/../conveyor.sh
+# The ask seam (lib.sh ask): `auto standing <run>` runs the engine on the record's main, as on its host; any other ask
+# fails.
+export CONVEYOR_FOREMAN_ASK='[[ $CONVEYOR_CMD == "auto standing "?* ]] || exit 3; cd "$CONVEYOR_MAIN" && bash "$ENG" auto standing "${CONVEYOR_CMD#auto standing }"'
 fail() { echo "FAIL [standing-$CASE]: $*" >&2; exit 1; }
-# fixture <case>: a project alpha with the test pack, its kinds <json list>, and its Foreman's folder.
+# pack <checkout> <kinds>: a git checkout with the test pack, its auto.standing <kinds> (a json list).
+pack() {
+  git init -q "$1" && mkdir -p "$1/.conveyor" \
+    && jq --argjson k "$2" '.plugin = {follow: "main"} | .auto.standing = $k' "$SRC/../lib/test-pack.json" > "$1/.conveyor/project.json"
+}
+# fixture <case> <kinds>: the Foreman's own checkout of alpha here, and alpha's record, its main on the host ($H, the
+# checkout the ask seam runs on), as in the setup where the Foreman runs on the owner's machine and the belt on a host.
+# The record's pack has <kinds>; this checkout's pack has every kind when <kinds> is empty, else none, so the start
+# shows whose pack it read.
 fixture() {
   T=$B/$1 CASE=$1
   export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_STATE_HOME=$T/xstate
-  M=$T/alpha FD=$T/foreman
+  M=$T/alpha H=$T/host/alpha FD=$T/foreman
   export CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$M
-  mkdir -p "$XDG_CONFIG_HOME/conveyor" "$FD" && git init -q "$M" && mkdir -p "$M/.conveyor" \
-    && jq --argjson k "$2" '.plugin = {follow: "main"} | .auto.standing = $k' "$SRC/../lib/test-pack.json" > "$M/.conveyor/project.json" \
-    && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" "$FD" && pack "$H" "$2" \
+    && pack "$M" "$(jq -c 'if length == 0 then ["asked-fix", "review-followup", "release-check", "fixed-block"] else [] end' <<<"$2")" \
+    && git -C "$M" remote add origin https://example.com/acme/alpha.git \
+    && jq -n --arg h "$H" '{records: [{repo: "alpha", main: $h}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     || fail "the fixture was not made"
 }
 start() { (cd "$M" && bash "$SRC/foreman.sh" claim sA) || fail "the claim failed"; } # the claim prints the start's context
@@ -47,8 +60,30 @@ t_none() {
   grep -qF '# Foreman mode: you are' <<<"$out" || fail "no Foreman start: $out"
   ! grep -qE 'STANDING YES|WARNING: the standing' <<<"$out" || fail "the start names standing kinds while none is on: $out"
 }
+# The host cannot be asked: one warning names the record, and no kind is taken, not even this checkout's.
+t_unread() {
+  local out; fixture unread '[]'; out=$(CONVEYOR_FOREMAN_ASK='exit 3' start)
+  grep -qF '# WARNING: the standing kinds of routine yes of alpha could not be read' <<<"$out" \
+    && ! grep -qF 'STANDING YES' <<<"$out" || fail "the start took kinds it could not read from the record: $out"
+}
 
-cases=(askedfix reviewfollowup releasecheck fixedblock none)
+# The command the start gives for logging an act reaches the record where its pack is (foreman.sh ask, by the real
+# lib.sh ask, its engine the one the record's install runs), not this checkout, whose pack has the kind off.
+# Bug it catches: the rules named the host's engine path with no way to the host, so the Foreman, on its own machine,
+# ran them against its own checkout: refused there, or logged in the wrong project.
+t_act() {
+  local out run c=0123456789abcdef0123456789abcdef01234567
+  fixture act '["asked-fix"]'; out=$(start)
+  run=$(sed -n 's/.*log it with `\(.*\) auto act <kind> .*/\1/p' <<<"$out")
+  [[ $run == *"foreman.sh ask alpha"* ]] || fail "the start's act command does not reach the record alpha: $out"
+  mkdir -p "$XDG_DATA_HOME/conveyor/versions/$c" && ln -s "$SRC/.." "$XDG_DATA_HOME/conveyor/versions/$c/conveyor" \
+    && jq -n --arg c "$c" '{commit: $c}' > "$H/.git/conveyor-engine.json" || fail "the record's install was not made"
+  export CONVEYOR_RULING_LOG=$T/rulings.jsonl
+  out=$(cd "$T" && unset CONVEYOR_FOREMAN_ASK && eval "$run auto act asked-fix 'filed #12 as the owner asked'" 2>&1) \
+    && [ "$(jq -r .answer "$CONVEYOR_RULING_LOG")" = 'filed #12 as the owner asked' ] || fail "the start's act command did not log the act in the record: $out"
+}
+
+cases=(askedfix reviewfollowup releasecheck fixedblock none unread act)
 for c in "${cases[@]}"; do (t_"$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

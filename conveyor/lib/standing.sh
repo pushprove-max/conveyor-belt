@@ -3,7 +3,7 @@
 # the Foreman takes it without asking (and, for review-followup, the engine: followups(), lib/followups.sh). Each kind
 # is off until the owner turns it on: setup writes the list empty, and the Board's Rules tab turns a kind on or off
 # (`conveyor.sh auto standing <kind> on|off`). The Foreman is told the kinds that are on, with their limits, at its
-# start (foreman.sh, through `conveyor.sh auto rules`) and in `auto rules`. Each act under a kind is one row of the
+# start (foreman.sh asks each of its records for `conveyor.sh auto standing`, on the host that has the record). Each act under a kind is one row of the
 # ruling log, source "standing", with its kind (standinglog); the Foreman then tells the owner in one line.
 # Sourced by commands/auto.sh and lib/followups.sh, after lib/prompts.sh (packget).
 # Test seam: CONVEYOR_RULING_LOG (the ruling log).

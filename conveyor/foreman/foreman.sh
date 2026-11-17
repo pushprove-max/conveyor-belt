@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | off | start | words | live | filing | filed --
+# foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | words | live | filing | filed --
 # Foreman mode (plan docs/plans/conveyor-plugin-2026-11-10.md, section 11b). The Foreman is a Claude session in a
 # project's main checkout that watches that project's Conveyor (or its group's: lib.sh mine) and brings the owner
 # what needs them: it files issues,
@@ -29,7 +29,7 @@
 #   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
 #   Claude Code process (cleared_). Then, for the
 #   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md, and the standing kinds of routine
-#   yes its pack turns on: `conveyor.sh auto rules`), then its saved state: the DONE items of state.md archived
+#   yes each record's pack turns on, asked of the record: `conveyor.sh auto standing`), then its saved state: the DONE items of state.md archived
 #   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
 #   built fresh (never saved), then state.md, cut to its 5000-byte cap.
 #   A session that was the Foreman and no longer is gets one line saying so, once, shown to the owner (systemMessage).
@@ -58,7 +58,8 @@ set -uo pipefail
 case ${1:-} in
   setup | launch | start | words | live | filing | filed | off) ;;
   claim) [ $# = 2 ] && [[ $2 =~ ^[A-Za-z0-9-]+$ ]] || { echo "usage: foreman.sh claim <session id>" >&2; exit 2; } ;;
-  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | off | start | words | live | filing | filed" >&2; exit 2 ;;
+  ask) [ $# -ge 3 ] && [[ $2 =~ ^[A-Za-z0-9._-]+$ ]] || { echo "usage: foreman.sh ask <repo> <command> [<argument>...]" >&2; exit 2; } ;;
+  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | words | live | filing | filed" >&2; exit 2 ;;
 esac
 # A hook's input, and the session it names.
 case $1 in start | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
@@ -322,7 +323,7 @@ off() {
 }
 
 context() {
-  local err s=$FD/state.md n
+  local err s=$FD/state.md n repo main
   cat <<EOF
 # Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner, and you build no code yourself: the cards do.
 # You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only: every other project has its own Foreman. Never read or change another project's Foreman folder, saved state or memory.
@@ -343,10 +344,19 @@ EOF
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"
   # This project's (or group's) own rules, from its Foreman folder.
   if [ -s "$FD/rules.md" ]; then echo; echo "# $FD/rules.md (this project's Foreman rules)"; cat "$FD/rules.md"; fi
-  # The standing kinds of routine yes the pack turns on, with their limits, and auto's rules while it is on
-  # (`conveyor.sh auto rules`, lib/standing.sh); one warning line when they cannot be read, so none is taken.
+  # Auto's rules while it is on (`conveyor.sh auto rules`): the mode is this machine's, set by /conveyor-belt:auto here.
   if err=$(bash "$FHERE/../conveyor.sh" auto rules 2>/dev/null); then [ -z "$err" ] || { echo; printf '%s\n' "$err"; }
-  else echo "# WARNING: the standing kinds of routine yes could not be read (conveyor.sh auto rules failed), so take none without asking."; fi
+  else echo "# WARNING: auto's rules could not be read (conveyor.sh auto rules failed)."; fi
+  # The standing kinds of routine yes each record's pack turns on, with their limits (`conveyor.sh auto standing`,
+  # lib/standing.sh), asked of the record as the live summary asks it (ask: over ssh when the host file names a host),
+  # so a kind the Board turns on or off in the host's pack counts here; one warning line for a record whose kinds
+  # cannot be read, so none of its kinds is taken. The rules' commands run by `foreman.sh ask <repo>` (ask_cmd), from
+  # this machine, so they reach the record on its host, not the host's engine path here.
+  while IFS=$'\t' read -r repo main; do
+    [ -n "$repo" ] || continue
+    if err=$(ASK_LIMIT=10 ask "$repo" "$main" auto standing "CONVEYOR_MAIN=$(printf %q "$CONVEYOR_MAIN") bash $(printf %q "$FHERE/foreman.sh") ask $repo" 2>/dev/null); then [ -z "$err" ] || { echo; echo "# $repo"; printf '%s\n' "$err"; }
+    else echo "# WARNING: the standing kinds of routine yes of $repo could not be read (conveyor.sh auto standing failed), so take none without asking."; fi
+  done < <(mine 2>/dev/null)
   # The project runs an old engine here, and why (`conveyor.sh take stale`, from this install: no remote is read).
   err=$(bash "$FHERE/../conveyor.sh" take stale 2>/dev/null) && [ -n "$err" ] && echo "# WARNING: $err"
   echo
@@ -497,4 +507,13 @@ words() {
   jq -cn --arg c "$out" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
 }
 
-if [ "$1" = claim ]; then claim_cmd "$@"; else "$1" "$@"; fi
+# ask <repo> <command> [<argument>...]: one engine command of that record of this Foreman's (mine), run where the
+# record is (lib.sh ask: over ssh when the host file names a host); the standing kinds' rules name it (context).
+ask_cmd() {
+  local repo main
+  main=$(mine | awk -F'\t' -v r="$2" '$1 == r { print $2; exit }') && [ -n "$main" ] \
+    || { echo "foreman: ask: $2 is not a record of this Foreman" >&2; return 1; }
+  ask "$2" "$main" "${@:3}"
+}
+
+if [ "$1" = claim ]; then claim_cmd "$@"; elif [ "$1" = ask ]; then ask_cmd "$@"; else "$1" "$@"; fi
