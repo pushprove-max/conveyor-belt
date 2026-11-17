@@ -838,7 +838,7 @@
       return s;
     };
     box.append(sel('bprio', 'Filter every column by priority', [['', 'Any priority']].concat(PRIS.map((x) => [x, x])), v.pri),
-      sel('barea', 'Filter every column by area', [['', 'Any area']].concat(areas.map((a) => [a, a.slice(p.length)])), v.area),
+      sel('barea', 'Filter every column by area', [['', 'Any area']].concat(areas.map((a) => [a, a.slice(p.length).replace(/^[:/]/, '')])), v.area),
       sel('blabel', 'Filter every column by label', [['', 'Any label']].concat(labels.map((l) => [l, l])), v.label),
       sel('bsort', 'Sort every column by', SORTS, v.sort),
       sel('bdir', 'Sort direction', [['asc', 'Ascending'], ['desc', 'Descending']], v.dir));

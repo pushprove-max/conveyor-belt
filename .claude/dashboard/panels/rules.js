@@ -107,6 +107,9 @@
   // The pack's area prefix, as the snapshot gives it; null from one without it: then no area is read or sent.
   const pre = () => (typeof S.d.areaPrefix === 'string' && S.d.areaPrefix ? S.d.areaPrefix : null);
   const isArea = (k) => typeof k === 'string' && pre() !== null && k.startsWith(pre());
+  // An area label's name: the prefix cut off, then the colon or slash after it, which a prefix such as "area" does
+  // not hold (prefix "area", label "area:web": "web").
+  const areaName = (k) => k.slice(pre().length).replace(/^[:/]/, '');
   // Whether the project's engine knows the dependency guard and `control force`: its control record names depGuard
   // (the engine fills in every field it knows). An older pinned engine is never sent either.
   const depKnown = () => { const c = ctl(); return !!c && typeof c.depGuard === 'boolean'; };
@@ -516,7 +519,7 @@
   function groupName(key) {
     if (S.by === 'priority') return key;
     if (S.by === 'label') return key || 'No label: held by you';
-    return key ? key.slice(pre().length) : 'No area';
+    return key ? areaName(key) : 'No area';
   }
   function groups(all) {
     const m = new Map();
@@ -1343,7 +1346,7 @@
     box.addEventListener('change', () => { if (box.checked) S.picked.add(x.issue); else S.picked.delete(x.issue); draw(); });
     const t0 = Date.parse(x.created || '');
     li.append(box, S.ctx.issueLink(x), h('span', 'board-title', x.title || 'untitled'), h('span', 'rules-prio', prio(x)),
-      h('span', 'board-from', x.areas.length ? x.areas.map((a) => a.slice(pre().length)).join(', ') : 'no area'));
+      h('span', 'board-from', x.areas.length ? x.areas.map(areaName).join(', ') : 'no area'));
     list(x.labels).filter((l) => !isArea(l)).forEach((l) => li.append(S.ctx.chip(l, 'quiet')));
     li.append(h('span', 'board-from rules-age', Number.isNaN(t0) ? 'age not known' : `${S.ctx.dur((Date.now() - t0) / 1000)} old`),
       S.ctx.chip(stateWord(x), { blocked: 'bad', you: 'warn', label: 'warn', next: 'ok', building: 'info' }[x.state] || 'quiet'));
@@ -1382,7 +1385,7 @@
     tools.append(search,
       sel('istate', 'Filter the open issues by state', [['', 'Any state']].concat(STATES), v.state),
       sel('iprio', 'Filter the open issues by priority', [['', 'Any priority'], ['P0', 'P0'], ['P1', 'P1'], ['P2', 'P2'], ['P3', 'P3']], v.pri),
-      sel('iarea', 'Filter the open issues by area', [['', 'Any area']].concat(areas.map((a) => [a, a.slice(pre().length)])), v.area),
+      sel('iarea', 'Filter the open issues by area', [['', 'Any area']].concat(areas.map((a) => [a, areaName(a)])), v.area),
       sel('ilabel', 'Filter the open issues by label', [['', 'Any label']].concat(labels.map((l) => [l, l])), v.label),
       sel('isort', 'Sort the open issues by', ISORTS, v.sort),
       sel('idir', 'Sort direction', [['asc', 'Ascending'], ['desc', 'Descending']], v.dir));
