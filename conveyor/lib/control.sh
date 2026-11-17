@@ -182,24 +182,40 @@ modelsallowed() { # <variable>
 # so Conveyor files one issue to add the price, held (the control record holds it, as `control hold` does), once for
 # each model whatever the loop's turns or restarts: $NOPRICE keeps {filed: [{model, issue, at}]}. The models: those of
 # the models.allowed in force (modelsallowed()), the Codex models the host's report lists (the Board offers them), and
-# those run: the builder's, the reviewer's and the judge's seats, the Tests seat and the research lane's model. Which
+# those run: the builder's, the reviewer's and the judge's seats, the Tests seat, the research lane's model, and each
+# model ID the Board lists under Seen: those the card sessions of the last 30 days ran (a failed one's too) and those
+# the research lane's sessions ran (dashboard_limit.py lane_models). Which
 # have no price is dashboard_limit.py's (unpriced: the built-in table with the pack's prices over it; an OpenCode
 # model keeps the cost OpenCode reports, so it is never one). `serve` looks once a minute (run()), and asks that only
-# when the models or the pack's prices changed since the last look that filed all it had to (NOPRICE_K), so a filing
+# when the models or the pack's prices changed since the last look that filed all it had to (NOPRICE_K), or at every
+# look when there is a research lane, whose models only that ask reads; so a filing
 # GitHub did not take is tried again at the next look. One look at a time (a lock of its own). CONVEYOR_NOPRICE_CMD,
 # when set, runs in place of dashboard_limit.py unpriced, as bash -c; one that fails files nothing.
 NOPRICE=${STATE%/*}/noprice.json
 NOPRICE_CMD=${CONVEYOR_NOPRICE_CMD:-python3 $(printf %q "$HERE/../.claude/scripts/dashboard_limit.py") unpriced}
 NOPRICE_K=''
 noprice() {
-  local a c p r ms k miss m n out lock x y cli rc=0
+  local a c p r ms k miss m n out lock x y cli ran rw since rc=0
   modelsallowed a || return 1
+  rw=$(researchwt)
   hostclis >/dev/null 2>&1 || HOST_R=''
   if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi
   packget prices p lanes.research r 2>/dev/null || return 1
+  # The model IDs the card sessions of the last 30 days ran, as the Board counts them under Seen (dashboard_limit.py
+  # card_costs, the steps rows.jq takes): a build's, fix's or rebase's are the models its result names (stats.byModel,
+  # else stats.models when it names one), else the model it was run on; a review's is its own model; a test runs none.
+  # A failed session or review is the blocked line's spent, at that line's time. A seat asked for one model can run
+  # another. Only the lines that name a model are parsed, and a line that does not read is skipped. No such line (grep
+  # fails, a missing file too) is no model.
+  since=$(jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate') || return 1
+  ran=$({ grep -hF '"model' "$STATE" "$RETRIED" 2>/dev/null || :; } | jq -nRc --arg s "$since" '[inputs | try fromjson catch null | objects
+      | if .step == "blocked" then (.spent | objects) + {time} else . end
+      | select((.step | IN("build", "review", "fix", "rebase")) and (.time | strings) >= $s)
+      | ((if .step != "review" then .stats | objects | ((.byModel | objects | select(length > 0) | keys) // (.models | arrays | select(length == 1))) else empty end) // [.model])
+      | .[] | strings | select(. != "")] | unique') || return 1
   # Each model with its CLI. A seat the record and pack leave unset (no judge, say) adds none, and fails no look.
   x=$({ for m in builder reviewer judge; do seat "$m" "$c" 2>/dev/null || :; done; } | jq -rs --argjson a "$a" --argjson h "${HOST_R:-null}" --argjson c "$c" \
-      --argjson r "${r:-null}" '[(.[] | [.agent, .model]), ($a | objects | to_entries[] | (if .key == "codex" or .key == "codex-builder" then "codex" else "" end) as $k
+      --argjson r "${r:-null}" --argjson ran "$ran" '[(.[] | [.agent, .model]), ($ran[] | ["", .]), ($a | objects | to_entries[] | (if .key == "codex" or .key == "codex-builder" then "codex" else "" end) as $k
         | .value[]? | [$k, .]), ($h.codex[]? | ["codex", .]), ($c.tests | objects | if .cli == "opencode" then ["", "opencode:" + .model] else [.cli, .model] end),
         ($r | objects | ["claude", .model])] | map(select(.[1] | strings)) | unique[] | map(. // "") | join("\u001f")') || return 1
   # A one-word name (sol, opus) is a family or an alias, no model ID: Codex runs a family's newest model (codexmodel()),
@@ -210,8 +226,9 @@ noprice() {
       if [[ $m =~ ^[a-z]{2,}$ ]]; then [ "$cli" != codex ] || ! y=$(codexmodel "$m" 2>/dev/null) || printf '%s\n' "$y"; else printf '%s\n' "$m"; fi
     done <<<"$x" | jq -Rsc '[splits("\n") | select(length > 0)] | unique') || return 1
   k=$ms$'\037'$p
-  [ "$k" != "$NOPRICE_K" ] || return 0
-  miss=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" '{prices: $p, models: $m}' | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && jq -e 'arrays' <<<"$miss" >/dev/null 2>&1 || return 1
+  [ -n "$rw" ] || [ "$k" != "$NOPRICE_K" ] || return 0
+  miss=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" --arg s "$since" --arg rw "$rw" --arg pj "$HOME/.claude/projects" \
+      '{prices: $p, models: $m, since: $s} | if $rw == "" then . else .research = {worktree: $rw, projects: $pj} end' | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && jq -e 'arrays' <<<"$miss" >/dev/null 2>&1 || return 1
   { exec {lock}>>"$NOPRICE.lock"; } 2>/dev/null || return 1
   flock -n "$lock" || { exec {lock}>&-; return 0; }
   while IFS= read -r m; do
@@ -232,6 +249,18 @@ Done when: the Board's Model prices shows a price for \`$m\`." 2>&1) \
   exec {lock}>&-
   [ "$rc" != 0 ] || NOPRICE_K=$k
   return $rc
+}
+# The research lane's folder, printed (nothing when there is none): the host file's lanes.research.worktree of this
+# checkout's record (the record whose main is this checkout, compared as lanenote does; ~/ is the home folder).
+researchwt() {
+  local m w
+  [ -e "$HOST" ] || return 0
+  while IFS= read -r -d '' m && IFS= read -r -d '' w; do
+    [ "$m" = "$MAIN" ] || { [[ $m == /* ]] && [ "$m" -ef "$MAIN" ]; } || continue
+    [[ $w != \~/* ]] || w=$HOME/${w#"~/"}
+    printf '%s\n' "$w"; return 0
+  done < <(jq -j '.records | arrays | .[] | objects | select([.main, (try .lanes.research.worktree catch null)] | all(type == "string" and . != "" and (test("\u0000") | not)))
+    | "\(.main)\u0000\(.lanes.research.worktree)\u0000"' "$HOST" 2>/dev/null)
 }
 # progs: the programs the models.allowed in force lists a model for, one per line (doctor's).
 progs() {

@@ -430,7 +430,8 @@ listed under:
 - for the reviewer and the judge: `codex`, `claude-reviewer` and `opencode`.
 
 A model that a seat runs, or that the Board offers, can have no price. The Rules tab shows it under Model prices, in
-"Offered with no price". The loop files one held issue for each such model, "Model price missing: <model>", and does
+"Offered with no price". A model that the sessions of the last 30 days used, and that no price prices, shows in
+"Seen but not priced". The loop files one held issue for each such model, "Model price missing: <model>", and does
 not file it again. A Codex family name, such as `sol`, is not a model ID: the check uses the model that Codex runs for
 it. Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. An OpenCode model
 does not need a price: the Board shows the cost that OpenCode reports.

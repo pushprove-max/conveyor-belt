@@ -27,8 +27,9 @@
       The same, for the cards of <cards-file>, one a line (conveyor.sh snapshot): the priced cards go to
       <priced-file>, one a line, and the rest of the part to stdout. <kept> is a summary of the cards priced last
       time: a card whose line has not changed since is not priced again (card_costs).
-  dashboard_limit.py unpriced  < {prices, models: [...]}
-      The model IDs of models that no price row prices, the pack's prices put over the table (unpriced), as a JSON list.
+  dashboard_limit.py unpriced  < {prices, models: [...], since, research}
+      The model IDs of models that no price row prices, the pack's prices put over the table (unpriced), as a JSON list:
+      those of models, and those the research lane's sessions ran since then.
 
 Every figure comes from that reading or from Claude Code's own transcripts; a
 figure with no source is null, never 0 or an estimate. Dollars are list-price
@@ -701,9 +702,13 @@ def known(m):
 def unpriced(part):
     """Of the model IDs `models` names, those with no price row (known), after the part's `prices` (the pack's) are
     put over the table: what Conveyor files an issue for (noprice(), lib/control.sh). An OpenCode model keeps the cost
-    OpenCode reports, so it is never one."""
+    OpenCode reports, so it is never one. The part's `research` ({worktree, projects}, as card_costs takes it) adds
+    the model IDs the research lane's sessions ran from `since` on (lane_models): the Board lists them under Seen."""
     use_prices(part.get("prices") if isinstance(part.get("prices"), dict) else {})
-    ms = part.get("models") if isinstance(part.get("models"), list) else []
+    ms = list(part.get("models")) if isinstance(part.get("models"), list) else []
+    r = part.get("research")
+    if isinstance(r, dict):
+        ms += lane_models(r.get("projects"), r.get("worktree"), epoch(part.get("since")))
     return sorted({m for m in ms if isinstance(m, str) and m and not m.startswith("opencode:") and known(m) is None})
 
 

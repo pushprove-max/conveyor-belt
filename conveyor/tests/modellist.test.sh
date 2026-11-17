@@ -81,3 +81,41 @@ t_nopricefamily() {
   [ "$out" = '["Model price missing: gpt-6.3-sol","Model price missing: m"]' ] \
     || fail "a Codex family name got an issue in place of the model it runs, or that model, with no price, got none: $out"
 }
+# Bug: a model only a session's result names (asked for one model, the CLI ran another) got no issue: the look read
+# the settings and the CLIs' lists, never the models the sessions ran, which the Board prices and lists under Seen.
+# Bug too: a failed build's models (the blocked line's spent), which the Board lists, got none. As the Board: a build's
+# models of the last 30 days count, a failed one's too, and a review's own model; a review's stats (priced at its own
+# model), a test's, an older build's and a line that does not read do not.
+t_nopriceran() {
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  local now old; now=$(TZ=UTC p_date now +%Y-%m-%dT%H:%M:%SZ); old=$(TZ=UTC p_date '40 days ago' +%Y-%m-%dT%H:%M:%SZ)
+  { printf '{"card":"c1","step":"build","time":"%s","model":"claude-opus-5-5","stats":{"byModel":{"claude-ran-9":{},"claude-opus-5-5":{}},"models":["claude-ran-9","claude-opus-5-5"]}}\n' "$now"
+    printf '{"card":"c1","step":"review","time":"%s","model":"claude-reviewer-9","stats":{"models":["claude-review-9"]}}\n' "$now"
+    printf '{"card":"c1","step":"test","time":"%s","stats":{"models":["claude-test-9"]}}\n' "$now"
+    printf '{"card":"c0","step":"build","time":"%s","stats":{"models":["claude-old-9"]}}\n' "$old"
+    echo '{"card":"c2","stats":{"models":[' ; } >> "$ST/cards.jsonl"
+  # A failed build that `retry` took out of the card records: its line is in retried.jsonl only. Bug it catches: a look
+  # that read the card records alone filed no issue for it, though the Board lists it.
+  printf '{"card":"c3","step":"blocked","time":"%s","spent":{"step":"build","model":"claude-opus-5-5","stats":{"models":["claude-spent-9"]}}}\n' "$now" >> "$ST/retried.jsonl"
+  looks 'noprice'
+  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
+  [ "$out" = '["Model price missing: claude-ran-9","Model price missing: claude-reviewer-9","Model price missing: claude-spent-9","Model price missing: m","Model price missing: x"]' ] \
+    || fail "a model a session (or a failed one) ran, or a review's own, got no issue, or a review's stats, a test's or an older one got one: $out"
+}
+# Bug: a model only the research lane's sessions ran (no card's step) is listed under Seen but got no issue: the look
+# read the card records only. A session outside the lane's folder does not count, as on the Board.
+t_nopricelane() {
+  export HOME=$T/$CASE/home; mkdir -p "$XDG_CONFIG_HOME/conveyor"
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  jq -n --arg m "$R" '{records: [{repo: "main", main: $m, lanes: {research: {worktree: "~/lane"}}}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  local p=$HOME/.claude/projects/x t; t=$(TZ=UTC p_date now +%Y-%m-%dT%H:%M:%SZ); mkdir -p "$p"
+  sess() { jq -cn --arg m "$1" --arg c "$2" --arg t "$t" '{type: "assistant", cwd: $c, sessionId: $m, timestamp: $t, message: {model: $m}}'; }
+  { sess research-9 "$HOME/lane"; sess outside-9 "$HOME/lane-x"; } > "$p/s.jsonl"
+  # Two looks in one loop, a lane session that ran late-9 between them, the settings the same. Bug it catches: a later
+  # look skipped as the settings had not changed, so a model the lane ran after the loop's first look got no issue.
+  # The line and the path are put in here: the engine the look sources sets a p of its own.
+  looks "noprice && printf '%s\n' $(printf %q "$(sess late-9 "$HOME/lane")") >> $(printf %q "$p/s.jsonl") && noprice"
+  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
+  [ "$out" = '["Model price missing: m","Model price missing: research-9","Model price missing: x","Model price missing: late-9"]' ] \
+    || fail "a model only the research lane ran (or ran after the first look) got no issue, or one outside the lane got one: $out"
+}

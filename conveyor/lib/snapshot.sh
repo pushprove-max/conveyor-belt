@@ -473,17 +473,8 @@ snapshot() (
   packget auto.standing sk 2>/dev/null && [ -n "$sk" ] || sk=null
   packget lanes.research.model rmodel 2>/dev/null || rmodel=''
   # The research lane's sessions are no card's step: seen counts the models they ran from their transcripts in the
-  # default login's projects folder. The lane is the host file's lanes.research.worktree of this checkout's record (the
-  # record whose main is this checkout, compared as lanenote does; ~/ is the home folder); none, and none is read.
-  rwt=''
-  if [ -e "$HOST" ]; then
-    while IFS= read -r -d '' m && IFS= read -r -d '' w; do
-      [ "$m" = "$MAIN" ] || { [[ $m == /* ]] && [ "$m" -ef "$MAIN" ]; } || continue
-      rwt=$w; break
-    done < <(jq -j '.records | arrays | .[] | objects | select([.main, (try .lanes.research.worktree catch null)] | all(type == "string" and . != "" and (test("\u0000") | not)))
-      | "\(.main)\u0000\(.lanes.research.worktree)\u0000"' "$HOST" 2>/dev/null)
-    [[ $rwt != \~/* ]] || rwt=$HOME/${rwt#"~/"}
-  fi
+  # default login's projects folder (researchwt(), lib/control.sh); none, and none is read.
+  rwt=$(researchwt)
   # The cards priced are kept beside the card records ($STATE.priced, dashboard_limit.py cardlines): a card whose line
   # is as it was at the last snapshot is not priced again. One priced card a line ($d/priced).
   jq -cn --argjson p "$pp" --arg rw "$rwt" --arg pj "$HOME/.claude/projects" '{prices: $p, since: ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate)}
