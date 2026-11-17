@@ -348,6 +348,31 @@ call, and a case whose only assertions are `toBeDefined` or `toBeTruthy`. When J
 replace these. Click the "Hollow N" filter chip to see only these files. The Judge tab of an open row lists its
 hollow cases, each with its kind and the reason.
 
+To fix the hollow cases of a file, open its row and click **Fix hollow cases**. The issue preview lists each hollow
+case with its kind and reason. The issue asks a card to make each case assert the behaviour that it names. When
+another test already proves that behaviour, the card can delete the case. It then names that test on a line
+`COVERED-BY: <test file>: <its case> | <the deleted case>`. Before the card goes to review, Conveyor runs the hollow
+check of Judge on the changed file. When a model of another family than the builder's is set up, the check runs on
+that model. When the check still finds a hollow case, or a deleted case has no COVERED-BY line, the card is blocked,
+and the reason names the cases. The file stops showing Hollow when a later run of Judge names no hollow case.
+
+A file shows "Waits" when its last run took more than 2 times its CPU seconds on the clock. The file waits more than
+it works: it sleeps, polls, or waits for a timeout, a lock or the network. Judge reads the clock and CPU seconds of
+its recent runs and names each wait on a line `WAIT: <case> | <kind> | <file:line> | <reason>`. To fix the file, open
+its row and click **Fix the waiting**. The issue holds the clock and CPU seconds of its recent runs and the waits that
+Judge named. It asks a card to remove or shorten the waits and keep what the cases test. Before the card goes to
+review, Conveyor runs the file alone 3 times in a row with the change, each run on a test slot. Each run must pass
+and take at most 2 times its CPU seconds on the clock. When a run does not, the card is blocked, and the reason names
+that run.
+
+A file with no run on record shows "Never run". When Conveyor can tell why, the status says it: the pack's
+`tests.patterns` or the test command do not match the file, loading the file fails (with the error), or the file is
+skipped (with its skip markers). Open its row for two actions. **Make it run** opens an issue that asks a card to
+make the test command run the file, or to fix what stops it. After the Test step of the card, Conveyor checks that
+the step ran the file and that the file passed. When it did not, the card is blocked. **Delete it** opens an issue
+that asks a card to delete the file. For each case that matters, the card names the test that proves it on a
+`COVERED-BY` line. The review of the card checks these lines, as it does for an Optimize card that deletes a file.
+
 The Mutants caught column shows the newest mutation check of a file, as "14 / 20": the check made 20 small changes
 (mutants) to the code that the file tests, and the file failed on 14 of them. The column is empty until a check of
 the file ends. Point at the count to see when the check ran and on which commit. A check that runs, waits in the
@@ -368,7 +393,8 @@ Overview starts with a box that says what state the file is in: how far over its
 cards and by how much each one changed it, and whether its runs are slower or faster than usual. Under it is the
 verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
 buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Fix failures** (on a file
-with a flaky or main failure), **Raise this file's budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
+with a flaky or main failure), **Fix hollow cases** (on a Hollow file), **Fix the waiting** (on a file that Waits),
+**Make it run** and **Delete it** (on a file Never run), **Raise this file's budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
 Raise this file's budget… when Judge said keep, Run while an Optimize issue of the file is open, and Optimize in other
 cases. Six tiles follow: the CPU seconds now with the budget, the last 4 runs as bars, the last Optimize as a
 percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs

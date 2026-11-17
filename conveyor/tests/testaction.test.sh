@@ -62,7 +62,8 @@ t_tajudge() {
   loop control tests claude m-tests high > /dev/null || fail "control tests was refused"
   # Its hollow cases (#77): two HOLLOW lines that read, and one with no kind, skipped and counted.
   printf '%s\n' 'It runs the whole loop for one check.' 'HOLLOW: reads the pack | mock-echo | it checks the stub returns what the stub was given' \
-    '- HOLLOW: `one` | no-assert | it asserts nothing' 'HOLLOW: two | it only prints' 'CAUSE: two | shared state | it binds the fixed port 8080' 'CAUSE: one | luck | no kind' 'VERDICT: split' > "$STUB/ta-last"
+    '- HOLLOW: `one` | no-assert | it asserts nothing' 'HOLLOW: two | it only prints' 'CAUSE: two | shared state | it binds the fixed port 8080' 'CAUSE: one | luck | no kind' \
+    '- WAIT: two | polling | `tests/x.test.sh:12` | it polls the port every second' 'WAIT: one | nap | tests/x.test.sh:3 | no kind' 'VERDICT: split' > "$STUB/ta-last"
   id=$(loop testaction judge tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the judge did not start: $id"
   # While the session runs: its text so far is in the file, and its record says running.
   wait_until "grep -q 'first words' '$ST/testactions/$id.txt'" "cat '$ST/testactions/$id.txt' '$ST/testactions/$id.err'" || fail "the text written so far is not in the text file while the session runs"
@@ -90,6 +91,11 @@ t_tajudge() {
   # Bug it catches (#188): the causes the judge named were lost in its text; a CAUSE line with no kind is left out.
   [ "$(tarec "$id" '.causes | tojson')" = '[{"case":"two","kind":"shared state","reason":"it binds the fixed port 8080"}]' ] \
     || fail "the record does not hold the one CAUSE line that reads: $(cat "$ST/testactions/$id.json")"
+  # Bug it catches (#189): the waits of a file that Waits were not asked for, or lost in the judge's text; a WAIT line
+  # with no kind is left out.
+  grep -qF 'WAIT: <case> | <kind> | <file:line> | <one-line reason>' "$STUB"/ta-prompt.* || fail "the prompt does not ask for the waits"
+  [ "$(tarec "$id" '.waits | tojson')" = '[{"case":"two","kind":"polling","at":"tests/x.test.sh:12","reason":"it polls the port every second"}]' ] \
+    || fail "the record does not hold the one WAIT line that reads: $(cat "$ST/testactions/$id.json")"
   grep -q 'first words' "$ST/testactions/$id.txt" && grep -q 'VERDICT: split' "$ST/testactions/$id.txt" || fail "the text file did not grow to the session's whole text: $(cat "$ST/testactions/$id.txt")"
   # It tried to file an issue and to write a file of the repo: both failed, and the repo is as it was.
   [ "$(cat "$STUB/ta-tries")" = $'gh 1\nwrite 1' ] && [ ! -e "$STUB/filed" ] || fail "the session filed an issue or wrote a file: $(cat "$STUB/ta-tries" "$STUB/filed" 2>&1)"

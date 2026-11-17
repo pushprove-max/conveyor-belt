@@ -1251,14 +1251,18 @@ optproof() { # <card> <worktree> <issue json> <test file>
 # output. A change that removes the file does not hold. Writes the result in <worktree>.unfixed, which the review is
 # shown, its first line the reason when the check does not hold (card() blocks the card with it). Fails when the
 # check does not hold.
-# shellcheck disable=SC2034 # FIXFAILS is used in lib/card.sh
-FIXFAILS='Fix the failures of the test file ' STEADYRUNS=10
-steadyproof() { # <card> <worktree> <test file>
-  local mwt=$CARDS/mainrun/$1.steady f=$3 sha out='' rc=0 i=0 bad='' why='' cs tl='' ls
+# Given a ratio, it is the check of a Fix the waiting card (#189; WAITFIX): the file runs WAITRUNS times in a row, and
+# each run must also take at most that many seconds on the clock for each of its CPU seconds (its runner's `TESTRUN
+# sec` line, timed()); the reason a run does not names it with its clock and CPU seconds.
+# shellcheck disable=SC2034 # FIXFAILS, WAITFIX and WAITRATIO are used in lib/card.sh
+FIXFAILS='Fix the failures of the test file ' STEADYRUNS=10 WAITFIX='Fix the waiting of the test file ' WAITRUNS=3 WAITRATIO=2
+steadyproof() { # <card> <worktree> <test file> [<the most clock seconds a run may take for each CPU second>]
+  local mwt=$CARDS/mainrun/$1.steady f=$3 lim=${4:-} n=$STEADYRUNS what='Fix failures' sha out='' rc=0 i=0 bad='' why='' cs tl='' ls t s c figs=''
+  [ -z "$lim" ] || { n=$WAITRUNS; what='Fix the waiting'; }
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
-  if [ ! -e "$2/$f" ]; then why="the change removes the test file $f: a Fix failures card keeps it and what it tests"
+  if [ ! -e "$2/$f" ]; then why="the change removes the test file $f: a $what card keeps it and what it tests"
   elif sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
@@ -1266,22 +1270,134 @@ steadyproof() { # <card> <worktree> <test file>
     # Alone: its list names every other test file of the commit as passed, as a run of one file alone does (tests()),
     # so a command that selects the change's tests (as this project's does) runs none of them.
     ls=$(git -C "$mwt" -c core.quotePath=false ls-files 2>/dev/null | testpaths | grep -vxF -- "$f" | awk '{ print "pass\t" $0 }')
-    while [ -z "$bad" ] && [ "$i" -lt "$STEADYRUNS" ]; do
+    while [ -z "$bad" ] && [ "$i" -lt "$n" ]; do
       i=$((i + 1))
-      { [ -z "$ls" ] || printf '%s\n' "$ls"; printf 'fail\t%s\n' "$f"; } > "$mwt.rerun"; tests "$mwt" test.command alone; rc=$?
-      [ "$rc" = 0 ] || bad=$i
+      { [ -z "$ls" ] || printf '%s\n' "$ls"; printf 'fail\t%s\n' "$f"; } > "$mwt.rerun"; rm -f "$mwt.times"; tests "$mwt" test.command alone; rc=$?
+      if [ "$rc" != 0 ]; then bad=$i
+      elif [ -n "$lim" ]; then
+        t=$(timed "$mwt" 2>/dev/null | jq -r --arg f "$f" '.[$f] // {} | "\(.sec // "")\t\(.cpu // "")"' 2>/dev/null); s=${t%%$'\t'*} c=${t#*$'\t'}
+        if [ -z "$s" ] || [ -z "$c" ]; then bad=$i why="the test file $f gave no clock and CPU seconds in run $i of $n with the change, alone on a test slot: its runner prints no TESTRUN sec line for it"
+        elif ! jq -en --argjson s "$s" --argjson c "$c" --argjson l "$lim" '$s <= $c * $l' >/dev/null 2>&1; then
+          bad=$i why="the test file $f still waits: in run $i of $n with the change, alone on a test slot, it took $s s on the clock for $c CPU s, more than $lim times its CPU time"
+        else figs+="${figs:+, }$s s for $c CPU s"; fi
+      fi
     done
     if [ -n "$bad" ]; then
-      cs=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[.files[]?.cases[]?.name | select(. != "")] | unique | join(", ")' 2>/dev/null)
       tl=$(tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000')
-      why="the test file $f failed in run $bad of $STEADYRUNS with the change, alone on a test slot (exit $rc)${cs:+: its failing cases: $cs}"
+      [ -n "$why" ] || { cs=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[.files[]?.cases[]?.name | select(. != "")] | unique | join(", ")' 2>/dev/null)
+        why="the test file $f failed in run $bad of $n with the change, alone on a test slot (exit $rc)${cs:+: its failing cases: $cs}"; }
     fi
   else why="the test file $f could not be run with the change: ${out:0:300}"; fi
   { if [ -n "$why" ]; then printf '%s\n' "$why"
-    else printf 'This issue makes the test file %s pass reliably. Run alone with the change, on a test slot, it passed in each of %s runs in a row.\n' "$f" "$STEADYRUNS"; fi
+    elif [ -n "$lim" ]; then printf 'This issue makes the test file %s wait less. Run alone with the change, on a test slot, it passed in each of %s runs in a row, each at most %s times its CPU seconds on the clock: %s.\n' "$f" "$n" "$lim" "$figs"
+    else printf 'This issue makes the test file %s pass reliably. Run alone with the change, on a test slot, it passed in each of %s runs in a row.\n' "$f" "$n"; fi
     [ -z "$tl" ] || { echo 'The end of the output of the run that failed:'; echo '```'; printf '%s\n' "$tl"; echo '```'; }; } > "$2.unfixed"
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -z "$why" ]
+}
+# The Board's other fix issues about one test file (#189), each a bug card that card() checks in place of the
+# bug-card check, its file named by its title's start (speedfile()): Fix hollow cases (HOLLOWFIX, hollowproof()),
+# Fix the waiting (WAITFIX, steadyproof() with WAITRATIO), Make it run (MAKERUN, its title "Make the test file <file>
+# run": runproof(), and ranproof() after its test step) and Delete it (DELFILE, deleteproof()).
+# shellcheck disable=SC2034 # used in lib/card.sh
+HOLLOWFIX='Fix the hollow cases of the test file ' MAKERUN='Make the test file ' DELFILE='Delete the test file '
+# The check of a Fix hollow cases card: each case the issue names on its HOLLOW lines (as the Board's Fix hollow cases
+# writes them, tatagged() of lib/testaction.sh) now asserts the behaviour it names, or is deleted. A case is deleted
+# when the change removes the file, or its name is no longer in the file. Each deleted case needs a line of the
+# build's reply (<worktree>.out: its text, as ownbudget() reads it) `COVERED-BY: <test file>: <its case> | <the deleted
+# case>`, naming a test file the change keeps. The lines are kept in <worktree>.covered, so a check again after a fix
+# session (fixproof()) reads the build's lines with those of the fix's reply. A file the change keeps is read by the judge's hollow check
+# (TAHOLLOWASK, the judge's own words): one read-only session in the card's worktree (judgecall(), lib/review.sh) on
+# the seat hollowseat() names, whose answer ends with HOLLOWDONE. The card holds when it names no hollow case. Writes
+# the result in <worktree>.unfixed, the reason first when it does not hold (each case still found hollow, or each
+# deleted case with no COVERED-BY line), and fails then.
+HOLLOWDONE='HOLLOW-CHECK: done'
+hollowproof() { # <card> <worktree> <issue json> <test file>
+  local wt=$2 f=$4 c x cs kept='' gone=() uncov=() cov s j why='' found=''
+  rm -f "$wt.unfixed"
+  # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
+  git -C "$wt" add -A 2>/dev/null && ! git -C "$wt" diff --cached --quiet HEAD 2>/dev/null || return 0
+  cs=$(jq -r '.body // ""' <<<"$3" | tatagged HOLLOW "$TAHOLLOW" /dev/stdin 2>/dev/null | jq -r '.[] | objects | .case | gsub("^[`\"\u0027]+|[`\"\u0027]+$"; "")' 2>/dev/null | awk 'NF && !s[$0]++')
+  # The lines of the file that start a case (the test edits' table, TESTEDIT_TABLE; the whole file for a language it
+  # has no row for): a case is kept while one of them names it, so its name left in a comment does not keep it.
+  [ ! -e "$wt/$f" ] || kept=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE"'(($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x
+      | (first(table[] | select(any(.ext[]; . == $x))) // null) as $t | if $t == null then . else [split("\n")[] | select(test($t.case))] | join("\n") end' "$wt/$f" 2>/dev/null)
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    [ -e "$wt/$f" ] && grep -qF -- "$c" <<<"$kept" || gone+=("$c")
+  done <<<"$cs"
+  # The COVERED-BY lines of the build's reply and of each later fix's reply, each {file, for}: a deleted case is covered by a line for it whose file the change keeps.
+  cov=$(jq -Rrn '[inputs | fromjson? // empty | objects | if .type == "result" then .result elif .type == "item.completed" and .item.type? == "agent_message" then .item.text
+      elif .type == "text" then .part.text? else empty end | strings | split("\n")[] | sub("^[\\s*`_>-]+"; "")
+      | capture("^COVERED-BY:\\s*`?(?<file>[^\\s:`]+):\\s*.*?\\S\\s*\\|\\s*`?(?<for>.*?[^\\s*`_])[\\s*`_]*$")] | .[] | "\(.file)\t\(.for)"' "$wt.out" 2>/dev/null)
+  cov=$({ cat "$wt.covered" 2>/dev/null; [ -z "$cov" ] || printf '%s\n' "$cov"; } | awk 'NF && !s[$0]++')
+  if [ -n "$cov" ]; then printf '%s\n' "$cov" > "$wt.covered"; fi
+  for c in "${gone[@]}"; do
+    C=$c awk -F'\t' '$2 == ENVIRON["C"] { print $1 }' <<<"$cov" | while IFS= read -r x; do [ -f "$wt/$x" ] && echo y; done | grep -q y || uncov+=("$c")
+  done
+  [ ${#uncov[@]} = 0 ] || why="each deleted hollow case needs a COVERED-BY line in the build's or a fix session's reply naming a test file the change keeps (COVERED-BY: <test file>: <its case> | <the deleted case>), and these have none: $(printf '%s, ' "${uncov[@]}" | sed 's/, $//')"
+  if [ -z "$why" ] && [ -e "$wt/$f" ]; then
+    if ! s=$(hollowseat); then why="the judge's hollow check could not run: no reviewer or judge seat is set"
+    elif ! j=$(CALLSEAT=$s CALLSTEP=build CALLACT='the judge checks the test file for hollow cases' judgecall "$wt" "Read the test file $f in this worktree as the staged change leaves it, and $TAHOLLOWASK Change nothing. End your answer with one line: $HOLLOWDONE" "Test file: $f"); then
+      why="the judge's hollow check could not run: $(jq -r '.failed // "it gave no answer"' <<<"$j" 2>/dev/null)"
+    elif [ "$(grep -v '^[[:space:]]*$' "$wt.judge" | tail -n 1 | tr -d '*`_' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" != "$HOLLOWDONE" ]; then
+      why="the judge's hollow check gave no whole answer: its last line is not $HOLLOWDONE"
+    else
+      found=$(tahollow "$wt.judge" 2>/dev/null | jq -r '.hollow | map("\(.case) (\(.kind)): \(.reason)") | join("; ")' 2>/dev/null)
+      [ -z "$found" ] || why="the judge's hollow check ($(jq -r '"\(.agent) \(.model)"' <<<"$s")) still finds hollow cases in $f: $found"
+    fi
+  fi
+  { if [ -n "$why" ]; then printf '%s\n' "$why"
+    else printf 'This issue makes the hollow cases of the test file %s prove something. ' "$f"
+      if [ -e "$wt/$f" ]; then printf 'The judge'"'"'s hollow check (%s) read the file with the change and found no hollow case.' "$(jq -r '"\(.agent) \(.model)"' <<<"$s")"; else printf 'The change deletes the file.'; fi
+      [ ${#gone[@]} = 0 ] || printf ' The deleted cases, each with its COVERED-BY line in the card'"'"'s replies: %s.' "$(printf '%s, ' "${gone[@]}" | sed 's/, $//')"
+      echo; fi
+    [ -z "$cov" ] || { echo "The COVERED-BY lines of the card's replies:"; printf '%s\n' "$cov" | awk -F'\t' '{ print "- " $2 ": covered by " $1 }'; }; } > "$wt.unfixed"
+  [ -z "$why" ]
+}
+# The seat the hollow check runs on: of the reviewer's and the review judge's seats (seat(), lib/control.sh), the
+# first on another CLI than the builder's (another model family); else the reviewer's, else the judge's. Fails with
+# none.
+hollowseat() {
+  local b s ss=()
+  b=$(seat builder 2>/dev/null | jq -r '.agent // empty' 2>/dev/null)
+  s=$(seat reviewer 2>/dev/null) && ss+=("$s"); s=$(seat judge 2>/dev/null) && ss+=("$s")
+  for s in "${ss[@]}"; do [ "$(jq -r '.agent // empty' <<<"$s" 2>/dev/null)" = "$b" ] || { printf '%s\n' "$s"; return 0; }; done
+  [ ${#ss[@]} != 0 ] && printf '%s\n' "${ss[0]}"
+}
+# The check of a Make it run card, before its review: a change that removes the test file does not hold (deleting it is
+# Delete it). Its proof follows its test step (ranproof()). Writes what the review is told in <worktree>.unfixed, the
+# reason first when it does not hold, and fails then.
+runproof() { # <worktree> <test file>
+  rm -f "$1.unfixed"
+  git -C "$1" add -A 2>/dev/null && ! git -C "$1" diff --cached --quiet HEAD 2>/dev/null || return 0
+  if [ ! -e "$1/$2" ]; then echo "the change removes the test file $2: a Make it run card keeps it and makes the test command run it" > "$1.unfixed"; return 1; fi
+  printf 'This issue makes the test file %s run. After this review, the card'"'"'s test step must run it, and it must pass; else the card is blocked.\n' "$2" > "$1.unfixed"
+}
+# After the test step of a Make it run card passed: the step ran the file and it passed, when what the step passed
+# (<worktree>.passed, passlist(): the file whole, or a case of it) names it. Prints why not, and fails, when it does not.
+ranproof() { # <worktree> <test file>
+  jq -e --arg f "$2" 'any(.units[]?; . == $f or startswith($f + "\t"))' "$1.passed" > /dev/null 2>&1 && return 0
+  echo "the card's test step did not run the test file $2: the test command still does not run it, or it ran none of its cases"
+  return 1
+}
+# The check of a Delete it card: the change removes the test file, and it is then checked as an Optimize delete
+# (optproof()): the review is told the cases the file held and asked to name, for each, the test that still covers
+# it on a COVERED-BY line. A change that keeps the file does not hold: <worktree>.unfixed says so, and it fails.
+deleteproof() { # <card> <worktree> <issue json> <test file>
+  git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || { rm -f "$2.unfixed"; return 0; }
+  [ ! -e "$2/$4" ] || { echo "the change keeps the test file $4: a Delete it card deletes it" > "$2.unfixed"; return 1; }
+  optproof "$@"
+}
+# The check of a Fix the waiting, Fix hollow cases or Delete it card (<kind>: WAITFIX, HOLLOWFIX or DELFILE): card()
+# runs it after the build, and again before each later review when a fix or rebase session changed the card, so the
+# proof the review reads is of the change that lands. Fails when the check does not hold.
+fixproof() { # <card> <worktree> <issue json> <test file> <kind>
+  case $5 in
+    "$WAITFIX") steadyproof "$1" "$2" "$4" "$WAITRATIO" ;;
+    "$HOLLOWFIX") hollowproof "$1" "$2" "$3" "$4" ;;
+    *) deleteproof "$1" "$2" "$3" "$4" ;;
+  esac
 }
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its

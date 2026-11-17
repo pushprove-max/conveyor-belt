@@ -71,6 +71,26 @@ NOMARK='(.step | IN("deps", "start", "filed", "pushed", "issue") | not)'
 # test fails on main's code without the fix, wherever main is (bugproof()). Without it the card is sent back to build
 # and blocked, never reviewed.
 provenbug() { echo 'echo two >> a.txt; echo "[ \$(wc -l < a.txt) -ge $(wc -l < a.txt) ]" > a.test.sh' > "$STUB/build"; echo 'bash a.test.sh' > "$STUB/mainrun-cmd"; }
+# The checks of the Board's fix cards (fixcheck.test.sh, runcheck.test.sh): the engine as the loop loads it, in a shell
+# of the case's main ($R), cards under the case's folder, with <commands> run there (eval); its output in run.out, its
+# exit in $RC, the first line of what the review is shown (<worktree>.unfixed of $FXWT) in $WHY.
+fx_in() { # <commands>
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 9
+    names || exit 9
+    eval "$1" ) > "$T/$CASE/run.out" 2>&1; RC=$?
+  [ "$RC" != 9 ] || fail "the engine could not be loaded: $(cat "$T/$CASE/run.out")"
+  # shellcheck disable=SC2034 # read by the cases of fixcheck.test.sh and runcheck.test.sh
+  WHY=$(head -n 1 "$FXWT.unfixed" 2>/dev/null)
+}
+# Card c7's worktree on main ($FXWT), with <change> made in it and staged; main holds the <file> <content> pairs first.
+fx_wt() { # <change> [<file> <content>]...
+  local c=$1; shift
+  while [ $# -gt 1 ]; do printf '%s\n' "$2" > "$R/$1"; git -C "$R" add "$1"; shift 2; done
+  git -C "$R" commit -qm 'tests' || fail "main's files"
+  FXWT=$T/$CASE/cards/c7
+  git -C "$R" worktree add -q --detach "$FXWT" && (cd "$FXWT" && eval "$c") && git -C "$FXWT" add -A || fail "the card's change could not be staged"
+}
 loop() { CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" "$@"; }
 # The tunables, models and checks are the pack's: a case changes them in main's pack, for the rest of the case
 # (tune), or for one command (tuned).

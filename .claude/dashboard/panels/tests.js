@@ -33,8 +33,9 @@
 // A row opens (#130, the owner's mockup D) to the tabs Overview (open first), Timeline (N), Judge and Mutation, each
 // tied to its pane. Overview: the diagnosis box (its state: over budget by how much, after which Optimize cards and by
 // how much each changed it, its trend; the judge's verdict chip with its reason in one line and Full report, which
-// opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Fix failures, Raise this file's
-// budget…, Run and More, the next step suggested, nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
+// opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Fix failures, Fix hollow cases,
+// Fix the waiting, Make it run, Delete it (#189), Raise this file's budget…, Run and More, the next step suggested,
+// nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
 // now with its budget, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
 // bugs caught, mutants), its failures (#188: the card changes it caught, apart, then each failed test step with its
 // kind, card and cases) and its 3 latest events with a link to the Timeline. Timeline: every event newest first (its
@@ -55,6 +56,11 @@
 // not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row's Timeline lists its own edits.
 // Hollow (#77): a file with hollow cases (hollowOf(): its newest ended judge's, else the engine's cheap check's) has the
 // status Hollow, so its filter chip "Hollow N"; an opened row's Judge tab lists them with their kind and reason.
+// The other fix issues (#189), each a button of an opened row's actions with the preview Optimize opens, and a title
+// the engine knows its card by: Fix hollow cases on a Hollow file (its HOLLOW lines; a deleted case is named on a
+// COVERED-BY line), Fix the waiting on a file that Waits (the clock and CPU of its recent runs, and the WAIT lines its
+// newest judge named, the snapshot's waits), and Make it run and Delete it on a file Never run, whose row says why
+// it did not run when the engine can tell (the snapshot's neverRun). Each Done-when is what the card's check proves.
 // Mutation checks (#79): the column Mutants caught ("14 / 20": its newest done check, empty before one; when it ran and
 // on which commit on hover; "queued", "running" or "paused" beside it); an opened row's check state (queued with its
 // place, running with mutant n of m, paused, failed or done) and surviving mutants (source and line, before and after,
@@ -683,6 +689,51 @@
     }
     return { kind: 'issue', what: 'Fix failures', repo: S.d.repo, file, title: `Fix the failures of the test file ${file}`, body: head.concat(tails, done).join('\n'), verdict: v && v.verdict === 'stabilise' ? v.verdict : null };
   }
+  // ---- the other fix issues (#189): Fix hollow cases, Fix the waiting, Make it run and Delete it ----
+  // Each draft's title is the one the engine knows its card by (HOLLOWFIX, WAITFIX, MAKERUN and DELFILE,
+  // lib/testrun.sh), and its Done-when is how the card's check proves it fixed. A list is cut, as in draftFix(), so the
+  // body with its Done-when fits BODY_MAX, with a line that counts the rest; each line is printable.
+  const printable = (l) => l.replace(/\p{C}/gu, ' ').trimEnd();
+  function drafted(what, title, file, head, lists, done) {
+    const lines = head.map(printable);
+    lists.forEach(([top, items, said]) => {
+      if (!items.length) { if (top) lines.push('', top); return; }
+      lines.push('', top);
+      const at = items.findIndex((x) => { const l = printable(said(x)); if (lines.concat(l, '', done).join('\n').length + 40 > BODY_MAX) return true; lines.push(l); return false; });
+      if (at >= 0) lines.push(`- and ${items.length - at} more`);
+    });
+    return { kind: 'issue', what, repo: S.d.repo, file, title, body: lines.concat('', 'Done when:', done).join('\n'), verdict: null };
+  }
+  // Its waits (#189): the WAIT lines its newest judge named (the snapshot's waits), [{case, kind, at, reason}].
+  const waitsOf = (f) => list(f.waits).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
+  const waitSaid = (x) => `${x.case} | ${x.kind} | ${typeof x.at === 'string' ? x.at : ''} | ${typeof x.reason === 'string' ? x.reason : ''}`;
+  // Why it never ran, when the engine can tell (the snapshot's neverRun: {kind, reason}), else null.
+  const neverWhy = (f) => (obj(f.neverRun) && typeof f.neverRun.reason === 'string' && f.neverRun.reason ? f.neverRun.reason : null);
+  // Fix hollow cases: each hollow case (hollowOf()) as a HOLLOW line the card's check reads (hollowproof()).
+  const draftHollow = (f) => drafted('Fix hollow cases', `Fix the hollow cases of the test file ${f.file}`, f.file,
+    ['Make each hollow case of this test file prove something: a hollow case succeeds without proving anything. Make each case below assert the behaviour it names.',
+      'Or delete a case when another test already proves that behaviour, and name that test in your reply, on a line of its own: COVERED-BY: <test file>: <its case> | <the deleted case>.'],
+    [['Its hollow cases (case | kind | reason):', hollowOf(f), (x) => `- HOLLOW: ${x.case} | ${x.kind} | ${typeof x.reason === 'string' && x.reason.trim() ? x.reason : 'no reason given'}`]],
+    ['- The judge\'s hollow check of the changed file, run by the card\'s check on a model of another family than the builder\'s where one is set up, names no hollow case.',
+      '- Each deleted case has its COVERED-BY line, naming a test file that is kept.']);
+  // Fix the waiting: the clock and CPU seconds of its recent runs, and the waits its judge named.
+  function draftWaits(f) {
+    const last = obj(f.lastRun) || {}, runs = list(f.runs).filter((r) => obj(r) && num(r.sec) !== null && num(r.cpu));
+    const w = waitsOf(f);
+    return drafted('Fix the waiting', `Fix the waiting of the test file ${f.file}`, f.file,
+      [`This test file waits more than it works: its last run took ${num(last.clockPerCpu) === null ? 'more than 2' : one(last.clockPerCpu)} times its CPU seconds on the clock. Remove or shorten its waits, and keep what its cases test: do not cut a wait so that a case no longer checks what it waited for.`],
+      [['Its recent runs, newest first (clock, CPU):', runs, (r) => `- ${one(r.sec)} s on the clock for ${one(r.cpu)} CPU s (${one(r.sec / r.cpu)}×), ${runBy(r)}`],
+        [w.length ? 'The waits the judge named (case | kind | file:line | reason):' : 'The judge has named no wait of it yet: find the waits in the file (sleep, polling, timeout, lock, network).', w, (x) => `- WAIT: ${waitSaid(x)}`]],
+      ['- The file succeeds in 3 runs in a row alone on a test slot, and each run takes at most 2 times its CPU seconds on the clock.']);
+  }
+  // Make it run and Delete it, on a file that never ran: why, when the engine can tell.
+  const neverSaid = (f) => `This test file has never run: no card's test step and no whole-suite run has a run of it on record. ${neverWhy(f) ? `Why, as the engine can tell: ${neverWhy(f)}.` : 'The engine cannot tell why.'}`;
+  const draftRun = (f) => drafted('Make it run', `Make the test file ${f.file} run`, f.file,
+    [neverSaid(f), 'Make the test command run it (or the pack\'s tests.patterns match it), or fix what stops it loading or skips it. Keep what it tests.'], [],
+    ['- The card\'s test step runs this file, and it succeeds.']);
+  const draftDelete = (f) => drafted('Delete it', `Delete the test file ${f.file}`, f.file,
+    [neverSaid(f), 'Delete it. For each of its cases that matters, name the test that already proves its behaviour, on a line of its own: COVERED-BY: <test file>: <its case>. When no other test proves a case that matters, make the file run instead.'], [],
+    ['- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it.']);
   // What ran a run, in words (#130): a whole-suite run with its result, as the Runs list says it, or the card's issue;
   // never a card's id, nor "card null".
   const runBy = (r) => (r.whole === true ? `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`
@@ -812,7 +863,8 @@
     return look(f) && !v ? 'judge' : 'run';
   }
   // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Fix failures (with failures no
-  // card's change caused), Raise this file's budget…, Run and More; the next step suggested is the primary one.
+  // card's change caused), Fix hollow cases (Hollow), Fix the waiting (Waits), Make it run and Delete it (Never run),
+  // Raise this file's budget…, Run and More; the next step suggested is the primary one.
   function stepButtons(f) {
     const h = S.ctx.h, file = f.file, now = h('div', 'tests-act-row tests-steps'), noSeat = !tmodel(), next = nextStep(f);
     const btn = (key, text, act, label, fn) => button(text, `${key === next ? 'btn-primary' : 'btn-quiet'} tests-act`, act, label, fn);
@@ -833,7 +885,14 @@
     const fix = fixable(f).length ? btn('fix', 'Fix failures', 'fix-failures', `Fix failures: preview an issue about ${file}`, () => {
       S.notes.delete(dk(file)); S.ask = draftFix(f); S.keep = { act: 'issue-title', file }; draw();
     }) : null;
-    now.append(judge, opt, ...(fix ? [fix] : []), raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
+    // The other fix issues (#189), each on a file with its status: the same preview, of its own draft.
+    const has = (k) => marks(f).some((m) => m[0] === k);
+    const fixes = [[has('hollow'), 'Fix hollow cases', 'fix-hollow', draftHollow], [has('waits'), 'Fix the waiting', 'fix-waits', draftWaits],
+      [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete]]
+      .filter(([on]) => on).map(([, text, act, draft]) => btn(act, text, act, `${text}: preview an issue about ${file}`, () => {
+        S.notes.delete(dk(file)); S.ask = draft(f); S.keep = { act: 'issue-title', file }; draw();
+      }));
+    now.append(judge, opt, ...(fix ? [fix] : []), ...fixes, raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
     if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
     return now;
   }
@@ -1711,6 +1770,8 @@
         chips.append(k === 'issue' ? issueOf(f, any) : k === 'runner' || k === 'whole' ? h('span', 'tests-quiet', words) : S.ctx.chip(words, tone));
       });
       tell();
+      // Why a file never ran (#189), when the engine can tell.
+      if (marks(f).some((m) => m[0] === 'never') && neverWhy(f)) chips.append(h('span', 'tests-quiet tests-never-why', `Not run: ${neverWhy(f)}`));
       // A grey fact, not a problem chip: a file that never fails may check nothing.
       if ((num(f.runsOnRecord) || 0) >= NEVER && num(f.caught) === 0) chips.append(h('span', 'tests-quiet tests-never', 'Never caught anything'));
       const fileCell = cell(check, 'tests-file');

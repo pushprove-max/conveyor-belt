@@ -46,7 +46,7 @@ ownyes() { # <card> <issue> <worktree> <issue json> <test file>
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
-  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk=''
+  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
@@ -259,7 +259,10 @@ card() { # <card> <issue> [<branch> <tip>]
     # its budgets, or a file does not pass, the card is blocked with that reason and no review, its blocked line
     # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
     # FIXFAILS) is checked by steadyproof(): when its file fails in one of its runs in a row, the card is blocked
-    # naming that run, with no review.
+    # naming that run, with no review. So are the Board's other fix issues (#189): Fix the waiting (WAITFIX), Fix hollow
+    # cases (HOLLOWFIX) and Delete it (DELFILE) by fixproof() (pk), here and again before each later review on a change
+    # a fix or rebase session made (pt: the tree it last held on), and Make it run (MAKERUN) by runproof() now and by
+    # ranproof() once its test step passed (mk).
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       OWNBUDGET=${ob%%$'\t'*} speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
@@ -267,6 +270,12 @@ card() { # <card> <issue> [<branch> <tip>]
       sk=$OPTREVIEW; OWNBUDGET=${ob%%$'\t'*} optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$FIXFAILS"); then
       sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+    elif { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
+      || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk='' sk=''; false; }; then
+      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
+    elif sf=$(speedfile "$issue" "$MAKERUN"); then
+      sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
       # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
       # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (redproof()):
@@ -317,6 +326,12 @@ card() { # <card> <issue> [<branch> <tip>]
       # Same-file cards review in parallel: no claim and no wait before a review. They line up only to land (at
       # settle() below), and a card is reviewed again there only when an earlier landing changed the lines it changed,
       # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
+      # A fix or rebase session changed a Fix the waiting, Fix hollow cases or Delete it card: its check runs again on
+      # what this review reads, and the card is blocked when it no longer holds.
+      if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then
+        fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
+        pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
+      fi
       began "$c" "$n" review
       # The review sees the card's commit trailers beside the diff, and the D<n> lines of the last checked reply.
       t="the engine could not read the commit trailers of the card"; more=$(trailerview "$wt") \
@@ -623,6 +638,8 @@ card() { # <card> <issue> [<branch> <tip>]
       else record "$c" "$n" test pass "$(jq -cn --argjson s "$sec" '{sec:$s,usage:{input:0,write:0,write1h:0,read:0,output:0},reused:true}')"; fi
       # The test rules read the line just recorded (lib/testrules.sh): with their switch off, they file nothing.
       [ -z "$ran" ] || testrulespass > /dev/null
+      # A Make it run card (#189) holds only when its test step ran its file and the file passed.
+      [ -z "$mk" ] || t=$(ranproof "$wt" "$mk") || { block "$c" "$n" "$wt" "test: $t"; return; }
       # A card that gave way claims its files now; a card whose change is not on main as it is now (main moved while it
       # was away or during its tests) is fitted onto it, and its checks run again there, holding its files (its tests
       # too when the fitted change is not the one that passed: testedhere()).

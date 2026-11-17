@@ -471,6 +471,31 @@ This issue makes one test file pass reliably and keeps what it tests, so no test
 the change. After the build, the file was run alone with the change, on a test slot, 10 runs in a row: each must pass.
 Judge whether the change removes the cause of its failures, and whether the file still tests all that it tested
 before: a case deleted, skipped or weakened so that it passes is a finding. Its result:'
+# What the review of the Board's other fix cards (#189; card(): Fix the waiting, Fix hollow cases, Delete it and Make
+# it run) is told before the check's result.
+# shellcheck disable=SC2034 # used in lib/card.sh
+WAITREVIEW='# The Fix the waiting check
+This issue removes or shortens the waits of one test file and keeps what it tests, so no test must fail on main'"'"'s
+code without the change. After the build, the file was run alone with the change, on a test slot, 3 runs in a row: each
+must pass and take at most 2 times its CPU seconds on the clock. Judge whether its cases still test all that they
+tested before: a wait cut so that a case no longer checks what it waited for is a finding. Its result:'
+# shellcheck disable=SC2034 # used in lib/card.sh
+HOLLOWREVIEW='# The Fix hollow cases check
+This issue makes each hollow case of one test file assert the behaviour it names, or deletes it when another test
+already proves that behaviour. After the build, the judge'"'"'s hollow check, on a model of another family than the
+builder'"'"'s where one is set up, read the file with the change: it must find no hollow case. Each deleted case needs a
+COVERED-BY line in the build'"'"'s reply. Judge whether each case now asserts what it names, and whether the test each
+COVERED-BY line names proves what its deleted case named. Its result:'
+# shellcheck disable=SC2034 # used in lib/card.sh
+DELREVIEW='# The Delete it check
+This issue deletes one test file that has never run, so no test must fail on main'"'"'s code without the change. Each
+case of it that matters must be proved by another test. Its result:'
+# shellcheck disable=SC2034 # used in lib/card.sh
+RUNREVIEW='# The Make it run check
+This issue makes one test file run: the test command or the pack'"'"'s tests.patterns now take it, or what stopped it
+loading is fixed. After this review, the card'"'"'s test step must run the file, and it must pass, or the card is
+blocked. Judge whether the file now runs in each test run that should run it, and whether its cases test what they
+name. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

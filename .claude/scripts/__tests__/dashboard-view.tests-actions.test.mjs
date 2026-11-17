@@ -17,8 +17,9 @@ test('Tests actions: an opened row has Judge, Optimize, Run and More with its si
   const w = boot({ tab: 'tests' });
   deliver(w, snap({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'keep' })] }));
   const more = open(w, MERGE), words = (els) => Array.from(els, (b) => b.textContent);
-  // Issue 130 adds Raise this file's budget… to the next steps of the diagnosis box (the owner's mockup D).
-  assert.deepEqual(words(more.querySelectorAll('.tests-act-row > button, .tests-act-row > .tests-more-menu > button')), ['Judge', 'Optimize', 'Raise this file\'s budget…', 'Run', 'More']);
+  // Issue 130 adds Raise this file's budget… to the next steps of the diagnosis box (the owner's mockup D); issue 189
+  // adds Fix the waiting, as this file waits (2.5 times its CPU on the clock).
+  assert.deepEqual(words(more.querySelectorAll('.tests-act-row > button, .tests-act-row > .tests-more-menu > button')), ['Judge', 'Optimize', 'Fix the waiting', 'Raise this file\'s budget…', 'Run', 'More']);
   assert.equal(act(more, 'more').getAttribute('aria-expanded'), 'false');
   assert.equal(more.querySelector('[role="menu"]'), null, 'the menu is closed');
   act(more, 'more').click();

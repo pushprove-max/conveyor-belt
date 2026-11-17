@@ -35,13 +35,18 @@
 #   named on its COVERED-BY lines; null and [] with none), since (the median CPU seconds of the
 #   file's runs after it landed; null with none or before it lands), sinceRuns (their count), and mutantsBefore and
 #   mutantsAfter (the file's newest mutation check that ended done before it landed, and after: {at, killed, of};
-#   null with none or before it lands)}; removed: true for a
+#   null with none or before it lands)}; a Board filing of another kind (Fix failures, Fix hollow cases, Fix the
+#   waiting, Make it run, Delete it) is listed here as well; removed: true for a
 #   file main's checkout no longer tracks whose landed Optimize deleted or merged it (the totals leave it out);
 #   hollow: the cheap check's hollow cases of a JavaScript or TypeScript file (testhollow(), below), [{case, kind,
 #   reason}], [] with none; null for a file of another kind or not in main's checkout;
 #   mutation: its newest mutation check (lib/mutate.sh), {file, at, sha, seed, state, reason, of (its mutants), tried,
 #   killed, survived ([{source, line, kind, before, after}]), noresult, notMutated, end}; null when none was made;
 #   mutationPlace: its place in the mutation checks' asked list ($MUTS/asked, mutask()), 1 first; null when not asked;
+#   waits: the waits its newest judge that ended done named on WAIT lines (lib/testaction.sh tawaits()), [{case, kind,
+#   at, reason}]; null when no judge of it named waits or none (a judge from before WAIT lines were asked for);
+#   neverRun: why a file of main's checkout with no run on record never ran, when the engine can tell (neverwhy(),
+#   below), {kind, reason}; null for a file with a run, or one it cannot tell of;
 #   a file that only a Board filing names is listed too;
 # slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
 #   slower.share;
@@ -229,7 +234,7 @@ testhollow() { # <the test files of main's checkout, a JSON list>
         reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])' --args "${fs[@]}"
 }
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru all ln ch hv
+  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
@@ -248,12 +253,13 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ch=$(printf '%s\n' "$ch" | git -C "$MAIN" diff-tree --stdin -r --root --name-only --no-renames -z 2>/dev/null \
     | jq -Rsc --arg want "$ch" '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
-  printf '%s\n' "$ln" | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
+  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
     --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
-    --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) "$OWNERS$FAILURE"'
+    --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) \
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$OWNERS$FAILURE"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
@@ -310,7 +316,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
-           mutationPlace: ($place[$f] // null)}
+           mutationPlace: ($place[$f] // null),
+           waits: ([$tj[] | select(.file == $f)] | max_by(.end // "") | if . == null or .waits == [] then null else .waits end)}
         | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
     | sort_by(-(.cpu // -1), .file)
@@ -322,7 +329,61 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
          | .testedits[] | objects | select(.file | type == "string") | {card: $l.card, issue: $l.issue, time: $l.time} + .) as $e ({n: {}, out: []};
            if (.n[$e.file] // 0) < $keep then .out += [$e] | .n[$e.file] += 1 else . end) | .out),
        totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length)}) + {
-         steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}'
+         steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}') || return 1
+  nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
+  jq -c --argjson nv "$nv" '.files |= map(.neverRun = ($nv[.file] // null))' <<<"$out"
+}
+# Why a test file of main's checkout with no run on record never ran (#189), when the engine can tell, for the
+# Board's Never run: {file: {kind, reason}}; a file it cannot tell of is left out. The first that holds, in this order:
+# patterns: the pack's tests.patterns do not match it (testpaths()), or the test command names what it runs
+# (testrunner(): `named`, a glob, a file or a folder) and that does not match it; load: loading it fails, the error
+# of a shell file that bash -n, a JavaScript file that node --check, or a Python file that python3 cannot parse, kept
+# by the file's content (its blob) in $TESTACTS/neverloads (nl; not a .json name, which the action records have), so a
+# file is parsed once a content; skipped: it
+# holds skip markers (the test edits' table, TESTEDIT_TABLE, an `only` mark aside), each named once.
+neverwhy() { # <the files, a JSON list>
+  local f cmd rn w pat x ld bl e l1 le sk new='' out='' nl=$TESTACTS/neverloads
+  [ "$(jq 'length' <<<"$1" 2>/dev/null)" != 0 ] || { echo '{}'; return; }
+  packget test.command cmd 2>/dev/null || cmd=''
+  rn=$(testrunner "$cmd" "$MAIN" 2>/dev/null); w=''; [[ $rn != named\ * ]] || w=${rn##* }
+  pat=$(jq -r '.[]' <<<"$1" | testpaths 2>/dev/null)
+  ld=$(jq -ce 'objects' "$nl" 2>/dev/null) || ld='{}'
+  while IFS= read -r f; do
+    [ -f "$MAIN/$f" ] || continue
+    x=''
+    # shellcheck disable=SC2053 # $w is the command's glob: matched as a pattern
+    if ! grep -qxF -- "$f" <<<"$pat"; then x=$(jq -cn '{kind: "patterns", reason: "the pack'"'"'s tests.patterns do not match it"}')
+    elif [ -n "$w" ] && ! { [ "$f" = "$w" ] || [[ $w == *[*?[]* && $f == $w ]] || [[ -d $MAIN/$w && $f == "${w%/}"/* ]]; }; then
+      x=$(jq -cn --arg c "$cmd" --arg w "$w" '{kind: "patterns", reason: "the test command (\($c)) runs \($w), which does not match it"}')
+    else
+      bl=$(git -C "$MAIN" hash-object -- "$f" 2>/dev/null) || bl=''
+      if [ -n "$bl" ] && e=$(jq -er --arg b "$bl" 'if has($b) then .[$b] else error end' <<<"$ld" 2>/dev/null); then :
+      else
+        e=''
+        case $f in
+          *.sh | *.bash) e=$(cd "$MAIN" && bash -n "$f" 2>&1) || e=${e:-bash -n failed} ;;
+          *.js | *.mjs | *.cjs) ! command -v node > /dev/null || e=$(cd "$MAIN" && node --check "$f" 2>&1) || e=${e:-node --check failed} ;;
+          *.py) e=$(cd "$MAIN" && python3 -c 'import ast, sys
+try: ast.parse(open(sys.argv[1], "rb").read(), sys.argv[1])
+except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.exit(1)' "$f" 2>&1) || e=${e:-python3 could not parse it} ;;
+        esac
+        # Its location line and its error line, one line, its paths relative to main's checkout.
+        e=${e//"$MAIN/"/}; l1=$(head -n 1 <<<"$e"); le=$(grep -m 1 -iE 'error' <<<"$e"); [ -z "$le" ] || [ "$le" = "$l1" ] || l1+=" $le"; e=${l1:0:300}
+        [ -z "$bl" ] || { ld=$(jq -c --arg b "$bl" --arg e "$e" '.[$b] = $e' <<<"$ld"); new=1; }
+      fi
+      if [ -n "$e" ]; then x=$(jq -cn --arg e "$e" '{kind: "load", reason: "loading it fails: \($e)"}')
+      else
+        sk=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE"'(($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x
+            | (first(table[] | select(any(.ext[]; . == $x))) // null) as $t | if $t == null then empty
+              else [split("\n")[] | match($t.skip; "g").string | gsub("^[\\s{,]+|[\\s(:]+$"; "") | select(test("only") | not)] | unique | join(", ") end' "$MAIN/$f" 2>/dev/null)
+        [ -z "$sk" ] || x=$(jq -cn --arg s "$sk" '{kind: "skipped", reason: "it is skipped: \($s)"}')
+      fi
+    fi
+    [ -z "$x" ] || out+=$(jq -cn --arg f "$f" --argjson x "$x" '{($f): $x}')$'\n'
+  done < <(jq -r '.[]' <<<"$1")
+  # The parse results, kept for the next snapshot (a write that fails costs a parse again, nothing else).
+  [ -z "$new" ] || { mkdir -p "$TESTACTS" && taput "$nl" "$ld"; } 2>/dev/null || :
+  jq -cs 'add // {}' <<<"$out"
 }
 
 # conveyor.sh test-settings: one test setting of the pack saved, as the Board saves it. Each refuses a bad value, says

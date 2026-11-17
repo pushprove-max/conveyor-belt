@@ -154,6 +154,35 @@ t_tfempty() {
     || fail "the part with no file time: $got"
 }
 
+# Bug it catches (#189): a file with no run on record showed "Never run" with no reason, and a file that Waits had no
+# waits to name. Each file never run says why when the engine can tell: lone.test.sh, which the pack's tests.patterns
+# do not match; other/o.test.mjs, which the test command's folder (tests) does not hold; tests/bad.test.sh, which
+# does not parse (bash -n); tests/skip.test.mjs, skipped by its describe.skip. tests/fine.test.sh says nothing, nor
+# does tests/ran.test.sh, which ran. The waits are its newest judge's WAIT lines: an older judge's are not shown. The
+# parse is kept by the file's content: a second look reads it from the record, not from bash -n.
+t_tfnever() {
+  setup '[]'; tune '.tests.patterns = ["tests/", "other/"] | .test.command = "node --test tests"'
+  mkdir -p "$R/tests" "$R/other"; echo 'echo one' > "$R/lone.test.sh"; echo 'it("o", () => {});' > "$R/other/o.test.mjs"
+  echo 'if then fi' > "$R/tests/bad.test.sh"; echo "describe.skip('x', () => { it('y', () => {}); });" > "$R/tests/skip.test.mjs"
+  echo 'echo fine' > "$R/tests/fine.test.sh"; echo 'echo ran' > "$R/tests/ran.test.sh"
+  git -C "$R" add -A && git -C "$R" commit -qm 'tests' || fail "main's files"
+  tf_runs tests/ran.test.sh 1
+  mkdir -p "$ST/testactions"
+  jq -cn '{id: "000000000001", action: "judge", state: "done", file: "tests/ran.test.sh", end: "2026-11-10T00:00:00Z", waits: [{case: "old", kind: "sleep", at: "tests/ran.test.sh:1", reason: "older"}]}' > "$ST/testactions/000000000001.json"
+  jq -cn '{id: "000000000002", action: "judge", state: "done", file: "tests/ran.test.sh", end: "2026-11-11T00:00:00Z", waits: [{case: "one", kind: "polling", at: "tests/ran.test.sh:1", reason: "it polls"}]}' > "$ST/testactions/000000000002.json"
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '[.files[] | {file, neverRun}] | sort_by(.file)' <<<"$got")" = '[{"file":"lone.test.sh","neverRun":{"kind":"patterns","reason":"the pack'"'"'s tests.patterns do not match it"}},'\
+'{"file":"other/o.test.mjs","neverRun":{"kind":"patterns","reason":"the test command (node --test tests) runs tests, which does not match it"}},'\
+'{"file":"tests/bad.test.sh","neverRun":{"kind":"load","reason":"loading it fails: tests/bad.test.sh: line 1: syntax error near unexpected token `then'"'"'"}},'\
+'{"file":"tests/fine.test.sh","neverRun":null},{"file":"tests/ran.test.sh","neverRun":null},{"file":"tests/skip.test.mjs","neverRun":{"kind":"skipped","reason":"it is skipped: describe.skip"}}]' ] \
+    || fail "why each file never ran: $(jq -c '[.files[] | {file, neverRun}]' <<<"$got")"
+  [ "$(jq -c '[.files[] | select(.waits != null) | {file, waits}]' <<<"$got")" = '[{"file":"tests/ran.test.sh","waits":[{"case":"one","kind":"polling","at":"tests/ran.test.sh:1","reason":"it polls"}]}]' ] \
+    || fail "the waits are not the newest judge's: $(jq -c '[.files[] | {file, waits}]' <<<"$got")"
+  jq -c 'map_values("kept: " + .)' "$ST/testactions/neverloads" > "$ST/nl" && mv "$ST/nl" "$ST/testactions/neverloads" || fail "the parse record: $(cat "$ST/testactions/neverloads" 2>&1)"
+  got=$(tf_in neverwhy '["tests/bad.test.sh"]') && [ "$(jq -r '.["tests/bad.test.sh"].reason' <<<"$got")" = 'loading it fails: kept: tests/bad.test.sh: line 1: syntax error near unexpected token `then'"'"'' ] \
+    || fail "a file whose content was parsed before is parsed again: $got"
+}
+
 # A file with its own budget is held to it, not to the project's 5 CPU s, in the slow note (slowtests()) and in the
 # part: a.test (own 20) at 10 CPU s is no note; b.test (own 2) at 3 is one, against 2; c.test (none) at 6, against 5.
 # The test line the run makes (slowrec()) records each file's clock seconds, which the part reads. Bug caught: a slow

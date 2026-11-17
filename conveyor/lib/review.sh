@@ -312,14 +312,16 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
 # One judge call, read-only as a review is (claudereview(), codexreview(), opencodereview()): its answer in
 # <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens and
 # usage (an OpenCode judge's holding its cost, usage.cost, when it reports one); one that fails prints them with failed (why) and fails.
+# The check of a Fix hollow cases card (hollowproof(), lib/testrun.sh) runs it on another seat: CALLSEAT, a seat as
+# seat() prints it, with CALLSTEP and CALLACT the step and action its live record shows.
 judgecall() { # <worktree> <instructions> <the brief and the findings>
   # shellcheck disable=SC2034 # PROXY_ROLE is read by proxyroute() in lib/control.sh
-  local s model effort agent d p rc sec f='' roll run='' PROXY_ROLE=reviewer # the review's route (proxyroute())
-  s=$(judgeseat) || { jq -cn '{failed: "the control record names no judge, and the pack allows the review no model of another family than the reviewer runs on"}'; return 1; }
+  local s=${CALLSEAT:-} model effort agent d p rc sec f='' roll run='' PROXY_ROLE=reviewer # the review's route (proxyroute())
+  [ -n "$s" ] || s=$(judgeseat) || { jq -cn '{failed: "the control record names no judge, and the pack allows the review no model of another family than the reviewer runs on"}'; return 1; }
   jqget "$s" model model effort effort agent agent || model='' effort='' agent=''
   d=$(seatready judge "$s") || { jq -cn --arg m "$model" --arg r "$d" '{model: $m, failed: $r}'; return 1; } # the CLI the seat names, never another
   rm -f "$1.judge" "$1.judge.events"
-  jq -cn --arg m "$model" '{step: "review", at: (now | todate), last: null, turns: 0, model: $m, action: "the judge reads the findings"}' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
+  jq -cn --arg m "$model" --arg s "${CALLSTEP:-review}" --arg a "${CALLACT:-the judge reads the findings}" '{step: $s, at: (now | todate), last: null, turns: 0, model: $m, action: $a}' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
   sec=$SECONDS
   if [ "$agent" = claude ]; then
     # The card's review account, else its builder's; with no shell, the staged change is a file given to it alone.

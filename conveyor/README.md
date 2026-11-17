@@ -716,7 +716,12 @@ and the test files of main's checkout, and holds:
   `no-assert` with no `expect(` and no `assert` in it, and `defined-only` when each of its assertions is
   `expect(...).toBeDefined()` or `.toBeTruthy()`. An assertion in a comment counts too, so the check can miss a hollow
   case but never names a case that asserts. The Board shows a Judge's `hollow` (Test actions, below) in place of this
-  one once a Judge of the file ended;
+  one once a Judge of the file ended. `waits` holds the `waits` of the newest Judge of the file that ended done (Test
+  actions, below), `[{case, kind, at, reason}]`, and is null when that Judge named none. `neverRun` says why a file of
+  main's checkout with no run on record never ran, when Conveyor can tell, as `{kind, reason}`, and is null otherwise.
+  The kind is `patterns` (the pack's `tests.patterns` do not match the file, or the test command names a glob, a file
+  or a folder that does not match it), `load` (`bash -n`, `node --check` or Python cannot parse the file; the reason
+  holds the error) or `skipped` (the file holds skip markers, named in the reason);
 - `slower`: the names of the files slower than their usual;
 - `edits`: each entry of the `testedits` of the landed cards (below), newest first, with the card's `card`, `issue`
   and `time` (when it landed); the newest 5 of each file;
@@ -1103,6 +1108,9 @@ and files no issue (or runs the file by hand, with no session: `testaction run`,
   that passes but proves nothing, on a line `HOLLOW: <case> | <kind> | <one-line reason>`. The kind is `mock-echo`
   (it only checks that a mock gives back what it was told to give), `text-only` (it only checks that a file contains
   some text), `no-assert` (it has no assertion) or `defined-only` (it only checks that a value is defined or truthy).
+  When the recent runs of the file took more than 2 times their CPU seconds on the clock, it names each wait on a
+  line `WAIT: <case> | <kind> | <file:line> | <one-line reason>`. The kind is `sleep`, `polling`, `timeout`, `lock`,
+  `network` or `other`.
 - `conveyor.sh testaction explain <test file>`: which card made the file slower, and what in its change is the cause.
 
 The test file is a path of the repo as main has it. The session runs on the Tests seat of the control record: a CLI
@@ -1134,7 +1142,9 @@ Each action keeps two files in `testactions/` of the state folder, which stay af
   text's last line names none; explain: null), `hollow` and `hollowSkipped` (judge: its `HOLLOW` lines as
   `[{case, kind, reason}]`, and how many lines that start `HOLLOW:` could not be read, with no case, no kind of the
   four or no reason; such a line is left out and fails nothing), `causes` (judge: its `CAUSE` lines as
-  `[{case, kind, reason}]`; a line that cannot be read is left out), `pid` while it runs, and `reason` for a failed one.
+  `[{case, kind, reason}]`; a line that cannot be read is left out), `waits` (judge: its `WAIT` lines as
+  `[{case, kind, at, reason}]`, `at` the file and line; a line that cannot be read is left out), `pid` while it runs,
+  and `reason` for a failed one.
 
 `conveyor.sh testaction stop <id>` stops that one running action, and no other; its record says stopped. One time
 limit applies to every action: the pack's `tunables.testActionTimeout`, 900 seconds by default. An action that runs
@@ -1169,6 +1179,28 @@ without the fix, for the check of its card). It files a Fix failures issue the s
 failures of the test file <file>". The bug-card check does not apply to such a card. The file runs alone 10 times in
 a row with the change, each run on a test slot. When one run fails, the card is blocked before its review, and the
 reason names that run and its failing cases. The review is shown the result.
+
+The Tests page files four more issues about one test file the same way. The bug-card check does not apply to their
+cards either; each has a check of its own, and the review is shown its result:
+
+- Fix hollow cases, "Fix the hollow cases of the test file <file>": its body names each hollow case on a line
+  `- HOLLOW: <case> | <kind> | <reason>`. Before the review, a case whose name no case line of the file holds any
+  more is deleted. It needs a line `COVERED-BY: <test file>: <its case> | <the deleted case>` in the build's reply,
+  or in the reply of a later fix session, that names a test file the change keeps. Then the hollow check of Judge
+  reads the file with the change, in one read-only session. It runs on the reviewer's seat or the review judge's
+  seat, the first of them on another CLI than the builder's, and else on the reviewer's. Its answer ends with the line `HOLLOW-CHECK: done`. The card is blocked
+  when a deleted case has no such line, when the answer names a hollow case (the reason names each one), or when the
+  check cannot run or its answer is cut short.
+- Fix the waiting, "Fix the waiting of the test file <file>": the file runs alone 3 times in a row with the change,
+  each run on a test slot. Each run must pass, and its clock seconds must be at most 2 times its CPU seconds (the
+  `TESTRUN sec` line of its runner). When a run does not, the card is blocked, and the reason names that run.
+- Make it run, "Make the test file <file> run": a change that removes the file is blocked. After the card's Test step
+  passed, the step must have passed the file or one of its cases; else the card is blocked.
+- Delete it, "Delete the test file <file>": a change that keeps the file is blocked. A change that removes it is
+  checked as an Optimize delete: the review names a `COVERED-BY` line for each of its cases.
+
+The checks of Fix hollow cases, Fix the waiting and Delete it run again before each later review when a fix or rebase
+session changed the card. When a check no longer holds, the card is blocked with its reason.
 
 The snapshot's `testActions` holds `seat` (the Tests seat, or null), `limit` and `actions`: the records of the 20
 newest actions, running and kept, and of each file's newest older judge with a verdict, newest first; the other

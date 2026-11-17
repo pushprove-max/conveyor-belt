@@ -18,7 +18,7 @@
 # may run), verdict (judge: the word its text's last line names, VERDICT: <keep | speed up | split | merge | delete |
 # stabilise> (taverdict()), else "no verdict"; explain: null), hollow and hollowSkipped (judge: the hollow cases its HOLLOW lines name, and the
 # HOLLOW lines that could not be read: tahollow()), causes (judge: the causes of its failures its CAUSE lines name,
-# tacauses()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
+# tacauses()), waits (judge: the waits its WAIT lines name, tawaits()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
 # session's text, written as the session writes it; <id>.events and <id>.err, the CLI's output and its errors. All of
 # it stays after the session ends. `conveyor.sh testaction stop <id>` ends that one session and no other, or takes a
 # queued one off, unstarted.
@@ -32,7 +32,13 @@ TAVERDICTS='keep|speed up|split|merge|delete|stabilise'
 TATEXT='fromjson? // empty | objects | if .type == "assistant" then .message.content[]? | select(.type == "text") | .text | strings | . + "\n"
   elif .type == "item.completed" and .item.type == "agent_message" then .item.text | strings | . + "\n"
   elif .type == "text" then .part.text | strings | . + "\n" else empty end'
-TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), delete it, or stabilise it. Give the evidence for your choice: its recorded times below, what it tests, whether another test already proves the same behaviour, and why it failed in its recent failures below. A failure with the verdict card is the test doing its job: the change of that card broke what the test checks. Choose stabilise when its failures with the verdict flaky or main have a cause in the test itself: shared state, timing, order, environment or a fixture. For stabilise, name the cause of each failing case on a line of its own: CAUSE: <case> | <kind> | <one-line reason>. The kind is one of: shared state, timing, order, environment, fixture. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, name each hollow case of the file, a case that passes without proving anything, on a line of its own: HOLLOW: <case> | <kind> | <one-line reason>. The kind is one of: mock-echo (it only checks that a mock returned what the mock was told to return), text-only (it only checks that a file contains some text), no-assert (it has no assertion), defined-only (it only checks that a value is defined or truthy). Give no HOLLOW line when no case is hollow. End your answer with one line: VERDICT: <keep | speed up | split | merge | delete | stabilise>"
+# What the judge is asked of the hollow cases; the check of a Fix hollow cases card asks it too (hollowproof(),
+# lib/testrun.sh).
+TAHOLLOWASK="name each hollow case of the file, a case that passes without proving anything, on a line of its own: HOLLOW: <case> | <kind> | <one-line reason>. The kind is one of: mock-echo (it only checks that a mock returned what the mock was told to return), text-only (it only checks that a file contains some text), no-assert (it has no assertion), defined-only (it only checks that a value is defined or truthy). Give no HOLLOW line when no case is hollow."
+# What it is asked of the waits (#189): the Tests page marks a file Waits when its last run took more than 2 times its
+# CPU time on the clock (WAITRATIO, lib/testrun.sh).
+TAWAITASK="When its recent runs took more than 2 times their CPU seconds on the clock (clocks against times, or sec against cpu, above), the file waits more than it works: name each wait in it on a line of its own: WAIT: <case> | <kind> | <file:line> | <one-line reason>. The kind is one of: sleep, polling, timeout, lock, network, other. Give no WAIT line when it does not wait."
+TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), delete it, or stabilise it. Give the evidence for your choice: its recorded times below, what it tests, whether another test already proves the same behaviour, and why it failed in its recent failures below. A failure with the verdict card is the test doing its job: the change of that card broke what the test checks. Choose stabilise when its failures with the verdict flaky or main have a cause in the test itself: shared state, timing, order, environment or a fixture. For stabilise, name the cause of each failing case on a line of its own: CAUSE: <case> | <kind> | <one-line reason>. The kind is one of: shared state, timing, order, environment, fixture. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, $TAHOLLOWASK $TAWAITASK End your answer with one line: VERDICT: <keep | speed up | split | merge | delete | stabilise>"
 # A judge's lines `<tag>: <case> | <kind> | <reason>`, from its text: each {case, kind, reason}, or false for a line
 # that starts with the tag and does not read as a case, one of the kinds and a reason. A line may start with the marks
 # of a list, quote or emphasis, as the VERDICT line may.
@@ -47,6 +53,13 @@ tahollow() { tatagged HOLLOW "$TAHOLLOW" "$1" | jq -c '{hollow: map(objects), ho
 # verdict names; a CAUSE line that does not read is left out.
 TACAUSE='shared state|timing|order|environment|fixture'
 tacauses() { tatagged CAUSE "$TACAUSE" "$1" | jq -c '{causes: map(objects)}'; } # <text file>
+# Its WAIT lines (#189): {waits: [{case, kind, at, reason}]}, each wait of a file that waits more than it works; at
+# is the file and line of the wait. A WAIT line that does not read (no kind of TAWAIT, no file:line) is left out.
+TAWAIT='sleep|polling|timeout|lock|network|other'
+tawaits() { # <text file>
+  jq -Rnc --arg k "$TAWAIT" '{waits: [inputs | sub("^[\\s*`_>-]+"; "") | select(startswith("WAIT:"))
+    | capture("^WAIT:\\s*(?<case>.*?\\S)\\s*\\|\\s*(?<kind>" + $k + ")\\s*\\|\\s*`?(?<at>[^|\\s`]+:[0-9]+)`?\\s*\\|\\s*(?<reason>.*?[^\\s*`_])[\\s*`_]*$")]}' "$1"
+}
 # Its verdict: the word its last line that is not blank names (VERDICT: <one of TAVERDICTS>), in lower case; "no
 # verdict" when that line names none.
 taverdict() { # <text file>
@@ -228,7 +241,7 @@ tarun() { # <the record> <worktree> <prompt>
   if [ "$(jq -r .action <<<"$r")" = judge ]; then
     v=$(taverdict "$f.txt")
     hv=$(tahollow "$f.txt" 2>/dev/null) || hv='{"hollow": [], "hollowSkipped": 0}'
-    hv=$(jq -c --argjson c "$(tacauses "$f.txt" 2>/dev/null || echo '{"causes": []}')" '. + $c' <<<"$hv")
+    hv=$(jq -c --argjson c "$(tacauses "$f.txt" 2>/dev/null || echo '{"causes": []}')" --argjson w "$(tawaits "$f.txt" 2>/dev/null || echo '{"waits": []}')" '. + $c + $w' <<<"$hv")
   fi
   taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" --argjson hv "$hv" '. + {end: $t, state: $s, verdict: $v} + $hv + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"
