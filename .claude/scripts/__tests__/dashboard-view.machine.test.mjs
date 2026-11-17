@@ -388,3 +388,19 @@ test('the machine: a project\'s Needs you names its open decisions beside its is
   deliver(w, d);
   assert.match(said(section(w, 'widgetshop').querySelector('[data-list="Needs you"]')), /Needs you \(2\).*#41.*decision: Take card payments from Monday\?/);
 });
+
+// Issue 204: a card that only waits on another card holds no slot, so the Belt panel's count leaves it out as the On the
+// belt tile does, and filtered to one project it leaves out that project's own. Bug it catches: the panel counted every
+// card on the belt, so with cap 1, one card building and one waiting, the tile said 1 of 1 and the panel 2 of 1.
+test('the belt: its count leaves out the cards that only wait on another card, each project its own', () => {
+  const d = two();
+  Object.assign(d.panels.belt.data, { waiting: 1, byRepo: { sample: { cap: 3, waiting: 0 }, widgetshop: { cap: 5, waiting: 1 } } });
+  const w = boot();
+  deliver(w, d);
+  const count = () => panel(w, 'belt').querySelector('.panel-count').textContent;
+  assert.equal(count(), '2 of 8', 'three cards, one waiting: two hold a slot');
+  choose(w, act(head(w), 'project'), 'widgetshop');
+  assert.equal(count(), '1 of 5', 'widgetshop: two cards, its one waiting card left out');
+  choose(w, act(head(w), 'project'), 'sample');
+  assert.equal(count(), '1 of 3', 'sample: another project\'s waiting card is not taken off its count');
+});

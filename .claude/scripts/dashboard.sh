@@ -161,7 +161,7 @@
 #           null when the snapshot does not list them), order (the issues its record pins), rules, models ({builder, reviewer}: model and
 #           effort in force; judge: {on: false}, or {on: true, model, effort} in force, null when its record does not
 #           read), landedToday, todayUsd, todayLeftOut) and foremen (as foremen() gives them, with foremenError).
-#   belt, belt3d, queue and cost's cards also carry byRepo ({repo: the fields that are one project's}: belt's cap, queue's held,
+#   belt, belt3d, queue and cost's cards also carry byRepo ({repo: the fields that are one project's}: belt's cap and waiting, queue's held,
 #   belt3d's queue while the queue of all is unknown,
 #   cost's figures), which the
 #   page shows in their place when it is filtered to one project.
@@ -765,7 +765,7 @@ PANELS_JQ='
         decisions: $dec.decisions, decisionsError: $dec.error, retrying: $retrying}} end),
    belt: (if $R == null then {error: $cerr, data: null} else {error: null, data: {cards: [$belt[] | select((pushFailed and (. as $c | any($landed[]; .repo == $c.repo and .card == $c.card))) | not)],
         cap: ($R | slots), waiting: ($R | idle),
-        byRepo: ($R | map({key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end)}}) | from_entries)}} end),
+        byRepo: ($R | map({key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end), waiting: ([.] | idle)}}) | from_entries)}} end),
    queue: (if $R == null then {error: $cerr, data: null} else {error: null, data: (
         # held: how many open issues the Board holds (the snapshot open.held: by you, a label, a rule or a wait), the
         # count of its Held column; null when a record does not list them.

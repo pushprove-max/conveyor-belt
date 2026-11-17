@@ -122,7 +122,7 @@ q '.panels | all(.[]; has("error") and has("data"))' "every part is {error, data
 [ -z "$(find "$OUT" -maxdepth 1 \( -name '.run.*' -o -name '.data.js.*' \) | head -n 1)" ] || fail "a collect leaves no temporary file beside data.js: $(ls -A "$OUT")"
 
 # --- a host with nothing on it: every list is a measured empty list, never null ---
-q '.panels.belt == {error: null, data: {cards: [], cap: 6, waiting: 0, byRepo: {sample: {cap: 3}, widgetshop: {cap: 3}}}}' "an empty belt is an empty list, with the builder slots of both records and each record's own"
+q '.panels.belt == {error: null, data: {cards: [], cap: 6, waiting: 0, byRepo: {sample: {cap: 3, waiting: 0}, widgetshop: {cap: 3, waiting: 0}}}}' "an empty belt is an empty list, with the builder slots of both records and each record's own"
 # Its deck's slots are the head's "On the belt" figure, the Belt part's cards of its cap (issue 413: the deck read the
 # host's test-slot pool, "2/16 FREE" with 5 cards running, beside the tile's "5 of 13").
 q '.panels.belt3d == {error: null, data: {repos: ["sample", "widgetshop"], byRepo: {}, belt: [], queue: {next: [], held: [], waiting: []}, needs: [], landed: [],
@@ -513,7 +513,7 @@ q '.panels.machine.data.projects[0] | .repo == "sample" and .state == "paused" a
 q '.panels.machine.data.projects[1] | .repo == "widgetshop" and .state == null and .mode == null and .cap == 2 and .guard == null and .used == 1 and (.belt | map([.issue, .url])) == [[5, "'"$CU"'/5"]]
   and .queue == null and .held == null and .waiting == null and .order == null and .rules == null and .models == null and .todayUsd == 0.5' \
   "the other project is its own section: a list or record its snapshot does not give is null, never the first project's and never empty"
-q '.panels.belt.data | .cap == 5 and .byRepo == {sample: {cap: 3}, widgetshop: {cap: 2}}' "the belt carries each project's own cap beside the sum, for the page filtered to one project"
+q '.panels.belt.data | .cap == 5 and .byRepo == {sample: {cap: 3, waiting: 0}, widgetshop: {cap: 2, waiting: 0}}' "the belt carries each project's own cap beside the sum, for the page filtered to one project"
 q '.panels.queue.data.byRepo == {sample: {held: 2}, widgetshop: {held: 1}}' "the queue carries each project's own held count beside the sum"
 # The host file here names no Foreman group and no state folder holds a mark: each project has its own Foreman line,
 # and each says no session holds the role.
@@ -584,8 +584,8 @@ MP=$(jq -c '.paused = true | .cap = 4' <<<"$MC")
 answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waiting = 1' <<<"$C3")")" "$C_URL" 0
 run
 q '.panels.machine.data | .state == "paused" and (.projects | map(.state)) == ["paused", "running"]' "a paused machine is paused; each project's state stays its own record's"
-q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used, .panels.belt.data.waiting] == [3, [1, 2], 3, 1]' \
-  "a card that only waits on another card holds no slot in the machine's, the project's and the deck's count, and the Belt part says how many wait"
+q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used, .panels.belt.data.waiting, .panels.belt.data.byRepo.sample.waiting, .panels.belt.data.byRepo.widgetshop.waiting] == [3, [1, 2], 3, 1, 0, 1]' \
+  "a card that only waits on another card holds no slot in the machine's, the project's and the deck's count, and the Belt part says how many wait, all and each project's own (issue 204: the Belt panel filtered to a project counts against that project's)"
 q '[.panels.machine.data.cap, .panels.belt.data.cap, .panels.belt3d.data.deck.cap] == [4, 4, 4]' "a machine cap under the projects' own caps together is the slots in force, the same in every part"
 # Belt 3D's deck reads out the machine's state as the machine part has it (its LOOP readout) (issue 393): a deck that
 # said LIVE on a paused machine would lie.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// On the belt: each card being built and where it is. Its part: {cards, cap}; a card is {repo, card,
+// On the belt: each card being built and where it is. Its part: {cards, cap, waiting}; a card is {repo, card,
 // issue, title, url, parent, step, review, of, stepAt, landed, model, tokens, usd, reading, live ({turns, lastOutputAt,
 // action} | null), reviews, track, start, pickedAt, priorSec, earlier, totalSec}, as `conveyor.sh snapshot` gives its
 // belt. track is the six steps Build, Review, Fix,
@@ -70,8 +70,14 @@
     tab: 'overview',
     projects: true,  // filtered to one project, cap is that project's own (the part's byRepo)
     rows: 5,  // a card is four lines: five of them fill the panel's default length
-    // A card that has landed and waits for its push or for its issue to close holds no builder slot: it is not counted.
-    count: (d) => { const n = d.cards.filter((c) => !c.landed).length; return typeof d.cap === 'number' ? `${n} of ${d.cap}` : n; },
+    // A card that has landed and waits for its push or for its issue to close holds no builder slot, and nor does a card
+    // the loop leaves out of its count as it only waits on another card (the part's waiting): neither is counted, as
+    // the On the belt tile of the head counts them (head.js).
+    count: (d) => {
+      const all = d.cards.filter((c) => !c.landed).length;
+      const n = all - Math.min(typeof d.waiting === 'number' && d.waiting > 0 ? d.waiting : 0, all);
+      return typeof d.cap === 'number' ? `${n} of ${d.cap}` : n;
+    },
     isEmpty: (d) => d.cards.length === 0,
     empty(el, ctx) { el.append(ctx.state('empty', 'The belt is empty', 'Conveyor builds no card now.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the belt', message)); },
