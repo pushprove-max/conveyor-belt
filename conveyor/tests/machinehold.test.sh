@@ -103,6 +103,10 @@ t_machinenocontrol() {
   [ "$out" = '[{"case":"b.test: flaky","verdict":"main"}]' ] || fail "a failure with no control that could run was not main's: $out"
   [ "$(jq -c '[.reds[].cases[].case]' "$ST/mainred.json")" = '["b.test: flaky"]' ] || fail "the case did not go to main's fix card: $(cat "$ST/mainred.json" 2>&1)"
   [ ! -e "$ST/machinehold.json" ] || fail "a red main held the loop: $(cat "$ST/machinehold.json")"
+  # A schema description has no behaviour to run, so its text is checked: it said an empty test.control made every
+  # failure on main the machine's (issue 230), the opposite of the main verdict above.
+  jq -r '.properties.test.properties.control.description' "$SRC/schema/pack.schema.json" | grep -qF "Empty, or none of these runs: a failure on main is main's unless its test file passed before with the same inputs." \
+    || fail "test.control's description does not say an empty list leaves a failure on main main's"
 }
 
 # D3: b.test's input b.txt changed since its last pass and the control c.test passes beside it: main is red, as
