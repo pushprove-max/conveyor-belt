@@ -156,7 +156,8 @@ Some steps always go to you, whatever kinds are on: new engine behaviour that yo
 release that you did not ask for, and anything that `auto.reserved` holds.
 
 The Foreman's start text lists each kind that is on, with these limits. It reads the kinds from each project's pack
-on the host that runs its belt, where the Board turns them on or off. So does `conveyor.sh auto standing`. The
-commands the Foreman runs for a kind also run on that host, for that project. Each step
+on the host that runs its belt, where the Board turns them on or off. The commands the Foreman runs for a kind also
+run on that host, for that project. `conveyor.sh auto standing` is different: it reads the pack of the checkout where
+you run it, not the pack on the host. Each step
 taken under a kind goes into the ruling log with its kind (source `standing`). The Foreman then tells you about it in
 one line.
