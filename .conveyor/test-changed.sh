@@ -1147,6 +1147,13 @@ for t in "${!run[@]}"; do
   [ "$t" != conveyor/conveyor.test.sh ] || enginewhole || continue
   unset "run[$t]"; printf 'TESTRUN whole-only\t%s\n' "$t" >> "$log"
   echo "== $t: not run: whole-only (test.files.\"$t\".wholeOnly in .conveyor/project.json), the nightly whole test runs it"
+  # The whole engine left to the nightly run still runs the engine case files this change adds or changes, each
+  # whole: else a change to conveyor/tests/lib.sh with a new case ran no engine case at all, and the bug-card check
+  # read that as the new case passing without the fix (#229).
+  if [ "$t" = conveyor/conveyor.test.sh ]; then
+    own=$(for f in "${changed[@]}"; do case $f in conveyor/tests/*.test.sh) [ -f "$f" ] && sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f";; esac; done | sort -u | paste -sd' ' -)
+    [ -z "$own" ] || { cases=$own; run[conveyor/conveyor.test.sh]=1; echo "== the engine case files this change touches run whole: $own"; }
+  fi
 done
 # Each engine case file is a test file of its own (the owner, 2026-11-17; issue 214): the runner's chosen cases run as
 # the case files that hold them, each with its own cases alone (ecases), its own process, start-up, test slot and
