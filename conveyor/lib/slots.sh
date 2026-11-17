@@ -25,11 +25,12 @@
 # names only those. The cores kept for the user (slot_reserved) are left out, unless they are all the test may use.
 # Nothing where taskset is not (macOS): no worker is pinned there.
 slot_cpus() {
-  local l r x k kl a=() c=()
+  local l r x k kl a=() c=() n
   command -v taskset >/dev/null || return 0
-  l=$(taskset -cp "0-$(( $(nproc --all) - 1 ))" "$BASHPID" >/dev/null 2>&1; taskset -cp "$BASHPID" 2>/dev/null)
+  n=$(nproc --all) || n=''
+  l=$({ [ -z "$n" ] || taskset -cp "0-$((n - 1))" "$BASHPID"; } >/dev/null 2>&1; taskset -cp "$BASHPID" 2>/dev/null)
   l=${l##*: }; IFS=, read -ra r <<<"$l"
-  mapfile -t kl < <(slot_reserved); k=" ${kl[*]} "
+  mapfile -t kl < <(slot_reserved "$n"); k=" ${kl[*]} "
   for x in "${r[@]}"; do [[ $x =~ ^[0-9]+(-[0-9]+)?$ ]] || continue; for ((l = 10#${x%-*}; l <= 10#${x#*-}; l++)); do a+=("$l"); [[ $k == *" $l "* ]] || c+=("$l"); done; done
   [ ${#c[@]} -gt 0 ] || c=("${a[@]}")
   [ ${#c[@]} = 0 ] || printf '%s\n' "${c[@]}"
@@ -40,10 +41,10 @@ slot_cpus() {
 # user's terminal and apps always have free cores. A number keeps that many of the machine's highest-numbered cores; a
 # list of core numbers keeps those. One core is always left for card work: a number of every core keeps all but
 # core 0, and a list that names every core keeps all but its lowest. None where taskset is not (slot_reserve_why).
-slot_reserved() {
-  local n
+slot_reserved() { # [the machine's cores (nproc --all), when the caller has read them]
+  local n=${1:-}
   command -v taskset >/dev/null || return 0
-  n=$(nproc --all) || return 0
+  [ -n "$n" ] || n=$(nproc --all) || return 0
   jq -r --argjson n "$n" '.reserveCores
     | if type == "number" then floor | select(. > 0) | [range([$n - ., 1] | max; $n)]
       elif type == "array" then map(numbers | floor | select(. >= 0 and . < $n)) | unique | if length >= $n then .[1:] else . end
@@ -157,13 +158,22 @@ slot_wait() {
   exec {SLOT_FD}>&-; return 1
 }
 
+# True when a process holds an flock on <file>; false for a file that is not there. Its lock is tried on a descriptor
+# of this shell, so flock is the only program it starts (`flock -n <file> true` started two).
+slot_held() { # <file>
+  local fd rc=1
+  { exec {fd}<"$1"; } 2>/dev/null || return 1
+  flock -n "$fd" 2>/dev/null || rc=0
+  exec {fd}<&-; return "$rc"
+}
+
 # True when a push waits for a slot (slot_first) and this is not it: the slot just taken is given back, so the push
 # takes it ahead of every test worker that waits. A push's claim is a file of $SLOT_DIR/first that its push holds an
 # flock on; one no process holds (its push was killed) counts for nothing.
 slot_yield() {
   local f
   [ -z "${SLOT_FIRST:-}" ] || return 1
-  for f in "$SLOT_DIR"/first/[0-9]*; do [ -e "$f" ] && ! flock -n "$f" true 2>/dev/null && return 0; done
+  for f in "$SLOT_DIR"/first/[0-9]*; do slot_held "$f" && return 0; done
   return 1
 }
 
@@ -177,7 +187,7 @@ slot_first() {
   local d=$SLOT_DIR/first f cfd=''
   { mkdir -p "$d" && exec {cfd}>>"$d/.$BASHPID" && flock "$cfd" && mv -f "$d/.$BASHPID" "$d/$BASHPID"; } 2>/dev/null \
     || { [ -z "$cfd" ] || exec {cfd}>&-; rm -f "$d/.$BASHPID"; echo "conveyor: the push's claim on the next test slot could not be made in $d" >&2; return 1; }
-  for f in "$d"/[0-9]*; do [ "$f" = "$d/$BASHPID" ] || ! flock -n "$f" true 2>/dev/null || rm -f "$f"; done
+  for f in "$d"/[0-9]*; do [ "$f" = "$d/$BASHPID" ] || slot_held "$f" || rm -f "$f"; done
   until SLOT_FIRST=1 slot_try || SLOT_FIRST=1 slot_wait 0.1; do :; done
   rm -f "$d/$BASHPID"; exec {cfd}>&-
 }
@@ -193,13 +203,13 @@ slot_ask() {
   { mkdir -p "$d" && exec {SLOT_ASK}>>"$d/.$BASHPID" && flock "$SLOT_ASK" && mv -f "$d/.$BASHPID" "$d/$BASHPID"; } 2>/dev/null \
     || { [ -z "$SLOT_ASK" ] || exec {SLOT_ASK}>&-; SLOT_ASK=''; rm -f "$d/.$BASHPID"; return 1; }
   SLOT_ASKF=$d/$BASHPID
-  for f in "$d"/[0-9]*; do [ "$f" = "$SLOT_ASKF" ] || ! flock -n "$f" true 2>/dev/null || rm -f "$f"; done
+  for f in "$d"/[0-9]*; do [ "$f" = "$SLOT_ASKF" ] || slot_held "$f" || rm -f "$f"; done
 }
 slot_unask() { [ -z "${SLOT_ASK:-}" ] || { rm -f "$SLOT_ASKF"; exec {SLOT_ASK}>&-; SLOT_ASK=''; }; }
 # How many test runs of the machine ask now (slot_ask); 1 when none does.
 slot_asked() {
   local f n=0
-  for f in "$SLOT_DIR"/asks/[0-9]*; do [ -e "$f" ] && ! flock -n "$f" true 2>/dev/null && n=$((n + 1)); done
+  for f in "$SLOT_DIR"/asks/[0-9]*; do slot_held "$f" && n=$((n + 1)); done
   [ "$n" -gt 0 ] && echo "$n"
 }
 
@@ -268,7 +278,7 @@ slot_whole() {
     flock "$l"; on=0; first=1; early=''; held=1; later=''; yield=''
     for t in $(ls "$d" | grep -x '[0-9]\{1,15\}' | sort -n); do
       [ "$t" != "$n" ] || continue
-      if flock -n "$d/$t" true 2>/dev/null; then rm -f "$d/$t"; continue; fi
+      if ! slot_held "$d/$t"; then rm -f "$d/$t"; continue; fi
       s=$(cat "$d/$t" 2>/dev/null)
       if [ "$s" = on ]; then on=$((on + 1))
       elif [ "$s" = s ]; then held=$((held + 1)); if [ "$((10#$t))" -gt "$n" ]; then later=1; elif [ -n "$SLOT_HOME" ]; then first=''; fi
@@ -384,7 +394,7 @@ slot_free() { exec {SLOT_FD}>&-; }
 # How many slots of the pool are held now.
 slot_used() {
   local i n=0
-  for ((i = 1; i <= SLOT_N; i++)); do flock -n "$SLOT_DIR/$i" true 2>/dev/null || n=$((n + 1)); done
+  for ((i = 1; i <= SLOT_N; i++)); do ! slot_held "$SLOT_DIR/$i" || n=$((n + 1)); done
   echo "$n"
 }
 

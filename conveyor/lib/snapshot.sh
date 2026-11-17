@@ -329,13 +329,13 @@ checkrun() { # <scratch folder>; prints {} when the pack names no progress comma
 # taken under the lock a rewrite of the records holds (moveout), so no card is in both files or in neither, and only
 # the whole lines of the records are read (check() says why). 3 when the copy was taken and the hold could not be saved.
 snapcopy() { # [<open issues json>]
-  local rc=0 c
-  [ -z "${1:-}" ] || { c=$(ctl 2>/dev/null) && [ "$(adopted "$c" "$1" 2>/dev/null)" = "$c" ]; } || locked adopt "$1" || rc=3
+  local rc=0 c CTL_V
+  [ -z "${1:-}" ] || { ctlread 2>/dev/null && c=$CTL_V && [ "$(adopted "$c" "$1" 2>/dev/null)" = "$c" ]; } || locked adopt "$1" || rc=3
   # The copy, and what the snapshot reads of the records past their rows, are the state database's answers to one
   # call (state.py), read at one time: the pushes, the cards waiting for the owner's yes (yes), the samples and the
   # declined list.
-  ( flock 5 && stdb ask -o "$d/$(basename "$STATE")" lines cards -- -o "$d/$(basename "$RETRIED")" lines retried -- -o "$d/pushes" pushes \
-      -- -o "$d/yes" yes "$YES" "$ST" -- -o "$d/samples" samples -- -o "$d/$(basename "$DECLINED")" lines declined ) 5>>"$STATE.checked.lock" \
+  ( flock 5 && stdb ask -o "$d/${STATE##*/}" lines cards -- -o "$d/${RETRIED##*/}" lines retried -- -o "$d/pushes" pushes \
+      -- -o "$d/yes" yes "$YES" "$ST" -- -o "$d/samples" samples -- -o "$d/${DECLINED##*/}" lines declined ) 5>>"$STATE.checked.lock" \
     && { [ ! -e "$CONTROL" ] || cp -- "$CONTROL" "$d/control.json"; } && return $rc
 }
 # The rows of a records file of the copy, written to <to>, from a running summary of the file kept beside it (<kept>):
@@ -348,7 +348,9 @@ snapcopy() { # [<open issues json>]
 # every row from the whole file, on each line the loop wrote, was a fifth of a snapshot's work and grew every day.
 snaprows() { # <records file> <kept> <to>
   local k size h1 h2 o s n=-1 src=$1
-  k=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$SHUT"; } | cksum) && size=$(($(wc -c < "$1"))) || return 1
+  # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
+  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$SHUT"; } | cksum) || return 1
+  k=$SNAPROWS_K && size=$(($(wc -c < "$1"))) || return 1
   # Read from a copy: a snapshot running beside this one may put a newer summary in its place meanwhile.
   cp -- "$2" "$3.sum" 2>/dev/null || : > "$3.sum"
   { read -r h1 h2 o s && [ "$h1 $h2" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] && [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; } < "$3.sum" && n=$o
@@ -375,7 +377,9 @@ snapshot() (
   # its hold cannot be saved, the issues are not known: a new issue is never shown queued when it is not held.
   saw=$(clock) || exit 1; issues=$(openissues "$FIELDS" 2>/dev/null) || issues=''
   snapcopy "$issues"; case $? in 0) ;; 3) issues='' ;; *) echo "conveyor: cannot copy the card records" >&2; exit 1 ;; esac
-  READ=$d/$(basename "$STATE"); READ_OLD=$d/$(basename "$RETRIED"); CONTROL=$d/control.json; LIVEJSON=$(live); : "${LIVEJSON:={\}}"
+  READ=$d/${STATE##*/}; READ_OLD=$d/${RETRIED##*/}; CONTROL=$d/control.json; LIVEJSON=$(live); : "${LIVEJSON:={\}}"
+  # The control record read once, in this shell: the readers below (health's among them) find it kept (ctlread).
+  if ctlread 2>/dev/null; then control=$CTL_V; else control=null; fi
   # A plain assignment inside the subshell, never a prefix on the call: a prefix would put the whole issue list in the
   # environment of every command health runs, and past the kernel limit each one fails with "Argument list too long".
   h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" && snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
@@ -384,7 +388,7 @@ snapshot() (
   # too, as github() does for the feed, when the host's report is missing or CLI_TTL old; else a host the loop has
   # never run on offers each CLI with no models.
   [ -n "$GITHUB" ] || hostclis due >/dev/null 2>&1 || :
-  models=$(jq -c .models <<<"$h"); control=$(ctl 2>/dev/null) || control=null; settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
+  models=$(jq -c .models <<<"$h"); settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
   # A main-red fix card is titled from its entry as it is now (redtitles()), so a case added while it runs shows.
   jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '{cards: (map($live[.card] as $v
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
@@ -435,7 +439,7 @@ snapshot() (
   fi
   cr=$(checkrun "$d")
   # The machine's test-slot pool (lib/slots.sh): how many of its slots a test run holds now, of how many.
-  ts=$(slot_pool >/dev/null 2>&1 && jq -cn --argjson u "$(slot_used)" --argjson n "$SLOT_N" '{used: $u, of: $n}' 2>/dev/null) && [ -n "$ts" ] || ts=null
+  ts=$(slot_pool >/dev/null 2>&1 && printf '{"used":%d,"of":%d}' "$(slot_used)" "$SLOT_N" 2>/dev/null) && [ -n "$ts" ] || ts=null
   # The readings of the account the next card will use.
   stdb ask -o "$d/limit" limit "$ACCT" 2>/dev/null || : > "$d/limit"
   # The reading of each account the guard reads for the record, as the guard acts on it (guardaccts).
@@ -771,7 +775,7 @@ snapshot() (
         | (if $r == null then null else $r.value | numbered end) as $n | . + {round: (if $n == null then null else $r.key + 1 end), findings: $n} else . end)
     | sort_by(.time) | reverse
     | def shown: .dismissed == null and .built == null and ((.time | fromdate?) // 0) >= $now - 7 * 86400;
-    {shown: map(select(shown)), rest: map(select(shown | not))}' "$d/$(basename "$DECLINED")" > "$d/declined" 2>/dev/null && [ -s "$d/declined" ] || echo '{"shown":[],"rest":[]}' > "$d/declined"
+    {shown: map(select(shown)), rest: map(select(shown | not))}' "$d/${DECLINED##*/}" > "$d/declined" 2>/dev/null && [ -s "$d/declined" ] || echo '{"shown":[],"rest":[]}' > "$d/declined"
   # testActions: the Tests seat (the control record's tests, null when none is set), the time limit of an action and
   # the actions' records it lists, running and kept, newest first (testacts(), lib/testaction.sh). tests: the test files'
   # figures, settings and totals (testspart(), lib/testfiles.sh), null when the pack cannot be read.
@@ -803,7 +807,8 @@ snapshot() (
 lanekeys() {
   local l p q b f
   l=$(lanepath 2>/dev/null && cd "$LANE" 2>/dev/null && pwd -P)
-  git -C "$MAIN" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r p; do
+  git -C "$MAIN" worktree list --porcelain 2>/dev/null | while IFS= read -r p; do
+    [[ $p == 'worktree '* ]] && p=${p#worktree } || continue
     q=$(cd "$p" 2>/dev/null && pwd -P) && [ "$q" != "$MAIN" ] || continue
     { [ -n "$l" ] && [ "$q" = "$l" ]; } || [ "$(git -C "$p" config --worktree --get protocol.allow 2>/dev/null)" = never ] || continue
     f=$(git -C "$p" log --reverse --format=%s "refs/heads/$BRANCH..HEAD" 2>/dev/null | head -n 1); [ -n "$f" ] || continue

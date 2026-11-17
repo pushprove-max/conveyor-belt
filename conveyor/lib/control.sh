@@ -17,10 +17,10 @@
 # or in rules (one a newer copy added, while a card runs on the older copy in its worktree), is passed through
 # unchecked, so a control action keeps it when it writes the record. Anything else is not a record: the reason on
 # stderr and exit 1.
-# The file is read at every use; what this check made of it is kept, keyed on the file and its exact text (CTL_K), so
-# the same text is not checked again and any other is; a record that fails is never kept. A read in a subshell keeps
-# nothing: ctlread sets CTL_V in the shell that calls it, and a subshell started after it finds what it kept. A file
-# with a NUL byte is checked as before and not kept (a bash variable cannot hold it).
+# The file is read at every use; what this check made of it is kept, keyed on its exact text (CTL_K), so the same
+# text, a copy's too (the snapshot's), is not checked again and any other is; a record that fails is never kept. A
+# read in a subshell keeps nothing: ctlread sets CTL_V in the shell that calls it, and a subshell started after it
+# finds what it kept. A file with a NUL byte is checked as before and not kept (a bash variable cannot hold it).
 CTL_K=()
 # The record when there is no file, and each key's default where a record leaves the key out: control-defaults.json
 # beside this file, one key a line, read here into CTL0 (compact). A new key is a new line there; ctlcheck gives it to
@@ -43,8 +43,8 @@ ctlread() { # sets CTL_V to the control record, as ctl prints it
   [ -n "$CTL0" ] || { echo "conveyor: the control record's defaults, $HERE/lib/control-defaults.json, cannot be read" >&2; return 1; }
   [ -s "$CONTROL" ] || { CTL_V=$CTL0; return; }
   { IFS= read -r -d '' t; a=$?; } 2>/dev/null <"$CONTROL"
-  [ "$a" = 1 ] && [ "${#CTL_K[@]}" = 3 ] && [ "${CTL_K[0]}" = "$CONTROL" ] && [ "${CTL_K[1]}" = "$t" ] && { CTL_V=${CTL_K[2]}; return 0; }
-  if [ "$a" = 1 ]; then CTL_V=$(ctlcheck <<<"$t") && CTL_K=("$CONTROL" "$t" "$CTL_V"); else CTL_V=$(ctlcheck "$CONTROL"); fi \
+  [ "$a" = 1 ] && [ "${#CTL_K[@]}" = 2 ] && [ "${CTL_K[0]}" = "$t" ] && { CTL_V=${CTL_K[1]}; return 0; }
+  if [ "$a" = 1 ]; then CTL_V=$(ctlcheck <<<"$t") && CTL_K=("$t" "$CTL_V"); else CTL_V=$(ctlcheck "$CONTROL"); fi \
     || { echo "conveyor: $(notwhole)" >&2; return 1; }
 }
 ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit non-zero

@@ -211,13 +211,16 @@ homes() { # <control record>
      {"control.cap": (if $c.cap != null then {value: $c.cap, home: "control record"} else {value: $d, home: "seed"} end),
       "control.model": seat("builder"; $b), "control.reviewer": seat("reviewer"; $r)}] | add' <<<"$a"
 }
+# With no file to read, each is {} with no jq started.
 live() { # every live record there is, as one object by card
-  local f
-  for f in "$CARDS"/*.live; do [ ! -e "$f" ] || jq -c --arg c "$(basename "$f" .live)" '{($c): .}' "$f" 2>/dev/null; done | jq -cs 'add // {}'
+  local f c o=''
+  for f in "$CARDS"/*.live; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.live}" '{($c): .}' "$f" 2>/dev/null)$'\n'; done
+  if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
 }
 aways() { # each card that gave way (giveway()): {to: the issue it gave way to, fixing: for the fix of its failed tests}, as one object by card
-  local f
-  for f in "$CARDS"/*.claim; do [ ! -e "$f" ] || jq -c --arg c "$(basename "$f" .claim)" 'select(.away == true and (.to | type) == "number") | {($c): {to, fixing: (.fixing == true)}}' "$f" 2>/dev/null; done | jq -cs 'add // {}'
+  local f c o=''
+  for f in "$CARDS"/*.claim; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.claim}" 'select(.away == true and (.to | type) == "number") | {($c): {to, fixing: (.fixing == true)}}' "$f" 2>/dev/null)$'\n'; done
+  if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
 }
 # cycles: every set of open issues that depend on each other, lowest number first in each; those issues are
 # never picked, nor is any issue that waits on one of them. null when gh did not list the open issues.

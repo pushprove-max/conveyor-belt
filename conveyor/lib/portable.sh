@@ -9,6 +9,11 @@
 # `date -d`, `stat -c` or `find -newermt` directly.
 # This file must parse in macOS's bash 3.2, so that require_bash can say what is wrong.
 
+# True on macOS: the system's name (uname -s), asked once in each shell that sources this file and kept (P_OS) for
+# every later call, a subshell's included.
+P_OS=''
+p_darwin() { [ -n "$P_OS" ] || P_OS=$(uname -s); [ "$P_OS" = Darwin ]; }
+
 # 0 when this bash is <major>.<minor> or newer.
 p_bashok() { # <major.minor>
   local maj=${1%%.*} min=${1#*.}
@@ -42,7 +47,7 @@ p_brewprefix() {
 # exported; once only, so a nested call leaves PATH as it is. Elsewhere, nothing.
 p_path() {
   local pre d dirs=''
-  [ "$(uname -s)" = Darwin ] || return 0
+  p_darwin || return 0
   pre=$(p_brewprefix)
   for d in coreutils findutils gnu-sed grep; do [ ! -d "$pre/opt/$d/libexec/gnubin" ] || dirs=$dirs:$pre/opt/$d/libexec/gnubin; done
   [ ! -d "$pre/opt/openssl@3/bin" ] || dirs=$dirs:$pre/opt/openssl@3/bin
@@ -54,7 +59,7 @@ p_path() {
 # flock everywhere; on macOS the GNU tools first on PATH (p_path). Exits with what is missing.
 p_tools() {
   local miss='' pre pkg
-  if [ "$(uname -s)" = Darwin ]; then
+  if p_darwin; then
     p_path; pre=$(p_brewprefix)
     for pkg in coreutils:timeout coreutils:date coreutils:stat findutils:find gnu-sed:sed grep:grep; do
       [ -x "$pre/opt/${pkg%%:*}/libexec/gnubin/${pkg#*:}" ] || miss="$miss g${pkg#*:}"
@@ -68,13 +73,13 @@ p_tools() {
 
 # The 1-minute load average.
 p_load() {
-  if [ "$(uname -s)" = Darwin ]; then sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}'
-  else cut -d' ' -f1 /proc/loadavg 2>/dev/null; fi
+  if p_darwin; then sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}'
+  else local l; { read -r l _ < /proc/loadavg && printf '%s\n' "$l"; } 2>/dev/null; fi
 }
 
 # "<used KiB> <total KiB>"; used is what is not available (macOS: free, inactive and speculative pages are available).
 p_mem() {
-  if [ "$(uname -s)" = Darwin ]; then
+  if p_darwin; then
     { sysctl -n hw.memsize; vm_stat; } 2>/dev/null | awk 'NR == 1 {t = $1 / 1024; next} /page size of/ {p = $8}
       /^Pages (free|inactive|speculative):/ {gsub(/\./, "", $NF); a += $NF} END {if (t && p) printf "%d %d", t - a * p / 1024, t}'
   else awk '/^MemTotal:/ {t = $2} /^MemAvailable:/ {a = $2} END {if (t) printf "%d %d", t - a, t}' /proc/meminfo 2>/dev/null; fi
@@ -105,7 +110,7 @@ p_alive() { [ -n "$2" ] && [ "$(p_started "$1")" = "$2" ] && [[ $(ps -o stat= -p
 # Runs <command> as the leader of a session of its own (no controlling terminal, a process group of its own) and
 # exits as it does: setsid on Linux; macOS has no setsid command, so perl's POSIX::setsid there.
 p_setsid() { # <command> [args]
-  if [ "$(uname -s)" = Darwin ]; then perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "$ARGV[0]: $!\n"' "$@"; else setsid -w "$@"; fi
+  if p_darwin; then perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "$ARGV[0]: $!\n"' "$@"; else setsid -w "$@"; fi
 }
 
 # Every process, one line each: "<pid> <its parent's pid> <its command line>".
@@ -113,11 +118,11 @@ p_procs() { ps -A -ww -o pid=,ppid=,args= 2>/dev/null; }
 
 # <pid>'s arguments, each one ended by a NUL byte, where the system gives them apart: Linux. Nothing on macOS, where ps
 # gives only the line p_procs has, an argument with a space in it reading as two.
-p_argv() { [ "$(uname -s)" = Darwin ] || cat "/proc/$1/cmdline" 2>/dev/null; } # <pid>
+p_argv() { p_darwin || cat "/proc/$1/cmdline" 2>/dev/null; } # <pid>
 
 # The folder <pid> runs in.
 p_cwd() { # <pid>
-  if [ "$(uname -s)" = Darwin ]; then lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'
+  if p_darwin; then lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'
   else readlink "/proc/$1/cwd" 2>/dev/null; fi
 }
 
@@ -125,7 +130,7 @@ p_cwd() { # <pid>
 # cannot be read: the process is gone, or another user's.
 p_env() { # <pid> <name>
   local s
-  if [ "$(uname -s)" = Darwin ]; then
+  if p_darwin; then
     s=$(ps -E -ww -o command= -p "$1" 2>/dev/null) && [ -n "$s" ] || return 1
     printf '%s\n' "$s" | sed -n "s/.* $2=//p" | sed 's/ [A-Za-z_][A-Za-z0-9_]*=.*//'
   else
