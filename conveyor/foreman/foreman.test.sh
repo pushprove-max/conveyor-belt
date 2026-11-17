@@ -484,6 +484,19 @@ jq -cn '{type: "user", uuid: "u8", message: {content: "watch"}}, {type: "assista
   {type: "assistant", message: {content: [{type: "text", text: "#12 landed successfully."}]}}' > "$T/t.jsonl"
 out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t}' | bash "$SRC/stop.sh" reply)
 jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a report replying to a meta wake passed: $out"
+# Bug (#243): the owner typed a request during a turn that began with a wake, and the report answering it was refused
+# as a wake reply, so the Foreman wrote it twice. A message the owner types mid-turn (a queued_command entry of human
+# origin) makes the reply an answer to the owner; a task notification queued mid-turn does not.
+midturn() { # <uuid> <origin kind>
+  jq -cn --arg u "$1" --arg k "$2" '{type: "user", uuid: $u, isMeta: true, message: {content: "Stop hook feedback: Conveyor: alpha: blocked: #7"}},
+    {type: "assistant", message: {content: [{type: "tool_use", name: "Bash"}]}},
+    {type: "attachment", attachment: {type: "queued_command", prompt: "file the bugs you found", origin: {kind: $k}}},
+    {type: "user", message: {content: [{type: "tool_result", content: "ok"}]}},
+    {type: "assistant", message: {content: [{type: "text", text: "Filed #31 and #32 in the conveyor-belt repo."}]}}' > "$T/t.jsonl"
+  jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t}' | bash "$SRC/stop.sh" reply
+}
+out=$(midturn u14 human); [ -z "$out" ] || fail "the reply to the owner's mid-turn request was judged as a wake reply: $out"
+out=$(midturn u15 task-notification); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a report replying to a wake passed after a task notification: $out"
 # Other meta entries still do not open a turn.
 jq -cn '{type: "user", uuid: "u9", message: {content: "what now"}}, {type: "user", uuid: "u9m", isMeta: true, message: {content: "Caveat: example"}},
   {type: "assistant", message: {content: [{type: "text", text: "Should I file #9?"}]}}' > "$T/t.jsonl"
