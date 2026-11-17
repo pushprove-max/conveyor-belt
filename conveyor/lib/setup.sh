@@ -203,6 +203,7 @@ setup() { # as SETUP_USAGE
   # Yes runs the whole suite under coverage now and writes the map, saying what it mapped and how long it took; a run
   # that fails says so, and the cards' tests are found by name. No writes test.map off, so it is not asked again.
   [ -z "$tmw" ] || echo "conveyor: no test map: $tmw; a card's tests are found by name"
+  filehint
   if [ "$tma" = yes ] && [ -n "$tmt" ]; then mapbuild "$MAIN" || :
   elif [ "$tma" = no ] && ! jq -e '.test.map' "$PACK" >/dev/null 2>&1; then
     jq '.test.map = "off"' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
@@ -728,6 +729,22 @@ doctordeps() {
 # or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code or a Board not running. Exit 1 when anything is missing,
 # but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
 # which says how to get a newer one. The project's checks need jq and git; without either they are named as not checked.
+# Setup's suggestion of a test.fileCommand, while the pack sets none and the project's test files run alone as plain
+# scripts (fileguess()): a bug card's check then runs each of its test files alone, never test.command's whole suite.
+filehint() {
+  local fc g
+  packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] && g=$(fileguess "$MAIN") && [ -n "$g" ] || return 0
+  echo "conveyor: the test files run alone as plain scripts (\`$g <file>\`); set test.fileCommand to \"$g\" in .conveyor/project.json, so a bug card's check runs each of its test files alone"
+}
+# Doctor's warning of a test command that runs test files it is not given (WIDE, widewhy()): the newest bugproof line
+# with result wide, while the pack sets no test.fileCommand and its test.command is still the one that line names.
+widewarn() {
+  local fc c e
+  packget test.fileCommand fc test.command c 2>/dev/null && [ -z "$fc" ] || return 0
+  e=$(stdb ask lines cards 2>/dev/null | jq -rRn --arg c "$c" '[inputs | fromjson? | objects | select(.step == "bugproof" and .result == "wide")] | last
+    | select(. != null and .wide.command == $c) | "\(.wide.given) \(.wide.ran)"' 2>/dev/null) && [ -n "$e" ] || return 0
+  echo "warning: $(widewhy "${e% *}" "${e#* }" "$MAIN")"
+}
 doctor() {
   local bad=0 p e t c h f
   ok() { echo "ok: $1"; }; no() { echo "missing: $1; fix: $2"; bad=1; }
@@ -930,6 +947,7 @@ doctor() {
   e=$(stdb ask lines cards 2>/dev/null | jq -s "$UNTIMED"' untimed' 2>/dev/null) || e=0
   t=$(jq -r '.test.report | objects | select(.format == null and .option) | "; the test command runs \(.runner), whose report option \(.option) would give them"' "$PACK" 2>/dev/null) || t=''
   [[ ! $e =~ ^[1-9][0-9]*$ ]] || echo "warning: the last $e card test run$([ "$e" = 1 ] || echo s) recorded no test times: the test command prints no \`TESTRUN sec\` lines; conveyor/README.md, The CPU budget of a test file, says how to add them$t"
+  widewarn
   if packget privacy.mode e && [ "$e" = public ]; then
     if t=$(termsfile); then ok "the terms file $t"
     elif termsnamed; then no "a readable terms file (the host file $HOST names one, or does not read, and the pack's privacy.mode is public)" "make the file it names readable, or take \"terms\" out of $HOST"

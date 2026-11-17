@@ -45,6 +45,17 @@ testdone() { # <worktree>; prints {done, failed}
   ok=$(find "$1.testlog/cases/ok" -maxdepth 1 -type f 2>/dev/null | wc -l); bad=$(find "$1.testlog/cases/failed" -maxdepth 1 -type f 2>/dev/null | wc -l)
   printf '{"done":%d,"failed":%d}\n' $((ok + bad)) $((bad))
 }
+# The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote.
+testprogress() { # <output file> [log...]
+  local f=$1; shift
+  cat "$f" "$@" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk -v own="$(wc -l < "$f" 2>/dev/null || echo 0)" -v logs="$#" '
+    /^test-changed: [0-9]+ web test file\(s\) selected/ { of += $2; seen = 1; next }
+    NR <= own && logs > 0 { next }
+    /^-- (ok|FAIL) / || /^ (✓|❯|×|↓) [^ ]+ \([0-9]+ tests?[ |)]/ { run++ }
+    /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); of += $1; seen = 1 }
+    /^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); cof += $1; cseen = 1 }
+    END { printf "{\"run\":%d,\"of\":%s,\"cases\":%s}\n", run, (seen ? of + 0 : "null"), (cseen ? cof + 0 : "null") }'
+}
 
 # Waits for a running step and keeps its live record (README.md) while it runs; returns the step's exit. Only
 # the whole lines the output file has gained since the last look are read, so a long session costs no more each
@@ -111,13 +122,7 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       # A case that began or ended (its runner's cases folder) is progress, though nothing was printed.
       [ "$cs $dn" = "${size#* }" ] || st=$(jq -c '.progress = (now | todate)' <<<"$st")
       size="${now% *} $cs $dn"
-      new=$(cat "$f" "${logs[@]}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk -v own="$(wc -l < "$f")" -v logs="${#logs[@]}" '
-          /^test-changed: [0-9]+ web test file\(s\) selected/ { of += $2; seen = 1; next }
-          NR <= own && logs > 0 { next }
-          /^-- (ok|FAIL) / || /^ (✓|❯|×|↓) [^ ]+ \([0-9]+ tests?[ |)]/ { run++ }
-          /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); of += $1; seen = 1 }
-          /^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); cof += $1; cseen = 1 }
-          END { printf "{\"run\":%d,\"of\":%s,\"cases\":%s}\n", run, (seen ? of + 0 : "null"), (cseen ? cof + 0 : "null") }' \
+      new=$(testprogress "$f" "${logs[@]}" \
         | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: {run, of},
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"

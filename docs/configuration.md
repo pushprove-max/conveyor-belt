@@ -84,6 +84,12 @@ is blocked with the reason `no test file found in the change (patterns: <list>)`
 the test files that it gets, the card is blocked, and the reason says so. Correct `tests.patterns` or
 `test.fileCommand`, then retry the card.
 
+Some test commands run every test file, whatever files they get. For a bug card, such a command runs the full suite
+on main's code, not only the card's test files. When the command runs far more test files than it gets, the check
+result that the review sees says so, and `conveyor.sh doctor` shows a `warning:` line. Both tell you to set
+`test.fileCommand`. When your test files run alone as plain scripts, for example `node <file>`, they name the value
+to use. Setup also suggests that value when the pack has no `test.fileCommand`.
+
 Setup suggests patterns when the default misses your test files ([Setup](setup.md#setup)). `conveyor.sh doctor`
 shows a `missing:` line when the patterns match no tracked file, or when they miss test files that your test command
 names.

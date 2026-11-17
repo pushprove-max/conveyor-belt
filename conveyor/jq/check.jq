@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -17,8 +17,11 @@ def ok: . as $r | (keys - known) == need
         and all(need[]; . as $k | $r | needok($k))
         # A bugproof line: the bug-card check was skipped (bugproof()), its reason saying why; or a speed-up card's check
         # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof(), optproof()), and the fix
-        # it made with the test files it added or changed (a line written before the fix was recorded has neither).
-        and (.step != "bugproof" or (.result == "skipped" and .speed == null) or ((.result | IN("ok", "fail"))
+        # it made with the test files it added or changed (a line written before the fix was recorded has neither); or
+        # test.command, given the check's test files, ran far more (wide: {given, ran, command}).
+        and (.wide == null or (.step == "bugproof" and .result == "wide" and (.wide | type == "object" and keys == ["command", "given", "ran"]
+          and (.command | type == "string") and ([.given, .ran] | all(type == "number")))))
+        and (.step != "bugproof" or (.result == "skipped" and .speed == null) or (.result == "wide" and .speed == null and .wide != null) or ((.result | IN("ok", "fail"))
           and (.speed | type == "object" and (.file | type == "string") and ([.before, .after] | all(. == null or type == "number"))
             and (keys == ["after", "before", "file"] or (keys == ["after", "before", "file", "fix", "into"]
               and (.fix | IN("sped up", "split", "merged", "deleted")) and (.into | type == "array" and all(.[]; type == "string")))))))

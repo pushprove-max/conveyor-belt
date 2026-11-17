@@ -434,6 +434,9 @@ NOTEST='no test file found in the change (patterns: <patterns>); set tests.patte
 SHARED='the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTALONE='test files were found in the change, but the test command, given them, selected none of them, so they did not run without the fix; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
+# What the check's result and doctor say of a test command that, given <n> test files, ran <ran> (widewhy(), lib/issues.sh).
+# shellcheck disable=SC2034 # used in lib/issues.sh
+WIDE='the test command, given <n> test file(s), ran <ran> test files: it runs test files it is not given, so the bug-card check runs all of them; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTBACK='main'"'"'s code could not be put back, so the test files did not run without the fix'
 # shellcheck disable=SC2034 # used in lib/card.sh

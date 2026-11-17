@@ -814,7 +814,9 @@ cleanrun() { # <worktree> <command> [<list>]
 # which card() gives the build session and the block: "the new tests pass without the fix" (UNFIXED) only when its
 # test files ran without the fix; with none found it names the patterns (NOTEST). Test files the command, given them,
 # selected none of (its run ended "nothing selected") could not be run alone: the check fails with exit 2 and says
-# so (NOTALONE), as a build session cannot change the pack. A failed run on main
+# so (NOTALONE), as a build session cannot change the pack. Test files test.command, given them, ran with far more
+# test files (widerun()) are named in the result (WIDE), and the card gets a bugproof line (result wide) that doctor
+# reads; the check goes on as before. A failed run on main
 # that gave no result for one of those files (noresult(): no pass and no fail of it) proves nothing either way: it runs
 # once more, and when that run gives none either, the result's first line is "the proof run on main gave no result for
 # <file>: <the run's last lines>" and the check fails with exit 2 (the card is blocked, as a build session cannot
@@ -842,6 +844,14 @@ filecmd() { # <the pack's test.fileCommand>
     "  if CONVEYOR_TEST_FILE=\$f bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null; then echo \"-- ok \$f\" | tee -a \"\$l\"; else echo \"-- FAIL \$f\" | tee -a \"\$l\"; r=1; fi" \
     'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"' \
     'echo "TESTRUN files=$n" >> "$l"; exit $r'
+}
+# The test files a run of the bug-card check in <worktree> ran (testprogress(): its live record's files.run), when that
+# is far more than the <n> test files it was given: over ten for each. Nothing when it ran no more.
+widerun() { # <worktree> <n>
+  local logs=() r
+  mapfile -t logs < <(testlogs "$1")
+  r=$(testprogress "$1.test" "${logs[@]}" | jq -r .run) && [[ $r =~ ^[0-9]+$ ]] || return 0
+  [ "$r" -le $(($2 * 10)) ] || echo "$r"
 }
 # One run of the bug-card check with the pack's command <field>, in <worktree>: given files, it runs them alone, each a
 # `fail` line of the run's list (CONVEYOR_TEST_RERUN); given none, the command selects the staged change's tests.
@@ -933,7 +943,7 @@ inlinesplit() { # <worktree> <path> <kind json>
   rm -rf "$d"; return $rc
 }
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh=''
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh='' wide='' wc
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -987,6 +997,13 @@ bugproof() { # <card> <worktree> <issue json>
       # A run given the files that selected none of them did not run them: it is no run without the fix, and the
       # reason is the result's first line, as the block (card()) shows it.
       [ "$rc" != 0 ] || [ "$(testrec "$mwt" "$rc" 0 | jq -r .ended)" != 'nothing selected' ] || { alone=1; BUGWHY=$NOTALONE; }
+      # Given the test files, test.command ran far more (widerun()): the result names it, and the card's bugproof line
+      # (result wide) is what doctor warns of while the pack's test.command is still that one.
+      if [ "$fld" = test.command ] && wide=$(widerun "$mwt" ${#fs[@]}) && [ -n "$wide" ]; then
+        packget test.command wc 2>/dev/null || wc=''
+        record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof wide "$(jq -cn --argjson n ${#fs[@]} --argjson r "$wide" --arg c "$wc" '{wide: {given: $n, ran: $r, command: $c}}')"
+        wide=$(widewhy ${#fs[@]} "$wide" "$2")
+      fi
       { [ -z "$nr" ] || printf 'the proof run on main gave no result for %s: %s\n' "$nr" \
           "$(tail -n 5 "$mwt.test" 2>/dev/null | tr -d '\000\r' | sed 's/\x1b\[[0-9;]*m//g' | awk 'NF { sub(/^[ \t]+/, ""); s = s (s == "" ? "" : " / ") $0 } END { print substr(s, 1, 300) }')"
         [ -z "$alone" ] || printf '%s\n' "$NOTALONE"
@@ -997,6 +1014,7 @@ bugproof() { # <card> <worktree> <issue json>
         elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."
         elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
         else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; fi
+        [ -z "$wide" ] || printf '%s.\n' "${wide^}"
         echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
     fi
     # Does the change select any test of its own? Asked only when its test files proved nothing and selected nothing

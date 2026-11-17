@@ -945,7 +945,12 @@ reason), and the check runs again; when it still does not hold, the card is bloc
 When the change adds or changes no test file, the reason is "no test file found in the change (patterns: <the
 patterns>); set tests.patterns in .conveyor/project.json" in its place. When the command, given the test files,
 selects none of them, they did not run: the card is blocked with a reason that says so and names `test.fileCommand`,
-with no second build session and no review. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
+with no second build session and no review. When the command, given the test files, runs far more test files (more
+than ten for each file it gets, as the live record's `files.run` counts them), the check's result says so and names
+the fix: set `test.fileCommand`, with `node`, `bash` or `python3` when every test file runs alone as such a plain
+script. The card also gets a `bugproof` line (result `wide`) with `wide: {given, ran, command}`. `doctor` prints a
+`warning:` line from the newest such line while the pack sets no `test.fileCommand` and its `test.command` is that
+command. Setup prints the same value as a suggestion when the pack has no `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
 file that failed (a runner that stops the run with no test failing proves nothing). A failed run whose logs give no
 result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
 that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:

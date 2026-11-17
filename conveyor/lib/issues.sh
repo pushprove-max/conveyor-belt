@@ -312,6 +312,51 @@ testpaths() { # [-v] [-z]
   [ -n "${TESTRX:-}" ] || names || { cat > /dev/null; return 1; }
   grep -E "$@" -e "$TESTRX" || :
 }
+# The JavaScript files <file>... load, each ended by a NUL: each <file>, with the local modules it imports (also by a
+# dynamic import(), as `await import('./x.mjs')`) or requires by a relative path (./ or ../; with no extension, the
+# .js, .mjs or .cjs file of that name), and theirs in turn, each once. A <file> is a path with a /.
+jsloads() { # <file>...
+  local f m p e q=("$@"); local -A seen=()
+  while [ ${#q[@]} != 0 ]; do
+    f=${q[0]}; q=("${q[@]:1}")
+    [ -z "${seen[$f]:-}" ] || continue
+    seen[$f]=1; printf '%s\0' "$f"
+    while IFS= read -r m; do
+      p=$(cd "${f%/*}/${m%/*}" 2>/dev/null && pwd -P) || continue
+      for e in '' .js .mjs .cjs; do [ ! -f "$p/${m##*/}$e" ] || { q+=("$p/${m##*/}$e"); break; }; done
+    done < <(grep -oE "(from|import[[:space:]]*\(?|require[[:space:]]*\()[[:space:]]*['\"]\.\.?/[^'\"]+['\"]" -- "$f" 2>/dev/null | sed -E "s/^[^'\"]*['\"]//; s/['\"]$//")
+  done
+}
+# The test.fileCommand that fits the test files tracked in <checkout> (testpaths()) when each runs alone as a plain
+# script: node when every one is JavaScript (.js, .cjs, .mjs) that loads node:test or assert and names no other test
+# runner (vitest, jest, mocha), itself or through the local modules it loads (jsloads()), as a test file that takes its
+# cases from a shared helper does; bash when every one is a shell script whose first line runs bash; python3 when every
+# one is Python that runs itself (an `if __name__ == "__main__":` line). Nothing for any other mix, or for no test file.
+fileguess() { # <checkout>
+  local fs=() k f l=()
+  mapfile -d '' -t fs < <(git -C "$1" -c core.quotePath=false ls-files -z 2>/dev/null | testpaths -z)
+  [ ${#fs[@]} != 0 ] || return 0
+  k=$(printf '%s\n' "${fs[@]}" | sed -E 's/.*\.[cm]?js$/node/; s/.*\.(sh|bash)$/bash/; s/.*\.py$/python3/; /^(node|bash|python3)$/!s/.*/-/' | sort -u)
+  # Each check finds the files that fail it: the guess holds when none does. A file that cannot be read fails it.
+  case $k in
+    # Each test file with the local modules it loads: one of them loads node:test or assert, and none names another runner.
+    node) for f in "${fs[@]}"; do
+            mapfile -d '' -t l < <(jsloads "$1/$f")
+            grep -qE "node:test|node:assert|['\"]assert(/strict)?['\"]" -- "${l[@]}" 2>/dev/null \
+              && ! grep -qE "['\"](vitest|jest|@jest/globals|mocha)['\"]" -- "${l[@]}" 2>/dev/null || return 0
+          done ;;
+    bash) [ -z "$(cd "$1" && printf '%s\0' "${fs[@]}" | xargs -0 awk 'FNR == 1 && !/^#!.*bash/ { print FILENAME } { nextfile }' 2>&1)" ] ;;
+    python3) [ -z "$(cd "$1" && printf '%s\0' "${fs[@]}" | xargs -0 grep -LE "^if __name__ == ['\"]__main__['\"]:" -- 2>&1)" ] ;;
+    *) false ;;
+  esac && echo "$k"
+}
+# The reason a test command that, given <n> test files, ran <ran> (WIDE) is named: with the test.fileCommand that fits
+# the test files of <checkout> when they run alone as plain scripts (fileguess()).
+widewhy() { # <n> <ran> <checkout>
+  local w=${WIDE//'<n>'/"$1"} g
+  g=$(fileguess "$3") || g=''
+  printf '%s%s\n' "${w//'<ran>'/"$2"}" "${g:+, such as \"$g\", as the test files run alone as plain scripts (\`$g <file>\`)}"
+}
 # The runner a test command starts, and how it takes a list of test files, as one line `<mode> <runner>`: args for a
 # runner that takes test files as arguments (node --test, vitest, jest, mocha, pytest, rspec), runner for one that
 # takes packages or test targets, not files (go test, cargo test: runnercmd(), lib/testrun.sh); `named <runner> <word>` when the command already names what an
