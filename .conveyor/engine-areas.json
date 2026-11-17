@@ -657,6 +657,7 @@
 {"area": "cmd-full-test", "test": "crossreuse.test.sh"}
 {"area": "cmd-release-prep", "file": "conveyor/commands/release-prep.sh"}
 {"area": "cmd-release-prep", "test": "release.test.sh"}
+{"area": "cmd-release-prep", "test": "caselocks.test.sh"}
 {"area": "cmd-release-prep", "test": "releaserun.test.sh"}
 {"area": "cmd-release-prep", "test": "releaseboard.test.sh"}
 {"area": "cmd-release-prep", "test": "releasestop.test.sh"}

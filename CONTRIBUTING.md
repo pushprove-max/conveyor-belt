@@ -66,6 +66,10 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   `conveyor/tests/` (no case file over 600 lines), and a new engine source file in one area of
   `.conveyor/engine-areas.json` that names its case files: `test-changed.sh --check` fails for a file under
   `conveyor/lib/` in an area whose tests are `"all"` with no `why`, and for a case file no area lists.
+- A case uses no lock or folder that other cards share: cards test side by side on one machine, so a shared release
+  lock or cards folder makes one card's case fail another's. Its engine calls name its own main under `$T/$CASE` and
+  its own cards folder (`loop`, or `CONVEYOR_CARDS=$T/$CASE/cards`); `conveyor/tests/lib.sh` unsets the
+  `CONVEYOR_CARDS` and `CONVEYOR_MAIN` the run starts with.
 - `/units` (`hooks/units.tsx`): `claude plugin test .` and `claude plugin validate .` in the plugin's checkout, and
   `bash hooks/units-fetch.test.sh` for its fetch. A card's test step runs the mod's test files (`hooks/*.test.tsx`)
   through `claude plugin test`, with one `-- ok` or `-- FAIL` line a file.

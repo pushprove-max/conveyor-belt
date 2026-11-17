@@ -20,9 +20,11 @@ export CONVEYOR_TEST_POOL=$SLOT_N:$SLOT_DIR
 # yes" off, t_branchvisible's card landed).
 # CONVEYOR_MAIN and CONVEYOR_FOREMAN_DIR (the Foreman's launcher sets them) and CLAUDE_PROJECT_DIR (Claude Code's) name
 # the real main checkout: a case that calls the engine with none of its own would read and write that checkout's state
-# (issue 452).
+# (issue 452). CONVEYOR_CARDS, where a shell or launcher exports it, names a machine's cards folder: a case that calls
+# the engine with none of its own would take that folder's release lock, claims and live files, shared with every
+# card that tests at the same time (caselocks.test.sh). Without it, a case's cards folder is beside its own main.
 unset CARDCTL CONVEYOR_CARD_SETTINGS CONVEYOR_OPENCODE_GUARD CONVEYOR_CODEX_GUARD CONVEYOR_CARD_RULES CONVEYOR_CARD CONVEYOR_FOREMAN CLAUDE_CODE_SESSION_ID CONVEYOR_TEST_SLOTS \
-  CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CLAUDE_PROJECT_DIR
+  CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CLAUDE_PROJECT_DIR CONVEYOR_CARDS
 # The Foreman's mark (the session it is) is never this machine's own.
 export XDG_STATE_HOME=$T/state
 # The loop asks for a weekly limit reading while a card runs: never Claude's own here; a case sets its own.
