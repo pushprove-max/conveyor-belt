@@ -3,7 +3,8 @@
 # timeout: 300
 # Engine cases: card work yields to the user (issue 194; lib/slots.sh steer_words, steer_set, steer_use, steer_watch;
 # the host file's steer, steer_on in lib/paths.sh): card sessions at lowered priority, card test runs at idle priority,
-# given their normal priority back while they starve, and nothing else lowered.
+# given their normal priority back while they starve, and nothing else lowered; a test run's slice removed after it
+# (steer_end, steer_sweep).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -99,6 +100,8 @@ t_steerslice() {
     w() { systemctl --user show -p CPUWeight -p IOWeight "$s" | paste -sd' '; }
     { w; steer_set up 0; w; steer_set down 0; w; steer_end; w; } > "$d/w"; echo "$s" > "$d/s" ) || fail "no slice was made where a user systemd scope can be"
   s=$(cat "$d/s")
+  # Issue 331: the slice stayed active after the run ended, one per card process that ever ran.
+  ! systemctl --user is-active --quiet "$s" || fail "the run's slice $s is still active after its end"
   grep -q "/$s/" "$d/cg" || fail "the run is not in its slice $s: $(cat "$d/cg")"
   grep -q -- "--slice=$s " "$d/box" || fail "a box made inside the run is not in the run's slice: $(cat "$d/box")"
   [ "$(cat "$d/w")" = "CPUWeight=1 IOWeight=1
@@ -106,6 +109,26 @@ CPUWeight=100 IOWeight=100
 CPUWeight=1 IOWeight=1
 CPUWeight=[not set] IOWeight=[not set]" ] || fail "the slice's weights were not 1, 100 when raised, 1 again, then gone: $(cat "$d/w")"
   [ "$(cat /proc/self/cgroup)" = "$mine" ] || fail "the caller moved: $(cat /proc/self/cgroup)"
+}
+
+# Bug it catches (issue 331): a run killed before its end (steer_end never ran) left its slice active for good. At the
+# loop's start the slice of a process that is gone is removed; that of a live process, whose run may not have started
+# yet, is kept.
+t_steersweep() {
+  local d=$T/$CASE live dead s
+  mkdir -p "$d"
+  command -v systemctl >/dev/null && timeout 10 systemd-run --user --scope --quiet true >/dev/null 2>&1 </dev/null || return 0
+  sleep 60 & live=$! # sleep: a live process whose slice stays
+  bash -c 'echo $$' > "$d/dead"; dead=$(cat "$d/dead") # a process that has ended
+  for s in "$live" "$dead"; do
+    systemctl --user set-property --runtime "conveyor_steer_$s.slice" CPUWeight=1 >/dev/null 2>&1 </dev/null
+    systemd-run --user --scope --quiet --collect --slice="conveyor_steer_$s.slice" true >/dev/null 2>&1 </dev/null
+  done
+  systemctl --user is-active --quiet "conveyor_steer_$dead.slice" || fail "the stand-in slice of the ended process was not made"
+  steer_sweep
+  systemctl --user is-active --quiet "conveyor_steer_$live.slice" || fail "the slice of a live process was removed"
+  ! systemctl --user is-active --quiet "conveyor_steer_$dead.slice" || fail "the slice of a process that is gone is still active"
+  kill "$live" 2>/dev/null; steer_drop "conveyor_steer_$live.slice"
 }
 
 # Bug it catches: on macOS (taskpolicy) nothing was lowered. A session starts at the utility clamp, a test run in the

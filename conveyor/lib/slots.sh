@@ -465,7 +465,30 @@ steer_prio() { # <session | test> <the cores left, else empty>
 }
 
 # Drops the slice steer_words made (its runtime settings with it), once the run in it has ended.
-steer_end() { [ -z "${STEER_SLICE:-}" ] || timeout 10 systemctl --user revert "$STEER_SLICE" >/dev/null 2>&1 </dev/null; STEER_SLICE=''; }
+steer_end() { [ -z "${STEER_SLICE:-}" ] || steer_drop "$STEER_SLICE"; STEER_SLICE=''; }
+
+# Drops steer slice <slice>: its runtime settings, and the slice itself when no process is left in it (a slice stays
+# active once made, so one left was never removed). A slice with a process still in it keeps it; steer_sweep removes
+# it once it is empty.
+steer_drop() { # <slice>
+  local g
+  timeout 10 systemctl --user revert "$1" >/dev/null 2>&1 </dev/null
+  g=$(timeout 10 systemctl --user show -p ControlGroup --value "$1" 2>/dev/null </dev/null)
+  [ -z "$g" ] || ! grep -qx 'populated 1' "/sys/fs/cgroup$g/cgroup.events" 2>/dev/null || return 0
+  timeout 10 systemctl --user stop "$1" >/dev/null 2>&1 </dev/null
+}
+
+# At the loop's start: drops each steer slice (conveyor_steer_<pid>.slice) whose process is gone, one a run that was
+# killed, or whose machine stopped, left behind (steer_end never ran for it).
+steer_sweep() {
+  local s p
+  command -v systemctl >/dev/null 2>&1 || return 0
+  while read -r s _; do
+    [[ $s =~ ^conveyor_steer_([0-9]+)\.slice$ ]] || continue
+    p=${BASH_REMATCH[1]}
+    ps -p "$p" >/dev/null 2>&1 || steer_drop "$s"
+  done < <(timeout 10 systemctl --user list-units --all --plain --no-legend 'conveyor_steer_*.slice' 2>/dev/null </dev/null)
+}
 
 # The processes of the steered run <process group>: those of the group, and every process under its leader, as a test
 # runner's workers can each be a process group of their own (the engine's own cases are: tests/lib.sh run_case).

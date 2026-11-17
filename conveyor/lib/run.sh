@@ -203,6 +203,7 @@ run() { # [max-cards] [serve]
   rm -f "$PUSHING" "$SAYS" # a loop killed during its push left them; no push runs here now, and this loop has said nothing yet
   self=$(p_started $$)
   speedretry
+  steer_sweep # the CPU slices of test runs whose process is gone (lib/slots.sh)
   [ -n "$OWN" ] || [ -z "$RAN" ] || FOLLOW=$serve
   if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
   while :; do
