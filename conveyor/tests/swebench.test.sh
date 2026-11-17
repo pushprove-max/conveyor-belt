@@ -171,8 +171,14 @@ t_swediff() {
 t_swesolo() {
   swe; local out first
   first=$(sweorder | head -n 1)
-  echo 'echo fixed > x.py; command -v gh > "$STUB/solo-gh"' > "$STUB/build"
+  echo 'echo fixed > x.py; command -v gh > "$STUB/solo-gh"; echo "${CLAUDE_CONFIG_DIR:-default}" > "$STUB/solo-acct"' > "$STUB/build"
+  # The builder is set to a named account (`control account`), and the caller's shell is on another login.
+  export XDG_CONFIG_HOME=$T/$CASE/config CLAUDE_CONFIG_DIR=$T/$CASE/inherited; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE/acct1"
+  jq -cn --arg a "$T/$CASE/acct1" '{accounts: [{name: "first", configDir: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  jq -c '.account = "first"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
   out=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $out"
+  # Bug: the solo session ran on the login it inherited, not on the builder's account that the usage guard reads.
+  [ "$(cat "$STUB/solo-acct")" = "$T/$CASE/acct1" ] || fail "the solo session did not run on the builder's account: $(cat "$STUB/solo-acct")"
   # Bug: the session ran in bypass mode on the host, with a shell, the real gh, and the dataset's reference patches and
   # hidden tests in reach. The CLI's own confinement cannot run here (the claude stub): its arguments are what is checked.
   [ "$(cat "$STUB/solo-gh")" = "$B/work/$first/bin/gh" ] || fail "the solo session was not given the sandbox's gh: $(cat "$STUB/solo-gh")"
@@ -199,6 +205,19 @@ t_sweguard() {
   # Bug: a paused project read as "paused", not "paused by guard", so a run (here Claude alone) started past its guard.
   jq -c '.mode = "pause"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
   out=$(CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":90}}"' loop bench swe 1 --solo 2>&1) && fail "a solo run started at the usage guard of a paused project: $out"
+  grep -q 'the usage guard is reached' <<<"$out" && [ ! -s "$STUB/sessions" ] || fail "the refusal does not name the guard, or a session ran: $out"
+}
+# Bug: with Codex in both seats the guard read no account, so a solo run started its Claude session on the builder's
+# named account (`control account`) past that account's limit.
+t_swesologuard() {
+  swe; local out
+  export XDG_CONFIG_HOME=$T/$CASE/config; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE/acct1"
+  jq -cn --arg a "$T/$CASE/acct1" '{accounts: [{name: "first", configDir: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  jq -c '.guard = 50 | .account = "first" | .model = {cli: "codex", model: "x", effort: null} | .reviewer = {cli: "codex", model: "x", effort: "low"}' \
+    "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  # Only the named account is at its limit.
+  out=$(CONVEYOR_LIMIT_CMD='u=10; [ "$CLAUDE_CONFIG_DIR" != "'"$T/$CASE/acct1"'" ] || u=90; echo "{\"seven_day\":{\"utilization\":$u}}"' loop bench swe 1 --solo 2>&1) \
+    && fail "a solo run started on an account at the usage guard: $out"
   grep -q 'the usage guard is reached' <<<"$out" && [ ! -s "$STUB/sessions" ] || fail "the refusal does not name the guard, or a session ran: $out"
 }
 

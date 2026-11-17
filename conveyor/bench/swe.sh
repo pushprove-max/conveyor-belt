@@ -79,8 +79,14 @@ swe_resolve() {
   fi
 }
 # Whether the project's usage guard is reached now (the loop's own test: state(), lib/control.sh), whatever the
-# project's mode: a paused or stopped project's guard still stands for a run of its own.
-swe_guarded() { local pct; ctlread 2>/dev/null || return 1; pct=$(guardread "$CTL_V" ask | jq -r '.pct // empty'); [ "$(state "$(jq -c '.mode = "run"' <<<"$CTL_V")" "$pct")" = "paused by guard" ]; }
+# project's mode: a paused or stopped project's guard still stands for a run of its own. A solo run's guard reads the
+# one account its session runs on (swe_solo), the builder's, whatever agent and route the seats have: guardread reads
+# none for a Codex or OpenCode builder or one on an API route, and the solo session is Claude on the subscription.
+swe_guarded() { # [solo: any non-empty word]
+  local pct; ctlread 2>/dev/null || return 1
+  if [ -n "${1:-}" ]; then pct=$(ACCT=$(ctlacct "$CTL_V") reading | jq -r '.pct // empty'); else pct=$(guardread "$CTL_V" ask | jq -r '.pct // empty'); fi
+  [ "$(state "$(jq -c '.mode = "run"' <<<"$CTL_V")" "$pct")" = "paused by guard" ]
+}
 # How many tasks a difference must reach to be told from run-to-run noise with n tasks: two standard errors of the
 # difference of two resolved counts at a rate of one half, ceil(sqrt(2n)), and never more than n (with so few tasks
 # that this passes n, only a total break, a difference of n, shows). noised() is that number, for swe_diff's verdict too.
@@ -186,11 +192,14 @@ swe_build() { # <task json> <sb> <eng>
 # One task given to Claude alone: one session on the issue in the sandbox's main, its change the patch. The session
 # has the sandbox's gh and no other way out: no shell and no web tools, its file tools only, edits only in the
 # sandbox's main and, in dontAsk mode, no read outside it (the dataset's rows, with the reference patches and hidden
-# tests, and the results are denied by name as well); no settings file or MCP server of the host is read.
+# tests, and the results are denied by name as well); no settings file or MCP server of the host is read. It runs on
+# the builder's account (`control account`), the one the usage guard reads (swe_guarded), never on an inherited login.
 swe_solo() { # <task json> <sb> <model>
-  local sb=$2 t0 base; base=$(jq -r .base <<<"$1"); t0=$(date +%s)
+  local sb=$2 t0 base acct; base=$(jq -r .base <<<"$1"); t0=$(date +%s)
+  ctlread 2>/dev/null || { echo "the control record could not be read"; return 1; }
+  acct=$(acctenv "$(ctlacct "$CTL_V")") || { echo "$acct"; return 1; }
   { printf 'Fix this issue in the repository in the current folder. Change the code only; do not commit.\n\n'; jq -r .issue <<<"$1"; } > "$sb/prompt"
-  (cd "$sb/$SWE_MAIN" && swe_env "$sb" timeout "$(swe_conf .taskTimeout)" claude -p --output-format json --permission-mode dontAsk ${3:+--model "$3"} \
+  (cd "$sb/$SWE_MAIN" && acctrun "$acct" && swe_env "$sb" timeout "$(swe_conf .taskTimeout)" claude -p --output-format json --permission-mode dontAsk ${3:+--model "$3"} \
     --setting-sources "" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools "Edit(/$sb/$SWE_MAIN/**)" \
     --disallowedTools "Read(/$SWE_DIR/raw.*)" "Read(/$SWE_DIR/tasks.*)" "Read(/$SWE_DIR/results/**)" < "$sb/prompt" > "$sb/solo.json" 2> "$sb/solo.err")
   git -C "$sb/$SWE_MAIN" add -A && swe_patch "$sb" "$base" --cached > "$sb/patch" || return 1
@@ -233,7 +242,7 @@ swe_run() { # <n> <solo or ""> <engine>
   local n=$1 arm=conveyor key eng='' tf all i t id r reused=0 pt v
   [ -z "$2" ] || arm=solo
   mkdir -p "$SWE_DIR" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7 || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
-  ! swe_guarded || { echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
+  ! swe_guarded "$2" || { echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
   tf=$(swe_tasks) || return 1; all=$(wc -l < "$tf")
   [ "$n" -le "$all" ] || { echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
   SWE_COMMIT=''; SWE_VERSION=''; SWE_MODEL=''
@@ -263,7 +272,7 @@ swe_run() { # <n> <solo or ""> <engine>
       swe_live --arg t "$id" --arg r "$r" '.tasks += [{id: $t, result: $r, reused: true}] | .done += 1 | .resolved += (if $r == "resolved" then 1 else 0 end)'
       continue
     fi
-    ! swe_guarded || { echo "conveyor: the usage guard is reached: the run stops before $id"; swe_end guard; return 0; }
+    ! swe_guarded "$2" || { echo "conveyor: the usage guard is reached: the run stops before $id"; swe_end guard; return 0; }
     swe_live --arg t "$id" '.current = $t'
     r=$(swe_task "$t" "$arm" "$key" "${eng:-$SWE_MODEL}"); echo "$i/$n $id: $r"
     swe_live --arg t "$id" --arg r "$r" '.tasks += [{id: $t, result: $r, reused: false}] | .done += 1 | .current = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
