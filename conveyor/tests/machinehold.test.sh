@@ -260,6 +260,22 @@ t_repairempty() {
   echo 'echo "exit 0" > conveyor/lib/slots.sh' > "$STUB/build"
   repairheld 'card.repair broken,' 'the run with the change passed, but its logs do not say that c.test passed in it'
 }
+# D1: the run without the change fails for a reason of its own, not the control: it is given a test file the change
+# adds, which main's commit lacks (with test.list env, .conveyor/test-changed.sh fails such a file), while c.test
+# passes there, as main's harness is sound. Bug it catches: the lane passed a card whose control passes without its
+# change, as it took any failed run without the change for the control's failure. The lane asks the run's logs for it.
+t_repairbaseline() {
+  repairsetup
+  local out
+  echo 'harness() { return 0; }' > "$R/conveyor/lib/slots.sh" && git -C "$R" commit -qam "a sound harness" || fail "main's harness could not be mended"
+  echo 'while IFS= read -r f; do [ -z "$f" ] || [ -e "$f" ] || { echo "bash: $f: No such file or directory"; exit 1; }; done <<<"${CONVEYOR_TEST_FILES:-}"' >> "$STUB/pre"
+  echo '{"controls":["c.test"]}' > "$ST/machinehold.json"
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && echo new > "$T/$CASE/cards/c7/d.test" && git -C "$T/$CASE/cards/c7" add d.test \
+    || fail "the card's worktree could not be made"
+  out=$(eng 'TEST_FILES=d.test; repairproof c7 "$CONVEYOR_CARDS/c7"; echo "$? $REPAIRED"')
+  [[ $out == "1 the run on main's code at "*" without the change failed, but its logs do not say that c.test failed in it, so it proves nothing" ]] \
+    || fail "the lane took a run that failed without the control failing for the control's failure: $out"
+}
 
 # D1, D4: card c1 takes the repair lane through repairlane() and is judged (a repairproof() that does not end here).
 # Bugs it catches: two repair cards judged at once, each against a main the other changes; and a lane recorded with

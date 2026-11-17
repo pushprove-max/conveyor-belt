@@ -741,12 +741,14 @@ repairholder() {
 # The repair lane's judgement of a card (repairlane()), in the shape of redproof(): the files of the machine hold run
 # in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.repair, each named `fail` in
 # the run's list, with the pack's test.command: first without the card's change, where they must fail, then with it
-# staged, where they must pass. Then the card's changed tests run in its own worktree (the command given the tests its
+# staged, where they must pass. The run without the change must fail with a control its logs (testfails()) name failed
+# or out of time: a run that fails for another reason, such as test files the change adds that this commit lacks,
+# proves nothing. Then the card's changed tests run in its own worktree (the command given the tests its
 # change touches, testsel(), and no list of earlier passes), and must pass. Each of the three runs is a clean one
 # (cleanrun()). Sets REPAIRED: what the runs showed.
 # shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
 repairproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.command cmd 2>/dev/null; then REPAIRED="the pack's test.command could not be read"
@@ -754,8 +756,11 @@ repairproof() { # <card> <worktree>
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
     && jq -r '.[] | "fail\t\(.)"' <<<"$cj" > "$mwt.rerun"; then
-    if cleanrun "$mwt" "$cmd" "$mwt.rerun"; then
+    cleanrun "$mwt" "$cmd" "$mwt.rerun" || brc=$?
+    if [ "$brc" = 0 ]; then
       REPAIRED="$cs passed on main's code at ${sha:0:12} without the change in a clean harness, so the change repairs nothing there"
+    elif ! testfails "$mwt.test" "$brc" | jq -e --argjson c "$cj" '[.files[]?.file, .timeout.file?] as $f | any($c[]; IN($f[]))' >/dev/null 2>&1; then
+      REPAIRED="the run on main's code at ${sha:0:12} without the change failed, but its logs do not say that $cs failed in it, so it proves nothing"
     elif ! out=$(git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>&1); then
       REPAIRED="the change could not be applied to main's code at ${sha:0:12}, so $cs did not run with it: ${out:0:400}"
     elif ! cleanrun "$mwt" "$cmd" "$mwt.rerun"; then
