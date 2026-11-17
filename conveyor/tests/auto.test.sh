@@ -91,3 +91,17 @@ autoreruled() { # <on|narrow>
 }
 t_autoreruled() { autoreruled on; }
 t_autoreruledn() { autoreruled narrow; }
+
+# Bug: auto off counted every "### " entry in the log as a decision made for the owner, the ones under "Waiting for the
+# owner" too, so a log with 1 decision and 3 waiting entries said "after 4 decision(s)". It says 1 decided, 3 waiting.
+t_autooffcount() {
+  local out log; setup '[]'
+  out=$(cd "$R" && loop auto on) || fail "auto on failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  printf '%s\n' '# Decisions made for the owner (auto, from 2026-11-16 22:14)' '' '## Summary' '' 'Decided for the owner: 1. Waiting for the owner: 3.' '' \
+    '## Decisions' '' '### 22:20 d-a: Merge it?' '- **Question:** Merge it?' '- **Picked:** yes' '' \
+    '## Waiting for the owner' '' '### 22:30 d-b: Ship it?' '- **Question:** Ship it?' '' '### 22:31 d-c: Drop it?' '- **Question:** Drop it?' '' \
+    '- d-d: Which colour? (no recommended option)' > "$log"
+  out=$(cd "$R" && loop auto off) && [[ $out == "auto OFF after 1 decided, 3 waiting for the owner: "* ]] || fail "auto off: $out"
+  [ "$(cd "$R" && loop auto band | jq .count)" = 1 ] || fail "the band after off: $(cd "$R" && loop auto band)"
+}
