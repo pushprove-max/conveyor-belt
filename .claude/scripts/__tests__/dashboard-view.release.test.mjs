@@ -119,6 +119,22 @@ test('a failed run names each case that timed out as timed out, beside the faile
   assert.deepEqual(Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="timedout"] li'), (x) => x.textContent), ['metrics: timed out']);
 });
 
+// Bugs this guards (#274): a red suite on main's head offers no honest way to release, or Release anyway goes on one
+// click, with a confirm that does not name the failures it releases over, or is offered over a suite of an older main.
+test('#274: release-prep\'s red run on main\'s head offers Release anyway, on a second click that names the failed files and cases', async () => {
+  const w = boot();
+  const red = { ...RUN, ended: '2026-11-14T08:15:00Z', state: 'failed', done: 140, of: 140, failed: 1, cases: ['capwaittests'], files: { done: 140, of: 140, failed: ['conveyor/conveyor.test.sh'] } };
+  deliver(w, data(red));
+  assert.equal(chip(w), 'Suite failed');
+  assert.ok(stepOf(w, 'full-suite').contains(act(card(w), 'release-anyway')), 'Release anyway is beside the red result');
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-anyway').click()), [], 'one press sends nothing');
+  assert.equal(act(card(w), 'release-anyway').textContent,
+    'Click again: release 1.0.0 over this failed suite, with no new run. Failed files: conveyor/conveyor.test.sh. Failed cases: capwaittests.');
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-anyway').click()), [{ action: 'release-run', args: ['anyway', '1.0.0'], repo: 'plugin' }]);
+  next(w, data(red, { head: NEW }));
+  assert.equal(act(card(w), 'release-anyway'), null, 'no Release anyway over a suite of an older main');
+});
+
 // Bugs this guards: a suite passed on main's head offers no release; once a card lands it still offers one, of a main
 // the suite never tested; a release made shows as still to do.
 test('D3: passed on main\'s head, Release 1.0.0; a card lands, Main moved and Run again on the new main; released, Released', async () => {

@@ -357,8 +357,8 @@ UNESCAPE='def hex: ascii_downcase | explode | reduce .[] as $d (0; . * 16 + (if 
 # Every GitHub write the engine and the Board make (`gh-write`) goes through here (plan section 8, P5): a test fails on
 # a gh write anywhere else. The state and cards folders are written as <state> and <cards>, and kept work as
 # <state>/kept, never as absolute paths. The text (every argument, and every file gh would read: --body-file, -F,
-# --input, or api's -F/--field <key>=@<file>, in each of their forms: -F <x>, -F<x>, -F=<x>, -wF <x>, --field=<x>,
-# --input=<x>; - is standard input; and all of it again with its string escapes decoded) is checked by
+# --input, release's --notes-file, or api's -F/--field <key>=@<file>, in each of their forms: -F <x>, -F<x>, -F=<x>, -wF <x>, --field=<x>,
+# --input=<x>, --notes-file=<x>; - is standard input; and all of it again with its string escapes decoded) is checked by
 # privacy/check.sh, with the terms file the host file names (terms; ~/ is the user's home); a file that cannot be read
 # posts nothing. The terms file is optional: with no host file, or one that names none, the check runs with no word
 # list. With the pack's
@@ -422,9 +422,9 @@ gh_write() { # <gh arguments>
       field) v=$a fld=1 ;;
       text) ;; # literal text, though it starts with -F or --body-file=
       *) if [ "$a" = -- ]; then ended=text # as gh reads it: every argument after -- is literal text, not an option
-         elif [[ $a == --body-file || $a == --input ]]; then want=src
+         elif [[ $a == --body-file || $a == --input || $a == --notes-file ]]; then want=src
          elif [ "$a" = --field ]; then want=field
-         elif [[ $a == --body-file=* || $a == --input=* ]]; then pre=${a%%=*}=; src=${a#*=}
+         elif [[ $a == --body-file=* || $a == --input=* || $a == --notes-file=* ]]; then pre=${a%%=*}=; src=${a#*=}
          elif [[ $a == --field=* ]]; then pre=--field=; v=${a#--field=} fld=1
          elif [[ $a == --* ]]; then [[ $val != *" $a "* ]] || want=text
          elif [[ $a =~ ^-[[:alpha:]] ]]; then

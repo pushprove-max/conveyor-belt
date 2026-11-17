@@ -50,12 +50,34 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    - there is no notes file, or the notes break a rule of the style that the style check reads,
    - the privacy check finds something in the tracked files or in a commit since the last tag,
    - the whole test suite does not pass on the commit. When the newest `conveyor/release-suite` status on the commit
-     is a pass (step 4), the suite does not run again. Otherwise the command runs it.
+     is a pass (step 4), the suite does not run again. Otherwise the command runs it. To release over a failed suite,
+     see [A release over a failed suite](#a-release-over-a-failed-suite).
 
    The output gives the reason.
 6. When all checks pass, the command sets the version in `plugin.json` and the tag in the marketplace entry, and
    makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
    and makes the GitHub release with the notes as its text (`gh release create`).
+
+## A release over a failed suite
+
+Use this only when the owner says so, and only when the failures are not in the code that you release. An example is
+a test that fails only when the machine is busy and passes when it runs alone. Fix the test in a later release.
+
+Run `conveyor.sh release <version> --anyway --by <who>`, with the name of the person who decided. It releases the head
+of `main` only when step 4 ran the suite on that same commit and the suite failed. It stops, and changes nothing, when
+the suite did not run on the head of `main`, or when `main` moved after the suite ran. Then run step 4 again. All the
+other checks of step 5 apply.
+
+Before it releases, the command prints the failed files and cases. It does not run the suite again, and it posts no
+status: the `conveyor/release-suite` status of the commit stays failure. The GitHub release has the notes, then a
+section "Known test failures". This section says "released over a failed suite by <who>" and lists the failed files
+and cases. The record of the release (`release/run.json` in the cards folder) keeps the same names. The privacy
+check reads `<who>` and these names before anything is tagged. If it finds something, the command stops and releases
+nothing.
+
+On the Board, the Release panel shows **Release anyway** beside a failed suite on the head of `main`. The first click
+shows the failed files and cases. The second click runs `conveyor.sh release-run anyway <version>`, with you, the Board
+user, as `<who>`.
 
 ## A release from the Board
 

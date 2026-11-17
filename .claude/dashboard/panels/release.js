@@ -10,7 +10,8 @@
 // <version>`: release-prep alone, which writes a notes draft and stops when main has no notes, else runs the whole
 // suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite of that
 // version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
-// ("Runs the suite first"); then release makes the tag and the GitHub release. Stop (`release-run stop`, a second click too) shows only while a run is
+// ("Runs the suite first"); then release makes the tag and the GitHub release. Beside release-prep's red result on main's
+// head, Release anyway sends `release-run anyway <version>`: release over that failed suite. Stop (`release-run stop`, a second click too) shows only while a run is
 // under way. Each reason a refused or failed run printed shows under the step it belongs to. The panel is wide or full,
 // never small: in the narrow column every line wraps.
 (() => {
@@ -234,6 +235,18 @@
       const p = h('p', 'row-meta', suiteSaid);
       p.dataset.figure = 'suite-use';
       s2.append(p);
+    }
+    // Release anyway, beside release-prep's red result on main's head when main holds the notes: the owner's release
+    // over that failed suite (`release-run anyway <version>`). A release cannot be undone: a second click whose words
+    // name the failed files and cases. The suite's status stays failed.
+    if (s.failed && s.cur.step === 'release-prep' && s.cur.sha === m.head && notes && VERSION.test(v)) {
+      const c = s.cur, files = c.files && typeof c.files === 'object' ? list(c.files.failed).map(String) : [], named = list(c.cases).map(String);
+      const ask = `Click again: release ${v} over this failed suite, with no new run. ${files.length ? `Failed files: ${files.join(', ')}. ` : ''}`
+        + `${named.length ? `Failed cases: ${named.join(', ')}.` : 'The run named no failed case.'}`;
+      const any = h('button', 'btn', 'Release anyway');
+      any.type = 'button'; any.dataset.act = 'release-anyway';
+      any.title = `Make the tag v${v} and the GitHub release over this failed suite. Its status stays failed, and the release says who released it over which failures.`;
+      s2.append(ctx.twice(any, 'final', ask, () => send(ctx, rec.repo, ['anyway', v], `Release ${v} started over the failed suite.`)));
     }
     const steps = h('ol', 'rows numbered compact release-steps');
     steps.append(s1, s2, s3);

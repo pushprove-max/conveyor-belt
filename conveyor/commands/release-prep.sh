@@ -29,6 +29,11 @@
 #   commit removed is still one (a sign-off or co-author trailer's email that is the commit's own is not: relmessage);
 # - the whole suite passed on that commit: the newest conveyor/release-suite status is success (release-prep's
 #   pass), else this command runs the suite, as release-prep does, once every other check has passed.
+#   With --anyway --by <who> (the owner's choice to release over a red suite), in its place: release-prep's suite ran
+#   on that commit and failed (the record's red, below). No suite runs, and no status is posted: the status stays
+#   failure. It prints the failed files and cases, and the GitHub release's body is the notes with a "Known test
+#   failures" section that says the release went out over a failed suite by <who> and lists them; the record's anyway
+#   says the same ({by, sha, files, cases}).
 # Then: a commit (made only when either changes) sets plugin.json's version and the marketplace entry's ref to
 # v<version>, with no sha; the annotated tag v<version> is made on it; a second commit sets the entry's sha to that
 # tagged commit, since a commit cannot hold its own id. The branch and the tag are pushed together (--atomic: if the
@@ -43,13 +48,16 @@
 # ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
 # (null for a whole suite; else {sha and time: the run it reused, ran: the files it reran, none when no test ran, kept:
 # the passes it kept}), reasons
-# (each line the command printed to stderr, its "conveyor: <command>: " taken off) and pid (the process whose tree
-# `release-run stop` ends)}. A release after a passed release-prep of the same version keeps that run's
-# suite (sha, done, failed, cases, moved, reused, since); one after a refused release of it keeps that one's (all but
-# moved).
+# (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree
+# `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
+# and anyway (a release made over it: red with by, else null)}. A release after a passed release-prep of the same
+# version keeps that run's suite (sha, done, failed, cases, moved, reused, since); one after a failed release-prep of
+# it keeps that suite too, its files and timedout, and makes red of it; one after a refused release of it keeps that
+# one's (all but moved), and its red.
 # `conveyor.sh release-run [prep] <version>` is the Board's Release (docs/board.md): the owner's yes, given there. It
 # starts release-prep, then, when it passes and prep is not given, release, in the background, and returns (with prep,
-# release-prep alone: the Board's Draft notes and Run suite, which release nothing); their output is in
+# release-prep alone: the Board's Draft notes and Run suite, which release nothing; `release-run anyway <version> --by
+# <who>`, the Board's Release anyway: release --anyway alone); their output is in
 # $CARDS/release/run.log. That release is told the commit the suite passed on: a main that moved since is refused and
 # its record says moved, so it is never tested and released again without the owner's yes. Without prep, when the
 # record is a passed release-prep of that version on main's head, main not moved since, it starts release alone, told
@@ -146,11 +154,13 @@ relrec() { jq -c "$@" "$RELRUN" > "$RELRUN.new" 2>/dev/null && mv -f "$RELRUN.ne
 relstart() { # <command name> <version>
   local was=null
   # release keeps the suite's commit and cases from release-prep's pass of its version, or from a release of it
-  # refused since (a retry takes the pass from the status and runs no suite).
+  # refused since (a retry takes the pass from the status and runs no suite). From release-prep's failed suite of its
+  # version: that suite, and red, the failed run `release --anyway` may go over, kept through a refused release.
   [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, done, failed, cases, moved, reused}
-    elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases, reused} else empty end' "$RELRUN" 2>/dev/null) || was=null
+    elif .step == "release-prep" and .state == "failed" then {since, sha, done, failed, cases, moved, reused, files, timedout, red: {sha, files: (.files.failed // []), cases}}
+    elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reused: null, reasons: [], pid: $p} + $w' > "$RELRUN.new" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   unset CONVEYOR_RELEASE_PID # the suite's own commands are no part of this run's record
 }
@@ -271,8 +281,9 @@ releaseprep() { # <version>
   echo "conveyor: release-prep: the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
   return 1
 }
+RELBY='' # release --anyway --by <who>: who releases over release-prep's failed suite
 release() { # <version>
-  local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=()
+  local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=() red='' body='' known=''
   local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-}
   [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
   unset CONVEYOR_RELEASE_SHA
@@ -314,15 +325,39 @@ release() { # <version>
   fi
   name=$(jq -r .name "$P" 2>/dev/null) && [ -n "$(jq --arg n "$name" '.plugins[] | select(.name == $n)' "$M" 2>/dev/null)" ] \
     || why+=("$M has no entry for the plugin $P names")
+  # Over a red suite: only release-prep's failed suite of this version on this very commit (the record's red).
+  if [ -n "$RELBY" ]; then
+    red=$(jq -ce '.red | objects' "$RELRUN" 2>/dev/null) || red=''
+    if [ -z "$red" ]; then why+=("--anyway: release-prep's suite of $v did not run and fail on ${sha:0:12}, so there is no failed suite to release over: run release-prep $v")
+    elif [ "$(jq -r .sha <<<"$red")" != "$sha" ]; then
+      why+=("--anyway: release-prep's suite of $v failed on $(jq -r '.sha[0:12]' <<<"$red"), not on ${sha:0:12}: $BRANCH moved since; run release-prep $v again"); red=''
+    else
+      # The section the GitHub release's body gets: who, and the failed files and cases. It is published, so the
+      # privacy check reads it here, before anything is tagged or pushed (gh_write would refuse it after the push).
+      known=$(jq -r --arg v "$v" --arg by "$RELBY" '"\n## Known test failures\n\n\($v) was released over a failed suite by \($by): the whole suite failed on \(.sha[0:12]).\n"
+        + (if .files == [] then "" else "\nFailed files:\n\n" + (.files | map("- \(.)\n") | join("")) end)
+        + (if .cases == [] then "" else "\nFailed cases:\n\n" + (.cases | map("- \(.)\n") | join("")) end)' <<<"$red") \
+        || why+=("--anyway: the Known test failures section could not be made from release-prep's record")
+      if [ -n "$known" ] && ! { [ -z "$terms" ] && termsnamed; }; then
+        out=$(printf '%s\n' "$known" | "$HERE/privacy/check.sh" ${terms:+--terms "$terms"} - 2>&1) \
+          || why+=("--anyway: the privacy check finds something in --by or the failed files and cases, which the release notes would publish: $(head -n 5 <<<"$out" | paste -sd ';' -)")
+      fi
+    fi
+  fi
   if [ ${#why[@]} != 0 ]; then printf 'conveyor: release: refused, nothing tagged or released: %s\n' "${why[@]}" >&2; return 1; fi
   # The suite last: it takes the longest, and a refusal above needs none of it.
-  state=$(timeout 60 gh api "repos/{owner}/{repo}/commits/$sha/statuses?per_page=100" < /dev/null 2>/dev/null \
-    | jq -r '[.[] | select(.context == "conveyor/release-suite")][0].state // "none"' 2>/dev/null)
-  if [ "$state" = success ]; then
-    # The record names the commit the pass is of; its cases are known only from a run of that commit kept above.
-    relrec --arg s "$sha" 'if .sha == $s then . else .sha = $s | .done = 0 | .failed = 0 | .cases = [] | .reused = null end'
-    echo "conveyor: release: the whole suite passed on ${sha:0:12} (release-prep's status); it is not run again"
-  else relsuite release "$sha" || { echo "conveyor: release: refused, nothing tagged or released: the whole suite did not pass on ${sha:0:12}" >&2; return 1; }; fi
+  if [ -n "$red" ]; then
+    # No suite runs and no status is posted: conveyor/release-suite stays the failure release-prep posted.
+    echo "conveyor: release: $v goes out over the failed suite on ${sha:0:12}, by $RELBY; $(jq -r '"failed files: \(if .files == [] then "none named" else .files | join(", ") end); failed cases: \(if .cases == [] then "none named" else .cases | join(", ") end)"' <<<"$red")"
+  else
+    state=$(timeout 60 gh api "repos/{owner}/{repo}/commits/$sha/statuses?per_page=100" < /dev/null 2>/dev/null \
+      | jq -r '[.[] | select(.context == "conveyor/release-suite")][0].state // "none"' 2>/dev/null)
+    if [ "$state" = success ]; then
+      # The record names the commit the pass is of; its cases are known only from a run of that commit kept above.
+      relrec --arg s "$sha" 'if .sha == $s then . else .sha = $s | .done = 0 | .failed = 0 | .cases = [] | .reused = null end'
+      echo "conveyor: release: the whole suite passed on ${sha:0:12} (release-prep's status); it is not run again"
+    else relsuite release "$sha" || { echo "conveyor: release: refused, nothing tagged or released: the whole suite did not pass on ${sha:0:12}" >&2; return 1; }; fi
+  fi
   # The suite takes long: a checkout that moved meanwhile would tag commits no check above read.
   [ "$(git rev-parse -q --verify HEAD)" = "$sha" ] && [ -z "$(git status --porcelain --untracked-files=no)" ] \
     || { echo "conveyor: release: refused, nothing tagged or released: the checkout moved or changed while the suite ran" >&2; return 1; }
@@ -336,25 +371,36 @@ release() { # <version>
     || { relundo; echo "conveyor: release: the release commits or the tag could not be made; they are undone, nothing pushed" >&2; return 1; }
   git push -q --atomic "$REMOTE" "HEAD:refs/heads/$BRANCH" "refs/tags/v$v" < /dev/null \
     || { relundo; echo "conveyor: release: $BRANCH and v$v could not be pushed (did $REMOTE/$BRANCH move?); the release commits and the tag are undone, nothing released" >&2; return 1; }
-  gh_write release create "v$v" --verify-tag --title "$v" --notes-file "$notes" < /dev/null \
-    || { echo "conveyor: release: v$v is pushed, but its GitHub release could not be made: make it from the tag with $notes as its body" >&2; return 1; }
-  echo "conveyor: release: v$v is released at ${t:0:12}"
+  # Pushed, the release is out: the record says it went over the failed suite, and who said so.
+  # Its GitHub release's body is the notes, then the known failures, in a scratch file outside the cards folder (gh_write
+  # writes that folder's path as <cards>).
+  if [ -n "$red" ]; then
+    relrec --arg by "$RELBY" '.anyway = (.red + {by: $by})'
+    body=$(mktemp) && { cat "$notes" && printf '%s\n' "$known"; } > "$body" \
+      || { rm -f "$body"; echo "conveyor: release: v$v is pushed, but its GitHub release's body could not be written: make it from the tag with $notes and a Known test failures section as its body" >&2; return 1; }
+  fi
+  gh_write release create "v$v" --verify-tag --title "$v" --notes-file "${body:-$notes}" < /dev/null; rc=$?
+  [ -z "$body" ] || rm -f "$body"
+  [ $rc = 0 ] || { echo "conveyor: release: v$v is pushed, but its GitHub release could not be made: make it from the tag with $notes$([ -z "$red" ] || echo " and a Known test failures section") as its body" >&2; return 1; }
+  echo "conveyor: release: v$v is released at ${t:0:12}${red:+, over a failed suite by $RELBY}"
 }
 # The Board's Release: release-prep, then on its pass release, in the background (above). Without prep, when the
 # record (the newest run) is a passed release-prep of <version> on main's head, main not moved since: release alone,
-# told that commit.
-releasego() { # <version> [prep: release-prep alone]
+# told that commit. With anyway (Release anyway): release --anyway --by <who> alone, which checks the failed suite.
+releasego() { # <version> [prep: release-prep alone | anyway <who>]
   local ok=''
   ( flock -n 9 ) 9>>"$CARDS/release/lock" || { echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
-  [ "${2:-}" = prep ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false) | .sha | strings' "$RELRUN" 2>/dev/null) \
+  [ -n "${2:-}" ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false) | .sha | strings' "$RELRUN" 2>/dev/null) \
     && [ "$ok" = "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" ] || ok=''; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     export CONVEYOR_RELEASE_PID=$BASHPID
     # release is told the commit release-prep's suite passed on, so a main that moved meanwhile is refused, never run
     # and released again without the owner's second press.
-    if [ -n "$ok" ]; then CONVEYOR_RELEASE_SHA=$ok bash "$HERE/conveyor.sh" release "$1"
+    if [ "${2:-}" = anyway ]; then bash "$HERE/conveyor.sh" release "$1" --anyway --by "$3"
+    elif [ -n "$ok" ]; then CONVEYOR_RELEASE_SHA=$ok bash "$HERE/conveyor.sh" release "$1"
     else bash "$HERE/conveyor.sh" release-prep "$1" && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
   if [ "${2:-}" = prep ]; then echo "conveyor: release-run: release-prep $1 is running, and nothing is released; its output is in $CARDS/release/run.log"
+  elif [ "${2:-}" = anyway ]; then echo "conveyor: release-run: release $1 is running over release-prep's failed suite, by $3; its output is in $CARDS/release/run.log"
   elif [ -n "$ok" ]; then echo "conveyor: release-run: release $1 is running, with the suite that passed on ${ok:0:12}; its output is in $CARDS/release/run.log"
   else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
@@ -376,15 +422,19 @@ releasestop() {
 }
 shift
 if [ "$CMD_ARG" = release ]; then
-  [ "${1:-}" != --help ] || { echo "usage: conveyor.sh release <version: X.Y.Z>"; echo "$RELHELP"; exit 0; }
-  [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf 'usage: conveyor.sh release <version: X.Y.Z>\n%s\n' "$RELHELP" >&2; exit 2; }
+  [ "${1:-}" != --help ] || { echo "usage: conveyor.sh release <version: X.Y.Z> [--anyway --by <who>]"; echo "$RELHELP"; exit 0; }
+  # --anyway --by <who>: the owner's release over release-prep's failed suite, under a name of one line.
+  if [ $# = 4 ] && [ "$2" = --anyway ] && [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]]; then RELBY=$4; set -- "$1"; fi
+  [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf 'usage: conveyor.sh release <version: X.Y.Z> [--anyway --by <who>]\n%s\n' "$RELHELP" >&2; exit 2; }
   relrun release "$1"
 elif [ "$CMD_ARG" = release-run ]; then
   if [ "$*" = stop ]; then releasestop
   else
-    prep=; [ $# = 2 ] && [ "$1" = prep ] && { prep=prep; shift; }
-    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> | release-run stop" >&2; exit 2; }
-    mkdir -p "$CARDS/release" && releasego "$1" $prep
+    how=; by=
+    if [ $# = 2 ] && [ "$1" = prep ]; then how=prep; shift
+    elif [ $# = 4 ] && [ "$1" = anyway ] && [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]]; then how=anyway by=$4; set -- "$2"; fi
+    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> | release-run anyway <version: X.Y.Z> --by <who> | release-run stop" >&2; exit 2; }
+    mkdir -p "$CARDS/release" && releasego "$1" $how "$by"
   fi
 else
   [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-prep <version: X.Y.Z>" >&2; exit 2; }

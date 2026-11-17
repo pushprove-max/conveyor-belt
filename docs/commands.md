@@ -162,8 +162,10 @@ GitHub and releases:
 - `release-prep <version>` prepares a release ([Releases](releases.md)).
 - `release <version>` makes the release: the tag, the pinned marketplace entry and the GitHub release
   ([Releases](releases.md)). Only the owner decides a release: the Foreman runs it only after the owner says yes in
-  chat.
+  chat. `release <version> --anyway --by <who>` releases over the failed suite of `release-prep` on the same commit
+  ([A release over a failed suite](releases.md#a-release-over-a-failed-suite)).
 - `release-run <version>` is the Board's **Release**: `release` alone when the suite of that version passed on the
   head of `main` and `main` did not move after it, else `release-prep`, then `release` when the suite passes.
   `release-run prep <version>` is its **Draft notes** and **Run suite**: `release-prep` alone, which releases nothing.
+  `release-run anyway <version> --by <who>` is its **Release anyway**: `release --anyway` alone.
   `release-run stop` stops that run ([Releases](releases.md#a-release-from-the-board)).

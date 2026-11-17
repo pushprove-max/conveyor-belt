@@ -875,13 +875,18 @@ for a in 1.2.0 stop 'prep 1.2.0'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run $a" ] || fail "release_run_${a// /_}_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
 done
+# Release anyway over a red suite is logged under the Board user who confirmed it. Bug: the release over a red suite
+# is logged as no one's, or the press reaches no command.
 fresh_control
-for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id' prep 'prep stop' 'prep 1.2' '1.2.0 prep'; do
+[ "$(ctl "$(act release-run anyway 1.2.0)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run anyway 1.2.0 --by Board user $(jq -r '.users | keys[0]' "$CONVEYOR_DASHBOARD_AUTH")" ] \
+  || fail "release_run_anyway_names_the_user: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control
+for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id' prep 'prep stop' 'prep 1.2' '1.2.0 prep' anyway 'anyway 1.2' 'anyway 1.2.0 --by'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 400 ] || fail "release_run_takes_a_version_or_stop: '$a' answered '$(cat "$M/ctl.out")'"
 done
 [ -z "$(calls)" ] || fail "release_run_takes_a_version_or_stop: ran '$(calls)'"
-pass=$((pass + 3))
+pass=$((pass + 4))
 # The Tests page's limits and a file's budget or mark reach `conveyor.sh test-settings` on the record, each argument
 # one quoted word (a reason with spaces too). Bug: a Save reaches no command, or a shape the engine does not take
 # (no value, a budget below 1, a path that reads as an option, a reason of two lines) is sent on.

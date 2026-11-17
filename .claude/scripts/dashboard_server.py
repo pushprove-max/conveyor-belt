@@ -174,7 +174,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
 # or full-test (the Rules tab's Run full test suite, Push landed and Push anyway: `conveyor.sh full-test [push | anyway <run id>]`),
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
-# or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`),
+# or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`,
+# and Release anyway: `release-run anyway <version> --by <Board user>`),
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
 # or standing (the Rules tab's Done without asking: one standing kind of routine yes on or off, `conveyor.sh auto standing`),
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
@@ -382,8 +383,9 @@ def control_ok(body):
         return v in ([], ['push']) or (n == 2 and v[0] == 'anyway' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'push-now':  # Push now: what landed, pushed through the pre-push hook only, with no full test run
         return n == 0
-    if a == 'release-run':  # the Release panel's Release (the version typed), Draft notes and Run suite (prep, the version) and Stop (stop)
-        return (n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)) or (n == 2 and v[0] == 'prep' and VERSION.fullmatch(v[1]) is not None)
+    if a == 'release-run':  # the Release panel's Release (the version typed), Draft notes and Run suite (prep, the version),
+        # Release anyway over release-prep's red suite (anyway, the version) and Stop (stop)
+        return (n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)) or (n == 2 and v[0] in ('prep', 'anyway') and VERSION.fullmatch(v[1]) is not None)
     if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's budget or mark
         return test_settings_ok(v)
     if a == 'standing':  # the Rules tab: one standing kind of routine yes, on or off
@@ -593,8 +595,9 @@ def control_script(action, args, main, today, record=None, user=None):
         return '%s push-now' % conv
     if action == 'release-run':
         # Release: the owner's yes to release-prep, then release, which run on the host after the answer; prep: release-prep
-        # alone (Draft notes, Run suite); or Stop.
-        return '%s release-run %s' % (conv, ' '.join(q(x) for x in args))
+        # alone (Draft notes, Run suite); or Stop. A release over a red suite (anyway) is logged under the Board user who
+        # confirmed it.
+        return '%s release-run %s%s' % (conv, ' '.join(q(x) for x in args), ' --by %s' % q('Board user %s' % user) if args[:1] == ['anyway'] else '')
     if action in ('test-settings', 'prices'):
         # The record's pack (.conveyor/project.json of its main), changed by the engine's own command, which checks it.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))

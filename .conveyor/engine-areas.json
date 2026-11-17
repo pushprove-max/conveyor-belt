@@ -726,6 +726,7 @@
 {"area": "cmd-release-prep", "test": "releasestop.test.sh"}
 {"area": "cmd-release-prep", "test": "releaseagain.test.sh"}
 {"area": "cmd-release-prep", "test": "releasereuse.test.sh"}
+{"area": "cmd-release-prep", "test": "releaseanyway.test.sh"}
 {"area": "cmd-release-prep", "test": "inheritedfds.test.sh"}
 {"area": "cmd-release-prep", "test": "crossreuse.test.sh"}
 {"area": "cmd-release-prep", "file": "conveyor/tools/notes-check.sh"}

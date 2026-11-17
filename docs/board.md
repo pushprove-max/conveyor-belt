@@ -260,6 +260,10 @@ example **Release 1.0.0**) or **Run again on the new main**. Click it, then clic
   pass and runs `conveyor.sh release <version>` ([Releases](releases.md)). Else Conveyor runs
   `conveyor.sh release-prep <version>`, which runs the whole suite first, and runs `conveyor.sh release <version>` when
   the suite passes. The second click's text says which of the two occurs. Nothing else starts a release.
+- **Release anyway** shows beside a failed suite on the head of `main`. The first click shows the failed files and
+  cases. The second click is your yes to release over them: Conveyor runs `conveyor.sh release-run anyway <version>`,
+  and the release names you and the failures. The status of the suite stays failed
+  ([A release over a failed suite](releases.md#a-release-over-a-failed-suite)).
 
 **Stop** shows only while a run is in progress. After a second click, it stops the processes of that run. Conveyor
 itself continues.

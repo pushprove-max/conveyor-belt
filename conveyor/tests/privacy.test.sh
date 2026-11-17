@@ -74,6 +74,9 @@ t_privfiles() {
       *) out=$(loop gh-write "$@" "$a$b" 2>&1) ;; esac
     [ $? = 3 ] && grep -q 'home path' <<<"$out" && [ "$(wc -l < "$STUB/comments")" = 1 ] || fail "a body read from a file ($a) was posted unchecked: $out"
   done
+  # Bug: release create's --notes-file was passed to gh unread, so release notes were published with no check.
+  out=$(loop gh-write release create v1 --notes-file "$T/$CASE/body" 2>&1); [ $? = 3 ] && grep -q 'home path' <<<"$out" || fail "release notes read from a file were posted unchecked: $out"
+  out=$(loop gh-write release create v1 --notes-file="$T/$CASE/body" 2>&1); [ $? = 3 ] && grep -q 'home path' <<<"$out" || fail "release notes read from --notes-file= were posted unchecked: $out"
   # pr review's --comment, -c and -a are switches, so the file after them is still read; issue edit's -m takes a value.
   for a in --comment -c -a; do
     out=$(loop gh-write pr review 7 "$a" --body-file="$T/$CASE/body" 2>&1); [ $? = 3 ] && grep -q 'home path' <<<"$out" || fail "pr review $a hid a body file from the check: $out"
