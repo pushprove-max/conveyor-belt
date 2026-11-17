@@ -310,11 +310,14 @@
       }
     },
     "foreman": {
-      "description": "The Foreman's model and effort (plan section 11b).",
+      "description": "The Foreman's model and effort (plan section 11b), and when its watcher wakes it for a waiting card.",
       "type": "object",
-      "required": ["model", "effort"],
       "additionalProperties": false,
-      "properties": { "model": { "type": "string", "minLength": 1 }, "effort": { "type": "string", "minLength": 1 } }
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 },
+        "waitWake": { "description": "Minutes a card waits for main to change, or on another card, before the Foreman's watcher wakes it (watch-conveyor.sh); it wakes again, \"still waiting\", after each further waitWake minutes of the same wait.", "type": "integer", "minimum": 1, "default": 10 }
+      }
     },
     "review": {
       "description": "How the card review is asked.",

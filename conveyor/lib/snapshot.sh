@@ -41,7 +41,8 @@
 #   fix), stepAt (when the step began), model (the one running the step: a session's or a review's, else null),
 #   tokens (fresh, so far) and usd so far: the finished steps and the live record of the running one. reading is
 #   false, and usd null, while neither a finished session or review nor the live record holds a token: "no reading
-#   yet", never $0. live is {turns, lastOutputAt} of the running step, or null. beyond: why it took a slot beyond the
+#   yet", never $0. live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
+#   card waiting for main to change, testrun.sh mainwait(), when that wait began), or null. beyond: why it took a slot beyond the
 #   project's cap ("main is red": a main-red fix, redfix()), null once it has landed or when it took none. reviews and
 #   track are as below.
 # reviews (of a belt card and of a landed one): its finished reviews in order: round, verdict (GO, NO-GO, or none),
@@ -106,6 +107,8 @@
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
 # standing: the pack's auto.standing, the standing kinds of routine yes that are on (lib/standing.sh), for the Rules
 #   tab; null when the pack cannot be read.
+# waitWake: the pack's foreman.waitWake (default 10), the minutes a card waits for main to change, or on another card,
+#   before the Foreman's watcher wakes it; read here, on the belt's host, as the Foreman's machine may hold no pack.
 # awaitingDeploy: the open issues labelled awaiting-deploy (built, waiting for the owner's deploy), apart from next and
 #   from held, which never count them: issue, title, since (when the label was last added; null when GitHub did not
 #   say), lowest number first. null when gh cannot list the issues.
@@ -373,7 +376,7 @@ snapshot() (
   # A main-red fix card is titled from its entry as it is now (redtitles()), so a case added while it runs shows.
   jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '{cards: (map($live[.card] as $v
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
-      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, turns, last, usage, files, tests, list, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end)
+      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))}' "$d/rows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
   # has none. The models the steps of the last 30 days ran are counted from since (seen).
@@ -456,8 +459,9 @@ snapshot() (
       why: (if $ft == "" then "the pack names no full test suite (test.full)" else null end), running: $r, last: (map(objects) | last)}' 2>/dev/null) || ft=null
   # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).
   su=$(suites) || su='[]'; rl=$(releasemain) || rl=null
+  packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
   jq -cn --slurpfile all "$d/priced" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
-    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" \
+    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --argjson q "$queue" --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$(p_date "$day" +%s)" --argjson t0w "$(p_date "$since" +%s)" --argjson t0p "$(p_date "$prev" +%s)" "$DEPS$LEVEL"'
@@ -675,7 +679,7 @@ snapshot() (
                 state: (if $r == null then "gone" elif $r.x.retried then "queued" elif $r.result == "" then $r.x.at else $r.step end)} end) as $won
          | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $landed then null else .x.review end), of: $max, stepAt, landed: $landed,
          model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), tokens: $s.tokens, usd: $s.usd, reading: $s.reading,
-         live: (if .live then {turns: .live.turns, lastOutputAt: .live.last, action: (.live.action // null)} else null end),
+         live: (if .live then {turns: .live.turns, lastOutputAt: .live.last, action: (.live.action // null), at: (.live.at // null)} else null end),
          done: {tokens: .x.tokens, usd, reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)},
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
          parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
@@ -688,6 +692,7 @@ snapshot() (
        limits: $ga,
        inFlight: ([$c[] | select(.result == "" and .x.accounts != null) | .x.accounts] | unique),
        areaPrefix: $area,
+       waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,
        landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd, reviews: .runReviews, followups: .x.followups,

@@ -32,6 +32,10 @@ t_mainred() {
   c=$(st 'select(.step == "picked") | .card')
   # Issue 201: while it only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
   wait_until "[ -e '$T/$CASE/cards/$c.idle' ]" || fail "the card waiting for main did not mark itself waiting: the loop would count it against the cap"
+  # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher
+  # times its wake from; without it the wait never wakes the Foreman.
+  [ "$(loop snapshot 2>/dev/null | jq -r --arg c "$c" '.belt[] | select(.card == $c) | .live.at')" = "$(jq -r .at "$T/$CASE/cards/$c.live")" ] \
+    || fail "the snapshot does not give when the wait for main began: $(loop snapshot 2>/dev/null | jq -c --arg c "$c" '.belt[] | select(.card == $c) | .live')"
   [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:c.test|fail:b.test:flaky|" ] && [ "$(ran main)" = "flaky three" ] \
     || fail "main's run was not told to run the failing case alone and the file that failed naming no case whole: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
   [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "[\"fail\",[{\"case\":\"c.test\",\"verdict\":\"main\"},{\"case\":\"b.test: flaky\",\"verdict\":\"main\"}],\"$(git -C "$R" rev-parse HEAD)\"]" ] \

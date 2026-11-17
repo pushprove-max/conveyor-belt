@@ -10,6 +10,9 @@
 #     limit, with the cards it waited on, or a test case that hangs, by name); one whose step the engine ended
 #     for no progress and runs once more (did) is a new problem, and says so ("ended and retried"); a second stall
 #     blocks the card, and its blocked alert says so; each only once two polls in a row, at least a poll apart, list it
+#   a card that has waited for main to change, or on another card, for the pack's foreman.waitWake minutes (default
+#     10): it names the card, what it waits on and that card's step and last action (for main, each main-red fix card
+#     open or blocked); once per wait, and "still waiting" after each further waitWake minutes of it
 #   the record unreachable: no snapshot for 2 minutes (never one failed poll)
 #   an awaited issue landed: $FD/await-<repo>.txt lists issue numbers, one per line, of the record <repo>, so a
 #     group's Foreman claimed in another checkout awaits the same issues of the same projects; one whose card has
@@ -110,6 +113,27 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (select(.state == "control record unreadable") | ["control", "picks nothing", "", "the loop picks nothing: \(.reason // "the control record does not read" | one)"]),
     (.cycles | arrays | .[] | arrays | map(tostring) | ["cycle:\(join("-"))", "dependency cycle", (map("#" + .) | join(" ")),
       "issues \(map("#" + .) | join(", ")) depend on each other: none of them will be picked"]),
+    # A card that has waited $wake minutes (the pack'"'"'s foreman.waitWake, the snapshot'"'"'s waitWake: read on the belt'"'"'s
+    # host, as a remote belt'"'"'s pack is not on this machine; 10 when it gives none) on another card (health waitingOnCard) or
+    # for main to change (its live action, testrun.sh mainwait(); the snapshot'"'"'s belt live.at is when that wait
+    # began): what it waits on, with that card'"'"'s step and last action, or, for main, each main-red fix card open or
+    # blocked. Its key holds the wait'"'"'s start and how many times $wake it has lasted, so each wait wakes once, and
+    # again ("still waiting") after each further $wake minutes.
+    (.blocked as $hb | (($snap.waitWake | numbers | select(. >= 1)) // 10) as $wake
+      | def about($h): ($h | ref) as $r | ([$snap.belt | arrays | .[] | objects | select(.card == $h.card)] | first) as $b
+          | ([$hb[] | select(.card == $h.card)] | first) as $x
+          | if $b then "\($r) (at \($b.step), last action: \($b.live.action // "none"))"
+            elif $x then "\($r) (blocked: \($x.reason))" else "\($r) (\($h.state // "gone"))" end;
+      ([$snap.belt | arrays | .[] | objects | select((.name | strings) and (.landed | not)) | about(.)]
+        + [$hb[] | select(.name | strings) | about(.)]
+        | if . == [] then "no main-red fix card is open" else "main-red fix card " + join(", ") end) as $reds
+      | ((.waitingOnCard | arrays | .[] | objects | {c: ., since, on: about(.waitsOn | objects)}),
+         ($snap.belt | arrays | .[] | objects | select(.live.action | strings | startswith("waiting for main to change"))
+           | {c: ., since: .live.at, on: "main to change (\(.live.action | ltrimstr("waiting for main to change: "))); \($reds)"}))
+      | (.since | strings | fromdate?) as $t | (($now - $t) / 60 | floor) as $m | ($m / $wake | floor) as $n | select($n >= 1)
+      | (.c | ref) as $r
+      | ["wait:\(.c.card):\(.since):\($n)", "card waiting", $r,
+          (if $n == 1 then "\($r) has waited \($m) minutes on " else "\($r) is still waiting, \($m) minutes now, on " end) + .on | gsub("\\s+"; " ") | .[0:600]]),
     # Every other kind of Needs you on the Board, from the list the Board reads too (.claude/scripts/dashboard_needs.json), each
     # read from the snapshot field the list names: waiting, before and blocked are read from health, above (the push
     # the Board lists under blocked wakes as "push failing"). A kind added to the list later wakes under its name.

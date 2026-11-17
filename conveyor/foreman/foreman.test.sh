@@ -127,6 +127,11 @@ grep -qF '# Check status with conveyor.sh foreman status, not your own snapshot 
 grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?"' <<<"$out" \
   && grep -qF 'on yes run conveyor.sh setup pack-commit yes' <<<"$out" \
   || fail "the Foreman's start context does not ask the owner by the picker to commit the pack: $out"
+# Bug (#220): on a wake for a waiting card the Foreman only reported it, and cards waited for hours. Its rules tell it
+# to find the cause and fix it.
+grep -qF '# A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits' <<<"$out" \
+  && grep -qF 'Then fix the cause: a hand fix when the belt is blocked and the owner'"'"'s rules allow it, otherwise file the issue.' <<<"$out" \
+  || fail "the Foreman's start context does not tell it to find and fix why a card waits: $out"
 grep -qF "alpha waiting on the owner's yes: #12" <<<"$out" && grep -qF "beta waiting on the owner's yes: #19" <<<"$out" \
   || fail "the live summary does not cover both records: $out"
 grep -qF "alpha waiting on the owner's yes before its build: #21" <<<"$out" || fail "the live summary leaves out an issue waiting for its yes before its build: $out"

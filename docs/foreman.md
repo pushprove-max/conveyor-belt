@@ -47,6 +47,15 @@ it up:
 - A card that the Foreman waits for lands: the wake names its commit.
 - A blocked card: the wake names the reason.
 - A release or full-test run that ends: the wake names the result and the failed cases.
+- A card that waits for main to change, or waits on another card, for the minutes of the pack setting
+  `foreman.waitWake` (in `.conveyor/project.json`): the wake names the card and what it waits on. For another card,
+  it gives that card's step and last action. For main, it gives each main-red fix card that is open, with its step
+  and last action, or blocked, with its reason. Each wait wakes the Foreman once. If the wait goes on for the same
+  time again, the next wake says "still waiting".
+
+On a wake for a waiting card, the Foreman does more than report it. It finds why the card waits: it reads the log of
+the card it waits on, the main-red record and the test log. Then it fixes the cause. If the belt is blocked and your
+rules allow it, it makes a fix by hand. If not, it files an issue.
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 
