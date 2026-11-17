@@ -348,6 +348,19 @@ t_followprunewaiter() {
   [ ! -e "$V/$A" ] || fail "the install of a Foreman waiter that ended was kept: $(ls "$V")"
   [ -d "$V/$C1" ] || fail "the install another project's live Foreman waiter runs from was removed: $(ls "$V")"
 }
+# Bug (#198): the live Foreman waiter of another project, which no host file or followers list of this one names (or
+# whose Foreman folder is not in the state folder guessed for it), ran from $A, and this project's prune removed $A
+# under it: its watcher died and its blocked cards woke nothing. The waiter lists its Foreman folder in the machine's
+# foremen file (foreman/waiter.sh; foreman/gone.test.sh checks that it does), and every prune keeps what it names.
+t_followprunefar() {
+  prunesetup
+  local F=$T/$CASE/elsewhere/foreman; mkdir -p "$F" && echo "$F" >> "${V%/*}/foremen" || fail "the foremen file was not written"
+  sleep 60 & w=$!; trap 'kill $w 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT # sleep: a stand-in waiter
+  echo "$w $A s1" > "$F/waiter.pid"
+  pushed 'echo 1 > n.txt'; C1=$NEW; takeby "$A" >/dev/null || fail "$C1 was not taken"
+  pushed 'echo 2 > n.txt'; C2=$NEW; takeby "$C1" >/dev/null || fail "$C2 was not taken"
+  [ -d "$V/$A" ] || fail "the install a live Foreman waiter the foremen file lists runs from was removed: $(ls "$V")"
+}
 # Bug (#186): two projects on one machine follow main, each with its own host file, so neither is in the other's
 # records. The other's take lists it (FOLLOWERS), and this project's prune keeps the commit the other runs. A Board of
 # either (a process running from an install, named by its path) keeps its commit too.

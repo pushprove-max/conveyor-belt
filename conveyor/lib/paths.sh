@@ -39,6 +39,11 @@ USES=${VERSIONS%/*}/uses
 # file of the project pruning does not list it.
 # shellcheck disable=SC2034 # read by lib/install.sh, which conveyor.sh sources beside this file
 FOLLOWERS=${VERSIONS%/*}/followers
+# The Foreman folders of this machine, one a line, each listed by its own waiter as it starts (foreman/waiter.sh):
+# prune() keeps the commit each live waiter names in its waiter.pid, also for a project no list above names, or one
+# whose Foreman folder is not where its state folder is guessed.
+# shellcheck disable=SC2034 # read by lib/install.sh, which conveyor.sh sources beside this file
+FOREMEN=${VERSIONS%/*}/foremen
 # The Board's own virtualenv (the page server's Python, dashboard.sh's BOARD_PY): setup fills it from requirements.txt
 # with every hash checked, never the system Python; doctor checks each package the Board imports.
 BOARD_VENV=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv

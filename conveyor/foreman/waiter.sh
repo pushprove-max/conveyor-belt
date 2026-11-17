@@ -27,7 +27,12 @@
 # reads the commit the project runs now (its pack's plugin.commit, else for a pack that follows the plugin its
 # conveyor-engine.json commit, as shim.sh reads them); when that is another installed commit, it stops its watchers
 # and runs again from that install, in this same process, so no wake is missed while the install moves. An update of
-# the install (lib/install.sh, prune) keeps the version folder waiter.pid names while this waiter's pid runs.
+# the install (lib/install.sh, prune) keeps the version folder waiter.pid names while this waiter's pid runs: each
+# waiter lists its Foreman folder in the machine's foremen file (lib/paths.sh FOREMEN), which every prune reads. When
+# its install is gone all the same and the project's commit is not installed to move to, it stops its watchers, puts
+# one WATCHER DOWN wake and ends (the Stop hook's waiter delivers it at once; a held one leaves it in pending for the
+# next stop): the next hook of the session starts a
+# waiter again through the shim, which installs the project's commit again.
 # For tests: CONVEYOR_FOREMAN_WATCHERS (the watchers, one command line each, in place of the four),
 # CONVEYOR_FOREMAN_RENEW (seconds, 82800), CONVEYOR_FOREMAN_LOOK (seconds between two reads of the commit, 60),
 # CONVEYOR_FOREMAN_SESSION_PID (the session's process).
@@ -122,6 +127,9 @@ if [ "$MODE" = --check ]; then
   why='nothing held waiter.lock'; log "a hook of the session found no waiter running: it starts one"
   handoff; exit 0
 fi
+# Listed for the prune of every project of this machine, whose own lists may not name this Foreman's folder.
+FOREMEN=${VERSIONS%/*}/foremen
+{ grep -qxF "$FD" "$FOREMEN" || echo "$FD" >> "$FOREMEN"; } 2>/dev/null
 printf '%s %s %s\n' "$$" "${FROM:--}" "$SID" > "$FD/waiter.pid"
 foreman "$SID" || exit 0
 [ ! -f "$LOG" ] || [ "$(wc -l < "$LOG")" -le 400 ] ||{ tail -n 200 "$LOG" > "$LOG.new" && mv "$LOG.new" "$LOG"; } 2>/dev/null
@@ -183,6 +191,14 @@ while :; do
   if new=$(moved); then
     stop_all; log "moves to the install $new"; trap - EXIT
     CONVEYOR_FOREMAN_END=$end exec bash "$VERSIONS/$new/conveyor/foreman/waiter.sh" $MODE <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')"
+  fi
+  # The install it runs from is gone, with no other to move to: its watchers cannot be started again from it, so it
+  # never runs on with one missing. One wake, then it ends; no handoff, as its own waiter.sh is gone too.
+  if [ -n "$FROM" ] && [ ! -f "$SELF" ]; then
+    echo "WATCHER DOWN: the Conveyor install $VERSIONS/$FROM the Foreman's waiter ran from is gone, and the project's commit is not installed; the watchers stopped. The next hook of this session starts them again; if no wake comes after it, run /conveyor-belt:setup in $CONVEYOR_MAIN" | pending_put
+    log "its install $FROM is gone"
+    if [ -z "$MODE" ] && deliver; then why="$why (its install $FROM is gone)"; stop_all; exit 2; fi
+    why="its install $FROM is gone; the wake waits in pending for the next stop"; stop_all; exit 0
   fi
   for w in "${!PID[@]}"; do
     [ "${PID[$w]}" = "${ended:-}" ] || continue
