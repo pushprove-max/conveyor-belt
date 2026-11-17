@@ -35,6 +35,8 @@ mkdir -p "$CONVEYOR_MAIN/conveyor/state"
 rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
   + (if $j == null then {} else {judge: $j} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }
 rec picked ok; rec build ok
+# The project name this checkout's loop takes, as the real engine names it (and its machine slot file after it).
+(set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
 if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J"; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
 rec review GO; rec test pass; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" commit -qam fix; rec landed ok; gh issue close 1
@@ -63,7 +65,7 @@ EOF
 swe() {
   setup '[]'; template swe swemake || fail "the SWE-bench fixture was not made"
   export SWE_FX=$T/$CASE/fx XDG_DATA_HOME=$T/$CASE/data; cp -a "$FIXTURE.swe/." "$SWE_FX/" || fail "the fixture was not copied"
-  export CONVEYOR_BENCH_PYTHON=$SWE_FX/py CONVEYOR_BENCH_SOURCE=file://$SWE_FX/eng.git B=$ST/bench/swe
+  export CONVEYOR_BENCH_PYTHON=$SWE_FX/py CONVEYOR_BENCH_SOURCE=file://$SWE_FX/eng.git B=$ST/bench/swe SWE_SRC=$SRC
   trap 'chmod -R u+w "$T/$CASE"' EXIT
   EA=$(git -C "$SWE_FX/eng.git" rev-parse 'v1.0.0^{commit}'); EB=$(git -C "$SWE_FX/eng.git" rev-parse main)
 }
@@ -79,6 +81,9 @@ t_swepresets() {
   out=$(loop bench swe 1 2>&1) || fail "swe 1 failed: $out"
   [ "$(cat "$SWE_FX/log")" = "B SWE-bench $first" ] || fail "swe 1 did not build the first task of the pinned order ($first) with main's engine: $(cat "$SWE_FX/log")"
   grep -q "Expected: about 2 sessions (worst case 8)" <<<"$out" || fail "the run did not say the sessions expected before it began (worst case: build, 3 reviews, 2 fixes, a test fix and its review): $out"
+  # Bug: every sandbox's checkout was named main, so the benchmarks of two projects running at once took one project
+  # name, main, and shared one machine slot file (lib/pick.sh), each loop leaving the other's cards out of its count.
+  [ "$(cat "$SWE_FX/rtag")" = "swe-${R##*/}" ] || fail "the sandbox's loop does not take a name of this project's own: $(cat "$SWE_FX/rtag" 2>&1)"
   out=$(loop bench swe 2 2>&1) || fail "swe 2 failed: $out"
   [ "$(sed -n 2p "$SWE_FX/log")" = "B SWE-bench $second" ] && [ "$(wc -l < "$SWE_FX/log")" = 2 ] || fail "swe 2 did not reuse the first task's result and build only the second: $(cat "$SWE_FX/log")"
   grep -q "1/2 $first: resolved (reused)" <<<"$out" || fail "swe 2 did not say the first task was reused: $out"
@@ -168,7 +173,7 @@ t_swesolo() {
   # hidden tests in reach. The CLI's own confinement cannot run here (the claude stub): its arguments are what is checked.
   [ "$(cat "$STUB/solo-gh")" = "$B/work/$first/bin/gh" ] || fail "the solo session was not given the sandbox's gh: $(cat "$STUB/solo-gh")"
   local a; a=$(tail -n 1 "$STUB/sessions")
-  [[ $a == *'--permission-mode dontAsk'* && $a == *'--tools Read,Grep,Glob,Edit,Write '* && $a == *"Edit(/$B/work/$first/main/**)"* \
+  [[ $a == *'--permission-mode dontAsk'* && $a == *'--tools Read,Grep,Glob,Edit,Write '* && $a == *"Edit(/$B/work/$first/swe-${R##*/}/**)"* \
     && $a == *"Read(/$B/raw.*)"* && $a == *'--setting-sources  --strict-mcp-config'* && $a != *bypassPermissions* ]] \
     || fail "the solo session is not held to its sandbox's files with no shell: $a"
   [ ! -s "$SWE_FX/log" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "the solo run did not take one Claude session and no engine"

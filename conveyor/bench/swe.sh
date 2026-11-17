@@ -28,6 +28,10 @@
 # the harness could not grade, is not run: no result is kept, and the run names it apart from the failed ones.
 SWE_CONF=$HERE/bench/swe.json
 SWE_DIR=$ST/bench/swe
+# The folder name of a sandbox's main checkout. The engine names a project with no host record by its checkout's folder,
+# and keeps the project's machine slot file (lib/pick.sh) under that name: swe-<this project>, so the benchmarks of two
+# projects that run at once never share one slot file, and neither takes the name of a project called main.
+SWE_MAIN=swe-$RTAG
 # The harness's Python: the swebench virtualenv's (docs/benchmarks.md says how to make it), else python3.
 SWE_VENV=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/swebench-venv
 swe_h() {
@@ -113,13 +117,13 @@ swe_board() {
        tasks: (map({key: .task, value: {resolved, sessions, tokens, minutes}}) | from_entries), at: (map($pos[.task] // empty) | sort)}))}')"
 }
 swe_live() { local l; l=$(jq -c "$@" "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" && swe_board; } # [jq options] <jq filter>
-# The sandbox of one task: <sb>/origin, a bare repository holding the base commit as main, <sb>/main, its clone, and
+# The sandbox of one task: <sb>/origin, a bare repository holding the base commit as main, <sb>/swe-<project>, its clone, and
 # <sb>/bin/gh, the sandbox's gh (swe_gh) serving the task's issue, for the engine's loop and the solo session alike.
 swe_sandbox() { # <task json> <sb>
   local url base; url=$(jq -r .url <<<"$1"); base=$(jq -r .base <<<"$1")
   { [ ! -e "$2" ] || { chmod -R u+w "$2" && rm -rf "$2"; }; } && mkdir -p "$2/bin" && git init -q --bare -b main "$2/origin" \
     && git -C "$2/origin" fetch -q --depth 1 "$url" "$base" && git -C "$2/origin" update-ref refs/heads/main "$base" \
-    && git clone -q "file://$2/origin" "$2/main" && printf '.conveyor/\nconveyor/\n' >> "$2/main/.git/info/exclude" \
+    && git clone -q "file://$2/origin" "$2/$SWE_MAIN" && printf '.conveyor/\nconveyor/\n' >> "$2/$SWE_MAIN/.git/info/exclude" \
     && printf '%s\n' "$base" > "$2/base" \
     && jq -c '{number: 1, title: "SWE-bench \(.id)", body: .issue, labels: [], milestone: null, createdAt: "2026-01-01T00:00:00Z", state: "OPEN"}' <<<"$1" > "$2/issue.json" \
     && swe_gh "$2"
@@ -129,7 +133,7 @@ swe_sandbox() { # <task json> <sb>
 swe_env() { # <sb> <command...>
   env -u CARDCTL -u CONVEYOR_CARD_SETTINGS -u CONVEYOR_OPENCODE_GUARD -u CONVEYOR_CODEX_GUARD -u CONVEYOR_CARD_RULES -u CONVEYOR_CARD \
     -u CONVEYOR_FOREMAN -u CLAUDE_CODE_SESSION_ID -u CONVEYOR_FOREMAN_DIR -u CLAUDE_PROJECT_DIR -u CONVEYOR_ADOPT -u CONVEYOR_KIDS \
-    CONVEYOR_MAIN="$1/main" CONVEYOR_CARDS="$1/cards" PATH="$1/bin:$PATH" "${@:2}"
+    CONVEYOR_MAIN="$1/$SWE_MAIN" CONVEYOR_CARDS="$1/cards" PATH="$1/bin:$PATH" "${@:2}"
 }
 # The sandbox's gh: issue #1 is the task's issue, open until the card closes it or a push moves the origin's main past
 # the base commit (GitHub closes an issue on a push whose commit says it closes it); a comment, label, follow-up or
@@ -157,17 +161,17 @@ EOF
   chmod +x "$1/bin/gh"
 }
 # The final patch of a sandbox: what its main holds over the base commit.
-swe_patch() { git -C "$1/main" diff --binary "$2" "${3:-refs/heads/main}" --; } # <sb> <base> [<what>]
+swe_patch() { git -C "$1/$SWE_MAIN" diff --binary "$2" "${3:-refs/heads/main}" --; } # <sb> <base> [<what>]
 # One task built by the engine in <eng> (its conveyor.sh). Prints the result's build part {sessions, tokens, minutes,
 # steps}, the patch in <sb>/patch.
 swe_build() { # <task json> <sb> <eng>
   local sb=$2 sst t0 base; base=$(jq -r .base <<<"$1"); t0=$(date +%s)
-  mkdir -p "$sb/main/.conveyor" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
+  mkdir -p "$sb/$SWE_MAIN/.conveyor" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
   jq --arg t "$(jq -r .test <<<"$1")" --arg l "$sb/rulings.jsonl" '{owner, labels: ((.labels // {}) + {nonProductAreas: []}), models, review, prices, privacy,
     tunables: ((.tunables // {}) + {closeWait: 0}), rulings: {log: $l}, test: {command: $t, survey: false}, productPaths: [".conveyor-none/"], linkFromMain: [], checks: [],
-    push: {env: {}}, remote: "origin", defaultBranch: "main", landBatch: 1} | with_entries(select(.value != null))' "$MAIN/.conveyor/project.json" > "$sb/main/.conveyor/project.json" \
+    push: {env: {}}, remote: "origin", defaultBranch: "main", landBatch: 1} | with_entries(select(.value != null))' "$MAIN/.conveyor/project.json" > "$sb/$SWE_MAIN/.conveyor/project.json" \
     || { echo "the project's pack could not be read to make the task's pack"; return 1; }
-  sst=$(swe_env "$sb" bash "$3" state-dir 2>/dev/null) && [ -n "$sst" ] || sst=$sb/main/conveyor/state
+  sst=$(swe_env "$sb" bash "$3" state-dir 2>/dev/null) && [ -n "$sst" ] || sst=$sb/$SWE_MAIN/conveyor/state
   [ "$(cd "$sst" 2>/dev/null && pwd -P)" != "$(cd "$ST" && pwd -P)" ] || { echo "the host file gives the sandbox the project's own state folder"; return 1; }
   mkdir -p "$sst" && ctl | jq '.mode = "run" | .held = [] | .order = [] | .startHeld = [] | .start = "queue" | .rules.followups = false | .rules.visible = false | .rules.push = true' > "$sst/control.json" \
     || { echo "the project's control record could not be read"; return 1; }
@@ -186,10 +190,10 @@ swe_build() { # <task json> <sb> <eng>
 swe_solo() { # <task json> <sb> <model>
   local sb=$2 t0 base; base=$(jq -r .base <<<"$1"); t0=$(date +%s)
   { printf 'Fix this issue in the repository in the current folder. Change the code only; do not commit.\n\n'; jq -r .issue <<<"$1"; } > "$sb/prompt"
-  (cd "$sb/main" && swe_env "$sb" timeout "$(swe_conf .taskTimeout)" claude -p --output-format json --permission-mode dontAsk ${3:+--model "$3"} \
-    --setting-sources "" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools "Edit(/$sb/main/**)" \
+  (cd "$sb/$SWE_MAIN" && swe_env "$sb" timeout "$(swe_conf .taskTimeout)" claude -p --output-format json --permission-mode dontAsk ${3:+--model "$3"} \
+    --setting-sources "" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools "Edit(/$sb/$SWE_MAIN/**)" \
     --disallowedTools "Read(/$SWE_DIR/raw.*)" "Read(/$SWE_DIR/tasks.*)" "Read(/$SWE_DIR/results/**)" < "$sb/prompt" > "$sb/solo.json" 2> "$sb/solo.err")
-  git -C "$sb/main" add -A && swe_patch "$sb" "$base" --cached > "$sb/patch" || return 1
+  git -C "$sb/$SWE_MAIN" add -A && swe_patch "$sb" "$base" --cached > "$sb/patch" || return 1
   jq -sc --argjson m "$(( $(date +%s) - t0 ))" 'map(select(.type == "result")) | last // {} | .usage // {} as $u
     | {sessions: 1, tokens: (($u.input_tokens // 0) + ($u.cache_creation_input_tokens // 0) + ($u.output_tokens // 0)), minutes: ($m / 6 | round / 10), steps: []}' "$sb/solo.json" 2>/dev/null \
     || jq -nc --argjson m "$(( $(date +%s) - t0 ))" '{sessions: 1, tokens: 0, minutes: ($m / 6 | round / 10), steps: []}'
