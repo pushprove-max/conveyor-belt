@@ -20,7 +20,10 @@ terms=''
 # github.com or gitlab.com (any other user at those hosts is still a hit), or is a systemd instance unit name
 # (<name>@<instance>.service, also .slice, .socket, .scope, .target, .mount, .timer or .path), not an address. A home path is
 # a hit unless its user is dev, the neutral user of the demo's container (docs/demo/record-terminal.sh). A folder after
-# /home/ or /Users/ that starts with a dot (/home/.claude) is no user's home, as no user name starts with a dot.
+# /home/ or /Users/ that starts with a dot (/home/.claude) is no user's home, as no user name starts with a dot. A
+# /home/ or /Users/ right after a shell variable, a closing } or ) or another path part ($C/home/hf, ${T}/Users/a,
+# tmp/home/x) is a folder under that path, not an absolute home path; at the start of a path, after a space, a quote,
+# = or : it is still a hit.
 PATTERNS=$'email\t[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}
 private address\t(^|[^0-9.])(10\\.[0-9]{1,3}|192\\.168|172\\.(1[6-9]|2[0-9]|3[01]))\\.[0-9]{1,3}\\.[0-9]{1,3}($|[^0-9])
 home path\t/(Users|home)/[^./[:space:]][^/[:space:]]*
@@ -45,7 +48,12 @@ one() { # <file> <name shown>
         | grep -vE '^[0-9]+:(ssh://git@|git@[^:]+:$|git@(github\.com|gitlab\.com)$)' \
         | grep -vE '^[0-9]+:[^@]+@[^@]*\.(service|slice|socket|scope|target|mount|timer|path):?$' | cut -d: -f1
     elif [ "$name" = 'home path' ]; then
-      grep -anoE -- "$rx" "$1" | grep -vE '^[0-9]+:/(Users|home)/dev\.*([^A-Za-z0-9._-].*)?$' | cut -d: -f1
+      # A nested home or Users folder is renamed (home_) first, so the pattern needs no character before the slash:
+      # a match that took that character would take it from the next path too (the : between the exempt dev home and
+      # another user's home in one PATH value).
+      LC_ALL=C sed -E ':a
+s#([A-Za-z0-9_.~$})*-])/(Users|home)/#\1/\2_/#g
+ta' "$1" | grep -anoE -- "$rx" | grep -vE '^[0-9]+:/(Users|home)/dev\.*([^A-Za-z0-9._-].*)?$' | cut -d: -f1
     else
       grep -anE -- "$rx" "$1" | cut -d: -f1
     fi | sort -nu | while read -r l; do echo "$2:$l: $name"; done

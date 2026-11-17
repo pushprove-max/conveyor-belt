@@ -185,6 +185,19 @@ t_privunit() {
   out=$("$c" "$f"); [ "$out" = "$(printf '%s\n' "$f:4: email" "$f:5: email")" ] || fail "hits: $out"
 }
 
+# Bug (#329): the 1.5.0 release was refused on swebench.test.sh's HF_HOME="$C/home/hf", a folder named home under the
+# case's temp folder read as a user's home. A home or Users folder after a shell variable, a closing } or ), or
+# another path part (lines 1 to 3) is not a hit; at the start of a path, after a space, a quote, = or : (4 to 7), and
+# beside a non-hit on its line (8), it still is. Right after the exempt dev home, past the : or quote its match ends
+# on (9, 10), it is a hit too: a match that took the character before its slash hid the next path.
+t_privnested() {
+  local c=$SRC/privacy/check.sh f=$T/$CASE/f out H=/home U=/Users; mkdir -p "$T/$CASE"
+  printf '%s\n' "HOME=\"\$C$H\" HF_HOME=\"\$C$H/hf\" \${T}$U/a \$C$H$H/x" "tmp$H/x and \$(pwd)$U/x" "a-b_c.d$H/x" \
+    "$H/alice/x" "cd $U/bob" "\"$H/a\" '$U/b'" "HOME=$H/a PATH=/bin:$H/a/bin" "\$C$H/hf then $H/alice" \
+    "PATH=$H/dev:$H/alice/bin" "[\"$H/dev\",\"$H/alice\"]" > "$f"
+  out=$("$c" "$f"); [ "$out" = "$(for l in 4 5 6 7 8 9 10; do echo "$f:$l: home path"; done)" ] || fail "hits: $out"
+}
+
 # P5: every GitHub write the engine and the Board make goes through gh_write (conveyor.sh gh-write): a gh write
 # anywhere else in them is a fail. A gh api call is allowed only as a graphql read.
 t_ghwrite() {
