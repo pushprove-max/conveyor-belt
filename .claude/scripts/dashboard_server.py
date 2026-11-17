@@ -448,7 +448,8 @@ PROVIDERS = frozenset({'claude', 'openai', 'opencode', 'other'})
 
 def test_settings_ok(v):
     """Whether args are one `conveyor.sh test-settings` command: budget <CPU s>, slow-issues true|false,
-    file-budget <file> <CPU s>, file-budget-clear <file>, slow-mark <file> <reason: one line> or slow-mark-clear <file>."""
+    file-budget <file> <CPU s>, file-budget-clear <file>, slow-mark <file> <reason: one line>, slow-mark-clear <file>
+    or cpu-time <file> (Record CPU time: the pack's test command changed, an admin's alone)."""
     n, w = len(v), v[0] if v else None
     if n == 2 and w == 'budget':
         return BUDGET.fullmatch(v[1]) is not None
@@ -458,7 +459,7 @@ def test_settings_ok(v):
         return TEST_FILE.fullmatch(v[1]) is not None and BUDGET.fullmatch(v[2]) is not None
     if n == 3 and w == 'slow-mark':
         return TEST_FILE.fullmatch(v[1]) is not None and said_ok(v[2])
-    if n == 2 and w in ('file-budget-clear', 'slow-mark-clear'):
+    if n == 2 and w in ('file-budget-clear', 'slow-mark-clear', 'cpu-time'):
         return TEST_FILE.fullmatch(v[1]) is not None
     return False
 
@@ -1508,6 +1509,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # The test map's build runs the whole suite on the build machine: an admin's to start or stop.
         if not machine and body['action'] == 'testmap' and role_of(read_store(), user) != 'admin':
             return self.reply(403, 'only an admin builds the test map')
+        # Record CPU time changes the pack's test command, which every card runs: an admin's.
+        if not machine and body['action'] == 'test-settings' and body['args'][0] == 'cpu-time' and role_of(read_store(), user) != 'admin':
+            return self.reply(403, 'only an admin changes the test command')
         # A Tests page action on a list of files is answered one result a file; only it may be over MAX_CONTROL_BODY.
         files = None if machine else test_files(body['action'], body['args'])
         if int(length) > MAX_CONTROL_BODY and not files:

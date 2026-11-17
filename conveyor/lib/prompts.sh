@@ -496,6 +496,13 @@ This issue makes one test file run: the test command or the pack'"'"'s tests.pat
 loading is fixed. After this review, the card'"'"'s test step must run the file, and it must pass, or the card is
 blocked. Judge whether the file now runs in each test run that should run it, and whether its cases test what they
 name. Its result:'
+# shellcheck disable=SC2034 # used in lib/card.sh
+ALONEREVIEW='# The Make it run alone check
+This issue makes one test file that only whole-suite runs ran (wholeOnly in the pack) run by itself, or moves what it
+runs into test files the runner can list, and keeps what it tests. After the build, the pack must no longer mark the
+file wholeOnly, and the file (or the test files the change adds in place of a file it removes) was run alone through
+the pack'"'"'s test.list, with the change, on a test slot: it must pass. Judge whether the change keeps every check the
+file ran: a check dropped so that the file can run alone is a finding. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

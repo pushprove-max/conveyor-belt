@@ -162,6 +162,13 @@ r = req('POST', '/control', cookie=mx, body={'action': 'testmap', 'args': ['buil
 check('admin_builds_the_test_map', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh testmap build'"), (r, RAN[-1:]))
 r = req('POST', '/control', cookie=mx, body={'action': 'testmap', 'args': ['delete'], 'repo': 'project'}, **other)
 check('test_map_takes_build_or_stop', r[0] == 400 and len(RAN) == n + 1, r)
+# Record CPU time (#190) changes the pack's test command, which every card runs: a member's ask is refused (403) and
+# nothing runs; an admin's runs conveyor.sh test-settings cpu-time <file>. Bug it catches: a member changed it.
+n = len(RAN)
+r = req('POST', '/control', cookie=ana, body={'action': 'test-settings', 'args': ['cpu-time', 'a.test.js'], 'repo': 'project'}, **other)
+check('member_cannot_change_the_test_command', r[0] == 403 and b'only an admin' in r[2] and len(RAN) == n, r)
+r = req('POST', '/control', cookie=mx, body={'action': 'test-settings', 'args': ['cpu-time', 'a.test.js'], 'repo': 'project'}, **other)
+check('admin_records_cpu_time', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh test-settings cpu-time a.test.js'"), (r, RAN[-1:]))
 srv.shutdown()
 print('PASS: dashboard-server-local (%d checks)' % passed[0])
 EOF

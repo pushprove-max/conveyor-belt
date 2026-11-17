@@ -397,9 +397,12 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then listcmd "$1" "$cmd" 2>"$1.test" || return 1; cmd=$LISTCMD; fi
-  # A card's run and the full test suite (fulltest(), release-prep's relsuite()) ask for the runner's report: setup gives
-  # test.full the card's command.
-  REPORT_ENV=(); if [ -z "${2:-}" ] || [ "$2" = test.full ]; then reportask "$1"; [ -z "$REPORT_ARGS" ] || cmd="$cmd $REPORT_ARGS"; fi
+  # The check of a Make it run alone card (aloneproof()) gives the command itself, in TEST_CMD: the test command given
+  # one file as the pack's test.list says.
+  [ -z "${TEST_CMD:-}" ] || cmd=$TEST_CMD
+  # A card's run, the full test suite (fulltest(), release-prep's relsuite()) and a run of TEST_CMD ask for the
+  # runner's report: setup gives test.full the card's command.
+  REPORT_ENV=(); if [ -z "${2:-}" ] || [ "$2" = test.full ] || [ -n "${TEST_CMD:-}" ]; then reportask "$1"; [ -z "$REPORT_ARGS" ] || cmd="$cmd $REPORT_ARGS"; fi
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)
     b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); t=$(git -C "$1" write-tree 2>/dev/null)
@@ -1476,15 +1479,78 @@ deleteproof() { # <card> <worktree> <issue json> <test file>
   [ ! -e "$2/$4" ] || { echo "the change keeps the test file $4: a Delete it card deletes it" > "$2.unfixed"; return 1; }
   optproof "$@"
 }
-# The check of a Fix the waiting, Fix hollow cases or Delete it card (<kind>: WAITFIX, HOLLOWFIX or DELFILE): card()
+# The check of a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card (<kind>: WAITFIX, HOLLOWFIX,
+# DELFILE or ALONEFIX): card()
 # runs it after the build, and again before each later review when a fix or rebase session changed the card, so the
 # proof the review reads is of the change that lands. Fails when the check does not hold.
 fixproof() { # <card> <worktree> <issue json> <test file> <kind>
   case $5 in
     "$WAITFIX") steadyproof "$1" "$2" "$4" "$WAITRATIO" ;;
     "$HOLLOWFIX") hollowproof "$1" "$2" "$3" "$4" ;;
+    "$ALONEFIX") aloneproof "$1" "$2" "$4" ;;
     *) deleteproof "$1" "$2" "$3" "$4" ;;
   esac
+}
+# Make it run alone (#190): the Board's issue about a test file the pack marks wholeOnly, its title "Make the test file
+# <file> run alone" (MAKERUN, then the file, then ALONEFIX). alonefile() prints its file; fixproof() checks it with
+# aloneproof(), as it checks Fix the waiting.
+ALONEFIX=' run alone'
+alonefile() { # <issue json>
+  [[ $(jq -r '.title // ""' <<<"$1") == "$MAKERUN"*"$ALONEFIX" ]] && speedfile "$1" "$MAKERUN"
+}
+# The check of a Make it run alone card: main's pack (.conveyor/project.json) as the change leaves it no longer marks
+# the file wholeOnly, and the file runs alone, with the change, on a test slot, through that pack's test.list: its
+# test command is given the file as test.list says (args: its path at the end; placeholder: in place of {files}; env:
+# in CONVEYOR_TEST_FILES; runner: its package or test target, runnercmd()). The run must pass and name the file: what
+# it passed (testfails()) or timed (timed()) names it. A change that removes the file (its runs moved into other test
+# files) runs the test files the change adds in its place. Writes the result in <worktree>.unfixed, the reason first
+# when it does not hold, and fails then.
+aloneproof() { # <card> <worktree> <test file>
+  local mwt=$CARDS/mainrun/$1.alone f=$3 sha out='' rc=0 why='' cmd lm q x tl='' fs=() ok pp=$2/.conveyor/project.json
+  rm -f "$2.unfixed"
+  # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
+  git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
+  if [ -e "$2/$f" ]; then fs=("$f")
+  else mapfile -t fs < <(git -C "$2" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null | testpaths); fi
+  # The pack the change leaves; main's own when the project does not track it (no card changes it then). Its test
+  # command and test.list are the ones the run below uses: a card that sets test.list to make the file run alone is
+  # checked with that setting, not main's.
+  [ -e "$pp" ] || pp=$PACK
+  { IFS= read -r -d '' cmd && IFS= read -r -d '' lm; } < <(jq -j '(.test.command // ""), "\u0000", (.test.list // ""), "\u0000"' "$pp" 2>/dev/null) || { cmd=''; lm=''; }
+  if jq -e --arg f "$f" '.test.files[$f].wholeOnly == true' "$pp" > /dev/null 2>&1; then
+    why="the change leaves the test file $f marked whole-only (test.files.\"$f\".wholeOnly in .conveyor/project.json): a Make it run alone card takes the mark off"
+  elif [ ${#fs[@]} = 0 ]; then why="the change removes the test file $f and adds no test file to run what it ran"
+  else
+    q=$(printf '%q ' "${fs[@]}"); q=${q% }
+    case $lm in
+      args) if [[ $(testrunner "$cmd" "$2" 2>/dev/null) == named* ]]; then why="test.list is args, and test.command already names the tests it runs, so it cannot be given ${fs[*]} alone"
+        else cmd="$cmd $q"; fi ;;
+      placeholder) if [[ $cmd == *'{files}'* ]]; then cmd=${cmd//\{files\}/"$q"}; else why='test.list is placeholder, and test.command has no {files}'; fi ;;
+      env) cmd="export CONVEYOR_TEST_FILES=$(printf %q "$(printf '%s\n' "${fs[@]}")"); $cmd" ;;
+      runner) x=$(runnercmd "$cmd" "$2" "${fs[@]}") && cmd=$x || why=$x ;;
+      *) why="the pack's test.list is ${lm:-not set}, so the test command cannot be given one test file alone: set test.list (docs/configuration.md, Which tests a card runs)" ;;
+    esac
+  fi
+  [ -z "$why" ] || { printf '%s\n' "$why" > "$2.unfixed"; return 1; }
+  if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+    && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
+      && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index; } 2>&1 < /dev/null); then
+    TEST_CMD=$cmd tests "$mwt" test.command alone; rc=$?
+    if [ "$rc" != 0 ]; then
+      x=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[.files[]?.cases[]?.name | select(. != "")] | unique | join(", ")' 2>/dev/null)
+      why="the test file ${fs[*]} failed run alone through the pack's test.list, with the change, on a test slot (exit $rc)${x:+: its failing cases: $x}"
+      tl=$(tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000')
+    else
+      ok=$({ testfails "$mwt.test" 0 2>/dev/null | jq -r '.passed[]?, (.passcases + .okcases)[]?.file' 2>/dev/null; timed "$mwt" 2>/dev/null | jq -r 'keys[]' 2>/dev/null; })
+      for x in "${fs[@]}"; do grep -qxF -- "$x" <<<"$ok" || { why="the run alone through the pack's test.list passed, but did not run the test file $x: no log line or report of the run names it"; break; }; done
+    fi
+  else why="the test file ${fs[*]} could not be run with the change: ${out:0:300}"; fi
+  { if [ -n "$why" ]; then printf '%s\n' "$why"
+    else printf 'This issue makes the test file %s run alone. The pack no longer marks it whole-only, and run alone through the pack'"'"'s test.list (%s), with the change, on a test slot, %s passed.\n' "$f" "$lm" "${fs[*]}"; fi
+    [ -z "$tl" ] || { echo 'The end of the output of the run that failed:'; echo '```'; printf '%s\n' "$tl"; echo '```'; }; } > "$2.unfixed"
+  git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  [ -z "$why" ]
 }
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
@@ -1689,6 +1755,8 @@ mainwait() { # <worktree> <main's commit> <the cases, as one text>
 # given its normal priority back while it starves (steer_watch). It runs on its slot's core (slot_mine, or the home
 # slot's that the runner has), which is never a core kept for the user (slot_cpus): steer_words's taskset of the
 # cores left would undo that pin, so the run is lowered without it (with it only when no slot has a core to pin to).
+# CONVEYOR_TEST_TIME is the path of tools/testtime.sh, for a test command the Board's Record CPU time wrapped in it
+# (cpuplan(), lib/testfiles.sh).
 testonce() { # <worktree> <cmd>
   # shellcheck disable=SC2034 # STEER_HOW and STEER_SLICE are set by steer_prio and read by steer_watch (lib/slots.sh)
   local pid clock sw rc r='' t0 k STEER STEER_HOW STEER_SLICE
@@ -1697,7 +1765,7 @@ testonce() { # <worktree> <cmd>
   t0=$(date +%s); steer_prio test "$k"
   [ -n "$SLOT_CPUS" ] || [ -z "$k" ] || STEER=(taskset -c "$k" "${STEER[@]}")
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec "${STEER[@]}" timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec "${STEER[@]}" timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" & clock=$!; steer_watch $pid 8>&- & sw=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock $sw 2>/dev/null; wait $clock $sw 2>/dev/null; rm -f "$1.turnwait"; steer_end

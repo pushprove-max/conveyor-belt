@@ -6,7 +6,11 @@
 # flaky-test record ($FLAKY), the slow-test record ($SLOWFILED), the test rules' log ($TESTRULESLOG) and the Board's
 # test issues ($TAFILED):
 # settings: the pack's fileBudget, slowIssues (true or false), slower ({share, runs, minRuns}) and files (each file's own
-#   budget and slowOnPurpose, as the pack holds them);
+#   budget and slowOnPurpose, as the pack holds them), and report (the pack's test.report, {runner, format, path, env,
+#   args, option}, null with none: the runner whose report gives a Wall only file's clock seconds, #190), and cpuTime
+#   (cpuplan(): {file, was, command}, the test command Record CPU time saves, or {why}; null when it cannot be told);
+# suite: the newest whole-suite run on record ($SUITERUNS), {time, cpu: the CPU seconds of its files summed, null with
+#   none}, null with no run: what a change to a wholeOnly file waits for (#190);
 # rules: the test rules (lib/testrules.sh): the pack's switch, guards and rules (testrulesettings()), and last: the
 #   list of the last pass (testrulespass()), {time, on, matches, burst}, null before the first, and log: the last
 #   TESTRULES_SHOWN lines of the rules' log ($TESTRULESLOG), newest first; null when the pack cannot be read;
@@ -234,7 +238,7 @@ testhollow() { # <the test files of main's checkout, a JSON list>
         reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])' --args "${fs[@]}"
 }
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv
+  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
@@ -331,7 +335,12 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
        totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}') || return 1
   nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
-  jq -c --argjson nv "$nv" '.files |= map(.neverRun = ($nv[.file] // null))' <<<"$out"
+  rp=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || rp=null
+  cp=$(cpuplan 2>/dev/null) || cp=null
+  jq -c --argjson nv "$nv" --argjson rp "$rp" --argjson cp "$cp" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) '.files |= map(.neverRun = ($nv[.file] // null))
+    | .settings.report = $rp | .settings.cpuTime = $cp
+    | .suite = ($su | max_by(.time // "") | if . == null then null
+        else {time, cpu: ([.files | objects | .[] | objects | .cpu | numbers] | if . == [] then null else add * 1000 | round / 1000 end)} end)' <<<"$out"
 }
 # Why a test file of main's checkout with no run on record never ran (#189), when the engine can tell, for the
 # Board's Never run: {file: {kind, reason}}; a file it cannot tell of is left out. The first that holds, in this order:
@@ -394,12 +403,13 @@ except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.
 #   file-budget-clear <file>     that budget taken off: the file is held to test.fileBudget again
 #   slow-mark <file> <reason>    test.files.<file>.slowOnPurpose: the reason, one line that is not blank
 #   slow-mark-clear <file>       that mark taken off
+#   cpu-time <file>              test.command made the one cpuplan() gives for that file (Record CPU time, #190)
 # A file with neither setting left is taken out of test.files.
-TESTSET_USAGE='usage: conveyor.sh test-settings budget <CPU s> | slow-issues <true | false> | file-budget <file> <CPU s> | file-budget-clear <file> | slow-mark <file> <reason> | slow-mark-clear <file>'
+TESTSET_USAGE='usage: conveyor.sh test-settings budget <CPU s> | slow-issues <true | false> | file-budget <file> <CPU s> | file-budget-clear <file> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file>'
 testsettings() { # <what> [<file>] [<value>]
-  local why='' r=${3:-}
+  local why='' r=${3:-} p
   case ${1:-}:$# in
-    budget:2 | slow-issues:2 | file-budget:3 | file-budget-clear:2 | slow-mark:3 | slow-mark-clear:2) ;;
+    budget:2 | slow-issues:2 | file-budget:3 | file-budget-clear:2 | slow-mark:3 | slow-mark-clear:2 | cpu-time:2) ;;
     *) echo "$TESTSET_USAGE" >&2; return 2 ;;
   esac
   case $1 in
@@ -411,6 +421,10 @@ testsettings() { # <what> [<file>] [<value>]
   case $1 in file-budget | slow-mark)
     { [ -n "$2" ] && [ "$(git -C "$MAIN" ls-files -- ":(literal)$2" 2>/dev/null)" = "$2" ]; } || why=${why:-"\"$2\" is not a file of main's checkout"} ;;
   esac
+  if [ "$1" = cpu-time ]; then
+    p=$(cpuplan) || p='{"why": "the pack cannot be read"}'
+    why=$(jq -r --arg f "$2" 'if .file == $f then empty elif .why then .why else "the test command runs \(.file), not \($f)" end' <<<"$p")
+  fi
   [ -z "$why" ] || { echo "conveyor: test-settings $1: $why; nothing changed" >&2; return 1; }
   case $1 in
     budget) packset --argjson v "$2" '.test.fileBudget = $v' ;;
@@ -419,7 +433,34 @@ testsettings() { # <what> [<file>] [<value>]
     slow-mark) packset --arg f "$2" --arg v "$r" '.test.files[$f].slowOnPurpose = $v' ;;
     file-budget-clear) packset --arg f "$2" 'if .test.files[$f] == null then . else del(.test.files[$f].budget) end' ;;
     slow-mark-clear) packset --arg f "$2" 'if .test.files[$f] == null then . else del(.test.files[$f].slowOnPurpose) end' ;;
+    cpu-time) packset --arg c "$(jq -r '.command' <<<"$p")" '.test.command = $c' ;;
   esac
+}
+# Record CPU time (#190): how the pack's test command can give a Wall only file's CPU seconds, as JSON. No runner's
+# report gives CPU seconds (README.md, The CPU budget of a test file), so a report option never can. The wrapper
+# conveyor/tools/testtime.sh times one command as one file's run, so it applies when the test command runs one test
+# file and nothing else: the command is given no list (test.list not set, or none), is one plain command (no ; & | < >
+# $ ` quote or bracket), and of its words exactly one names a path of main's checkout, a test file. Then it prints
+# {file, was, command}: the command wrapped in testtime.sh (its path in CONVEYOR_TEST_TIME, testonce()), its output
+# as before and its `TESTRUN sec` line put in the run's log, where the run reads it. The wrapper is a shell function
+# called last, so the words a run adds at the command's end (the runner's report args, reportask()) go to the test
+# command. Else {why}: why neither applies.
+cpuplan() {
+  local cmd lm w ws=() ps=() q
+  packget test.command cmd test.list lm || return 1
+  local no='No report option gives CPU time: a runner'"'"'s report gives clock seconds only. The wrapper conveyor/tools/testtime.sh does not apply either:'
+  local how='wrap each test file'"'"'s run with it in your test script (conveyor/README.md, The CPU budget of a test file).'
+  if [[ $cmd == *testtime.sh* || $cmd == *CONVEYOR_TEST_TIME* ]]; then jq -cn --arg w "The test command already runs conveyor/tools/testtime.sh, and its runs give no CPU seconds for this file: check that the wrapper names this file." '{why: $w}'; return 0; fi
+  if [ -n "$lm" ] && [ "$lm" != none ]; then jq -cn --arg w "$no the test command is given the test files of each card's change (test.list $lm), and one wrapper around it gives one time for all of them: $how" '{why: $w}'; return 0; fi
+  if [[ $cmd == *[\;\&\|\<\>\$\`\"\'\(\)\{\}\\]* || $cmd == *$'\n'* ]]; then jq -cn --arg w "$no the test command is not one plain command, so Conveyor cannot wrap it safely: $how" '{why: $w}'; return 0; fi
+  read -ra ws <<<"$cmd"
+  for w in "${ws[@]}"; do [[ $w == -* ]] || [ ! -e "$MAIN/$w" ] || ps+=("$w"); done
+  if [ ${#ps[@]} != 1 ] || [ ! -f "$MAIN/${ps[0]}" ] || [ -z "$(printf '%s\n' "${ps[0]}" | testpaths)" ]; then
+    jq -cn --arg w "$no the test command runs more than one test file, or a folder or script, and one wrapper around it gives one time for all of them: $how" '{why: $w}'; return 0
+  fi
+  q=$(printf %q "${ps[0]}")
+  jq -cn --arg f "${ps[0]}" --arg was "$cmd" --arg c "conveyor_cputime() { local o r; o=\$(mktemp); \"\$CONVEYOR_TEST_TIME\" $q -- $cmd \"\$@\" > \"\$o\" 2>&1; r=\$?; cat \"\$o\"; grep '^TESTRUN sec' \"\$o\" >> \"\$CONVEYOR_TEST_LOG/cputime\"; rm -f \"\$o\"; return \$r; }; conveyor_cputime" \
+    '{file: $f, was: $was, command: $c}'
 }
 # The pack in main's checkout changed by a jq filter, checked against the schema and then saved whole by one rename;
 # a pack that does not read or whose change fails the check is left as it was. One writer at a time (a lock in the

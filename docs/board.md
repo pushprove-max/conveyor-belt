@@ -316,6 +316,25 @@ them has its own budget, so the file itself has no budget. It shows "Runs other 
 never shows Over budget, Slower than usual or Waits, and you cannot optimize it, set its budget or mark it slow on
 purpose.
 
+A Wall only file has no CPU seconds because no test runner's report gives CPU time. The status says why and names the
+runner from the pack's `test.report`. With no `test.report`, the clock time came from a `TESTRUN sec` line of your test
+command with no CPU seconds. CPU seconds come from a `TESTRUN sec` line that `conveyor/tools/testtime.sh` prints.
+When your test command runs only this one test file, is one plain command and gets no test list (`test.list` not set,
+or `none`), the row has **Record CPU time**. It shows your test command now and the same command wrapped in the
+helper. Click **Save the test command** to save it in the pack's `test.command`. Only an admin can save it. The next
+run of the file records its CPU seconds, and Wall only goes away. In all other cases the row says why no action can
+apply, and shows none. Then wrap each test file's run with the helper in your test script (`conveyor/README.md`, The
+CPU budget of a test file).
+
+A Whole suite only file costs more than its own time. A card's Test step never runs it, so a change to it is tested
+only by a whole-suite run. The status gives the CPU seconds of the newest whole-suite run on record. To fix it, open
+its row and click **Make it run alone**. The issue asks a card to make the file run by itself, or to move what it runs
+into test files that the runner can list, and to keep what it tests. Before the card goes to review, Conveyor checks
+two things. The pack must no longer mark the file `wholeOnly`. The file must pass when it runs alone with the change,
+on a test slot, and Conveyor gives it to the test command as the pack's `test.list` says. When the change removes
+the file, Conveyor runs the test files that the change adds. When a check fails, the card is blocked, and the reason
+says why. After the card lands, the row no longer shows Whole suite only, and a card's Test step can run the file.
+
 The Caught column shows how often a test file caught a real bug. Conveyor counts it from the card records: a card
 Test step failed in the file, the card landed, and its landed change did not change the file. So the fix went into
 the code. When the landed change did change the file, the file was changed to pass. Point at the count to see how
@@ -394,7 +413,7 @@ cards and by how much each one changed it, and whether its runs are slower or fa
 verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
 buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Fix failures** (on a file
 with a flaky or main failure), **Fix hollow cases** (on a Hollow file), **Fix the waiting** (on a file that Waits),
-**Make it run** and **Delete it** (on a file Never run), **Raise this file's budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
+**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), **Raise this file's budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
 Raise this file's budget… when Judge said keep, Run while an Optimize issue of the file is open, and Optimize in other
 cases. Six tiles follow: the CPU seconds now with the budget, the last 4 runs as bars, the last Optimize as a
 percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs

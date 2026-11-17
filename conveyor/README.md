@@ -680,8 +680,13 @@ budget from the start shows no change when it gets three times slower. So the sn
 file with its own usual time. It is made from the card test lines (those of retried cards too), the whole-suite runs
 and the test files of main's checkout, and holds:
 
-- `settings`: the pack's `fileBudget`, `slowIssues`, `slower` (`{share, runs, minRuns}`) and `files` (each file's own
-  settings, as the pack holds them);
+- `settings`: the pack's `fileBudget`, `slowIssues`, `slower` (`{share, runs, minRuns}`), `files` (each file's own
+  settings, as the pack holds them), `report` (the pack's `test.report`, null with none: the runner a Wall only
+  file's status names) and `cpuTime` (Record CPU time: `{file, was, command}`, the one test file the test command
+  runs and the command wrapped in `conveyor/tools/testtime.sh`, which `conveyor.sh test-settings cpu-time <file>` saves;
+  or `{why}`, why no wrapper applies);
+- `suite`: the newest whole-suite run on record, `{time, cpu}`, `cpu` the CPU seconds of its files added up (null
+  when none has any); null with no whole-suite run. A `wholeOnly` file's status gives it as what a change to it costs;
 - `rules`: the test rules (Test rules, below): `on`, `perDay`, `maxOpen`, `quietDays`, `burst` and `list`, as the
   pack holds them with their defaults, and `last`, the list of the last pass (`{time, on, matches, burst}`), null
   before the first;
@@ -791,7 +796,11 @@ refused with the reason, and the pack does not change:
 - `test-settings file-budget-clear <file>`: that budget removed; the file is held to `test.fileBudget` again;
 - `test-settings slow-mark <file> <reason>`: the "slow on purpose" mark of one file that main's checkout tracks, with
   its reason (the spaces at its ends removed);
-- `test-settings slow-mark-clear <file>`: that mark removed.
+- `test-settings slow-mark-clear <file>`: that mark removed;
+- `test-settings cpu-time <file>`: `test.command` wrapped in `conveyor/tools/testtime.sh` for that file, as the
+  snapshot's `cpuTime` gives it, refused with its `why` when no wrapper applies. The test command finds the helper in
+  `CONVEYOR_TEST_TIME`, and puts the helper's `TESTRUN sec` line in the run's log. Only an admin can save it from the
+  Board.
 
 A file with no setting left is removed from `test.files`. The next snapshot shows each change.
 
@@ -1192,7 +1201,7 @@ failures of the test file <file>". The bug-card check does not apply to such a c
 a row with the change, each run on a test slot. When one run fails, the card is blocked before its review, and the
 reason names that run and its failing cases. The review is shown the result.
 
-The Tests page files four more issues about one test file the same way. The bug-card check does not apply to their
+The Tests page files five more issues about one test file the same way. The bug-card check does not apply to their
 cards either; each has a check of its own, and the review is shown its result:
 
 - Fix hollow cases, "Fix the hollow cases of the test file <file>": its body names each hollow case on a line
@@ -1210,8 +1219,15 @@ cards either; each has a check of its own, and the review is shown its result:
   passed, the step must have passed the file or one of its cases; else the card is blocked.
 - Delete it, "Delete the test file <file>": a change that keeps the file is blocked. A change that removes it is
   checked as an Optimize delete: the review names a `COVERED-BY` line for each of its cases.
+- Make it run alone, "Make the test file <file> run alone", for a file `test.files` marks `wholeOnly`: the pack as
+  the change leaves it (main's own when the project does not track `.conveyor/project.json`) must no longer mark the
+  file `wholeOnly`. Then the file runs alone with the change, on a test slot, given to the test command as the pack's
+  `test.list` says: at its end (`args`), in place of `{files}` (`placeholder`), in `CONVEYOR_TEST_FILES` (`env`), or
+  as its package or test target (`runner`). It must pass, and the run's log lines or its runner's report must name
+  it. A change that removes the file runs the test files it adds in its place. The card is blocked when the mark
+  stays, when `test.list` is not set or cannot give the file alone, or when the run fails or does not run the file.
 
-The checks of Fix hollow cases, Fix the waiting and Delete it run again before each later review when a fix or rebase
+The checks of Fix hollow cases, Fix the waiting, Delete it and Make it run alone run again before each later review when a fix or rebase
 session changed the card. When a check no longer holds, the card is blocked with its reason.
 
 The snapshot's `testActions` holds `seat` (the Tests seat, or null), `limit` and `actions`: the records of the 20

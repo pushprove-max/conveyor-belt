@@ -34,7 +34,7 @@
 // tied to its pane. Overview: the diagnosis box (its state: over budget by how much, after which Optimize cards and by
 // how much each changed it, its trend; the judge's verdict chip with its reason in one line and Full report, which
 // opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Fix failures, Fix hollow cases,
-// Fix the waiting, Make it run, Delete it (#189), Raise this file's budget…, Run and More, the next step suggested,
+// Fix the waiting, Make it run, Delete it (#189), Make it run alone and Record CPU time (#190), Raise this file's budget…, Run and More, the next step suggested,
 // nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
 // now with its budget, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
 // bugs caught, mutants), its failures (#188: the card changes it caught, apart, then each failed test step with its
@@ -61,6 +61,11 @@
 // COVERED-BY line), Fix the waiting on a file that Waits (the clock and CPU of its recent runs, and the WAIT lines its
 // newest judge named, the snapshot's waits), and Make it run and Delete it on a file Never run, whose row says why
 // it did not run when the engine can tell (the snapshot's neverRun). Each Done-when is what the card's check proves.
+// #190: a wholeOnly file's status says what a change to it costs (the snapshot's suite: the newest whole-suite run's
+// CPU seconds), and Make it run alone files the issue aloneproof() checks; a Wall only file's status names its runner
+// (the pack's test.report) and, by the engine's plan (the snapshot's settings.cpuTime), either has Record CPU time,
+// which previews the pack's test command wrapped in conveyor/tools/testtime.sh before an admin saves it
+// (`conveyor.sh test-settings cpu-time <file>`), or says why no action is shown (wallWhy()).
 // Mutation checks (#79): the column Mutants caught ("14 / 20": its newest done check, empty before one; when it ran and
 // on which commit on hover; "queued", "running" or "paused" beside it); an opened row's check state (queued with its
 // place, running with mutant n of m, paused, failed or done) and surviving mutants (source and line, before and after,
@@ -734,6 +739,42 @@
   const draftDelete = (f) => drafted('Delete it', `Delete the test file ${f.file}`, f.file,
     [neverSaid(f), 'Delete it. For each of its cases that matters, name the test that already proves its behaviour, on a line of its own: COVERED-BY: <test file>: <its case>. When no other test proves a case that matters, make the file run instead.'], [],
     ['- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it.']);
+  // ---- Whole suite only and Wall only (#190) ----
+  // What a wholeOnly file costs: a card's Test step never runs it, so a change to it is tested by a whole-suite run
+  // alone, the newest of which on record (the snapshot's suite) gives the CPU seconds.
+  const suite = () => obj(tests() && tests().suite);
+  function wholeCost() {
+    const s = suite(), cpu = s ? num(s.cpu) : null;
+    return cpu === null ? 'A change to it is tested only by a whole-suite run, and no whole-suite run with CPU seconds is on record.'
+      : `A change to it is tested only by a whole-suite run: ${one(cpu)} CPU s for the newest whole-suite run on record.`;
+  }
+  // Make it run alone: its title is the one the engine knows the card by (MAKERUN and ALONEFIX, lib/testrun.sh
+  // aloneproof()), and its Done-when is what that check proves.
+  const draftAlone = (f) => drafted('Make it run alone', `Make the test file ${f.file} run alone`, f.file,
+    ['This test file runs only in whole-suite runs: the pack marks it wholeOnly (test.files in .conveyor/project.json), as it starts other test files and cannot run alone, so a card\'s Test step never runs it.',
+      wholeCost(),
+      'Make the file run by itself, or move what it runs into test files the runner can list. Keep what it tests. Then remove its wholeOnly mark from the pack.'], [],
+    ['- The card\'s check runs the file alone through the pack\'s test list (test.list), and it exits 0. When the change moves its checks into other test files and removes it, the check runs the test files the change adds.',
+      '- The pack no longer marks the file wholeOnly.']);
+  // Record CPU time on a Wall only file: the engine's plan (the snapshot's settings.cpuTime, cpuplan() of
+  // lib/testfiles.sh), {file, was, command} when the pack's test command can be wrapped in conveyor/tools/testtime.sh
+  // for this file, else null.
+  function cpuPlan(f) {
+    const p = obj(settings().cpuTime);
+    return p && p.file === f.file && typeof p.command === 'string' && typeof p.was === 'string' ? p : null;
+  }
+  // Why a Wall only file has no CPU seconds, with its runner (the pack's test.report), and either what Record CPU time
+  // does or why no action is shown: the engine's reason, or the file its test command runs in place of this one.
+  function wallWhy(f) {
+    const r = obj(settings().report), runner = r && typeof r.runner === 'string' && r.runner ? r.runner : null, p = obj(settings().cpuTime);
+    const no = runner ? `No CPU time: its runner, ${runner}, gives clock time only in its report (the pack's test.report).`
+      : 'No CPU time: its test command gives a TESTRUN sec line with clock time only.';
+    if (cpuPlan(f)) return `${no} Record CPU time wraps the test command in conveyor/tools/testtime.sh.`;
+    const why = p && typeof p.why === 'string' ? p.why
+      : p && typeof p.file === 'string' ? `The wrapper conveyor/tools/testtime.sh applies only to ${p.file}, the one test file the test command runs.`
+        : 'Conveyor cannot tell whether a wrapper can give it.';
+    return `${no} No action: ${why}`;
+  }
   // What ran a run, in words (#130): a whole-suite run with its result, as the Runs list says it, or the card's issue;
   // never a card's id, nor "card null".
   const runBy = (r) => (r.whole === true ? `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`
@@ -784,6 +825,17 @@
           if (c.length > SAID_MAX) { say(`The file and case are more than ${SAID_MAX} characters.`); return; }
           send('flaky-off', [c, why], () => `Kept off: ${c}.`, () => { S.ask = null; });
         }), cancel('keep-cancel'));
+    } else if (a.kind === 'cpu') {
+      // Record CPU time (#190): the pack's test command now and as it will be saved; an admin's to save.
+      const code = (act, text) => { const c = h('pre', 'tests-cmd', text); c.dataset.act = act; return c; };
+      el.append(h('p', 'board-head', 'Record CPU time changes the pack\'s test command (test.command in .conveyor/project.json). Now:'),
+        code('cpu-was', a.was), h('p', 'tests-fact', 'Saved as:'), code('cpu-command', a.command),
+        h('p', 'tests-fact', `Proof: the next run of ${file} records its CPU seconds, and Wall only clears. Only an admin can save it.`),
+        button('Save the test command', 'btn-primary', 'cpu-save', `Record CPU time: save the test command for ${file}`, () => {
+          const k = dk(file), note = (state, text = '') => S.notes.set(k, { what: 'Record CPU time', state, text });
+          note('sending');
+          send('test-settings', ['cpu-time', file], () => 'Saved the test command.', () => { S.ask = null; note('done', 'Saved the test command. The next run records CPU seconds.'); }, (no) => note('refused', no));
+        }), cancel('cpu-cancel'));
     }
     return el;
   }
@@ -888,10 +940,15 @@
     // The other fix issues (#189), each on a file with its status: the same preview, of its own draft.
     const has = (k) => marks(f).some((m) => m[0] === k);
     const fixes = [[has('hollow'), 'Fix hollow cases', 'fix-hollow', draftHollow], [has('waits'), 'Fix the waiting', 'fix-waits', draftWaits],
-      [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete]]
+      [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete], [f.wholeOnly === true, 'Make it run alone', 'make-alone', draftAlone]]
       .filter(([on]) => on).map(([, text, act, draft]) => btn(act, text, act, `${text}: preview an issue about ${file}`, () => {
         S.notes.delete(dk(file)); S.ask = draft(f); S.keep = { act: 'issue-title', file }; draw();
       }));
+    // Record CPU time (#190), on a Wall only file whose test command the engine can wrap: the change, shown first.
+    const plan = wallOnly(f) ? cpuPlan(f) : null;
+    if (plan) fixes.push(btn('record-cpu', 'Record CPU time', 'record-cpu', `Record CPU time: preview the change to the test command for ${file}`, () => {
+      S.notes.delete(dk(file)); S.ask = { kind: 'cpu', repo: S.d.repo, file, was: plan.was, command: plan.command }; S.keep = { act: 'cpu-save', file }; draw();
+    }));
     now.append(judge, opt, ...(fix ? [fix] : []), ...fixes, raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
     if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
     return now;
@@ -1413,7 +1470,7 @@
   function stateOf(f) {
     if (f.wholeOnly === true) return 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it. It runs other test files, and each of them has its own budget.';
     if (!timed(f)) return 'Not timed yet: no run of it is on record.';
-    if (wallOnly(f)) return `Wall only: its runner gives no CPU time, so no budget holds it. Its last run took ${clockTook((obj(f.lastRun) || {}).sec)}.`;
+    if (wallOnly(f)) return `Wall only: no budget holds it. Its last run took ${clockTook((obj(f.lastRun) || {}).sec)}. ${wallWhy(f)}`;
     const b = budgetOf(f).cpu, done = gains(f), mark = shown(`mark:${f.file}`);
     const after = done.length ? ` after ${COUNT[done.length] || done.length} Optimize ${done.length === 1 ? 'card' : 'cards'} (${done.map((x) => pct(x.g.change)).join(', then ')})` : '';
     let s;
@@ -1772,6 +1829,9 @@
       tell();
       // Why a file never ran (#189), when the engine can tell.
       if (marks(f).some((m) => m[0] === 'never') && neverWhy(f)) chips.append(h('span', 'tests-quiet tests-never-why', `Not run: ${neverWhy(f)}`));
+      // What a whole-only file costs, and why a Wall only file has no CPU time, with what can record it (#190).
+      if (f.wholeOnly === true) chips.append(h('span', 'tests-quiet tests-whole-cost', wholeCost()));
+      if (wallOnly(f)) chips.append(h('span', 'tests-quiet tests-wall-why', wallWhy(f)));
       // A grey fact, not a problem chip: a file that never fails may check nothing.
       if ((num(f.runsOnRecord) || 0) >= NEVER && num(f.caught) === 0) chips.append(h('span', 'tests-quiet tests-never', 'Never caught anything'));
       const fileCell = cell(check, 'tests-file');

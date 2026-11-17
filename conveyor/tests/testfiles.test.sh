@@ -145,6 +145,8 @@ t_tfempty() {
   setup '[]'
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed with no test line: $got"
   [ "$(jq -c '[.files, .totals.steps]' <<<"$got")" = '[[],{"count":0,"waitSec":0,"runSec":0}]' ] || fail "the part with no test line: $got"
+  # #190: with no whole-suite run and no test.report, the part says none of either (null), never a made-up figure.
+  [ "$(jq -c '[.suite, .settings.report]' <<<"$got")" = '[null,null]' ] || fail "the suite and report with none on record: $got"
   { jq -cn '{card: "c-1", issue: 1, step: "test", time: "2026-11-12T12:00:00Z", result: "pass", wait: 3, run: 7}'
     jq -cn '{card: "c-2", issue: 2, step: "test", time: "2026-11-12T13:00:00Z", result: "fail", wait: 1.5, run: 2}'
     jq -cn '{card: "c-3", issue: 3, step: "test", time: "2026-11-12T14:00:00Z", result: "pass", reused: true}'
@@ -152,6 +154,21 @@ t_tfempty() {
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
   [ "$(jq -c '[.files, .slower, .totals]' <<<"$got")" = '[[],[],{"files":0,"overBudget":0,"slower":0,"steps":{"count":2,"waitSec":4.5,"runSec":9}}]' ] \
     || fail "the part with no file time: $got"
+}
+
+# Bug it catches (#190): the Board could not say what a whole-only file costs, nor name the runner of a Wall only file.
+# The part gives the newest whole-suite run's CPU seconds summed over its files (a file with no CPU seconds adds
+# nothing; an older run is not used), and the pack's test.report.
+t_tfsuite() {
+  setup '[]'; tune '.test.report = {runner: "vitest", format: "jest-json", path: "report.json"}'
+  { jq -cn '{time: "2026-11-10T00:00:00Z", how: "full", sha: "abc", files: {"a.test.sh": {result: "ok", sec: 9, cpu: 99}}}'
+    jq -cn '{time: "2026-11-12T00:00:00Z", how: "full", sha: "abd", files: {"a.test.sh": {result: "ok", sec: 9, cpu: 6.25}, "b.test.sh": {result: "ok", sec: 3, cpu: 2}, "c.test.ts": {result: "ok", sec: 4, cpu: null}}}'
+  } >> "$ST/suiteruns.jsonl"
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '[.suite, .settings.report]' <<<"$got")" = '[{"time":"2026-11-12T00:00:00Z","cpu":8.25},{"runner":"vitest","format":"jest-json","path":"report.json"}]' ] \
+    || fail "the suite's CPU seconds or the report: $(jq -c '[.suite, .settings.report]' <<<"$got")"
+  # The Record CPU time plan (cpuplan()) reaches the Board in the part: its file and command, or why not.
+  jq -e '.settings.cpuTime | (.why | strings) or (.file and .command)' <<<"$got" > /dev/null || fail "the part has no Record CPU time plan: $(jq -c .settings <<<"$got")"
 }
 
 # Bug it catches (#189): a file with no run on record showed "Never run" with no reason, and a file that Waits had no

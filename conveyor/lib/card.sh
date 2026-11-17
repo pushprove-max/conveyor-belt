@@ -262,7 +262,8 @@ card() { # <card> <issue> [<branch> <tip>]
     # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
     # FIXFAILS) is checked by steadyproof(): when its file fails in one of its runs in a row, the card is blocked
     # naming that run, with no review. So are the Board's other fix issues (#189): Fix the waiting (WAITFIX), Fix hollow
-    # cases (HOLLOWFIX) and Delete it (DELFILE) by fixproof() (pk), here and again before each later review on a change
+    # cases (HOLLOWFIX), Delete it (DELFILE) and Make it run alone (#190; ALONEFIX, before Make it run, whose title
+    # starts the same) by fixproof() (pk), here and again before each later review on a change
     # a fix or rebase session made (pt: the tree it last held on), and Make it run (MAKERUN) by runproof() now and by
     # ranproof() once its test step passed (mk).
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
@@ -273,7 +274,7 @@ card() { # <card> <issue> [<branch> <tip>]
     elif sf=$(speedfile "$issue" "$FIXFAILS"); then
       sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
-      || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk='' sk=''; false; }; then
+      || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$ALONEFIX sk=$ALONEREVIEW; sf=$(alonefile "$issue"); } || { pk='' sk=''; false; }; then
       fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
       pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
     elif sf=$(speedfile "$issue" "$MAKERUN"); then
@@ -304,7 +305,7 @@ card() { # <card> <issue> [<branch> <tip>]
     # (#189) is checked as after a build: the kept change lands only on the proof of what lands (pk, pt), and a Make
     # it run card only when its test step ran its file (mk).
     if { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
-      || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk='' sk=''; false; }; then
+      || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$ALONEFIX sk=$ALONEREVIEW; sf=$(alonefile "$issue"); } || { pk='' sk=''; false; }; then
       fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
       pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
     elif sf=$(speedfile "$issue" "$MAKERUN"); then
@@ -339,7 +340,7 @@ card() { # <card> <issue> [<branch> <tip>]
       # Same-file cards review in parallel: no claim and no wait before a review. They line up only to land (at
       # settle() below), and a card is reviewed again there only when an earlier landing changed the lines it changed,
       # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
-      # A fix or rebase session changed a Fix the waiting, Fix hollow cases or Delete it card: its check runs again on
+      # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
       # what this review reads, and the card is blocked when it no longer holds.
       if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then
         fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
