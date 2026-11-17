@@ -13,7 +13,8 @@
 #   a card that has waited for main to change, or on another card, for the pack's foreman.waitWake minutes (default
 #     10): it names the card, what it waits on and that card's step and last action (for main, each main-red fix card
 #     open or blocked); once per wait, and "still waiting" after each further waitWake minutes of it
-#   the record unreachable: no snapshot for 2 minutes (never one failed poll)
+#   the record unreachable: no snapshot for 2 minutes (never one failed poll), and none from one more read with a
+#     longer wait (a live engine under a high machine load reads slowly)
 #   an awaited issue landed: $FD/await-<repo>.txt lists issue numbers, one per line, of the record <repo>, so a
 #     group's Foreman claimed in another checkout awaits the same issues of the same projects; one whose card has
 #     pushed wakes once, naming the commit it landed as. The Foreman only appends to it: what was dropped is counted in await-done-<repo>.txt
@@ -44,7 +45,7 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
 SEEN=$FD/conveyor-reported.txt
-POLL=60 DOWN_S=120 PUSH_S=600
+POLL=60 DOWN_S=120 SLOW_S=150 PUSH_S=600
 # The kinds of the Board's Needs you, the list the Board reads too: one that does not read stops the watcher here,
 # never as a record read as unreachable.
 KINDS=$FHERE/../../.claude/scripts/dashboard_needs.json
@@ -199,16 +200,26 @@ while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt"
 
 # One record's problems now, each line prefixed with its repo: <repo> TAB <key> TAB <kind> TAB <issues> TAB <text>.
 record() { # <repo> <main> <now> <await>
-  local repo=$1 now=$3 rec cur first last err held
+  local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held
   local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
   local histf=$FD/conveyor-history-$repo.json
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone; one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
   # 128 KB a single argument may hold (#544).
-  if rec=$(ask "$repo" "$2" snapshot 2>"$errf") \
-    && { jq -e --argjson await "$4" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
-      && ask "$repo" "$2" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; } \
-    && cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$4" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf"); then
+  readsnap() { # <ask limit, seconds>: rec, the history file and cur, the problems; nonzero when the record does not read
+    rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") \
+    && { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
+      && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; } \
+    && cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
+  }
+  # The outage so far: a gap of more than three polls since the last failed one is a new outage, timed from now.
+  read -r first last 2>/dev/null < "$down" || first=
+  [[ $first =~ ^[0-9]+$ ]] && [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -le $((POLL * 3)) ] || first=$now
+  # A failed read that would make the record unreachable is read once more with the longer wait SLOW_S first (#241):
+  # under a high machine load a live engine's snapshot can take longer than the first wait. An engine that fails
+  # fast (stopped, its host down) fails the second read as fast, so its wake is not later; one that hangs wakes up to
+  # SLOW_S seconds later.
+  if readsnap "${ASK_LIMIT:-45}" || { [ $((now - first)) -ge "$DOWN_S" ] && readsnap "$SLOW_S"; }; then
     rm -f "$down"
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi
@@ -221,11 +232,8 @@ record() { # <repo> <main> <now> <await>
       $1 ~ /^stuck:/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
   else
-    # A failed poll breaks a run of idle polls. A gap of more than three polls since the last failed one is a new
-    # outage, timed from now.
+    # A failed poll breaks a run of idle polls.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
-    read -r first last 2>/dev/null < "$down" || first=
-    [[ $first =~ ^[0-9]+$ ]] && [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -le $((POLL * 3)) ] || first=$now
     echo "$first $now" > "$down"
     # Its reported keys stay reported (no text: a key already reported is never printed again).
     cur=$(awk -v p="$repo/" 'index($0, p) == 1 && $0 != p "unreachable" { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")

@@ -123,7 +123,30 @@ out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "forema
 grep -qxF 'alpha: 2 on the belt; building 1 of the cap 1, 1 waiting not counted' <<<"$out" || fail "the status does not give the count against the cap without the waiting card: $out"
 }
 
-cases=(status wake suite mainred building)
+# Issue 241: a snapshot read that takes longer than the ask's first wait (45 s), here as the ask's timeout exit, after 2
+# minutes with no snapshot. Bug it catches: under a high machine load the live engine's snapshot ran past the wait,
+# and the Foreman was woken with "unreachable" while the engine ran. The read is tried once more with a longer wait.
+slowask() { # <what the read with the longer wait does>
+  export CONVEYOR_FOREMAN_ASK="echo \$ASK_LIMIT >> $T/limits; [ \"\$ASK_LIMIT\" -gt 45 ] || exit 124; $1"
+  echo "$((NOW - 120)) $((NOW - 60))" > "$FD/conveyor-down-alpha.txt"
+}
+t_slowlive() {
+CASE=slowlive; fixture slowlive; mkdir -p "$FD"
+snap .; slowask "cat $T/snap"
+poll && fail "a slow but live engine woke the Foreman: $(cat "$FD"/pending/*.wake)"
+[ "$(paste -sd' ' "$T/limits")" = "45 150" ] || fail "the snapshot was not read once more with the longer wait: $(cat "$T/limits")"
+[ ! -e "$FD/conveyor-down-alpha.txt" ] || fail "the outage is still timed after a snapshot read"
+}
+# The same slow read with the engine stopped: the read with the longer wait fails too, and the wake comes at the
+# same poll as before. Bug it catches: a retry that hid a real outage.
+t_slowdown() {
+CASE=slowdown; fixture slowdown; mkdir -p "$FD"
+slowask "echo 'the engine is stopped' >&2; exit 1"
+poll || fail "no wake for an engine stopped 2 minutes: $(cat "$T/err")"
+grep -qF 'alpha: no snapshot for 2 minutes (the engine is stopped' "$FD"/pending/*.wake || fail "the wake does not name the outage:$(cat "$FD"/pending/*.wake)"
+}
+
+cases=(status wake suite mainred building slowlive slowdown)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0
