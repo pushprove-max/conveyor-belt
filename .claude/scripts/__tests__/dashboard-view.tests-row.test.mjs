@@ -166,6 +166,24 @@ test('Tests row: the arrows move between the tabs; the Timeline lists every even
   assert.equal(only[0].querySelector('.chip').textContent, 'keep');
 });
 
+// Bug it catches (#217): the snapshot's runs and edits hold a file's newest five alone, so a sixth run or test edit
+// took the oldest off the Timeline; the older ones (olderRuns, olderEdits) are listed too, oldest last.
+test('Tests row: the Timeline lists the older runs and test edits on record after the newest', () => {
+  const d = landed(), t = d.panels.tests.data.tests, f = t.files.find((x) => x.file === MERGE);
+  const edit = (n, h) => ({ card: `c${h}-${n}`, issue: n, time: iso(T0 - h * 3600000), file: MERGE, read: true, removedAsserts: 0, changedExpected: 0, skipsAdded: 0, timeoutsRaised: 0, casesDeleted: 0 });
+  t.edits = [edit(44, 1.5)];
+  Object.assign(f, { olderRuns: [{ cpu: 9, sec: 20, card: 'c20-401', issue: 401, url: `${P}/401`, time: iso(T0 - 20 * 3600000), whole: false }],
+    olderEdits: [edit(402, 21)] });
+  const w = show(d);
+  open(w, MERGE);
+  const tl = pane(w, 'timeline');
+  assert.deepEqual(words(tl.querySelectorAll('[data-filter]')), ['All 7', 'Runs 4', 'Optimize 1', 'Test edits 2', 'Judge 0']);
+  const items = Array.from(tl.querySelectorAll('.tests-tl-item'));
+  assert.deepEqual(items.map((li) => li.dataset.kind), ['runs', 'edits', 'runs', 'optimize', 'runs', 'runs', 'edits']);
+  assert.match(items[5].textContent, /#401/);
+  assert.match(items[6].textContent, /#402/);
+});
+
 // jsdom lays nothing out, so this reads the rule. Bug it catches: the page head, which stays at the top of the
 // window, covered the opened row's text as the page scrolled; a pane is at most the window under the head, and scrolls inside.
 test('Tests row: a tab\'s pane is never taller than the window under the page head, and scrolls inside', () => {

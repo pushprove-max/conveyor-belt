@@ -349,6 +349,14 @@ t_tfcaught() {
 # or bracket read as code, a changed message taken for a changed expected value, a skip or a deleted case
 # missed), a deleted test file left out, a new test file counted as an edit of one main had, or an unread kind left
 # out; and a Tests part with no list of them, or one that grows with every card that lands.
+# #217: runs holds a file's newest five runs alone, so the sixth took the first off the Board's Timeline, which lists
+# every event of a file: olderRuns holds the runs before them, newest first, as runs has them.
+t_tfolderruns() {
+  setup '[]'; tf_runs e.test 1 2 3 4 5 6 7
+  got=$(tf_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "e.test") | [[.runs[].cpu], (.olderRuns | map([.cpu, .card]))]')
+  [ "$got" = '[[7,6,5,4,3],[[2,"c-e.test-1"],[1,"c-e.test-0"]]]' ] || fail "e.test's runs and older runs: $got"
+}
+
 t_tfedits() {
   setup '[]'
   printf '%s\n' "it('a', () => {" '  expect(f()).toBe(3);' '  expect(g()).toBe(1);' '});' "it('b', () => {" '  expect(h()).toBe(2);' '}, { timeout: 1000 });' > "$R/a.test.mjs"
@@ -374,12 +382,17 @@ t_tfedits() {
   [ "$got" = '[["a.test.mjs",true,1,1,1,1,0],["a.test.py",false,null,null,null,null,null],["bool.test.mjs",true,0,1,0,0,0],["gone.test.sh",true,1,0,0,0,1],["msg.test.mjs",true,0,0,0,0,0],["multi.test.mjs",true,0,1,0,0,0],["re.test.mjs",true,1,1,0,0,0],["s.test.sh",true,1,0,0,1,1]]' ] \
     || fail "the landed line's testedits: $got"
   loop check >/dev/null || fail "the landed line with testedits does not check"
-  # Five later cards edit a.test.mjs: the part keeps a file's newest five edits alone (the snapshot stays small).
+  # Five later cards edit a.test.mjs: the part's edits keep a file's newest five alone (the list stays small).
   for i in 2 3 4 5 6; do
     jq -cn --argjson i "$i" '{card: "c-\($i)", issue: $i, step: "landed", time: "2099-01-01T0\($i):00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "s", reason: "",
       product: false, testedits: [{file: "a.test.mjs", read: true, removedAsserts: 0, changedExpected: 0, skipsAdded: 0, timeoutsRaised: 0, casesDeleted: 0}]}' >> "$ST/cards.jsonl"
   done
-  got=$(tf_in testspart 2026-11-09 | jq -c '.edits | map([.card, .issue, .file])')
+  part=$(tf_in testspart 2026-11-09)
+  got=$(jq -c '.edits | map([.card, .issue, .file])' <<<"$part")
   [ "$got" = '[["c-6",6,"a.test.mjs"],["c-5",5,"a.test.mjs"],["c-4",4,"a.test.mjs"],["c-3",3,"a.test.mjs"],["c-2",2,"a.test.mjs"],["c-1",7,"a.test.py"],["c-1",7,"bool.test.mjs"],["c-1",7,"gone.test.sh"],["c-1",7,"msg.test.mjs"],["c-1",7,"multi.test.mjs"],["c-1",7,"re.test.mjs"],["c-1",7,"s.test.sh"]]' ] \
     || fail "the Tests part's edits, newest first, a file's newest five: $got"
+  # #217: the sixth edit pushed the first out of edits, and so off the Board's Timeline, which lists every event of a
+  # file: each file's olderEdits holds the edits before its newest five, newest first.
+  got=$(jq -c '[.files[] | select(.file | IN("a.test.mjs", "bool.test.mjs")) | [.file, (.olderEdits | map([.card, .issue, .removedAsserts]))]]' <<<"$part")
+  [ "$got" = '[["a.test.mjs",[["c-1",7,1]]],["bool.test.mjs",[]]]' ] || fail "each file's older edits: $got"
 }

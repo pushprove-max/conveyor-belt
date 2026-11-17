@@ -21,7 +21,10 @@
 #   median is 0 or null), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
 #   gives none; card (null for a whole-suite run), time, whole (a whole-suite run), and a whole-suite run's result: ok,
 #   fail or null}; [] for a file never run), lastRun ({sec, cpu, clockPerCpu, time, whole} of its newest run; null with
-#   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
+#   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record), olderRuns (its runs on record
+#   before those in runs, newest first, as runs has them) and olderEdits (the test edits of it on record before the
+#   newest TESTKEEP that edits, below, holds, newest first, as edits has them), for the Board's Timeline, which lists
+#   every event of a file, wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
 #   a step that went again counts with the failures of its first run too: failedrun, FAILURE),
 #   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
@@ -296,6 +299,9 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | (reduce ($ls[] | select(.result == "fail" and (.card | type == "string")) | ($ch[0][$land[.card] | strings] // null) as $d | select($d != null)
         | failedfiles[] | [., IN($d[])]) as [$f, $ed] ({}; if $ed then .[$f].changed += 1 else .[$f].caught += 1 end)) as $catch
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
+    | [$cr | reverse[] | select(.step == "landed" and (.testedits | type == "array")) | . as $l
+        | .testedits[] | objects | select(.file | type == "string") | {card: $l.card, issue: $l.issue, time: $l.time} + .] as $alledits
+    | (reduce $alledits[] as $e ({}; .[$e.file] += [$e])) as $editsof
     | [($ls[] | . as $l | (.times | objects) as $t | ($l.clocks | objects // {}) as $k | $t + $k | keys[] as $f
         | select(($t[$f] | type) == "number" or ($k[$f] | type) == "number")
         | {file: $f, cpu: (($t[$f] | numbers) // null), sec: (($k[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
@@ -308,7 +314,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud | ($own.wholeOnly == true) as $wo
         | (if ($c | length) >= $mn and ($c | length) > $rn then $c[:-$rn] | median else null end) as $usual
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
-           runs: ($r[-$keep:] | reverse | map(del(.file))),
+           runs: ($r[-$keep:] | reverse | map(del(.file))), olderRuns: ($r[:-$keep] | reverse | map(del(.file))),
+           olderEdits: (($editsof[$f] // [])[$keep:]),
            lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} end),
            timedRuns: ($c | length), runsOnRecord: ($r | length), wholeOnly: $wo, failedSteps: ($failed[$f] // [] | length),
            failures: ($failed[$f] // [] | to_entries | map(.value + if .key < $keep then {} else {tail: null} end)),
@@ -329,8 +336,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | {settings: {fileBudget: $b, slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
        rules: (if $ru == null then null else $ru + {last: $last[0], log: ($lg[0] // [])} end),
        files: ., slower: map(select(.slower) | .file),
-       edits: (reduce ($cr | reverse[] | select(.step == "landed" and (.testedits | type == "array")) | . as $l
-         | .testedits[] | objects | select(.file | type == "string") | {card: $l.card, issue: $l.issue, time: $l.time} + .) as $e ({n: {}, out: []};
+       edits: (reduce $alledits[] as $e ({n: {}, out: []};
            if (.n[$e.file] // 0) < $keep then .out += [$e] | .n[$e.file] += 1 else . end) | .out),
        totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}') || return 1

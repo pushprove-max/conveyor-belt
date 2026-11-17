@@ -883,7 +883,7 @@ PANELS_JQ='
    # The Tests page, of the same records (repo null when none is steered; repos and others as the Board'"'"'s): each
    # record'"'"'s tests (its snapshot'"'"'s, testspart() of conveyor/lib/testfiles.sh; null from a snapshot without it or
    # whose pack does not read) and the machine'"'"'s Load limit (mload), the same in every record'"'"'s. Each run of a
-   # file is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link,
+   # file (runs and olderRuns) is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link,
    # and so is each of its Optimize issues (optimize: the Board'"'"'s filings, their state and proof numbers) and each of
    # its failures (failures: its failed test steps, each with its issue) with its issue'"'"'s url.
    tests: (if $R == null then {error: $cerr, data: null} else ($R | mload) as $ml
@@ -893,7 +893,7 @@ PANELS_JQ='
       def shut($o): if $o != null and .state == "open" and (.issue | IN($o[]) | not) then .state = "closed" else . end;
       def testsOf: . as $r | (.snap.open.issues | if type == "array" then [.[].issue] else null end) as $oi
         | {repo, machine: $ml, tests: (.snap.tests | if type != "object" then null
-        elif (.files | type) == "array" then .files |= map(if type == "object" then (.runs |= runsOf($r))
+        elif (.files | type) == "array" then .files |= map(if type == "object" then (.runs |= runsOf($r)) | (.olderRuns |= runsOf($r))
           | if (.failures | type) == "array" then .failures |= map(if type == "object" then tag($r) else . end) else . end
           | if (.optimize | type) == "array" then .optimize |= map(if type == "object" then tag($r) | shut($oi) else . end) else . end else . end) else . end),
         testActions: ((.snap.testActions | objects | {limit, actions, allowed}) // null), control: (.snap.control | objects // null), clis: ((.snap.modelSettings | objects | (.judge.clis // .reviewer.clis) | objects) // null),

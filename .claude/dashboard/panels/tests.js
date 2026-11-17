@@ -1540,10 +1540,13 @@
   // ---- its events: runs, Optimize issues, test edits and judge runs, newest first ----
   const KINDS = [['all', 'All'], ['runs', 'Runs'], ['optimize', 'Optimize'], ['edits', 'Test edits'], ['judge', 'Judge']];
   const EVENT = { runs: 'Run', optimize: 'Optimize', edits: 'Test edit', judge: 'Judge' };
+  // A file's runs and test edits are its newest few (runs, the snapshot's edits) and the older ones on record
+  // (olderRuns, olderEdits: lib/testfiles.sh testspart()), so the Timeline keeps every event a sixth one would push out.
   function events(f) {
-    return list(f.runs).filter(obj).map((r) => ({ kind: 'runs', t: r.time, r }))
+    return list(f.runs).concat(list(f.olderRuns)).filter(obj).map((r) => ({ kind: 'runs', t: r.time, r }))
       .concat(optsOf(f).map((o) => ({ kind: 'optimize', t: o.state === 'landed' && o.landed ? o.landed : o.time, o })),
-        editsOf().filter((e) => e.file === f.file).map((e) => ({ kind: 'edits', t: e.time, e })),
+        editsOf().filter((e) => e.file === f.file).concat(list(f.olderEdits).filter((e) => obj(e) && e.file === f.file))
+          .map((e) => ({ kind: 'edits', t: e.time, e })),
         actions().filter((a) => a.file === f.file && judged(a)).map((a) => ({ kind: 'judge', t: a.end || a.start, a })))
       .sort((x, y) => (Date.parse(y.t) || 0) - (Date.parse(x.t) || 0));
   }
