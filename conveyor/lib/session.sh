@@ -594,14 +594,29 @@ loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stder
   NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
   proxyfallback "$2"
 }
+# The words of a CLI that failed, fit to keep in a record or to show: the last 12 lines of <text> that are not blank,
+# each cut at 300 characters, with the user's home written ~, what looks like a credential (a value after key, token,
+# secret, password or authorization and a colon or =, quoted or not, one after Bearer, a run of 24 or more letters,
+# digits, - and _) left out, and every line the privacy check's patterns hit left out (nostart(), bench/swe.sh).
+cliwords() { # <text>
+  local words hits
+  # Cut after what is left out, so no part of a credential cut short is kept.
+  words=$(jq -rRs --arg h "${HOME:-}" '[splits("\n") | select(test("\\S"))] | .[-12:][]
+      | if $h != "" then split($h) | join("~") else . end
+      | gsub("(?<k>(key|token|secret|password|authorization)[\"'"'"']?\\s*[:=]\\s*(bearer\\s+)?)(\"([^\"\\\\]|\\\\.)*\"?|'"'"'[^'"'"']*'"'"'?|[^\\s\"'"'"',;\\[]+)"; "\(.k)[left out]"; "i")
+      | gsub("(?<k>bearer\\s+)[^\\s\"'"'"',;\\[]+"; "\(.k)[left out]"; "i")
+      | gsub("[A-Za-z0-9_-]{24,}"; "[left out]") | .[0:300]' <<<"$1" 2>/dev/null) || words=''
+  [ -n "$words" ] || return 0
+  hits=$(printf '%s\n' "$words" | "$HERE/privacy/check.sh" -)
+  if [ $? -gt 1 ]; then echo '[left out: the privacy check could not be made]'
+  else printf '%s\n' "$words" | H=$hits awk 'BEGIN { n = split(ENVIRON["H"], l, "\n"); for (i = 1; i <= n; i++) if (split(l[i], p, ": ") >= 2) { sub(/^-:/, "", p[1]); bad[p[1] + 0] = p[2] } }
+    { if (NR in bad) print "[a line left out: " bad[NR] "]"; else print }'; fi
+}
 # A session or review that failed (its exit not 0 and not the timeout's 124) with no turn past its first and no token
 # never began its work: its CLI stopped before it (not logged in, a model this account does not have, a settings
 # error). Sets NOSTART_WHY to its reason: the cause, named from the CLI's own words (a session through a proxy or the
-# API: that route at its base URL, never a sign-in to it), its exit and what to do; under it
-# those words (NOSTARTSAID, then the last lines of its stderr), the last 12 lines, each cut at 300 characters, with
-# the user's home written ~, what looks like a credential (a value after key, token, secret, password or
-# authorization and a colon or =, quoted or not, one after Bearer, a run of 24 or more letters, digits, - and _) left
-# out, and every line the privacy check's patterns hit left out. Sets NOSTART_START to the seat (builder or reviewer),
+# API: that route at its base URL, never a sign-in to it), its exit and what to do; under it those words (NOSTARTSAID,
+# then the last lines of its stderr) as cliwords() keeps them. Sets NOSTART_START to the seat (builder or reviewer),
 # CLI, model and account it ran on: a check session on that seat as it is set then runs before the card is put back
 # (startagain(), startnow()). Fails, setting neither, for any other session. NOSTART_LOGIN: the login's state when
 # the cause is the login (expired: its words say expired, refresh, revoked or refused; else not set), else empty.
@@ -609,23 +624,12 @@ loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stder
 # run, for the pause (signinstop()); NOSTART_START then has signin: true, so a resume puts the card back
 # (signinback()). Else empty.
 nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer> <account, "" for the default login> <worktree>
-  local raw words hits cause todo n p px c=${9##*/}
+  local raw words cause todo n p px c=${9##*/}
   NOSTART_LOGIN='' NOSTART_SIGNIN=''
   [ "$1" != 0 ] && [ "$1" != 124 ] && [ ! -e "$9.stalled" ] || return 1
   jq -e '([.tokens // {} | .[] | numbers] | add // 0) == 0 and (.stats.turns // 0) <= 1' <<<"$2" >/dev/null 2>&1 || return 1
   raw=$( { jq -rRn "$NOSTARTSAID" "$3" 2>/dev/null; tail -n 20 "$4" 2>/dev/null; } | tr -d '\000')
-  # Cut after what is left out, so no part of a credential cut short is kept.
-  words=$(jq -rRs --arg h "${HOME:-}" '[splits("\n") | select(test("\\S"))] | .[-12:][]
-      | if $h != "" then split($h) | join("~") else . end
-      | gsub("(?<k>(key|token|secret|password|authorization)[\"'"'"']?\\s*[:=]\\s*(bearer\\s+)?)(\"([^\"\\\\]|\\\\.)*\"?|'"'"'[^'"'"']*'"'"'?|[^\\s\"'"'"',;\\[]+)"; "\(.k)[left out]"; "i")
-      | gsub("(?<k>bearer\\s+)[^\\s\"'"'"',;\\[]+"; "\(.k)[left out]"; "i")
-      | gsub("[A-Za-z0-9_-]{24,}"; "[left out]") | .[0:300]' <<<"$raw" 2>/dev/null) || words=''
-  if [ -n "$words" ]; then
-    hits=$(printf '%s\n' "$words" | "$HERE/privacy/check.sh" -)
-    if [ $? -gt 1 ]; then words='[left out: the privacy check could not be made]'
-    else words=$(printf '%s\n' "$words" | H=$hits awk 'BEGIN { n = split(ENVIRON["H"], l, "\n"); for (i = 1; i <= n; i++) if (split(l[i], p, ": ") >= 2) { sub(/^-:/, "", p[1]); bad[p[1] + 0] = p[2] } }
-        { if (NR in bad) print "[a line left out: " bad[NR] "]"; else print }'); fi
-  fi
+  words=$(cliwords "$raw")
   # The route it took, when that is a proxy or the API: "the proxy at <base URL>" or "the API at <base URL>".
   px=''
   if [ "$5" != opencode ] && [ "$(proxyroute "$5")" = proxy ]; then

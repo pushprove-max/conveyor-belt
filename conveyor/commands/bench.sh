@@ -9,6 +9,7 @@ if [ "${2:-}" = swe ]; then
   . "$HERE/lib/prompts.sh" || exit 1
   . "$HERE/lib/control.sh" || exit 1
   . "$HERE/lib/install.sh" || exit 1
+  . "$HERE/lib/session.sh" || exit 1 # cliwords(): a failed Claude session's words, with no credential
   . "$HERE/bench/swe.sh" || exit 1
   tunables || { echo "conveyor: the pack's tunables cannot be read" >&2; exit 1; } # the guard's reading reads LIMIT_TTL and LIMIT_OLD
   shift 2; swe_main "$@"; exit

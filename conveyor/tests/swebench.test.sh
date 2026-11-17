@@ -206,6 +206,26 @@ t_swesolo() {
   [ "$(loop snapshot | jq -r .bench.soloKey)" = solo-claude-haiku-5-5 ] || fail "the snapshot's solo key is not the builder's model in force: $(loop snapshot | jq -c .bench.soloKey)"
 }
 
+# Bug: a solo session that failed to sign in was kept as an unresolved result (an empty patch, one session), and the
+# next run reused it after sign-in was fixed. And its stderr's credential and address were kept in the Board's snapshot.
+t_swesolofail() {
+  swe; local out first
+  first=$(sweorder | head -n 1)
+  # A credential and an address, made here so that this file holds neither.
+  printf 'sk-ant-oat01-%s\n' "$(printf 'Ab9x%.0s' {1..10})" > "$STUB/secret"; echo "contact: ops${AT}corp-mail.test" > "$STUB/mail"
+  echo '{ echo "Authorization: Bearer $(cat "$STUB/secret")"; cat "$STUB/mail"; } >&2
+echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"Invalid API key · Please run /login\"}"; exit 1' > "$STUB/build"
+  out=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $out"
+  grep -q "1/1 $first: not run: the Claude session failed (exit 1): Authorization: Bearer \[left out\] \[a line left out: email\] Invalid API key · Please run /login$" <<<"$out" \
+    || fail "the failed session was not reported as not run, with its words and no credential: $out"
+  [ -s "$B/board.json" ] && [ -s "$B/live.json" ] || fail "the run left no Board record to check"
+  ! grep -qF -e "$(cat "$STUB/secret")" -e "corp-mail" "$B/board.json" "$B/live.json" || fail "the Board's record holds the credential or the address"
+  [ ! -e "$B/results/solo-m/$first.json" ] || fail "a result was kept for the failed session: $(cat "$B/results/solo-m/$first.json")"
+  echo 'echo fixed > x.py' > "$STUB/build"
+  out=$(loop bench swe 1 --solo 2>&1) || fail "the second solo run failed: $out"
+  grep -q "1/1 $first: resolved$" <<<"$out" || fail "the task was not run again after sign-in was fixed: $out"
+}
+
 # Bug: a run starts while the project's usage guard is reached.
 t_sweguard() {
   swe; local out

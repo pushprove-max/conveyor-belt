@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh bench swe`: SWE-bench Verified tasks built through Conveyor and graded by the official harness.
-# Sourced by commands/bench.sh after the engine files it uses (paths, records, slots, prompts, control, install).
+# Sourced by commands/bench.sh after the engine files it uses (paths, records, slots, prompts, control, install, session).
 #   bench swe <n> [--solo] [--engine <version | commit>]   runs the first n tasks of the pinned order (1 to 500)
 #   bench swe stop                                         ends the run in progress
 #   bench swe results [--json]                             the results of every engine run so far, side by side
@@ -206,6 +206,11 @@ swe_solo() { # <task json> <sb> <model>
   (cd "$sb/$SWE_MAIN" && acctrun "$acct" && swe_env "$sb" timeout "$(swe_conf .taskTimeout)" claude -p --output-format json --permission-mode dontAsk ${3:+--model "$3"} \
     --setting-sources "" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools "Edit(/$sb/$SWE_MAIN/**)" \
     --disallowedTools "Read(/$SWE_DIR/raw.*)" "Read(/$SWE_DIR/tasks.*)" "Read(/$SWE_DIR/results/**)" < "$sb/prompt" > "$sb/solo.json" 2> "$sb/solo.err")
+  # A session that failed (a sign-in or API error) says nothing of the task: no result is kept, so the next run tries
+  # it again. A session stopped at the task's timeout is the arm's own result. Its words are kept in the run's results
+  # and the Board's snapshot, so they are cliwords()'s (lib/session.sh): no credential, no address.
+  local rc=$?; [ "$rc" = 0 ] || [ "$rc" = 124 ] || {
+    echo "the Claude session failed (exit $rc): $(cliwords "$(tail -n 20 "$sb/solo.err" 2>/dev/null; jq -rRn "$NOSTARTSAID" "$sb/solo.json" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"; return 1; }
   git -C "$sb/$SWE_MAIN" add -A && swe_patch "$sb" "$base" --cached > "$sb/patch" || return 1
   jq -sc --argjson m "$(( $(date +%s) - t0 ))" 'map(select(.type == "result")) | last // {} | .usage // {} as $u
     | {sessions: 1, tokens: (($u.input_tokens // 0) + ($u.cache_creation_input_tokens // 0) + ($u.output_tokens // 0)), minutes: ($m / 6 | round / 10), steps: []}' "$sb/solo.json" 2>/dev/null \

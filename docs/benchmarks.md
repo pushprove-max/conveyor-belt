@@ -60,8 +60,9 @@ else: it has no shell and no web tools, so it cannot run the tests.
 ## Results
 
 For each task the result shows whether it is resolved, and its sessions, tokens and minutes. A run ends with its
-resolved count of n and the engine commit. A task whose Docker image cannot be fetched or built, or that the harness
-could not grade, is reported as not run, never as failed, and the next run tries it again.
+resolved count of n and the engine commit. A task whose Docker image cannot be fetched or built, that the harness
+could not grade, or whose Claude alone session failed (for example, a sign-in error), is reported as not run, never as
+failed, and the next run tries it again.
 
 `conveyor.sh bench swe results` shows the results of every version run so far, side by side, with a line that says how
 big a difference the number of tasks can show.
