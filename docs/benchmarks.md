@@ -40,9 +40,9 @@ during the run. `conveyor.sh bench swe stop` ends a run.
 
 Each task is built in a sandbox of its own: a local clone of the task's repository at its base commit, with a pack
 made for it (the test command of the task's own Docker image) and the issue text as the card's issue. Conveyor builds,
-reviews, fixes and tests the card as it does any card, on the machine's test slots and under the builder cap. Nothing
-is pushed anywhere, and no issue is filed on GitHub. What lands on the sandbox's main is the final patch; a blocked
-card has none. The harness then grades the patch with the task's hidden tests.
+reviews, fixes and tests the card as it does any card, on the machine's test slots and under the builder cap. A card
+that lands is pushed only to the sandbox's own bare origin, never to the task's repository, and no issue is filed on
+GitHub. What lands on the sandbox's main is the final patch; a blocked card has none. The harness then grades the patch with the task's hidden tests.
 
 ### Another version
 
