@@ -360,7 +360,7 @@ closed() { # <card> <issue> <worktree> <ALREADY-DONE line>
   local err l
   [ "$(git rev-parse "refs/heads/$BRANCH")" = "$(git -C "$3" rev-parse HEAD)" ] \
     || { echo "the reviewer confirmed that main already fixes the issue, but main changed during that review. The fix is possibly not on main now, so the engine did not close the issue"; return 1; }
-  l=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$4" --argjson e "$(ending)" '{reason:$r} + $e')") || { echo "the engine cannot make the closed line, so it did not close the issue"; return 1; }
+  l=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$4" --argjson e "$(ending)" --argjson w "$(waited)" '{reason:$r} + $e + $w')") || { echo "the engine cannot make the closed line, so it did not close the issue"; return 1; }
   # A card of issue 0 (a main-red fix card) has no issue to close.
   [ "$2" = 0 ] || err=$(gh_write issue close "$2" --comment "Conveyor card $1 changed nothing: main already does what this issue asks, and the reviewer confirmed it."$'\n\n'"$4" 2>&1 >/dev/null) \
     || { echo "main already does what the issue asks, and the reviewer confirmed it. The engine could not close the issue:${err:0:400}"; return 1; }

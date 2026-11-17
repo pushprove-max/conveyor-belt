@@ -410,7 +410,7 @@ t_redproofgone() {
 }
 # Bug it catches: a fix card whose cases pass on main without its change (main is no longer red for them) landed a
 # change that proves nothing, or was blocked. Its whole run: it closes as already done, its closed line naming the
-# cases, and nothing lands.
+# cases and carrying its wait (waitSec, which the drift watch's mean wait reads), and nothing lands.
 t_redproofgreen() {
   redsetup $'one\nc.test'
   local s c; s=$(git -C "$R" rev-parse HEAD)
@@ -418,6 +418,7 @@ t_redproofgreen() {
   c=$(st 'select(.step == "closed") | .card')
   [[ $c == *-0 ]] && [ "$(st 'select(.step == "closed") | .reason')" = 'Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
     || fail "the fix card did not close as already done, naming the cases: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "closed") | .waitSec | type')" = number ] || fail "the closed line does not carry the card's wait: $(st 'select(.step == "closed")')"
   [ -z "$(st 'select(.step == "landed" or .step == "blocked")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$T/$CASE/cards/$c" ] \
     || fail "the fix card landed, was blocked or left its worktree: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   loop check || fail "the record check refuses the closed line"

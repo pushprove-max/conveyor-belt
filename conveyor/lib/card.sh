@@ -287,7 +287,7 @@ card() { # <card> <issue> [<branch> <tip>]
       # its change (exit 3) closes as already done, as nochange() closes a card, its change dropped.
       bugproof "$c" "$wt" "$issue"; trc=$?
       if [ $trc = 3 ]; then
-        t=$(head -n 1 "$wt.unfixed") && out=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" '{reason: $r} + $e')") && locked append "$out" \
+        t=$(head -n 1 "$wt.unfixed") && out=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$out" \
           || { block "$c" "$n" "$wt" "build: $(head -n 1 "$wt.unfixed" 2>/dev/null) The engine could not write the closed line"; return; }
         clean "$wt"; return
       fi

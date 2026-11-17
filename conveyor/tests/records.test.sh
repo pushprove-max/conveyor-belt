@@ -272,7 +272,8 @@ t_reopenonly() {
 # over the reviewer's NO-GO; a session that left no change and no such line (or one that is not its last line) is
 # reviewed or closed instead of blocked; the report lists a closed card as open, or the dashboard does not count it;
 # the reviewer reads the main the session started from, not today's; a GO closes the issue although main moved
-# during that review (another card may have removed the fix).
+# during that review (another card may have removed the fix); the closed line has no waitSec, so the drift watch
+# (bench/drift.sh) leaves the closed card out of its mean wait.
 # Each kind is a case of its own on a main of its own (done, donenogo, donemoved, doneempty), so they run side by side.
 # donesetup <issue>...: a fresh main with those issues, whose session changes nothing and says ALREADY-DONE (not last
 # for #9, not at all for #10); the reviewer's prompt is kept in $STUB/asked.
@@ -299,6 +300,7 @@ t_done() {
     && ! grep -q 'git diff --cached' "$STUB/asked" || fail "the reviewer was not asked to confirm the issue and the ALREADY-DONE line: $(cat "$STUB/asked")"
   [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review closed " ] || fail "steps of a card whose issue is already fixed: $(st '.step' | tr '\n' ' ')"
   [ "$(st 'select(.step == "closed") | [.result, .sha, .reason] | join("|")')" = 'ok||ALREADY-DONE: a.txt already holds the word one' ] || fail "closed line: $(st 'select(.step == "closed")')"
+  [ "$(st 'select(.step == "closed") | .waitSec')" = 0 ] || fail "the closed line does not carry the card's wait: $(st 'select(.step == "closed")')"
   [ "$(cat "$STUB/closed")" = 7 ] && grep -q 'ALREADY-DONE: a.txt already holds the word one' "$STUB/close-comments" || fail "issue #7 was not closed with the ALREADY-DONE line: $(cat "$STUB/close-comments" 2>&1)"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "something was committed, or main is dirty, or the worktree is left"
   loop check || fail "the record check refuses a closed line"
