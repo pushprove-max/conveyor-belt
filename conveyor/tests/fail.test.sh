@@ -471,7 +471,7 @@ EOT
   touch "$STUB/loggedout"; : > "$STUB/checks"
   loop run >/dev/null 2>&1
   b=$(st 'select(.issue == 7 and .step == "blocked")')
-  [ "$(jq -r .reason <<<"$b")" = 'build: the Claude sign-in is missing (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume' ] \
+  [ "$(jq -r .reason <<<"$b")" = "build: Claude Code's own sign-in is missing (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume" ] \
     || fail "a session that was not logged in is not blocked naming the cause: $(jq -r .reason <<<"$b")"
   [ "$(jq -r .tail <<<"$b")" = $'Not logged in · Please run /login\nAuthorization: Bearer [left out]\n[a line left out: email]' ] \
     || fail "the CLI's words are not kept, or kept with a credential or an address: $(jq -r .tail <<<"$b")"

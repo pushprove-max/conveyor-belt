@@ -54,7 +54,7 @@ t_proxynone() {
   pxsetup
   loop run >/dev/null 2>&1
   [ "$(sort -u "$STUB/routes")" = subscription ] || fail "a build with no proxy set ran on another route: $(cat "$STUB/routes")"
-  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -qF 'build: the Claude sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume' \
+  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -qF "build: Claude Code's own sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume" \
     || fail "the build is not blocked with the login as its cause: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'OAuth session expired and could not be refreshed' || fail "the blocked line lost the CLI's words: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
   [ "$(loop health | jq -c '.routes | [.subscription.state, .proxy.state]')" = '["expired","not set"]' ] || fail "health does not show the proxy not set: $(loop health | jq -c .routes)"
@@ -72,8 +72,8 @@ case "$*" in *bypassPermissions*) ;; *) exit 1 ;; esac
 echo '{"type":"result","subtype":"success","is_error":true,"error":"authentication_failed","result":"Failed to authenticate: OAuth session expired and could not be refreshed","num_turns":1,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}'; exit 1
 EOT
   loop run >/dev/null 2>&1
-  local why='build: the Claude sign-in expired; run claude /login (or set up the proxy route), then conveyor.sh control resume' out
-  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'build: the Claude sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume' ] \
+  local why="build: Claude Code's own sign-in expired; run claude /login (or set up the proxy route), then conveyor.sh control resume" out
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "build: Claude Code's own sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume" ] \
     || fail "the card is not blocked naming the sign-in and what to run: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
   [ "$(jq -c '[.mode, .signin]' "$ST/control.json")" = "$(jq -cn --arg w "$why" '["pause", $w]')" ] || fail "the loop did not pause itself with the reason: $(cat "$ST/control.json")"
   [ "$(loop health | jq -c '[.state, .reason]')" = "$(jq -cn --arg w "$why" '["paused", $w]')" ] || fail "health does not say paused with the reason: $(loop health | jq -c '[.state, .reason]')"
@@ -90,7 +90,8 @@ t_proxyboth() {
   # A proxy named with no key variable is given a stand-in token, so the expired login is not tried again through it.
   [ "$(head -n 2 "$STUB/routes")" = "subscription"$'\n'"$PXURL no-key" ] || fail "the build did not run again through the proxy: $(cat "$STUB/routes")"
   b=$(st 'select(.issue == 7 and .step == "blocked")')
-  jq -r .reason <<<"$b" | grep -q '^build: on the subscription login, the Claude sign-in expired (exit 1): .*; through the proxy, the Claude sign-in was refused (exit 1): ' \
+  # Issue 184: the proxy's refusal names the proxy at its base URL, never a sign-in to it.
+  jq -r .reason <<<"$b" | grep -q "^build: on the subscription login, Claude Code's own sign-in expired (exit 1): .*; through the proxy, the proxy at $PXURL refused the call (exit 1): check the proxy and the key it is sent (conveyor.sh doctor makes one call through it), then " \
     || fail "the blocked line does not name both causes: $(jq -r .reason <<<"$b")"
   jq -r .tail <<<"$b" | grep -qxF 'OAuth session expired and could not be refreshed' && jq -r .tail <<<"$b" | grep -qxF 'Invalid API key · Please run /login' \
     || fail "the blocked line lost the words of one route: $(jq -r .tail <<<"$b")"
@@ -146,6 +147,62 @@ EOF
   [ "$(cat "$STUB/reviews")" = "subscription"$'\n'"proxy base_url = \"$PXURL/v1\"" ] || fail "the Codex review did not run again with the proxy as its provider: $(cat "$STUB/reviews")"
   [ "$(st 'select(.issue == 7 and (.step | IN("review", "landed"))) | "\(.step) \(.route // "")"' | tr '\n' ,)" = 'review proxy,landed ,' ] \
     || fail "the card did not land with its review through the proxy: $(st 'select(.issue == 7) | [.step, .route, .reason] | join(" ")' | tr '\n' ,)"
+}
+
+# Issue 184. Bug: with a proxy route that needs no key (no key variable, none found), a session and a route check
+# were given no token, so Claude Code sent the proxy the machine's own login, which had expired, and every call failed.
+# A fixture proxy refuses a request with no Bearer token or with a CLI's own login (login-...) and takes any other
+# Bearer token; the stub CLIs send the token they are given, else their own login. A Claude session (proxyenv()), a
+# Codex session (codexargs()) and a route check of each (routecall(), as doctor and setup make it) all reach it.
+t_pxnokey() {
+  local d=$T/$CASE out; mkdir -p "$d" "$XDG_CONFIG_HOME/conveyor"
+  cat > "$d/proxy.py" <<'PY'
+import http.server, os, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("content-length") or 0))
+        t = (self.headers.get("Authorization") or "").partition("Bearer ")[2]
+        self.send_response(401 if t == "" or t.startswith("login-") else 200); self.end_headers()
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1] + "/port.new", "w").write(str(s.server_address[1])); os.rename(sys.argv[1] + "/port.new", sys.argv[1] + "/port")
+s.serve_forever()
+PY
+  python3 -I "$d/proxy.py" "$d" & PXSRV=$!; trap 'kill $PXSRV 2>/dev/null' EXIT
+  until [ -s "$d/port" ] || ! kill -0 $PXSRV 2>/dev/null; do sleep 0.1; done
+  local b; b=http://127.0.0.1:$(cat "$d/port") || fail "the fixture proxy did not start"
+  jq -n --arg b "$b" '{claudeProxy: {kind: "proxy", baseUrl: $b, roles: {builder: "proxy", reviewer: "proxy"}},
+    codexProxy: {kind: "proxy", baseUrl: "\($b)/v1", roles: {builder: "proxy", reviewer: "proxy"}}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  setup '[]'
+  unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
+  cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+cat > /dev/null
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN:-login-claude}" -d '{}' "$ANTHROPIC_BASE_URL/v1/messages")" = 200 ] && { echo OK; exit 0; }
+echo "OAuth session expired and could not be refreshed"; exit 1
+EOF
+  cat > "$STUB/codex" <<'EOF'
+#!/usr/bin/env bash
+cat > /dev/null
+b=$(grep -o 'base_url = "[^"]*"' <<<"$*" | cut -d '"' -f 2); k=$(grep -o 'env_key = "[^"]*"' <<<"$*" | cut -d '"' -f 2)
+t=login-codex; [ -z "$k" ] || t=${!k:-}
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $t" -d '{}' "$b/responses")" = 200 ] && { echo OK; exit 0; }
+echo "401 Unauthorized"; exit 1
+EOF
+  chmod +x "$STUB/claude" "$STUB/codex"
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$d/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
+    echo "claude session: $(PROXY_ROLE=builder proxyenv &&claude -p < /dev/null)"
+    echo "codex session: $(PROXY_ROLE=reviewer codexargs &&codex exec "${CODEX_PX[@]}" - < /dev/null)"
+    echo "claude check: $(routecall claude "" "$(claudeproxy)" "")"
+    echo "codex check: $(routecall codex "" "$(codexproxyset)" "")"
+    echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed"}' > "$d/s.out"
+    PROXY_ROLE=builder nostart 1 '{}' "$d/s.out" /dev/null claude m builder "" "$d/cards/x"; echo "why: ${NOSTART_WHY%%$'\n'*}" ) 2>&1 )
+  [ "$(sed -n 1,4p <<<"$out")" = $'claude session: OK\ncodex session: OK\nclaude check: works\ncodex check: works' ] \
+    || fail "a session or route check through a proxy that needs no key did not reach it with a stand-in token: $out"
+  # A session through the proxy whose answer says an OAuth login expired: the reason names the proxy at its base URL
+  # and says the login is Claude Code's own, with the command that signs it in, never a sign-in to the proxy.
+  [ "$(sed -n 5p <<<"$out")" = "why: the proxy at $b refused the call: its answer says Claude Code's own sign-in expired (exit 1): run claude /login, or check the proxy and the key it is sent (conveyor.sh doctor makes one call through it), then conveyor.sh control resume" ] \
+    || fail "the reason of an expired login through the proxy does not name the proxy and Claude Code's own login: $out"
 }
 
 # The one-answer calls (the judge, askmodel(), a test action, a check session), each called alone in the engine shell

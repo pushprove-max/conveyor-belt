@@ -177,6 +177,9 @@ when setup found that key only in your shell's environment. The answer is `setti
 `CODEX_PROXY_KEY` in the `env` of `~/.claude/settings.json`) or the path of a key file, as for the API key. Setup
 checks the proxy with the key from there.
 
+A proxy that needs no key works with no key set. Its sessions and checks send it a stand-in key, not the CLI's own
+login.
+
 Do not keep a key only in your shell's environment. The machine's service starts with a bare environment, so its
 cards do not get a key from there.
 

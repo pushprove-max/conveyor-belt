@@ -104,7 +104,7 @@ project's name (`widgetshop#12`). In a checkout that no record names, every card
 A loop that is not picking says so after `CONVEYOR` in the header, the band and the status
 line (`shop paused`, `shop stopped`, `shop paused by guard`, `shop: no loop process`), from the snapshot's health, so
 `conveyor.sh control pause` or `stop` shows there; a running loop adds nothing. A loop that paused itself, after a
-sign-in failed, shows the reason after the state (`shop paused: build: the Claude sign-in expired; ...`).
+sign-in failed, shows the reason after the state (`shop paused: build: Claude Code's own sign-in expired; ...`).
 
 ## Settings
 

@@ -344,13 +344,15 @@ subroles() { routesnow | jq -r '(.subscription.roles // ["builder", "reviewer"])
 # is sent the key as a Bearer token (ANTHROPIC_AUTH_TOKEN); the Anthropic API (kind api) as its own API key
 # (ANTHROPIC_API_KEY, sent as x-api-key), never as a Bearer token. Any other Anthropic key in the environment is
 # dropped first, so the route is never sent a key it was not named. A session on the subscription (proxyroute
-# subscription) is given none of it. Through a fallback route with no key, a stand-in key is set, as the
-# subscription's login is the one that failed.
+# subscription) is given none of it. With no key, a proxy (and the fallback route of either kind) is given a stand-in
+# key (NOKEY): with none, Claude Code sends the machine's own login, which a proxy that needs no key does not take,
+# and which on the fallback is the one that failed. The API (kind api, not the fallback) with no key is given none.
+NOKEY=no-key
 proxyenv() {
   local p b t v r; proxypack; r=$(proxyroute); [ "$r" = proxy ] || return 0
   p=$(claudeproxy); b=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
   routekey "$p"; v=$KEY_V
-  [ -n "$v" ] || [ -z "${PROXY_NOW:-}" ] || v=no-key
+  [ -n "$v" ] || { [ -z "${PROXY_NOW:-}" ] && [ "$(jq -r .kind <<<"$p")" = api ]; } || v=$NOKEY
   unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
   export ANTHROPIC_BASE_URL=$b
   if [ -z "$v" ]; then :
@@ -361,15 +363,18 @@ proxyenv() {
 # A Codex session's provider settings, in the array CODEX_PX: none on the subscription; through the proxy or the OpenAI
 # API (proxyroute codex), Codex's -c settings of a provider, conveyor-proxy, at codexProxy's baseUrl on the Responses
 # API, its env_key the variable keyEnv names when its key is found (routekey()), exported in the session's subshell
-# this is called in, so a key the service's bare environment lacks still reaches Codex.
+# this is called in, so a key the service's bare environment lacks still reaches Codex. A proxy (not kind api) with no
+# key found is given the stand-in key (NOKEY) in NOKEYENV, so Codex never sends it the machine's own login.
 CODEXPROV=conveyor-proxy
+NOKEYENV=CONVEYOR_PROXY_NOKEY
 codexargs() {
   local p b k
   CODEX_PX=(); [ "$(proxyroute codex)" = proxy ] || return 0
   p=$(codexproxyset); b=$(jq -r '.baseUrl | strings' <<<"$p"); k=$(jq -r '.keyEnv | strings' <<<"$p")
   [ -n "$b" ] || return 0
   routekey "$p"
-  if [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ -n "$KEY_V" ]; then declare -gx "$k=$KEY_V"; else k=''; fi
+  if [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ -n "$KEY_V" ]; then declare -gx "$k=$KEY_V"
+  elif [ -z "$KEY_V" ] && [ "$(jq -r .kind <<<"$p")" != api ]; then k=$NOKEYENV; declare -gx "$k=$NOKEY"; else k=''; fi
   codexpx "$b" "$k"
 }
 # Codex's -c settings of the provider conveyor-proxy at <base URL> on the Responses API, in CODEX_PX, its env_key the
@@ -383,21 +388,23 @@ codexpx() { # <base URL> [key variable]
 # the environment's Anthropic or OpenAI keys and base URLs, which the machine's service does not have. With a route (its JSON), through it, sent <key> as a
 # session is: Claude's proxy as a Bearer token (ANTHROPIC_AUTH_TOKEN), its API (kind api) as ANTHROPIC_API_KEY;
 # Codex's in the variable keyEnv names, through its provider settings (codexpx()). The key goes in the call's
-# environment, never on a command line. Prints "works", else "fails (<the first line it wrote>)", with the key and what
+# environment, never on a command line. A proxy (not kind api) with no key is sent the stand-in key (NOKEY), as a
+# session is (proxyenv(), codexargs()). Prints "works", else "fails (<the first line it wrote>)", with the key and what
 # looks like a credential left out, and fails.
 routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route JSON> <key>]
-  local d o rc k=''
+  local d o rc k='' v=${4:-}
   d=$(mktemp -d) || { echo "fails (no folder for the call)"; return 1; }
   [ -z "${3:-}" ] || { k=$(jq -r '.keyEnv | strings' <<<"$3"); [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || k=''; }
+  if [ -n "${3:-}" ] && [ -z "$v" ] && [ "$(jq -r .kind <<<"$3")" != api ]; then v=$NOKEY; [ "$1" = claude ] || k=$NOKEYENV; fi
   o=$(cd "$d" && unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY ENABLE_TOOL_SEARCH CLAUDE_CONFIG_DIR ${k:+"$k"}
     if [ "$1" = claude ]; then acctrun "${CALL_ACCT:-}"
       if [ -n "${3:-}" ]; then export ANTHROPIC_BASE_URL; ANTHROPIC_BASE_URL=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$3")
-        if [ -z "${4:-}" ]; then :; elif [ "$(jq -r .kind <<<"$3")" = api ]; then export ANTHROPIC_API_KEY="$4"; else export ANTHROPIC_AUTH_TOKEN="$4"; fi
+        if [ -z "$v" ]; then :; elif [ "$(jq -r .kind <<<"$3")" = api ]; then export ANTHROPIC_API_KEY="$v"; else export ANTHROPIC_AUTH_TOKEN="$v"; fi
       fi
       exec timeout --kill-after=10 120 claude -p ${2:+--model "$2"} --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." 2>&1
     fi
     CODEX_PX=()
-    if [ -n "${3:-}" ]; then { [ -n "$k" ] && [ -n "${4:-}" ] && export "$k=$4"; } || k=''; codexpx "$(jq -r '.baseUrl | strings' <<<"$3")" "$k"; fi
+    if [ -n "${3:-}" ]; then { [ -n "$k" ] && [ -n "$v" ] && export "$k=$v"; } || k=''; codexpx "$(jq -r '.baseUrl | strings' <<<"$3")" "$k"; fi
     exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" ${2:+-m "$2"} - <<<"Reply with the one word OK." 2>&1); rc=$?
   rm -rf "$d"
   [ $rc != 0 ] || { echo works; return 0; }

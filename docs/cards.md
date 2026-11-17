@@ -20,8 +20,9 @@ each cut short. Conveyor writes your home folder as `~`. It leaves out text that
 line that the privacy check's patterns find.
 
 When the cause is the sign-in (it expired, it is missing or it was refused), the reason says so and what to run, for
-example `build: the Claude sign-in expired`, then `run claude /login (or set up the proxy route), then conveyor.sh
-control resume`. The loop pauses at that first card, so the next cards do not fail in the same way. Cards that already
+example `build: Claude Code's own sign-in expired`, then `run claude /login (or set up the proxy route), then conveyor.sh
+control resume`. A session through a proxy or the API names that route and its base URL instead, for example
+`build: the proxy at http://localhost:4141 refused the call`, with the proxy's answer below. The loop pauses at that first card, so the next cards do not fail in the same way. Cards that already
 started go on. The Board, `/units` and `conveyor.sh foreman status` show the pause with that reason. When you resume
 (`conveyor.sh control resume`, or Resume on the Board), each card that the sign-in stopped goes back to the queue,
 once for each issue. When the role has a working fallback route through a proxy (`claudeProxy` or `codexProxy`), the

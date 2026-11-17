@@ -332,9 +332,9 @@ reviewer: gpt-6.10-sol (codex) through $base/v1, Codex's model_provider proxy, k
 t_proxytool() {
   proxy_start 8
   # toolSearch named otherwise is what the session gets; a proxy named with no key variable is sent none of the
-  # Anthropic keys the user holds for a direct route.
+  # Anthropic keys the user holds for a direct route, only the stand-in key (so not the machine's own login either).
   tune '.models.claudeProxy.toolSearch = "false" | del(.models.claudeProxy.keyEnv)'
-  [ "$(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)" = "$(printf 'ANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
+  [ "$(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)" = "$(printf 'ANTHROPIC_AUTH_TOKEN=no-key\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
     || fail "toolSearch named false did not reach the session, or a direct key went to the proxy: $(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)"
 }
 t_proxyv() {

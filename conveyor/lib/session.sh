@@ -575,7 +575,8 @@ loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stder
 }
 # A session or review that failed (its exit not 0 and not the timeout's 124) with no turn past its first and no token
 # never began its work: its CLI stopped before it (not logged in, a model this account does not have, a settings
-# error). Sets NOSTART_WHY to its reason: the cause, named from the CLI's own words, its exit and what to do; under it
+# error). Sets NOSTART_WHY to its reason: the cause, named from the CLI's own words (a session through a proxy or the
+# API: that route at its base URL, never a sign-in to it), its exit and what to do; under it
 # those words (NOSTARTSAID, then the last lines of its stderr), the last 12 lines, each cut at 300 characters, with
 # the user's home written ~, what looks like a credential (a value after key, token, secret, password or
 # authorization and a colon or =, quoted or not, one after Bearer, a run of 24 or more letters, digits, - and _) left
@@ -587,7 +588,7 @@ loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stder
 # run, for the pause (signinstop()); NOSTART_START then has signin: true, so a resume puts the card back
 # (signinback()). Else empty.
 nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer> <account, "" for the default login> <worktree>
-  local raw words hits cause todo n c=${9##*/}
+  local raw words hits cause todo n p px c=${9##*/}
   NOSTART_LOGIN='' NOSTART_SIGNIN=''
   [ "$1" != 0 ] && [ "$1" != 124 ] && [ ! -e "$9.stalled" ] || return 1
   jq -e '([.tokens // {} | .[] | numbers] | add // 0) == 0 and (.stats.turns // 0) <= 1' <<<"$2" >/dev/null 2>&1 || return 1
@@ -604,22 +605,34 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
     else words=$(printf '%s\n' "$words" | H=$hits awk 'BEGIN { n = split(ENVIRON["H"], l, "\n"); for (i = 1; i <= n; i++) if (split(l[i], p, ": ") >= 2) { sub(/^-:/, "", p[1]); bad[p[1] + 0] = p[2] } }
         { if (NR in bad) print "[a line left out: " bad[NR] "]"; else print }'); fi
   fi
+  # The route it took, when that is a proxy or the API: "the proxy at <base URL>" or "the API at <base URL>".
+  px=''
+  if [ "$5" != opencode ] && [ "$(proxyroute "$5")" = proxy ]; then
+    if [ "$5" = codex ]; then p=$(codexproxyset); else p=$(claudeproxy); fi
+    px=$(jq -r '"the \(if .kind == "api" then "API" else "proxy" end) at \(.baseUrl // "https://api.anthropic.com")"' <<<"$p")
+  fi
   if [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
     cause="the $5 CLI is not installed"; todo="install it, or set the $7 to a CLI this host has (conveyor.sh control, or Rules on the Board)"
   elif grep -Eqi "$LOGINSAID" <<<"$raw"; then
     NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
     if grep -Eqi 'expired|refresh' <<<"$raw"; then cause=expired
     elif grep -Eqi 'revoked|refused|invalid|unauthori[sz]ed|denied' <<<"$raw"; then cause='was refused'; else cause='is missing'; fi
-    case $5 in
+    if [ -n "$px" ]; then
+      # Through a proxy or the API: their refusal, never a sign-in to the route, which has none.
+      cause="$px refused the call"; todo="check ${px% at *} and the key it is sent (conveyor.sh doctor makes one call through it)"
+      if [ "$5" = claude ] && grep -qi 'oauth' <<<"$raw" && grep -Eqi 'expired|refresh' <<<"$raw"; then
+        cause+=": its answer says Claude Code's own sign-in expired"; todo="run claude /login${8:+ on the account $8}, or $todo"; fi
+    else case $5 in
       codex) cause="the Codex sign-in $cause"; todo="run codex login (or set up the proxy route)" ;;
       opencode) cause="the OpenCode sign-in $cause"; todo="run opencode auth login" ;;
-      *) cause="the Claude sign-in $cause"; todo="run claude /login${8:+ on the account $8} (or set up the proxy route)" ;;
-    esac
+      *) cause="Claude Code's own sign-in $cause"; todo="run claude /login${8:+ on the account $8} (or set up the proxy route)" ;;
+    esac; fi
     todo+=", then conveyor.sh control resume"; NOSTART_SIGNIN="$cause; $todo"
   elif grep -Eqi 'model' <<<"$raw" && grep -Eqi 'not found|not_found|not exist|unknown|invalid|not available|not supported|access' <<<"$raw"; then
     cause="the $5 CLI cannot run the model $6 on this account"; todo="set the $7 to a model the account has (conveyor.sh control, or Rules on the Board)"
   elif grep -Eqi 'setting|config' <<<"$raw"; then
     cause="the $5 CLI stopped on a settings error"; todo="fix the setting its words below name"
+  elif [ -n "$px" ]; then cause="the call through $px failed"; todo="check ${px% at *}, as its words below say"
   else cause="the $5 CLI stopped before any work"; todo="fix what its words below say"; fi
   # A card's worktree is named by its card id, c<time>-<project>-<issue> (pick()); a lane's preview is not a card.
   n=${c##*-}; [[ $n =~ ^[1-9][0-9]*$ ]] || n=$c
