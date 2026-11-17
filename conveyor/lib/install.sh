@@ -137,8 +137,10 @@ hooksmissing() { # <folder>
 # hook never take at once.
 take() { ( flock -w 600 9 || { echo "conveyor: another take of the plugin's main did not end" >&2; exit 1; }; taken ) 9>>"$ENGINE.lock"; }
 taken() {
-  local f h u n why t
+  local f h u n why t c
   packget plugin.follow f || return 1; [ -n "$f" ] || return 0
+  # Listed for the prune of every other project of this machine, whose host file may not name this one.
+  grep -qxF "$MAIN" "$FOLLOWERS" 2>/dev/null || { mkdir -p "${FOLLOWERS%/*}" && echo "$MAIN" >> "$FOLLOWERS"; } || return 1
   IFS=$'\t' read -r u h n < <(headof "$f") && [ -n "$h" ] || { echo "conveyor: the plugin's $f could not be read from its remote" >&2; return 1; }
   # The commit read is kept (head) when it changed, so stalenote() can say, with no remote read, that a newer one is
   # there to take.
@@ -164,6 +166,13 @@ taken() {
       boardrenew
     else echo "conveyor: did not take Conveyor commit $h of the plugin's $n, as $why; the project stays on $(jq -r '.commit // "no commit"' "$ENGINE")" >&2; fi
   fi
+  # The project's commit whose install is gone (main has not moved since, or its newest commit was refused) is
+  # installed again, so the project's hooks and loop have their engine back.
+  c=$(jq -r '.commit // empty' "$ENGINE" 2>/dev/null)
+  if [[ $c =~ ^[0-9a-f]{40}$ ]] && [ ! -e "$VERSIONS/$c" ]; then
+    t=$(install "$c" "$u" 2>&1 >/dev/null) || { echo "conveyor: Conveyor commit $c, the project's engine, is not installed and could not be installed again: $t" >&2; return 1; }
+    echo "conveyor: Conveyor commit $c, the project's engine, was not installed: installed it again"
+  fi
   prune ${why:+"$h"} || return
   # The time of this take, which worked, for stalenote(): the takes of setup, the loop and `conveyor.sh take` write no
   # line in ENGINELOG.
@@ -171,27 +180,30 @@ taken() {
 }
 # Old installs: of the commits this project took (ENGINE's taken), the newest two stay, and so does each one a card
 # of it in flight runs on (its worktree line's engine) or this loop runs, and each one a file of USES (a research
-# lane's settings, the machine's service) or a Conveyor service of this machine (services: a per-project one of before
-# too, whose restart or reboot runs the file it names) still names by its path, or another project of the host file
-# runs (its pack's pin, a card of it in flight or its loop: a pinned project repinned while a card runs on its old pin) or the
+# lane's settings, the machine's service), a Conveyor service of this machine (services: a per-project one of before
+# too, whose restart or reboot runs the file it names) or a process running (a loop, a Board) still names by its
+# path, or another project of the host file runs (its pack's pin, a card of it in flight or its loop: a pinned project repinned while a card runs on its old pin) or the
 # machine's Conveyor runs from, or the Foreman's waiter of this project or another runs from while it runs (foremanon):
 # those stay in the list, to be looked at again at the next prune. Every other leaves
-# the list, and its folder is removed unless another following project's own taken list names it (that project's
-# prune removes it; were it kept in both lists, neither would). A <refused> commit (installed to be checked, never
+# the list, and its folder is removed unless another following project, of the host file or of FOLLOWERS, names it in
+# its own ENGINE, as its commit or in its taken list (that project's prune removes it; were it kept in both lists,
+# neither would). A <refused> commit (installed to be checked, never
 # taken) not in the list goes the same way: no card runs on it, and it is never tried again.
 prune() { # [<refused>]
   local old keep held others c f t m s gone=()
   old=$(jq -r '(.taken // []) as $t | $t[:-2] + ($ARGS.positional - $t) | .[]' "$ENGINE" --args "$@" 2>/dev/null) && [ -n "$old" ] || return 0
   keep=$(inflight <(stdb ask lines cards 2>/dev/null)
     while IFS= read -r f; do grep -oE 'versions/[0-9a-f]{40}/' "$f" 2>/dev/null | cut -c10-49; done 2>/dev/null < <(cat "$USES" 2>/dev/null; services | cut -f1)
+    p_procs | awk -v v="$VERSIONS/" '{ s = $0; while ((i = index(s, v))) { s = substr(s, i + length(v)); if (s ~ /^[0-9a-f]{40}\//) print substr(s, 1, 40) } }'
     foremanon "$ST")$'\n'$OWN$'\n'$RAN
-  # The other projects: what they run (held), each line "h <commit>", and what their own taken lists name, "t <commit>".
+  # The other projects, those of the host file and those that listed themselves (FOLLOWERS): what they run (held), each
+  # line "h <commit>", and what their own ENGINE names (its commit and its taken list), "t <commit>".
   others=$(jq -r '.commit // empty | "h \(.)"' "$MACH/loop.json" 2>/dev/null
-    projects 2>/dev/null | while IFS=$'\t' read -r _ m _; do
+    { projects 2>/dev/null | cut -f2; cat "$FOLLOWERS" 2>/dev/null; } | awk '!seen[$0]++' | while IFS= read -r m; do
       [ ! "$m" -ef "$MAIN" ] || continue
       # Its state folder as paths.sh names it: the host file's stateDir for the host's own checkout, else its conveyor/state.
       s=$m/conveyor/state; [ "$(cd "$m" 2>/dev/null && pwd -P)" != "${hm:-}" ] || s=${hp[0]:-$s}
-      { jq -r '.plugin.commit // empty | "h \(.)"' "$m/.conveyor/project.json"; jq -r '.taken // [] | .[] | "t \(.)"' "$m/.git/conveyor-engine.json"
+      { jq -r '.plugin.commit // empty | "h \(.)"' "$m/.conveyor/project.json"; jq -r '(.taken // []) + [.commit // empty] | .[] | "t \(.)"' "$m/.git/conveyor-engine.json"
         { inflight "$s/cards.jsonl"; foremanon "$s"; } | sed 's/^/h /'; jq -r '.commit // empty | "h \(.)"' "$s/loop.json"; } 2>/dev/null
     done)
   held=$(sed -n 's/^h //p' <<<"$others"); others=$(sed -n 's/^t //p' <<<"$others")

@@ -197,6 +197,9 @@ record() { # <repo> <main> <now> <await>
     # Its reported keys stay reported (no text: a key already reported is never printed again).
     cur=$(awk -v p="$repo/" 'index($0, p) == 1 && $0 != p "unreachable" { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
     err=$(tr -s '[:space:]' ' ' < "$errf" | tail -c 200)
+    # The install this watcher runs from, removed under it, fails every poll on its own missing files: the line names
+    # that install and the fix, not the file it missed.
+    [ -f "$KINDS" ] || err="the Conveyor install ${FHERE%/conveyor/foreman} the Foreman's watcher runs from is gone; run /conveyor-belt:setup in $2 to install the project's engine again"
     [ $((now - first)) -lt "$DOWN_S" ] || cur+=$'\n'"unreachable"$'\t'"unreachable"$'\t\t'"no snapshot for $(((now - first) / 60)) minutes${err:+ ($err)}"
   fi
   awk -F'\t' -v r="$repo" '$1 != "" { print r "\t" $0 }' <<<"$cur"

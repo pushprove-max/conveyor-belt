@@ -87,6 +87,16 @@ fi
 # A pin names a version folder, so only a full commit id may: anything else could name a path outside versions/.
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || off "this project pins no Conveyor Belt commit; run /conveyor-belt:setup"
 dir=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$commit
+# A following project's taken commit whose install is gone (removed by a prune, or by hand) is repaired, not run with
+# the guards off: the plugin copy's take runs here, waited for, which takes the newest commit the pack follows or
+# installs the taken one again, and the command runs on what it took. Once repaired, the next call finds it installed, so this
+# says so once.
+if [ -n "$look" ] && [ ! -e "$dir" ]; then
+  touch "$look"; logged "$first" "plugin copy" "the project's commit $commit was not installed, so the plugin copy's take ran in the foreground"
+  was=$commit; commit=$(engine)
+  [[ $commit =~ ^[0-9a-f]{40}$ ]] && dir=${dir%/*}/$commit && [ -f "$dir/$1" ] \
+    && echo "conveyor: the project's Conveyor commit $was was not installed; the plugin's $(jq -r .plugin.follow "$pack") was taken again, and this runs on $commit" >&2
+fi
 [ -f "$dir/$1" ] || off "the project's Conveyor commit $commit is not installed; run /conveyor-belt:setup"
 # A following project's take of main, by its current engine (bgtake): its outcome is in the engine record (refused:
 # Needs you on the Board) and in the log.

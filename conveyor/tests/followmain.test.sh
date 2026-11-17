@@ -166,6 +166,22 @@ t_followhook() {
     || fail "the log does not keep the take's run by the engine that ran it: $(cat "$R/.git/conveyor-engine.log")"
 }
 
+# Bug (#186): the install of the project's taken commit was removed (another project's prune), and every hook then ran
+# with the guards off ("the project's Conveyor commit ... is not installed") until a take by hand. The next hook takes
+# again in the foreground, which installs that commit again (main has not moved), runs on it and says so.
+t_followrepair() {
+  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  tune '.plugin = {follow: "main"}'
+  pushed "cp '$SRC/../shim.sh' shim.sh && printf '#!/bin/sh\necho ran\n' > probe.sh && chmod +x probe.sh"; X1=$NEW
+  bash "$D/conveyor/conveyor.sh" install "$X1" >/dev/null && takeby "$X1" >/dev/null || fail "the first commit was not taken"
+  chmod -R u+w "$V/$X1" && rm -rf "${V:?}/$X1" || fail "the install was not removed"
+  out=$(echo '{"session_id": "s1"}' | CONVEYOR_HOOK=1 CLAUDE_PROJECT_DIR=$R bash "$D/shim.sh" probe.sh 2>"$STUB/shim.err")
+  [ "$out" = ran ] && [ "$(engine .commit)" = "$X1" ] && [ -f "$V/$X1/probe.sh" ] \
+    || fail "the hook did not install the project's commit again and run on it: $out $(cat "$STUB/shim.err")"
+  [ "$(cat "$STUB/shim.err")" = "conveyor: the project's Conveyor commit $X1 was not installed; the plugin's main was taken again, and this runs on $X1" ] \
+    || fail "the hook did not say once that it repaired the install: $(cat "$STUB/shim.err")"
+}
+
 # Bugs (#179): an engine whose own take is broken never leaves itself; a take that fails says nothing, so doctor, the
 # Foreman and /units do not name an old engine or why it stays.
 t_followhookfail() {
@@ -259,7 +275,7 @@ t_followprune() {
   takeby "$C2" >/dev/null || fail "take failed"
   [ ! -e "$V/$A" ] && [ -d "$V/$C1" ] && [ -d "$V/$C2" ] || fail "the install of a card that ended was kept: $(ls "$V")"
 }
-# The start of each other prune case (t_followprunelane, t_followpruneother, t_followprunelist), which run side by
+# The start of each other prune case (t_followprunelane, t_followpruneother, t_followpruneself, t_followprunelist), which run side by
 # side: a following project that has taken $A, with no card. The host file is the case's own, as two of them write one.
 prunesetup() {
   export XDG_CONFIG_HOME=$T/$CASE/config
@@ -331,6 +347,21 @@ t_followprunewaiter() {
   pushed 'echo 3 > n.txt'; C3=$NEW; takeby "$C2" >/dev/null || fail "$C3 was not taken"
   [ ! -e "$V/$A" ] || fail "the install of a Foreman waiter that ended was kept: $(ls "$V")"
   [ -d "$V/$C1" ] || fail "the install another project's live Foreman waiter runs from was removed: $(ls "$V")"
+}
+# Bug (#186): two projects on one machine follow main, each with its own host file, so neither is in the other's
+# records. The other's take lists it (FOLLOWERS), and this project's prune keeps the commit the other runs. A Board of
+# either (a process running from an install, named by its path) keeps its commit too.
+t_followpruneself() {
+  prunesetup
+  local O=$T/$CASE/other
+  cp -a "$R" "$O" && rm -rf "$O/conveyor/state" && CONVEYOR_MAIN=$O CONVEYOR_CARDS=$T/$CASE/ocards bash "$V/$A/conveyor/conveyor.sh" take >/dev/null \
+    && [ "$(jq -r .commit "$O/.git/conveyor-engine.json")" = "$A" ] || fail "the other project did not take $A"
+  pushed 'echo 1 > n.txt'; C1=$NEW; takeby "$A" >/dev/null || fail "$C1 was not taken"
+  bash -c 'sleep 60; :' "$V/$C1/.claude/scripts/dashboard.sh" & b=$!; trap 'kill $b 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT # sleep: a stand-in Board the test never waits for
+  pushed 'echo 2 > n.txt'; C2=$NEW; takeby "$C1" >/dev/null || fail "$C2 was not taken"
+  pushed 'echo 3 > n.txt'; C3=$NEW; takeby "$C2" >/dev/null || fail "$C3 was not taken"
+  [ -d "$V/$A" ] || fail "the commit another following project runs was removed: $(ls "$V")"
+  [ -d "$V/$C1" ] || fail "the commit a running Board runs was removed: $(ls "$V")"
 }
 t_followprunelist() {
   prunesetup

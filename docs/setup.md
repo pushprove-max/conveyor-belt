@@ -46,8 +46,9 @@ release, run `/plugin marketplace update conveyor-belt`, or turn on auto-update 
 
 The plugin does nothing in a project until `/conveyor-belt:setup` runs there. A project with no
 `.conveyor/project.json` keeps its Bash, Edit, Write and AskUserQuestion calls as they were. In a project whose
-commit is not installed on this machine, the guards are off, and each session shows one line that says so until
-setup installs the commit.
+pinned commit is not installed on this machine, the guards are off, and each session shows one line that says so
+until setup installs the commit. A project that follows releases or `main` installs its engine again
+([Following releases or main](#following-releases-or-main-or-pinning-a-commit)).
 
 Setup installs the newest release of the engine, and the loop runs from it. You do not clone the repository for
 the loop. The shell commands in these pages are that release's `conveyor/conveyor.sh`, in
@@ -244,6 +245,10 @@ machine. At most once a minute, a hook starts a take in the background. The next
 take fails, the plugin's own copy of the engine does the take again, in case the fault is in the old engine. Each
 background take writes its output and exit code to `.git/conveyor-engine.log` in the main checkout, which keeps the
 last 10 takes and the last take that worked.
+
+If the engine the project took is no longer installed on that machine, the next hook does not turn the guards off. It
+does a take first and waits for it. The take installs the newest commit it can, and the hook then runs on that
+commit. The hook shows one line that says so.
 
 When the project runs an older commit than the newest one it can take, `conveyor.sh doctor`, the Foreman's start and
 `/units` show one line:

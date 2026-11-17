@@ -34,6 +34,11 @@ ENGINELOG=$MAIN/.git/conveyor-engine.log
 # The files outside the installs that name one by its path (a research lane's settings, written by lanes/research.sh;
 # the machine's service, by install-service), one a line: prune() keeps each install one of them still names.
 USES=${VERSIONS%/*}/uses
+# The main checkouts of the projects that follow the plugin on this machine, one a line, each listed by its own take
+# (taken(), which setup runs too): prune() keeps every install one of them names in its ENGINE, also when the host
+# file of the project pruning does not list it.
+# shellcheck disable=SC2034 # read by lib/install.sh, which conveyor.sh sources beside this file
+FOLLOWERS=${VERSIONS%/*}/followers
 # The Board's own virtualenv (the page server's Python, dashboard.sh's BOARD_PY): setup fills it from requirements.txt
 # with every hash checked, never the system Python; doctor checks each package the Board imports.
 BOARD_VENV=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv
