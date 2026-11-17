@@ -11,7 +11,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # A sample project with no Conveyor in it, $S, with a CLAUDE.md and an AGENTS.md, on a feature branch, whose origin's default branch is trunk (with no
 # refs/remotes/origin/HEAD to say so), beside the code repo ($D, the plugin copy at commit $B), and a gh,
-# claude and codex stubbed in $G: gh's labels are $G/labels, those it created $G/created; it is signed out while
+# claude, codex and opencode stubbed in $G: gh's labels are $G/labels, those it created $G/created; it is signed out while
 # $G/out is there. Like GitHub, it lists every label (no first page only) and refuses to create one the repo has
 # under any case. The case's own host file names a readable terms file. All but the host file is made once per run
 # (samplemake, lib.sh template) and copied.
@@ -67,7 +67,10 @@ EOF
 mkdir -p "$CLAUDE_CONFIG_DIR/plugins" && echo "$3" >> "$G/claude-installs" \
   && jq -n --arg p "$3" '{version: 2, plugins: {($p): [{scope: "user"}]}}' > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
 EOF
-  printf '#!/bin/sh\n' > "$G/codex"; chmod +x "$G/gh" "$G/claude" "$G/codex" || return 1
+  printf '#!/bin/sh\n' > "$G/codex"
+  # An OpenCode that lists no models: the host's own, found otherwise, is asked `opencode models` by doctor and the
+  # Board's check (hostclis), and can take its whole 20 s timeout to answer.
+  printf '#!/bin/sh\nexit 1\n' > "$G/opencode"; chmod +x "$G/gh" "$G/claude" "$G/codex" "$G/opencode" || return 1
   # The Board's virtualenv, already made: its python3 records each pip call in $G/pip and, as pip with
   # --require-hashes does, fails unless the file it is given pins each package the Board imports, with a hash; it
   # fails to import the package $G/nopkg names.

@@ -4,7 +4,7 @@
 # hostfile.sh, the one reader of "which machine and which checkout" in the host file (issue 134). Bug caught: the
 # Board, its live feed and /units each read the host file by rules of their own, and /units's needed a host and a
 # main, so on the host file setup writes (records alone) /units showed no card while the Board did. Each case below
-# is one host file; conveyor/tests/boardone.test.sh (t_boardonereaders) has every reader read setup's own.
+# is one host file; conveyor/tests/boardone.test.sh (t_boardone) has every reader read setup's own.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 READER=$HERE/../hostfile.sh ENGINE=$(cd "$HERE/../../.." && pwd)
