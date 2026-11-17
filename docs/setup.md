@@ -252,8 +252,8 @@ When the project runs an older commit than the newest one it can take, `conveyor
 Conveyor runs an old engine here: commit 0543507, and the plugin's main is at 9f8e7d6 · last take that worked: 2026-11-16T05:10:00Z · last failure: <the reason> · to take it, run: cd <the main checkout> && bash <conveyor.sh> take
 ```
 
-The line gives the commit the project runs, the newest commit, the time of the last background take that worked, the
-reason the last one failed, and the command that takes the newest commit now. Run that command in a terminal. If it
+The line gives the commit the project runs, the newest commit, the time of the last take that worked, the reason the
+last background take failed, and the command that takes the newest commit now. Run that command in a terminal. If it
 fails too, its output says why. `doctor` reads the newest commit from GitHub. The Foreman and `/units` use the newest
 commit that the last take found.
 

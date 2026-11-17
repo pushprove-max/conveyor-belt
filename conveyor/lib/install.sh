@@ -164,7 +164,10 @@ taken() {
       boardrenew
     else echo "conveyor: did not take Conveyor commit $h of the plugin's $n, as $why; the project stays on $(jq -r '.commit // "no commit"' "$ENGINE")" >&2; fi
   fi
-  prune ${why:+"$h"}
+  prune ${why:+"$h"} || return
+  # The time of this take, which worked, for stalenote(): the takes of setup, the loop and `conveyor.sh take` write no
+  # line in ENGINELOG.
+  t=$(mktemp "$ENGINE.XXXXXX") && jq '. + {worked: (now | todate)}' "$ENGINE" > "$t" && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
 }
 # Old installs: of the commits this project took (ENGINE's taken), the newest two stay, and so does each one a card
 # of it in flight runs on (its worktree line's engine) or this loop runs, and each one a file of USES (a research
@@ -249,22 +252,24 @@ behind() { # <commit> <branch>
 }
 # The one line doctor, the Foreman's start and /units show while a pack that follows the plugin's main or its
 # releases runs a commit here that is not the newest it could take: the commit it runs, that newest one, the time of
-# the last take that worked and the last failure's reason (from ENGINELOG, the takes shim.sh starts beside a hook),
-# and the command that takes it now. The newest commit is read from the remote with `live` (headof), else (or when
+# the last take that worked (the newer of ENGINE's worked, which each take that works writes, and ENGINELOG's, the
+# takes shim.sh starts beside a hook, an old engine's among them), the last failure's reason (from ENGINELOG) and the
+# command that takes it now. The newest commit is read from the remote with `live` (headof), else (or when
 # that read fails) the one the last take read (ENGINE's head). Nothing for a pinned pack, one with no commit taken
 # here, or when the newest commit is the one it runs or the one refused (doctor and Needs you name that one).
 stalenote() { # [live]
-  local f c h n ok why
+  local f c h n w ok why
   packget plugin.follow f 2>/dev/null && [ -n "$f" ] || return 0
   c=$(jq -r '.commit // empty | strings' "$ENGINE" 2>/dev/null) && [ -n "$c" ] || return 0
   { [ "${1:-}" = live ] && IFS=$'\t' read -r _ h n < <(headof "$f") && [ -n "$h" ]; } \
     || IFS=$'\t' read -r h n < <(jq -r '.head | objects | [.commit, .name] | select(all(type == "string")) | @tsv' "$ENGINE" 2>/dev/null) || return 0
   [ -n "$h" ] && [ "$h" != "$c" ] && [ "$h" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ] || return 0
-  IFS=$'\t' read -r ok why < <(jq -nRr '[inputs | fromjson? | objects] as $l
-    | [([$l[] | select(.exit == 0)] | last | .time // "none in the log"),
+  w=$(jq -r '.worked // empty | strings' "$ENGINE" 2>/dev/null)
+  IFS=$'\t' read -r ok why < <({ cat "$ENGINELOG" 2>/dev/null || :; } | jq -nRr --arg w "$w" '[inputs | fromjson? | objects] as $l
+    | [([$l[] | select(.exit == 0) | .time | strings] + [$w] | map(select(. != "")) | max // "none in the log"),
        ([$l[] | select(.exit != 0)] | last | if . == null then "none in the log"
          else (.output // "" | tostring | split("\n") | map(select(test("\\S"))) | last) // "it ended with exit code \(.exit)" end)] | @tsv' \
-    "$ENGINELOG" 2>/dev/null)
+    2>/dev/null)
   echo "Conveyor runs an old engine here: commit ${c:0:7}, and the plugin's $n is at ${h:0:7} · last take that worked: ${ok:-none in the log} · last failure: ${why:-none in the log} · to take it, run: cd $(printf %q "$MAIN") && bash $(printf %q "$HERE/conveyor.sh") take"
 }
 # The machine's one user service (docs/setup.md, Run): it runs `machine` (machineloop) from the install of the commit pinned

@@ -202,6 +202,24 @@ t_followhookfail() {
   [ "warning: $(CONVEYOR_MAIN=$R bash "$V/$X2/conveyor/conveyor.sh" take stale)" = "$line" ] || fail "take stale does not print doctor's line"
 }
 
+# Bug (#192): the old-engine line read the last take that worked only from the hooks' log, so a take that worked by
+# setup, the loop or `conveyor.sh take` (none of which writes that log) was shown as "none in the log" or an older time.
+t_followtakeok() {
+  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  tune '.plugin = {follow: "main"}'; mainat "$A"
+  bash "$D/conveyor/conveyor.sh" install "$A" >/dev/null || fail "the first commit was not installed"
+  before=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  takeby "$A" >/dev/null || fail "the first commit was not taken"
+  [ ! -e "$R/.git/conveyor-engine.log" ] || fail "a take run by hand wrote the hooks' log, so this case proves nothing"
+  # A newer commit the last take read, not taken yet: the project runs an old engine.
+  t=$(jq --arg h "$B" '.head = {commit: $h, name: "main"}' "$R/.git/conveyor-engine.json") && printf '%s\n' "$t" > "$R/.git/conveyor-engine.json" \
+    || fail "the record's head was not moved"
+  line=$(CONVEYOR_MAIN=$R bash "$V/$A/conveyor/conveyor.sh" take stale)
+  ok=$(sed -n 's/.* · last take that worked: \([^ ]*\) · .*/\1/p' <<<"$line")
+  [[ $ok =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] && [[ ! $ok < $before ]] \
+    || fail "the line does not name the time of the take run by hand (after $before): $line"
+}
+
 # Bug: a project that pins a commit has engines installed and switched when the plugin's main moves.
 t_followpin() {
   setup '[]'; coderepo; trap 'kill $pid 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; pid=''
