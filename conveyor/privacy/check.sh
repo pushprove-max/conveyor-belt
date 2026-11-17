@@ -17,7 +17,8 @@ terms=''
 # name<TAB>extended regular expression, matched with grep -E. An email is a hit unless it holds "noreply" or is at a
 # domain reserved for examples (example.com, example.org, example.net or a subdomain of one, RFC 2606) or is a git SSH
 # address, not a person's: git@ after ssh://, git@<host> before a colon, or git@<host> alone where the host is
-# github.com or gitlab.com (any other user at those hosts is still a hit). A home path is
+# github.com or gitlab.com (any other user at those hosts is still a hit), or is a systemd instance unit name
+# (<name>@<instance>.service, also .slice, .socket, .scope, .target, .mount, .timer or .path), not an address. A home path is
 # a hit unless its user is dev, the neutral user of the demo's container (docs/demo/record-terminal.sh). A folder after
 # /home/ or /Users/ that starts with a dot (/home/.claude) is no user's home, as no user name starts with a dot.
 PATTERNS=$'email\t[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}
@@ -41,7 +42,8 @@ one() { # <file> <name shown>
     elif [ "$name" = email ]; then
       # Each match is taken with the ssh:// before it and the colon after it, where there is one, to tell an SSH address.
       grep -anoE -- "(ssh://)?$rx:?" "$1" | grep -vi noreply | grep -viE '@([a-z0-9-]+\.)*example\.(com|org|net):?$' \
-        | grep -vE '^[0-9]+:(ssh://git@|git@[^:]+:$|git@(github\.com|gitlab\.com)$)' | cut -d: -f1
+        | grep -vE '^[0-9]+:(ssh://git@|git@[^:]+:$|git@(github\.com|gitlab\.com)$)' \
+        | grep -vE '^[0-9]+:[^@]+@[^@]*\.(service|slice|socket|scope|target|mount|timer|path):?$' | cut -d: -f1
     elif [ "$name" = 'home path' ]; then
       grep -anoE -- "$rx" "$1" | grep -vE '^[0-9]+:/(Users|home)/dev\.*([^A-Za-z0-9._-].*)?$' | cut -d: -f1
     else

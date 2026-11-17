@@ -174,6 +174,17 @@ t_privssh() {
   out=$("$c" "$f"); [ "$out" = "$(printf '%s\n' "$f:5: email" "$f:6: email" "$f:7: email" "$f:8: email")" ] || fail "hits: $out"
 }
 
+# Bug (#275): the 1.4.0 release was refused on busy.test.sh's cgroup path /user.slice/user${AT}1000.service/app.slice,
+# a systemd instance unit name read as an email. A unit name (lines 1 to 3) is not a hit; a real address beside one on
+# its line (4) and an address at a real domain (5) still are.
+t_privunit() {
+  local c=$SRC/privacy/check.sh f=$T/$CASE/f out; mkdir -p "$T/$CASE"
+  printf '%s\n' "s=/user.slice/user${AT}1000.service/app.slice" "getty${AT}tty1.service and systemd-fsck${AT}dev-sda1.service: ok, sshd${AT}3.socket" \
+    "a${AT}b.timer, c${AT}d.mount, e${AT}f.target, g${AT}h.path, i${AT}j.scope, k${AT}l.slice" \
+    "user${AT}1000.service by someone${AT}gmail.com" "someone${AT}service.io" > "$f"
+  out=$("$c" "$f"); [ "$out" = "$(printf '%s\n' "$f:4: email" "$f:5: email")" ] || fail "hits: $out"
+}
+
 # P5: every GitHub write the engine and the Board make goes through gh_write (conveyor.sh gh-write): a gh write
 # anywhere else in them is a fail. A gh api call is allowed only as a graphql read.
 t_ghwrite() {
