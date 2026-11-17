@@ -183,6 +183,25 @@ t_mainredjoin() {
     && [ "$(git -C "$w/fix" diff --cached --name-only)" = .conveyor/test-links.json ] \
     || fail "the link of the case that joined is not staged: $(cat "$w/fix/.conveyor/test-links.json" 2>&1)"
 }
+# Issue 323: linksonly() after a main-fix card's session, which left its staged .conveyor/test-links.json in the
+# worktree as a symlink to a file outside it, then .conveyor itself as a symlink to a folder outside it. Bug it
+# catches: linksonly() wrote main's copy of the links through the symlink, so the session made the engine overwrite a
+# file outside the worktree. The outside files keep their text; the links still count as the card's only change.
+t_mainredlinksonlylink() {
+  local w=$T/$CASE got
+  mkdir -p "$w/fix/.conveyor" "$w/out/.conveyor"; git -C "$w/fix" init -q
+  echo '{}' > "$w/fix/.conveyor/test-links.json"; git -C "$w/fix" add -A; git -C "$w/fix" commit -qm links
+  echo keep > "$w/out/file"; echo keep > "$w/out/.conveyor/test-links.json"
+  jq -n '{reds: [{sha: "s", card: "cfix", cases: [{case: "b", links: {"lib/a.sh": ["tests/b.test.sh"]}}]}]}' > "$w/mainred.json"
+  got=$( eval "$(sed -n '/^testlinks() {/,/^}/p; /^linksonly() {/,/^}/p' "$SRC/lib/testrun.sh")"
+    MAINRED=$w/mainred.json
+    testlinks cfix "$w/fix" && ln -sf "$w/out/file" "$w/fix/.conveyor/test-links.json" || exit 1
+    linksonly cfix "$w/fix" && echo only
+    rm -rf "$w/fix/.conveyor" && ln -s "$w/out/.conveyor" "$w/fix/.conveyor" || exit 1
+    linksonly cfix "$w/fix" && echo dironly; : ) || fail "the fixture failed: $got"
+  [ "$got" = only ] && [ "$(cat "$w/out/file")" = keep ] && [ "$(cat "$w/out/.conveyor/test-links.json")" = keep ] \
+    || fail "linksonly() wrote through a symlink the session left, or took a symlinked .conveyor: $got: $(cat "$w/out/file" "$w/out/.conveyor/test-links.json")"
+}
 # Issue 604. Bug it catches: a card that ran only some cases of a test file, named under the runner (`TESTRUN case`
 # lines, no why or times of the file, no wholeSuite), counted as not having run it, so the search for the landing that
 # broke a case went past it and named no landing, or the wrong one. In a fixture repo, landing L1's card ran the
@@ -363,6 +382,12 @@ t_mainredland() {
 # renames it) and its file pass. The run on main is a runner that logs each file a `fail` line of its list names, as the test step's
 # runner does, and keeps that list in $STUB/redlist. The fix card's entry holds both cases.
 redsetup() { # <ok.txt on main, or nothing>
+  redrunner "$1"
+  local s; s=$(git -C "$R" rev-parse HEAD)
+  eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s" || fail "the cases were not recorded"
+}
+# redsetup's fixture and run on main, with no entry in the main-red record.
+redrunner() { # <ok.txt on main, or nothing>
   setup "[$(issue 7 2026-01-01)]"
   [ -z "$1" ] || { printf '%s\n' "$1" > "$R/ok.txt"; git -C "$R" add ok.txt; git -C "$R" commit -qm "ok.txt"; }
   printf '%s\n' 'cp "$CONVEYOR_TEST_RERUN" "$STUB/redlist"; L=$CONVEYOR_TEST_LOG/r; rc=0' \
@@ -372,8 +397,6 @@ redsetup() { # <ok.txt on main, or nothing>
     '  elif [ -n "$c" ] && grep -qx "gone:$c" ok.txt 2>/dev/null; then echo "-- ok $f" >> "$L"' \
     '  else echo "FAIL [${c:-$f}]: broken"; echo "-- FAIL $f" >> "$L"; rc=1; fi' \
     'done < "$CONVEYOR_TEST_RERUN"' 'exit $rc' > "$STUB/mainrun-cmd"
-  local s; s=$(git -C "$R" rev-parse HEAD)
-  eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s" || fail "the cases were not recorded"
 }
 # The check alone (bugproof(), which calls redproof()) on a fix card cfix whose worktree holds <ok.txt> staged: its
 # exit and the first line of its result.
@@ -422,4 +445,68 @@ t_redproofgreen() {
   [ -z "$(st 'select(.step == "landed" or .step == "blocked")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$T/$CASE/cards/$c" ] \
     || fail "the fix card landed, was blocked or left its worktree: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   loop check || fail "the record check refuses the closed line"
+}
+
+# Issue 323: verdicts() alone on card c7, its worktree on main with a new test file n.test staged and a comment added
+# to a.test, its last run failing a.test's one and n.test's two and running out of time in c.test. On main a.test's one
+# fails and c.test passes (ok.txt). One run on main, three verdicts:
+# - n.test: two, the card's own new file. Bug it catches: main's run was told to run n.test, which main lacks, its
+#   failure there marked main red, and the main-fix card found nothing to fix.
+# - c.test, a time-out that passes on main: the card's.
+# - a.test: one, a real failure on main: main's, and the only case in the main-red record. Bug it catches: a file the
+#   card only edits was taken for its own, so a case failing on main too never ran there and went to the card.
+t_mainredowncard() {
+  redrunner c.test
+  local w=$T/$CASE/cards/c7 out
+  echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
+    && git -C "$R" worktree add -q --detach "$w" && echo 't_two() { false; }' > "$w/n.test" && echo '# a comment' >> "$w/a.test" \
+    && git -C "$w" add n.test a.test || fail "the card's worktree could not be made"
+  out=$(eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]},{"file":"n.test","cases":[{"name":"two","line":1}]}],"timeout":{"sec":1,"file":"c.test"}}'"'"' | jq -c .verdicts') \
+    || fail "verdicts failed: $out"
+  jq -e 'any(.[]; .case == "n.test: two" and .verdict == "card")' <<<"$out" >/dev/null && ! grep -q $'^fail\tn.test' "$STUB/redlist" \
+    || fail "the failure of the card's own new test file ran on main or was not the card's: $out: $(cat "$STUB/redlist")"
+  jq -e 'any(.[]; .case == "c.test" and .verdict == "card")' <<<"$out" >/dev/null || fail "a time-out that passes on main was not the card's: $out"
+  jq -e 'any(.[]; .case == "a.test: one" and .verdict == "main")' <<<"$out" >/dev/null && grep -qx $'fail\ta.test\tone' "$STUB/redlist" \
+    || fail "a case that fails on main, in a file the card edits, did not run there or was not main's: $out: $(cat "$STUB/redlist")"
+  [ "$(jq -c '[.reds[].cases[].case]' "$ST/mainred.json")" = '["a.test: one"]' ] \
+    || fail "the main-red record does not hold only the case that fails on main: $(cat "$ST/mainred.json" 2>&1)"
+}
+
+# Issue 323: a main-fix card's whole run, its session making no change, and main now passing its cases. Its entry links
+# lib/x.sh to a.test, so the engine stages .conveyor/test-links.json in its worktree before the build. Bug it catches:
+# the card was blocked ("the session made no change, so there is nothing to review"), or the staged links were taken
+# for a change and went to review, and main stayed marked red. Its cases run again on main as it is now; they pass, so
+# the card closes as not needed, saying so, nothing lands, and its entry holds main red no more (redopen()).
+t_mainrednochange() {
+  redsetup $'one\nc.test'
+  local s c out
+  # The fixture ignores .conveyor/; a project tracks its links file, so the engine can stage it.
+  printf 'conveyor/\n.conveyor/*\n!.conveyor/test-links.json\n' > "$R/.gitignore" && echo '{}' > "$R/.conveyor/test-links.json" \
+    && git -C "$R" add .gitignore .conveyor/test-links.json && git -C "$R" commit -qm links || fail "the links file could not be committed"
+  s=$(git -C "$R" rev-parse HEAD)
+  jq -c '.reds[0].cases[0].links = {"lib/x.sh": ["a.test"]}' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  echo ':' > "$STUB/build"
+  loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
+  c=$(st 'select(.step == "picked") | .card')
+  [ "$(st 'select(.step == "closed") | .reason')" = 'Not needed: the session made no change, and the cases ran again on main. Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
+    || fail "the fix card with no change did not close as not needed: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  out=$(eng "redopen $c && echo open")
+  [ -z "$(st 'select(.step | IN("blocked", "landed", "review"))')" ] && [[ $out != *open* ]] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$T/$CASE/cards/$c" ] \
+    || fail "the fix card was blocked, reviewed or landed, its entry still holds main red, or its worktree stayed: $out: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  recok "$ST/cards.jsonl" "the fix card with no change"
+}
+
+# Issue 323: nochange() alone on main-fix card cfix, its session making no change and ending with an ALREADY-DONE line,
+# while its cases still fail on main. Bug it catches: the card went to the ALREADY-DONE review, whose GO closed it with
+# main still red. It is blocked, naming the run on main, with no review.
+t_mainrednochangered() {
+  redsetup ''
+  local w=$T/$CASE/cards/cfix out
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  git -C "$R" worktree add -q --detach "$w" HEAD && echo '{"type":"result","result":"ALREADY-DONE: main fixes it"}' > "$w.out" \
+    || fail "the fix card's worktree could not be made"
+  out=$(eng 'nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
+  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. Its cases on main as it is now: "*'`a.test: one`, `c.test` still fails on main'"'"'s code at '*', and there is no change to run them with.' ]] \
+    && [ -z "$(st 'select(.card == "cfix" and (.step | IN("closed", "review", "start")))')" ] \
+    || fail "the fix card whose cases still fail on main was not blocked naming the run, or went to review: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }

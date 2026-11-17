@@ -331,8 +331,23 @@ visible() { # <review file> [held | any]
 # card's closing line is `closed`. Anything else blocks the card with the reason; there is no fix round.
 # The untouched worktree is first moved to main as it stands, so the reviewer reads today's main, not the one the
 # session started from; closed() then refuses a main that has moved on from the commit the reviewer read.
+# A main-red fix card (issue 0, its entry in the main-red record) that made no change first runs its cases again on
+# main as it is now (redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
+# closes as not needed, its closed line saying so. Else it is blocked, saying why, whatever its reply says: only that
+# run, not a review of an ALREADY-DONE line, shows main is no longer red.
 nochange() { # <card> <issue> <worktree> <brief>
   local c=$1 n=$2 wt=$3 said t res err
+  if [ "$n" = 0 ] && jq -e --arg c "$c" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1; then
+    t="the session made no change, so there is nothing to review"
+    [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] && err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
+      || { block "$c" "$n" "$wt" "$t. The engine could not run its cases again on main: the worktree is not clean or could not be moved to main. ${err:0:400}"; return; }
+    redproof "$c" "$wt"
+    [ $? = 3 ] || { block "$c" "$n" "$wt" "$t. Its cases on main as it is now: $(head -n 1 "$wt.unfixed")"; return; }
+    t="Not needed: the session made no change, and the cases ran again on main. $(head -n 1 "$wt.unfixed")"
+    res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$res" \
+      || { block "$c" "$n" "$wt" "$t The engine could not write the closed line"; return; }
+    clean "$wt"; return
+  fi
   said=$(jq -r 'select(.type == "result") | .result // "" | tostring' "$wt.out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1)
   [[ $said == "ALREADY-DONE: "*[![:space:]]* ]] && [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] \
     || { block "$c" "$n" "$wt" "the session made no change, so there is nothing to review"; return; }

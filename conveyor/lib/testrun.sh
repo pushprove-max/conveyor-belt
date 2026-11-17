@@ -701,30 +701,36 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 #   runs them too, on the same slot (CONVEYOR_TEST_ONESLOT: a runner of the command runs its workers one at a time on
 #   the run's slot, slot_take), each named `fail` in its list. With no control that could run, nothing tells the
 #   machine from main, and a failure whose inputs changed is main's, as before issue 221.
-# - card: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
-#   select it): the card's to fix, as before.
+# - card: it passed on main, or main's run did not run it (its worktree could not be made, the command did not
+#   select it, or its file is one the card's own change adds, which main does not have: issue 323): the card's to
+#   fix, as before. A file the change edits runs on main in main's version: failing there too, it is main's.
 # - flaky: it failed on the first run and passed on the run again (PASSEDAGAIN; flakyrun() records it).
 # Prints the test line's part: {verdicts: [{case, verdict}]} and, when the cases ran on main, mainRun: {sha, sec (the
 # seconds main's run took, its wait for a slot included), exit}. Each case whose verdict is main goes to the fix card of main's commit (mainred());
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local mwt=$CARDS/mainrun/${2##*/} sha='' u m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]'
+  local mwt=$CARDS/mainrun/${2##*/} sha='' u um m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
   u=$(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | if .cases == [] then {file: $f, case: null} else .cases[] | {file: $f, case: .name} end]
     + [.timeout.file // empty | {file: ., case: null}] | unique | map(select(.case != null or .file != $cmd))' <<<"$3" 2>/dev/null) || u='[]'
-  if [ "$u" != '[]' ]; then
+  # The files the card's own change (staged) adds (issue 323): main has no such file, so it cannot run there. Such a
+  # unit is the card's (card) and does not run on main. When the change cannot be read, no unit runs on main: each is
+  # the card's.
+  chg=$(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null) && chg=$(jq -cRn '[inputs | select(. != "")]' <<<"$chg") || chg=null
+  um=$(jq -c --argjson c "$chg" 'if $c == null then [] else map(select(.file | IN($c[]) | not)) end' <<<"$u") || um='[]'
+  if [ "$um" != '[]' ]; then
     if sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
       && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
         && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
       && { hits=$(cachehits "$mwt" | jq -cRn '[inputs | select(. != "")]') || hits='[]'
         ctl=$(jq -cn --argjson h "$hits" --argjson u "$u" --argjson c "${ctl:-[]}" '[$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique' 2>/dev/null) || ctl='[]'; } \
-      && jq -r --argjson u "$u" --argjson ctl "$ctl" --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
+      && jq -r --argjson u "$u" --argjson um "$um" --argjson ctl "$ctl" --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
         '([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))]
           | unique - [$u[].file] - $ctl | .[] | "pass\t\(.)"),
-        ($u[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
+        ($um[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
       s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 tests "$mwt" test.command alone; rc=$?; s=$((SECONDS - s))
       # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit).
       if [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
@@ -738,10 +744,10 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   fi
   TEST_WAIT=$w; TEST_RUN=$r; TEST_FREE=$fr
   fst=$(jq -ce objects "$2.first" 2>/dev/null) || fst=null
-  v=$(jq -cn --argjson u "$u" --argjson m "${mf:-null}" --argjson l "${3:-null}" --argjson fst "$fst" --argjson h "$hits" --argjson ctl "${ctl:-[]}" --argjson cf "$cf" "$NOTPASSED$PASSEDAGAIN"'
+  v=$(jq -cn --argjson u "$u" --argjson um "$um" --argjson m "${mf:-null}" --argjson l "${3:-null}" --argjson fst "$fst" --argjson h "$hits" --argjson ctl "${ctl:-[]}" --argjson cf "$cf" "$NOTPASSED$PASSEDAGAIN"'
     [($fst | select(. != null) | passedagain($l)[] | {case: ., verdict: "flaky"}),
      ($u[] | . as $x | {case: (if .case == null then .file else "\(.file): \(.case)" end), file,
-       verdict: (if $m != null and any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] else any(.cases[]; .name == $x.case) end))
+       verdict: (if $m != null and ($x | IN($um[])) and any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] else any(.cases[]; .name == $x.case) end))
          then (if ($x.file | IN($h[]) | not) and ($ctl == [] or $ctl - $cf != []) then "main" else "machine" end) else "card" end)})]') || v='[]'
   while IFS=$'\t' read -r c f; do mainred "$1" "$c" "$f" "$sha" || :; done < <(jq -r '.[] | select(.verdict == "main") | [.case, .file] | @tsv' <<<"$v")
   # A machine verdict holds the loop (machinehold()) until the controls that failed, and the files that failed with
@@ -1069,7 +1075,8 @@ bugproof() { # <card> <worktree> <issue json>
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
   # A main-red fix card (its entry in the main-red record names it) is proved by main's own failing cases (redproof()).
-  ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 || { redproof "$1" "$2"; return; }
+  # Its change that is only the links the engine staged (linksonly()) is no change, as above: card() drops it.
+  ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 || { ! linksonly "$1" "$2" || return 0; redproof "$1" "$2"; return; }
   # A change to test files alone (every changed path, deleted ones too, is a test file: testpaths()) has no fix to take out:
   # its tests would run on the same code and pass, so it is not run. The review is told, and judges the tests.
   # The paths are counted, not tested with grep -q: under pipefail its early exit could fail the pipe and pass a change
@@ -1253,6 +1260,8 @@ redproof() { # <card> <worktree>
       out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change, so the card closes as already done"; rc=3
     elif [ -n "$(rednames pass "$wo")" ]; then
       out="$(rednames pass "$wo") passes on main's code at $sha without the change (main is no longer red for it), while $(rednames fail "$wo") fails there"
+    elif git -C "$2" diff --cached --quiet HEAD 2>/dev/null; then
+      out="$(rednames fail "$wo") still fails on main's code at $sha, and there is no change to run them with" # nochange()
     elif ! out=$(git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>&1); then
       out="the change could not be applied to main's code at $sha, so the cases did not run with it: ${out:0:400}"
     else
@@ -1874,6 +1883,20 @@ testlinks() { # <card> <worktree>
   old=$(jq -ce objects "$f" 2>/dev/null) || old='{}'
   mkdir -p "${f%/*}" && jq -n --argjson a "$old" --argjson b "$new" 'reduce ($b | to_entries[]) as $e ($a; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))' > "$f.new" \
     && mv -f "$f.new" "$f" && git -C "$2" add -- .conveyor/test-links.json
+}
+# Whether the staged change of main-red fix card <card>'s worktree is only the links testlinks() stages (issue 323):
+# its session made no change of its own. The links are staged again from main's copy of the file and must come out
+# the same; when they do not, the staged file is put back as it was. The session wrote the worktree: a .conveyor that
+# is a symlink is not taken, and the file and testlinks()'s .new are unlinked before each write, so no write follows a
+# symlink or hard link the session left there to a file outside the worktree.
+linksonly() { # <card> <worktree>
+  local f=.conveyor/test-links.json b
+  [ "$(git -C "$2" diff --cached --name-only --no-renames HEAD 2>/dev/null)" = "$f" ] && [ ! -L "$2/.conveyor" ] && [ -d "$2/.conveyor" ] \
+    && b=$(git -C "$2" rev-parse -q --verify ":$f") && rm -f "$2/$f" "$2/$f.new" || return 1
+  { git -C "$2" show "HEAD:$f" > "$2/$f" 2>/dev/null || rm -f "$2/$f"; } && git -C "$2" add -A -- "$f" && testlinks "$1" "$2" \
+    && [ "$(git -C "$2" rev-parse -q --verify ":$f")" = "$b" ] && return 0
+  rm -f "$2/$f" "$2/$f.new"; git -C "$2" cat-file blob "$b" > "$2/$f" && git -C "$2" add -- "$f"
+  return 1
 }
 # Whether a main-red fix card is open: not picked yet ("") or given back by `retry` (no line of it in the card
 # records), on the belt or blocked; not when it landed or closed. Records that cannot be read count as open.

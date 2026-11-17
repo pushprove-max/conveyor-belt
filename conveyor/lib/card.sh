@@ -327,7 +327,10 @@ card() { # <card> <issue> [<branch> <tip>]
     # A build that changed nothing but proposes a budget of its own (ob) stops for the owner's yes to it (OWNSTOP), as
     # a card with a change does below, not as a session that made no change: with the yes, its retry sets the budget
     # and closes the issue (ownyes(), above); with the owner's no, the issue is held.
-    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet || { [ -z "$ob" ] || { jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'}" post; return; }
+    # A main-red fix card whose staged change is only the links the engine staged (linksonly()) made no change: the
+    # links come with a fix, so with none they are dropped (issue 323).
+    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet \
+      && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || { [ -z "$ob" ] || { jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'}" post; return; }
       nochange "$c" "$n" "$wt" "$sprompt"; return; }
     if [ "$mode" = land ]; then
       # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a

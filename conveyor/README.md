@@ -412,7 +412,10 @@ failure gets a verdict:
   card is blocked with "<case> still fails with the change", with no review. When every case passes without the
   change, main is no longer red for them: the card closes as already done, with no review, and its change does not
   land. Its `closed` line names the cases. When some cases pass without the change and others fail, or a run gives
-  no result for a case, the card is blocked, and the reason names the case.
+  no result for a case, the card is blocked, and the reason names the case. When its build session makes no change,
+  its cases run again on main as it is now. When they all pass, the card closes as not needed, and its `closed`
+  line says so; main is no longer red. Otherwise it is blocked, and the reason gives the result on main. An
+  `ALREADY-DONE` line in the session's reply does not change this.
   The Board shows it titled "Main is red: <cases>"; its commit names the cases and main's
   commit. In place of an issue number, the Board, `foreman status` and the Foreman's wakes name it
   "Main is red (<commit>)". A case found failing on the same commit, while its card runs too, is added to that card (its title on the
@@ -460,7 +463,9 @@ failure gets a verdict:
   live record saying "waiting for the repair lane", until the process of the card in the lane ends. Then its test
   step runs again.
 - **card**: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
-  select it). The card goes to its fix session.
+  select it). A failure in a test file that the card's change adds is always the card's: main does not have that
+  file, so it does not run on main. A test file that the change edits runs on main in main's version. The card goes
+  to its fix session.
 - **flaky**: it failed on the first run and passed on the run again (Flaky tests, below).
 
 When main has moved since the card's commit, a card with a failure that is not main's does not go to its fix session
