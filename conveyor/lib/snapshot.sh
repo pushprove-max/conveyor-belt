@@ -104,6 +104,8 @@
 #   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, review), pct, readAt, email (its
 #   login on this machine)}]; null when it could not be read.
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
+# standing: the pack's auto.standing, the standing kinds of routine yes that are on (lib/standing.sh), for the Rules
+#   tab; null when the pack cannot be read.
 # awaitingDeploy: the open issues labelled awaiting-deploy (built, waiting for the owner's deploy), apart from next and
 #   from held, which never count them: issue, title, since (when the label was last added; null when GitHub did not
 #   say), lowest number first. null when gh cannot list the issues.
@@ -376,6 +378,7 @@ snapshot() (
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
   # has none. The models the steps of the last 30 days ran are counted from since (seen).
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
+  packget auto.standing sk 2>/dev/null && [ -n "$sk" ] || sk=null
   packget lanes.research.model rmodel 2>/dev/null || rmodel=''
   # The research lane's sessions are no card's step: seen counts the models they ran from their transcripts in the
   # default login's projects folder. The lane is the host file's lanes.research.worktree of this checkout's record (the
@@ -758,7 +761,7 @@ snapshot() (
   testspart "$since" > "$d/tests" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
   # testMap: the Test map part (mapboard(), lib/testmap.sh).
   mapboard "$MAIN" > "$d/testmap" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
-  jq -c --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0]
+  jq -c --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk
     | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1

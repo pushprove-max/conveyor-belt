@@ -81,7 +81,7 @@ cmd setup setup.sh 'setup [--owner <name>] [--product <path>]... [--test <comman
 cmd setup setup.sh 'setup pack-commit [yes | no]'
 cmd doctor doctor.sh 'doctor'
 cmd wording wording.sh 'wording adversarial | review'
-cmd auto auto.sh 'auto on | narrow | off | status | band | rules | decide'
+cmd auto auto.sh 'auto on | narrow | off | status | band | rules | decide | standing <kind> on|off | act <kind> <what>'
 cmd foreman foreman.sh 'foreman [status [<project>] | <claude argument>...]'
 cmd lane lane.sh 'lane research create | lane fast create | review | land | reset [--drop <sha>]'
 cmd flaky flaky.sh 'flaky add <case> <source> <note> | flaky off <case> <source> <note>'

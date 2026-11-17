@@ -333,7 +333,8 @@
       "default": {},
       "additionalProperties": false,
       "properties": {
-        "reserved": { "description": "What is never decided for the owner: an open decision whose question, recommended option or options hold one of these words or phrases (in any case) waits for the owner.", "type": "array", "items": { "type": "string", "minLength": 1 }, "default": ["production deploy", "prod deploy", "delete", "feature flag", "security", "password", "product setting", "configured value", "licence", "license", "consent"] }
+        "reserved": { "description": "What is never decided for the owner: an open decision whose question, recommended option or options hold one of these words or phrases (in any case) waits for the owner.", "type": "array", "items": { "type": "string", "minLength": 1 }, "default": ["production deploy", "prod deploy", "delete", "feature flag", "security", "password", "product setting", "configured value", "licence", "license", "consent"] },
+        "standing": { "description": "The standing kinds of routine yes the Foreman takes without asking, each logged in the ruling log (source standing): asked-fix (a fix the owner asked for is filed and released at once), review-followup (a follow-up of a card the owner approved that only finishes or corrects that card's change is released; the engine releases one whose finding names only files of its parent card's change), release-check (a failed check in a release the owner asked for gets one fix card, then the release goes on), fixed-block (a card whose block a landed fix removed gets Depends on: #<fix> and retry --fresh). Each kind is off until the owner turns it on (the Board's Rules tab).", "type": "array", "items": { "enum": ["asked-fix", "review-followup", "release-check", "fixed-block"] }, "default": [] }
       }
     },
     "privacy": {

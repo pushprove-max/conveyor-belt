@@ -897,6 +897,18 @@ done
 [ "$(ctl "$(act test-settings slow-mark a.test.sh "$(printf 'two\nlines')")")" = 400 ] || fail "test_settings_take_only_their_shapes: a reason of two lines answered '$(cat "$M/ctl.out")'"
 [ -z "$(calls)" ] || fail "test_settings_take_only_their_shapes: ran '$(calls)'"
 pass=$((pass + 2))
+# The Rules tab's standing kinds reach `conveyor.sh auto standing <kind> on|off` on the record. Bug: a switch reaches no
+# command, or a kind the engine does not know, or a value other than on and off, is sent on.
+fresh_control
+[ "$(ctl "$(act standing review-followup on)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM auto standing review-followup on" ] \
+  || fail "standing_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control
+for a in 'review-followup' 'review-followup maybe' 'any-fix on' 'asked-fix on off' '-x on'; do
+  # shellcheck disable=SC2086 # each word an argument
+  [ "$(ctl "$(act standing $a)")" = 400 ] || fail "standing_takes_a_kind_and_on_or_off: '$a' answered '$(cat "$M/ctl.out")'"
+done
+[ -z "$(calls)" ] || fail "standing_takes_a_kind_and_on_or_off: ran '$(calls)'"
+pass=$((pass + 2))
 # The Tests page's actions (#521) reach the engine's commands on the record, each argument one quoted word; an issue
 # filed has the pack's type and last priority. Bug: an action that reaches no command, or a shape the engine does not
 # take (a stop with no id, a path that reads as an option, a rule value of two words, a title of two lines) sent on; Keep a

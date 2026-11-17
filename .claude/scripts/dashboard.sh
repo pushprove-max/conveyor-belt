@@ -136,8 +136,9 @@
 #           (the snapshot's: cards, usd, perCard {usd, pct}, guard, reading, pausesAt; null from a snapshot without one;
 #           no time), prices (the snapshot's: the built-in model prices, the pack's prices, added models and aliases,
 #           each model's display name and the model IDs seen in 30 days, for Model prices and the Board's model names; null
-#           from a snapshot without them) and open (as the Board's: every held issue with its labels and reasons, and
-#           every open issue).
+#           from a snapshot without them), standing (the snapshot's: the pack's auto.standing, the standing kinds
+#           of routine yes that are on; null from a snapshot without it) and open (as the Board's: every held issue
+#           with its labels and reasons, and every open issue).
 #   tests   the Tests page, of the same record (repo null when none is; repos and others as the Board's): tests (the
 #           snapshot's: each test file's figures, each of its runs with its card's issue and url, each issue the Board
 #           filed for it ($TAFILED) with its url, state (closed for an open one the snapshot's open issues lack), landed commit, fix and the proof's before and after CPU s, the pack's test
@@ -709,7 +710,7 @@ PANELS_JQ='
        building: [$s.belt[] | select(.landed != true)] | length, onBelt: [$s.belt[] | select(.landed != true) | .issue],
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],
        blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, since}] | few($r), forecast: ($s.forecast // null),
-       prices: ($s.prices // null), open: openOf($r)};
+       prices: ($s.prices // null), standing: ($s.standing // null), open: openOf($r)};
   # From the first pick-up of the work of the card to its landing: totalSec of the snapshot, else the time in its card id.
   def took: (.totalSec | numbers) // (try ((.card | capture("^c(?<d>[0-9]{8}T[0-9]{6})-").d | strptime("%Y%m%dT%H%M%S") | mktime) as $s
     | ((.time | fromdate) - $s) | select(. >= 0)) catch null) // null;

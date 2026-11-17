@@ -169,6 +169,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
 # or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`),
 # or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
+# or standing (the Rules tab's Done without asking: one standing kind of routine yes on or off, `conveyor.sh auto standing`),
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
@@ -196,6 +197,8 @@ ACCOUNT = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')  # an account name, as 
 EFFORTS = frozenset({'minimal', 'low', 'medium', 'high', 'xhigh', 'max'})  # claude's, codex's and opencode's, as conveyor.sh's EFFORTS
 KIND = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,39}')  # a finding kind the judge always accepts, as conveyor.sh's control takes it
 KINDS_MAX = 20
+# The standing kinds of routine yes, as conveyor.sh's auto standing takes them (conveyor/lib/standing.sh).
+STANDING = frozenset({'asked-fix', 'review-followup', 'release-check', 'fixed-block'})
 # An area rule is the pack's area prefix and a name: any label here; conveyor.sh checks the prefix.
 RULE = re.compile(r'(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,79})=(on|off)')
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
@@ -376,6 +379,8 @@ def control_ok(body):
         return (n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)) or (n == 2 and v[0] == 'prep' and VERSION.fullmatch(v[1]) is not None)
     if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's budget or mark
         return test_settings_ok(v)
+    if a == 'standing':  # the Rules tab: one standing kind of routine yes, on or off
+        return n == 2 and v[0] in STANDING and v[1] in ('on', 'off')
     if a == 'prices':  # the Rules tab's Model prices: one model's price, added model, display name or alias
         return n >= 2 and MODEL.fullmatch(v[1]) is not None and (
             (n in (5, 6) and v[0] == 'set' and all(PRICE.fullmatch(x) for x in v[2:]))
@@ -582,6 +587,9 @@ def control_script(action, args, main, today, record=None, user=None):
     if action in ('test-settings', 'prices'):
         # The record's pack (.conveyor/project.json of its main), changed by the engine's own command, which checks it.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))
+    if action == 'standing':
+        # The record's pack's auto.standing: one kind on or off (conveyor.sh auto standing, which checks it).
+        return '%s auto standing %s %s' % (conv, q(args[0]), q(args[1]))
     if action in ('testaction', 'testrules', 'testmap'):
         # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's;
         # a build of the test map starts on the host and returns (conveyor.sh testmap build), or is stopped.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh auto on | narrow | off | status | band | rules | decide`: /conveyor-belt:auto, for the project it is
-# called in. While it is on, the Foreman decides the owner's open decisions for them, by the owner's recorded way of
+# `conveyor.sh auto on | narrow | off | status | band | rules | decide | standing <kind> on|off | act <kind> <what>`:
+# /conveyor-belt:auto, for the project it is called in. While it is on, the Foreman decides the owner's open decisions for them, by the owner's recorded way of
 # deciding, and logs each with its reasons; what the pack reserves (auto.reserved) is never decided and waits for the
 # owner. Sourced by conveyor.sh.
 # - on: the owner is away: decide every open decision that has a recommended option and that nothing reserves, unless
@@ -9,7 +9,11 @@
 #   gave in their latest ruling on the same question (in the ruling log). Each starts a log,
 #   <state folder>/auto/<date>-<time>.md: "## Summary", "## Decisions", "## Waiting for the owner". off ends it.
 # - status: one line for the owner. band: {scope: full|narrow|off, since, count} for the plugin's band (hooks/auto.tsx).
-#   rules: what the Foreman is told while it is on (nothing while off).
+#   rules: what the Foreman is told while it is on, then the standing kinds of routine yes the pack turns on
+#   (lib/standing.sh), which hold whether auto is on or off; nothing while auto is off and no kind is on.
+# - standing <kind> on|off: the Board's Rules tab turns one standing kind on or off in the pack (auto.standing).
+#   act <kind> <what>: the Foreman logs one act under a kind that is on (the ruling log, source "standing") and gets the
+#   line it tells the owner; a kind that is off is refused, so the step goes to the owner.
 # - decide: one pass over the ledger's open decisions (the Board's, .claude/scripts/decision.sh list). Each decided
 #   one gets its log entry (question, pick, why, reversible), written before decision.sh answers it with its
 #   recommended option; each one it leaves gets a line under "## Waiting for the owner", once.
@@ -17,7 +21,11 @@
 # picker answer the owner gave, with whether it was the recommended option), never written here.
 # Test seams: CONVEYOR_LEDGER (decision.sh's), CONVEYOR_RULING_LOG (the ruling log).
 . "$HERE/lib/prompts.sh" || exit 1
-[ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide)$ ]] || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide" >&2; exit 2; }
+. "$HERE/lib/testfiles.sh" || exit 1
+. "$HERE/lib/standing.sh" || exit 1
+{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide)$ ]]; } \
+  || { [ $# = 4 ] && [[ " ${STANDING_KINDS[*]} " == *" $3 "* ]] && { { [ "$2" = standing ] && [[ $4 =~ ^(on|off)$ ]]; } || { [ "$2" = act ] && [[ $4 == *[![:space:]]* ]]; }; }; } \
+  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | standing <kind> on|off | act <kind> <what> (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
 AD=$ST/auto MODE=$ST/auto/mode.json LAST=$ST/auto/last.json DECISION=$HERE/../.claude/scripts/decision.sh
 die() { echo "conveyor: auto: $*" >&2; exit 1; }
 # The mode while on, as JSON: {scope, since, log}; fails while off.
@@ -26,7 +34,6 @@ mode() { jq -ce 'select(type == "object" and (.scope == "full" or .scope == "nar
 logged() { awk '/^### / { n++ } /^- \*\*Recorded:\*\* no/ { n-- } END { print n + 0 }' "$1" 2>/dev/null || echo 0; }
 m=$(mode) || m=''
 if [ -n "$m" ]; then IFS=$'\t' read -r scope since log < <(jq -r '[.scope, .since, .log] | @tsv' <<<"$m"); fi
-rulingslog() { [ -z "${CONVEYOR_RULING_LOG:-}" ] || { echo "$CONVEYOR_RULING_LOG"; return; }; CONVEYOR_MAIN=$MAIN bash -c '. "$1" && rulings_log' _ "$HERE/../.claude/hooks/lib/rulings.sh"; }
 RL=$(rulingslog) || RL=''
 # The owner's way of deciding, from their last 100 picker answers in the ruling log.
 way() {
@@ -71,9 +78,12 @@ case $2 in
     if [ -n "$m" ]; then jq -cn --arg s "$scope" --arg t "$since" --argjson n "$(logged "$log")" '{scope: $s, since: $t, count: $n}'
     else jq -cn --argjson n "$(jq -r '.count // 0 | numbers' "$LAST" 2>/dev/null || echo 0)" '{scope: "off", since: null, count: $n}'; fi ;;
   rules)
-    [ -n "$m" ] || exit 0
     r=$(reserved) || exit 1
-    run="bash $(printf %q "$HERE/conveyor.sh") auto decide"
+    # The standing kinds hold whether auto is on or off: alone while it is off, after auto's own rules while it is on.
+    eng="bash $(printf %q "$HERE/conveyor.sh")"
+    if [ -z "$m" ]; then standingrules "$eng" "$r"; exit; fi
+    sr=$(standingrules "$eng" "$r") || exit 1
+    run="$eng auto decide"
     if [ "$scope" = full ]; then
       cat <<EOF
 # AUTO IS ON (since $since, /conveyor-belt:auto on)
@@ -97,7 +107,17 @@ The owner is here. Decide only the formalities; ask them everything else as usua
 - Tell the owner each one in one line in your next reply: "Decided without asking: <what>, because <why>; say 'reverse <id>' to undo."
 - Never decide: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings. When unsure, ask the owner.
 EOF
-    fi ;;
+    fi
+    [ -z "$sr" ] || printf '\n%s\n' "$sr" ;;
+  standing)
+    # The pack's list as it was, with the kind added or taken out; each kind once, in STANDING_KINDS' order.
+    packset --arg k "$3" --argjson on "$([ "$4" = on ] && echo true || echo false)" --argjson all "$(jq -cn '$ARGS.positional' --args "${STANDING_KINDS[@]}")" \
+      '.auto.standing = ((.auto.standing // []) - [$k] + (if $on then [$k] else [] end) | . as $s | $all | map(select(IN($s[]))))' || exit 1
+    echo "auto: the standing kind $3 is $4. $([ "$4" = on ] && echo 'The Foreman takes it without asking, and logs each act.' || echo 'Each such step goes to the owner again.')" ;;
+  act)
+    standingon "$3" || { echo "conveyor: auto: the standing kind $3 is not on in the pack (auto.standing), so this step goes to the owner: ask them" >&2; exit 1; }
+    id=$(standinglog "$3" "${4//$'\n'/ }") || exit 1
+    echo "Done without asking ($3): ${4//$'\n'/ }; logged as $id." ;;
   decide)
     [ -n "$m" ] || { echo "conveyor: auto is off; /conveyor-belt:auto on or narrow turns it on" >&2; exit 2; }
     [ -f "$log" ] || die "the log $log is gone"

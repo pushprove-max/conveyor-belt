@@ -118,6 +118,8 @@ t_setup() {
   jq -e '.owner.name == "Dana" and .productPaths == ["src/", "web app/"] and .test.command == "npm test" and .test.full == "npm test" and .defaultBranch == "trunk"
       and .plugin == {follow: "releases"} and .privacy.mode == "public" and .remote == "origin"' "$S/.conveyor/project.json" >/dev/null \
     || fail "the pack is not the answers, the defaults and the plugin's releases followed: $(cat "$S/.conveyor/project.json")"
+  # Bug: a new pack turned on a standing kind of routine yes the owner never chose; each is off until they turn it on.
+  jq -e '.auto.standing == []' "$S/.conveyor/project.json" >/dev/null || fail "setup did not write auto.standing empty: $(jq -c .auto "$S/.conveyor/project.json")"
   # No to the first test-speed survey: none filed, and the answer saved, so the rerun below is not asked again.
   [ ! -e "$G/filed" ] && jq -e '.test.firstSurvey == false' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --survey no filed a survey issue, or did not save the answer: $(cat "$G/filed" 2>&1) $(jq -c .test "$S/.conveyor/project.json")"

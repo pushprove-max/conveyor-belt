@@ -108,3 +108,25 @@ asks the host about the record over ssh. Open decisions for that record come fro
   pack's `auto.reserved` holds (the pack is the project's settings, `.conveyor/project.json`; by default production deploys, deletes, new feature flags, security and password
   settings, configured product values, and licence or consent questions). Those are listed under "Waiting for the
   owner". A band above the prompt shows whether auto is on.
+
+## Standing yes
+
+Some routine steps get the same yes from you each time. You can give that yes once, kind by kind. The Foreman then
+takes those steps without asking. Each kind is off until you turn it on in the Rules tab of the Board ("... without
+asking"). The pack keeps the list as `auto.standing`. A kind works whether `/conveyor-belt:auto` is on or off.
+
+- `asked-fix`: you report a problem or ask for a fix. The Foreman files the issue and queues it at once.
+- `review-followup`: the review of a card you approved files a follow-up. The Foreman queues the follow-up when it
+  only finishes or corrects that card's own change. Conveyor does this itself for a follow-up on a pipeline file: when
+  the finding names only files of its parent card's change and no word of `auto.reserved`, the follow-up is not held.
+- `release-check`: a check fails in a release you asked for, such as a false privacy hit or a red test file. The
+  Foreman files one fix card for it. When the fix lands, the release goes on.
+- `fixed-block`: a fix that landed removed the cause of a blocked card. The Foreman adds `Depends on: #<fix>` to the
+  card's issue and runs `conveyor.sh retry <issue> --fresh`.
+
+Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
+release that you did not ask for, and anything that `auto.reserved` holds.
+
+The Foreman's start text lists each kind that is on, with these limits. So does `conveyor.sh auto rules`. Each step
+taken under a kind goes into the ruling log with its kind (source `standing`). The Foreman then tells you about it in
+one line.

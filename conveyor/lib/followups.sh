@@ -13,6 +13,9 @@
 # pushes), or a file under one (onpipeline()), is filed held: the control record holds its issue, as `control hold` does, before the card lands,
 # so it is never built until the owner releases it. Its body holds one more line, "Cost to every card:", which reads
 # "not assessed": nothing here assesses it. The snapshot lists it in Needs you (pipeline) while it is held.
+# With the pack's standing kind review-followup on (auto.standing, lib/standing.sh), such a finding that names only
+# files of the card's own change (ownonly()) is not held: it only finishes or corrects the change the owner approved.
+# Its release is logged in the ruling log, source "standing", kind review-followup; one that cannot be logged is held.
 # The whole test on main (the pack's test.main; a pack that names none has none): a card's test step runs only the
 # tests of what the card touched, so the whole test is run here instead, by `serve` beside its cards and never by a
 # card: no card waits on it. A run is due when main is at another commit than the last run's and the last try began
@@ -42,6 +45,7 @@
 # of the same cases while the issue filed for them is open adds a comment to it, with the commits up to the new one,
 # and files none, whatever failed in the runs between; one whose issue GitHub says nothing of writes nothing, and
 # keeps the issue (and, as any failure not written, is tried again).
+. "$HERE/lib/standing.sh" || exit 1
 MAIN_TEST_EVERY=3600 MAIN_ALONE=3
 mainput() { printf '%s\n' "$1" > "$MAINTEST.new" && mv -f "$MAINTEST.new" "$MAINTEST" || { rm -f "$MAINTEST.new"; return 1; }; } # <the record>
 maintest() {
@@ -156,6 +160,20 @@ onpipeline() {
       | range(0; $w | length) as $i | range($i + 1; ($w | length) + 1) as $j | $w[$i:$j] | join(" ") | sub("\\.+$"; "") | norm]
     | if any(. as $p | $e | any(. as $x | $x == "" or $p == $x or ($p | startswith($x + "/")))) then "1" else "" end'
 }
+# <finding> <worktree>: prints 1 when the finding names a file, and each file it names is one of the worktree's staged
+# change (the card's change, as its review read it); a name with no folder counts as the changed file of that name. A
+# file it names: a word with a "/" that ends in an extension or a "/", or is a tracked path; or a word that is a tracked
+# file's name or a changed file. A word is a run of letters, digits and _.@+/- (so a ":<line>" is not part of it), its
+# leading "./" and closing "." dropped. Bug it stops: a follow-up that changes another pipeline file let through with no
+# one asked.
+ownonly() {
+  jq -rn --arg f "$1" --rawfile ch <(git -C "$2" diff --cached --no-renames --name-only 2>/dev/null) --rawfile tr <(git -C "$2" ls-files 2>/dev/null) '
+    def lines: split("\n") | map(select(. != ""));
+    ($ch | lines) as $c | ($tr | lines) as $t | ($t | map(split("/")[-1])) as $tn | ($c | map(split("/")[-1])) as $cn
+    | [$f | scan("[A-Za-z0-9_.@+/-]+") | sub("^(\\./)+"; "") | sub("\\.+$"; "")
+       | select(. != "" and ((contains("/") and (test("\\.[A-Za-z0-9]+$") or endswith("/") or IN($t[]))) or IN($tn[]) or IN($c[])))]
+    | if length > 0 and all(IN($c[]) or ((contains("/") | not) and IN($cn[]))) then "1" else "" end'
+}
 unfile() { # <parent issue> <review file> <follow-up issue>...
   local n=$1 r=$2 i j=0 found=(); shift 2
   mapfile -t found < <(leftovers "$r")
@@ -165,8 +183,9 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
   done
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost
+  local f mark where out num n nums=() more=() found=() pipe cost own='' free res
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
+  ! standingon review-followup || { packget auto.reserved res || { echo "cannot read the pack's auto.reserved"; return 1; }; own=1; }
   n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r --arg p "$AREA" '(.labels | map(.name | select(startswith($p))) | .[0] // empty | "--label", .),
     (.milestone.title // empty | "--milestone", .)' <<<"$2") || { echo "cannot read the parent issue's labels and milestone"; return 1; }
   mapfile -t found < <(leftovers "$3")
@@ -178,6 +197,11 @@ followups() { # <card> <issue json> <review file>
     mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$f" | head -n 1)
     mark=$(jq -r --argjson i "${mark:-1}" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] end' <<<"$PRIOS")
     cost=$(onpipeline "$f" <<<"$pipe") || { unfile "$n" "$3" "${nums[@]}"; echo "cannot tell whether a finding names a pipeline file, so nothing landed (finding: ${f:0:200})"; return 1; }
+    # A finding that holds a word or phrase of auto.reserved (in any case, as auto decide reads it) is never let
+    # through: it waits for the owner. Bug: a follow-up on the card's own file about security went unheld.
+    free=''; [ -z "$cost" ] || [ -z "$own" ] \
+      || [ "$(jq --arg f "$f" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$res" 2>/dev/null)" != false ] \
+      || free=$(ownonly "$f" "${3%.review}")
     cost=${cost:+$'\nCost to every card: not assessed'}
     out=$(gh_write issue create --title "${f:0:200}" --label "$FOLLOWUP" --label "$TYPE" ${mark:+--label "$mark"} "${more[@]}" \
       --body "Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue.
@@ -187,7 +211,8 @@ Where: ${where:-the finding names no file:line}$cost
 Follow-up depth: 1" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")
-    [ -z "$cost" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
+    [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
+    [ -z "$cost" ] || [ -n "$free" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
       || { unfile "$n" "$3" "${nums[@]}"; echo "a follow-up that changes a pipeline file could not be held, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
   done
   jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}"

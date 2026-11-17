@@ -18,7 +18,7 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
   models: {allowed: {claude: ["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5"], codex: ["gpt-6.1-sol", "gpt-6-astra"],
     "claude-reviewer": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"]}},
   lanes: {research: {model: "claude-fable-5-2", effort: "medium"}},
-  privacy: {mode: "public"}}'
+  privacy: {mode: "public"}, auto: {standing: []}}'
 # The question "Run a first test-speed survey now?" (conveyor/README.md, The first survey): answered by --survey yes|no,
 # and asked, as the pack's answers are (exit 2, nothing written), while the pack has no saved answer
 # (test.firstSurvey); a saved answer is not asked again unless --survey is given. Once the labels are there, yes files

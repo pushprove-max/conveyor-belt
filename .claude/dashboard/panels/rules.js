@@ -11,7 +11,9 @@
 // accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
 // card lands (On or Off; disabled the same way for a record with no rules.push), Visible changes need your yes (On or
-// Off; disabled the same way for a record with no rules.visible), Held by you (the count, a link to the list below)
+// Off; disabled the same way for a record with no rules.visible), one row a standing kind of routine yes the Foreman
+// takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release check, Fixed block, each On
+// or Off; disabled the same way for a snapshot with no standing), Held by you (the count, a link to the list below)
 // and, when there is one, the pinned order with Move up (not on the first), Move down (not on the last) and Unpin.
 // A switch's words under its name say what it does, whichever choice is set; what Off means shows beside it only
 // while Off is set. Push landed and Run full test suite are actions, not rules: they are on the Board (Control tab).
@@ -49,7 +51,7 @@
 // Rules panel's heading names it ("Rules: sample"); every change names it.
 // Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), state, control, cap, guard,
 // modelSettings, areaPrefix, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps,
-// blocked, forecast, prices, open (with issues: every open issue), repos, others}.
+// blocked, forecast, prices, standing, open (with issues: every open issue), repos, others}.
 (function () {
   'use strict';
   const AREA = /^[A-Za-z0-9._/-]{1,60}$/;  // the name after the pack's area prefix, as dashboard_server.py's RULE takes it
@@ -58,6 +60,13 @@
   const KINDS_MAX = 20;   // the kinds one `judge always` takes (dashboard_server.py)
   const RELEASE_MAX = 50; // the issues one release takes (dashboard_server.py)
   const DEPENDS_MAX = 20; // the issues one depends takes (dashboard_server.py)
+  // The standing kinds of routine yes (the pack's auto.standing, conveyor/lib/standing.sh): key, name, what it does.
+  const STANDING = [
+    ['asked-fix', 'Fix you asked for', 'the Foreman files the fix you ask for and queues it at once'],
+    ['review-followup', 'Review follow-up', 'a follow-up that only finishes or corrects a card you approved is queued'],
+    ['release-check', 'Release check', 'a failed check in a release you asked for gets one fix card, then the release goes on'],
+    ['fixed-block', 'Fixed block', 'a card blocked by a cause that a landed fix removed waits on that fix and is tried again'],
+  ];
   const ORDER_MAX = 500;  // the issues one order takes (dashboard_server.py)
   const ARM_MS = 5000;    // a Queue that removes a label, or a Build choice that skips queued issues, waits this long for its second click
   // The finding kinds offered to pick from: those the review prompt names (its P0 level: security, data; its three
@@ -227,6 +236,7 @@
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
     if (action === 'depends') return `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`;
     if (action === 'prices') return priceWords(a);
+    if (action === 'standing') return `${(STANDING.find(([k]) => k === a[0]) || [a[0], a[0]])[1]} without asking: ${a[1]}`;
     return action;
   }
 
@@ -319,6 +329,11 @@
         put({ guessed: false });
         // A model price saved shows at once (pricesSection), its Undo's too.
         if (action === 'prices' && repo === S.d.repo) S.priceSaved = { for: S.d.prices, over: applied(pricesShown(), list(args)) };
+        // A standing kind saved shows at once too, until the next snapshot.
+        if (action === 'standing' && repo === S.d.repo) {
+          const [k, o] = list(args);
+          S.standingSaved = { for: S.d.standing, over: list(standingShown()).filter((x) => x !== k).concat(o === 'on' ? [k] : []) };
+        }
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
         // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
         const at = repo === S.d.repo ? S : S.kept.get(repo), now = res.rec || (guess && guess[0]);
@@ -857,6 +872,17 @@
     yOn.disabled = yOff.disabled = !yesKnown;
     el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
       yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
+
+    // Done without asking: one row a standing kind of routine yes, On or Off. Off (each kind's setting from setup)
+    // sends each such step to you. A Conveyor whose snapshot has no standing is sent neither choice.
+    const standingOn = standingShown();
+    STANDING.forEach(([k, name, what]) => {
+      const on = !!standingOn && standingOn.includes(k);
+      const sOn = choice('On', `standing-${k}-on`, `${name} without asking: on`, on, () => { if (!on) send('standing', [k, 'on'], null, ['standing', [k, 'off']]); });
+      const sOff = choice('Off', `standing-${k}-off`, `${name} without asking: off`, !on, () => { if (on) send('standing', [k, 'off'], null, ['standing', [k, 'on']]); });
+      sOn.disabled = sOff.disabled = !standingOn;
+      el.append(row(`standing-${k}`, `${name} without asking`, what, sOn, sOff, standingOn ? offLine(on, 'the Foreman asks you first') : newer(false)));
+    });
 
     // Held by you: the count, and a link to the list below.
     const link = h('a', 'rules-link', 'See them below');
@@ -1426,6 +1452,10 @@
   const byFamily = (a, b) => familyRank(a) - familyRank(b) || newer(a, b);
   const usd = (v) => (num(v) !== null ? `$${+v.toFixed(6)}` : '—');
   const writeOf = (r) => (num(r.cacheWrite) !== null ? r.cacheWrite : num(r.input) !== null ? r.input * 1.25 : null);
+  // The pack's standing kinds as shown: as a change saved here left them, until a new snapshot comes; null from a
+  // snapshot without them.
+  const standingShown = () => (S.standingSaved && S.standingSaved.for === S.d.standing ? S.standingSaved.over
+    : Array.isArray(S.d.standing) ? S.d.standing : null);
   // The pack's prices as shown: as the changes saved here left them, until a new snapshot comes.
   const pricesShown = () => (S.priceSaved && S.priceSaved.for === S.d.prices ? S.priceSaved.over
     : S.d.prices && S.d.prices.overrides && typeof S.d.prices.overrides === 'object' ? S.d.prices.overrides : {});

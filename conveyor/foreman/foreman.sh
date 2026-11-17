@@ -27,7 +27,8 @@
 #   marks it the Foreman. A resumed session given a new id whose transcript is the Foreman session's takes the mark
 #   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
 #   Claude Code process (cleared_). Then, for the
-#   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md), then its saved state: the DONE items of state.md archived
+#   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md, and the standing kinds of routine
+#   yes its pack turns on: `conveyor.sh auto rules`), then its saved state: the DONE items of state.md archived
 #   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
 #   built fresh (never saved), then state.md, cut to its 5000-byte cap.
 #   A session that was the Foreman and no longer is gets one line saying so, once, shown to the owner (systemMessage).
@@ -340,6 +341,10 @@ EOF
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"
   # This project's (or group's) own rules, from its Foreman folder.
   if [ -s "$FD/rules.md" ]; then echo; echo "# $FD/rules.md (this project's Foreman rules)"; cat "$FD/rules.md"; fi
+  # The standing kinds of routine yes the pack turns on, with their limits, and auto's rules while it is on
+  # (`conveyor.sh auto rules`, lib/standing.sh); one warning line when they cannot be read, so none is taken.
+  if err=$(bash "$FHERE/../conveyor.sh" auto rules 2>/dev/null); then [ -z "$err" ] || { echo; printf '%s\n' "$err"; }
+  else echo "# WARNING: the standing kinds of routine yes could not be read (conveyor.sh auto rules failed), so take none without asking."; fi
   # The project runs an old engine here, and why (`conveyor.sh take stale`, from this install: no remote is read).
   err=$(bash "$FHERE/../conveyor.sh" take stale 2>/dev/null) && [ -n "$err" ] && echo "# WARNING: $err"
   echo
