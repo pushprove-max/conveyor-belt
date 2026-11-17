@@ -22,7 +22,11 @@
       counts only the sessions run in them; every other figure is the account's. The env PP_PRICES holds
       the pack's model prices, added models and aliases (its `prices`, as JSON), put over the built-in table (use_prices).
   dashboard_limit.py cards  < {cards: [...], prices, since, research}
-      Conveyor's cards with each finished session, review and test run priced at list price (conveyor.sh snapshot).
+      Conveyor's cards with each finished session, review and test run priced at list price.
+  dashboard_limit.py cardlines <cards-file> <kept> <priced-file>  < {prices, since, research}
+      The same, for the cards of <cards-file>, one a line (conveyor.sh snapshot): the priced cards go to
+      <priced-file>, one a line, and the rest of the part to stdout. <kept> is a summary of the cards priced last
+      time: a card whose line has not changed since is not priced again (card_costs).
 
 Every figure comes from that reading or from Claude Code's own transcripts; a
 figure with no source is null, never 0 or an estimate. Dollars are list-price
@@ -675,7 +679,7 @@ def lane_models(projects, worktree, since):
     return {m: len(s) for m, s in out.items()}
 
 
-def card_costs(part):
+def card_costs(part, lines=None, kept=None, dest=None):
     """Conveyor's cards priced: each finished session (build, fix, rebase) and review (Codex too) at the list
     price of the model that ran it, from the token split its record line holds. A finished step is priced only at the
     model its own line names: a step whose line names none is unpriced, never priced at the model routing.json
@@ -825,14 +829,18 @@ def card_costs(part):
     part["table"] = table
     part["names"] = {m: display(m) for m in [*table, *(pack if isinstance(pack, dict) else {})] if m}
     since, seen = part.pop("since", None), {}
-    for card in part["cards"]:
+
+    def priced(card):
+        """The card priced, in place. Returns what seen counts of it: each step's [time, the models it ran, its route
+        or None], of every time (count() keeps those of since or later)."""
+        uses = []
         steps = [s for s in card.get("steps") or [] if isinstance(s, dict)]
         models = card.get("models") if isinstance(card.get("models"), dict) else {}
         for s in steps:
-            if isinstance(since, str) and s.get("step") != "test" and isinstance(s.get("time"), str) and s["time"] >= since:
-                for x in {x for x in ((s.get("step") != "review" and ran(s)) or [s.get("model")]) if isinstance(x, str) and x}:
-                    k, ways = seen.get(x, (0, set()))
-                    seen[x] = (k + 1, ways | ({s["route"]} if isinstance(s.get("route"), str) and s["route"] else set()))
+            if s.get("step") != "test" and isinstance(s.get("time"), str):
+                xs = sorted({x for x in ((s.get("step") != "review" and ran(s)) or [s.get("model")]) if isinstance(x, str) and x})
+                if xs:
+                    uses.append([s["time"], xs, s["route"] if isinstance(s.get("route"), str) and s["route"] else None])
             s["usd"], m, why, by = usd(s, None)
             s.pop("pricedAs", None)
             s.pop("pricedBy", None)
@@ -849,6 +857,64 @@ def card_costs(part):
         card["usd"] = None if any(s["usd"] is None for s in steps) else round(sum(s["usd"] for s in steps), 4)
         if isinstance(card.get("live"), dict):
             card["live"]["usd"] = usd(card["live"], models)[0]
+        return uses
+
+    def count(uses):
+        for t, xs, r in uses:
+            if isinstance(since, str) and t >= since:
+                for x in xs:
+                    k, ways = seen.get(x, (0, set()))
+                    seen[x] = (k + 1, ways | ({r} if r else set()))
+
+    if lines is None:
+        for card in part["cards"]:
+            count(priced(card))
+    else:
+        # A card's line priced before, under the same prices and this same script, is taken from <kept> as it was
+        # priced: only the cards whose line is new or changed are read and priced. The summary is a line `<key>
+        # <sha256 of the rest>`, then a line `<sha256 of the card's line>\t<the card priced>\t<what seen counts of
+        # it>` for each card of the last call; any other summary is not used.
+        key = hashlib.sha256(json.dumps([pack, hashlib.sha256(open(__file__, "rb").read()).hexdigest()], sort_keys=True).encode()).hexdigest()
+        was = {}
+        try:
+            with open(kept, "rb") as f:
+                head, body = f.readline().split(), f.read()
+            if head == [key.encode(), hashlib.sha256(body).hexdigest().encode()]:
+                for ln in body.decode("ascii").split("\n")[:-1]:
+                    h, p, u = ln.split("\t")
+                    was[h] = (p, json.loads(u))
+        except (OSError, ValueError):
+            was = {}
+        now, out, had = {}, [], len(was)
+        with open(lines, "rb") as f:
+            for ln in f:
+                ln = ln.rstrip(b"\n")
+                if not ln:
+                    continue
+                h = hashlib.sha256(ln).hexdigest()
+                if h not in was:
+                    card = json.loads(ln)
+                    uses = priced(card)
+                    was[h] = (json.dumps(card, separators=(",", ":")), uses)
+                now[h] = was[h]
+                out.append(was[h][0])
+                count(was[h][1])
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write("".join(o + "\n" for o in out))
+        # The summary is written again only when a card's line is new, changed or gone (or the summary was not used),
+        # through a file of its own and one rename: a call beside this one never reads half of it.
+        if not len(was) == had == len(now):
+            body = "".join(f"{h}\t{p}\t{json.dumps(u, separators=(',', ':'))}\n" for h, (p, u) in now.items()).encode()
+            tmp = f"{kept}.{os.getpid()}"
+            try:
+                with open(tmp, "wb") as f:
+                    f.write(f"{key} {hashlib.sha256(body).hexdigest()}\n".encode() + body)
+                os.replace(tmp, kept)
+            except OSError:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
     research = part.pop("research", None)
     if isinstance(since, str) and isinstance(research, dict):
         for x, n in lane_models(research.get("projects"), research.get("worktree"), epoch(since)).items():
@@ -1479,6 +1545,9 @@ def main(argv):
         return 0
     if len(argv) == 2 and argv[1] == "cards":
         json.dump(card_costs(json.load(sys.stdin)), sys.stdout)
+        return 0
+    if len(argv) == 5 and argv[1] == "cardlines":
+        json.dump(card_costs(json.load(sys.stdin), *argv[2:5]), sys.stdout)
         return 0
     if len(argv) >= 7 and argv[1] == "build":
         try:

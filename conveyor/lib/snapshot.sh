@@ -215,6 +215,46 @@ SNAPKEEP=20 PUSHKEEP=100
 # when a step of the day's landed cards is unpriced, so a part cost is never drawn as the whole});
 # slots, today's samples by local hour ({hour, slots: the mean in use, cap}); and cards, each card of the 7 days.
 METRICS=$(<"$HERE/jq/metrics.jq")
+# CARDRUNS (after METRICS; cardruns.py runs it on the cards of the issues that changed): given cards, every card of
+# each issue among them, it prints for each, in their order, the card with its metrics and its runs' sums, then its
+# waits ($waits in the snapshot) of the first kind, then of the second (arrays). It reads, past the cards of the card's
+# issue, only $now, the samples ($smp), $every and $yes (cardruns.py keys the issue's summary on those).
+# $blocks: the stretches the issue was blocked, which cardm counts. A card restarted (`retry`, or a stop and a new
+# pick) is a new card of the same issue. Its runs are the cards of its issue since the issue last landed or closed, in
+# the card records and the retried file, up to and with it ($runsOf, by card). A card of more than one run holds their
+# sums: usd and x.tokens (what a belt card adds its live step to), runReviews and runFixes, runSteps (their steps: the
+# cost rows and the per-landed averages count them), and in metrics every figure added up, with thisRun its own;
+# metrics.runs counts them on every card. The waits: a blocked card from its end to when `retry` gave it back
+# (retriedAt); a card retried before that was recorded, to the next pick of its issue; one still blocked (not retried,
+# no later pick) to now; a retried one with neither is left out. Then a card whose issue was closed while it was
+# blocked (x.blockedAt): from its block to its closed line.
+CARDRUNS='. as $cs
+    | ([$cs[] | if .x.blockedAt != null then {issue, end: .x.blockedAt, to: .x.endAt} else select(.step == "blocked") | {issue, end: .x.endAt, to: .x.retriedAt} end]) as $blocks
+    | ([$cs[] | {card, issue, at: (.startedAt | fromdate)}]) as $picks
+    | ($smp | map(.time | fromdate)) as $st | ($smp | map(select((.cap | type) == "number" and .slots >= .cap) | .time | fromdate)) as $sf
+    | [$cs | map(. + {metrics: cardm($now; $blocks; $st; $sf; $every; $yes)})] as $all
+    | ($all[0] | map(select(.issue != 0)) | group_by(.issue)
+        | map(sort_by(.startedAt, .card) | reduce .[] as $k ({run: [], out: []}; .run += [$k] | .out += [{key: $k.card, value: .run}]
+            | if ($k.step | IN("landed", "closed")) and $k.x.blockedAt == null then .run = [] else . end) | .out[])
+        | from_entries) as $runsOf
+    | def runsum(f): [.[] | f] | if any(. == null) then null else add end;
+      def secsum(f): [.[] | f | numbers] | if length == 0 then null else add end;
+      def own: {usd, tokens, unpriced, buildSec, reviewSec, fixSec, testSec, rebuildSec, landSec, runSec, reviews, fixes, testRuns};
+    $all[0][] | ($runsOf[.card] // [.]) as $r | .runSteps = [$r[].steps[]] | .runReviews = ($r | map(.reviews) | add)
+      | .runFixes = ($r | map(.metrics.fixes) | add)
+      | if ($r | length) < 2 then .metrics.runs = 1
+        else .usd = ($r | runsum(.usd) | if . == null then null else . * 10000 | round / 10000 end)
+          | .x.tokens = {claude: ($r | map(.x.tokens.claude // 0) | add), codex: ($r | map(.x.tokens.codex // 0) | add)}
+          | .metrics += {runs: ($r | length), thisRun: (.metrics | own), usd, tokens: ($r | runsum(.metrics.tokens)),
+              unpriced: ($r | map(.metrics.unpriced) | add), buildSec: ($r | secsum(.metrics.buildSec)), reviewSec: ($r | secsum(.metrics.reviewSec)),
+              fixSec: ($r | secsum(.metrics.fixSec)), testSec: ($r | secsum(.metrics.testSec)), rebuildSec: ($r | secsum(.metrics.rebuildSec)),
+              landSec: ($r | secsum(.metrics.landSec)), runSec: ($r | secsum(.metrics.runSec)), reviews: ($r | map(.metrics.reviews) | add),
+              fixes: .runFixes, testRuns: ($r | map(.metrics.testRuns) | add)} end
+      | ., [select(.step == "blocked") | (.x.endAt | fromdate) as $e | .issue as $i | .card as $k
+          | ([$picks[] | select(.issue == $i and .card != $k and .at >= $e) | .at] | min) as $nx
+          | if .x.retriedAt != null then {from: $e, to: (.x.retriedAt | fromdate)}
+            elif $nx != null then {from: $e, to: $nx} elif .x.retried then empty else {from: $e, to: $now} end],
+        [select(.x.blockedAt != null) | {from: (.x.blockedAt | fromdate), to: (.x.endAt | fromdate)}]'
 # checkRun, only when the pack's checks names a progress command: the check run it prints (pack.schema.json says its
 # shape) with counts ({passed, failed, running, queued, reused}), done (passed, failed and reused lanes), all, and
 # leftSec: while it runs and once a quarter of its lanes are done, the mean seconds of the done lanes with a time,
@@ -390,10 +430,11 @@ snapshot() (
   [ -n "$GITHUB" ] || hostclis due >/dev/null 2>&1 || :
   models=$(jq -c .models <<<"$h"); settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
   # A main-red fix card is titled from its entry as it is now (redtitles()), so a case added while it runs shows.
-  jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '{cards: (map($live[.card] as $v
+  # One card a line: the pricing below prices only the lines that changed since the last snapshot.
+  jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '(map($live[.card] as $v
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
       | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end)
-    + ($old[0] | map(.x.retried = true)) | map(.models = $m))}' "$d/rows" > "$d/all" || exit 1
+    + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$d/rows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
   # has none. The models the steps of the last 30 days ran are counted from since (seen).
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
@@ -411,11 +452,12 @@ snapshot() (
       | "\(.main)\u0000\(.lanes.research.worktree)\u0000"' "$HOST" 2>/dev/null)
     [[ $rwt != \~/* ]] || rwt=$HOME/${rwt#"~/"}
   fi
-  jq -c --argjson p "$pp" --arg rw "$rwt" --arg pj "$HOME/.claude/projects" '.prices = $p | .since = ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate)
-      | if $rw == "" then . else .research = {worktree: $rw, projects: $pj} end' "$d/all" \
-    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards > "$d/pricedall" 2>/dev/null \
-    && jq -ce .cards "$d/pricedall" > "$d/priced" 2>/dev/null && pricedok=true \
-    || { pricedok=false; jq -c '.cards | map(.usd = null | .steps |= map(.usd = null) | if .live then .live.usd = null else . end)' "$d/all" > "$d/priced"; } || exit 1
+  # The cards priced are kept beside the card records ($STATE.priced, dashboard_limit.py cardlines): a card whose line
+  # is as it was at the last snapshot is not priced again. One priced card a line ($d/priced).
+  jq -cn --argjson p "$pp" --arg rw "$rwt" --arg pj "$HOME/.claude/projects" '{prices: $p, since: ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 30 * 86400 | todate)}
+      | if $rw == "" then . else .research = {worktree: $rw, projects: $pj} end' \
+    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cardlines "$d/all" "$STATE.priced" "$d/priced" > "$d/pricedall" 2>/dev/null && pricedok=true \
+    || { pricedok=false; jq -c '.usd = null | .steps |= map(.usd = null) | if .live then .live.usd = null else . end' "$d/all" > "$d/priced"; } || exit 1
   # prices: the Rules tab's Model prices, the built-in rows, the pack's entries, each model's display name and the
   # model IDs seen in 30 days, and the research lane's model for its mark; null when the table cannot be run.
   { $pricedok && jq -c --argjson o "$pp" --arg rm "$rmodel" '{builtIn: (.table | to_entries | map({model: .key, input: .value[0], output: .value[1], cacheRead: .value[2],
@@ -464,7 +506,8 @@ snapshot() (
   fl=$(jq -ce --argjson h "$h" --argjson days "$FLAKY_DAYS" --argjson defs "$defs" --argjson refs "$refs" "$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
     | [.entries | arrays | .[] | objects | select((.case | type) == "string" and ((.time | fromdate?) // 0) > $t - $days * 86400)] | group_by(.case)
     | map(.[0].case as $c | {case: $c, count: length, issue: ([$f[] | select(.case == $c) | .issue][-1] // null), files: ($c | caseowners)}) | sort_by(-.count, .case)' "$FLAKY" 2>/dev/null) || fl='[]'
-  so=$(slowoffs | jq -cs 'sort_by(.file)') || so='[]'
+  # The slow-test list, from the snapshot's copy of the card records (health brought their summary up to date).
+  so=$(linesum "$READ" "$STATE.health" "$d/hrec" "$HEALTHLINE" && slowoffs "$d/hrec" | jq -cs 'sort_by(.file)') || so='[]'
   # The last pass of the test rules, when its burst guard stopped it (testrulespass()).
   tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
   # The full test suite (fulltest()): the run in progress, only while its lock is held (a run that was killed left its
@@ -476,7 +519,12 @@ snapshot() (
   # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).
   su=$(suites) || su='[]'; rl=$(releasemain) || rl=null
   packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
-  jq -cn --slurpfile all "$d/priced" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
+  # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
+  # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
+  printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
+    && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
+    || exit 1
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --argjson q "$queue" --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -495,44 +543,16 @@ snapshot() (
     '"$TRACK"'
     '"$METRICS"'
     $hs[0] as $h
-    | ([$all[0][] | if .x.blockedAt != null then {issue, end: .x.blockedAt, to: .x.endAt} else select(.step == "blocked") | {issue, end: .x.endAt, to: .x.retriedAt} end]) as $blocks
-    # Every stretch waiting on the owner: a blocked card from its end to when `retry` gave it back (retriedAt); a card
-    # retried before that was recorded, to the next pick of its issue; one still blocked (not retried, no later pick)
-    # to now; a retried one with neither is left out. A card whose issue was closed while it was blocked (x.blockedAt)
-    # waited from its block to its closed line.
-    | ($h.time | fromdate) as $nowt
-    | ([$all[0][] | {card, issue, at: (.startedAt | fromdate)}]) as $picks
-    | ([$all[0][] | select(.step == "blocked") | (.x.endAt | fromdate) as $e | .issue as $i | .card as $k
-        | ([$picks[] | select(.issue == $i and .card != $k and .at >= $e) | .at] | min) as $nx
-        | if .x.retriedAt != null then {from: $e, to: (.x.retriedAt | fromdate)}
-          elif $nx != null then {from: $e, to: $nx} elif .x.retried then empty else {from: $e, to: $nowt} end]
-      + [$all[0][] | select(.x.blockedAt != null) | {from: (.x.blockedAt | fromdate), to: (.x.endAt | fromdate)}]) as $waits
-    | ($smp | map(.time | fromdate)) as $st | ($smp | map(select((.cap | type) == "number" and .slots >= .cap) | .time | fromdate)) as $sf
-    | [$all[0] | map(. + {metrics: cardm($h.time | fromdate; $blocks; $st; $sf; $every; $yes)})] as $all
-    # A card restarted (`retry`, or a stop and a new pick) is a new card of the same issue. Its runs are the cards of
-    # its issue since the issue last landed or closed, in the card records and the retried file, up to and with it
-    # ($runsOf, by card). A card of more than one run holds their sums: usd and x.tokens (what a belt card adds its
-    # live step to), runReviews and runFixes, runSteps (their steps: the cost rows and the per-landed averages count
-    # them), and in metrics every figure added up, with thisRun its own; metrics.runs counts them on every card.
-    # $later: the cards a later run of their issue follows (the cost rows show that run, with their dollars in it).
+    # Every stretch waiting on the owner, and each card with its metrics and the sums of its runs: CARDRUNS says what
+    # they hold. Here the runs of the issue of each card, to it ($runsOf, as CARDRUNS finds them), name the earlier
+    # runs that the times of a card count; $later: the cards a later run of their issue follows (the cost rows show
+    # that run, with their dollars in it).
+    | $all[1] as $waits | ($h.time | fromdate) as $nowt
     | ($all[0] | map(select(.issue != 0)) | group_by(.issue)
         | map(sort_by(.startedAt, .card) | reduce .[] as $k ({run: [], out: []}; .run += [$k] | .out += [{key: $k.card, value: .run}]
             | if ($k.step | IN("landed", "closed")) and $k.x.blockedAt == null then .run = [] else . end) | .out[])
         | from_entries) as $runsOf
     | ([$runsOf[] | .[:-1][] | .card] | unique) as $later
-    | def runsum(f): [.[] | f] | if any(. == null) then null else add end;
-      def secsum(f): [.[] | f | numbers] | if length == 0 then null else add end;
-      def own: {usd, tokens, unpriced, buildSec, reviewSec, fixSec, testSec, rebuildSec, landSec, runSec, reviews, fixes, testRuns};
-    [$all[0] | map(($runsOf[.card] // [.]) as $r | .runSteps = [$r[].steps[]] | .runReviews = ($r | map(.reviews) | add)
-      | .runFixes = ($r | map(.metrics.fixes) | add)
-      | if ($r | length) < 2 then .metrics.runs = 1
-        else .usd = ($r | runsum(.usd) | if . == null then null else . * 10000 | round / 10000 end)
-          | .x.tokens = {claude: ($r | map(.x.tokens.claude // 0) | add), codex: ($r | map(.x.tokens.codex // 0) | add)}
-          | .metrics += {runs: ($r | length), thisRun: (.metrics | own), usd, tokens: ($r | runsum(.metrics.tokens)),
-              unpriced: ($r | map(.metrics.unpriced) | add), buildSec: ($r | secsum(.metrics.buildSec)), reviewSec: ($r | secsum(.metrics.reviewSec)),
-              fixSec: ($r | secsum(.metrics.fixSec)), testSec: ($r | secsum(.metrics.testSec)), rebuildSec: ($r | secsum(.metrics.rebuildSec)),
-              landSec: ($r | secsum(.metrics.landSec)), runSec: ($r | secsum(.metrics.runSec)), reviews: ($r | map(.metrics.reviews) | add),
-              fixes: .runFixes, testRuns: ($r | map(.metrics.testRuns) | add)} end)] as $all
     | ($h.unpushed | map(.sha)) as $un
     # A card that has landed is not done: its commit is pushed, then GitHub closes its issue. Until both are, it stays
     # on the belt (x.after: push, pushfail when a push that carried it failed, pushheld when it failed its check and

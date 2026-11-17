@@ -240,8 +240,21 @@ testhollow() { # <the test files of main's checkout, a JSON list>
     | reduce (inputs | split("\t") | select(length == 3)) as [$f, $c, $k] ($all; .[$f] += [{case: $c, kind: $k,
         reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])' --args "${fs[@]}"
 }
+# What the Tests part reads of each line of the records (linesum(), lib/records.sh). A project with no test line has
+# its part all the same. The steps other than test are those that give a Board filing's state (optimize, below) and a
+# card's landed commit (caught, below), as the text of the line names them (so a line that names one in a field of
+# its own counts too). Of each, the fields the part reads and none other: a test line's failures, verdicts and output
+# only when it failed or ran again (failedrun), its output's last 1500 characters (failure), and a review's reason
+# only its COVERED-BY lines (optimize).
+TESTLINE='select(test("\"step\":\"(test|picked|bugproof|blocked|closed|landed|review)\"")) | fromjson? | objects
+  | def cut: if type == "string" then .[-1500:] else . end;
+  {card, issue, step, time, result} + if .step == "test" then {times, clocks, reused, wait, run}
+      + (if .result == "fail" or .rerun != null then {verdicts, failures, rerun: (.rerun | if type == "object" and has("tail") then .tail |= cut else . end), tail: (.tail | cut)} else {} end)
+    elif .step == "landed" then {sha, testedits} elif .step == "bugproof" then {speed} elif .step == "blocked" then {reason}
+    elif .step == "review" then {reason: (.reason | if type == "string" then [split("\n")[] | select(test("^COVERED-BY: [^\\s:]+: "))] | join("\n") else . end)}
+    else {} end'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp
+  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp td
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
@@ -249,9 +262,11 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   testowners
-  # A project with no test line has its part all the same: grep finding none is no failure. The steps other than test
-  # are those that give a Board filing's state (optimize, below) and a card's landed commit (caught, below).
-  ln=$({ olds; recs; } 2>/dev/null | { grep -E '"step":"(test|picked|bugproof|blocked|closed|landed|review)"' || :; })
+  # The retried lines, then the card records, as the part reads them (TESTLINE), each from its summary (linesum()).
+  td=$(mktemp -d) || return 1
+  { olds > "$td/old" && recs > "$td/rec" && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$td/rec" "$STATE.tests" "$td/r" "$TESTLINE" \
+      && ln=$(cat "$td/o" "$td/r"); } 2>/dev/null || ln=''
+  rm -rf "$td"
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
   # call (a commit main's checkout does not have is left out). A path is a commit's key only when it is one of the
   # commits asked for.

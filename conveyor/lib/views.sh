@@ -239,16 +239,26 @@ aways() { # each card that gave way (giveway()): {to: the issue it gave way to, 
 UNTIMED='def untimed: [.[] | select(.step == "test" and (.result | IN("pass", "fail")) and .reused != true and (.refused | type) != "string"
     and .ended != "nothing selected" and (.selected.files // 1) > 0)] | .[-5:]
   | if length > 0 and all(.[]; .times | type != "object") then length else 0 end;'
+# What health reads of each line of the records (linesum(), lib/records.sh): every field it reads below, the cycles
+# (DEPS) and the issues before their build (SEE) take of a line, and none other: a line's tail, review and token counts
+# were most of the bytes it read. A test line's times only as whether they are an object (untimed).
+HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, followups} + if .step == "worktree" then {pid, started}
+    elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check}
+    elif .step == "picked" then {mainRed} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
+    else {} end'
 health() {
-  local loop=true gh=false free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld tr so sr pr co
+  local loop=true gh=false free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld tr so sr pr co hd rc
   check && lv=${LIVEJSON:-$(live)} || return 1
+  # The records and the retried lines, as health reads them (HEALTHLINE).
+  hd=$(mktemp -d) || return 1
+  linesum "$READ" "$STATE.health" "$hd/rec" "$HEALTHLINE" && linesum "$READ_OLD" "$RETRIED.health" "$hd/old" "$HEALTHLINE" || { rm -rf "$hd"; return 1; }
   gone=$(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
-      | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.) | "\(.card)\t\(.pid)\t\(.started // "")"] | .[]' "$READ" \
-    | while IFS=$'\t' read -r k p t; do p_alive "$p" "$t" || printf '%s\n' "$k"; done | jq -Rcs 'split("\n") | map(select(. != ""))') || return 1
+      | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.) | "\(.card)\t\(.pid)\t\(.started // "")"] | .[]' "$hd/rec" \
+    | while IFS=$'\t' read -r k p t; do p_alive "$p" "$t" || printf '%s\n' "$k"; done | jq -Rcs 'split("\n") | map(select(. != ""))') || { rm -rf "$hd"; return 1; }
   c=$(ctl 2>/dev/null) || { c=null; why=$(notwhole); }
   if a=${ISSUESJSON:-$(openissues number,title,body,labels,createdAt 2>/dev/null)} && [ "$a" != null ]; then
-    cyc=$(jq -c --slurpfile cards "$READ" "$DEPS"' cycles($cards)' <<<"$a" 2>/dev/null) && [ -n "$cyc" ] || cyc=null
-    bf=$(jq -c --slurpfile cards "$READ" --argjson c "$c" --arg built "$BUILT" \
+    cyc=$(jq -c --slurpfile cards "$hd/rec" "$DEPS"' cycles($cards)' <<<"$a" 2>/dev/null) && [ -n "$cyc" ] || cyc=null
+    bf=$(jq -c --slurpfile cards "$hd/rec" --argjson c "$c" --arg built "$BUILT" \
         --arg area "$AREA" --argjson np "$NONPRODUCT" "$SEE"'
       ($cards | map(.issue)) as $taken | ($c // {}) as $c
       | [.[] | (.labels // [] | map(.name)) as $l
@@ -302,7 +312,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson pressure "$pr" --argjson steer "$sr" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$READ_OLD" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
+    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
@@ -366,5 +376,6 @@ health() {
        gh: $gh, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
        untimed: untimed, report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null)}
-    | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"
+    | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"
+  rc=$?; rm -rf "$hd"; return $rc
 }

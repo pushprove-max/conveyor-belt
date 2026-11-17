@@ -73,6 +73,30 @@ turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_
 # files themselves even when its folder is the state folder: the helper would write the database there.
 recs() { if [ "$READ" = "$STATE" ] && [ -z "${DRYPICK:-}" ]; then stdb ask lines cards; else cat -- "$READ"; fi; }
 olds() { if [ "$READ_OLD" = "$RETRIED" ] && [ -z "${DRYPICK:-}" ]; then stdb ask lines retried; else cat -- "$READ_OLD"; fi; }
+# What a reader needs of each line of a records file of whole lines (a copy: READ, READ_OLD, or what recs or olds
+# gave), written to <to>: the output of <filter> (jq -R: it is given each line's text) for each line, in the file's
+# order, from a running summary of the file kept beside the history (<kept>), as snaprows keeps the rows: a line
+# `<offset> <sum> <key>` (offset: how many of the file's bytes the summary has read; sum: their cksum; key: the filter,
+# quoted to one line), then the filter's lines. Only the lines past the offset are read. The summary is made anew from
+# the whole file when it is missing, has another key, or its bytes are no longer the file's first bytes: `retry`
+# rewrote the file, shorter, or grown past the offset again since. Health, the Tests part and the slow-test list read
+# every line of the records whole on each snapshot, and grew with the history. A file not grown since costs two
+# programs (cksum and cat): the snapshot is read again and again (t_snapexec counts its programs).
+linesum() { # <records file> <kept> <to> <filter>
+  local k r cs size h o s n=0
+  printf -v k '%q' "$4"
+  r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
+  # One open of the summary, its line and the rest read from it: a reader running beside this one may put a newer
+  # summary in its place meanwhile.
+  { read -r o s h && [ "$h" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] \
+      && if [ "$o" = "$size" ]; then [ "$s" = "$cs" ]; else [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; fi \
+      && cat > "$3" && n=$o; } 2>/dev/null < "$2"
+  [ "$n" -gt 0 ] || : > "$3" || return 1
+  [ "$n" -lt "$size" ] || return 0
+  # Only the bytes cksum summed: a line appended since is read at the next call.
+  tail -c +$((n + 1)) "$1" | head -c $((size - n)) | jq -cR "$4" >> "$3" || return 1
+  { printf '%s %s %s\n' "$size" "$cs" "$k" && cat "$3"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
+}
 append() { printf '%s\n' "$1" | stdb append cards; }
 # One step = one line, of no fixed size (a tail can hold many long lines), appended under the lock (locked, above),
 # so another writer's line never lands inside it.

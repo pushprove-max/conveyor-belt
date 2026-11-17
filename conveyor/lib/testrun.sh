@@ -242,9 +242,11 @@ SLOWFILED=${STATE%/*}/slow.json
 # The test files kept off card test steps for their CPU seconds (the owner, 2026-11-14): each file of $SLOWFILED whose
 # issue no card has landed yet, its entry there one a line: {file, issue} and why (cpu and sec in the card run that
 # filed it, card; last: {cpu, card}, the card run before it; budget) and since. Such a file runs only in the full suite
-# and the whole test on main (slowoff()), and comes back to card test steps when the card of its issue lands.
-slowoffs() {
-  stdb ask lines cards 2>/dev/null | jq -cRn --slurpfile s "$SLOWFILED" '[inputs | fromjson? | objects | select(.step == "landed") | .issue | numbers] as $l
+# and the whole test on main (slowoff()), and comes back to card test steps when the card of its issue lands. The
+# snapshot gives what health reads of its copy of the card records (linesum(), HEALTHLINE): each line's step and issue.
+# shellcheck disable=SC2120 # the snapshot passes the lines (lib/snapshot.sh); the card steps read the database
+slowoffs() { # [<the card records' lines>]
+  { if [ -n "${1:-}" ]; then cat -- "$1"; else stdb ask lines cards; fi; } 2>/dev/null | jq -cRn --slurpfile s "$SLOWFILED" '[inputs | fromjson? | objects | select(.step == "landed") | .issue | numbers] as $l
     | $s[0].filed | arrays | .[] | objects | select((.file | type) == "string" and (.issue | type) == "number" and (IN(.issue; $l[]) | not))' 2>/dev/null
 }
 # A card's run is told to keep each file slowoffs() names off (tests()): a `pass` line in its list for it (unless the
