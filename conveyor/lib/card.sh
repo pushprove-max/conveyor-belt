@@ -16,6 +16,33 @@ redbrief() { # <card> <issue> <branch>
   red=$(redissue "$1") && [ "$red" != "$issue" ] || return 0
   sprompt=${sprompt/"$(issuepart "$issue")"/"$(issuepart "$red")"}; issue=$red
 }
+# A card of a speed-up or Optimize issue whose newest blocked card's build changed nothing and stopped for the owner's
+# yes to a budget of its own for its test file (OWNSTOP, kept with no patch) has nothing to build, review or land. By
+# the issue as it is now against the body that card kept (keptway()): an approval line since (land) sets the budget in
+# the pack's test.files (testsettings()) and closes the issue, its closed line naming the budget, unless the yes gives
+# a condition (conditional()): then nothing is set and the card is blocked naming it; none since (wait)
+# stops again for the yes. Exit 1 when the card goes on to its build: no such stop, or the issue changed since.
+ownyes() { # <card> <issue> <worktree> <issue json> <test file>
+  local c=$1 n=$2 wt=$3 sf=$5 l k b why err msg
+  l=$(stdb ask issue retried "$n" 2>/dev/null | jq -rs --arg s "$YES$OWNSTOP$sf: " 'map(select(.step == "blocked")) | last // empty
+    | select((.reason | startswith($s)) and (.kept // "") != "") | "\(.kept)/\(.card)\t\(.reason)"' 2>/dev/null) && [ -n "$l" ] || return 1
+  k=$ST/${l%%$'\t'*}; [ ! -s "$k.patch" ] || return 1
+  b=${l#*$'\t'}; b=${b#"$YES$OWNSTOP$sf: "}; why=${b#*' CPU s: '}; b=${b%%' CPU s: '*}
+  case $(keptway "$4" "$k.body") in
+    land) ;;
+    wait) jq -c '{body}' <<<"$4" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: $b CPU s: $why" post; return 0 ;;
+    *) return 1 ;;
+  esac
+  # A yes with a condition (the Board's "Approve with a condition") may ask for another budget than the one proposed,
+  # and with no change there is nothing a review could hold to it: nothing is set, and the card stops naming it.
+  ! conditional "$4" || { block "$c" "$n" "$wt" "$OWNER's yes to a budget of its own for $sf, $b CPU s, gives a condition, and a build that changed nothing has nothing to hold to it, so no budget was set: set the budget the condition asks for on the Board's Tests page (conveyor.sh test-settings file-budget $sf <CPU s>) and shut the issue"; return 0; }
+  err=$(testsettings file-budget "$sf" "$b" 2>&1) || { block "$c" "$n" "$wt" "the owner's yes to a budget of its own for $sf could not be saved in the pack: ${err:0:400}"; return 0; }
+  msg="$sf has a budget of its own, $b CPU s, with $OWNER's yes; its build changed nothing, so nothing lands"
+  err=$(gh_write issue close "$n" --comment "Conveyor card $c closes this issue: $msg."$'\n\n'"Why the file needs it: $why" 2>&1 >/dev/null) \
+    || { block "$c" "$n" "$wt" "$msg. The engine could not close the issue: ${err:0:400}"; return 0; }
+  record "$c" "$n" closed ok "$(jq -cn --arg r "$msg" --argjson e "$(ending)" '{reason:$r} + $e')"
+  clean "$wt"
+}
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
@@ -94,6 +121,9 @@ card() { # <card> <issue> [<branch> <tip>]
       echo "conveyor: card $c: $sf has a budget of its own, ${ob%%$'\t'*} CPU s, with $OWNER's yes"; ob=''
     fi
   fi
+  # Such a stop whose build changed nothing has no kept patch (mode is empty): ownyes() sets the budget and closes the
+  # issue on the yes, or stops again with none.
+  [ -z "$mode" ] && [ -z "$br" ] && [ "$n" != 0 ] && [ -n "$sf" ] && ownyes "$c" "$n" "$wt" "$issue" "$sf" && return
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
   # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
   [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
@@ -260,9 +290,10 @@ card() { # <card> <issue> [<branch> <tip>]
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
     redbrief "$c" "$n" "$br"
-    # A build that changed nothing but proposes a budget of its own (ob) has no patch or review to land on a yes, so it
-    # is blocked naming the budget and where the owner sets it, not as a session that made no change.
-    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet || { [ -z "$ob" ] || { block "$c" "$n" "$wt" "the build changed nothing and proposes a budget of its own for the test file $sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'} To accept it, set that budget on the Board's Tests page (conveyor.sh test-settings file-budget $sf ${ob%%$'\t'*}) and shut the issue"; return; }
+    # A build that changed nothing but proposes a budget of its own (ob) stops for the owner's yes to it (OWNSTOP), as
+    # a card with a change does below, not as a session that made no change: with the yes, its retry sets the budget
+    # and closes the issue (ownyes(), above); with the owner's no, the issue is held.
+    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet || { [ -z "$ob" ] || { jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'}" post; return; }
       nochange "$c" "$n" "$wt" "$sprompt"; return; }
     if [ "$mode" = land ]; then
       # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a

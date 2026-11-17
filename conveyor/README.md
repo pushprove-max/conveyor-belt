@@ -516,8 +516,9 @@ measured on, or the pack's value and why. It measures only when the sum is over 
 
 **A budget of its own.** A file whose cases cannot fit the budget without losing what they test gets a budget of its
 own in `test.files`. The Board's Tests page sets it (`conveyor.sh test-settings file-budget`, below). The build of an
-Optimize or speed-up card can also propose one with an `OWN-BUDGET:` line. Its card then stops for the owner's yes,
-and the yes sets that budget (Bug cards, below).
+Optimize or speed-up card can also propose one with an `OWN-BUDGET:` line, with a change or with no change. Its card
+then stops for the owner's yes, and the yes sets that budget (Bug cards, below). When the build changed no file, the
+yes sets the budget and closes the issue. Nothing is built, reviewed or landed.
 
 A project whose test command prints no `TESTRUN sec` lines records no test times, and no file of it is held to the
 budget. The plugin ships a helper for it, `conveyor/tools/testtime.sh <file> -- <command>...`: it runs the command
@@ -905,7 +906,11 @@ waits under Needs you with the reason "a budget of its own for the test file <fi
 does not depend on the rule "visible changes need the owner's yes". With the yes (an approval line, as for a visible
 change), the next card sets the budget (`test.files`, as `conveyor.sh test-settings file-budget` does) and lands
 from the kept patch, with no build and no review. With no yes, the card stops again. With the owner's no (the Board's
-Decline), the issue is held. The card is not built again for it.
+Decline), the issue is held. The card is not built again for it. A build can also change no file and end with the
+`OWN-BUDGET:` line. Then the card stops for the yes at once, with no review. With the yes, the next card sets the
+budget and closes the issue, and the closed line names the budget. No build, review or landing runs. A yes with a
+condition sets no budget. The card stops and names the condition. Set the budget it asks for on the Board's Tests page,
+then shut the issue.
 
 The loop retries a blocked card by itself when the check above has changed since the card was blocked. When the loop
 starts, it looks at each issue whose last card is blocked by an older version of this check. It retries the card one

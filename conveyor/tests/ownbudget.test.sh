@@ -12,13 +12,15 @@
 # runs of 9, 10 and 11), against the pack's test.fileBudget of 8. Each run under cards/mainrun/ names the cases one and
 # two of each file of its list as passed and times each at 9 CPU s; the run for the build's brief (<card>.cases) logs
 # them under its runner, run.test.sh, as a runner of case files does (the engine's conveyor/conveyor.test.sh). Its build speeds f.test.sh up and ends its reply
-# with an OWN-BUDGET line for 9 CPU s; one GO review. The build's brief is kept in $STUB/brief.
+# with an OWN-BUDGET line for 9 CPU s; one GO review. The build's brief is kept in $STUB/brief. With an argument, the
+# build is that reply's text alone: it changes no file.
 ownstart() {
   setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"
   echo 'echo slow' > "$R/f.test.sh"
   git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's file"
   echo "$GO" > "$STUB/review.1"; : > "$STUB/comments"
   echo 'echo fast > f.test.sh; echo "{\"type\":\"result\",\"result\":\"Done.\\nOWN-BUDGET: 9 CPU s: each case starts a whole loop\"}"' > "$STUB/build"
+  [ -z "${1:-}" ] || jq -cn --arg r "$1" '{type: "result", result: $r}' | jq -Rr '"echo \(@sh)"' > "$STUB/build"
   for c in 9 10 11; do
     jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
   done
@@ -82,4 +84,55 @@ t_ownbudgetagents() {
   got=$(export STATE=$T/$CASE/cards.jsonl; . "$SRC/lib/testrun.sh" && ownbudget "$w") && [ "$got" = $'9\teach case starts a whole loop' ] || fail "a Codex build's OWN-BUDGET line was not read: '$got'"
   jq -cn '{type: "text", part: {text: "Reading the file."}}, {type: "text", part: {text: "Done.\nOWN-BUDGET: 9.5 CPU s: each case starts a whole loop"}}, {type: "step_finish"}' > "$w.out"
   got=$(export STATE=$T/$CASE/cards.jsonl; . "$SRC/lib/testrun.sh" && ownbudget "$w") && [ "$got" = $'9.5\teach case starts a whole loop' ] || fail "an OpenCode build's OWN-BUDGET line was not read: '$got'"
+}
+
+# Bug it catches (#158): a build that changes nothing and ends with an OWN-BUDGET line is blocked as a session that made
+# no change, or with a reason that only says how to set the budget by hand, so the owner's yes on the Board sets
+# nothing. It stops for the yes as a change does (the OWNSTOP reason, under Needs you), with no review; the approval
+# line, given back by the next turn, sets test.files' budget of f.test.sh to 9 and closes the issue with a closed line
+# naming the budget, with no second build, no review and nothing landed.
+t_ownnochangeyes() {
+  ownstart $'Nothing to split.\nOWN-BUDGET: 9 CPU s: each case starts a whole loop'
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "$STOP" ] && [ ! -s "$STUB/reviews" ] || fail "the no-change build did not stop for Dana's yes to the budget: $(steps)"
+  [ "$(budget)" = null ] || fail "the stop set the budget: $(budget)"
+  issue 7 2026-01-01 bug | jq -c '[.title = "Optimize the test file f.test.sh" | .body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"
+  loop run >/dev/null || fail "run after the approval line exited non-zero"
+  [ "$(budget)" = 9 ] || fail "the yes did not set the budget of f.test.sh: $(budget)"
+  [ "$(st 'select(.issue == 7 and .step == "closed") | .reason')" = "f.test.sh has a budget of its own, 9 CPU s, with Dana's yes; its build changed nothing, so nothing lands" ] \
+    && grep -qx 7 "$STUB/closed" || fail "the yes did not close the issue with a line naming the budget: $(steps)"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -s "$STUB/reviews" ] && [ -z "$(st 'select(.step == "landed")')" ] || fail "the yes built, reviewed or landed: $(steps)"
+}
+
+# Bug it catches: the owner's yes with a condition (the Board's "Approve with a condition") to a no-change budget stop
+# sets the proposed budget and closes the issue, though the condition asks for another one. Nothing is set, the issue
+# stays open, and the card stops naming the condition, with no build and no review.
+t_ownnochangecond() {
+  ownstart $'Nothing to split.\nOWN-BUDGET: 9 CPU s: each case starts a whole loop'
+  issue 7 2026-01-01 bug | jq -c '[.title = "Optimize the test file f.test.sh" | .body += "\n\nVisible change approved: Dana 2026-01-02 (yes, condition: set the budget to 8 CPU s)\n"]' > "$STUB/issues.json"
+  loop run >/dev/null || fail "run after the approval line exited non-zero"
+  [ "$(budget)" = null ] && ! grep -qx 7 "$STUB/closed" 2>/dev/null || fail "the yes with a condition set the budget or closed the issue: $(budget), $(steps)"
+  st 'select(.issue == 7 and .step == "blocked") | .reason' | tail -n 1 | grep -qF "Dana's yes to a budget of its own for f.test.sh, 9 CPU s, gives a condition" \
+    && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -s "$STUB/reviews" ] || fail "the yes with a condition did not stop naming it with no build: $(steps)"
+}
+
+# Bug it catches: the owner's no to a no-change budget stop sets the budget, or the card is built again for it. The
+# owner's no holds the issue (`unblock --hold`, the Board's Hold: the issue held, its card given back): no card, and no
+# budget. Released with no yes, its next card stops again for the yes with no build, and still sets no budget.
+t_ownnochangeno() {
+  ownstart $'Nothing to split.\nOWN-BUDGET: 9 CPU s: each case starts a whole loop'
+  loop unblock 7 --hold >/dev/null || fail "the hold of #7"
+  loop run >/dev/null || fail "run of the held issue exited non-zero"
+  [ -z "$(st 'select(.issue == 7)')" ] && [ "$(budget)" = null ] || fail "the held issue got a card or a budget: $(steps), $(budget)"
+  loop control release 7 >/dev/null || fail "the release of #7"
+  loop run >/dev/null || fail "run of the released issue exited non-zero"
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "$STOP" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
+    || fail "the released issue with no yes did not stop again with no build: $(steps)"
+  [ "$(budget)" = null ] && ! grep -qx 7 "$STUB/closed" 2>/dev/null || fail "the no set the budget or closed the issue: $(budget)"
+}
+
+# Bug it catches: a speed-up build that changes nothing and proposes no budget is taken for a budget stop. It is
+# blocked as a session that made no change (nochange()).
+t_ownnochangenone() {
+  ownstart 'Nothing to split.'
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "the session made no change, so there is nothing to review" ] || fail "the no-change build without OWN-BUDGET did not go to nochange(): $(steps)"
 }
