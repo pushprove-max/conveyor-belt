@@ -32,7 +32,7 @@
 # and have not yet claimed the files, and stays away. Its claims keep its count of give-ways (gave). The card that
 # claims the files of one that gave way is named on it (to: its issue), for the Board and its live record (watch()).
 claim() { # <card> <worktree> <the card's pid>; under the lock
-  local mine others o c w ord passed gave away for='[]' apart='[]' notready=0 unready='[]' stk
+  local mine others o c w ord passed gave away for='[]' apart='[]' notready=0 unready='[]' stk t
   ord=$(ctl 2>/dev/null) && ord=$(jq -c .order <<<"$ord") || ord='[]'
   away=$(jq -c 'select(.away == true) | {away, for: (.for // [] | arrays), to: (.to // null), fixing: (.fixing == true)}' "$2.claim" 2>/dev/null) && [ -n "$away" ] || away='{"for": []}'
   # This runs every turn of a wait (settle()), so it starts no program whose answer is known (#532): a card not away
@@ -55,12 +55,14 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
   if [ "$others" != '[]' ]; then
     apart=$(together "$2.cpatch.new" "$mine" "$others" "$(cardpatch "$2" ':(exclude)*.md')") || return 1
     # A card stacked on another (its worktree on the stack's base, stackto()): its change applies on that card's, and
-    # it lands only after it, so it waits on it still; but not on that card away for the fix of its failed tests: it is
-    # fitted onto main alone then, and lands.
+    # it lands only after it, so it waits on it still; but not on that card away for a fix round (giveway()): for the
+    # fix of its failed tests (fixing), or, once its own tests passed on the change it holds (testedhere()), for the
+    # fix of its review's findings (fix; the owner, 2026-11-17). It is fitted onto main alone then, and lands.
     stk=$(jq -r --arg h "$(git -C "$2" rev-parse HEAD 2>/dev/null)" 'select(.base == $h) | .on' "$2.stack" 2>/dev/null) || stk=''
     if [ -n "$stk" ]; then
+      t=false; ! jq -e --arg s "$stk" 'any(.[]; .card == $s and .away == true and .fix == true)' <<<"$others" >/dev/null || ! testedhere "$2" || t=true
       apart=$(jq -c --arg s "$stk" 'map(select(. != $s))' <<<"$apart") \
-        && others=$(jq -c --arg s "$stk" 'map(select(.card != $s or .away != true or .fixing != true))' <<<"$others") || return 1
+        && others=$(jq -c --arg s "$stk" --argjson t "$t" 'map(select(.card != $s or .away != true or (.fixing != true and (.fix != true or ($t | not)))))' <<<"$others") || return 1
     fi
     [ "$apart" = '[]' ] || others=$(jq -c --argjson a "$apart" 'map(select(.card | IN($a[]) | not))' <<<"$others") || return 1
     ready "$2" || notready=1
@@ -230,14 +232,20 @@ docsonly() { # <patch of its change, by its absolute path> <id>
 # fixed or tested again) gives up its turn for that time: its claim is marked away, so it holds nothing (claim()),
 # and a card that is ready lands meanwhile; it claims again when it is ready (settle()), after the cards
 # that were waiting for its files then (for). gave counts its give-ways; one that has given way GIVEWAY times keeps
-# its claim, as before give-ways (not for a test fix while a card is stacked on it, stackto()): returns 1 then, and when
+# its claim, as before give-ways (not for a fix round while a card is stacked on it, stackto()): returns 1 then, and when
 # it holds nothing to give. fixing marks a give-way for the
-# fix of the card's failed tests, for the Board.
+# fix of the card's failed tests, for the Board; fix one for the fix of its review's findings.
 GIVEWAY=3
-giveway() { # <card> <worktree> [fixing]; under the lock
+giveway() { # <card> <worktree> [fixing|fix]; under the lock
   local o f='[]' s=false
-  # A card stacked on this one (stackto()) goes on once this one gives way for a test fix: that give-way is not capped.
-  [ "${3:-}" != fixing ] || ! jq -e --arg c "$1" 'select(.on == $c)' "$CARDS"/*.stack >/dev/null 2>&1 || s=true
+  # A card stacked on this one (stackto()) goes on once this one gives way for a fix round (claim()): that give-way is
+  # not capped, and a claim already away (given way to be fitted, reviewed or tested again) is marked for that round.
+  if [ -n "${3:-}" ] && jq -e --arg c "$1" 'select(.on == $c)' "$CARDS"/*.stack >/dev/null 2>&1; then
+    s=true
+    if jq -e '.away == true' "$2.claim" >/dev/null 2>&1; then
+      jq -c --arg x "$3" '.[$x] = true' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"; return 1
+    fi
+  fi
   jq -e --argjson n "$GIVEWAY" --argjson s "$s" '.held == true and ((.gave // 0) < $n or $s)' "$2.claim" >/dev/null 2>&1 || return 1
   for o in "$CARDS"/*.claim; do
     [ -e "$o" ] && [ "$o" != "$2.claim" ] || continue
@@ -245,7 +253,7 @@ giveway() { # <card> <worktree> [fixing]; under the lock
       and (.paths - (.paths - $me[0].paths)) != []' "$o" >/dev/null 2>&1 && kill -0 "$(jq -r .pid "$o")" 2>/dev/null || continue
     f=$(jq -c --arg c "$(basename "$o" .claim)" '. + [$c]' <<<"$f")
   done
-  jq -c --argjson f "$f" --arg x "${3:-}" '{pid, paths, held: false, away: true, gave: ((.gave // 0) + 1), for: $f, to: null, fixing: ($x == "fixing")}' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"
+  jq -c --argjson f "$f" --arg x "${3:-}" '{pid, paths, held: false, away: true, gave: ((.gave // 0) + 1), for: $f, to: null, fixing: ($x == "fixing"), fix: ($x == "fix")}' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"
 }
 
 # Stacking (the owner, 2026-11-17: a card waited 4 hours on a holder that looped through its fixes). With batches on

@@ -1371,8 +1371,9 @@ With batches on (`landBatch` over 1), a card that would wait on a card that hold
 stacked on that card: its change is put on main plus the holder's change, with the one session it needs to fit there,
 and it is reviewed and tested there while the holder goes on. When the holder's tests pass, the holder's batch takes
 the stacked card after the holder, and both land in one batch. When the holder's tests fail, the stacked card waits no
-more: it is fitted onto main alone, reviewed and tested there, and lands. The holder is then fitted onto it after its
-fix. A stacked card whose checks or tests fail on the holder's change is not blocked or sent to a fix for that: it
+more: it is fitted onto main alone, reviewed and tested there, and lands. When the holder goes to any other fix round,
+such as a fix of its review findings, the stacked card does the same once its own tests have passed; until then it
+waits. The holder is then fitted onto it after its fix. A stacked card whose checks or tests fail on the holder's change is not blocked or sent to a fix for that: it
 waits, and runs them again where it goes next. When the holder's change changes after the stack, the card is stacked
 again once; after that it waits on the holder. A card whose issue names the holder's issue in a `Depends on:` line is
 never stacked: it waits.

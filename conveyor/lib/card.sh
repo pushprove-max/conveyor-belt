@@ -402,7 +402,9 @@ card() { # <card> <issue> [<branch> <tip>]
       # its findings are declined.
       mode=''; last=1; isfu=''; ! jq -e --arg fu "$FOLLOWUP" '(.labels // [] | any(.name == $fu)) or (.body // "" | test("(^|\n)Follow-up depth: 0*[1-9][0-9]*[ \t\r]*(\n|$)"))' <<<"$issue" >/dev/null || isfu=1
     else
-      began "$c" "$n" fix
+      # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
+      # (giveway(), claim()).
+      locked giveway "$c" "$wt" fix; began "$c" "$n" fix
       old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
       # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), or a P3 listed only
       # (a MINOR line, minor()), is not its to fix.

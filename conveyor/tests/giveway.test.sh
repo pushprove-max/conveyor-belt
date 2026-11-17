@@ -388,3 +388,44 @@ t_stackfirst() {
   jq -c '.held = true | .gave = 3' "$CARDS/c7-7.claim" > "$CARDS/c7-7.claim.new" && mv "$CARDS/c7-7.claim.new" "$CARDS/c7-7.claim"; rm -f "$CARDS/c8-8.stack"
   ! (giveway c7-7 "$CARDS/c7-7" fixing) && [ "$(jq -c .held "$CARDS/c7-7.claim")" = true ] || fail "#7, given way 3 times, gave way with no card stacked on it"
 }
+
+# A stacked card that passed its tests goes on when its holder goes to any fix round (the owner, 2026-11-17), not only
+# a test fix. Bug: #8, stacked on #7 (its change on line 2, next to #7's, so it fits only on #7's) and tested there,
+# waited at its claim while #7 was away for the fix of its review findings. #7, given way 3 times, gives way for that
+# round with #8 stacked on it (fix); away already (given way to be reviewed again), it is marked for the round. #8,
+# tested, waits on #7 away for no fix round, goes on once #7 is in one, and waits on still while not yet tested.
+t_stackfixround() {
+  setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 7 8; do
+    git -C "$R" worktree add -q "$CARDS/c$n-$n" -b "card-$n" main
+    echo "{\"card\":\"c$n-$n\",\"issue\":$n,\"step\":\"picked\"}" >> "$ST/cards.jsonl"
+  done
+  sed -i 1s/1/seven/ "$CARDS/c7-7/a.txt"; git -C "$CARDS/c7-7" add -A
+  sed -i 1s/1/seven/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" commit -qam "main plus #7's change"
+  sed -i 2s/2/eight/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" add -A
+  echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":true,\"gave\":3}" > "$CARDS/c7-7.claim"
+  echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"passed\":false}" > "$CARDS/c8-8.claim"
+  jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
+  # claim(), giveway() and what they call, as the engine has them, run from main's checkout.
+  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
+  # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
+  local HERE=$SRC GIVEWAY=3
+  ctl() { cat "$ST/control.json"; }
+  cl8() { (cd "$R" && STATE=$ST/cards.jsonl BRANCH=main claim c8-8 "$CARDS/c8-8" $$); }
+  (giveway c7-7 "$CARDS/c7-7" fix) && [ "$(jq -c '[.held, .away, .fix, .fixing, .gave]' "$CARDS/c7-7.claim")" = '[false,true,true,false,4]' ] \
+    || fail "#7, given way 3 times, did not give way for its review fix round with #8 stacked on it: $(cat "$CARDS/c7-7.claim")"
+  echo '{"issue":8}' > "$CARDS/c8-8.ready"; (cd "$R" && tested "$CARDS/c8-8")
+  jq -c '.fix = false' "$CARDS/c7-7.claim" > "$CARDS/c7-7.claim.new" && mv "$CARDS/c7-7.claim.new" "$CARDS/c7-7.claim"
+  w=$(cl8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] || fail "#8 did not wait on #7, away for no fix round: $w"
+  ! (giveway c7-7 "$CARDS/c7-7" fix) && [ "$(jq -c '[.away, .fix, .gave]' "$CARDS/c7-7.claim")" = '[true,true,4]' ] \
+    || fail "#7, away already, was not marked for its review fix round: $(cat "$CARDS/c7-7.claim")"
+  w=$(cl8) && [ -z "$w" ] || fail "#8, stacked on #7 and tested, waited on #7 in its review fix round: $w"
+  rm -f "$CARDS/c8-8.ready"
+  w=$(cl8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] || fail "#8, stacked on #7 and not yet tested, did not wait on it: $w"
+  # A test fix while away (its tests run holding nothing after a give-way) is marked too; there #8 goes on untested, as before.
+  jq -c '.fix = false' "$CARDS/c7-7.claim" > "$CARDS/c7-7.claim.new" && mv "$CARDS/c7-7.claim.new" "$CARDS/c7-7.claim"
+  ! (giveway c7-7 "$CARDS/c7-7" fixing) && [ "$(jq -c .fixing "$CARDS/c7-7.claim")" = true ] && w=$(cl8) && [ -z "$w" ] \
+    || fail "#8 waited on #7, away already, in the fix of its failed tests: $w $(cat "$CARDS/c7-7.claim")"
+}
