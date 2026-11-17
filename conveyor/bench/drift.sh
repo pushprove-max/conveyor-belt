@@ -47,12 +47,16 @@ OUT=$(jq -nc --arg want "$WANT" '
     {before: group($order[$i - 1]), after: group($order[$i])} | .small = [to_entries[] | select(.value.cards < 5) | .key]
 ' "$1" 2>&1) || { echo "drift: $(sed 's/^jq: error (at [^)]*): //' <<<"${OUT:-the records could not be read}")" >&2; exit 1; }
 [ -z "$JSON" ] || { printf '%s\n' "$OUT"; exit 0; }
+# jq lines the table up: column(1) is not on every machine (bsdextrautils on Ubuntu) and setup does not install it.
 jq -r '
   def v: if . == null then "-" else tostring end;
-  def row($n; f): "\($n)\t\(.before | f | v)\t\(.after | f | v)";
-  "Figure\tbefore \(.before.engine[:8])\tafter \(.after.engine[:8])",
-  row("Cards"; .cards), row("Landed"; .landed), row("Blocked"; .blocked), row("Tokens a card"; .tokens),
-  row("Minutes a card"; .minutes), row("Reviews to land"; .reviews), row("Fix rounds a card"; .fixes),
-  row("Minutes waited a card"; .waits)
-' <<<"$OUT" | column -t -s $'\t'
+  def row($n; f): [$n, (.before | f | v), (.after | f | v)];
+  def pad($w): . + " " * ($w - length + 2);
+  [["Figure", "before \(.before.engine[:8])", "after \(.after.engine[:8])"],
+   row("Cards"; .cards), row("Landed"; .landed), row("Blocked"; .blocked), row("Tokens a card"; .tokens),
+   row("Minutes a card"; .minutes), row("Reviews to land"; .reviews), row("Fix rounds a card"; .fixes),
+   row("Minutes waited a card"; .waits)]
+  | (map(.[0] | length) | max) as $w0 | (map(.[1] | length) | max) as $w1
+  | .[] | "\(.[0] | pad($w0))\(.[1] | pad($w1))\(.[2])"
+' <<<"$OUT"
 jq -r '.small[] as $g | "The \($g) group holds \(.[$g].cards) \(if .[$g].cards == 1 then "card" else "cards" end): too small to mean anything (fewer than 5 cards)."' <<<"$OUT"

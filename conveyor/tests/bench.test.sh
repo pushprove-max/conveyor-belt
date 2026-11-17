@@ -185,11 +185,13 @@ driftrecs() {
 # shown as if it meant something, or the group of 5 is called too small; an engine commit with nothing before it is
 # compared with nothing; a blocked card whose issue is closed later counts as closed, its minutes to the close (a5's
 # would be 200); a blocked card's wait is left out (A's would be 1); an engine commit whose cards all still run (C) is skipped, so the latest
-# change is compared as B against A, and `drift.sh <C>` is refused.
+# change is compared as B against A, and `drift.sh <C>` is refused; the table needs column(1), which setup does not
+# install (a stub that fails stands in for a machine without it).
 t_benchdrift() {
   local f=$T/$CASE/recs.jsonl out
-  mkdir -p "$T/$CASE" && driftrecs > "$f"
-  out=$("$SRC/bench/drift.sh" "$f") || fail "the drift watch failed: $out"
+  mkdir -p "$T/$CASE/bin" && driftrecs > "$f"
+  printf '#!/bin/sh\necho "column: command not found" >&2; exit 127\n' > "$T/$CASE/bin/column" && chmod +x "$T/$CASE/bin/column"
+  out=$(PATH=$T/$CASE/bin:$PATH "$SRC/bench/drift.sh" "$f") || fail "the drift watch failed: $out"
   [ "$out" = "Figure                 before aaaaaaaa  after bbbbbbbb
 Cards                  5                2
 Landed                 4                2
