@@ -18,7 +18,9 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # and waits on it as on a card whose change cannot be read (together()), so #7 is among the cards of the batch it
 # makes. With $STUB/overlap the patch stays: the cards that wait on #7 are those whose change does not apply with its.
 # Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
-# worktree removed): a card that takes another path fails the case rather than hanging it.
+# worktree removed): a card that takes another path fails the case rather than hanging it. A card in $STUB/ready not
+# yet picked is not gone: the hold waits for it (the hold marks each card it saw, $STUB/seen.<n>). Under load the loop
+# can pick #9 after #7 reached its hold, and a hold that went on then made a batch without #9 (#276).
 # A live record every second (the pack's default), not the test pack's 0.2 s: a card waiting at its claim, or on the
 # card whose batch took it, looks again each `live` seconds, and these cases' cards wait a lot; at 0.2 s those looks
 # were 10 to 17% of each case's instructions. The cases wait on what the cards do, not on those seconds.
@@ -33,7 +35,8 @@ n=${PWD##*-}
 EOF
   cat > "$STUB/hold" <<'EOF'
 case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
-  w=1 g=''; for n in $(cat "$STUB/ready"); do ls -d ../*-$n >/dev/null 2>&1 || g=1
+  w=1 g=''; for n in $(cat "$STUB/ready"); do
+    if ls -d ../*-$n >/dev/null 2>&1; then : > "$STUB/seen.$n"; elif [ -e "$STUB/seen.$n" ]; then g=1; fi
     jq -e .tested ../*-$n.ready >/dev/null 2>&1 && jq -e '.held == false' ../*-$n.claim >/dev/null 2>&1 || w=''; done
   [ -z "$w$g" ] || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
 EOF
@@ -288,10 +291,13 @@ else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt; : 
 EOF
   printf '%s\n' '! { git cat-file -e "$2:flag-a" 2>/dev/null && git cat-file -e "$2:flag-b" 2>/dev/null; } || { echo "flag-a and flag-b together"; exit 1; }' > "$STUB/flags"
   tune --arg f "$STUB/flags" '.checks += [$f]'
+  # #9 is picked only once #7 is in its hold, as the loop can pick it under load (#276): the batch still takes it.
+  # shellcheck disable=SC2016 # run by the loop's same-file check
+  export CONVEYOR_OVERLAP_CMD='case $(cat) in *"queued issue"?"#9 "*) while [ -d "$STUB" ] && [ ! -e "$STUB/seen.8" ]; do sleep 0.1; done ;; esac; exit 1'
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 9 " ] && [ "$(st 'select(.step == "landed" and .issue != 9) | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] \
-    || fail "#8 and #7 did not land as one batch before #9: $(st 'select(.step == "landed")')"
+    || fail "#8 and #7 did not land as one batch before #9: $(st 'select(.step == "landed")'); steps of #9: $(st 'select(.issue == 9) | "\(.step) \(.reason)"' | tr '\n' ,)"
   st 'select(.issue == 9 and .step == "test" and .result == "fail") | .tail' | grep -q 'flag-a and flag-b together' || fail "#9's test line does not name the failing check"
   grep -q 'flag-a and flag-b together' "$STUB/fixbrief" || fail "#9's fix was not given the failing check"
   [ -e "$R/flag-a" ] && [ ! -e "$R/flag-b" ] || fail "main holds the two flags the check refuses together"
