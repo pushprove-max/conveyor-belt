@@ -27,7 +27,8 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
              | {step: $sp.step, time, sec: ((.time | fromdate) - ($g[$i - 1].time | fromdate)), tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)},
                 usage: $sp.usage} + (if $sp.model then {model: $sp.model} else {} end)
              + ({result: "fail", effort: $sp.effort, stats: $sp.stats, unread: $sp.unread, ran: $sp.sec, route: $sp.route} | with_entries(select(.value != null)))],
-         result: ($end.result // ""), sha: ($end.sha // ""), reason: ($end.reason // ""), tail: ($end.tail // ""), kept: ($end.kept // ""),
+         # A card the loop retried itself (retriedWhy, retry()) says why after its reason: the Board's earlier attempt shows it.
+         result: ($end.result // ""), sha: ($end.sha // ""), reason: (($end.reason // "") + ($end.retriedWhy // "" | if . == "" then "" else "; " + . end)), tail: ($end.tail // ""), kept: ($end.kept // ""),
          x: {at: (if $at == "picked" then "brief" elif $at == "landing" and $l.step != "test" then "tests" else $at end),
              review: (if $at == "review" then $r + 1 else null end),
              tokens: {claude: (map(.tokens.claude) | add), codex: (map(.tokens.codex) | add)},

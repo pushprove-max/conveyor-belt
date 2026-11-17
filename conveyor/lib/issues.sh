@@ -19,6 +19,7 @@ strays() {
 # the same file when its turn comes.
 # A main-red fix card (issue 0, redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing.
+# RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy.
 retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a p f
   check || return 1
@@ -77,7 +78,8 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
     done
   fi
   # The blocked line carries when the owner gave the card back (retriedAt): the wait ends there, not at the next pick.
-  MOVETAG='if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} else . end' moveout "$k" "${a[@]}" || return 1
+  MOVETAG='if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) else . end' \
+    moveout "$k" "${a[@]}" --arg why "${RETRYWHY:-}" || return 1
   echo "conveyor: $what can be picked again; its old lines are in $RETRIED"
   [ "$k" = '.issue == $n' ] || return 0
   [ -z "${2:-}" ] || { echo "conveyor: its next card builds from nothing; $([ -n "$moved" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }

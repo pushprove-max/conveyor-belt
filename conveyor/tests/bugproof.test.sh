@@ -332,7 +332,10 @@ t_speedslow() {
   [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now; its budget is 8 CPU s' ] && [ ! -e "$STUB/asked" ] \
     || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
   [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
+  # #180: with no version on its line, a later change to the check could not tell this block from others.
+  [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] || fail "the blocked line does not carry the speed check's version $SPEEDV: $(st 'select(.step == "blocked")')"
 }
+SPEEDV=$(sed -n 's/^SPEEDCHECK=//p' "$SRC/lib/testrun.sh") # the version of the speed check, as testrun.sh sets it
 
 # Bug it catches: a speed-up card whose file fails with the change is let through because it ran fast.
 t_speedfails() {
@@ -385,6 +388,7 @@ t_optslow() {
   optcard 'echo fast > f.test.sh' 10
   [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now; its budget is 8 CPU s' ] && [ ! -e "$STUB/asked" ] \
     || fail "an Optimize card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
+  [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] || fail "the blocked line does not carry the speed check's version $SPEEDV: $(st 'select(.step == "blocked")')"
 }
 
 # D2. Bug it catches: a split into f1 and f2 (f removed) is blocked because f is gone, or is let through unrun. The two

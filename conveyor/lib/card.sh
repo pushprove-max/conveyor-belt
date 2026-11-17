@@ -220,12 +220,13 @@ card() { # <card> <issue> [<branch> <tip>]
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
     # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
     # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when its file is not faster, a split does not fit
-    # its budgets, or a file does not pass, the card is blocked with that reason and no review.
+    # its budgets, or a file does not pass, the card is blocked with that reason and no review, its blocked line
+    # carrying the check's version (SPEEDCHECK, lib/testrun.sh).
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
-      OWNBUDGET=${ob%%$'\t'*} speedproof "$c" "$wt" "$issue" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      OWNBUDGET=${ob%%$'\t'*} speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$OPTIMIZE"); then
-      sk=$OPTREVIEW; OWNBUDGET=${ob%%$'\t'*} optproof "$c" "$wt" "$issue" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      sk=$OPTREVIEW; OWNBUDGET=${ob%%$'\t'*} optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
       # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
       # build session cannot repair the runner.

@@ -895,6 +895,14 @@ change), the next card sets the budget (`test.files`, as `conveyor.sh test-setti
 from the kept patch, with no build and no review. With no yes, the card stops again. With the owner's no (the Board's
 Decline), the issue is held. The card is not built again for it.
 
+The loop retries a blocked card by itself when the check above has changed since the card was blocked. When the loop
+starts, it looks at each issue whose last card is blocked by an older version of this check. It retries the card one
+time, as `conveyor.sh retry <issue> --fresh` does: the next card builds from nothing, and the old card's kept work moves
+to a dated folder under `kept-dropped/` in the state folder. The log and the Board's card say "retried: the speed check
+that blocked it has changed". The loop does not do this for an issue that you hold, or for a card that the current
+check blocked. It retries each card in this way only one time, and `speedretried.jsonl` in the state folder keeps the
+cards that it retried.
+
 ## The whole test on main
 
 A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs

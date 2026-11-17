@@ -97,6 +97,34 @@ redfix() { # <the loop's own cards in progress, card ids one a line>
     '[.reds[]?.card | strings] as $fix | select(any($own[]; IN($fix[])) | not) | [$s[].card] as $taken
     | first(.reds[]? | select(.card == null or (.card | IN($taken[]) | not)) | .sha)' "$MAINRED" 2>/dev/null
 }
+# The cards an older speed check blocked, at the loop's start: each is retried as `retry <issue> --fresh` retries it
+# (its kept work moved to kept-dropped), with no one asked, and says why (SPEEDWHY) in the log and on its retried line.
+# A card counts when its blocked line is the last end of its issue (no card picked, landed or closed since) and the
+# version of the speed check that blocked it is lower than this engine's (SPEEDCHECK, lib/testrun.sh): its speedcheck,
+# or, on a line that carries none (written before the lines carried it), 1 for the first check's two reasons and 2 for
+# the second's three ("the file is not faster: ...; its budget is ...", "the split does not fit: ..." and "the file is
+# over the budget of its own ..."). Not a card whose issue the owner holds, nor one retried
+# so before: SPEEDRETRIED keeps {card, issue, speedcheck, time} of each. No control record read, nothing is retried.
+SPEEDWHY='retried: the speed check that blocked it has changed'
+speedretry() {
+  local held c n v
+  held=$(ctl 2>/dev/null | jq -ce '.held // [] | arrays') || return 0
+  while read -r c n v; do
+    [ -n "$c" ] || continue
+    RETRYWHY=$SPEEDWHY locked retry "$n" fresh >/dev/null || continue
+    echo "conveyor: card $c of issue #$n: $SPEEDWHY"
+    jq -cn --arg c "$c" --argjson n "$n" --argjson v "$v" --arg t "$(date -u +%FT%TZ)" '{card: $c, issue: $n, speedcheck: $v, time: $t}' >> "$SPEEDRETRIED" \
+      || echo "conveyor: card $c could not be noted in $SPEEDRETRIED as retried" >&2
+  done < <(turncards | jq -rs --argjson now "$SPEEDCHECK" --argjson held "$held" --slurpfile was <(cat "$SPEEDRETRIED" 2>/dev/null) '
+      ($was | map(.card)) as $d | map(objects | select((.issue | type) == "number" and .issue != 0)) | group_by(.issue)[]
+      | map(select(.step | IN("picked", "blocked", "landed", "closed", "pushed"))) | last | select(.step == "blocked")
+      | (.speedcheck // (.reason // "" | if startswith("build: the files of the split are not faster: ")
+          or (startswith("build: the file is not faster: ") and (contains("; its budget is ") | not)) then 1
+          elif startswith("build: the file is not faster: ") or startswith("build: the split does not fit: ")
+          or startswith("build: the file is over the budget of its own that the build proposes: ") then 2 else null end)) as $v
+      | select($v != null and $v < $now and (.issue | IN($held[]) | not) and (.card | IN($d[]) | not))
+      | "\(.card) \(.issue) \($v)"' 2>/dev/null)
+}
 # The cards with an open record whose process is gone, at the loop's start and at each look: the machine or the loop
 # stopped under them (a power cut, a reboot, a loop killed with its cards), and nothing would ever close them. Only a
 # card whose worktree line names its process (pid and start) counts, and none of the loop's own (given, card ids one a
@@ -163,6 +191,7 @@ run() { # [max-cards] [serve]
   while read -r p k t; do [ -z "$p" ] || [ -z "${took[$p]:-}" ] || kids[$p]+="$k $t"$'\n'; done <<<"$held"
   rm -f "$PUSHING" "$SAYS" # a loop killed during its push left them; no push runs here now, and this loop has said nothing yet
   self=$(p_started $$)
+  speedretry
   [ -n "$OWN" ] || [ -z "$RAN" ] || FOLLOW=$serve
   if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
   while :; do

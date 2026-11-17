@@ -951,6 +951,14 @@ speedbrief() { # <card> <worktree> <test file>
 # or when that run gives no CPU seconds, the pack's test.splitAllowance. The reason names each file over its budget and by how much, and a sum over
 # its limit with the allowance and where it came from.
 NOCASE=conveyor-no-case
+# The version of this check (speedproof(), optproof()): raised by every change to what it passes. The blocked line of
+# a card it fails carries it (speedcheck, card()); once it rises, the loop retries each card an older version blocked
+# (speedretry(), lib/run.sh). Lines written before that carry none, and are told by their reasons: version 1's two
+# ("the file is not faster: <n> CPU s on record, <n> CPU s now" and "the files of the split are not faster: ..."), and
+# version 2's three ("the file is not faster: ...; its budget is ...", "the split does not fit: ..." and "the file is
+# over the budget of its own that the build proposes: ...").
+# shellcheck disable=SC2034 # read by lib/card.sh and lib/run.sh
+SPEEDCHECK=2
 speedproof() { # <card> <worktree> <issue json> <test file> [<test file the change adds>...]
   local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l b='' fs='{}' sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' prc
   rm -f "$2.unfixed"

@@ -110,6 +110,8 @@ choosecards() {
 [ -n "${CONVEYOR_CARDS:-}" ] || CARDS=$(dirname "$MAIN")/$(keptcards "$CARDSNAME" || choosecards)
 STATE=$ST/cards.jsonl
 RETRIED=${STATE%/*}/retried.jsonl # the lines of blocked cards that `retry` took out of the card records
+# shellcheck disable=SC2034 # read by lib/run.sh, which conveyor.sh sources beside this file
+SPEEDRETRIED=${STATE%/*}/speedretried.jsonl # the cards an older speed check blocked that the loop retried (speedretry())
 # The card records' lines the record check refused, set aside (quarantine(), views.sh): {line, field, time, record}.
 # shellcheck disable=SC2034 # read by lib/views.sh, which conveyor.sh sources beside this file
 QUARANTINE=${STATE%/*}/quarantined.jsonl
