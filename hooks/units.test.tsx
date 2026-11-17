@@ -149,7 +149,7 @@ test('/units from a host file with two projects shows both: the first one\'s pau
   await w.clock.settle()
   const text = await units($)
   expect(text).toMatch(/^CONVEYOR · bakery paused +today \$3\.50  ● lab\n/)
-  expect(text).toMatch(/\nON THE BELT \(2\)\n #12 Bread oven timer +[^\n]*\n[^]*\n gadgetlab#7 Gear ratio chart +/)
+  expect(text).toMatch(/\nON THE BELT \(bakery 1 · gadgetlab 1\)\n #12 Bread oven timer +[^\n]*\n[^]*\n gadgetlab#7 Gear ratio chart +/)
 })
 
 test('an empty board prints every section with its empty line, a missing data file says so, and a lane with no worktree is left out', async ($, on) => {

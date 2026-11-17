@@ -308,8 +308,9 @@ threshold when it is below it. A threshold that the host file does not set keeps
 When the host file sets `maxLoad` or `minFreeMemMB`, those settings hold new cards back, and the state holds no card
 and no test back.
 
-The Board's Health panel shows a Machine room row with the state and its figures. `/units` shows them under ON THE
-BELT. A card that waits for the machine room says which figure holds it, for example "waiting for machine room:
+The Board's Health panel shows a Machine room row with the state and its figures. When the state holds new cards
+back, `/units` shows one line under ON THE BELT with the figure over its limit, for example "machine strained: memory
+pressure 25.5% (limit 20%) · new cards wait". When the state holds no card, it shows no line. A card that waits for the machine room says which figure holds it, for example "waiting for machine room:
 Strained (memory pressure 25.5% is at or above 20%)".
 
 ## The control record

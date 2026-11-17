@@ -90,9 +90,11 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // suites: a release's suite, the full test), under way (ended null) or ended. building and waiting: the running
 // loop's cards counted against its builder cap (cap; null with no cap) at its last turn, and its cards left out of that
 // count as they only wait on another card; null when no loop runs or the snapshot does not say. pressure: the
-// machine's pressure (Steady, Busy or Strained, with its figures and the one that set it), null when not said.
-export type Pressure = { state: string; cpu: number | null; memory: number | null; wakeMs: number | null; freeMB: number | null; why: string }
-export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; pressure: Pressure | null }
+// machine's pressure (Steady, Busy or Strained, why: the figure that set it, gates: whether it holds new cards back,
+// and machineCap: the host file's machine cap, null with none), null when not said. onBelt: the record's
+// cards on the belt; landing: those of them landed, in Push (the loop's building leaves them out).
+export type Pressure = { state: string; why: string; gates: boolean; machineCap: number | null }
+export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; pressure: Pressure | null; onBelt: number; landing: number }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
 export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
@@ -202,8 +204,8 @@ const timesOf = (x: any): Times => ({ start: time(x.start) ?? time(x.pickedAt), 
 const parentOf = (x: any) => { const n = num(x.parent); return n !== null && n > 0 ? n : null }
 
 // state "" when no figure could be read.
-const pressureOf = (v: any): Pressure | null => (v && typeof v === 'object'
-  ? { state: one(v.state), cpu: num(v.cpu), memory: num(v.memory), wakeMs: num(v.wakeMs), freeMB: num(v.freeMB), why: one(v.why) } : null)
+const pressureOf = (v: any, machine: any): Pressure | null => (v && typeof v === 'object'
+  ? { state: one(v.state), why: one(v.why), gates: v.gates === true, machineCap: num(machine?.cap) } : null)
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
 type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[] }
@@ -216,7 +218,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
-    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waitingCount), cap: num(j.health?.builderCap), pressure: pressureOf(j.health?.pressure) },
+    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waitingCount), cap: num(j.health?.builderCap), pressure: pressureOf(j.health?.pressure, j.health?.machine),
+      onBelt: j.belt.length, landing: j.belt.filter((x: any) => x?.step === 'push' || x?.step === 'issue').length },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
       ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
@@ -389,14 +392,14 @@ export const timelineText = (s: TimelineStep): string => {
 }
 // Parts joined with " · " (or `sep`) and wrapped at the width, never cut: a later field must not fall off a narrow
 // terminal. A wrapped line is indented two more under the first; only one part wider than the whole line is cut.
-const wrapParts = (parts: string[], w: number, lead: string, sep = ' · '): Line[] => {
+const wrapParts = (parts: string[], w: number, lead: string, sep = ' · ', style: Omit<Seg, 't'> = { d: true }): Line[] => {
   const out: Line[] = []
   let cur = ''
   for (const p of parts) {
     const next = cur ? `${cur}${sep}${p}` : `${lead}${p}`
-    if (cur && cols(next) > w) { out.push([{ t: cur, d: true }]); cur = `${lead}  ${p}` } else cur = next
+    if (cur && cols(next) > w) { out.push([{ ...style, t: cur }]); cur = `${lead}  ${p}` } else cur = next
   }
-  if (cur) out.push([{ t: cur, d: true }])
+  if (cur) out.push([{ ...style, t: cur }])
   return out.map(l => fitWidth(l, w))
 }
 // The two lines of metricsText, then one line a finished step (its timeline), each wrapped.
@@ -663,22 +666,51 @@ const hostSegs = (s: State): Line => [{ t: '●', c: C.ok }, { t: ` ${s.host} re
 const loopText = (snap: Snap): string => snap.loops
   .map(l => (l.loop === false ? `${l.repo}: no loop process` : l.state && l.state !== 'running' ? `${l.repo} ${l.state}${l.reason ? `: ${l.reason}` : ''}` : ''))
   .filter(Boolean).join(' · ')
-// Each running loop's cards building against its builder cap, as `foreman status` gives them: `building 1 of the cap 1,
-// 1 waiting not counted` (a card that only waits on another card takes no build slot); with more than one loop, each
-// after its repo. Nothing for a loop that does not say, or that runs with no cap.
+// Each running loop's cards building against its builder cap, as `foreman status` gives them, for the band and the
+// summary line: `building 1 of the cap 1, 1 waiting not counted` (a card that only waits on another card takes no build
+// slot); with more than one loop, each after its repo. Nothing for a loop that does not say, or that runs with no cap.
 const capText = (snap: Snap): string => {
   const ls = snap.loops.filter(l => l.building !== null && l.cap !== null)
   return ls.map(l => `${snap.loops.length > 1 ? `${l.repo} ` : ''}building ${l.building} of the cap ${l.cap}${l.waiting ? `, ${l.waiting} waiting not counted` : ''}`).join(' · ')
 }
-// The machine's pressure, the same in every record (the first that says): `machine room Busy · CPU pressure 45.5% ·
-// memory pressure 1.5% · wake delay 0.2 ms · CPU pressure 45.5% is at or above 40%`, as its parts. None when no
-// record says.
+// The cards on the belt against the builder cap, for the head of ON THE BELT: `1 of 7`, and `2 of 1, 1 waiting not
+// counted` for the cards on the belt that take no build slot: one that only waits on another card, and a landed one
+// in Push (`1 landing`). With more than one project, each project's count after its name: `bakery 1 of 3 ·
+// gadgetlab 1`; a project whose loop gives no cap has its count on the belt only. None when the belt is empty and no
+// loop gives a cap.
+const beltCounts = (snap: Snap): string[] => {
+  const capped = (l: Loop) => l.building !== null && l.cap !== null
+  const one = (l: Loop) => {
+    const not = [...(l.waiting ? [`${l.waiting} waiting`] : []), ...(l.landing ? [`${l.landing} landing`] : [])]
+    return capped(l) ? `${l.onBelt} of ${l.cap}${not.length ? `, ${not.join(' and ')} not counted` : ''}` : `${l.onBelt}`
+  }
+  if (!snap.belt.length && !snap.loops.some(capped)) return []
+  if (snap.loops.length > 1) return snap.loops.map(l => `${l.repo} ${one(l)}`)
+  return [snap.loops[0] ? one(snap.loops[0]) : `${snap.belt.length}`]
+}
+// The head of ON THE BELT with its counts in brackets, wrapped at the width when they do not fit on one line.
+const beltHead = (snap: Snap, w: number): Line[] => {
+  const p = beltCounts(snap)
+  if (!p.length) return [head('ON THE BELT', 0)]
+  const t = ` (${p.join(' · ')})`
+  if (cols(`ON THE BELT${t}`) <= w) return [[{ t: 'ON THE BELT', c: C.head, b: true }, { t, c: C.head }]]
+  return wrapParts(p.map((x, i) => `${i ? '' : 'ON THE BELT ('}${x}${i === p.length - 1 ? ')' : ''}`), w, '', ' · ', { c: C.head })
+}
+// The machine room, only while it holds new cards back, as one line: what holds them and the figure over its limit,
+// from the first record that says: `machine strained: memory pressure 25.5% (limit 20%) · new cards wait`. The state
+// holds cards as pick.sh's roomed() reads it: only when it gates (no host file maxLoad or minFreeMemMB); not read or
+// Strained, no new card starts; Busy, a new card starts only below half the machine cap, and with no machine cap it
+// holds nothing (Busy says `fewer new cards`). None when Steady, when the state holds nothing, or when no record says.
+// Kept short to stay one line at /units' 72 columns.
 const roomParts = (snap: Snap): string[] => {
   const p = snap.loops.map(l => l.pressure).find(x => x)
-  if (!p) return []
-  const fig = (v: number | null, say: (n: number) => string) => (v === null ? [] : [say(v)])
-  return [`machine room ${p.state || 'not read'}`, ...fig(p.cpu, n => `CPU pressure ${n}%`), ...fig(p.memory, n => `memory pressure ${n}%`),
-    ...fig(p.wakeMs, n => `wake delay ${n} ms`), ...fig(p.freeMB, n => `${n} MB free`), ...(p.why ? [p.why] : [])]
+  if (!p || !p.gates || p.state === 'Steady') return []
+  if (!p.state) return ['machine room not read', 'new cards wait']
+  const busy = p.state === 'Busy'
+  if (busy && p.machineCap === null) return []
+  const m = /^(?:the )?(.+?) is (?:at or above|below) (.+)$/.exec(p.why)
+  return [`machine ${p.state.toLowerCase()}: ${m ? `${m[1]} (limit ${m[2]})` : p.why || 'no figure given'}`,
+    busy ? 'fewer new cards' : 'new cards wait']
 }
 // Last on a line that is cut at its end, so the counts before it are kept on a narrow screen.
 const capTail = (snap: Snap): string => (capText(snap) ? ` · ${capText(snap)}` : '')
@@ -762,9 +794,8 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
 // step it is in. No time is estimated. In /units, a latest review the judge ran on adds its counts on a dim line.
 // While a step streams, its live fields follow on a dim line of their own.
 export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
-  head('ON THE BELT', snap.belt.length),
-  ...(capText(snap) ? [[{ t: `  ${capText(snap)}`, d: true }]] : []),
-  // Wrapped, not cut: the wake delay and the figure that holds cards are last on a line wider than /units.
+  ...beltHead(snap, w),
+  // Wrapped, not cut: the figure that holds cards must not fall off /units' narrow pane.
   ...wrapParts(roomParts(snap), w, '  '),
   ...(snap.belt.length ? [] : [empty('the belt is empty')]),
   ...snap.belt.flatMap((b, i): Line[] => {
