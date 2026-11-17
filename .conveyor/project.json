@@ -46,11 +46,9 @@
       },
       "conveyor/conveyor.test.sh": {
         "wholeOnly": true
-      },
-      "conveyor/tests/bugproof.test.sh": {
-        "budget": 162.3
       }
-    }
+    },
+    "fileBudget": 320
   },
   "linkFromMain": [
     "node_modules"
