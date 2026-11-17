@@ -427,8 +427,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   if [ -z "$SLOT_HOME" ]; then
     at=$(date -u +%FT%TZ)
     until slot_try || slot_wait; do
-      jq -cn --arg at "$at" --argjson n "$(slot_used)" --argjson of "$SLOT_N" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
-        action: "waiting for a test slot (\($n) of \($of) in use)"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
+      jq -cn --arg at "$at" --arg a "$(slot_waiting)" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+        action: $a}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     done
   fi
   TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS

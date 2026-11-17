@@ -109,6 +109,11 @@ t_pressureslot() {
   prpsi 12.5 25.5
   ! slot_try || fail "a test took a slot while the machine was Strained"
   ! slot_wait 0.1 || fail "a test waited for a slot and got it while the machine was Strained"
+  # Bug: a card held by the pressure with slots free said only "0 of 2 in use", not the figure that held it.
+  [ "$(slot_waiting)" = "waiting for a test slot: the machine is Strained (memory pressure 25.5% is at or above 20%), 0 of 2 in use" ] \
+    || fail "the Test step's wait did not name the figure that holds it: $(slot_waiting)"
+  ! slot_try && [ "$(slot_waiting)" = "waiting for a test slot: the machine is Strained (memory pressure 25.5% is at or above 20%), 0 of 2 in use" ] \
+    || fail "the kept reading lost the figure that holds the test: $(slot_waiting)"
   # Bug: the engine's test runner names the cases' host file (none) and a Steady pressure after it reads the pool
   # (tests/lib.sh): its own slots read those, and took the machine's slots while it was Strained.
   ( rm -f "$SLOT_DIR/pressure"; export XDG_CONFIG_HOME=$T/$CASE/cases CONVEYOR_PSI_DIR=$T/$CASE/steady
@@ -121,6 +126,7 @@ t_pressureslot() {
   echo "$((EPOCHSECONDS - 5)) Strained" > "$SLOT_DIR/pressure"
   slot_try || fail "no slot was taken once the machine was Steady"
   exec {SLOT_FD}>&-
+  [ "$(slot_waiting)" = "waiting for a test slot (0 of 2 in use)" ] || fail "a Steady machine's wait named a pressure figure: $(slot_waiting)"
   # maxLoad set: the pressure holds no test.
   prpsi 85.5 25.5; rm -f "$SLOT_DIR/pressure"; jq '.maxLoad = 50' "$H" > "$H.new" && mv "$H.new" "$H"
   slot_try || fail "a test was held by the pressure with maxLoad set"

@@ -62,20 +62,31 @@ slot_pool() {
 . "${BASH_SOURCE[0]%/*}/pressure.sh" || return 1
 # Whether the machine is Strained (lib/pressure.sh), so no new test takes a slot, where the host file sets neither
 # maxLoad nor minFreeMemMB (those keep the machine room as they set it); no host file, or one that does not read,
-# holds no test back. The reading is kept in $SLOT_DIR/pressure ("<epoch> <state>") for 3 s, so the workers that
-# wait share one reading every few seconds.
+# holds no test back. The reading is kept in $SLOT_DIR/pressure ("<epoch> <state> <why>") for 3 s, so the workers that
+# wait share one reading every few seconds. Sets SLOT_WHY to the figure that makes it Strained (pressure's why), empty
+# when it is not, so a card held at its Test step says which figure holds it (slot_waiting).
 # The host file and the pressure's seams are those slot_pool read the pool under (SLOT_HOSTF, SLOT_PSI, SLOT_WAKE), not
 # the environment's now: the engine's test runner names a host file and a Steady pressure of the cases' own after it
 # reads the pool (tests/lib.sh), and its own slots kept the machine's gate only so.
 slot_strained() {
-  local kf=$SLOT_DIR/pressure at='' s=''
+  local kf=$SLOT_DIR/pressure at='' s='' w=''
+  SLOT_WHY=''
   jq -e 'objects | [.maxLoad, .minFreeMemMB] | map(numbers) | length == 0' "${SLOT_HOSTF:-}" >/dev/null 2>&1 || return 1
-  { read -r at s < "$kf"; } 2>/dev/null
+  { read -r at s w < "$kf"; } 2>/dev/null
   if ! [[ $at =~ ^[0-9]+$ ]] || [ $((EPOCHSECONDS - at)) -ge 3 ] || [ "$at" -gt "$EPOCHSECONDS" ]; then
-    s=$(CONVEYOR_PSI_DIR=${SLOT_PSI:-} CONVEYOR_WAKE_CMD=${SLOT_WAKE:-} pressure "$SLOT_HOSTF" | jq -r '.state // ""')
-    { echo "$EPOCHSECONDS $s" > "$kf.$BASHPID" && mv -f "$kf.$BASHPID" "$kf"; } 2>/dev/null
+    { read -r s; read -r w; } < <(CONVEYOR_PSI_DIR=${SLOT_PSI:-} CONVEYOR_WAKE_CMD=${SLOT_WAKE:-} pressure "$SLOT_HOSTF" | jq -r '(.state // ""), (.why // "" | gsub("\n"; " "))')
+    { echo "$EPOCHSECONDS $s $w" > "$kf.$BASHPID" && mv -f "$kf.$BASHPID" "$kf"; } 2>/dev/null
   fi
-  [ "$s" = Strained ]
+  [ "$s" = Strained ] || return 1
+  SLOT_WHY=$w
+}
+
+# The Test step's word for a card that waits for a slot: how many of the pool are held and, while the machine is
+# Strained (slot_strained), the figure that holds it, so a card held with slots free does not look held by the pool.
+slot_waiting() {
+  local n; n=$(slot_used)
+  if [ -n "${SLOT_WHY:-}" ]; then echo "waiting for a test slot: the machine is Strained ($SLOT_WHY), $n of $SLOT_N in use"
+  else echo "waiting for a test slot ($n of $SLOT_N in use)"; fi
 }
 
 # Takes a slot of the pool that is free now: SLOT_FD is the descriptor that holds it, SLOT_K its number. 1 when none is

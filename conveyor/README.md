@@ -276,7 +276,9 @@ one core, and `MemoryMax` the machine's memory over the pool's slots, so a test 
 its cores gets one core's time and no more. A runner gets the words that start a command so from `slot_box` (after
 `slot_pool`: `"${SLOT_BOX[@]}" <command>`). Where
 no such scope can be made (macOS, no user systemd, a systemd without `--expand-environment`), nothing is boxed; a box is never made inside another. A card with no slot waits before its tests start, and the Board
-says "waiting for a test slot (n of N in use)"; the wait does not count against its test timeout. Builds and reviews
+says "waiting for a test slot (n of N in use)". When the machine is Strained, the Board names the figure that holds the
+card, for example "waiting for a test slot: the machine is Strained (memory pressure 25.5% is at or above 20%), 0 of
+2 in use". The wait does not count against its test timeout. Builds and reviews
 take no slot.
 
 Pushes go first. The push step (a landed card's push, and Push landed's) runs `git push`, and so the project's
