@@ -602,7 +602,8 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 #   the machine's, not main's (machinehold()). The controls are the files of the pack's test.control that have a
 #   recorded pass on main's content (cachehits()), or all of them when the cache has no pass on main's content at all
 #   (a test command that logs no `TESTRUN inputs` lines records none), and are not among the failing files: main's run
-#   runs them too, on the same slot, each named `fail` in its list. With no control that could run, nothing tells the
+#   runs them too, on the same slot (CONVEYOR_TEST_ONESLOT: a runner of the command runs its workers one at a time on
+#   the run's slot, slot_take), each named `fail` in its list. With no control that could run, nothing tells the
 #   machine from main, and a failure whose inputs changed is main's, as before issue 221.
 # - card: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
 #   select it): the card's to fix, as before.
@@ -628,7 +629,7 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
         '([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))]
           | unique - [$u[].file] - $ctl | .[] | "pass\t\(.)"),
         ($u[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
-      s=$SECONDS; tests "$mwt" test.command alone; rc=$?; s=$((SECONDS - s))
+      s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 tests "$mwt" test.command alone; rc=$?; s=$((SECONDS - s))
       # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit).
       if [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
       # The controls that did not pass: each one the run did not end ok (failed, timed out or not run).

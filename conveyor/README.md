@@ -266,7 +266,9 @@ The host file's `testSlots` is the size of the pool (the default, and the most, 
 the slots themselves). A slot is a core: on Linux a test command is pinned to its slot's core, so the workers it
 starts without a slot of their own share that one core, and one that cannot be pinned does not start. A project's runner that wants more cores sources the file
 `CONVEYOR_TEST_SLOTS` names and, for each worker, calls `slot_pool` once, then `slot_take` before the worker,
-`slot_mine` in it and `slot_free` after starting it.
+`slot_mine` in it and `slot_free` after starting it. When Conveyor runs a card's failing tests on main next to the
+controls, it sets `CONVEYOR_TEST_ONESLOT`: `slot_take` then gives each worker the run's own slot, one at a time, so
+the controls and the failing tests use the same core.
 
 A slot is also a hard limit. On Linux, each test file a test step runs, and each case of the engine's
 runner, starts in its slot's box: a scope of the user's systemd (`systemd-run --user --scope`) with `CPUQuota=100%`,

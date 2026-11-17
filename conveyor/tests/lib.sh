@@ -15,6 +15,9 @@ T=$(mktemp -d); trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT # u+w: the installs a
 # Each case runs in its slot's box (slot_box, run_case): one core and its share of the memory, however many it starts.
 . "$SRC/lib/slots.sh"; slot_pool || exit 1; slot_box
 export CONVEYOR_TEST_POOL=$SLOT_N:$SLOT_DIR
+# A run kept to one slot (CONVEYOR_TEST_ONESLOT) keeps this runner's cases on its slot (slot_pool read it): the loops
+# the cases run take slots as any other run does.
+unset CONVEYOR_TEST_ONESLOT
 # A run inside a Conveyor card inherits the loop's own environment. CARDCTL is the loop's control record (run.sh hands
 # it to each card): a case's card read the belt's rules for its own (with the belt's "visible changes need the owner's
 # yes" off, t_branchvisible's card landed).

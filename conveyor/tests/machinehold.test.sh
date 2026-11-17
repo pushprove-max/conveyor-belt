@@ -109,6 +109,22 @@ t_machinenocontrol() {
     || fail "test.control's description does not say an empty list leaves a failure on main main's"
 }
 
+# Issue 229: the run of the failing cases on main keeps to its one slot. Bug it catches: a runner of the command (this
+# project's .conveyor/test-changed.sh) gave its workers other slots of the pool, so the control passed on one slot and
+# said nothing of the slot a failing case ran on. In a pool of 2, main's run holds slot 1; its runner's second worker,
+# asked for while the first is on slot 1 and slot 2 is free, must wait for slot 1, not take slot 2.
+t_machineoneslot() {
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 2, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
+  holdsetup 'main fail flaky'
+  local out
+  [ "$(nproc --all)" -ge 2 ] || fail "the case needs a pool of 2 slots, and this machine has one core"
+  # The first worker holds slot 1 (its lock) until the second has a slot, or 4 s with the fix, under which the second
+  # waits for it: a fixed sleep ended first on a busy machine, and the second worker then had slot 1 without the fix.
+  echo 'case $PWD in */mainrun/c7) . "$CONVEYOR_TEST_SLOTS"; slot_pool; slot_take; (i=0; while [ ! -e "$STUB/took" ] && [ $i -lt 40 ]; do sleep 0.1; i=$((i + 1)); done) & slot_free; slot_take; : > "$STUB/took"; echo "$SLOT_HOME_K $SLOT_K" > "$STUB/oneslot"; slot_free ;; esac' > "$STUB/pre" # sleep: the stub runs in the test command's shell, which has no wait_until
+  out=$(holdjudge) || fail "verdicts failed: $out"
+  [ "$(cat "$STUB/oneslot" 2>&1)" = "1 1" ] || fail "main's run beside the controls gave a worker another slot (home slot, worker's slot): $(cat "$STUB/oneslot" 2>&1)"
+}
+
 # D3: b.test's input b.txt changed since its last pass and the control c.test passes beside it: main is red, as
 # before. Bug it catches: a real red main called the machine's, so it went to no fix card.
 t_machinemain() {

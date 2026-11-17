@@ -32,7 +32,7 @@ slot_cpus() {
 
 # Sets SLOT_DIR (the pool's folder), SLOT_N (its size), SLOT_CPUS (the cores of its slots: slot_cpus) and, inside a run that holds
 # a slot, SLOT_HOME (the descriptor that holds it), SLOT_HOME_K (the slot's number) and SLOT_TURN (the turns already
-# taken on it, above this runner); SLOT_HOME is empty outside one.
+# taken on it, above this runner); SLOT_HOME is empty outside one. SLOT_ONE is CONVEYOR_TEST_ONESLOT, read here (slot_take).
 # Where the host file names no testSlotsDir, CONVEYOR_TEST_POOL (<size>:<folder>) names the pool instead: the engine's
 # test runner (tests/lib.sh) names its own pool so to the loops its cases run, whose host file is the case's and names
 # none. A case's loop read the machine's pool, found the case's slot of the runner's pool no slot of it, and waited
@@ -49,7 +49,7 @@ slot_pool() {
   for ((f = 1; f <= SLOT_N; f++)); do
     [ -e "$SLOT_DIR/$f" ] || : >> "$SLOT_DIR/$f" || { echo "conveyor: the test slot $SLOT_DIR/$f cannot be made: no test can take a slot" >&2; return 1; }
   done
-  SLOT_HOME=''; SLOT_HOME_K=''; SLOT_TURN=${fd#"${fd%%.*}"}; fd=${fd%%.*}
+  SLOT_ONE=${CONVEYOR_TEST_ONESLOT:-}; SLOT_HOME=''; SLOT_HOME_K=''; SLOT_TURN=${fd#"${fd%%.*}"}; fd=${fd%%.*}
   case $fd in ''|*[!0-9]*) return 0 ;; esac
   # Only slots 1 to SLOT_N: a numbered file of the folder beyond them (a slot of a larger pool, since cut) is no slot.
   for ((f = 1; f <= SLOT_N; f++)); do
@@ -130,13 +130,17 @@ slot_asked() {
 }
 
 # A runner's slot for its next worker, waited for: the run's home slot when no other worker of the run is on it
-# (asked five times a second, so the next worker starts as the one before it ends), else a slot of the pool.
+# (asked five times a second, so the next worker starts as the one before it ends), else a slot of the pool. A run
+# told to keep to one slot (CONVEYOR_TEST_ONESLOT, read by slot_pool: the run of a card's failing cases on main beside
+# the controls, verdicts() in lib/testrun.sh) never takes one of the pool: its workers run one at a time on its home
+# slot, so a control that passes there passed on the slot of every failing case.
 slot_take() {
   local i=0
   while :; do
     if [ -n "$SLOT_HOME" ] && { exec {SLOT_FD}>>"$SLOT_DIR/$SLOT_HOME_K$SLOT_TURN.t"; } 2>/dev/null; then
       flock -n "$SLOT_FD" && { SLOT_K=$SLOT_HOME_K; SLOT_ENV=$SLOT_HOME$SLOT_TURN.t; return 0; }
       exec {SLOT_FD}>&-
+      [ -z "${SLOT_ONE:-}" ] || { sleep 0.2; continue; }
     fi
     if [ $((i++ % 5)) = 0 ] && slot_try; then return 0; fi
     slot_wait 0.2 && return 0
