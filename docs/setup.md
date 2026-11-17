@@ -198,8 +198,13 @@ the role uses: the CLI's own login, the proxy through the CLI, or the API with t
 
 Then setup writes the pack, sets the project to follow the plugin's releases, installs the newest release, adds the
 project to the host file, adds `/conveyor/state/` to `.git/info/exclude` so that git does not list the state folder,
-creates the labels the pack names and runs `conveyor.sh doctor`. It gives the command that
-commits the pack, `.conveyor/project.json`. Commit it on your default branch. `doctor` prints one `ok:` line for each thing in place. It prints a
+creates the labels the pack names and runs `conveyor.sh doctor`. When the pack, `.conveyor/project.json`, is not
+committed or setup changed it, setup shows you the change and asks "Commit the Conveyor pack (.conveyor/project.json)
+on <default branch> now?". On yes, it commits only that file on your default branch, in your main checkout, and
+pushes it when the Rules tab's **Push when a card lands** rule is On. Your other changes stay as they are. On no, the
+pack stays on this machine: cards read the pack from the default branch, so they do not get it until you commit it.
+When your checkout is on another branch, or the pack has a conflict, setup says so and does not ask. The Foreman asks
+the same question when it finds the pack not committed. `doctor` prints one `ok:` line for each thing in place. It prints a
 `missing:` line, with its fix, for each thing that is not. You can run `setup` again: it changes only what is not there
 yet.
 

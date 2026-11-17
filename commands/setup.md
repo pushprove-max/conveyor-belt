@@ -5,11 +5,12 @@ allowed-tools: Bash, AskUserQuestion, Read, Glob, Grep, Write
 ---
 
 Set up Conveyor Belt in the project checkout this session runs in. Run every command from that checkout.
-The arguments given were: `$ARGUMENTS`. When they hold `--foreman`, add `--foreman` to every setup command below
+The arguments given were: `$ARGUMENTS`. When they hold `--foreman`, add `--foreman` to each run of step 1's setup command
 (it is safe to run again: it rewrites only the Foreman's own settings and never its saved state). When they hold
-`--pin`, add `--pin` to every setup command below: a new project is then pinned to this plugin copy's commit instead of
+`--pin`, add `--pin` to each run of step 1's setup command: a new project is then pinned to this plugin copy's commit instead of
 following the plugin's releases. When they hold `--survey`, ask the user "Run a first test-speed survey now?" (yes / no)
-before step 1, and add `--survey yes` or `--survey no`, as answered, to every setup command below.
+before step 1, and add `--survey yes` or `--survey no`, as answered, to each run of step 1's setup command. Add none of these to
+`setup pack-commit` in step 3: it takes no other argument.
 
 First install the requirements, then sign in, before step 1:
 
@@ -66,9 +67,14 @@ First install the requirements, then sign in, before step 1:
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
 3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json`
    prints a line (the pack is not committed, or setup changed
-   it since its commit), give the user the
-   one command that commits it, on the default branch: `git add .conveyor/project.json && git commit -m "Add the
-   Conveyor pack"`. Do not run it yourself.
+   it since its commit), run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup pack-commit`. When it exits 1 (the
+   default branch is not checked out, or the pack has a conflict), show its message and ask nothing more about the
+   pack. When it prints an `ask:` line, ask the user that question with AskUserQuestion ("Commit the Conveyor pack
+   (.conveyor/project.json) on <default branch> now?", yes / no), with the change it printed shown in the question.
+   On yes, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup pack-commit yes`; on no, run
+   `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup pack-commit no`. Show its output: it says what it committed and
+   pushed, or that the pack is not committed and stays on this machine, as cards read the pack from the default
+   branch. Never ask the user to type a git command for the pack.
 4. For each `missing: CLAUDE.md` or `missing: AGENTS.md` line doctor printed, ask the user "Write an optimized
    CLAUDE.md (or AGENTS.md) for this project?" (yes / no). On no, write nothing. On yes, write that file at the root of
    this checkout, and only when no file or link of that name is there; never overwrite or edit a file that is there.

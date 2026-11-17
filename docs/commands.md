@@ -127,6 +127,8 @@ Setup and the engine:
   [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]` and `doctor` ([Setup](setup.md)). Yes to a lane makes that lane
   ([Lanes](lanes.md)). `--link yes|no` answers if each card's worktree links the dependency folders that setup found,
   and `--worktree-setup <command>` installs them in each card's worktree instead.
+- `setup pack-commit` shows the pack's change that is not committed. `setup pack-commit yes` commits only the pack on
+  the default branch, and `setup pack-commit no` commits nothing ([Setup](setup.md)).
 - `install <commit>` installs that commit read-only.
 - `take`: a project that follows main takes main's newest commit when it passes its check.
 - `wording adversarial|review` prints the review wording.

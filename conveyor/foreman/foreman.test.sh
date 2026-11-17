@@ -123,6 +123,10 @@ grep -qF '# Check status with conveyor.sh foreman status, not your own snapshot 
   && grep -qF '# Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.' <<<"$out" \
   && grep -qF '# Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.' <<<"$out" \
   || fail "the Foreman's start context lacks the three lean-habit rules: $out"
+# Bug (#187): the Foreman listed a git command for the owner to commit the pack. Its rules put the question by the picker.
+grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?"' <<<"$out" \
+  && grep -qF 'on yes run conveyor.sh setup pack-commit yes' <<<"$out" \
+  || fail "the Foreman's start context does not ask the owner by the picker to commit the pack: $out"
 grep -qF "alpha waiting on the owner's yes: #12" <<<"$out" && grep -qF "beta waiting on the owner's yes: #19" <<<"$out" \
   || fail "the live summary does not cover both records: $out"
 grep -qF "alpha waiting on the owner's yes before its build: #21" <<<"$out" || fail "the live summary leaves out an issue waiting for its yes before its build: $out"

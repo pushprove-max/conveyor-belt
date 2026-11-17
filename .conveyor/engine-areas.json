@@ -430,6 +430,7 @@
 {"area": "install", "test": "setupservice.test.sh"}
 {"area": "install", "file": "conveyor/lib/install.sh"}
 {"area": "setup", "test": "setup.test.sh"}
+{"area": "setup", "test": "packcommit.test.sh"}
 {"area": "setup", "test": "apiroute.test.sh"}
 {"area": "setup", "test": "boardone.test.sh"}
 {"area": "setup", "test": "buildhost.test.sh"}

@@ -278,6 +278,48 @@ heldstart() {
     || { rm -f "$CONTROL.new"; echo "conveyor: the control record $CONTROL could not be written with the open issues held (gh issue list, or the folder); run setup again" >&2; return 1; }
   echo "conveyor: wrote the control record $CONTROL: new issues start held; $(heldline "$(jq length <<<"$open")")"
 }
+# `conveyor.sh setup pack-commit [yes | no]`: the pack (.conveyor/project.json) committed on the default branch, in the
+# main checkout, when it is not committed or differs from its commit; /conveyor-belt:setup and the Foreman ask the owner
+# first, so the owner never types a git command. With no answer it commits nothing: it prints `ask: <the question>` and
+# the change, or `ok: the pack is committed` when there is nothing to commit. yes commits only the pack (other
+# changes in the checkout, staged or not, are left as they are), "Add the Conveyor pack" when the default branch has no
+# pack yet, else "Update the Conveyor pack", and pushes it to the pack's remote when the control record's rule "Push
+# when a card lands" (rules.push) is on; no commits nothing and says the pack stays on this machine. With the default
+# branch not checked out, or a conflict in the pack, it says so, asks nothing and commits nothing (exit 1).
+packcommit() {
+  local f=.conveyor/project.json st on msg out
+  [ $# -le 1 ] && [[ ${1-ask} =~ ^(ask|yes|no)$ ]] || { echo "usage: conveyor.sh setup pack-commit [yes | no]" >&2; return 2; }
+  st=$(git -C "$MAIN" status --porcelain -- "$f") || return 1
+  [ -n "$st" ] || { echo "ok: the pack is committed"; return 0; }
+  # Before the pack is read (names): a pack with conflict marks in it fails its check.
+  [[ ${st:0:2} =~ ^(DD|AU|UD|UA|DU|AA|UU)$ ]] \
+    && { echo "conveyor: $MAIN/$f has a conflict; resolve it, then run /conveyor-belt:setup again: the pack is not committed" >&2; return 1; }
+  names || return 1
+  on=$(git -C "$MAIN" symbolic-ref -q --short HEAD)
+  [ "$on" = "$BRANCH" ] || { echo "conveyor: $MAIN has ${on:-a detached HEAD} checked out, not the default branch $BRANCH: the pack is not committed" >&2; return 1; }
+  case ${1-ask} in
+    ask)
+      echo "ask: Commit the Conveyor pack ($f) on $BRANCH now?"
+      if git -C "$MAIN" cat-file -e "HEAD:$f" 2>/dev/null; then git -C "$MAIN" --no-pager diff HEAD -- "$f"
+      else git -C "$MAIN" --no-pager diff --no-index -- /dev/null "$f"; fi
+      return 0 ;;
+    no)
+      echo "conveyor: the pack is not committed: cards read the pack from $BRANCH, so it stays on this machine until it is committed"
+      return 0 ;;
+  esac
+  git -C "$MAIN" cat-file -e "HEAD:$f" 2>/dev/null && msg='Update the Conveyor pack' || msg='Add the Conveyor pack'
+  # A commit with a path commits that path alone (git commit --only): the index's other entries stay staged.
+  out=$(git -C "$MAIN" add -- "$f" 2>&1 && git -C "$MAIN" commit -q -m "$msg" -- "$f" 2>&1) \
+    || { echo "conveyor: the pack was not committed: $out" >&2; return 1; }
+  echo "conveyor: committed $f on $BRANCH: $msg ($(git -C "$MAIN" rev-parse --short HEAD))"
+  if [ "$(ctl 2>/dev/null | jq -r '.rules.push')" = true ]; then
+    out=$(git -C "$MAIN" push -q "$REMOTE" "$BRANCH" 2>&1) \
+      || { echo "conveyor: the pack's commit was not pushed to $REMOTE $BRANCH: $out" >&2; return 1; }
+    echo "conveyor: pushed it to $REMOTE $BRANCH"
+  else
+    echo "conveyor: not pushed, as the rule \"Push when a card lands\" is off: it goes with main's next push"
+  fi
+}
 # What setup and doctor say of the open issues the control record holds.
 heldline() { echo "$1 open issue$([ "$1" = 1 ] || echo s) held; release one with \`conveyor.sh control release <issue>\` or on the Board"; }
 # The project's instruction files that Conveyor's sessions read, at the root of the main checkout: CLAUDE.md (the
