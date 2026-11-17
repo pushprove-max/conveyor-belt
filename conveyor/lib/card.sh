@@ -260,7 +260,10 @@ card() { # <card> <issue> [<branch> <tip>]
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
     redbrief "$c" "$n" "$br"
-    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet || { nochange "$c" "$n" "$wt" "$sprompt"; return; }
+    # A build that changed nothing but proposes a budget of its own (ob) has no patch or review to land on a yes, so it
+    # is blocked naming the budget and where the owner sets it, not as a session that made no change.
+    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet || { [ -z "$ob" ] || { block "$c" "$n" "$wt" "the build changed nothing and proposes a budget of its own for the test file $sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'} To accept it, set that budget on the Board's Tests page (conveyor.sh test-settings file-budget $sf ${ob%%$'\t'*}) and shut the issue"; return; }
+      nochange "$c" "$n" "$wt" "$sprompt"; return; }
     if [ "$mode" = land ]; then
       # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
       # last review's NO-GO), so there is no review here and no review line. A review after this is this card's first.
