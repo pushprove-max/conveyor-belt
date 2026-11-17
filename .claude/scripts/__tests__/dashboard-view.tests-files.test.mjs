@@ -58,11 +58,13 @@ test('Tests: a row opens to list its runs, each with a link to its card, its bud
   deliver(w, full());
   const more = open(w, MERGE);
   assert.equal(act(rowOf(w, MERGE), 'open').getAttribute('aria-expanded'), 'true');
+  // Its runs are on its Timeline (issue 130), newest first.
   assert.deepEqual(Array.from(more.querySelectorAll('.tests-run a.issue'), (a) => [a.textContent, a.getAttribute('href')]),
     [['#509', `${P}/509`], ['#451', `${P}/451`], ['#435', `${P}/435`]], 'the cards that ran it, newest first');
-  assert.match(more.querySelector('.tests-run').textContent, /^12\.0 CPU s · 30\.0 s on the clock · card #509/);
+  assert.equal(more.querySelector('.tests-run .tests-tl-what').textContent, '12.0 CPU s · 30.0 s on the clock · card #509');
   assert.match(more.querySelectorAll('.tests-run')[2].textContent, /clock not recorded/);
-  assert.match(more.textContent, /Budget: 8\.0 CPU s, the project budget\.Slow on purpose: none\./);
+  // Its budget is under CPU now, on its Overview.
+  assert.equal(more.querySelector('[data-tile="cpu"] .tests-tile-sub').textContent, 'Budget: 8.0 CPU s, the project budget.');
   // Issue 73: the budget and the mark are set from the More menu; each editor shows once picked there, with where it saves.
   assert.equal(more.querySelector('.rules-row'), null, 'no editor until picked from More');
   menu(w, MERGE, 'menu-budget');

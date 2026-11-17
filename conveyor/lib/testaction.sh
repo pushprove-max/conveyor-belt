@@ -3,7 +3,8 @@
 # (the control record's tests: {cli, model, effort}) about one test file of the project, in one headless session that
 # needs no code review and files no issue: judge (is the file worth its cost: keep, speed up, split, merge or delete)
 # or explain (which card and what cause made it slower). With no Tests seat set it starts nothing and says why (exit 2).
-# The session is given the file, its recorded times from the test lines of the card records (times, timed, slow), the
+# The session is given the file, its recorded times from the test lines of the card records (times, clocks, timed, slow) and
+# from the whole-suite runs, as the Tests page shows them, the
 # cards that ran it and its flaky entries (testfacts()). It reads a copy of main as it is at the ask, a worktree of
 # that commit whose files it cannot write ($CARDS/testactions/<id>, removed when it ends), and finds a gh that refuses
 # every call first on its PATH; a Claude session has only Read, Grep and Glob, a Codex one its read-only sandbox and an
@@ -129,7 +130,7 @@ tastart() { # <id>
     out=$(git -C "$MAIN" worktree add -q --detach "$wt" "$sha" 2>&1 < /dev/null && chmod -R a-w "$wt" 2>&1) \
       || { tadrop "$wt"; tafail "$1" "the copy of $BRANCH the session reads could not be made: ${out:0:300}"; return; }
     if [ "$how" = judge ]; then p=$TAJUDGE; else p=$TAEXPLAIN; fi
-    p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts recorded times, from the test lines of the card records, oldest first (times: its CPU seconds in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget):\n"
+    p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
       + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
       + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
       + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)' <<<"$facts")"
@@ -145,16 +146,18 @@ tafail() { # <id> <why>: a queued action that could not start, failed
   local r
   r=$(jq -ce 'objects' "$TESTACTS/$1.json" 2>/dev/null) && taput "$TESTACTS/$1.json" "$(jq -c --arg t "$(clock)" --arg w "${2:0:600}" '. + {end: $t, state: "failed", reason: $w}' <<<"$r")"
 }
-# What the session is given of <file>: {runs: each test line that timed it, oldest first, {card, issue, time} and its
-# times, timed and slow parts for the file; cards: the cards of those lines, {card, issue}; flaky: the entries of the
-# flaky-test record for it or a case of it ("<file>: <case>")}.
+# What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
+# test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), timed and slow parts for
+# the file, and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}; cards: the
+# cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>")}.
 testfacts() { # <file>
   local fl
   fl=$(jq -c --arg f "$1" '[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": ")))]' "$FLAKY" 2>/dev/null) || fl='[]'
-  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --argjson fl "$fl" '[inputs | fromjson? | objects | select(.step == "test")
-      | {card, issue, time, times: ((.times | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first),
-         slow: ([.slow | arrays | .[] | objects | select(.file == $f)] | first)} | select(.times != null or .timed != null or .slow != null) | del(.[] | nulls)]
-    | sort_by(.time) | {runs: ., cards: (map({card, issue}) | unique_by(.card)), flaky: $fl}'
+  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --argjson fl "$fl" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) '[inputs | fromjson? | objects | select(.step == "test")
+      | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first),
+         slow: ([.slow | arrays | .[] | objects | select(.file == $f)] | first)} | select(.times != null or .clocks != null or .timed != null or .slow != null) | del(.[] | nulls)] as $c
+    | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
+    | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl}'
 }
 # The worktree a session read, gone: made writable again, then removed.
 tadrop() { chmod -R u+w "$1" 2>/dev/null; git -C "$MAIN" worktree remove --force "$1" 2>/dev/null; rm -rf "$1"; git -C "$MAIN" worktree prune 2>/dev/null; } # <worktree>

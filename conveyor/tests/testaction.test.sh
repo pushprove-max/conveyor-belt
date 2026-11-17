@@ -40,7 +40,10 @@ t_tajudge() {
   tasetup; local id out
   # A test line that timed the file, over its budget, and a flaky entry of a case of it.
   jq -cn '{card: "c1-5", issue: 5, step: "test", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "",
-    times: {"tests/x.test.sh": 41.5, "tests/other.test.sh": 2}, slow: [{file: "tests/x.test.sh", sec: 44, cpu: 41.5, budget: 8, changed: false}]}' >> "$ST/cards.jsonl"
+    times: {"tests/x.test.sh": 41.5, "tests/other.test.sh": 2}, clocks: {"tests/x.test.sh": 44}, slow: [{file: "tests/x.test.sh", sec: 44, cpu: 41.5, budget: 8, changed: false}]}' >> "$ST/cards.jsonl"
+  # Bug it catches (#130): a file timed in whole-suite runs alone was "not timed" to the judge, while the Tests page
+  # showed its runs: the whole-suite runs ($SUITERUNS) are in its recorded times too.
+  jq -cn '{time: "2026-11-03T00:00:00Z", how: "full", sha: "", files: {"tests/x.test.sh": {result: "ok", sec: 50, cpu: 45.5}, "tests/other.test.sh": {result: "ok", sec: 1, cpu: 1}}}' > "$ST/suiteruns.jsonl"
   echo '{"entries":[{"case":"tests/x.test.sh: one","source":"c2-6","time":"2026-11-02T00:00:00Z","card":"c2-6","issue":6}],"filed":[]}' > "$ST/flaky.json"
   # No Tests seat: no session starts, and the command says why.
   out=$(loop testaction judge tests/x.test.sh 2>&1); [ $? = 2 ] && grep -q 'no Tests seat is set' <<<"$out" || fail "a judge with no Tests seat was not refused, saying why: $out"
@@ -55,8 +58,9 @@ t_tajudge() {
   [ "$(tarec "$id" '[.state, .end, .action, .file, .limit] | tojson')" = '["running",null,"judge","tests/x.test.sh",900]' ] || fail "the record does not say running while the session runs: $(cat "$ST/testactions/$id.json")"
   grep -q -- '--model m-tests --effort high' "$STUB/ta-args" || fail "the session did not start on the Tests seat's CLI, model and effort: $(cat "$STUB/ta-args")"
   out=$(cat "$STUB"/ta-prompt.*)
-  grep -qF 'Test file: tests/x.test.sh' <<<"$out" && grep -qF '"times":41.5' <<<"$out" && grep -qF '"budget":8' <<<"$out" && grep -qF 'c1-5 (#5)' <<<"$out" \
-    && grep -qF 'tests/x.test.sh: one' <<<"$out" && ! grep -qF 'other.test.sh' <<<"$out" || fail "the prompt does not name the file, its recorded times, the cards that ran it and its flaky entries alone: $out"
+  grep -qF 'Test file: tests/x.test.sh' <<<"$out" && grep -qF '"times":41.5' <<<"$out" && grep -qF '"clocks":44' <<<"$out" \
+    && grep -qF '{"time":"2026-11-03T00:00:00Z","whole":true,"how":"full","cpu":45.5,"sec":50,"result":"ok"}' <<<"$out" && grep -qF '"budget":8' <<<"$out" && grep -qF 'c1-5 (#5)' <<<"$out" \
+    && grep -qF 'tests/x.test.sh: one' <<<"$out" && ! grep -qF 'other.test.sh' <<<"$out" || fail "the prompt does not name the file, its recorded times (its card runs and whole-suite runs), the cards that ran it and its flaky entries alone: $out"
   : > "$STUB/ta-go"
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json'" || fail "the record still says running after the session ended"
   [ "$(tarec "$id" '[.state, .cli, .model, .effort, .verdict, (.end | type), has("pid")] | tojson')" = '["done","claude","m-tests","high","split","string",false]' ] \

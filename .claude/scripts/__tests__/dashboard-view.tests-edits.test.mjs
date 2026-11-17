@@ -16,7 +16,12 @@ const EDITS = [
   { card: 'c-3', issue: 43, time: '2026-11-11T10:00:00Z', file: X, ...zero },
   { card: 'c-2', issue: 42, time: '2026-11-10T10:00:00Z', file: E2E, ...none },
   { card: 'c-1', issue: 41, time: '2026-11-09T10:00:00Z', file: MERGE, ...zero, casesDeleted: 2 }];
-const shown = (root) => Array.from(root.querySelectorAll('.tests-edit'), (li) => [li.querySelector('.board-from').textContent, li.dataset.file]);
+// Each edit as [its card's issue, its file]. Bug it catches (#130): an edit named its card by the card's id
+// (c20261116T161028-…), which means nothing to a reader; it names the issue alone.
+const shown = (root) => Array.from(root.querySelectorAll('.tests-edit'), (li) => {
+  assert.doesNotMatch(li.textContent, /\bc-\d\b/, 'no card id');
+  return [li.querySelector('.issue').textContent, li.dataset.file];
+});
 const section = (w) => tp(w).querySelector('.tests-edits');
 const filter = (w, k) => Array.from(section(w).querySelectorAll('[data-act="edits-filter"]')).find((b) => b.dataset.filter === k);
 
@@ -31,15 +36,18 @@ test('Tests edits: Weakened shows only the edits with a count above zero, All ed
   assert.equal(section(w).querySelector('.board-head').textContent, 'Test edits by cards');
   assert.equal(section(w).previousElementSibling.classList.contains('tests-files'), true, 'right after the table');
   assert.deepEqual([filter(w, 'weakened').textContent, filter(w, 'weakened').getAttribute('aria-pressed'), filter(w, 'all').textContent], ['Weakened 2', 'true', 'All edits 4']);
-  assert.deepEqual(shown(section(w)), [['c-4', MERGE], ['c-1', MERGE]], 'Weakened: the edits with a count above zero, newest first');
+  assert.deepEqual(shown(section(w)), [['#44', MERGE], ['#41', MERGE]], 'Weakened: the edits with a count above zero, newest first');
   assert.equal(section(w).querySelector('.tests-edit-counts').textContent, ' · 1 assertion removed, 1 expected value changed, 1 skip, only or todo mark added');
   assert.match(section(w).querySelector('.tests-edit').textContent, /^#44/, 'it names the card\'s issue');
   filter(w, 'all').click();
-  assert.deepEqual(shown(section(w)), [['c-4', MERGE], ['c-3', X], ['c-2', E2E], ['c-1', MERGE]]);
+  assert.deepEqual(shown(section(w)), [['#44', MERGE], ['#43', X], ['#42', E2E], ['#41', MERGE]]);
   assert.deepEqual(Array.from(section(w).querySelectorAll('.tests-edit-counts'), (s) => s.textContent).slice(1, 3), [' · Edited, nothing weakened', ' · Edited, not read']);
   const row = Array.from(tp(w).querySelectorAll('.tests-row')).find((r) => r.dataset.file === MERGE);
   act(row, 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === MERGE);
-  assert.deepEqual(shown(more), [['c-4', MERGE], ['c-1', MERGE]], 'its own edits alone');
+  // On the row's Timeline, each with its time; the first one is marked Weakened.
+  assert.deepEqual(shown(more), [['#44', MERGE], ['#41', MERGE]], 'its own edits alone');
+  assert.equal(more.querySelector('.tests-edit').closest('.tests-pane').dataset.pane, 'timeline');
+  assert.match(more.querySelector('.tests-edit').textContent, /^.+Test edit#44 · 1 assertion removed.*Weakened$/);
   assert.equal(more.querySelector('.tests-edit-counts').textContent, ' · 1 assertion removed, 1 expected value changed, 1 skip, only or todo mark added');
 });

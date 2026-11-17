@@ -50,7 +50,8 @@ test('Tests mutants: the column shows "14 / 20" with when and which commit on ho
   assert.deepEqual(lis.map((l) => [l.querySelector('.board-label').textContent, l.querySelector('.tests-mut-before').textContent, l.querySelector('.tests-mut-after').textContent]),
     SIX.map((x) => [`conveyor/lib/merge.sh:${x.line}`, x.before.trim(), x.after.trim()]));
   assert.match(stateOf(w, MERGE), /^Done .+: 14 of 20 mutants caught\.$/);
-  assert.match(row.querySelector('.tests-opts li').textContent, /Mutants caught before: 9 \/ 20, after: 14 \/ 20/);
+  assert.match(row.querySelector('.tests-opt').textContent, /Mutants caught before: 9 \/ 20, after: 14 \/ 20/);
+  assert.equal(row.querySelector('[data-tile="mutants"] .tests-tile-big').textContent, '14 / 20', 'and on its Overview');
   assert.equal(stateOf(w, E2E), 'Running: mutant 4 of 20.');
 });
 

@@ -49,7 +49,7 @@ test('Tests: every test file has a row: the card run, the whole-only file with i
   act(rowOf(w, WHOLE), 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.match(more.textContent, /runs only in whole-suite runs/);
-  assert.match(more.querySelector('.tests-run').textContent, /^400\.0 CPU s · 487\.0 s on the clock · whole suite, failed · /);
+  assert.equal(more.querySelector('.tests-run .tests-tl-what').textContent, '400.0 CPU s · 487.0 s on the clock · whole suite, failed');
   assert.equal(more.querySelector('.tests-run a.issue'), null, 'a whole-suite run links no card');
 });
 

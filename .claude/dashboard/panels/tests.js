@@ -30,20 +30,29 @@
 // The bar shows the answer for each file, and each file left out with why: the runner for Optimize, every file for
 // Judge with no Tests model. From the click it shows a bar while the POST waits; then each action started shows its
 // state there (queued, running with its time, then its result and its text to open), and each Mutation check its file's.
-// A row opens to show its runs, each with a link to its card's issue or marked "whole suite" with its result, its
-// budget and its mark, its Optimize issues, and three actions: Judge, Optimize and Run. Its Optimize issues (#74): each
-// issue the Board filed for it (the snapshot's optimize: Optimize, and older speed-up, issues), newest first, with the
-// date filed, its "#NN" link and its state (open, building, blocked with the reason, landed with the commit, closed
-// without landing); landed, the fix its card made (sped up, split, merged into <file>, deleted) and its proof's CPU s
-// before and after, with the median of the runs since it landed beside before. The run where one landed (the first
-// after it) is marked in its Last runs bars and in its runs. A file a landed Optimize deleted or merged (removed) is not
+// A row opens (#130, the owner's mockup D) to the tabs Overview (open first), Timeline (N), Judge and Mutation, each
+// tied to its pane. Overview: the diagnosis box (its state: over budget by how much, after which Optimize cards and by
+// how much each changed it, its trend; the judge's verdict chip with its reason in one line and Full report, which
+// opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Raise this file's budget…, Run
+// and More, the next step suggested, nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
+// now with its budget, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
+// bugs caught, mutants) and its 3 latest events with a link to the Timeline. Timeline: every event newest first (its
+// runs, each with its card's issue or "whole suite" with its result; its Optimize issues; its test edits by their
+// issue, Weakened marked; its judge runs), with the filter chips All, Runs, Optimize, Test edits and Judge. Judge: its
+// newest ended judge, its verdict once at the top, then its report (without its VERDICT line), and its hollow cases.
+// Mutation: its check. A pane is never taller than the window under the page head (app.css). Its Optimize issues
+// (#74): each issue the Board filed for it (the snapshot's optimize: Optimize, and older speed-up, issues), with its
+// "#NN" link and its state (open, building, blocked with the reason, landed with the commit, closed without landing);
+// landed, the fix its card made (sped up, split, merged into <file>, deleted), its proof's CPU s before → after (with
+// no after, the median of the runs since it landed) with the change and Helped or Did not help, and the median of
+// the runs since it landed. The run where one landed (the first after it) is marked in its Last runs bars and in its runs. A file a landed Optimize deleted or merged (removed) is not
 // in the table: Removed by Optimize, after it, shows its last numbers, the issue and the files that took its cases.
 // Test edits by cards (#76): what each landed card did to a test file main had (the snapshot's edits, newest first):
-// its issue as a link, its card, the file, the time and its counts (assertions removed, expected values changed, skip,
+// its card's issue as a link (never the card's id, #130), the file, the time and its counts (assertions removed, expected values changed, skip,
 // only or todo marks added, timeouts raised, cases deleted), or "Edited, not read" for a kind of file the engine does
-// not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row lists its own edits.
+// not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row's Timeline lists its own edits.
 // Hollow (#77): a file with hollow cases (hollowOf(): its newest ended judge's, else the engine's cheap check's) has the
-// status Hollow, so its filter chip "Hollow N"; an opened row lists them with their kind and reason.
+// status Hollow, so its filter chip "Hollow N"; an opened row's Judge tab lists them with their kind and reason.
 // Mutation checks (#79): the column Mutants caught ("14 / 20": its newest done check, empty before one; when it ran and
 // on which commit on hover; "queued", "running" or "paused" beside it); an opened row's check state (queued with its
 // place, running with mutant n of m, paused, failed or done) and surviving mutants (source and line, before and after,
@@ -77,7 +86,7 @@
 // "Model for Tests actions": CLI, model (with Other… for a typed name) and effort, as the Rules tab's roles; a pick
 // says Unsaved, Save sends POST control {action: tests, args: [cli, model, effort] or [default]}, Cancel puts back the
 // one in force.
-// An opened row shows its newest action (#74) in a box under its buttons. From the click the box says it is sent, with a
+// An opened row shows its newest action (#74) in a box under its buttons; an ended judge's, on its Judge tab. From the click the box says it is sent, with a
 // bar, while the POST waits for the build machine (which answers once the action has started or is queued); refused, why.
 // An Optimize filed or a Mutation check asked from the row shows on a line beside it the same way (S.notes). While it
 // runs, a bar and the time used against the action's limit, and its text as the snapshot brings it (kept here, so a
@@ -85,7 +94,7 @@
 // Copy. Queued, a bar, "Queued, N ahead" and Stop. Ended, its
 // result with its time, CLI, model and effort; a judge's starts with "Verdict: <word>" and its chip, and, for speed
 // up, split, merge or delete, "Optimize with this verdict", which opens the Optimize preview with that verdict and its
-// text. The text of a judge or explain is formatted (md(): paragraphs, bold, lists, inline code and code blocks; any
+// text, on Overview, scrolled to, with the cursor at the start of its body; the preview shows the verdict. The text of a judge or explain is formatted (md(): paragraphs, bold, lists, inline code and code blocks; any
 // other markup as typed), a run's output as typed; Copy copies the raw text. Recent actions, collapsed until opened,
 // counts the running and queued actions in its heading and lists each kept action and each Optimize issue, newest
 // first, each with its file (a click opens its row), and Stop on a running or queued action, else Copy.
@@ -149,6 +158,9 @@
     mapRefused: null,    // why the last Build the test map was refused
     edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|budget` or `${dk(file)}|mark`
     mutAsked: new Map(), // the files a Mutation check was asked for here, by dk(file): the time asked, until the snapshot names them
+    tabs: new Map(),     // the tab open on an opened row, by dk(file): overview (with none), timeline, judge or mutation
+    tl: new Map(),       // the filter of an opened row's Timeline, by dk(file): all (with none), runs, optimize, edits or judge
+    uid: 0,              // a counter for the ids that tie a row's tabs to their panes
     settingsOpen: false };  // the Settings section is open
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -525,6 +537,21 @@
   }
   // The verdicts that Optimize acts on: each is one of the fixes an Optimize card picks.
   const ACTIONABLE = ['speed up', 'split', 'merge', 'delete'];
+  // A judge's text without its last line when that is its VERDICT line (as lib/testaction.sh reads it): the verdict
+  // line above the text says it once (#130). Copy still copies the text as written.
+  const unverdict = (text) => {
+    const lines = String(text).replace(/\s+$/, '').split('\n');
+    return /^[\s*`_>-]*VERDICT:/i.test(lines[lines.length - 1]) ? lines.slice(0, -1).join('\n') : text;
+  };
+  // The judge's reason in one line (#130): the first sentence of its text that is not a heading, a list's title, a
+  // HOLLOW or the VERDICT line, without its markup; cut to 160 characters.
+  function reasonOf(text) {
+    const l = String(text || '').split('\n').map((x) => x.replace(/\*\*|`/g, '').replace(/^\s*(?:#+|[-*]|\d{1,4}[.)])\s*/, '').trim())
+      .find((x) => x.split(/\s+/).length > 3 && !/:$/.test(x) && !/^(VERDICT|HOLLOW):/i.test(x));
+    if (!l) return '';
+    const s = (/^(.+?[.!?])(\s|$)/.exec(l) || [null, l])[1];
+    return s.length > 160 ? `${s.slice(0, 159)}…` : s;
+  }
   // The box of one action: running, a bar and the time used against its limit, its text so far, Stop and Copy;
   // queued, how many wait before it, and Stop; ended, its result (a judge's verdict line first, with Optimize with this
   // verdict when Optimize acts on it), its text (formatted, but a run's output) and Copy.
@@ -546,8 +573,9 @@
       const line = h('p', 'tests-verdict', 'Verdict: ');
       line.append(verdictChip(a.verdict));
       if (ACTIONABLE.includes(a.verdict)) {
+        // The preview is on the Overview tab: it opens there, scrolled to, with the cursor in its body (#130).
         const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `Optimize ${a.file}: preview an issue with this verdict`, () => {
-          S.ask = draftIssue(f, a); S.keep = { act: 'issue-title', file: f.file }; draw();
+          S.ask = draftIssue(f, a); S.tabs.set(dk(f.file), 'overview'); S.keep = { act: 'issue-body', file: f.file, scroll: true }; draw();
         });
         if (f.wholeOnly === true) { b.disabled = true; b.title = RUNNER_WHY; }
         line.append(' ', b);
@@ -558,7 +586,7 @@
     if (running(a) || a.action === 'run') {
       out = h('pre', 'tests-out', text || (running(a) ? 'Started. Its text shows here as it comes.' : 'No text.'));
       out.setAttribute('aria-live', 'polite');
-    } else out = text ? md(text) : h('p', 'board-from', 'No text.');
+    } else out = text ? md(a.action === 'judge' ? unverdict(text) : text) : h('p', 'board-from', 'No text.');
     btns.append(button('Copy', 'btn-quiet', 'copy', `Copy the text: ${name}, ${a.file}`, () => copy(text)));
     el.append(...parts, out, btns);
     if (a.textCut === true && !text) el.append(h('p', 'board-from', 'The text is long: the build machine sends its end only.'));
@@ -577,7 +605,7 @@
       `- Budget: ${one(f.budget)} CPU s`,
       `- Clock / CPU in its last run: ${num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`}`,
       `- Runs on record: ${num(f.timedRuns) || 0}. Test steps that failed in it: ${num(f.failedSteps) || 0}. Flaky entries: ${num(f.flaky) || 0}.`,
-      `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (card ${r.card})`).join(', ') || 'none'}`];
+      `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (${runBy(r)})`).join(', ') || 'none'}`];
     // A list of items under its heading: as many as the body holds with room for a line that counts the rest.
     const add = (head, items, said) => {
       if (!items.length) return;
@@ -594,8 +622,12 @@
       const room = BODY_MAX - lines.join('\n').length - 40, chars = Array.from(text);
       if (text && room > 0) lines.push('', 'The end of its text:', chars.length > room ? `…${chars.slice(-room).join('')}` : text);
     }
-    return { kind: 'issue', repo: S.d.repo, file, title: `Optimize the test file ${file}`, body: lines.join('\n') };
+    return { kind: 'issue', repo: S.d.repo, file, title: `Optimize the test file ${file}`, body: lines.join('\n'), verdict: v ? v.verdict : null };
   }
+  // What ran a run, in words (#130): a whole-suite run with its result, as the Runs list says it, or the card's issue;
+  // never a card's id, nor "card null".
+  const runBy = (r) => (r.whole === true ? `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`
+    : num(r.issue) !== null ? `card #${r.issue}` : 'a card');
   const asking = (kind, file) => S.ask && S.ask.repo === S.d.repo && S.ask.kind === kind && (file === undefined || S.ask.file === file);
   function field(act, label, value, set, o = {}) {
     const x = S.ctx.h(o.area ? 'textarea' : 'input', `field rules-field tests-field${o.area ? ' tests-body' : ''}`);
@@ -612,7 +644,9 @@
     if (!a || a.repo !== S.d.repo || a.file !== file || a.kind === 'on') return null;
     const el = h('div', 'tests-preview'), cancel = (act) => button('Cancel', 'btn-quiet', act, 'Cancel: send nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was sent.'); });
     if (a.kind === 'issue') {
-      el.append(h('p', 'board-head', 'Preview of the issue. Edit it, then file it.'),
+      el.append(h('p', 'board-head', 'Preview of the issue. Edit it, then file it.'));
+      if (a.verdict) { const v = h('p', 'tests-fact tests-preview-verdict', 'With the judge\'s verdict: '); v.append(verdictChip(a.verdict)); el.append(v); }
+      el.append(
         field('issue-title', 'Title of the issue', a.title, (v) => { a.title = v; }, { max: TITLE_MAX }),
         field('issue-body', 'Text of the issue', a.body, (v) => { a.body = v; }, { area: true, max: BODY_MAX }),
         button('File this issue', 'btn-primary', 'issue-file', `File this issue about ${file}`, () => {
@@ -705,24 +739,48 @@
     else el.append(h('span', null, n.text));
     return el;
   }
-  // The actions of an opened row (Judge, Optimize, Run and More), beside them the box of its action and the line of
-  // its Optimize or Mutation check, then the preview open on it. One that cannot start says why in its box or line.
-  function rowActions(f) {
-    const h = S.ctx.h, file = f.file, el = h('div', 'tests-acts'), noSeat = !tmodel();
-    const now = h('div', 'tests-act-row');
-    const judge = actBtn('Judge', 'judge', `${ACTS.judge}: ${file}`, () => start('judge', file));
+  // The next step a row suggests (#130), from its state, its judge's verdict and its Optimize issues: run a file that
+  // has no CPU time to judge, or that runs other test files; for one over budget, raise its budget when the judge said
+  // keep, wait for an Optimize issue still open (run it), else optimize it; judge a file that needs a look and has no
+  // verdict; else run it.
+  function nextStep(f) {
+    if (f.wholeOnly === true || !cpuTimed(f)) return 'run';
+    const v = verdictOf(f.file);
+    if (marks(f).some((m) => m[0] === 'over')) {
+      if (v && v.verdict === 'keep') return 'budget';
+      return optsOf(f).some((o) => ['open', 'building', 'blocked'].includes(o.state)) ? 'run' : 'optimize';
+    }
+    return look(f) && !v ? 'judge' : 'run';
+  }
+  // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Raise this file's budget…, Run
+  // and More; the next step suggested is the primary one.
+  function stepButtons(f) {
+    const h = S.ctx.h, file = f.file, now = h('div', 'tests-act-row tests-steps'), noSeat = !tmodel(), next = nextStep(f);
+    const btn = (key, text, act, label, fn) => button(text, `${key === next ? 'btn-primary' : 'btn-quiet'} tests-act`, act, label, fn);
+    const judge = btn('judge', 'Judge', 'judge', `${ACTS.judge}: ${file}`, () => start('judge', file));
     if (noSeat) judge.title = NO_SEAT;
     // A runner (wholeOnly) is held to no budget: its time is its files' time, so no issue asks to optimize it.
-    const opt = actBtn('Optimize', 'optimize', `Optimize: preview an issue about ${file}`, () => {
+    const again = optsOf(f).some((o) => o.state === 'landed');
+    const opt = btn('optimize', again ? 'Optimize again' : 'Optimize', 'optimize', `Optimize: preview an issue about ${file}`, () => {
       if (f.wholeOnly === true) { S.notes.set(dk(file), { what: 'Optimize', state: 'refused', text: RUNNER_WHY }); draw(); return; }
       S.notes.delete(dk(file)); S.ask = draftIssue(f); S.keep = { act: 'issue-title', file }; draw();
     });
     if (f.wholeOnly === true) opt.title = RUNNER_WHY;
-    now.append(judge, opt, actBtn('Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
+    // Its budget's editor, as Set a budget for this file in More opens it.
+    const raise = btn('budget', 'Raise this file\'s budget…', 'raise-budget', `Set a budget for ${file}`, () => { S.edit.add(`${dk(file)}|budget`); S.keep = { act: 'file-budget-field', file }; draw(); });
+    if (f.wholeOnly === true) { raise.disabled = true; raise.title = RUNNER_WHY; }
+    now.append(judge, opt, raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
     if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
-    el.append(h('p', 'board-head', 'Actions'), now);
+    return now;
+  }
+  // An ended judge shows on the Judge tab; the box of any other action of the row on its Overview.
+  const judged = (a) => a.action === 'judge' && !live(a) && a.state !== 'sending' && a.state !== 'refused';
+  // The rest of an opened row's actions, under its buttons: the box of its action and the line of its Optimize or
+  // Mutation check, then the preview open on it. One that cannot start says why in its box or line.
+  function rowActions(f) {
+    const h = S.ctx.h, file = f.file, el = h('div', 'tests-acts');
     const a = rowAction(file), n = noteLine(f);
-    if (a) el.append(box(a, f));
+    if (a && !judged(a)) el.append(box(a, f));
     if (n) el.append(n);
     // A flaky case is kept off until its flaky issue closes: Put back closes it. A case shows on each file it counts for
     // (the snapshot's files: a runner's case on its case file too).
@@ -736,7 +794,7 @@
     });
     const p = preview(f);
     if (p) el.append(p);
-    return el;
+    return el.childNodes.length ? el : null;
   }
 
   // ---- the Tests model: CLI, model (Other… for a typed name) and effort, as the Rules tab's roles ----
@@ -937,25 +995,29 @@
   const intoSaid = (o) => list(o.into).filter((x) => typeof x === 'string').join(', ');
   // The fix its card made: sped up, split into <files>, merged into <files> or deleted.
   const fixSaid = (o) => ((o.fix === 'split' || o.fix === 'merged') && intoSaid(o) ? `${o.fix} into ${intoSaid(o)}` : typeof o.fix === 'string' ? o.fix : null);
-  // Its proof's CPU s before and after, and, beside before, the median of the file's runs since it landed.
-  function numbersSaid(o) {
-    if (num(o.before) === null && num(o.after) === null) return null;
-    const n = num(o.sinceRuns) || 0, since = num(o.since) === null ? '' : ` (since it landed: ${one(o.since)} CPU s, the median of ${n} ${n === 1 ? 'run' : 'runs'})`;
-    return `CPU s before: ${one(o.before)}${since}${num(o.after) === null ? '' : `, after: ${one(o.after)}`}`;
+  // What a landed Optimize did (#130): its proof's CPU s before and after (with no after, the median of the file's runs
+  // since it landed), the change, and whether it helped (the file got faster); null when its numbers are not on record.
+  function gainOf(o) {
+    const b = num(o.before), a = num(o.after) !== null ? o.after : num(o.since);
+    if (!b || a === null) return null;
+    const change = (a - b) / b;
+    return { before: b, after: a, change, helped: Math.round(change * 100) < 0 };
+  }
+  const gainSaid = (g) => `${one(g.before)} → ${one(g.after)} CPU s (${pct(g.change)})`;
+  const helpedSaid = (g) => (g.helped ? 'helped' : 'did not help');
+  const helpedChip = (g) => S.ctx.chip(g.helped ? 'Helped' : 'Did not help', g.helped ? 'ok' : 'warn');
+  // Its numbers in a line: before → after with the change, and the median of the file's runs since it landed.
+  function numbersSaid(o, withHelped = true) {
+    const g = gainOf(o);
+    if (!g) return null;
+    const n = num(o.sinceRuns) || 0, since = num(o.since) === null || num(o.after) === null ? '' : ` · since it landed: ${one(o.since)} CPU s, the median of ${n} ${n === 1 ? 'run' : 'runs'}`;
+    return `${gainSaid(g)}${withHelped ? `, ${helpedSaid(g)}` : ''}${since}`;
   }
   // The mutants its file's tests caught before it landed and after (#79): the newest done mutation check of each, when
   // both are on record.
   function mutantsSaid(o) {
     const b = obj(o.mutantsBefore), a = obj(o.mutantsAfter), ok = (m) => m && num(m.killed) !== null && num(m.of) !== null;
     return ok(b) && ok(a) ? `Mutants caught before: ${b.killed} / ${b.of}, after: ${a.killed} / ${a.of}` : null;
-  }
-  // One Optimize issue of a row: when it was filed, its link, its state and, landed, its fix, numbers and mutants.
-  function optLine(o) {
-    const h = S.ctx.h, li = h('li', 'tests-opt');
-    li.dataset.issue = String(o.issue);
-    li.append(h('span', 'board-from', `Filed ${S.ctx.when(o.time)} · `), S.ctx.issueLink(o),
-      h('span', null, ` · ${[stateSaid(o)].concat(o.state === 'landed' ? [fixSaid(o), numbersSaid(o), mutantsSaid(o)] : []).filter(Boolean).join(' · ')}`));
-    return li;
   }
   // The runs where a landed Optimize took effect: the first timed run of the file after it landed, to its issue. The
   // row keeps only the last runs: when fewer of them come after it than its sinceRuns (all the timed runs since it
@@ -1040,12 +1102,13 @@
     const said = EDITS.filter(([k]) => (num(e[k]) || 0) > 0).map(([k, one1, more1]) => `${e[k]} ${e[k] === 1 ? one1 : more1}`);
     return said.length ? said.join(', ') : 'Edited, nothing weakened';
   }
-  // One edit: its card's issue and card, the file (withFile), its time and its counts.
+  // An edit's card by its issue, "#NN" (a link to it), never by the card's id (#130): "a card" when it has none.
+  const editIssue = (e, any) => (num(e.issue) !== null ? S.ctx.issueLink({ issue: e.issue, url: any ? any.replace(/\d+$/, String(e.issue)) : null }) : S.ctx.h('span', 'issue', 'a card'));
+  // One edit: its card's issue, the file (withFile), its time and its counts.
   function editLine(e, withFile, any) {
     const h = S.ctx.h, li = h('li', 'tests-edit');
     li.dataset.file = e.file;
-    if (num(e.issue) !== null) li.append(S.ctx.issueLink({ issue: e.issue, url: any ? any.replace(/\d+$/, String(e.issue)) : null }), h('span', null, ' '));
-    li.append(h('span', 'board-from', String(e.card || 'a card')));
+    li.append(editIssue(e, any));
     if (withFile) li.append(h('span', null, ' · '), h('span', 'board-label', e.file));
     li.append(h('span', 'board-from', ` · ${S.ctx.when(e.time)}`), h('span', 'tests-edit-counts', ` · ${editSaid(e)}`));
     return li;
@@ -1209,49 +1272,180 @@
     el.setAttribute('aria-label', runs.length ? `Last runs, oldest first: ${runs.map((r) => `${one(r.cpu)}${opt.has(r) ? ` (the ${optRunSaid(opt.get(r))})` : ''}`).join(', ')} CPU s` : 'No runs');
     return el;
   }
-  function more(f) {
-    const h = S.ctx.h, el = h('div', 'tests-more'), file = f.file;
-    const runs = h('ul', 'tests-runs');
-    runs.setAttribute('aria-label', `Runs of ${file}`);
-    const opt = optRuns(f);
-    list(f.runs).filter(obj).forEach((r) => {
-      const li = h('li', opt.has(r) ? 'tests-run tests-run-opt' : 'tests-run');
-      const cpu = num(r.cpu) === null ? 'CPU not recorded' : `${one(r.cpu)} CPU s`;
-      li.append(h('span', null, `${cpu} · ${num(r.sec) === null ? 'clock not recorded' : `${one(r.sec)} s on the clock`} · `));
-      if (r.whole === true) li.append(h('span', null, `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`));
-      else li.append(h('span', null, 'card '), r.issue ? S.ctx.issueLink(r) : h('span', 'issue', String(r.card || 'a card')));
-      li.append(h('span', 'board-from', ` · ${S.ctx.when(r.time)}`));
-      if (opt.has(r)) li.append(h('span', 'tests-run-mark', ` · the ${optRunSaid(opt.get(r))}`));
-      runs.append(li);
+  // ---- an opened row (#130, the owner's mockup D): the tabs Overview, Timeline (N), Judge and Mutation ----
+  const TABS = [['overview', 'Overview'], ['timeline', 'Timeline'], ['judge', 'Judge'], ['mutation', 'Mutation']];
+  const tabOf = (file) => S.tabs.get(dk(file)) || 'overview';
+  const showTab = (file, k) => { S.tabs.set(dk(file), k); S.keep = { act: `tab-${k}`, file }; draw(); };
+  const COUNT = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+  // Its budget, as in force or as saved here and not yet in a snapshot: its CPU s (null: none) and in words.
+  function budgetOf(f) {
+    const mine = shown(`budget:${f.file}`), all = shown('fileBudget');
+    if (f.wholeOnly === true) return { cpu: null, said: 'none, it runs other test files and each of them has its own' };
+    if (mine !== '') return { cpu: Number(mine), said: `${one(Number(mine))} CPU s, its own` };
+    return all !== '' ? { cpu: Number(all), said: `${one(Number(all))} CPU s, the project budget` } : { cpu: null, said: 'not known' };
+  }
+  // Its landed Optimize issues whose numbers are on record, oldest first, each with what it did.
+  const gains = (f) => optsOf(f).filter((o) => o.state === 'landed').reverse().map((o) => ({ o, g: gainOf(o) })).filter((x) => x.g);
+  // Its state in one paragraph: over its budget by how much, after which Optimize cards, and its trend.
+  function stateOf(f) {
+    if (f.wholeOnly === true) return 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it. It runs other test files, and each of them has its own budget.';
+    if (!timed(f)) return 'Not timed yet: no run of it is on record.';
+    if (wallOnly(f)) return `Wall only: its runner gives no CPU time, so no budget holds it. Its last run took ${clockTook((obj(f.lastRun) || {}).sec)}.`;
+    const b = budgetOf(f).cpu, done = gains(f), mark = shown(`mark:${f.file}`);
+    const after = done.length ? ` after ${COUNT[done.length] || done.length} Optimize ${done.length === 1 ? 'card' : 'cards'} (${done.map((x) => pct(x.g.change)).join(', then ')})` : '';
+    let s;
+    if (mark) s = `Slow on purpose: ${mark}.`;
+    else if (b && num(f.cpu) !== null && f.cpu > b) {
+      const x = f.cpu / b;
+      s = `${done.length ? 'Still ' : ''}${x >= 2 ? `${Math.round(x)} times` : `${Math.round((x - 1) * 100)}%`} over budget${after}: ${one(f.cpu)} CPU s against a budget of ${one(b)}.`;
+    } else s = b ? `Within budget${after}: ${one(f.cpu)} of ${one(b)} CPU s.` : `${one(f.cpu)} CPU s${after}.`;
+    const k = marks(f).map((m) => m[0]);
+    const trend = k.includes('slower') ? `It is slower than usual: ${pct(f.change)} against its median.` : k.includes('faster') ? `It is faster than usual: ${pct(f.change)} against its median.`
+      : num(f.change) !== null ? `Its runs are steady: ${pct(f.change)} against its median.` : '';
+    return trend ? `${s} ${trend}` : s;
+  }
+  // The diagnosis box (#130): the state, the judge's verdict with its reason in one line (its full report on the
+  // Judge tab), and the next steps, the suggested one primary.
+  function diagnosis(f) {
+    const h = S.ctx.h, el = h('div', 'tests-diag'), v = verdictOf(f.file), line = h('p', 'tests-diag-verdict');
+    line.append(h('span', 'board-label', 'Judge: '));
+    if (v) {
+      const why = reasonOf(S.texts.get(v.id) || '');
+      line.append(verdictChip(v.verdict));
+      if (why) line.append(h('span', 'tests-diag-why', why));
+      line.append(button('Full report', 'btn-quiet tests-act', 'judge-report', `The judge's full report on ${f.file}`, () => showTab(f.file, 'judge')));
+    } else line.append(h('span', 'board-from', 'Not judged yet.'));
+    el.append(h('p', 'tests-diag-state', stateOf(f)), line, stepButtons(f));
+    return el;
+  }
+  // A tile of the Overview: its label, its value and the lines under it.
+  function tile(key, label, value, ...sub) {
+    const h = S.ctx.h, t = h('div', 'tests-tile');
+    t.dataset.tile = key;
+    t.append(h('span', 'tests-tile-label', label), typeof value === 'string' ? h('span', 'tests-tile-big', value) : value);
+    sub.filter(Boolean).forEach((s) => t.append(typeof s === 'string' ? h('span', 'tests-tile-sub', s) : s));
+    return t;
+  }
+  // Its last 4 timed runs as bars, oldest first: each bar takes the focus and shows its value on hover and on focus (app.css).
+  function lastBars(f) {
+    const h = S.ctx.h, runs = list(f.runs).filter((r) => obj(r) && num(r.cpu) !== null).slice(0, 4).reverse();
+    if (!runs.length) return h('span', 'tests-tile-big', '—');
+    const el = h('span', 'tests-bars tests-tile-bars'), top = Math.max(...runs.map((r) => r.cpu));
+    el.setAttribute('role', 'group'); el.setAttribute('aria-label', 'Last runs, oldest first');
+    runs.forEach((r) => {
+      const b = h('span', 'tests-bar'), said = `${one(r.cpu)} CPU s, ${runBy(r)}, ${S.ctx.when(r.time)}`;
+      b.style.height = `${top > 0 ? Math.max(4, Math.round((r.cpu / top) * 100)) : 4}%`;
+      b.tabIndex = 0; b.dataset.value = one(r.cpu); b.title = said;
+      b.setAttribute('role', 'img'); b.setAttribute('aria-label', said);
+      el.append(b);
     });
-    if (!runs.children.length) runs.append(h('li', 'board-from', 'No run on record.'));
-    if (f.wholeOnly === true) el.append(h('p', 'tests-fact', 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it.'));
-    // As in force, or as saved here and not yet in a snapshot.
-    const mine = shown(`budget:${file}`), all = shown('fileBudget'), reason = shown(`mark:${file}`) || 'none';
-    const budget = f.wholeOnly === true ? 'none, it runs other test files and each of them has its own'
-      : mine !== '' ? `${one(Number(mine))} CPU s, its own` : all !== '' ? `${one(Number(all))} CPU s, the project budget` : 'not known';
-    el.append(h('p', 'board-head', 'Runs'), runs, h('p', 'tests-fact', `Budget: ${budget}.`), h('p', 'tests-fact', `Slow on purpose: ${reason}.`));
-    // Every Optimize (and older speed-up) issue filed for it, newest first.
-    const opts = optsOf(f);
-    if (opts.length) {
-      const ul = h('ul', 'tests-runs tests-opts');
-      ul.setAttribute('aria-label', `Optimize issues of ${file}`);
-      opts.forEach((o) => ul.append(optLine(o)));
-      el.append(h('p', 'board-head', 'Optimize issues'), ul);
+    return el;
+  }
+  // The six tiles: CPU now with its budget, the last 4 runs, the last Optimize, the clock, the bugs caught and the mutants.
+  function tiles(f) {
+    const h = S.ctx.h, el = h('div', 'tests-tiles'), last = obj(f.lastRun) || {}, lo = gains(f).pop(), m = mutDone(f), n = num(f.runsOnRecord) || 0;
+    let opt = tile('optimize', 'Last Optimize', '—', 'No Optimize landed.');
+    if (lo) {
+      const sub = h('span', 'tests-tile-sub');
+      sub.append(S.ctx.issueLink(lo.o), ` · ${one(lo.g.before)} → ${one(lo.g.after)} CPU s `, helpedChip(lo.g));
+      opt = tile('optimize', 'Last Optimize', pct(lo.g.change), sub);
     }
-    // What landed cards did to this file, newest first.
-    const edits = editsOf().filter((e) => e.file === file);
-    // Its hollow cases, each with its kind and reason.
+    el.append(tile('cpu', 'CPU now', num(f.cpu) === null ? '—' : `${one(f.cpu)} CPU s`, `Budget: ${budgetOf(f).said}.`),
+      tile('runs', 'Last 4 runs', lastBars(f)), opt,
+      tile('clock', 'Clock', clockTook(last.sec), num(last.clockPerCpu) === null ? null : `${one(last.clockPerCpu)}× clock / CPU`),
+      tile('caught', 'Bugs caught', String(num(f.caught) || 0), `in ${n} ${n === 1 ? 'run' : 'runs'}`),
+      tile('mutants', 'Mutants', m ? `${m.killed} / ${m.of}` : 'not checked', m ? 'caught' : null));
+    return el;
+  }
+  // ---- its events: runs, Optimize issues, test edits and judge runs, newest first ----
+  const KINDS = [['all', 'All'], ['runs', 'Runs'], ['optimize', 'Optimize'], ['edits', 'Test edits'], ['judge', 'Judge']];
+  const EVENT = { runs: 'Run', optimize: 'Optimize', edits: 'Test edit', judge: 'Judge' };
+  function events(f) {
+    return list(f.runs).filter(obj).map((r) => ({ kind: 'runs', t: r.time, r }))
+      .concat(optsOf(f).map((o) => ({ kind: 'optimize', t: o.state === 'landed' && o.landed ? o.landed : o.time, o })),
+        editsOf().filter((e) => e.file === f.file).map((e) => ({ kind: 'edits', t: e.time, e })),
+        actions().filter((a) => a.file === f.file && judged(a)).map((a) => ({ kind: 'judge', t: a.end || a.start, a })))
+      .sort((x, y) => (Date.parse(y.t) || 0) - (Date.parse(x.t) || 0));
+  }
+  // One event: when, its kind and what it was. A run: its CPU and clock time and what ran it, marked when it is the
+  // first after an Optimize landed (opt: optRuns()). An Optimize issue: its link and state; landed, its fix, before →
+  // after with the change, Helped or Did not help, and its mutants. A test edit: its card's issue and its counts,
+  // Weakened marked. A judge run: how it ended and its verdict. full: on the Timeline (its kind's class and data).
+  function eventLine(x, opt, any, full) {
+    const h = S.ctx.h, li = h('li', 'tests-tl-item'), what = h('span', 'tests-tl-what');
+    li.dataset.kind = x.kind;
+    li.append(h('span', 'board-from tests-tl-when', S.ctx.when(x.t)), h('span', 'board-label tests-tl-kind', EVENT[x.kind]), what);
+    if (x.kind === 'runs') {
+      const r = x.r;
+      if (full) li.classList.add(...(opt.has(r) ? ['tests-run', 'tests-run-opt'] : ['tests-run']));
+      what.append(`${num(r.cpu) === null ? 'CPU not recorded' : `${one(r.cpu)} CPU s`} · ${num(r.sec) === null ? 'clock not recorded' : `${one(r.sec)} s on the clock`} · `);
+      if (r.whole === true || num(r.issue) === null) what.append(runBy(r)); else what.append('card ', S.ctx.issueLink(r));
+      if (opt.has(r)) what.append(h('span', 'tests-run-mark', ` · the ${optRunSaid(opt.get(r))}`));
+    } else if (x.kind === 'optimize') {
+      const o = x.o, landed = o.state === 'landed', g = landed ? gainOf(o) : null;
+      if (full) { li.classList.add('tests-opt'); li.dataset.issue = String(o.issue); }
+      what.append(S.ctx.issueLink(o), ` · ${[landed ? stateSaid(o) : `filed, ${stateSaid(o)}`].concat(landed ? [fixSaid(o), numbersSaid(o, false), mutantsSaid(o)] : []).filter(Boolean).join(' · ')}`);
+      if (g) what.append(' ', helpedChip(g));
+    } else if (x.kind === 'edits') {
+      const e = x.e;
+      if (full) { li.classList.add('tests-edit'); li.dataset.file = e.file; }
+      what.append(editIssue(e, any), h('span', 'tests-edit-counts', ` · ${editSaid(e)}`));
+      if (weakened(e)) what.append(' ', S.ctx.chip('Weakened', 'bad'));
+    } else {
+      const a = x.a;
+      what.append(`${ENDED[a.state] || String(a.state)} · ${a.cli} · ${a.model} · ${a.effort}`);
+      if (typeof a.verdict === 'string') what.append(' ', verdictChip(a.verdict));
+    }
+    return li;
+  }
+  // The Timeline tab: every event, newest first, with filter chips All, Runs, Optimize, Test edits and Judge.
+  function timeline(f, all, opt, any) {
+    const h = S.ctx.h, el = h('div', 'tests-timeline'), on = S.tl.get(dk(f.file)) || 'all', bar = h('div', 'tests-filters');
+    bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', `Show the events of ${f.file}`);
+    KINDS.forEach(([k, words]) => {
+      const n = k === 'all' ? all.length : all.filter((x) => x.kind === k).length;
+      const b = button(`${words} ${n}`, 'rules-tog', `tl-${k}`, `${words}: ${n} ${n === 1 ? 'event' : 'events'}`, () => { S.tl.set(dk(f.file), k); S.keep = { act: `tl-${k}`, file: f.file }; draw(); });
+      b.dataset.filter = k; b.setAttribute('aria-pressed', String(on === k));
+      bar.append(b);
+    });
+    const picked = on === 'all' ? all : all.filter((x) => x.kind === on), ul = h('ul', 'tests-runs tests-tl');
+    ul.setAttribute('aria-label', `Events of ${f.file}, newest first`);
+    picked.forEach((x) => ul.append(eventLine(x, opt, any, true)));
+    el.append(bar, picked.length ? ul : h('p', 'board-from', all.length ? 'No event of this kind on record.' : 'No event on record.'));
+    return el;
+  }
+  // The Judge tab: the file's newest ended judge, its verdict said once at the top, then its full report (box()); and
+  // its hollow cases, each with its kind and reason.
+  function judgePane(f) {
+    const h = S.ctx.h, el = h('div', 'tests-acts tests-judge'), a = actions().find((x) => x.file === f.file && judged(x)), now = rowAction(f.file);
+    if (now && now.action === 'judge' && !judged(now)) el.append(h('p', 'board-from', 'A judge of this file is under way: it shows on Overview until it ends.'));
+    if (a) el.append(box(a, f));
+    else el.append(h('p', 'board-from', 'Not judged yet. Judge, on Overview, asks the Tests model whether this file is worth what it costs.'));
     const hollow = hollowOf(f);
     if (hollow.length) {
       const ul = h('ul', 'tests-runs tests-hollow');
-      ul.setAttribute('aria-label', `Hollow cases of ${file}`);
+      ul.setAttribute('aria-label', `Hollow cases of ${f.file}`);
       hollow.forEach((x) => ul.append(h('li', 'tests-hollow-case', hollowSaid(x))));
       el.append(h('p', 'board-head', 'Hollow cases'), ul);
     }
-    // Its mutation check: its state, and each mutant its tests did not catch, with its line and change.
+    return el;
+  }
+  function more(f) {
+    const h = S.ctx.h, el = h('div', 'tests-more'), file = f.file, on = tabOf(file), all = events(f), opt = optRuns(f), any = anyIssueUrl([f]);
+    // Overview: the diagnosis, the rest of its actions, the editors picked, the tiles and the 3 latest events.
+    const ov = h('div', 'tests-overview'), acts = rowActions(f);
+    ov.append(diagnosis(f));
+    if (acts) ov.append(acts);
+    ov.append(...editors(f), tiles(f));
+    const latest = h('div', 'tests-latest'), ul = h('ul', 'tests-runs tests-tl');
+    ul.setAttribute('aria-label', `The latest events of ${file}`);
+    all.slice(0, 3).forEach((x) => ul.append(eventLine(x, opt, any, false)));
+    latest.append(h('p', 'board-head', 'Latest'), all.length ? ul : h('p', 'board-from', 'No event on record.'),
+      button(`Timeline (${all.length})`, 'btn-quiet tests-act', 'timeline-all', `Every event of ${file}: Timeline (${all.length})`, () => showTab(file, 'timeline')));
+    ov.append(latest);
+    // Mutation: its check's state, and each mutant its tests did not catch, with its line and change.
     const mut = h('div', 'tests-mutation');
-    mut.append(h('p', 'board-head', 'Mutation check'), h('p', 'tests-fact tests-mut-state', mutState(f)));
+    mut.append(h('p', 'tests-fact tests-mut-state', mutState(f)));
     const surv = survivors(f);
     if (surv.length) {
       const ul = h('ul', 'tests-runs tests-survivors');
@@ -1265,28 +1459,49 @@
       });
       mut.append(ul);
     }
-    el.append(mut);
-    if (edits.length) el.append(h('p', 'board-head', 'Test edits by cards'), editsList(edits, `Test edits of ${file}`, false, anyIssueUrl([f])));
-    el.append(rowActions(f));
-    // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
-    if (f.wholeOnly === true) return el;
-    // The editor of the budget, or of the mark, shows once picked from More, and while a value typed, refused or saved
-    // here is in it.
+    // The tabs, each tied to its pane; only the open one's pane shows. Left and right arrows move between them.
+    const panes = { overview: ov, timeline: timeline(f, all, opt, any), judge: judgePane(f), mutation: mut };
+    const bar = h('div', 'tests-tabs'), id = `tests-row-${S.uid += 1}`;
+    bar.setAttribute('role', 'tablist'); bar.setAttribute('aria-label', `${file}: views`);
+    el.append(bar);
+    TABS.forEach(([k, words], i) => {
+      const t = button(k === 'timeline' ? `${words} (${all.length})` : words, 'btn-quiet tests-tab', `tab-${k}`, null, () => showTab(file, k));
+      t.id = `${id}-tab-${k}`; t.tabIndex = k === on ? 0 : -1;
+      t.setAttribute('role', 'tab'); t.setAttribute('aria-selected', String(k === on)); t.setAttribute('aria-controls', `${id}-${k}`);
+      t.addEventListener('keydown', (e) => {
+        const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (step) { e.preventDefault(); showTab(file, TABS[(i + step + TABS.length) % TABS.length][0]); }
+      });
+      bar.append(t);
+      const p = h('section', 'tests-pane');
+      p.id = `${id}-${k}`; p.dataset.pane = k; p.hidden = k !== on;
+      p.setAttribute('role', 'tabpanel'); p.setAttribute('aria-labelledby', t.id);
+      p.append(panes[k]);
+      el.append(p);
+    });
+    return el;
+  }
+  // The editors of its budget and of its mark, each shown once picked (from More, or Raise this file's budget…), and
+  // while a value typed, refused or saved here is in it. A runner (wholeOnly) is held to no budget, so a budget or a
+  // slow-on-purpose mark set here would never apply: it has none.
+  function editors(f) {
+    const file = f.file, out = [];
+    if (f.wholeOnly === true) return out;
     const editing = (what, key) => S.edit.has(`${dk(file)}|${what}`) || S.drafts.has(dk(key)) || S.pending.has(dk(key)) || (S.refused && S.refused.dk === dk(key));
     if (editing('budget', `budget:${file}`)) {
-      el.append(row('budget', 'Set a budget for this file', 'CPU s in place of the project budget', PACK, ...setting(`budget:${file}`, {
+      out.push(row('budget', 'Set a budget for this file', 'CPU s in place of the project budget', PACK, ...setting(`budget:${file}`, {
         act: 'file-budget', file, label: `Budget of ${file}`, type: 'number', placeholder: 'None', clear: 'Clear',
         check: budgetCheck, send: (v) => control(v === '' ? ['file-budget-clear', file] : ['file-budget', file, v]),
         said: (v) => (v === '' ? `${file} has no budget of its own` : `budget of ${file} now ${v} CPU s`) })));
     }
     if (editing('mark', `mark:${file}`)) {
-      el.append(row('mark', 'Mark as slow on purpose', 'No budget holds this file', PACK, ...setting(`mark:${file}`, {
+      out.push(row('mark', 'Mark as slow on purpose', 'No budget holds this file', PACK, ...setting(`mark:${file}`, {
         act: 'slow-mark', file, label: `Why ${file} is slow on purpose`, placeholder: 'Why it is slow on purpose', clear: 'Clear', ask: true,
         check: (v, set) => (v === '' ? (set === '' ? 'Type why the file is slow on purpose first.' : null) : null),
         send: (v) => control(v === '' ? ['slow-mark-clear', file] : ['slow-mark', file, v]),
         said: (v) => (v === '' ? `${file} is no longer marked slow on purpose` : `${file} is marked slow on purpose`) })));
     }
-    return el;
+    return out;
   }
   // The files of each status, by its key.
   const countsOf = (files) => Object.fromEntries(MARKS.map(([k]) => [k, files.filter((f) => marks(f).some((m) => m[0] === k)).length]));
@@ -1565,18 +1780,30 @@
     root.append(...parts);
     // The table scrolls sideways when wider than the panel (app.css): a new snapshot keeps its place.
     const side = el.querySelector('.tests-scroll'), left = side ? side.scrollLeft : 0;
+    // An opened row's tab pane scrolls inside (app.css): a new snapshot keeps the place read in it, by file and tab.
+    const paneKey = (p) => `${(p.closest('[data-file]') || { dataset: {} }).dataset.file}|${p.dataset.pane}`;
+    const read = new Map(Array.from(el.querySelectorAll('.tests-pane'), (p) => [paneKey(p), p.scrollTop]));
     el.replaceChildren(root, note);
     const wide = root.querySelector('.tests-scroll');
     if (wide) wide.scrollLeft = left;
+    root.querySelectorAll('.tests-pane').forEach((p) => { const top = read.get(paneKey(p)); if (top) p.scrollTop = top; });
     if (S.busy) {
       root.querySelectorAll('button, input, select, textarea').forEach((b) => {
-        if (!['filter', 'edits-filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more'].includes(b.dataset.act) && !/^(sort|figure)-/.test(b.dataset.act || '')) b.disabled = true;
+        if (!['filter', 'edits-filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more', 'timeline-all', 'judge-report'].includes(b.dataset.act) && !/^(sort|figure|tab|tl)-/.test(b.dataset.act || '')) b.disabled = true;
       });
     }
     if (keep) {
       const scope = keep.file ? Array.from(el.querySelectorAll('[data-file]')).filter((x) => x.dataset.file === keep.file) : [el];
       const again = scope.map((x) => x.querySelector(`[data-act="${keep.act}"]`)).find(Boolean);
-      if (again && !again.disabled) again.focus({ preventScroll: true });
+      if (again && !again.disabled) {
+        again.focus({ preventScroll: true });
+        // Asked (Optimize with this verdict, #130): the page scrolls to the preview, and the cursor is at the start of its body.
+        if (keep.scroll) {
+          const to = again.closest('.tests-preview') || again;
+          if (typeof to.scrollIntoView === 'function') to.scrollIntoView({ block: 'start' });
+          if (typeof again.setSelectionRange === 'function') again.setSelectionRange(0, 0);
+        }
+      }
     }
   }
 

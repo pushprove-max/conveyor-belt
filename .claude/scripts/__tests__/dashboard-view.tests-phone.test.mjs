@@ -52,7 +52,9 @@ test('Tests on a phone: the File column (.tests-name) is at least 20ch wide', ()
 // holds; a new one fails the last assertion until it is put in one list or the other.
 const HOLDS = {
   '.tests': 'the figures, the filters, .tests-scroll with the table, and Auto-file with its preview table',
-  '.tests-more': 'an opened row: its runs and .tests-acts',
+  '.tests-more': 'an opened row: its tabs and their panes',
+  '.tests-pane': 'a tab\'s pane of an opened row: .tests-overview, .tests-acts or the Timeline',
+  '.tests-overview': 'the Overview of an opened row: the diagnosis, .tests-acts, the tiles and the latest events',
   '.tests-acts': 'the actions of a row, .tests-preview and .tests-box',
   '.tests-box': 'the progress output, <pre class="tests-out">',
   '.tests-preview': 'the text fields of an issue, a close or a case kept off',
@@ -60,7 +62,8 @@ const HOLDS = {
 };
 const TEXT_ONLY = {
   '.tests-results-list': 'one line of text an action or an Optimize issue',
-  '.tests-runs': 'one line of text a run',
+  '.tests-runs': 'one line of text a run or an event',
+  '.tests-tiles': 'six tiles of text, one with small bars',
   '.tests-list': 'one line of text a file',
   '.tests-auto-log': 'one line of text an event',
 };

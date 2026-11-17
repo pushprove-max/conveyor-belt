@@ -719,6 +719,33 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tests-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; }
 .tests-bar { width: 6px; height: 100%; border-radius: 1px; background: var(--accent); transform-origin: bottom; }
 .tests-more { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); padding: var(--sp-2) 0; }
+/* An opened row (issue 130): its tabs, then the open tab's pane. A pane is never taller than the window under the page's
+   head, and scrolls inside, so the head never covers a part of it: brought into view (scroll-padding-top, above), all
+   of it shows below the head. */
+.tests-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); border-bottom: 1px solid var(--border); }
+.tests-tab { border-color: transparent; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.tests-tab[aria-selected="true"] { border-color: var(--border); border-bottom-color: var(--surface); font-weight: 600; }
+.tests-pane, .tests-overview { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.tests-pane { max-height: calc(100vh - var(--head-h, 64px) - 2 * var(--sp-3)); overflow-y: auto; padding: var(--sp-2) 0; }
+/* The diagnosis box: the state, the judge's verdict in one line and the next steps. */
+.tests-diag { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: var(--radius-sm); background: var(--surface-2); }
+.tests-diag p { margin: 0; }
+.tests-diag-state { font-weight: 600; }
+.tests-diag-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+/* The six tiles; the last runs' bars show their value on hover and on focus. */
+.tests-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(16ch, 1fr)); gap: var(--sp-2); }
+.tests-tile { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2); border: 1px solid var(--surface-2); border-radius: var(--radius-sm); min-width: 0; }
+.tests-tile-label { font-size: var(--fs-xs); color: var(--muted); }
+.tests-tile-big { font-size: var(--fs-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tests-tile-sub { font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
+.tests-tile-bars { height: 40px; gap: 4px; padding-top: 1.4em; box-sizing: content-box; }
+.tests-tile-bars .tests-bar { position: relative; width: 12px; height: auto; transform: none; }
+.tests-tile-bars .tests-bar:hover::after, .tests-tile-bars .tests-bar:focus::after { content: attr(data-value); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  font-size: var(--fs-xs); color: var(--text); white-space: nowrap; }
+/* An event of the Timeline, or of the latest 3: when, its kind, then what it was. */
+.tests-tl-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+.tests-tl-kind { min-width: 9ch; }
+.tests-tl-what { min-width: 0; overflow-wrap: anywhere; }
 .tests-runs, .tests-list { display: grid; gap: var(--sp-1); list-style: none; }
 .tests-fact { font-size: var(--fs-sm); }
 .tests-where { font-size: var(--fs-xs); color: var(--muted); }

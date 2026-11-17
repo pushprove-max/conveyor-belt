@@ -105,14 +105,25 @@ function history() {
   return d;
 }
 
-// Bug it guards (D5): Optimize's results were not seen: what each issue did, and whether the file got faster.
-test('Tests history: an opened row lists its Optimize issues newest first, the landed one with its commit, fix, numbers and median since', () => {
+// Bug it guards (D5): Optimize's results were not seen: what each issue did, and whether the file got faster. Issue
+// 130: several numbers in one run of text ("CPU s before: 11.0 (since it landed: …), after: 6.0") did not say whether
+// it helped, or by how much; each landed one says before → after, its change and Helped or Did not help.
+test('Tests history: an opened row\'s Timeline lists its Optimize issues newest first, the landed one as before → after with its change and Helped', () => {
   const w = show(history());
-  const items = Array.from(open(w, MERGE).querySelectorAll('.tests-opts .tests-opt'));
+  const items = Array.from(open(w, MERGE).querySelectorAll('.tests-tl .tests-opt'));
   assert.deepEqual(items.map((i) => i.dataset.issue), ['610', '600'], 'newest first');
-  assert.match(items[0].textContent, /^Filed .+ · #610 · open$/);
+  const what = (i) => i.querySelector('.tests-tl-what').textContent;
+  assert.equal(what(items[0]), '#610 · filed, open');
   assert.equal(items[0].querySelector('a').href, `${P}/610`);
-  assert.match(items[1].textContent, /^Filed .+ · #600 · landed as abc1234 · sped up · CPU s before: 11\.0 \(since it landed: 7\.5 CPU s, the median of 2 runs\), after: 6\.0$/);
+  assert.equal(what(items[1]), '#600 · landed as abc1234 · sped up · 11.0 → 6.0 CPU s (-45%) · since it landed: 7.5 CPU s, the median of 2 runs Helped');
+  assert.equal(items[1].querySelector('.chip').textContent, 'Helped');
+  // An Optimize that left the file slower says so.
+  const d = history();
+  Object.assign(d.panels.tests.data.tests.files.find((f) => f.file === MERGE).optimize[0], { after: 12 });
+  const w2 = show(d);
+  const worse = Array.from(open(w2, MERGE).querySelectorAll('.tests-tl .tests-opt')).find((i) => i.dataset.issue === '600');
+  assert.match(what(worse), /11\.0 → 12\.0 CPU s \(\+9%\)/);
+  assert.equal(worse.querySelector('.chip').textContent, 'Did not help');
 });
 
 // Bug it guards (D6): the run where an Optimize took effect was not seen, so the change in time could not be read.

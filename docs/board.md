@@ -326,13 +326,13 @@ checks that a mock gives back what the mock was told to give), `text-only` (it o
 text), `no-assert` (it has no assertion) and `defined-only` (it only checks that a value is defined or truthy). For a
 JavaScript or TypeScript test file, Conveyor finds the clear cases with no model: a case with no `expect` or `assert`
 call, and a case whose only assertions are `toBeDefined` or `toBeTruthy`. When Judge this test ends, its hollow cases
-replace these. Click the "Hollow N" filter chip to see only these files. An open row lists its hollow cases, each
-with its kind and the reason.
+replace these. Click the "Hollow N" filter chip to see only these files. The Judge tab of an open row lists its
+hollow cases, each with its kind and the reason.
 
 The Mutants caught column shows the newest mutation check of a file, as "14 / 20": the check made 20 small changes
 (mutants) to the code that the file tests, and the file failed on 14 of them. The column is empty until a check of
 the file ends. Point at the count to see when the check ran and on which commit. A check that runs, waits in the
-queue or is paused also shows "running", "queued" or "paused". An open row shows the state of its check: queued, with
+queue or is paused also shows "running", "queued" or "paused". The Mutation tab of an open row shows the state of its check: queued, with
 its place in the idle queue; running, with the mutant it runs ("mutant 4 of 20"); paused for a card; or done. It
 lists each mutant that survived: the source file and line, the line before and after the change, and "tests still
 passed". A surviving mutant shows a change that the tests do not see.
@@ -342,8 +342,30 @@ sort the table by that column. Click it again to reverse the order. An arrow sho
 you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path in
 the search box to see only the files that match it. The search and a filter chip work together.
 
-Click a file's name to open its row. The row shows its runs, each marked with its card or "whole suite", its budget,
-and three actions: Judge, Optimize and Run. Judge (Judge this test) and Run (Run this file now) start at once.
+Click a file's name to open its row. The row has four tabs: Overview, Timeline (with its count of events), Judge and
+Mutation. Overview shows first. Use the left and right arrow keys to move between the tabs.
+
+Overview starts with a box that says what state the file is in: how far over its budget it is, after which Optimize
+cards and by how much each one changed it, and whether its runs are slower or faster than usual. Under it is the
+verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
+buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Raise this file's
+budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
+Raise this file's budget… when Judge said keep, Run while an Optimize issue of the file is open, and Optimize in other
+cases. Six tiles follow: the CPU seconds now with the budget, the last 4 runs as bars, the last Optimize as a
+percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs
+caught and the mutants caught (or "not checked"). Point at a bar, or move the keyboard focus to it, to see its CPU
+seconds. Last, the 3 latest events, with a button that opens the Timeline.
+
+The Timeline lists every event of the file, newest first: its runs (each with its card's issue, or "whole suite" and
+its result), its Optimize issues, the test edits of landed cards and the runs of Judge. The filter chips All, Runs,
+Optimize, Test edits and Judge show one kind of event. A test edit shows the issue of its card, as a link, and its
+time. A weakened edit has the chip "Weakened".
+
+The Judge tab shows the newest result of Judge: its verdict once at the top, then its full report. The Mutation tab
+shows the mutation check of the file. A tab's content is never taller than the window under the page head: a long
+one scrolls inside its tab.
+
+Judge (Judge this test) and Run (Run this file now) start at once.
 Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers, its hollow cases,
 its surviving mutants (so that the card adds the assertions that catch them) and the newest verdict of Judge, with
 the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds Explain the slowdown,
@@ -356,7 +378,7 @@ asks for a test slot, the check pauses, and it goes on from its next mutant late
 queue holds the files that the page flags (Never caught anything, or Hollow), then the files checked longest ago
 (`conveyor/README.md`, Mutation checks).
 
-An open row also shows its newest action, in a box under its buttons. When you click Judge, Run or Explain the
+An open row also shows its newest action, in a box under its buttons. When Judge ends, its result moves to the Judge tab. When you click Judge, Run or Explain the
 slowdown, the box shows at once, with a bar and "Starting", until the build machine answers. A queued action shows a
 bar, "Queued, N ahead" and Stop. While it runs, you see its time bar, the time it used, its text as it comes, Stop and
 Copy. When it ends, you see its result in the same box. When the build machine refuses the action, the box shows "Not
@@ -367,24 +389,25 @@ with its mutants and its time, then its result). Optimize on a file that runs ot
 no issue. The text of Judge and Explain the
 slowdown shows as formatted text: paragraphs, bold, lists and code. Copy copies the text as the model wrote it. A
 Judge result starts with "Verdict:" and the verdict. When the verdict is speed up, split, merge or delete, click
-"Optimize with this verdict" to open the Optimize issue with that verdict and its text.
+"Optimize with this verdict" to open the Optimize issue with that verdict and its text. The page scrolls to the
+issue, which shows the verdict, and the cursor is in its text.
 
-An open row lists each Optimize issue filed for the file, and each older "Speed up the test file" issue, newest first.
-Each shows the date it was filed, its link and its state: open, building, blocked (with the reason), landed (with the
-commit), or closed without landing. A landed issue also shows the fix of its card (sped up, split, merged into a file,
-or deleted) and the CPU seconds of the file before and after the fix. Next to "before", it shows the median CPU
-seconds of the file's runs since the fix landed, when the file ran since then. The first run after the fix has a mark
-in the row's Last runs and in its list of runs, while the row still shows that run. When a mutation check of the file
-ended before the fix landed and another ended after it, a landed issue also shows the mutants caught before and after
-("Mutants caught before: 9 / 20, after: 14 / 20").
+The Timeline lists each Optimize issue filed for the file, and each older "Speed up the test file" issue. Each shows
+its link and its state: open, building, blocked (with the reason), landed (with the commit), or closed without
+landing. A landed issue also shows the fix of its card (sped up, split, merged into a file, or deleted), the CPU
+seconds of the file before → after the fix with the change as a percentage, and "Helped" or "Did not help". When the
+file ran since the fix landed, it also shows the median CPU seconds of those runs. The first run after the fix has a
+mark in the table's Last runs and in the Timeline, while the row still shows that run. When a mutation check of the
+file ended before the fix landed and another ended after it, a landed issue also shows the mutants caught before and
+after ("Mutants caught before: 9 / 20, after: 14 / 20").
 
 Test edits by cards shows what each landed card did to a test file that the project already had, newest first. A
-new test file is not in it. Each entry shows the issue and the card, the file, when the card landed and the counts:
+new test file is not in it. Each entry shows the issue of the card, the file, when the card landed and the counts:
 assertions removed, expected values changed in kept assertions, skip, only or todo marks added, timeouts raised and
 cases deleted. Conveyor reads shell test files and JavaScript and TypeScript test files. A file of another kind shows
 "Edited, not read". The Weakened filter, which shows first, shows the edits with one of these counts above zero. All
-edits shows every edit. Weakened edits on many cards show a pattern: tests that were made weaker to get green. An
-open row lists the edits of its own file.
+edits shows every edit. Weakened edits on many cards show a pattern: tests that were made weaker to get green. The
+Timeline of an open row lists the edits of its own file.
 
 A file that an Optimize deleted, or merged into another file, is not in the table. "Removed by Optimize", below the
 table, shows it with its last numbers, its issue and the test files that now have its cases. For a deleted file,
