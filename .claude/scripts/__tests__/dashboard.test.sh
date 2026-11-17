@@ -581,7 +581,7 @@ MP=$(jq -c '.paused = true | .cap = 4' <<<"$MC")
 # widgetshop's loop leaves one of its 3 cards out of its count against its cap, as it only waits on another card
 # (health.waiting, issue 201): the machine, the project, Belt 3D's deck and the On the belt tile (the Belt part's
 # waiting) count 1 + 2 slots in use, never 4.
-answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waiting = 1' <<<"$C3")")" "$C_URL" 0
+answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waitingCount = 1' <<<"$C3")")" "$C_URL" 0
 run
 q '.panels.machine.data | .state == "paused" and (.projects | map(.state)) == ["paused", "running"]' "a paused machine is paused; each project's state stays its own record's"
 q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used, .panels.belt.data.waiting, .panels.belt.data.byRepo.sample.waiting, .panels.belt.data.byRepo.widgetshop.waiting] == [3, [1, 2], 3, 1, 0, 1]' \

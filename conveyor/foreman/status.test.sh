@@ -116,7 +116,7 @@ grep -qxF 'alpha: Main is red (0123456789ab) is blocked since 2026-11-15T11:58:0
 # owner saw three cards on the belt with the cap at 3 and could not tell one of them was waiting and held no slot.
 t_building() {
 CASE=building; fixture building
-snap ".belt = [$(card 3 One build),$(card 4 Two land)] | .health.builderCap = 1 | .health.building = 1 | .health.waiting = 1"
+snap ".belt = [$(card 3 One build),$(card 4 Two land)] | .health.builderCap = 1 | .health.building = 1 | .health.waitingCount = 1"
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
 grep -qxF 'alpha: 2 on the belt; building 1 of the cap 1, 1 waiting not counted' <<<"$out" || fail "the status does not give the count against the cap without the waiting card: $out"
 }

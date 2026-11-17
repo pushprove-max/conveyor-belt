@@ -53,7 +53,7 @@ test('a head with no limit in the data file says so, and a day with an unpriced 
 // Bug: a card that only waits on another card takes no build slot, but /units gave only the count on the belt, so the
 // owner saw a full cap where the loop had a free slot.
 test('/units gives the cards building against the cap and leaves out those waiting on another card, as foreman status does', () => {
-  const s = board({ belt: BELT, health: { loop: true, state: 'running', building: 1, waiting: 1, builderCap: 1 } })
+  const s = board({ belt: BELT, health: { loop: true, state: 'running', building: 1, waitingCount: 1, builderCap: 1 } })
   const text = tableText(s, 120)
   expect(section(text, 'ON THE BELT').split('\n')[1]).toBe('  building 1 of the cap 1, 1 waiting not counted')
   expect(bandModel(s, 200, 0).map(plain)[0]).toMatch(/ · 2 on the belt · 0 queued · 0 landed · building 1 of the cap 1, 1 waiting not counted /)
@@ -63,7 +63,7 @@ test('/units gives the cards building against the cap and leaves out those waiti
   expect(tableText(s, 56).split('\n')[1]).toMatch(/ 2 on belt · 0 queued$/)
   expect(bandModel(s, 100, 0).map(plain)[0]).toMatch(/ · 2 on the belt · 0 queued · 0 landed/)
   // With no cap (off) or no loop count, only the count on the belt.
-  expect(summaryLine(board({ belt: BELT, health: { loop: true, building: 2, waiting: 0, builderCap: null } }))).toBe('conveyor: 2 on the belt · 0 landed · today $0.00')
+  expect(summaryLine(board({ belt: BELT, health: { loop: true, building: 2, waitingCount: 0, builderCap: null } }))).toBe('conveyor: 2 on the belt · 0 landed · today $0.00')
 })
 
 // Bug: a release's whole suite (about 15 minutes) runs and /units shows nothing of it, so the owner asks the Foreman

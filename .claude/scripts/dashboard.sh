@@ -49,7 +49,7 @@
 #           A card that has landed stays here (landed true) until it is pushed and its issue is closed (with the rule
 #           "Push when a card lands" off, the snapshot leaves an unpushed one out: Landed today shows it). cap: the
 #           slots in force (every project's own cap together, no more than the machine cap; null when neither is known).
-#           waiting: the cards on it that hold no slot as they only wait on another card (each loop's health.waiting).
+#           waiting: the cards on it that hold no slot as they only wait on another card (each loop's health.waitingCount).
 #   belt3d  the Belt 3D panel, cut from the parts above and nothing else: repos, belt (each belt card's repo, card,
 #           issue, title, url, step, stepAt, landed, waitsOn, usd, turns (its live record's), its reviews (round,
 #           verdict, counts) and its track's steps, at, since, tests and files, and its records' name and at, and
@@ -610,8 +610,8 @@ PANELS_JQ='
     | ([.[].snap.health.machine | objects][0].cap | numbers) // null
     | if . == null then $sum elif $sum == null then . else [., $sum] | min end;
   # The cards of the records (the record list) that hold no slot as they only wait on another card: the count each
-  # running loop leaves out of its own against its cap (health.waiting), together; 0 when none says.
-  def idle: [.[].snap.health.waiting | numbers] | add // 0;
+  # running loop leaves out of its own against its cap (health.waitingCount), together; 0 when none says.
+  def idle: [.[].snap.health.waitingCount | numbers] | add // 0;
   # The machine of the records (the record list) for the Tests page: its load limit (the host file maxLoad, as health
   # names it; null for none), unread (the host file does not read), and its cores and 1-minute load now (health
   # machineNow; null when not read, or from a snapshot from before it said).

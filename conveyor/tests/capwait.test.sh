@@ -21,7 +21,7 @@ capwaitrun() { ( loop run > "$STUB/run.out" 2>&1 ) & lp=$!; }
 cwwaits() { jq -e '.waits.on' "$T/$CASE/cards/"*-"$1".live >/dev/null 2>&1; } # <issue>: its card waits on another card now
 cwpicked() { [ -n "$(st "select(.issue == $1 and .step == \"picked\") | .card")" ]; } # <issue>
 # The loop's own count at its last turn, as health gives it: "<building> <waiting>".
-cwcounts() { loop health | jq -r '"\(.building) \(.waiting)"'; }
+cwcounts() { loop health | jq -r '"\(.building) \(.waitingCount)"'; }
 capwaitend() { loop control stop >/dev/null; wait "$lp" 2>/dev/null; kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; }
 
 # Bug it catches: a card that waited on a same-file card for minutes, using no CPU, still took one of the cap's slots,

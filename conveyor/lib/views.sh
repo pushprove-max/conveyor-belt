@@ -185,7 +185,7 @@ cards() {
 # to run: the record's signin; null otherwise), guard: at (the guard's percent, null for none), reading and
 # readAt (the reading it is held against, null when no guard is set or there is no reading) and missing (true when a
 # guard is set and there is no reading: the guard then pauses nothing), start (where new issues start: queue or held;
-# null when the record does not read), builderCap (the cap in force), building and waiting (the running loop's cards
+# null when the record does not read), builderCap (the cap in force), building and waitingCount (the running loop's cards
 # counted against that cap at its last turn, and its cards left out of that count as they only wait, run(); null when
 # no loop runs), models and
 # efforts (the ones in force, {claude, codex}: the next session's and the next review's), and homes (plan section 6).
@@ -339,7 +339,7 @@ health() {
              | select($k != []) | {card, issue, step: "test", since: ($k | map(.since) | min), cases: ($k | map(.name))}])),
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
-       gh: $gh, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waiting: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
+       gh: $gh, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
        untimed: untimed, report: $report, routes: $routes, quarantined: $qt}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"

@@ -138,7 +138,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
     + ((.health | objects | select((.building | type) == "number" and (.builderCap | type) == "number")
-      | "; building \(.building) of the cap \(.builderCap)\(if (.waiting // 0) > 0 then ", \(.waiting) waiting not counted" else "" end)") // ""),
+      | "; building \(.building) of the cap \(.builderCap)\(if (.waitingCount // 0) > 0 then ", \(.waitingCount) waiting not counted" else "" end)") // ""),
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),
