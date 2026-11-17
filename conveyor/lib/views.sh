@@ -254,9 +254,11 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
     elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check}
     elif .step == "picked" then {mainRed} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
+# READCHECKED, when set, says READ is a copy that check() has already passed and nothing appends to (the snapshot's):
+# health does not check it again.
 health() {
   local loop=true gh=false free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld tr so sr pr co hd rc
-  check && lv=${LIVEJSON:-$(live)} || return 1
+  { [ -n "${READCHECKED:-}" ] || check; } && lv=${LIVEJSON:-$(live)} || return 1
   # The records and the retried lines, as health reads them (HEALTHLINE).
   hd=$(mktemp -d) || return 1
   linesum "$READ" "$STATE.health" "$hd/rec" "$HEALTHLINE" && linesum "$READ_OLD" "$RETRIED.health" "$hd/old" "$HEALTHLINE" || { rm -rf "$hd"; return 1; }

@@ -122,8 +122,10 @@ t_snapshotdeploy() { snapshotstart
   mkdir "$STUB/tmp"; TMPDIR=$STUB/tmp loop snapshot >/dev/null 2>&1; [ -z "$(ls -A "$STUB/tmp")" ] || fail "a snapshot left its copy of the records behind: $(ls -A "$STUB/tmp")"
   # A line that does not check (#157): the snapshot is still given, with every card it gave before. The line is set
   # aside in quarantined.jsonl, and the snapshot's health names it. Bug: one bad line stopped every snapshot.
+  # #290: the rows (snaprows) read the records before health's check set the line aside, and jq stopped on it.
   local before after; before=$(loop snapshot | jq -c '[.landed, .awaitingDeploy]')
-  echo junk >> "$S/cards.jsonl"; after=$(loop snapshot 2>/dev/null) || fail "a snapshot stopped on a line that does not check"
+  echo junk >> "$S/cards.jsonl"; after=$(loop snapshot 2>"$STUB/junk.err") || fail "a snapshot stopped on a line that does not check: $(cat "$STUB/junk.err")"
+  ! grep -q 'parse error' "$STUB/junk.err" || fail "the snapshot's rows read the line before it was set aside: $(cat "$STUB/junk.err")"
   [ "$(jq -c '[.landed, .awaitingDeploy]' <<<"$after")" = "$before" ] && [ "$(jq -c '.health.quarantined | map(.field)' <<<"$after")" = '["(not JSON)"]' ] \
     || fail "the snapshot did not give the rest of the records, or its health does not name the line set aside: $(jq -c '[.landed, .health.quarantined]' <<<"$after")"
   ! grep -qx junk "$S/cards.jsonl" && [ "$(jq -sc 'map(.record)' "$S/quarantined.jsonl")" = '["junk"]' ] || fail "the snapshot did not set the bad line aside: $(cat "$S/quarantined.jsonl" 2>&1)"

@@ -446,7 +446,10 @@ snapshot() (
   # A plain assignment inside the subshell, never a prefix on the call: a prefix would put the whole issue list in the
   # environment of every command health runs, and past the kernel limit each one fails with "Argument list too long".
   # The rows before health: health's summaries of the records go stale with the rows' one, and snaprows says so first.
-  snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
+  # The check before the rows: a line that does not check is set aside (and dropped from READ) before rows.jq reads it,
+  # else one bad line stops the snapshot (#290). READ is this snapshot's own copy, so health need not check it again.
+  # shellcheck disable=SC2034 # READCHECKED is read by health (lib/views.sh), which conveyor.sh sources beside this file
+  check && READCHECKED=1 && snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
   # shellcheck disable=SC2034 # read by health (lib/views.sh), which conveyor.sh sources beside this file
   h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
   snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
