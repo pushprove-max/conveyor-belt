@@ -398,8 +398,10 @@ For each Mutation check, the bar shows the state of the check of that file. One 
 
 An Optimize card picks the fix: speed the file up, split it, merge it into another test file, or delete it. It does
 not need a test that fails on main. A file it keeps must pass in fewer CPU seconds than its median, else the card is
-blocked with "the file is not faster" and both numbers (`conveyor/README.md`, Bug cards: the new tests fail without
-the fix). The files of a split must pass in fewer CPU seconds summed. For a delete or a merge, the review names the
+blocked with "the file is not faster", both numbers and its budget (`conveyor/README.md`, Bug cards: the new tests
+fail without the fix). Each file of a split must pass at or under its budget, and the files' CPU seconds summed must be
+at most the old file's plus a start-up allowance for each new file. A file whose cases cannot fit its budget can get
+a budget of its own: the card stops under Needs you for your yes to it. For a delete or a merge, the review names the
 test that still covers each case of the file. Each file of an action on many files gets its own action or issue, and
 its own answer. At most 3 test actions run at once. The others wait as queued and start in the order asked. Stop
 takes a queued one off before it starts.

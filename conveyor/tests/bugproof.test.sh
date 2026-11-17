@@ -326,10 +326,10 @@ t_speedfaster() {
 }
 
 # D2. Bug it catches: a speed-up card whose file is as slow as its median lands as a speed-up. It is blocked with the
-# "not faster" reason naming both numbers, never reviewed.
+# "not faster" reason naming both numbers and the file's budget, never reviewed.
 t_speedslow() {
   speedcard 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now; its budget is 8 CPU s' ] && [ ! -e "$STUB/asked" ] \
     || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
   [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
 }
@@ -345,7 +345,9 @@ t_speedfails() {
 # `echo other`), whose median on
 # record is 10 CPU s (three whole-suite runs: 9, 10, 11). Its build runs <build>. Each run under cards/mainrun/ runs
 # the files of its list: it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each
-# as passed, and times each at the CPU seconds $STUB/cpu-<file> holds. The reviewer's prompt is kept in $STUB/asked.
+# as passed, and times each at the CPU seconds $STUB/cpu-<file> holds. The run of f on main for the build's brief
+# (speedbrief(), under cards/mainrun/<card>.cases) is not noted: ownbudget.test.sh holds that brief to its lines.
+# The reviewer's prompt is kept in $STUB/asked.
 optcard() { # <build> <cpu of f> [<cpu of f1> <cpu of f2>]
   setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"
   echo 'echo slow' > "$R/f.test.sh"; echo 'echo other' > "$R/g.test.sh"
@@ -359,7 +361,7 @@ optcard() { # <build> <cpu of f> [<cpu of f1> <cpu of f2>]
   done
   cat > "$STUB/mainrun-cmd" <<'EOF'
 while IFS=$'\t' read -r k f; do
-  [ "$k" = fail ] || continue; echo "$f: $(cat "$f" 2>/dev/null)" >> "$STUB/mainran"; printf '== %s\nok one\nok two\n' "$f"
+  [ "$k" = fail ] || continue; [[ $PWD == *.cases ]] || echo "$f: $(cat "$f" 2>/dev/null)" >> "$STUB/mainran"; printf '== %s\nok one\nok two\n' "$f"
   printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
 done < "$CONVEYOR_TEST_RERUN"
 EOF
@@ -381,7 +383,7 @@ t_optkeep() {
 # D1. Bug it catches: an Optimize card that keeps its file as slow as its median lands. It is blocked before review.
 t_optslow() {
   optcard 'echo fast > f.test.sh' 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now; its budget is 8 CPU s' ] && [ ! -e "$STUB/asked" ] \
     || fail "an Optimize card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
 }
 
@@ -391,7 +393,7 @@ t_optsplit() {
   optcard 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 2 3
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":5,"fix":"split","into":["f1.test.sh","f2.test.sh"]}' ] || fail "the split's record does not hold its summed CPU seconds: $(st 'select(.step == "bugproof")')"
   [ "$(sort "$STUB/mainran" | tr '\n' '|')" = 'f1.test.sh: one|f2.test.sh: two|' ] || fail "the split's new files did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
-  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed, lower than the median on record of f.test.sh, 10 CPU s' "$STUB/asked" \
+  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed (the median on record of f.test.sh is 10 CPU s), each file at or under its budget: f1.test.sh 2 of 8 CPU s, f2.test.sh 3 of 8 CPU s' "$STUB/asked" \
     || fail "the review was not shown the split's numbers"
   [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster split did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }

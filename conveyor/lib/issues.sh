@@ -88,8 +88,9 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
   # on, a yes with a condition has the kept patch reviewed against it with no build.
   if names 2>/dev/null && yeskept "$p" && l=$(gh issue view "$n" --json number,title,body,labels,milestone 2>/dev/null); then
     what=$(keptway "$l" "${ends%.patch}.body")
-    if ! yesrule; then [ "$what" != wait ] && [ "$what" != land ] || what=off
-    elif [ "$what" = land ] && conditional "$l"; then what=held
+    # A stop for a budget of its own for a test file waits for the yes whatever the rule.
+    if ! yesrule && [[ $(jq -r .reason <<<"$p") != "$YES$OWNSTOP"* ]]; then [ "$what" != wait ] && [ "$what" != land ] || what=off
+    elif [ "$what" = land ] && yesrule && conditional "$l"; then what=held
     fi
     case $what in
       held) echo "conveyor: its next card reviews the kept patch $ends against $OWNER's yes as the issue now gives it, with no build: the patch lands only after that review"; return 0 ;;
@@ -224,12 +225,13 @@ prior() { # <issue>
 }
 # Whether the kept patch of prior() ($1) is one card() would land with no build and no review: its card stopped for
 # the owner's yes after a review of that patch (the kept review is that card's own) that gave a verdict and said
-# whether the change is visible.
+# whether the change is visible, or that stopped for the yes to a budget of its own for its test file (OWNSTOP), which
+# needs no such answer.
 yeskept() { # <prior json>
   local from was rev
   from=$(jq -r .card <<<"$1"); was=$(jq -r .reason <<<"$1"); rev=$(jq -r .review <<<"$1")
   [ -n "$from" ] && [[ $was == "$YES"* ]] && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
-    && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && [ -n "$(visible "$rev" any)" ]
+    && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && { [ -n "$(visible "$rev" any)" ] || [[ $was == "$YES$OWNSTOP"* ]]; }
 }
 # How the next card takes up such a kept patch, from the issue as it is now ($1, its json) and the issue as the
 # review of that patch read it (the .body file its card kept when it stopped for the yes, $2). Approval lines aside:

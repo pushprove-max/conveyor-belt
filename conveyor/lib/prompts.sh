@@ -77,6 +77,10 @@ names() {
   # shellcheck disable=SC2034 # TESTRX and TESTGLOBS are read in lib/issues.sh and lib/testrun.sh
   PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]}
   YES="visible to customers or staff: needs $OWNER's yes: "
+  # A card that stops for the owner's yes to a budget of its own for its test file (card(), ownbudget()): its blocked
+  # reason is YES, OWNSTOP, then `<file>: <CPU s> CPU s: <why>`, so it waits under Needs you as a visible change does.
+  # shellcheck disable=SC2034 # OWNSTOP is read in lib/card.sh and lib/issues.sh
+  OWNSTOP='a budget of its own for the test file '
   [ "$r" = real ] && r=$REALPROOF || r=''
   REVIEW=${REVIEWT//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<product paths>'/"$p"}; REVIEW=${REVIEW//'<real proof>'/"$r"}
   REVIEWOFF=${REVIEW//'<yes>'/"$NOYESREVIEW"}; y=${YESREVIEW//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<yes>'/"${y//'<product paths>'/"$p"}"}
@@ -434,9 +438,10 @@ than its median on record. Judge whether the file still tests all that it tested
 OPTREVIEW='# The Optimize check
 This issue optimizes one test file: the change speeds it up, splits it, merges it into another test file or deletes
 it, and keeps what it tests, so no test must fail on main'"'"'s code without the change. A file the change keeps, and the
-test files a split adds, were run alone with the change, on a test slot: they must pass, and their CPU seconds summed
-must be lower than the file'"'"'s median on record. Judge whether the tests still test all that the file tested before.
-Its result:'
+test files a split adds, were run alone with the change, on a test slot: they must pass. A file kept must be faster
+than its median on record; the files of a split must each be at or under their budget, and their CPU seconds summed at
+most the file'"'"'s median plus a start-up allowance for each file the split adds. Judge whether the tests still test all
+that the file tested before. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

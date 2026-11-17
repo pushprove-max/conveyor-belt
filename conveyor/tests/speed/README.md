@@ -45,6 +45,20 @@ The same three rules are in the card rules (`.conveyor/card-rules.md`), so every
   proves. Why: a card run pays for the loop, its sessions and its waits around the one function: `testfails` 13.62 s to
   3.14 s (76% cut, #362) and `testrec` 19.26 s to 1.99 s (89% cut, #371) (`cases-4.md`).
 
+## How a split is checked, and a budget of its own
+
+An Optimize card that splits a test file passes its check when every case passes, each new file is at or under its
+budget (the pack's `test.fileBudget`, or the file's own in `test.files`), and the new files' CPU seconds summed are at
+most the old file's on record plus a start-up allowance for each new file. The allowance is the CPU seconds of a run of
+a new file with no case selected, when that run names no case. A runner with no case filter runs the whole file, so
+then the allowance is the pack's `test.splitAllowance`, as it is when that run gives no CPU seconds. A split never makes the
+sum lower, so a split into too few files fails: the card's brief says how many files a split alone needs. Make the
+heavy cases faster, or make the split finer.
+
+A file whose cases cannot fit the budget without losing what they test gets a budget of its own: the build ends its
+reply with `OWN-BUDGET: <CPU s> CPU s: <why>`, the card stops for the owner's yes, and the yes puts that budget in
+`test.files` for the file. `conveyor/README.md` (The CPU budget of a test file) has the details.
+
 ## Ways that worked
 
 - Split a case that runs several fixtures one after another into one case per fixture: the runner runs them side by

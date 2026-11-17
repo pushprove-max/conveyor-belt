@@ -493,6 +493,21 @@ quiet machine, with its worker threads) is on the card's test line (`slow`). A f
 marked slow on purpose is held to no budget: it is never on the `slow` line and no CPU test rule files it. The test
 line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`).
 
+**How a split is checked.** A split does not lower the CPU seconds summed: each new file has its own start-up. It
+gives files that each fit the budget and run side by side. So the check of an Optimize card (Bug cards: the new tests
+fail without the fix, below) passes a split when every case passes, each new file is at or under its budget, and the
+CPU seconds summed are at most the old file's median on record plus a start-up allowance for each new file. The check
+measures the allowance: it runs the first new file with no case selected (a run-again line
+`fail<TAB><file><TAB>conveyor-no-case`, a case that no file has). It uses that run only when the run names no case
+and the run of the split named a case of that file. A runner with no case filter runs the whole file, so its CPU
+seconds are not start-up. When the run is not used or gives no CPU seconds, the allowance is the pack's
+`test.splitAllowance` (default 1). It measures only when the sum is over the old file's median.
+
+**A budget of its own.** A file whose cases cannot fit the budget without losing what they test gets a budget of its
+own in `test.files`. The Board's Tests page sets it (`conveyor.sh test-settings file-budget`, below). The build of an
+Optimize or speed-up card can also propose one with an `OWN-BUDGET:` line. Its card then stops for the owner's yes,
+and the yes sets that budget (Bug cards, below).
+
 A project whose test command prints no `TESTRUN sec` lines records no test times, and no file of it is held to the
 budget. The plugin ships a helper for it, `conveyor/tools/testtime.sh <file> -- <command>...`: it runs the command
 once, then prints the file's `TESTRUN sec` line, with its clock seconds and its CPU seconds (the user plus system time
@@ -842,7 +857,8 @@ the title's next word. Such a change keeps what the file tests, so its tests pas
 there. The file runs alone, with the change, on a test slot, with the pack's `test.command`. It must pass, and its CPU
 seconds must be lower than its median on record (the median the Tests page shows). The card's `bugproof` line (result
 `ok` or `fail`) names the file and both numbers: `speed: {file, before, after}`. When the file is not faster, the card
-is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s now", with no review. When the file
+is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s now; its budget is <budget> CPU s",
+with no review. When the file
 fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
 shown the result.
 
@@ -852,8 +868,10 @@ another test file, or deletes it. No test must fail on main's code. The check de
 
 - The change keeps the file and adds no test file: the check is the speed-up check above.
 - The change adds test files (a split): the new files run alone, with the change, on a test slot, and so does the rest
-  of the old file when the change keeps it. They must pass, and their CPU seconds summed must be lower than the old
-  file's median. Else the card is blocked with the reason, with no review.
+  of the old file when the change keeps it. They must pass, and each file must be at or under its budget. Their CPU
+  seconds summed must be at most the old file's median plus a start-up allowance for each file the split adds (The
+  CPU budget of a test file, above). Else the card is blocked with no review. The reason names each file over its
+  budget and by how much, and a sum over its limit with the allowance.
 - The change removes the file and adds no test file (a delete, or a merge into another file): it is not run with the
   change. The file runs alone on main's code, and the review gets the cases that its runner named. The review must
   name, for each case, the test that still covers it, one line each: `COVERED-BY: <test file>: <case>`. Such a line is
@@ -864,6 +882,18 @@ split, and null for a delete or a merge. It also names the fix: `fix` is `sped u
 and `into` lists the test files that a split adds or that a merge changes (empty for the others). A change that
 removes the file and changes another test file is a merge into that file; one that changes no other test file is a
 delete.
+
+The build of a speed-up or Optimize card is told the target. Before the build, the file runs alone on main's code to
+count its cases. The brief gives the file's CPU seconds on record and its budget, its count of cases and their average
+CPU seconds, and how many files a split alone needs to fit the budget. It also says how the check above takes a split.
+When the build finds that the file's cases cannot fit the budget without losing what they test, it keeps the file and
+ends its reply with one line: `OWN-BUDGET: <CPU s> CPU s: <why>`. The check then holds the file to that budget in place
+of its own. After a review that lets the card land, the card stops for the owner's yes, as a visible change does, and
+waits under Needs you with the reason "a budget of its own for the test file <file>: <CPU s> CPU s: <why>". This stop
+does not depend on the rule "visible changes need the owner's yes". With the yes (an approval line, as for a visible
+change), the next card sets the budget (`test.files`, as `conveyor.sh test-settings file-budget` does) and lands
+from the kept patch, with no build and no review. With no yes, the card stops again. With the owner's no (the Board's
+Decline), the issue is held. The card is not built again for it.
 
 ## The whole test on main
 
