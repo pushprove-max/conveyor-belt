@@ -387,13 +387,13 @@ export const timelineText = (s: TimelineStep): string => {
   }
   return parts.join(' · ')
 }
-// Parts joined with " · " and wrapped at the width, never cut: a later field must not fall off a narrow terminal. A
-// wrapped line is indented two more under the first; only one part wider than the whole line is cut.
-const wrapParts = (parts: string[], w: number, lead: string): Line[] => {
+// Parts joined with " · " (or `sep`) and wrapped at the width, never cut: a later field must not fall off a narrow
+// terminal. A wrapped line is indented two more under the first; only one part wider than the whole line is cut.
+const wrapParts = (parts: string[], w: number, lead: string, sep = ' · '): Line[] => {
   const out: Line[] = []
   let cur = ''
   for (const p of parts) {
-    const next = cur ? `${cur} · ${p}` : `${lead}${p}`
+    const next = cur ? `${cur}${sep}${p}` : `${lead}${p}`
     if (cur && cols(next) > w) { out.push([{ t: cur, d: true }]); cur = `${lead}  ${p}` } else cur = next
   }
   if (cur) out.push([{ t: cur, d: true }])
@@ -671,13 +671,14 @@ const capText = (snap: Snap): string => {
   return ls.map(l => `${snap.loops.length > 1 ? `${l.repo} ` : ''}building ${l.building} of the cap ${l.cap}${l.waiting ? `, ${l.waiting} waiting not counted` : ''}`).join(' · ')
 }
 // The machine's pressure, the same in every record (the first that says): `machine room Busy · CPU pressure 45.5% ·
-// memory pressure 1.5% · wake delay 0.2 ms · CPU pressure 45.5% is at or above 40%`. Nothing when no record says.
-const roomText = (snap: Snap): string => {
+// memory pressure 1.5% · wake delay 0.2 ms · CPU pressure 45.5% is at or above 40%`, as its parts. None when no
+// record says.
+const roomParts = (snap: Snap): string[] => {
   const p = snap.loops.map(l => l.pressure).find(x => x)
-  if (!p) return ''
+  if (!p) return []
   const fig = (v: number | null, say: (n: number) => string) => (v === null ? [] : [say(v)])
   return [`machine room ${p.state || 'not read'}`, ...fig(p.cpu, n => `CPU pressure ${n}%`), ...fig(p.memory, n => `memory pressure ${n}%`),
-    ...fig(p.wakeMs, n => `wake delay ${n} ms`), ...fig(p.freeMB, n => `${n} MB free`), ...(p.why ? [p.why] : [])].join(' · ')
+    ...fig(p.wakeMs, n => `wake delay ${n} ms`), ...fig(p.freeMB, n => `${n} MB free`), ...(p.why ? [p.why] : [])]
 }
 // Last on a line that is cut at its end, so the counts before it are kept on a narrow screen.
 const capTail = (snap: Snap): string => (capText(snap) ? ` · ${capText(snap)}` : '')
@@ -763,7 +764,8 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
 export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   head('ON THE BELT', snap.belt.length),
   ...(capText(snap) ? [[{ t: `  ${capText(snap)}`, d: true }]] : []),
-  ...(roomText(snap) ? [fitWidth([{ t: `  ${roomText(snap)}`, d: true }], w)] : []),
+  // Wrapped, not cut: the wake delay and the figure that holds cards are last on a line wider than /units.
+  ...wrapParts(roomParts(snap), w, '  '),
   ...(snap.belt.length ? [] : [empty('the belt is empty')]),
   ...snap.belt.flatMap((b, i): Line[] => {
     const all = overallOf(b, s.now)
@@ -806,8 +808,8 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
     ...next.flatMap((q, i): Line[] => [titled(q, [{ t: ` ${i + 1} `, d: true }],
       [{ t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') },
         ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false),
-      // The one the machine holds back says why, with the figure that held it.
-      ...(q.room ? [fitWidth([{ t: `    ${q.room}`, d: true }], w)] : [])]),
+      // The one the machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last.
+      ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])]),
     // The issues that wait on another: not in the pick order, each with what it waits for.
     ...snap.waits.slice(0, NEXT).map((x): Line => titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [{ t: `Waits for ${x.waitsFor.map(n => `#${n}`).join(', ')}`, d: true }], w, false)),
     ...(snap.waits.length > NEXT ? [empty(`and ${snap.waits.length - NEXT} more waiting`)] : []),

@@ -76,6 +76,16 @@ test('/units shows the machine room state with its PSI figures and wake delay, a
   expect(section(text, 'ON THE BELT').split('\n')[1].trimEnd())
     .toBe('  machine room Strained · CPU pressure 12.5% · memory pressure 25.5% · wake delay 0.2 ms · memory pressure 25.5% is at or above 20%')
   expect(section(text, 'QUEUE').split('\n')[2].trimEnd()).toBe(`    ${room}`)
+  // Issue 233. Bug it catches: /units' pane is 72 columns at most and 56 by default, and both lines were cut at the
+  // width, so the wake delay and the held card's memory figure fell off. Each wraps now, every figure kept.
+  for (const w of [72, 56]) {
+    const narrow = tableText(s, w)
+    const belt = section(narrow, 'ON THE BELT').split('\n').slice(1), queue = section(narrow, 'QUEUE').split('\n').slice(2)
+    for (const l of [...belt, ...queue]) expect(cols(l.trimEnd())).toBeLessThanOrEqual(w)
+    const kept = belt.map(l => l.trim()).join(' · ')
+    expect(kept).toContain('wake delay 0.2 ms · memory pressure 25.5% is at or above 20%')
+    expect(queue.join(' ').replace(/\s+/g, ' ')).toContain(room)
+  }
   // No pressure said, no line; a queued card the machine does not hold has no line under it.
   const none = tableText(board({ queue: { next: queued(1), held: {} } }), 200)
   expect(section(none, 'ON THE BELT')).not.toMatch(/machine room/)
