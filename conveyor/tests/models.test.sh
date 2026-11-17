@@ -9,6 +9,21 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
+# An engine function called alone in the engine shell, as `conveyor.sh <command>` loads it (the libraries
+# commands/<command>.sh sources), with no loop run: a case about one function (the review, a session's route, doctor's
+# route lines) pays for that function, not for a whole card around it.
+engine() { # <run|doctor> <the engine command>
+  mkdir -p "$T/$CASE/cards"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/$1.sh")" && names && eval "$2" )
+}
+# reviewed() alone, as a card's review step calls it, on a worktree of main (cards/c<n>) with the build's change
+# staged: what it prints, then a last line of its exit and the verdict it left (rc=<exit> <verdict>).
+rvcall() { # <n>
+  engine run "w=\$CARDS/c$1"' && git -C "$MAIN" worktree add -q --detach "$w" && echo two >> "$w/a.txt" && git -C "$w" add a.txt \
+    && { reviewed "$w" "# Issue: body of the issue"; echo "rc=$? $(verdict "$w.review" 2>/dev/null)"; }'
+}
+
 # Bugs: a Claude model is refused as the reviewer, or one named with no CLI, or a Codex effort for it, is
 # accepted; the Reviewer choices are not the five models, or its efforts not those of the program in force; a Claude
 # reviewer still runs Codex, its GO or NO-GO is misread, its line lacks its model, usage or tokens.claude, or a
@@ -99,29 +114,30 @@ t_claudefail() {
       .spent.usage == {input: 200, write: 100, write1h: 0, read: 2000, output: 14}] | tojson')" = '["review","claude-opus-5-5",157,314,314,true]' ] \
     || fail "a failed Claude review left its cost out: $(st 'select(.issue == 8 and .step == "blocked")')"
 }
+# The three below call the review alone (rvcall): what a card does with its answer is t_claudereview's and t_claudefail's.
 t_claudeexit() {
   claude_reviewer "[$(issue 9 2026-01-03)]"
   echo "$NOGO" > "$STUB/review.1"; : > "$STUB/review-exit"
-  loop run --only 9 >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 3)' \
-    || fail "a Claude review that gave its NO-GO and then exited non-zero was run again: $(st 'select(.issue == 9)')"
+  out=$(rvcall 9)
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(head -n 1 <<<"$out")" = 'review failed (exit 3)' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
+    || fail "a Claude review that gave its NO-GO and then exited non-zero was run again: $out"
 }
 t_claudebare() {
   claude_reviewer "[$(issue 10 2026-01-04)]"
   # An answer that ends cleanly with neither a verdict nor token usage is no verdict: it runs once more.
   echo "$GO" > "$STUB/review.2"; : > "$STUB/review-bare"
-  loop run --only 10 >/dev/null 2>&1 || fail "run of #10 exited non-zero"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 10 and .step == "review") | "\(.result) \(.firstTry.reason)"')" = "GO review reported no token usage" ] \
-    && [ -n "$(st 'select(.issue == 10 and .step == "landed") | .sha')" ] || fail "a Claude answer with no verdict and no usage was not run again: $(st 'select(.issue == 10)')"
+  out=$(rvcall 10)
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = "review reported no token usage" ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    || fail "a Claude answer with no verdict and no usage was not run again: $out"
 }
 t_claudepart() {
   claude_reviewer "[$(issue 11 2026-01-05)]"
   # A first attempt whose usage is only part of what it used (one of its results holds none) leaves the step unpriced,
   # though the retry's usage is whole: merged, it would be priced under what it cost.
   echo "$GO" > "$STUB/review.2"; : > "$STUB/review-part"
-  loop run --only 11 >/dev/null 2>&1 || fail "run of #11 exited non-zero"
-  [ "$(st 'select(.issue == 11 and .step == "review") | [.result, .tokens.claude, (.unread | test("1 of 2 results"))] | tojson')" = '["GO",314,true]' ] \
-    || fail "a retried review whose first attempt's usage was partial is priced as whole: $(st 'select(.issue == 11 and .step == "review")')"
+  out=$(rvcall 11)
+  [ "$(head -n 1 <<<"$out" | jq -c '[.tokens.claude, (.unread | test("1 of 2 results"))]')" = '[314,true]' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    || fail "a retried review whose first attempt's usage was partial is priced as whole: $out"
 }
 
 # Bugs: an OpenCode model OpenCode lists is refused as the reviewer;
@@ -133,8 +149,9 @@ t_claudepart() {
 # model API refused) is the last attempt's alone; its live record is read as a Codex review's, so it shows no turns,
 # usage or action while it runs;
 # with no opencode on the host the review fails without naming it.
-t_opencodereview() {
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04))"
+# An OpenCode reviewer (prov/vendor/m-1 at high) on a main with issue 7, and its stubs.
+opencode_reviewer() {
+  setup "[$(issue 7 2026-01-01)]"
   # An OpenCode name listed under Codex is still OpenCode's; one with no provider, or a name of another shape listed
   # under OpenCode, is no OpenCode model.
   tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]
@@ -166,6 +183,9 @@ EOF
   chmod +x "$STUB/opencode"; printf '#!/usr/bin/env bash\n[ "${1:-}" != debug ] || exit 1\ntouch "$STUB/codex-ran"; exit 1\n' > "$STUB/codex"
   # The model it lists is taken, as OpenCode names it (one it does not list is taken too: clis.test.sh, t_clisseat).
   [ "$(ctl reviewer opencode prov/vendor/m-1 high | jq -c .reviewer)" = '{"cli":"opencode","model":"prov/vendor/m-1","effort":"high"}' ] || fail "an OpenCode reviewer was not accepted"
+}
+t_opencodereview() {
+  opencode_reviewer
   [ "$(loop snapshot | jq -c '.modelSettings.reviewer | [.choices, .agent, .efforts]')" \
     = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
     || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(loop snapshot | jq -c .modelSettings.reviewer)"
@@ -205,25 +225,29 @@ EOF
     && [ "$(sed -n 3p "$STUB/oc-env.1")" = 1 ] || fail "OpenCode was not run with every tool but reading denied, over the worktree's own config: $(cat "$STUB/oc-env.1")"
   grep -q '^+two$' "$STUB/oc-staged.1" && grep -q 'Proof: <proof>' "$STUB/oc-asked" || fail "OpenCode was not given REVIEW and the staged change"
   [ "$(cat "$STUB/status")" = 'M  a.txt' ] && ! grep -q pwned "$STUB/a" || fail "an OpenCode review changed the worktree: $(cat "$STUB/status") $(cat "$STUB/a")"
-  # #8: an answer with no verdict runs once more; both attempts' usage and cost are on the line.
-  r=$(wc -l < "$STUB/oc-runs"); echo 'I looked at it.' > "$STUB/review.$((r + 1))"; echo "$GO" > "$STUB/review.$((r + 2))"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(wc -l < "$STUB/oc-runs")" = $((r + 2)) ] \
-    && [ "$(st 'select(.issue == 8 and .step == "review") | [.result, .firstTry.reason, .tokens.codex, .usage.cost] | tojson')" = '["GO","the review ended without one clear verdict",370,1.5]' ] \
-    || fail "an OpenCode answer with no verdict was not run again, or its first attempt left out of the line: $(st 'select(.issue == 8 and .step == "review")')"
-  # #10: a try the model API refused (after one step) runs again; what it used and cost is on the line with the next.
-  r=$(wc -l < "$STUB/oc-runs"); : > "$STUB/refuse-api"; echo "$GO" > "$STUB/review.$((r + 2))"; tune '.tunables.apiPause = 0.1'
-  loop run --only 10 >/dev/null || fail "run of #10 exited non-zero"
-  [ "$(wc -l < "$STUB/oc-runs")" = $((r + 2)) ] && [ "$(st 'select(.issue == 10 and .step == "review") | [.result, .tokens.codex, .usage.output, .usage.cost] | tojson')" = '["GO",343,23,1]' ] \
-    || fail "an OpenCode review the API refused once was not run again with the refused try's usage and cost on its line: $(st 'select(.issue == 10 and .step == "review")')"
-  # #9: OpenCode gone from the host by the time the review runs: the review fails, naming it, and is not run again.
-  # The PATH keeps the stubs but no host's own opencode, which would otherwise be found in place of the removed stub.
-  r=$(wc -l < "$STUB/oc-runs"); echo 'echo two >> a.txt; rm -f "$STUB/opencode"' > "$STUB/build"
-  nooc=$(tr ':' '\n' <<< "$PATH" | while IFS= read -r d; do [ "$d" != "$STUB" ] && [ -e "$d/opencode" ] || printf '%s\n' "$d"; done | paste -sd: -)
-  PATH=$nooc loop run --only 9 >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/oc-runs")" = "$r" ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q 'the reviewer is set to opencode prov/vendor/m-1, and opencode is not installed on this host' \
-    || fail "a review with no opencode on the host did not fail naming it: $(st 'select(.issue == 9)')"
   loop check >/dev/null || fail "the cards' lines do not pass the record check"
+}
+# The OpenCode review's runs again and its failure, each a review called alone (rvcall) on the reviewer above.
+t_opencoderetry() {
+  opencode_reviewer; : > "$STUB/go" # no live record to wait for
+  # An answer with no verdict runs once more; both attempts' usage and cost are on the line.
+  echo 'I looked at it.' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  out=$(rvcall 8)
+  [ "$(wc -l < "$STUB/oc-runs")" = 2 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    && [ "$(head -n 1 <<<"$out" | jq -c '[.firstTry.reason, .tokens.codex, .usage.cost]')" = '["the review ended without one clear verdict",370,1.5]' ] \
+    || fail "an OpenCode answer with no verdict was not run again, or its first attempt left out of the line: $out"
+  # A try the model API refused (after one step) runs again; what it used and cost is on the line with the next.
+  : > "$STUB/refuse-api"; echo "$GO" > "$STUB/review.4"; tune '.tunables.apiPause = 0.1'
+  out=$(rvcall 10)
+  [ "$(wc -l < "$STUB/oc-runs")" = 4 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] && [ "$(head -n 1 <<<"$out" | jq -c '[.tokens.codex, .usage.output, .usage.cost]')" = '[343,23,1]' ] \
+    || fail "an OpenCode review the API refused once was not run again with the refused try's usage and cost on its line: $out"
+  # OpenCode gone from the host by the time the review runs: the review fails, naming it, and is not run again.
+  # The PATH keeps the stubs but no host's own opencode, which would otherwise be found in place of the removed stub.
+  rm "$STUB/opencode"
+  nooc=$(tr ':' '\n' <<< "$PATH" | while IFS= read -r d; do [ "$d" != "$STUB" ] && [ -e "$d/opencode" ] || printf '%s\n' "$d"; done | paste -sd: -)
+  out=$(PATH=$nooc rvcall 9)
+  [ "$(wc -l < "$STUB/oc-runs")" = 4 ] && grep -q 'the reviewer is set to opencode prov/vendor/m-1, and opencode is not installed on this host' <<<"$out" && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
+    || fail "a review with no opencode on the host did not fail naming it: $out"
 }
 
 # Bugs: a card session never reaches the proxy the user set (its base URL, key and ENABLE_TOOL_SEARCH left out); a
@@ -239,8 +263,13 @@ EOF
 # escaped quote in a multiline string ends it early, so the settings after it are not read.
 proxy_start() { # <issue>: a main with that one issue, the stub proxy serving, Codex and the pack routed through it
   setup "[$(issue "$1" 2026-01-01)]"
-  # Doctor's route lines, among its checks of this machine (some of which this case's machine fails).
-  routes() { { loop doctor || :; } | grep -E '^(builder|reviewer):'; }
+  # Doctor's route lines, from its routes() alone; and in doctor's own output, among its checks of this machine (some of
+  # which this case's machine fails), where a key's variable may meet doctor's own (t_proxykeys). Then the Anthropic
+  # variables a card session gets from proxyenv(), called alone as the session's subshell calls it before claude starts.
+  routes() { { engine doctor routes || :; } | grep -E '^(builder|reviewer):'; }
+  doctorroutes() { { loop doctor || :; } | grep -E '^(builder|reviewer):'; }
+  # Fails when the call does, so a direct session's empty list is never a call that did not run.
+  pxenv() { local o; o=$(engine run 'proxyenv && env') || return 1; grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ENABLE_TOOL_SEARCH)=' <<<"$o" | sort; return 0; }
   unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ENABLE_TOOL_SEARCH
   echo "$GO" > "$STUB/review.1"; sed -i '2i echo " $* " >> "$STUB/codex-args"' "$STUB/codex"
   # The stub proxy: GET .../models answers $STUB/models; each request logs its Authorization header and, while the
@@ -292,7 +321,7 @@ t_proxy() {
   [ "$(routes | sed -n 2p)" = "reviewer: gpt-6.10-sol (codex) through $base/redir/v1, Codex's model_provider proxy, key in PROXY_KEY" ] \
     && [ "$(cat "$STUB/auth")" = "Bearer $PROXY_KEY"$'\n-' ] || fail "the key followed a redirect to another origin: $(cat "$STUB/auth")"
   cp "$T/$CASE/config.toml" "$CODEX_HOME/config.toml"
-  out=$(routes)
+  out=$(doctorroutes)
   # The key is only in this shell's environment, which the machine's service does not have: doctor says so, and
   # calls through the proxy as the service does.
   [ "$out" = "builder: m (claude) through $base, key in PROXY_KEY; the service finds no key: no PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and no key file named (keyFile), and one call through it works
@@ -304,59 +333,50 @@ t_proxytool() {
   proxy_start 8
   # toolSearch named otherwise is what the session gets; a proxy named with no key variable is sent none of the
   # Anthropic keys the user holds for a direct route.
-  tune '.models.claudeProxy.toolSearch = "false" | del(.models.claudeProxy.keyEnv)'; echo "[$(issue 8 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
-  ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key loop run >/dev/null || fail "run exited non-zero"
-  [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
-    || fail "toolSearch named false did not reach the session, or a direct key went to the proxy: $(cat "$STUB/env")"
+  tune '.models.claudeProxy.toolSearch = "false" | del(.models.claudeProxy.keyEnv)'
+  [ "$(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)" = "$(printf 'ANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
+    || fail "toolSearch named false did not reach the session, or a direct key went to the proxy: $(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)"
 }
 t_proxyv() {
   proxy_start 11
   tune '.models.claudeProxy.toolSearch = "false"' # as t_proxytool leaves it
-  # A key variable named like one of the engine's own variables (v, key, e) still carries the key it holds.
+  # A key variable named like a variable of the engine's own (v, e), or ENV0, still carries the key it holds. v is a
+  # variable of proxyenv()'s callers in a card, so a whole card proves it; e is envof()'s, which proxyenv() called
+  # alone runs as well; ENV0 is no card variable, so proxyenv() called alone proves it too.
   tune '.models.claudeProxy.keyEnv = "v"'; echo "[$(issue 11 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
   v=v-secret loop run >/dev/null || fail "run exited non-zero"
   [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=v-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
     || fail "a key in a variable named v did not reach the session: $(cat "$STUB/env")"
-}
-t_proxye() {
-  proxy_start 12
-  tune '.models.claudeProxy.toolSearch = "false"' # as t_proxytool leaves it
-  tune '.models.claudeProxy.keyEnv = "e"'; echo "[$(issue 12 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
-  e=e-secret loop run >/dev/null || fail "run exited non-zero"
-  [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=e-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
-    || fail "a key in a variable named e did not reach the session: $(cat "$STUB/env")"
-}
-t_proxyenv0() {
-  proxy_start 13
-  tune '.models.claudeProxy.toolSearch = "false"' # as t_proxytool leaves it
-  tune '.models.claudeProxy.keyEnv = "ENV0"'; echo "[$(issue 13 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
-  echo 'printf %s "${ENV0-unset}" > "$STUB/review-env0"' > "$STUB/review-cmd"
-  ENV0=env0-secret loop run >/dev/null || fail "run exited non-zero"
-  [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=env0-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
-    || fail "a key in a variable named ENV0 did not reach the session: $(cat "$STUB/env")"
-  # The reviewer's own environment keeps the variable too: Codex reads a provider's env_key from it.
-  [ "$(cat "$STUB/review-env0")" = env0-secret ] || fail "the variable ENV0 did not reach the Codex reviewer: $(cat "$STUB/review-env0")"
+  tune '.models.claudeProxy.keyEnv = "e"'
+  [ "$(e=e-secret pxenv)" = "$(printf 'ANTHROPIC_AUTH_TOKEN=e-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
+    || fail "a key in a variable named e did not reach the session: $(e=e-secret pxenv)"
+  tune '.models.claudeProxy.keyEnv = "ENV0"'
+  [ "$(ENV0=env0-secret pxenv)" = "$(printf 'ANTHROPIC_AUTH_TOKEN=env0-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
+    || fail "a key in a variable named ENV0 did not reach the session: $(ENV0=env0-secret pxenv)"
 }
 t_proxykeys() {
   proxy_start 7
   : > "$STUB/auth"; sed -i 's/env_key = "PROXY_KEY"/env_key = "key"/' "$CODEX_HOME/config.toml"
-  key=key-secret routes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named key"
+  key=key-secret doctorroutes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named key"
   [ "$(cat "$STUB/auth")" = "Bearer key-secret" ] || fail "a key in a variable named key was not sent: $(cat "$STUB/auth")"
   : > "$STUB/auth"; sed -i 's/env_key = "key"/env_key = "e"/' "$CODEX_HOME/config.toml"
-  e=e-secret routes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named e"
+  e=e-secret doctorroutes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named e"
   [ "$(cat "$STUB/auth")" = "Bearer e-secret" ] || fail "a key in a variable named e was not sent: $(cat "$STUB/auth")"
   : > "$STUB/auth"; sed -i 's/env_key = "e"/env_key = "ENV0"/' "$CODEX_HOME/config.toml"
-  ENV0=env0-secret routes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named ENV0"
+  ENV0=env0-secret doctorroutes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named ENV0"
   [ "$(cat "$STUB/auth")" = "Bearer env0-secret" ] || fail "a key in a variable named ENV0 was not sent: $(cat "$STUB/auth")"
 }
 t_proxyfetch() {
   proxy_start 7
   # A key in a variable named like an engine global (FETCH) is sent to the proxy and reaches Codex as the user set it.
   : > "$STUB/auth"; sed -i 's/env_key = "PROXY_KEY"/env_key = "FETCH"/' "$CODEX_HOME/config.toml"; sed -i '2i printf %s "$FETCH" > "$STUB/codex-fetch"' "$STUB/codex"
+  # So does the claudeProxy key variable ENV0 (Codex reads a provider's env_key from the reviewer's own environment).
+  tune '.models.claudeProxy.keyEnv = "ENV0"'; echo 'printf %s "${ENV0-unset}" > "$STUB/review-env0"' > "$STUB/review-cmd"
   echo "[$(issue 14 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
-  FETCH=fetch-secret loop run >/dev/null || fail "run exited non-zero"
+  FETCH=fetch-secret ENV0=env0-secret loop run >/dev/null || fail "run exited non-zero"
   [ "$(sort -u "$STUB/auth")" = "Bearer fetch-secret" ] && [ "$(cat "$STUB/codex-fetch")" = fetch-secret ] \
     || fail "a key in a variable named FETCH was not sent, or Codex did not inherit it: $(cat "$STUB/auth") $(cat "$STUB/codex-fetch")"
+  [ "$(cat "$STUB/review-env0")" = env0-secret ] || fail "the variable ENV0 did not reach the Codex reviewer: $(cat "$STUB/review-env0")"
 }
 t_proxytoml() {
   proxy_start 7
@@ -426,7 +446,5 @@ t_proxydirect() {
   # A base URL the engine's own environment holds reaches the card session, so doctor names it.
   [ "$(ANTHROPIC_BASE_URL=https://example.com/v1 routes | sed -n 1p)" = "builder: m (claude) through https://example.com/v1, from the environment Conveyor runs in" ] \
     || fail "doctor called an inherited base URL direct: $(ANTHROPIC_BASE_URL=https://example.com/v1 loop doctor)"
-  echo "[$(issue 10 2026-01-04)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
-  loop run >/dev/null || fail "a direct run exited non-zero"
-  [ ! -s "$STUB/env" ] && [ "$(st 'select(.issue == 10 and .step == "review") | .model')" = x ] || fail "a direct run changed: $(cat "$STUB/env") $(st 'select(.issue == 10 and .step == "review") | .model')"
+  out=$(pxenv) && [ -z "$out" ] || fail "a direct session was given the proxy's environment, or proxyenv failed: $out"
 }
