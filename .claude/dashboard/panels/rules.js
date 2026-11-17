@@ -1589,18 +1589,19 @@
     const inUse = (m) => roles.has(m) || sessions.has(m);
     // Seen but not priced: an ID of the steps that no model and no alias prices (an OpenCode one keeps OpenCode's cost).
     const unpriced = seen.filter((x) => x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
-    // Offered or run with no price: a model a role runs, or one the Rules tab offers a role (each CLI's own list, the
-    // pack's for a CLI that lists none), that no model and no alias prices and no step has run yet (those are Seen but
-    // not priced). OpenCode's keep the cost OpenCode reports. A one-word name (sol, opus) is a family or an alias, no
+    // Offered or run with no price: a model a role runs, or one the models.allowed in force offers a role (the pack's
+    // list when it sets one, else the built-in models with the host's Codex models in place of the built-in Codex ones:
+    // a model only a CLI's own list names is not one when the pack sets a list), that no
+    // model and no alias prices and no step has run yet (those are Seen but not priced). OpenCode's keep the cost OpenCode reports. A one-word name (sol, opus) is a family or an alias, no
     // model ID: the CLI runs a model of its own choice, so the name has no price to add. Conveyor files one issue to
     // add each (noprice()).
     const offered = new Set(roles.keys());
     ROLES.forEach((k) => {
       const s = ms[k];
       if (!s) return;
-      [s.clis, s.allowed].forEach((by) => Object.entries(by && typeof by === 'object' ? by : {}).forEach(([c, o]) => {
-        if (c !== 'opencode') list(by === s.clis ? o && o.models : o).forEach((m) => { if (typeof m === 'string' && m) offered.add(m); });
-      }));
+      Object.entries(s.allowed && typeof s.allowed === 'object' ? s.allowed : {}).forEach(([c, o]) => {
+        if (c !== 'opencode') list(o).forEach((m) => { if (typeof m === 'string' && m) offered.add(m); });
+      });
     });
     const ran = new Set(seen.map((x) => x.model));
     const noPrice = [...offered].filter((m) => !m.startsWith('opencode:') && !/^[a-z]{2,}$/.test(m) && !isModel(canon(m)) && !aliasTo.has(m) && !ran.has(m)).sort();

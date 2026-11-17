@@ -429,8 +429,11 @@ listed under:
   (`models.allowed["codex-builder"]`),
 - for the reviewer and the judge: `codex`, `claude-reviewer` and `opencode`.
 
-A model that a seat runs, or that the Board offers, can have no price. The Rules tab shows it under Model prices, in
-"Offered with no price". A model that the sessions of the last 30 days used, and that no price prices, shows in
+A model that a seat runs, or that the project's model list has, can have no price. The model list is
+`models.allowed` when you set it. When you do not, it is Conveyor's built-in models, with the Codex models that Codex
+reports in place of the built-in Codex ones. The Rules tab shows such a
+model under Model prices, in "Offered with no price". A model that only Codex reports, when you set
+`models.allowed`, is not on this list. A model that the sessions of the last 30 days used, and that no price prices, shows in
 "Seen but not priced". The loop files one held issue for each such model, "Model price missing: <model>", and does
 not file it again. A Codex family name, such as `sol`, is not a model ID: the check uses the model that Codex runs for
 it. Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. An OpenCode model

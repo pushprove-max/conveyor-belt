@@ -81,6 +81,27 @@ t_nopricefamily() {
   [ "$out" = '["Model price missing: gpt-6.3-sol","Model price missing: m"]' ] \
     || fail "a Codex family name got an issue in place of the model it runs, or that model, with no price, got none: $out"
 }
+# Bug: a pack that sets models.allowed got an issue for each model of the host's Codex cache, though the Board offers
+# only the pack's list and no seat runs them (seven held issues for models the project never used). The host's models
+# are looked at only when the pack sets no list: then the Board offers them (t_nopricehost).
+t_nopriceallowed() {
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
+  looks 'noprice'
+  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
+  [ "$out" = '["Model price missing: m","Model price missing: x"]' ] \
+    || fail "a model only the host's Codex cache lists got an issue, though the pack's models.allowed does not offer it: $out"
+}
+# With no models.allowed the Board offers the host's Codex models, so one with no price gets its issue.
+t_nopricehost() {
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
+  tune 'del(.models.allowed)'
+  looks 'noprice'
+  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
+  [ "$(jq -c 'index("Model price missing: gpt-extra-9") != null' <<<"$out")" = true ] \
+    || fail "with no models.allowed, a Codex model the host reports and the Board offers got no issue: $out"
+}
 # Bug: a model only a session's result names (asked for one model, the CLI ran another) got no issue: the look read
 # the settings and the CLIs' lists, never the models the sessions ran, which the Board prices and lists under Seen.
 # Bug too: a failed build's models (the blocked line's spent), which the Board lists, got none. As the Board: a build's

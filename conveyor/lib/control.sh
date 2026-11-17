@@ -181,9 +181,9 @@ modelsallowed() { # <variable>
 # A model the belt runs or offers that has no price (docs/configuration.md, Models): the Board cannot show its cost,
 # so Conveyor files one issue to add the price, held (the control record holds it, as `control hold` does), once for
 # each model whatever the loop's turns or restarts: $NOPRICE keeps {filed: [{model, issue, at}]}. The models: those of
-# the models.allowed in force (modelsallowed()), the Codex models the host's report lists (the Board offers them), and
-# those run: the builder's, the reviewer's and the judge's seats, the Tests seat, the research lane's model, and each
-# model ID the Board lists under Seen: those the card sessions of the last 30 days ran (a failed one's too) and those
+# the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes: the pack's when it sets
+# one, so a model only the host's Codex cache lists is looked at only when the pack sets none), and those run: the builder's, the
+# reviewer's and the judge's seats, the Tests seat, the research lane's model, and each model ID the Board lists under Seen: those the card sessions of the last 30 days ran (a failed one's too) and those
 # the research lane's sessions ran (dashboard_limit.py lane_models). Which
 # have no price is dashboard_limit.py's (unpriced: the built-in table with the pack's prices over it; an OpenCode
 # model keeps the cost OpenCode reports, so it is never one). `serve` looks once a minute (run()), and asks that only
@@ -198,7 +198,6 @@ noprice() {
   local a c p r ms k miss m n out lock x y cli ran rw since rc=0
   modelsallowed a || return 1
   rw=$(researchwt)
-  hostclis >/dev/null 2>&1 || HOST_R=''
   if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi
   packget prices p lanes.research r 2>/dev/null || return 1
   # The model IDs the card sessions of the last 30 days ran, as the Board counts them under Seen (dashboard_limit.py
@@ -214,9 +213,9 @@ noprice() {
       | ((if .step != "review" then .stats | objects | ((.byModel | objects | select(length > 0) | keys) // (.models | arrays | select(length == 1))) else empty end) // [.model])
       | .[] | strings | select(. != "")] | unique') || return 1
   # Each model with its CLI. A seat the record and pack leave unset (no judge, say) adds none, and fails no look.
-  x=$({ for m in builder reviewer judge; do seat "$m" "$c" 2>/dev/null || :; done; } | jq -rs --argjson a "$a" --argjson h "${HOST_R:-null}" --argjson c "$c" \
+  x=$({ for m in builder reviewer judge; do seat "$m" "$c" 2>/dev/null || :; done; } | jq -rs --argjson a "$a" --argjson c "$c" \
       --argjson r "${r:-null}" --argjson ran "$ran" '[(.[] | [.agent, .model]), ($ran[] | ["", .]), ($a | objects | to_entries[] | (if .key == "codex" or .key == "codex-builder" then "codex" else "" end) as $k
-        | .value[]? | [$k, .]), ($h.codex[]? | ["codex", .]), ($c.tests | objects | if .cli == "opencode" then ["", "opencode:" + .model] else [.cli, .model] end),
+        | .value[]? | [$k, .]), ($c.tests | objects | if .cli == "opencode" then ["", "opencode:" + .model] else [.cli, .model] end),
         ($r | objects | ["claude", .model])] | map(select(.[1] | strings)) | unique[] | map(. // "") | join("\u001f")') || return 1
   # A one-word name (sol, opus) is a family or an alias, no model ID: Codex runs a family's newest model (codexmodel()),
   # which is the one to price; one that resolves to none runs nothing (codexready() says so), and Claude's CLI
