@@ -66,8 +66,8 @@ t_tfrunner() {
   setup '[]'; mkdir -p "$R/cases"; tune '.test.files = {"w.test.sh": {wholeOnly: true}}'
   printf '# run.test.sh\nt_rone() {\n  :\n}\nt_rthree() {\n  :\n}\n' > "$R/cases/r.test.sh"; printf '# run.test.sh\nt_rtwo() {\n  :\n}\n' > "$R/cases/q.test.sh"
   printf 't_rone() {\n  :\n}\n' > "$R/cases/solo.test.sh"; printf '# other.test.sh\nt_rone() {\n  :\n}\n' > "$R/cases/o.test.sh"
-  touch "$R/c.test.sh" "$R/w.test.sh" "$R/n.test.sh"
-  git -C "$R" add cases c.test.sh w.test.sh n.test.sh && git -C "$R" commit -qm tests || fail "main's test files"
+  touch "$R/c.test.sh" "$R/w.test.sh" "$R/n.test.sh" "$R/zz.test.sh"
+  git -C "$R" add cases c.test.sh w.test.sh n.test.sh zz.test.sh && git -C "$R" commit -qm tests || fail "main's test files"
   tf_runs cases/r.test.sh 2 3; tf_runs cases/q.test.sh 1; tf_runs cases/solo.test.sh 0.5; tf_runs cases/o.test.sh 0.4; tf_runs c.test.sh 2
   printf 'TESTRUN sec\tw.test.sh\t48\t30.5\n-- FAIL w.test.sh\n' > "$T/$CASE/suite.test"
   CONVEYOR_NOW=1794700800 tf_as full-test suiterec "$T/$CASE/suite" full 0123abcd || fail "suiterec failed"
@@ -76,15 +76,15 @@ t_tfrunner() {
     jq -cn '{card: "c-f2", issue: 2, step: "test", time: "2026-11-11T13:00:00Z", result: "fail", failures: {of: 1, files: [{file: "run.test.sh", cases: [{name: "rtwo", line: 3}]}], timeout: null},
       verdicts: [{case: "run.test.sh: rtwo", verdict: "card"}]}'
     # c.test.sh failed in 6 steps: the oldest has no tail, past the newest TESTKEEP (5). The newest passed on re-run
-    # (card(): a `test pass` line, its first run's failures in rerun, firstrun()), with no tail.
+    # (card(): a `test pass` line, its first run's failures and output's end in rerun, firstrun()), with no tail of its own.
     jq -cn 'range(5) | {card: "c-g\(.)", issue: 3, step: "test", time: "2026-11-12T0\(.):00:00Z", result: "fail", failures: {of: 1, files: [{file: "c.test.sh", cases: [{name: "one"}]}], timeout: null},
       verdicts: [{case: "c.test.sh: one", verdict: "card"}], tail: "t\(.)"}'
     jq -cn '{card: "c-g5", issue: 3, step: "test", time: "2026-11-12T05:00:00Z", result: "pass", reason: "passed on re-run: c.test.sh: one",
-      rerun: {exit: 1, failures: {files: [{file: "c.test.sh", cases: [{name: "one"}]}], timeout: null}}, verdicts: [{case: "c.test.sh: one", verdict: "flaky"}]}'
+      rerun: {exit: 1, failures: {files: [{file: "c.test.sh", cases: [{name: "one"}]}], timeout: null}, tail: "not ok one"}, verdicts: [{case: "c.test.sh: one", verdict: "flaky"}]}'
     # A step that failed again in another file (zz.test.sh) after n.test.sh's case and w.test.sh's time-out of its
-    # first run passed on the run again.
+    # first run passed on the run again; its tail is the run again's, its first run's in rerun.
     jq -cn '{card: "c-h1", issue: 4, step: "test", time: "2026-11-13T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "zz.test.sh", cases: [{name: "x"}]}], timeout: null},
-      rerun: {exit: 1, failures: {files: [{file: "n.test.sh", cases: [{name: "two"}]}, {file: "zz.test.sh", cases: [{name: "x"}]}], timeout: {sec: 60, file: "w.test.sh"}}},
+      tail: "again", rerun: {exit: 1, failures: {files: [{file: "n.test.sh", cases: [{name: "two"}]}, {file: "zz.test.sh", cases: [{name: "x"}]}], timeout: {sec: 60, file: "w.test.sh"}}, tail: "first"},
       verdicts: [{case: "n.test.sh: two", verdict: "flaky"}, {case: "w.test.sh", verdict: "flaky"}, {case: "zz.test.sh: x", verdict: "card"}]}'; } >> "$ST/cards.jsonl"
   echo '{"entries": [{"case": "run.test.sh: rone", "source": "s", "time": "2026-11-10T00:00:00Z"}, {"case": "run.test.sh: rtwo", "source": "s", "time": "2026-11-10T00:00:00Z"},
     {"case": "cases/solo.test.sh: rone", "source": "s", "time": "2026-11-10T00:00:00Z"}], "filed": []}' > "$ST/flaky.json"
@@ -97,16 +97,18 @@ t_tfrunner() {
   [ "$(jq -c '[.files[] | select(.file | IN("cases/r.test.sh", "cases/q.test.sh")) | {file, f: [.failures[] | {card, verdict, cases, tail: (.tail | if . then [length, .[-3:]] else . end)}]}]' <<<"$got")" \
     = '[{"file":"cases/r.test.sh","f":[{"card":"c-f1","verdict":"main","cases":["rone","rthree"],"tail":[1500,"END"]}]},{"file":"cases/q.test.sh","f":[{"card":"c-f2","verdict":"card","cases":["rtwo"],"tail":null}]}]' ] \
     || fail "the failures of the runner's case files: $(jq -c '[.files[] | select(.file | startswith("cases/")) | {file, failures}]' <<<"$got")"
-  # Bug it catches (#188): a step that passed on re-run (the flaky failure) was left out, as it is a `test pass` line.
+  # Bug it catches (#188): a step that passed on re-run (the flaky failure) was left out, as it is a `test pass` line;
+  # and (#228) it had no output, as its tail is its first run's, in rerun.
   [ "$(jq -c '.files[] | select(.file == "c.test.sh") | [.failedSteps, [.failures[] | [.card, .verdict, .tail]]]' <<<"$got")" \
-    = '[6,[["c-g5","flaky",null],["c-g4","card","t4"],["c-g3","card","t3"],["c-g2","card","t2"],["c-g1","card","t1"],["c-g0","card",null]]]' ] \
+    = '[6,[["c-g5","flaky","not ok one"],["c-g4","card","t4"],["c-g3","card","t3"],["c-g2","card","t2"],["c-g1","card","t1"],["c-g0","card",null]]]' ] \
     || fail "c.test.sh's failures, newest first, a tail on the newest 5 alone: $(jq -c '.files[] | select(.file == "c.test.sh") | .failures' <<<"$got")"
   # Bug it catches (#227): on a step that failed again in another file, the cases that passed on the run again (in
-  # rerun alone) were left out, so their files showed no failure.
-  [ "$(jq -c '[.files[] | select(.file | IN("n.test.sh", "w.test.sh")) | {file, failedSteps, f: [.failures[] | [.card, .verdict, .cases]]}]' <<<"$got")" \
-    = '[{"file":"w.test.sh","failedSteps":1,"f":[["c-h1","flaky",[]]]},{"file":"n.test.sh","failedSteps":1,"f":[["c-h1","flaky",["two"]]]}]' ] \
-    || fail "the first run's failures of a step that failed again: $(jq -c '[.files[] | select(.file | IN("n.test.sh", "w.test.sh")) | {file, failures}]' <<<"$got")"
-  got=$(jq -c '[.files[] | select(.file | startswith("cases/") | not) | {file, cpu, wholeOnly, runs: [.runs[] | {card, whole, result, sec, cpu}], last: (.lastRun | if . then {time, whole} else . end)}]' <<<"$got")
+  # rerun alone) were left out, so their files showed no failure. And (#228): those files had the run again's output,
+  # which does not show their failure, in place of the first run's; a file that failed again keeps the run again's.
+  [ "$(jq -c '[.files[] | select(.file | IN("n.test.sh", "w.test.sh", "zz.test.sh")) | {file, failedSteps, f: [.failures[] | [.card, .verdict, .cases, .tail]]}]' <<<"$got")" \
+    = '[{"file":"w.test.sh","failedSteps":1,"f":[["c-h1","flaky",[],"first"]]},{"file":"n.test.sh","failedSteps":1,"f":[["c-h1","flaky",["two"],"first"]]},{"file":"zz.test.sh","failedSteps":1,"f":[["c-h1","card",["x"],"again"]]}]' ] \
+    || fail "the first run's failures of a step that failed again: $(jq -c '[.files[] | select(.file | IN("n.test.sh", "w.test.sh", "zz.test.sh")) | {file, failures}]' <<<"$got")"
+  got=$(jq -c '[.files[] | select(.file | IN("w.test.sh", "c.test.sh", "n.test.sh")) | {file, cpu, wholeOnly, runs: [.runs[] | {card, whole, result, sec, cpu}], last: (.lastRun | if . then {time, whole} else . end)}]' <<<"$got")
   [ "$got" = '[{"file":"w.test.sh","cpu":30.5,"wholeOnly":true,"runs":[{"card":null,"whole":true,"result":"fail","sec":48,"cpu":30.5}],"last":{"time":"2026-11-15T00:00:00Z","whole":true}},'\
 '{"file":"c.test.sh","cpu":2,"wholeOnly":false,"runs":[{"card":"c-c.test.sh-0","whole":false,"result":null,"sec":3,"cpu":2}],"last":{"time":"2026-11-10T12:00:00Z","whole":false}},'\
 '{"file":"n.test.sh","cpu":null,"wholeOnly":false,"runs":[],"last":null}]' ] || fail "the three files: $got"

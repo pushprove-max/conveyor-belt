@@ -357,7 +357,7 @@ cacheoff() { # <worktree>
 # or a port's edit outside the files main changed), or the merge left a file that does not parse (card() writes
 # <worktree>.whole). A run that passed keeps what it
 # passed in the list too, for such a run and for a retried card (block() keeps it). The first run's exit and failures (testfails())
-# are in <worktree>.first, {exit, failures}, when the run went again, and the files it timed in <worktree>.times
+# are in <worktree>.first, {exit, failures, tail: the end of its output, left out when it gave none}, when the run went again, and the files it timed in <worktree>.times
 # (its `TESTRUN sec` lines, slowtests()), after those the runs before it timed when this run keeps their passes (a run
 # after a fix session does not run again a file that passed); the output is the last run's. A run that passed
 # on re-run adds its cases to the flaky-test record (flakyrun()) as it ends, a batch's run (batch()) too; a run again
@@ -433,7 +433,10 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
   if [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t" \
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
-    jq -c --argjson rc "$rc" '{exit: $rc, failures: del(.passed, .okcases, .passcases)}' <<<"$f" > "$1.first"
+    # Its output's end (the last 60 lines, as a failed test line's tail, card()) goes with them: the run again
+    # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
+    jq -c --argjson rc "$rc" --rawfile t <(tail -n 60 "$1.test" 2>/dev/null | tr -d '\000') \
+      '{exit: $rc, failures: del(.passed, .okcases, .passcases)} + ($t | sub("\n+$"; "") | if . == "" then {} else {tail: .} end)' <<<"$f" > "$1.first"
     # The files the first run timed, which the run again does not run, after those of the runs before it (slowtests()).
     mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } >> "$1.times" 2>/dev/null
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
@@ -566,7 +569,7 @@ testsel() { # <worktree>
     || { out=${out#jq: error (at <unknown>): }; printf '%s\n' "${out:-the list of tests could not be made}"; return 1; }
   printf '%s\n' "$out"
 }
-# The part of a test line that says the run went again (tests()): {rerun: {exit, failures}} of the first run, else {};
+# The part of a test line that says the run went again (tests()): {rerun: {exit, failures, tail}} of the first run, else {};
 # on a pass line, with the reason "passed on re-run: " and what had not passed (each case as <file>: <case>), each
 # of those a failure whose verdict is flaky (verdicts()).
 firstrun() { # <worktree> [pass]
@@ -574,7 +577,7 @@ firstrun() { # <worktree> [pass]
     {reason: ("passed on re-run: " + ($x | notpassed | if . == [] then "exit \($x.exit)" else join(", ") end)),
      verdicts: [$x | notpassed[] | {case: ., verdict: "flaky"}]} end' "$1.first" 2>/dev/null || echo '{}'
 }
-# What did not pass in a first run (<worktree>.first, {exit, failures}): each case as <file>: <case>, a file that failed
+# What did not pass in a first run (<worktree>.first, {exit, failures, tail}): each case as <file>: <case>, a file that failed
 # naming no case or ran out of time as the file alone; each once.
 NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] then $f else .cases[] | "\($f): \(.name)" end]
   + [.failures.timeout.file // empty] | unique;'

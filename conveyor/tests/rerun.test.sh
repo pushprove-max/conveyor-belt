@@ -109,6 +109,9 @@ t_rerunpass() {
   [ "$(tline 1 .reason)" = "passed on re-run: b.test: flaky" ] || fail "the test line does not say it passed on re-run, naming the case: $(tline 1 .reason)"
   [ "$(tline 1 '.rerun | [.exit, (.failures.files | map("\(.file):\(.cases | map(.name) | join(","))"))] | tojson')" = '[1,["b.test:flaky"]]' ] \
     || fail "the test line does not keep the first run's exit and failing case: $(tline 1 .rerun)"
+  # Bug it catches (#228): the run again overwrote the first run's output, so a flaky failure had none for the judge or
+  # the Board's Fix failures preview.
+  [[ "$(tline 1 '.rerun.tail')" == *"FAIL [flaky]: wrong"* ]] || fail "the test line does not keep the first run's output: $(tline 1 .rerun)"
   st 'select(.step == "landed") | .step' | grep -q landed || fail "the card did not land"
   loop check || fail "the record check refuses a test line with its first run"
   # The Board draws the card's Test step and its tests bar from these: each says it passed on re-run.

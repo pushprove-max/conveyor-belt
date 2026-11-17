@@ -79,8 +79,9 @@ def ok: . as $r | (keys - known) == need
         # Each failure's verdict (verdicts()), and the run of the failing cases on main.
         and (.verdicts // [] | type == "array" and all(type == "object" and keys == ["case", "verdict"] and (.case | type == "string") and (.verdict | IN("card", "main", "flaky"))))
         and (.mainRun // {sha: "", sec: 0, exit: 0} | type == "object" and keys == ["exit", "sec", "sha"] and (.sha | type == "string") and ([.sec, .exit] | all(type == "number")))
-        # A run that went again (tests()): the first run's exit and failures.
-        and (.rerun // {exit: 1, failures: {of: null, files: [], timeout: null}} | type == "object" and keys == ["exit", "failures"] and (.exit | type == "number") and (.failures | fails))
+        # A run that went again (tests()): the first run's exit and failures, and the end of its output.
+        and (.rerun // {exit: 1, failures: {of: null, files: [], timeout: null}} | type == "object" and (keys - ["tail"]) == ["exit", "failures"] and (.exit | type == "number") and (.failures | fails)
+          and (.tail // "" | type == "string"))
         and (.doneWhen // {items: 0, met: 0, failed: []} | type == "object" and (keys - ["notes"]) == ["failed", "items", "met"]
           and (.items | type == "number") and (.met | type == "number") and (.failed | type == "array" and all(type == "string"))
           and ((has("notes") | not) or (.notes | type == "array" and all(type == "string"))))

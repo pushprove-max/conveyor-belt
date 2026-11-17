@@ -76,18 +76,21 @@ OWNERS='def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]
 # case). tail: the last 1500 characters of the step's output (the line's tail), null with none. failedrun: a test
 # line as a failed step: a line that failed, with its first run's failures (in rerun, firstrun(), when the run went
 # again) added to its own, so a case that passed on the run again (its verdict flaky) still counts while another file
-# failed again; a first run's time-out as its file failing naming no case; a line that passed on re-run (card():
-# `test pass` with the first run's failures in rerun) with those failures as its own; no other line.
+# failed again, with the first run's output's end as its tail (the files that failed again kept in again, with the
+# line's own tail); a first run's time-out as its file failing naming no case; a line that passed on re-run (card():
+# `test pass` with the first run's failures and output's end in rerun) with those failures and that tail as its own;
+# no other line.
 FAILURE='def failedrun: if .result == "fail" then (if (.rerun.failures | type) == "object"
-        then .failures.files = [(.failures.files | arrays | .[]), (.rerun.failures.files | arrays | .[]),
+        then .again = failedfiles | .failures.files = [(.failures.files | arrays | .[]), (.rerun.failures.files | arrays | .[]),
           (.rerun.failures.timeout.file? | strings | {file: ., cases: []})] else . end)
-      elif .result == "pass" and (.rerun.failures | type) == "object" then .failures = .rerun.failures else empty end;
+      elif .result == "pass" and (.rerun.failures | type) == "object" then .failures = .rerun.failures | .tail = .rerun.tail
+      else empty end;
     def failure($f): [.verdicts | arrays | .[] | objects | select(any((.case | strings | caseowners[]); . == $f)) | .verdict | strings] as $v
     | {card, issue, time,
        verdict: (if any($v[]; . == "main") then "main" elif any($v[]; . == "flaky") then "flaky" elif any($v[]; . == "card") then "card" else null end),
        cases: [.failures.files | arrays | .[] | objects | (.file | strings) as $x | .cases | arrays | .[] | (.name | strings) as $n
          | select(any(owners($x; $n)[]; . == $f)) | $n] | unique,
-       tail: ((.tail | strings | .[-1500:]) // null)};'
+       tail: (if (.again | type) == "array" and (any(.again[]; . == $f) | not) then .rerun.tail else .tail end | (strings | .[-1500:]) // null)};'
 # What a card did to the test files it changed that main already had (#76), written on its landed line as testedits:
 # one entry a file, {file, read, removedAsserts, changedExpected, skipsAdded, timeoutsRaised, casesDeleted}. The one
 # table of patterns, a language a row: the file name endings it reads and the jq regular expressions of an assertion,
