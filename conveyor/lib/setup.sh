@@ -792,6 +792,13 @@ doctor() {
       "stop every loop but the machine's (a per-project service: systemctl --user disable --now conveyor-<name>.service, or launchctl bootout gui/\$(id -u)/conveyor.<name>), then run install-service once"
     elif [ ${#loops[@]} = 1 ]; then ok "one Conveyor loop on this machine: ${loops[0]}"; fi
   fi
+  # Whether card work yields to the user (the host file's steer, lib/slots.sh steer_words), and how, on this machine.
+  # shellcheck disable=SC2034 # STEER and STEER_SLICE are set by steer_words and steer_end (lib/slots.sh)
+  local STEER STEER_HOW STEER_SLICE s
+  if ! steer_on; then ok "card work runs at normal priority: the host file's steer is off (the Board's Rules tab, or conveyor.sh machine steer on, turns it on)"
+  else steer_words session; s=${STEER_HOW:-normal priority}; steer_words test; steer_end
+    ok "card work yields to you (the host file's steer is on): card sessions run at $s, card test runs at ${STEER_HOW:-normal priority, as nothing on this machine can lower them and raise them again}"
+  fi
   # A Conveyor service whose conveyor.sh is gone (an install removed under it): its loop may run now, on code it moved
   # to, but a restart or a reboot does not start it.
   while IFS=$'\t' read -r t c; do

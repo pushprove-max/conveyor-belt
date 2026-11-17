@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh doctor`: what the project and the host lack for Conveyor (doctor(), lib/setup.sh), sourced by conveyor.sh.
+. "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/views.sh" || exit 1

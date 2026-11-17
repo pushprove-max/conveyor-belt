@@ -77,7 +77,8 @@
 # repo: the project's name (REPO), as health names it too; health's room is the card the machine holds back (room()),
 #   and its machine the machine's settings (mhost(): {cap, maxLoad, minFreeMemMB, paused}, {unread: true} for a host
 #   file that does not read, null when it sets none), the same for every project of the machine, and its machineNow the
-#   machine's readings now ({cores, load: the 1-minute load}, each null when not read) for the Board's Load limit.
+#   machine's readings now ({cores, load: the 1-minute load}, each null when not read) for the Board's Load limit, and
+#   its steer whether card work yields to the user (the host file's steer, steer_on), for the Board's Rules tab.
 # queue: next (the first 10 issues pick would take, in its order: issue, title, priority, followup, retried, and room:
 #   why the machine holds it back, on the one it holds; one forced past its wait also has forced: true and waitsFor:
 #   the open issues it waits on, in order too, so it keeps its dependency tag); and, from the

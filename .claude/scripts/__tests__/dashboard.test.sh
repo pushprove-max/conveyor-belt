@@ -528,7 +528,7 @@ with_machine() { jq -c --argjson m "$1" '.health.machine = $m' <<<"$2"; } # <mac
 PUSHING='[{"card": "c0-98", "issue": 98, "title": "Landed, being pushed", "step": "push", "stepAt": "'"$(ago 60)"'", "landed": true, "usd": 1, "reading": true}]'
 # The machine's load limit is 20 here, and its 16 cores are at a load of 31.5 (#462).
 ML=$(jq -c '.maxLoad = 20' <<<"$MC")
-answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .health.machineNow = {cores: 16, load: 31.5} | .tests = {files: [{file: "a.test.sh", cpu: 3, runs: [{cpu: 3, card: "c5-12"}, {cpu: 2, card: "odd"}],
+answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .health.machineNow = {cores: 16, load: 31.5} | .health.steer = false | .tests = {files: [{file: "a.test.sh", cpu: 3, runs: [{cpu: 3, card: "c5-12"}, {cpu: 2, card: "odd"}],
     failures: [{card: "c6-13", issue: 13, verdict: "card", cases: ["one"]}],
     optimize: [{issue: 70, time: "2026-11-01T00:00:00Z", state: "landed", sha: "abc1234", fix: "sped up", into: [], before: 10, after: 4, since: 3.5, sinceRuns: 2},
       {issue: 71, state: "open"}, {issue: 72, state: "open"}]}]} | .open.issues = [{issue: 71}]
@@ -544,6 +544,10 @@ q '.panels.tests.data | .machine == {maxLoad: 20, unread: false, cores: 16, load
   and (.tests.files | map([.file, .cpu])) == [["a.test.sh", 3]] and .others.widgetshop.tests == null
   and (.tests.files[0].runs | map([.card, .issue, .url])) == [["c5-12", 12, "'"$PU"'/12"], ["odd", null, null]]' \
   "the Tests part names the machine's load limit, cores and load, the same for every project, and each project's own test files, each run with its card's link"
+# Issue 194: the Rules tab sets whether card work yields to the user, a setting of the machine (the host file's steer).
+# One record's health says it is off, the other's (an older snapshot) says nothing: the Rules part shows it off, never
+# on for the record that did not say.
+q '.panels.rules.data.steer == false' "the Rules part carries the machine's steer, off as one record's health says"
 # Bug (#74): a file's Optimize issues reached the Tests page with no link. Each keeps its state and the proof's before
 # and after CPU s, and gets its issue's url. And one no card took, closed on GitHub (#72 is not among the open issues:
 # the Board's Close its issue as done), still showed as open.

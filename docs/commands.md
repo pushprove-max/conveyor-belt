@@ -59,7 +59,8 @@ The loop:
   `max-cards` is how many build at once.
 - `serve` runs the same loop with no end, for one project.
 - `machine` runs the machine's one Conveyor, a loop for every record of the host file. `machine pause` and
-  `machine resume` pause and resume every project.
+  `machine resume` pause and resume every project. `machine steer on` and `machine steer off` turn
+  [Card work yields to you](configuration.md#card-work-yields-to-you) on and off.
 - `install-service` installs `machine` as the machine's service.
 - `board` installs the [Board](board.md#install-the-board) as a user service, for the project of the checkout it runs in.
 

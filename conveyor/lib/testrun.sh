@@ -1400,16 +1400,18 @@ mainwait() { # <worktree> <main's commit> <the cases, as one text>
 }
 # One run of the command <cmd> in the worktree, on the slot tests() holds. The report file an earlier run wrote
 # (<worktree>.report, reportask()) goes first: a runner that adds to it (tools/mochatimes.cjs) would otherwise give the
-# run again the first run's times too.
+# run again the first run's times too. The run is lowered to idle priority (steer_words test, lib/slots.sh), and
+# given its normal priority back while it starves (steer_watch).
 testonce() { # <worktree> <cmd>
-  local pid clock rc r='' t0
+  # shellcheck disable=SC2034 # STEER_HOW and STEER_SLICE are set by steer_words and read by steer_watch (lib/slots.sh)
+  local pid clock sw rc r='' t0 STEER STEER_HOW STEER_SLICE
   [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report"
-  t0=$(date +%s)
+  t0=$(date +%s); steer_words test
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
-  pid=$!; testclock $pid "$1.turnwait" & clock=$!
+    CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec "${STEER[@]}" timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+  pid=$!; testclock $pid "$1.turnwait" & clock=$!; steer_watch $pid 8>&- & sw=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
-  kill $clock 2>/dev/null; wait $clock 2>/dev/null; rm -f "$1.turnwait"
+  kill $clock $sw 2>/dev/null; wait $clock $sw 2>/dev/null; rm -f "$1.turnwait"; steer_end
   reported "$1" "$t0"
   # timeout made the command a process group of its own ($pid): a process left of it that closed the slot's
   # descriptor still keeps the slot (slot_left).

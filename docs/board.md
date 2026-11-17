@@ -124,7 +124,9 @@ The Rules tab holds the settings:
 - the builder, reviewer and judge: each a CLI installed on the loop's machine, then a model, then an effort
   ([Models](configuration.md#models)),
 - the accounts ([Accounts](#accounts)),
-- where new issues start.
+- where new issues start,
+- **Card work yields to you**: a setting of the build machine, for every project. On, card sessions and test runs
+  run at a low priority ([Card work yields to you](configuration.md#card-work-yields-to-you)).
 
 A setting changed there shows its new value at once. A value the host refuses goes back, with the refusal beside it.
 

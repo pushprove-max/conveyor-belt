@@ -59,6 +59,13 @@ if r[0] != 200 or len(RAN) != 1 or RAN[0][:2] != ['bash', '-c'] or conv not in R
 r = post('/machine', {'action': 'pause'})
 if r[0] != 200 or len(RAN) != 2 or RAN[1] != ['bash', '-c', '%s machine pause' % conv]:
     fail('machine_runs_here_as_this_checkout', '%s, ran %s' % (r, RAN[1:]))
+# Issue 194: the Rules tab's Card work yields to you sets the machine's steer, on or off; any other value runs nothing.
+r = post('/machine', {'action': 'steer', 'value': 'off'})
+if r[0] != 200 or len(RAN) != 3 or RAN[2] != ['bash', '-c', '%s machine steer off' % conv]:
+    fail('machine_steer_runs_here', '%s, ran %s' % (r, RAN[2:]))
+r = post('/machine', {'action': 'steer', 'value': 'low'})
+if r[0] != 400 or len(RAN) != 3:
+    fail('machine_steer_refuses_other_values', '%s, ran %s' % (r, RAN[3:]))
 srv.shutdown()
-print('PASS: dashboard-server-onemachine (3 checks)')
+print('PASS: dashboard-server-onemachine (5 checks)')
 EOF

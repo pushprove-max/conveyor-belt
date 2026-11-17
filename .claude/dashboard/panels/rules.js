@@ -11,9 +11,11 @@
 // accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
 // card lands (On or Off; disabled the same way for a record with no rules.push), Visible changes need your yes (On or
-// Off; disabled the same way for a record with no rules.visible), one row a standing kind of routine yes the Foreman
-// takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release check, Fixed block, each On
-// or Off; disabled the same way for a snapshot with no standing), Held by you (the count, a link to the list below)
+// Off; disabled the same way for a record with no rules.visible), Card work yields to you (On or Off, the machine's
+// steer, sent as POST /machine; disabled the same way when the snapshot does not say it), one row a standing kind of
+// routine yes the Foreman takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release
+// check, Fixed block, each On or Off; disabled the same way for a snapshot with no standing), Held by you (the count, a
+// link to the list below)
 // and, when there is one, the pinned order with Move up (not on the first), Move down (not on the last) and Unpin.
 // A switch's words under its name say what it does, whichever choice is set; what Off means shows beside it only
 // while Off is set. Push landed and Run full test suite are actions, not rules: they are on the Board (Control tab).
@@ -84,7 +86,10 @@
   const S = { d: null, ctl: null, ctlAt: null, was: {}, guessed: false, floor: null, read: null, turned: false, refused: null,
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
-    drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set() };
+    drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
+    steer: null, steerSent: null };
+  // steer: the machine's Card work yields to you as the snapshot says (null: an engine that does not say); steerSent:
+  // the value the host took from here, shown until a snapshot says it.
   // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
   // search typed; priceSaved, the pack's prices as the changes saved here left them, until the next snapshot;
@@ -872,6 +877,26 @@
     yOn.disabled = yOff.disabled = !yesKnown;
     el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
       yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
+    // Card work yields to you: the machine's (the host file's steer, every project's alike), sent as POST /machine.
+    // On (the default) runs card sessions at lowered priority and card test runs at idle priority; Off runs them at
+    // normal priority. Undo sends the other value.
+    const steerKnown = S.steer !== null, steerOn = S.steerSent !== null ? S.steerSent : S.steer !== false;
+    const steerTo = (on) => {
+      if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return; }
+      S.busy = true; draw(); say('Sending…');
+      S.ctx.post('machine', { action: 'steer', value: on ? 'on' : 'off' }).then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the host answered ${r.status}`]),
+        () => [false, 'the host did not answer']).then(([ok, said]) => {
+        S.busy = false;
+        if (ok) S.steerSent = on;
+        draw();
+        say(ok ? `Done: Card work yields to you is ${on ? 'on' : 'off'}.` : `Not done: ${S.ctx.refusal(said)}`, ok ? () => steerTo(!on) : null);
+      });
+    };
+    const sOn = choice('On', 'steer-on', 'Card work yields to you: on', steerOn, () => { if (!steerOn) steerTo(true); });
+    const sOff = choice('Off', 'steer-off', 'Card work yields to you: off', !steerOn, () => { if (steerOn) steerTo(false); });
+    sOn.disabled = sOff.disabled = !steerKnown;
+    el.append(row('steer', 'Card work yields to you', 'card sessions and tests run at low priority on the build machine, for every project',
+      sOn, sOff, steerKnown ? offLine(steerOn, 'card work runs at normal priority, beside yours') : newer(steerKnown)));
 
     // Done without asking: one row a standing kind of routine yes, On or Off. Off (each kind's setting from setup)
     // sends each such step to you. A Conveyor whose snapshot has no standing is sent neither choice.
@@ -1880,6 +1905,9 @@
     if (id === PART) ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Rules: ${view.repo}` : null);
     if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
     S.raw = [d, read, view.repo];
+    // The machine's steer, whichever project is drawn (only the part's top names it); null from an older engine.
+    S.steer = d && typeof d.steer === 'boolean' ? d.steer : null;
+    if (S.steerSent === S.steer) S.steerSent = null;
     if (S.d && view.repo !== S.d.repo) {
       S.picked.clear(); S.open.clear(); S.armed = null; S.asking = null; S.turned = false; S.dep = null;
       const pin = !S.ctl && S.floor !== null ? ctl() : null;
