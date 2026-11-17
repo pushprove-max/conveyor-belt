@@ -127,7 +127,32 @@ t_pressureslot() {
   slot_try || fail "no slot was taken once the machine was Steady"
   exec {SLOT_FD}>&-
   [ "$(slot_waiting)" = "waiting for a test slot (0 of 2 in use)" ] || fail "a Steady machine's wait named a pressure figure: $(slot_waiting)"
-  # maxLoad set: the pressure holds no test.
+  # maxLoad set while the run goes on: the next read of the pool takes it, and the pressure holds no test.
   prpsi 85.5 25.5; rm -f "$SLOT_DIR/pressure"; jq '.maxLoad = 50' "$H" > "$H.new" && mv "$H.new" "$H"
+  slot_pool || fail "the pool could not be read again"
   slot_try || fail "a test was held by the pressure with maxLoad set"
+}
+
+# Bugs (#273): every slot ask ran jq on the host file to learn whether it sets maxLoad or minFreeMemMB, and a worker
+# held by a Strained machine started sleep each second: a whole run's waiting workers started thousands of programs.
+# Between two readings an ask now starts none: jq is counted by a stub, and every other program fails on an empty PATH.
+t_pressureslotcost() {
+  export XDG_CONFIG_HOME=$T/$CASE/config CONVEYOR_PSI_DIR=$T/$CASE/psi CONVEYOR_WAKE_CMD='echo 0.2'
+  local H=$T/$CASE/config/conveyor/host.json s=$T/$CASE/stub i n real
+  real=$(command -v jq); mkdir -p "${H%/*}" "$CONVEYOR_PSI_DIR" "$s" "$T/$CASE/none"
+  printf '#!/bin/sh\necho >> "%s/jqs"\nexec "%s" "$@"\n' "$s" "$real" > "$s/jq"; chmod +x "$s/jq"
+  jq -n --arg d "$T/$CASE/slots" '{testSlots: 2, testSlotsDir: $d}' > "$H"
+  prpsi 12.5 25.5
+  PATH=$s:$PATH
+  slot_pool || fail "the pool could not be made"
+  slot_strained || fail "the first ask did not read the machine as Strained"
+  : > "$s/jqs"
+  for i in 1 2 3 4 5 6 7 8 9 10; do slot_strained || fail "ask $i did not read the machine as Strained"; done
+  n=$(wc -l < "$s/jqs"); [ "$n" = 0 ] || fail "10 slot asks between two readings started jq $n times"
+  # shellcheck disable=SC2123 # on purpose: a PATH with no programs, so any program the held ask starts fails
+  ( PATH=$T/$CASE/none; at=$EPOCHREALTIME
+    ! slot_wait 0.3 2> "$T/$CASE/err" || fail "a test got a slot while the machine was Strained"
+    [ ! -s "$T/$CASE/err" ] || fail "a held slot ask started a program: $(<"$T/$CASE/err")"
+    [ $(( ${EPOCHREALTIME/[.,]/} - ${at/[.,]/} )) -ge 250000 ] || fail "a held slot ask did not wait before it asked again"
+    [ "$SLOT_WHY" = "memory pressure 25.5% is at or above 20%" ] || fail "a held slot ask did not name the figure: $SLOT_WHY" ) || exit 1
 }

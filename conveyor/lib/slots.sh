@@ -72,7 +72,9 @@ slot_reserve_why() {
 }
 
 # Sets SLOT_DIR (the pool's folder), SLOT_N (its size), SLOT_CPUS (the cores of its slots: slot_cpus), SLOT_HOSTF, SLOT_PSI
-# and SLOT_WAKE (the host file and pressure seams it was read under, for slot_strained) and, inside a run that holds
+# and SLOT_WAKE (the host file and pressure seams it was read under, for slot_strained), SLOT_GATE (1 when that host
+# file reads and sets neither maxLoad nor minFreeMemMB, so the pressure gates the slots; read here once, not at each
+# slot ask: slot_strained) and, inside a run that holds
 # a slot, SLOT_HOME (the descriptor that holds it), SLOT_HOME_K (the slot's number) and SLOT_TURN (the turns already
 # taken on it, above this runner); SLOT_HOME is empty outside one. SLOT_ONE is CONVEYOR_TEST_ONESLOT, read here (slot_take).
 # Where the host file names no testSlotsDir, CONVEYOR_TEST_POOL (<size>:<folder>) names the pool instead: the engine's
@@ -87,8 +89,11 @@ slot_pool() {
   mapfile -t c < <(slot_cpus); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(nproc --all)
   # A pool larger than the cores would put two slots on one core: it is the cores.
   SLOT_N=${p:-$(jq -er '.testSlots | numbers | floor | select(. >= 1)' "$host" 2>/dev/null)} && [ "$SLOT_N" -le "$n" ] || SLOT_N=$n
-  SLOT_HOSTF=$host SLOT_PSI=${CONVEYOR_PSI_DIR:-} SLOT_WAKE=${CONVEYOR_WAKE_CMD:-}
+  SLOT_HOSTF=$host SLOT_PSI=${CONVEYOR_PSI_DIR:-} SLOT_WAKE=${CONVEYOR_WAKE_CMD:-} SLOT_GATE=''
+  jq -e 'objects | [.maxLoad, .minFreeMemMB] | map(numbers) | length == 0' "$host" >/dev/null 2>&1 && SLOT_GATE=1
   mkdir -p "$SLOT_DIR" || { echo "conveyor: the test slots folder $SLOT_DIR cannot be made: no test can take a slot" >&2; return 1; }
+  # The FIFO no one writes to that a worker held by the pressure waits on (slot_nap).
+  [ -p "$SLOT_DIR/nap" ] || mkfifo "$SLOT_DIR/nap" 2>/dev/null || :
   for ((f = 1; f <= SLOT_N; f++)); do
     [ -e "$SLOT_DIR/$f" ] || : >> "$SLOT_DIR/$f" || { echo "conveyor: the test slot $SLOT_DIR/$f cannot be made: no test can take a slot" >&2; return 1; }
   done
@@ -106,13 +111,14 @@ slot_pool() {
 # holds no test back. The reading is kept in $SLOT_DIR/pressure ("<epoch> <state> <why>") for 3 s, so the workers that
 # wait share one reading every few seconds. Sets SLOT_WHY to the figure that makes it Strained (pressure's why), empty
 # when it is not, so a card held at its Test step says which figure holds it (slot_waiting).
-# The host file and the pressure's seams are those slot_pool read the pool under (SLOT_HOSTF, SLOT_PSI, SLOT_WAKE), not
-# the environment's now: the engine's test runner names a host file and a Steady pressure of the cases' own after it
-# reads the pool (tests/lib.sh), and its own slots kept the machine's gate only so.
+# The host file and the pressure's seams are those slot_pool read the pool under (SLOT_HOSTF, SLOT_GATE, SLOT_PSI,
+# SLOT_WAKE), not the environment's now: the engine's test runner names a host file and a Steady pressure of the cases'
+# own after it reads the pool (tests/lib.sh), and its own slots kept the machine's gate only so. Between two readings
+# it starts no program: every waiting worker of a run asks each second.
 slot_strained() {
   local kf=$SLOT_DIR/pressure at='' s='' w=''
   SLOT_WHY=''
-  jq -e 'objects | [.maxLoad, .minFreeMemMB] | map(numbers) | length == 0' "${SLOT_HOSTF:-}" >/dev/null 2>&1 || return 1
+  [ -n "${SLOT_GATE:-}" ] || return 1
   { read -r at s w < "$kf"; } 2>/dev/null
   if ! [[ $at =~ ^[0-9]+$ ]] || [ $((EPOCHSECONDS - at)) -ge 3 ] || [ "$at" -gt "$EPOCHSECONDS" ]; then
     { read -r s; read -r w; } < <(CONVEYOR_PSI_DIR=${SLOT_PSI:-} CONVEYOR_WAKE_CMD=${SLOT_WAKE:-} pressure "$SLOT_HOSTF" | jq -r '(.state // ""), (.why // "" | gsub("\n"; " "))')
@@ -145,10 +151,18 @@ slot_try() {
   return 1
 }
 
+# Waits <seconds> with no program started: bash's own read with a time limit on the pool's FIFO (slot_pool), which no
+# one writes to; sleep where it cannot be opened.
+slot_nap() { # <seconds>
+  local f
+  if { exec {f}<>"$SLOT_DIR/nap"; } 2>/dev/null && [ -p "/dev/fd/$f" ]; then read -rt "$1" -u "$f"; exec {f}>&-; else [ -z "${f:-}" ] || exec {f}>&-; sleep "$1"; fi
+  return 0
+}
+
 # Waits up to [seconds] (1) for one slot of the pool, picked at random, so a waiting worker costs no busy loop. 1 when
 # it has none yet, the machine is Strained (slot_strained), or a push waits for one (slot_yield): the caller asks again.
 slot_wait() {
-  if slot_strained; then sleep "${1:-1}"; return 1; fi
+  if slot_strained; then slot_nap "${1:-1}"; return 1; fi
   SLOT_K=$((RANDOM % SLOT_N + 1))
   { exec {SLOT_FD}>>"$SLOT_DIR/$SLOT_K"; } 2>/dev/null || { sleep "${1:-1}"; return 1; }
   if flock -w "${1:-1}" "$SLOT_FD"; then

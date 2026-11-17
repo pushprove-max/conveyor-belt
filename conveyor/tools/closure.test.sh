@@ -113,8 +113,7 @@ mkdir -p "$H/.config/conveyor" && jq -n --argjson n "$SLOT_N" --arg d "$SLOT_DIR
 # before it starts (the run's home slot, or one of the pool) and holds it, on the slot's core, with all it runs, which
 # inherit the descriptor: the slot comes back when the last of them has ended (held), so the units of every run on the
 # machine together never pass the pool.
-J=$SLOT_N; export SLOT_DIR SLOT_N SLOT_CPUS SLOT_HOME SLOT_HOME_K SLOT_TURN SLOT_ONE; export -f slot_try slot_wait slot_yield slot_take slot_mine
-J=$SLOT_N; export SLOT_DIR SLOT_N SLOT_CPUS SLOT_HOME SLOT_HOME_K SLOT_TURN SLOT_HOSTF SLOT_PSI SLOT_WAKE; export -f slot_try slot_wait slot_yield slot_take slot_mine slot_strained pressure p_psi p_wake roomnow p_load p_mem
+J=$SLOT_N; export SLOT_DIR SLOT_N SLOT_CPUS SLOT_HOME SLOT_HOME_K SLOT_TURN SLOT_ONE SLOT_HOSTF SLOT_GATE SLOT_PSI SLOT_WAKE; export -f slot_try slot_wait slot_nap slot_yield slot_take slot_mine slot_strained pressure p_psi p_wake roomnow p_load p_mem
 install() {
   local f p w nm bv hide=()
   [ ! -s "$UNREACHED" ] || fail "$(sed 's/$/: closure.sh does not reach it: add an anchored source, or a line to the left-out list/' "$UNREACHED")"
