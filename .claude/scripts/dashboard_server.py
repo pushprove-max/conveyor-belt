@@ -1583,8 +1583,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except OSError:
             return self.reply(500, '%s; ruling NOT logged' % said)
         # When the host's answer was in, by this machine's clock in whole seconds rounded up. The collector on
-        # this machine stamps a snapshot (updatedAt) before it reads the host, so one stamped at or after this time
-        # read the record after the change; the Board keeps the answer until such a snapshot comes.
+        # this machine stamps a snapshot (updatedAt) before it reads the host, and each record the live feed's
+        # snapshot of it (readAt) when that snapshot began, so one stamped at or after this time read the record after
+        # the change; the Board keeps the answer until such a snapshot comes.
         if results is not None:
             return self.json_reply(200, {'results': results}, {'X-Answered-At': str(math.ceil(time.time()))})
         self.reply(200, said, {'X-Answered-At': str(math.ceil(time.time()))})

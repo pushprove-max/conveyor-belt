@@ -39,14 +39,32 @@ test('Rules: a queued row stays shown as queued through a snapshot made before t
   assert.equal(row(w), null, 'a snapshot made after the change that shows it removes the row');
 });
 
-test('Rules: when the first snapshot made after a Queue still holds the issue, the row comes back with the error', async () => {
+// Issue 288: the live feed's snapshot of the record (readAt) can have begun before the release while data.js around it
+// is dated after the answer. Bug: that first update came back "Not queued: ... still shows it held" and the user had to
+// press Queue again.
+test('Rules: a Queue answered, then an update dated after it whose record snapshot began before it, keeps the row queued; the next shows it', async () => {
+  const w = boot({ tab: 'rules' });
+  await queued(w, record({ held: [] }, T0));
+  w.clock = T0 + 30000;
+  const stale = snap(T0 + 5000);
+  stale.panels.rules.data.readAt = new Date(T0 - 3000).toISOString();
+  next(w, stale);
+  assert.ok(row(w) && row(w).classList.contains('is-pending'), 'still shown as queued, not as refused');
+  assert.equal(row(w).querySelector('.rules-refused'), null);
+  const fresh = snap(T0 + 10000, []);
+  fresh.panels.rules.data.readAt = new Date(T0 + 2000).toISOString();
+  next(w, fresh);
+  assert.equal(row(w), null, 'the record snapshot begun after the answer shows it queued');
+});
+
+test('Rules: when the first snapshot made after a Queue still holds the issue the host released, the error says a later hold holds it', async () => {
   const w = boot({ tab: 'rules' });
   await queued(w, record({ held: [] }, T0));
   w.clock = T0 + 30000;
   next(w, snap(T0 + 5000));
   assert.ok(!row(w).classList.contains('is-pending'));
   assert.ok(act(row(w), 'queue'), 'it can be queued again');
-  assert.match(row(w).querySelector('.rules-refused').textContent, /^Not queued: the first update after the change still shows it held\.$/);
+  assert.match(row(w).querySelector('.rules-refused').textContent, /^Not queued: the host released it, but a later hold holds it again \(/);
 });
 
 test('Rules: a refused Queue brings the row back with the refusal beside it', async () => {

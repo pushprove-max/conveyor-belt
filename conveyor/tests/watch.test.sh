@@ -47,11 +47,24 @@ watchstart() {
 # from a dead one.
 t_watch() {
   watchstart
-  stream 90 "$T/$CASE/watch.out" "PATH=$STUB/slowbin:$PATH" CONVEYOR_WATCH_GITHUB=1
+  # The snapshot sums its records with cksum (snaprows): while $STUB/snapslow is there, each call waits its seconds, a
+  # time drawn here, so the first snapshot takes at least that long.
+  mkdir -p "$STUB/snapbin"
+  printf '#!/usr/bin/env bash\n[ ! -s "%s/snapslow" ] || sleep "$(cat "%s/snapslow" 2>/dev/null)" 2>/dev/null\nexec "%s" "$@"\n' "$STUB" "$STUB" "$(command -v cksum)" > "$STUB/snapbin/cksum" # sleep: a stand-in for a slow snapshot read
+  chmod +x "$STUB/snapbin/cksum"
+  local x=$((RANDOM % 10 + 5)) slow t0 wall; slow=$((x / 10)).$((x % 10)); echo "$slow" > "$STUB/snapslow"
+  t0=${EPOCHREALTIME//[!0-9]/}
+  stream 90 "$T/$CASE/watch.out" "PATH=$STUB/snapbin:$STUB/slowbin:$PATH" CONVEYOR_WATCH_GITHUB=1
   trap 'kill $pid 2>/dev/null' EXIT
   come '.type == "snapshot" and .why == "start"' "the first snapshot"
+  wall=$(( ${EPOCHREALTIME//[!0-9]/} - t0 )); rm -f "$STUB/snapslow"
   [ "$(ev '.why == "start"' | jq -c '[(.snap.belt | map(.card)), (.snap.queue.order | map(.issue)), .snap.health.gh, has("cpuCap"), .repoUrl]')" = '[["c1"],[7],true,false,null]' ] \
     || fail "the first snapshot: $(ev '.why == "start"' | jq -c '[.snap.belt, .snap.queue, .cpuCap, .repoUrl]')"
+  # It says how long it took: at least the time cksum waited, at most the time from the stream's launch to the line
+  # (issue 288: with no such time, the Board dated what it read by when the line came, after a change the snapshot had
+  # not read).
+  ev '.why == "start"' | jq -e --argjson s "$slow" --argjson w "$wall" '.took | numbers | . >= $s and . <= $w / 1000000' >/dev/null \
+    || fail "the first snapshot does not say how long it took (cksum waited $slow s, the line came $wall us after the launch): $(ev '.why == "start"' | jq -c .took)"
   # GitHub goes slow, and a read of it is under way (one is asked every second).
   : > "$STUB/slow"; till "a read of GitHub, once it was slow," test -e "$STUB/slowed"
   rec c2 7 picked '{"title":"title 7"}'

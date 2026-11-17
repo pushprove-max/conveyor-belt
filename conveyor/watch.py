@@ -5,9 +5,10 @@
 It prints one JSON object a line on stdout, each line whole, until its reader goes (ssh closed: the write fails and it
 ends). Every line has `type` and `at` (when it was printed):
 
-  snapshot  {why: start | record | control | loop | github | refresh, snap (`conveyor.sh snapshot`), repoUrl (the
-            checkout's GitHub address, null for none), lastPushAt (when the last push that worked was recorded, null for
-            none)}. The first line is one; a new one follows a
+  snapshot  {why: start | record | control | loop | github | refresh, snap (`conveyor.sh snapshot`), took (seconds from
+            when the snapshot began to this line: what it read, the control record too, is that much older than the
+            line), repoUrl (the checkout's GitHub address, null for none), lastPushAt (when the last push that worked
+            was recorded, null for none)}. The first line is one; a new one follows a
             new record line, a retry, a push, a new guard reading (record), a control change (control), the loop's
             process starting or ending (loop), and a new answer from GitHub (github).
             Changes that come while one is built give one more after it, not one each. With no other for REFRESH
@@ -216,7 +217,7 @@ class Stream:
                 while self.pending is None:
                     self.cond.wait()
                 why, self.pending = self.pending, None
-                self.snapped = time.monotonic()
+                self.snapped = began = time.monotonic()
             try:
                 run = subprocess.run(['bash', SH, 'snapshot'], capture_output=True, text=True, env=self.env, timeout=SNAPSHOT_LIMIT,
                                      stdin=subprocess.DEVNULL)
@@ -238,7 +239,7 @@ class Stream:
                     self.belt = {b.get('card'): b for b in snap.get('belt') or [] if isinstance(b, dict)}
                     self.models = (snap.get('health') or {}).get('models') or {}
                     self.sent_live = None
-                Out.send('snapshot', why=why, snap=snap, **extra)
+                Out.send('snapshot', why=why, took=round(time.monotonic() - began, 3), snap=snap, **extra)
                 self.send_live()
 
     # ---- GitHub, on its own timer ----

@@ -5,7 +5,9 @@
 dashboard.sh --loop runs it beside the page server. For every record conveyor/host.json names it keeps one
 `conveyor.sh watch` running (conveyor/watch.py says what each line holds): over ssh to the build machine (at host.json's
 `ssh` target), or here on one machine (config()). After each line it writes <dashboard folder>/stream.json, the same
-object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
+object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), each record with readAt (when its
+snapshot began, by this machine's clock: data.js is dated when it is built, which can be after a change the snapshot
+did not read yet), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
 the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
 is down), writtenAt (when this file was written: every TICK seconds at least)}. After a line that changed something it
 has `dashboard.sh --publish` build data.js again from that and the slower parts the last cycle read, so a card's step
@@ -99,7 +101,7 @@ class Feed:
         self.lock = threading.Lock()
         self.recs = [{'repo': repo, 'main': m, 'snap': None, 'overlay': None, 'repoUrl': None, 'lastPushAt': None, 'up': False,
                       'heardAt': None, 'downAt': time.time(), 'error': 'the stream has not opened yet', 'unreachable': False,
-                      'snapAt': None, 'failed': None, 'failedAt': None}
+                      'snapAt': None, 'readAt': None, 'failed': None, 'failedAt': None}
                      for repo, m in recs]
         self.wlock = threading.Lock()
         self.dirty = threading.Event()  # data.js is to be built again
@@ -172,8 +174,12 @@ class Feed:
         with self.lock:
             rec['heardAt'] = now
             if kind == 'snapshot' and isinstance(ev.get('snap'), dict):
+                # When the snapshot began, by this machine's clock: what it read is that old, however late the line
+                # came. A line that does not say how long it took is dated when it came.
+                took = ev.get('took')
+                took = took if isinstance(took, (int, float)) and not isinstance(took, bool) and 0 <= took < 86400 else 0
                 rec.update(snap=ev['snap'], overlay=None, repoUrl=ev.get('repoUrl'), lastPushAt=ev.get('lastPushAt'),
-                           up=True, downAt=None, error=None, unreachable=False, snapAt=now, failed=None, failedAt=None)
+                           up=True, downAt=None, error=None, unreachable=False, snapAt=now, readAt=now - took, failed=None, failedAt=None)
                 changed = True
             elif kind == 'live' and isinstance(ev.get('cards'), dict) and rec['snap'] is not None:
                 rec['overlay'] = ev['cards']
@@ -228,7 +234,8 @@ class Feed:
             heard = [r['snapAt'] if r['up'] and r['failed'] is not None else r['heardAt'] for r in recs]
             down = [dict(r, error=r['failed'], downAt=r['failedAt']) if r['up'] else r for r in recs if stale(r)]
             records = None if any(r['snap'] is None for r in recs) else [
-                {'repo': r['repo'], 'snap': self.merged(r), 'steered': r['main'] == self.hmain, 'repoUrl': r['repoUrl'], 'lastPushAt': r['lastPushAt']}
+                {'repo': r['repo'], 'snap': self.merged(r), 'steered': r['main'] == self.hmain, 'repoUrl': r['repoUrl'], 'lastPushAt': r['lastPushAt'],
+                 'readAt': iso(r['readAt'])}
                 for r in recs]
             error = None
             if records is None:

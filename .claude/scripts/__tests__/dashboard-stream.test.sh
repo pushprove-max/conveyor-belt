@@ -73,7 +73,9 @@ snap() {
 }
 card() { jq -cn --arg c "$1" --argjson i "$2" --arg now "$NOWISO" '{card: $c, issue: $i, title: "T\($i)", step: "build", review: null, of: 3, stepAt: $now, landed: false,
   model: "claude-x", tokens: {claude: 0, codex: 0}, usd: null, reading: false, live: null, reviews: [], track: null}'; }
-line() { jq -cn --arg t snapshot --argjson s "$1" '{type: $t, at: "x", why: "start", snap: $s, repoUrl: "https://github.com/o/r", lastPushAt: null}'; }
+# Each snapshot took TOOK seconds on the host, a time drawn here: the record's readAt is that long before the line came.
+TOOK=$((RANDOM % 5000 + 1000))
+line() { jq -cn --arg t snapshot --argjson s "$1" --argjson took "$TOOK" '{type: $t, at: "x", why: "start", took: $took, snap: $s, repoUrl: "https://github.com/o/r", lastPushAt: null}'; }
 S1=$(line "$(snap "[$(card c1 11)]")")
 S2=$(line "$(snap "[$(card c1 11), $(card c2 12)]")")
 LIVE='{"type":"live","at":"x","cards":{"c1":{"tokens":{"claude":5000,"codex":0},"usd":1.25,"reading":true,"live":{"turns":4,"lastOutputAt":"'"$NOWISO"'","action":"Bash: npm test"},"files":null}}}'
@@ -100,9 +102,13 @@ feed
 until_is "a_snapshot_reaches_data_js" data '.panels.belt.data.cards | map(.card) == ["c1"]' .panels.belt
 until_is "the_feed_is_live" stream '.stream.live == true and .records[0].steered and .records[0].repoUrl == "https://github.com/o/r"'
 grep -q 'CONVEYOR_MAIN=/srv/main exec bash /srv/main/conveyor/conveyor.sh watch' "$T/ssh-calls" || fail "the ssh command: $(cat "$T/ssh-calls")"
+# The Rules part is dated by when the record's snapshot began, not when data.js was built (issue 288: a release
+# answered while the snapshot ran was judged by a snapshot that had not read it, and came back "Not queued").
+data | jq -e '(.updatedAt | fromdate) - (.panels.rules.data.readAt | fromdate) | . >= $t - 1 and . < $t + 100' --argjson t "$TOOK" >/dev/null \
+  || fail "the rules part's readAt is not when its snapshot began, $TOOK s before the line: $(data | jq -c '[.updatedAt, .panels.rules.data.readAt]')"
 until_is "a_live_line_reaches_data_js" data '.panels.belt.data.cards[0] | .live.action == "Bash: npm test" and .usd == 1.25 and .tokens.claude == 5000 and .reading' .panels.belt
 until_is "health_says_live" data '.panels.health.data.stream | .live == true and (.heardAt | type) == "string" and .since == null'
-pass=$((pass + 5))
+pass=$((pass + 6))
 
 # A stream that drops is opened again, and starts from a whole snapshot: the live line of the first is gone with it.
 : > "$T/drop"

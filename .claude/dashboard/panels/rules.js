@@ -201,7 +201,15 @@
   function moveMark(repo, action, args, o) {
     const a = list(args);
     (action === 'unlabel' ? a.slice(0, 1) : a).forEach((n) => S.moved.set(`${repo}#${Number(n)}`,
-      Object.assign({ repo, issue: Number(n), action, labels: action === 'unlabel' ? a.slice(1) : [], out: false, at: null, error: null }, o)));
+      Object.assign({ repo, issue: Number(n), action, labels: action === 'unlabel' ? a.slice(1) : [], out: false, at: null, rec: null, error: null }, o)));
+  }
+  // Why a snapshot begun after the host's answer does not show the move m. A release the host answered with a record
+  // (rec) took: the host refuses one that does not, with its reason (post), so a later hold holds the issue again.
+  function moveWhy(m) {
+    if (m.action === 'release' && m.rec) {
+      return 'the host released it, but a later hold holds it again (Hold on the Board or the command line, or a follow-up filed as held).';
+    }
+    return `the first update after the change still shows it ${m.action === 'hold' ? 'not held' : m.action === 'unlabel' ? 'with the label' : 'held'}.`;
   }
   // Whether the snapshot view shows the move m.
   function moveShown(view, m) {
@@ -211,6 +219,13 @@
     const mine = c ? list(c.held).includes(m.issue) : rows.some((x) => list(x.reasons).some((r) => r && r.kind === 'you'));
     return m.action === 'hold' ? mine : !mine;
   }
+  // When the snapshot of the project view began (ms), or null: the record's readAt, as the live feed's snapshot of it can
+  // have begun before a change while the data around it is dated after (issue 288); else when the collector began.
+  function readOf(view, ctx) {
+    const at = view && typeof view.readAt === 'string' ? Date.parse(view.readAt) : NaN;
+    if (Number.isFinite(at)) return at;
+    return typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
+  }
   // A new snapshot of the project view, begun at read: each move it is new enough to show is done, or failed.
   function moveJudge(view, read) {
     S.moved.forEach((m, k) => {
@@ -219,7 +234,7 @@
       if (m.error) { if (shown) S.moved.delete(k); return; }
       if (m.at !== null && (read === null || read < m.at)) return;
       if (shown) S.moved.delete(k);
-      else m.error = `${MOVES[m.action]}: the first update after the change still shows it ${m.action === 'hold' ? 'not held' : m.action === 'unlabel' ? 'with the label' : 'held'}.`;
+      else m.error = `${MOVES[m.action]}: ${moveWhy(m)}`;
     });
   }
   // The words beside a moved row: while it waits for a snapshot, and when it failed.
@@ -335,7 +350,7 @@
       const moves = (o) => { if (MOVES[action]) moveMark(repo, action, args, o); };
       if (MOVES[action]) { moves({ out: true }); draw(); }
       return post(action, args, repo).then((res) => {
-        moves(res.ok ? { at: res.at } : { error: `${MOVES[action]}: ${S.ctx.refusal(res.said)}` });
+        moves(res.ok ? { at: res.at, rec: res.rec } : { error: `${MOVES[action]}: ${S.ctx.refusal(res.said)}` });
         if (!res.ok) { back(res.said, res.at); tell(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
         put({ guessed: false });
         // A model price saved shows at once (pricesSection), its Undo's too.
@@ -1911,8 +1926,7 @@
     S.at.set(id, { el, ctx });
     // The panel acted in last (S.from), for the line that says what the action did (say): heard before the control's own handler.
     if (!S.heard.has(el)) { S.heard.add(el); ['click', 'input', 'change', 'keydown', 'drop'].forEach((t) => el.addEventListener(t, () => { S.from = id; }, true)); }
-    const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
-    const view = ctx.project(d);
+    const view = ctx.project(d), read = readOf(view, ctx);
     // The Rules show one project: with more than one on the host the Rules panel's heading names it, whatever Show says.
     if (id === PART) ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Rules: ${view.repo}` : null);
     if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
@@ -1960,7 +1974,7 @@
     // A part equal to the one drawn last, in a snapshot begun at another time, is weighed like any other while an
     // answer is shown or a snapshot was turned away (as the Board's).
     same(el, d, ctx) {
-      const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
+      const read = readOf(ctx.project(d), ctx);
       if ((S.ctl || S.turned || S.moved.size) && read !== S.read) render(id)(el, d, ctx);
     },
   }));
