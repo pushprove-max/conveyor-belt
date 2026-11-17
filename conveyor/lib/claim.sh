@@ -260,15 +260,17 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     [ $moved = 0 ] || rm -f "$3.ready"
     # The card records kept in this shell (stdb, lib/records.sh): a look that finds them unchanged asks no database.
     stdb ask lines cards >/dev/null 2>&1 || :
-    w=$(locked claim "$1" "$3" "$me") || { block "$1" "$2" "$3" "$5: the engine could not write the claim on the files of the card"; return 1; }
+    w=$(locked claim "$1" "$3" "$me") || { rm -f "$3.idle"; block "$1" "$2" "$3" "$5: the engine could not write the claim on the files of the card"; return 1; }
+    # While it only sleeps out a wait, on a card or on the batch card that took it, <worktree>.idle stands: the loop
+    # does not count the card against the builder cap then (idle(), lib/run.sh). It goes before any work of the card.
     # Taken into a batch (gather()): it waits for the card that took it, which lands it (3) or finds it breaks the
     # batch's tests (4). A batch whose card is gone takes it no more.
     if [ -e "$3.batch" ]; then
       b=$(jq -c objects "$3.batch" 2>/dev/null) || b='{}'
-      ! jq -e .landed <<<"$b" >/dev/null 2>&1 || return 3
+      ! jq -e .landed <<<"$b" >/dev/null 2>&1 || { rm -f "$3.idle"; return 3; }
       # That run was the batch card's: its wait and run are not known here (testrec()).
-      ! jq -e .fail <<<"$b" >/dev/null 2>&1 || { trc=$(jq -r .fail <<<"$b"); sec=$(jq -r '.sec // 0' <<<"$b"); TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch"; return 4; }
-      if kill -0 "$(jq -r '.pid // 0' <<<"$b")" 2>/dev/null; then [ -n "$w" ] || { sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
+      ! jq -e .fail <<<"$b" >/dev/null 2>&1 || { trc=$(jq -r .fail <<<"$b"); sec=$(jq -r '.sec // 0' <<<"$b"); TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; return 4; }
+      if kill -0 "$(jq -r '.pid // 0' <<<"$b")" 2>/dev/null; then [ -n "$w" ] || { : > "$3.idle"; sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
     fi
     if [ -n "$w" ]; then
       # Each wait begins with its start line, one after a session of this call too (a card that kept its claim through
@@ -286,7 +288,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # checks failing block it, as at its turn; its tests failing send it to its fix (4). Not one merged onto main
       # whose files have not been found to parse (parses()): that check runs first, at its turn (card()).
       if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && ! jq -e '.tested == true or .alone == true' "$3.ready" >/dev/null 2>&1 && packget landBatch b && [ "$b" -gt 1 ]; then
-        out=$(checks "$3") || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
+        rm -f "$3.idle"; out=$(checks "$3") || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
         began "$1" "$2" test; sec=$SECONDS; tests "$3"; trc=$?; sec=$((SECONDS - sec))
         [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); return 4; }
         # Its test files over the time budget are a note on its test line (slowtests()), never a finding (card()).
@@ -295,10 +297,10 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         testrulespass > /dev/null
         tested "$3"; began "$1" "$2" "$5"; continue
       fi
-      sleep "$LIVE"; continue
+      : > "$3.idle"; sleep "$LIVE"; continue
     fi
     # The wait ended: a later wait of this call begins anew, what the card waited before it counted once.
-    [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }
+    rm -f "$3.idle"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }
     old=$(git -C "$3" rev-parse HEAD 2>&1) || { block "$1" "$2" "$3" "$5: the engine could not read the commit of the worktree:${old:0:300}"; return 1; }
     [ "$old" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ] || return $moved
     # A card an ordered card went past is reviewed again on main as it is now, even when its patch applies there, and

@@ -5,6 +5,19 @@
 `conveyor.sh control [<action>]` changes the control record; with no action it prints the record. A new project starts
 on the values in `conveyor/lib/control-defaults.json`; a record keeps each value it sets.
 
+`conveyor.sh control cap <1-100|off>` sets the builder cap: how many cards build at once (Cards at once on the Rules
+tab). A card that only waits on another card does not take a build slot. These are the waits that do not count:
+
+- a wait at the landing claim on a card that changes the same files,
+- a wait on the batch card that took the card,
+- a wait in the Test step for main to change, when main is red.
+
+A waiting card that runs its own checks or tests counts while they run, and its tests take test slots as other tests
+do. When the wait ends, the card counts again. The loop leaves out no more waiting cards than the cap. Each waiting
+card past that limit counts, so the loop does not start new cards while old cards wait. The machine's cap counts the
+cards of each project in the same way. `conveyor.sh foreman status`, `/units` and the Board show a waiting card as waiting, and
+give the count of cards that build against the cap without the waiting cards.
+
 `conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]` and
 `conveyor.sh control judge <cli> <model> [effort]` set the review's judge (below, The judge): each project's record holds
 its own, and the Board's Rules tab sets them in its Judge row.
@@ -371,8 +384,8 @@ failure gets a verdict:
   longer exists is dropped. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
   Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
   and its test step runs again (the same change keeps its passes, so the cases that failed run again). Those cards
-  hold their slots while they wait, so the loop starts a main-red fix card even with the project's cap
-  reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap,
+  hold no build slot while they wait (Control, above), but the waiting cards past the cap still hold theirs, so the
+  loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap,
   `maxLoad` and `minFreeMemMB` apply as to any card. The Board shows that card as "beyond the cap: main is red".
 - **card**: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
   select it). The card goes to its fix session.

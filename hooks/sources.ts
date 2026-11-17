@@ -86,8 +86,10 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // or "control record unreadable" ("" when the snapshot does not say), reason: why it picks nothing ("" when the
 // snapshot gives none), and loop: whether its process runs. judgeDeclined: when each finding the judge declined was
 // declined, from every record's declined list, each line once. suites: each record's whole-suite runs (the snapshot's
-// suites: a release's suite, the full test), under way (ended null) or ended.
-export type Loop = { repo: string; state: string; reason: string; loop: boolean | null }
+// suites: a release's suite, the full test), under way (ended null) or ended. building and waiting: the running
+// loop's cards counted against its builder cap (cap; null with no cap) at its last turn, and its cards left out of that
+// count as they only wait on another card; null when no loop runs or the snapshot does not say.
+export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
 export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
@@ -208,7 +210,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
-    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null },
+    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waiting), cap: num(j.health?.builderCap) },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
       ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
@@ -653,6 +655,15 @@ const hostSegs = (s: State): Line => [{ t: '●', c: C.ok }, { t: ` ${s.host} re
 const loopText = (snap: Snap): string => snap.loops
   .map(l => (l.loop === false ? `${l.repo}: no loop process` : l.state && l.state !== 'running' ? `${l.repo} ${l.state}${l.reason ? `: ${l.reason}` : ''}` : ''))
   .filter(Boolean).join(' · ')
+// Each running loop's cards building against its builder cap, as `foreman status` gives them: `building 1 of the cap 1,
+// 1 waiting not counted` (a card that only waits on another card takes no build slot); with more than one loop, each
+// after its repo. Nothing for a loop that does not say, or that runs with no cap.
+const capText = (snap: Snap): string => {
+  const ls = snap.loops.filter(l => l.building !== null && l.cap !== null)
+  return ls.map(l => `${snap.loops.length > 1 ? `${l.repo} ` : ''}building ${l.building} of the cap ${l.cap}${l.waiting ? `, ${l.waiting} waiting not counted` : ''}`).join(' · ')
+}
+// Last on a line that is cut at its end, so the counts before it are kept on a narrow screen.
+const capTail = (snap: Snap): string => (capText(snap) ? ` · ${capText(snap)}` : '')
 const loopSegs = (snap: Snap): Seg[] => (loopText(snap) ? [{ t: ' · ' }, { t: loopText(snap), c: C.you, b: true }] : [])
 
 // The head, two lines: CONVEYOR, today's cost and the host; then the weekly limit with its reset, and
@@ -734,6 +745,7 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
 // While a step streams, its live fields follow on a dim line of their own.
 export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   head('ON THE BELT', snap.belt.length),
+  ...(capText(snap) ? [[{ t: `  ${capText(snap)}`, d: true }]] : []),
   ...(snap.belt.length ? [] : [empty('the belt is empty')]),
   ...snap.belt.flatMap((b, i): Line[] => {
     const all = overallOf(b, s.now)
@@ -882,7 +894,7 @@ export const bandModel = (s: State, w: number, frame: number): Line[] => {
   const queued = snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} queued`
   const out: Line[] = [spread(
     [{ t: 'CONVEYOR', c: C.head, b: true }, ...loopSegs(snap), ...(snap.needs.length ? [{ t: ' · ' }, { t: `${snap.needs.length} need${snap.needs.length === 1 ? 's' : ''} you`, c: C.you, b: true }] : []),
-      { t: ` · ${snap.belt.length} on the belt · ${queued} · ${snap.landed.length} landed` }],
+      { t: ` · ${snap.belt.length} on the belt · ${queued} · ${snap.landed.length} landed${capTail(snap)}` }],
     [...limitSegs(s, true), { t: ' · ' }, todaySeg(snap), { t: ' · ' }, ...hostSegs(s)], w)]
   out.push(...foremanModel(s, w, false))
   const n = snap.needs[0]
@@ -903,7 +915,7 @@ export const bandModel = (s: State, w: number, frame: number): Line[] => {
 }
 
 export const summaryLine = (s: State): string =>
-  s.snap ? `conveyor: ${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${loopText(s.snap) ? `${loopText(s.snap)} · ` : ''}${s.snap.needs.length ? `${s.snap.needs.length} need${s.snap.needs.length === 1 ? 's' : ''} you · ` : ''}${s.snap.belt.length} on the belt · ${s.snap.landed.length} landed · ${plain([todaySeg(s.snap)])}` : `${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${s.note}`
+  s.snap ? `conveyor: ${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${loopText(s.snap) ? `${loopText(s.snap)} · ` : ''}${s.snap.needs.length ? `${s.snap.needs.length} need${s.snap.needs.length === 1 ? 's' : ''} you · ` : ''}${s.snap.belt.length} on the belt · ${s.snap.landed.length} landed · ${plain([todaySeg(s.snap)])}${capTail(s.snap)}` : `${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${s.note}`
 
 // What the toasts compare between two polls: the cards that need you and the cards that landed, by card id.
 export type Seen = { needs: Map<string, string>; landed: Map<string, string> }

@@ -76,9 +76,19 @@ fresh() { if stale; then echo stale; else "$@"; fi; }
 machined() { grep -qE '^(cmd machine |  machine\) )' "$1" 2>/dev/null; }
 # The issues, as a JSON list, of the cards a card on the belt waits on now (its live record's waits, at settle()) that
 # `retry` gave back: their lines are out of the card records. Nothing when there are none. The loop picks one of them
-# first, even with every slot taken: the card that waits on it holds a slot, and with the belt full of such cards it
-# would never be picked. A card that waited once and went on holds its slot for work, and starts nothing past the cap.
+# first, even with every slot taken: a card that waits on it past the waiting cards left out of the count (idle())
+# holds a slot, and with the belt full of such cards it would never be picked. A card that waited once and went on
+# holds its slot for work, and starts nothing past the cap.
 # A run with --only takes only the listed ones.
+# How many of the loop's cards in progress only wait now: alive, with <worktree>.idle standing. A card stands it while
+# it sleeps out a wait on a same-file card or on the batch card that took it (settle()), or for main to change on a
+# red main (mainwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
+# against the cap: the rest count, so the loop does not start card after card while the old ones pile up waiting.
+idle() { # <the loop's own cards in progress, "<pid> <card>" one a line>
+  local p c n=0
+  while read -r p c; do [ -n "$c" ] && [ -e "$CARDS/$c.idle" ] && kill -0 "$p" 2>/dev/null && n=$((n + 1)); done <<<"$1"
+  echo "$n"
+}
 urgent() {
   live | jq -c --slurpfile s <(turncards) --argjson only "${ONLY:-null}" '[$s[] | select(.step == "picked") | .card] as $on
     | [$s[] | select(.step | IN("landed", "closed", "blocked")) | .card] as $ended
@@ -170,7 +180,7 @@ revive() { # <the loop's own cards, one a line>
       | [.card, .issue, .pid, .started, $s] | @tsv] | .[]' < <(turncards) 2>/dev/null)
 }
 run() { # [max-cards] [serve]
-  local left=${1:--1} serve=${2:-} cap base='' picked running started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
+  local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
   # kids: an adopted card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
@@ -288,6 +298,10 @@ run() { # [max-cards] [serve]
       stried=$SECONDS; survey 8>&- < /dev/null
     fi
     running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}") + ${#took[@]})); waits=''
+    # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
+    # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
+    idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)"); [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
+    building=$((running - idles))
     if [ -z "$old" ] && stale; then
       old=1; enginepin p f 2>/dev/null || f=''
       if [ -n "$FOLLOW" ]; then echo "conveyor: the checkout has moved on from this loop's $RAN; nothing new is picked, and the loop restarts on the checkout's new code once its push is done"
@@ -295,8 +309,9 @@ run() { # [max-cards] [serve]
       else echo "conveyor: the pack pins another Conveyor commit than this loop's $OWN; nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the pinned commit once its push is done" || echo "ends once its cards and push are done")"; fi
     fi
     [ -z "$why" ] || [ -z "$old" ] || why+="; the loop $([ -n "$serve" ] && echo "restarts on the $([ -n "$FOLLOW" ] && echo "checkout's new code" || echo "project's Conveyor commit") once its push is done" || echo "ends once its cards and push are done")"
-    say=$(jq -cn --argjson p "$$" --arg t "$self" --arg s "$now" --arg r "$why" --arg c "$RAN" --arg h "$([ -n "$OWN" ] || echo "$HERE")" \
-      '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end)}')
+    # building and waiting: the cards counted against the cap, and those left out as they only wait (health()).
+    say=$(jq -cn --argjson p "$$" --arg t "$self" --arg s "$now" --arg r "$why" --arg c "$RAN" --arg h "$([ -n "$OWN" ] || echo "$HERE")" --argjson b "$building" --argjson w "$idles" \
+      '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end), building: $b, waiting: $w}')
     [ "$say" = "$said" ] || { printf '%s\n' "$say" > "$SAYS.new" && mv -f "$SAYS.new" "$SAYS" && said=$say; }
     # Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new loop
     # would start a second push beside one still running, and nothing is picked meanwhile; no other push starts once
@@ -333,13 +348,15 @@ run() { # [max-cards] [serve]
     # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES and never
     # asks GitHub itself while the pick holds the records' lock.
     urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
-    red=''; [ "$cap" -le 0 ] || [ "$running" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
+    red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
     # While a session's API-side error is fresh (session()), no card is picked: its session would meet the same outage.
-    asking=''; if { [ "$running" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ]; then
+    asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ]; then
       if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
     fi
-    # The machine's count of this project's cards (room()), and no card of it waiting for a slot when it asks for none.
-    RUNNING=$running; slotturn "$running" "$([ "$asking" = 1 ] && [ "$now" = running ] && echo 1)"
+    # The machine's count of this project's cards (room()), the waiting ones left out as here, and no card of it
+    # waiting for a slot when it asks for none.
+    # shellcheck disable=SC2034 # RUNNING is read by room() and slotput, from lib/pick.sh
+    RUNNING=$building; slotturn "$building" "$([ "$asking" = 1 ] && [ "$now" = running ] && echo 1)"
     # A blocked card whose issue was closed leaves the blocked lists (shut), and the issue leaves the open list this
     # turn's pick reads. Closed is decided from the issue's own state on GitHub, never from its absence in the open
     # list (a filter or --only narrows that): each blocked card's issue is asked at every turn until it is seen
@@ -371,7 +388,7 @@ run() { # [max-cards] [serve]
     # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks
     # GitHub for the queue, and a job of the loop's would count as a card).
     if [ $((SECONDS - sampled)) -ge "$SAMPLE" ]; then
-      sampled=$SECONDS; ( sample "$running" "$cap" "$now" >/dev/null 2>&1 8>&- & )
+      sampled=$SECONDS; ( sample "$building" "$cap" "$now" >/dev/null 2>&1 8>&- & )
       [ "$running" = 0 ] || ( reading >/dev/null 2>&1 8>&- & )
     fi
     if [ -n "$asking" ]; then
@@ -381,8 +398,8 @@ run() { # [max-cards] [serve]
       [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red" ] \
         || { picked=$(BEYOND='main is red' locked fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
       # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
-      [ -n "$picked" ] || [ "$running" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
-      [ -n "$picked" ] || [ "$running" -ge "$cap" ] \
+      [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
+      [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
         || picked=$([ "$asking" = 1 ] && locked fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") || { [ "$running" != 0 ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
       [ "$picked" != stale ] || continue # the next turn says so and stops picking
       [ "$picked" != wait ] || { waits=1; picked=''; }

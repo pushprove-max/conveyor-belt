@@ -208,3 +208,16 @@ test('the account page\'s head follows the live feed\'s changes, not only its sn
   assert.equal(needs(), '0', 'the change redraws the tile');
   assert.equal(w.document.getElementById('status').textContent, 'Live');
 });
+
+// Issue 201: a card that only waits on another card takes no build slot, so the On the belt tile leaves it out of the
+// cards it counts against the slots in force, and says so on a tap. Bug it catches: the tile counted every card on the
+// belt, so with the cap reached by one waiting card the owner saw a full belt while the loop picked a new card.
+test('the On the belt tile leaves out the cards that only wait on another card, and says how many', () => {
+  const w = boot();
+  const data = full();
+  data.panels.belt.data.waiting = 1;
+  deliver(w, data);
+  assert.equal(fig(w, 'belt'), '1 of 3', 'two cards on the belt, one waiting: one holds a slot');
+  tile(w, 'belt').click();
+  assert.equal(tile(w, 'belt').querySelector('.stat-gap').textContent, '1 card waits on another card: not counted');
+});

@@ -216,7 +216,7 @@ owed() {
   [ -n "$o" ] && git merge-base --is-ancestor "${o##* }" "refs/heads/$BRANCH" 2>/dev/null && ! atorigin "${o##* }" && echo "$o"
 }
 
-tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".first "$1".rerun "$1".rerun.new "$1".whole "$1".passed "$1".bpass "$1".times "$1".reported "$1".report "$1".slow "$1".timed "$1".cpus "$1".clocks; rm -rf "$1".rv "$1".batchtestlog; }
+tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".first "$1".rerun "$1".rerun.new "$1".whole "$1".passed "$1".bpass "$1".times "$1".reported "$1".report "$1".slow "$1".timed "$1".cpus "$1".clocks; rm -rf "$1".rv "$1".batchtestlog; }
 clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
@@ -281,8 +281,8 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
     if mkdir -p "$k" 2>/dev/null && mv -f "$3.$f" "$k/" 2>/dev/null; then kept=$k; else left=1; fi
   done
   [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .err, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun]"; }
-  if [ -n "$hold" ]; then git worktree remove --force "$3" 2>/dev/null; rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".index "$3".msg "$3".review.new "$3".carried "$3".live "$3".live.tmp "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled
-  elif [ -z "$stay" ]; then tidy "$3"; else rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".patch "$3".index "$3".msg "$3".review.new "$3".carried "$3".base "$3".live "$3".live.tmp "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled; fi
+  if [ -n "$hold" ]; then git worktree remove --force "$3" 2>/dev/null; rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".index "$3".msg "$3".review.new "$3".carried "$3".live "$3".live.tmp "$3".idle "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled
+  elif [ -z "$stay" ]; then tidy "$3"; else rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".patch "$3".index "$3".msg "$3".review.new "$3".carried "$3".base "$3".live "$3".live.tmp "$3".idle "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled; fi
   # The session or review that failed: what it spent is on this line (spent, and its tokens), so it is priced.
   sp=$(jq -ce 'objects' "$3.spent" 2>/dev/null) || sp=null; rm -f "$3.spent"
   reading fresh >/dev/null 2>&1

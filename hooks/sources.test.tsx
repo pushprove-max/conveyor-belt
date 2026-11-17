@@ -50,6 +50,22 @@ test('a head with no limit in the data file says so, and a day with an unpriced 
   expect(text.split('\n')[1]).toMatch(/^weekly limit not read +0 on belt · 0 queued$/)
 })
 
+// Bug: a card that only waits on another card takes no build slot, but /units gave only the count on the belt, so the
+// owner saw a full cap where the loop had a free slot.
+test('/units gives the cards building against the cap and leaves out those waiting on another card, as foreman status does', () => {
+  const s = board({ belt: BELT, health: { loop: true, state: 'running', building: 1, waiting: 1, builderCap: 1 } })
+  const text = tableText(s, 120)
+  expect(section(text, 'ON THE BELT').split('\n')[1]).toBe('  building 1 of the cap 1, 1 waiting not counted')
+  expect(bandModel(s, 200, 0).map(plain)[0]).toMatch(/ · 2 on the belt · 0 queued · 0 landed · building 1 of the cap 1, 1 waiting not counted /)
+  expect(summaryLine(s)).toBe('conveyor: 2 on the belt · 0 landed · today $0.00 · building 1 of the cap 1, 1 waiting not counted')
+  // Bug: the cap text in the head made its right side too wide for /units' 56 columns, so the belt and queue counts
+  // were dropped; and in the band, cut at its end, it pushed the queue and landed counts off.
+  expect(tableText(s, 56).split('\n')[1]).toMatch(/ 2 on belt · 0 queued$/)
+  expect(bandModel(s, 100, 0).map(plain)[0]).toMatch(/ · 2 on the belt · 0 queued · 0 landed/)
+  // With no cap (off) or no loop count, only the count on the belt.
+  expect(summaryLine(board({ belt: BELT, health: { loop: true, building: 2, waiting: 0, builderCap: null } }))).toBe('conveyor: 2 on the belt · 0 landed · today $0.00')
+})
+
 // Bug: a release's whole suite (about 15 minutes) runs and /units shows nothing of it, so the owner asks the Foreman
 // whether it runs, how far it is and whether anything failed; or a run long over stays on the board.
 const SUITE = { kind: 'release', version: '1.2.0', step: 'release-prep', sha: 'a1b2c3d4e5f6a7b8', since: ago(12), ended: null, state: 'running', done: 140, failed: 2, cases: ['x: a', 'y: b'], moved: false, reasons: [] }

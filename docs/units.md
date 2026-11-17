@@ -15,7 +15,10 @@ host file (its settings file), whether or not the session's project is the plugi
 is shown. A figure is never cut: figures are right-aligned and the title is what gives way.
 
 - A head, two lines: `CONVEYOR`, dollars today and the Conveyor host (`● buildbox`); then the weekly limit with its
-  reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. In `/units` a third line gives how
+  reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. While the loop runs with a builder
+  cap, the first line under `ON THE BELT` gives the cards building against the cap and the cards that wait on another
+  card, which take no build slot (`building 1 of the cap 1, 1 waiting not counted`); the band and the status line give
+  the same at their end. In `/units` a third line gives how
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).
 - **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
@@ -53,7 +56,8 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   step it stopped in is said here: `failed at Build (step 1 of 6) after 12m`, then its six steps and one line for each
   finished review (`R1 NO-GO  1 P1, 2 P2`; a review recorded with no counts shows its verdict alone), and its
   measurements (below).
-- **ON THE BELT**: three lines a card and a blank line between cards.
+- **ON THE BELT**: under the heading, the same count against the builder cap as the head, when the loop gives it; then
+  three lines a card and a blank line between cards.
   1. The issue and its short title in bold (a follow-up: what it fixes and the issue it came from, `Board: … ↳ #12`,
      never the raw `[P2] path:line …` title), then right-aligned when the card was picked up (local time, with the date
      when it is not today), its overall time so far (from its pick-up, never the time it sat queued; a card resumed

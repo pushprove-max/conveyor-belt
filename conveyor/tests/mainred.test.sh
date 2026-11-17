@@ -30,6 +30,8 @@ t_mainred() {
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until "$waiting" 'cat "$STUB/run.out"' || fail "the card did not wait for main: $(cat "$STUB/run.out")"
   c=$(st 'select(.step == "picked") | .card')
+  # Issue 201: while it only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
+  wait_until "[ -e '$T/$CASE/cards/$c.idle' ]" || fail "the card waiting for main did not mark itself waiting: the loop would count it against the cap"
   [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:c.test|fail:b.test:flaky|" ] && [ "$(ran main)" = "flaky three" ] \
     || fail "main's run was not told to run the failing case alone and the file that failed naming no case whole: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
   [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "[\"fail\",[{\"case\":\"c.test\",\"verdict\":\"main\"},{\"case\":\"b.test: flaky\",\"verdict\":\"main\"}],\"$(git -C "$R" rev-parse HEAD)\"]" ] \

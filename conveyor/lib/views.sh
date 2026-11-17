@@ -185,7 +185,9 @@ cards() {
 # to run: the record's signin; null otherwise), guard: at (the guard's percent, null for none), reading and
 # readAt (the reading it is held against, null when no guard is set or there is no reading) and missing (true when a
 # guard is set and there is no reading: the guard then pauses nothing), start (where new issues start: queue or held;
-# null when the record does not read), builderCap (the cap in force), models and
+# null when the record does not read), builderCap (the cap in force), building and waiting (the running loop's cards
+# counted against that cap at its last turn, and its cards left out of that count as they only wait, run(); null when
+# no loop runs), models and
 # efforts (the ones in force, {claude, codex}: the next session's and the next review's), and homes (plan section 6).
 # homes: each setting the loop reads, by its name in the pack (tunables.poll, models.allowed, rulings.log, checks)
 # or the control record (control.cap, control.model, control.reviewer), as {value: the one in force, home: "pack",
@@ -230,7 +232,7 @@ UNTIMED='def untimed: [.[] | select(.step == "test" and (.result | IN("pass", "f
     and .ended != "nothing selected" and (.selected.files // 1) > 0)] | .[-5:]
   | if length > 0 and all(.[]; .times | type != "object") then length else 0 end;'
 health() {
-  local loop=true gh=false free a not=() lv c r=null cap cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld tr
+  local loop=true gh=false free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc mn ld tr
   check && lv=${LIVEJSON:-$(live)} || return 1
   gone=$(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
       | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.) | "\(.card)\t\(.pid)\t\(.started // "")"] | .[]' "$READ" \
@@ -257,6 +259,8 @@ health() {
   if [ "$loop" = true ] && said=$(jq -ce 'select(.state == "control record unreadable" and (.pid | type == "number")) | {pid, reason}' "$SAYS" 2>/dev/null) \
     && kill -0 "$(jq -r .pid <<<"$said")" 2>/dev/null; then st='control record unreadable'; why=$(jq -r '.reason // ""' <<<"$said"); fi
   [ "$loop" = true ] && cm=$(jq -ce '.commit | strings' "$SAYS" 2>/dev/null) || cm=null
+  # The running loop's count at its last turn: {building: the cards counted against the cap, waiting: those left out}.
+  [ "$loop" = true ] && bw=$(jq -ce 'select((.building | type) == "number" and (.waiting | type) == "number") | {building, waiting}' "$SAYS" 2>/dev/null) || bw='{"building":null,"waiting":null}'
   if [ "$loop" = true ] && pu=$(jq -ce 'select((.pid | type == "number") and (.since | type == "string")) | {pid, since, sha}' "$PUSHING" 2>/dev/null) \
     && kill -0 "$(jq -r .pid <<<"$pu")" 2>/dev/null; then pu=$(jq -c 'del(.pid)' <<<"$pu"); else pu=null; fi
   ghok && gh=true
@@ -273,7 +277,7 @@ health() {
   done
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
-    --argjson cap "$cap" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" \
+    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" \
     --slurpfile old "$READ_OLD" --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
@@ -335,7 +339,7 @@ health() {
              | select($k != []) | {card, issue, step: "test", since: ($k | map(.since) | min), cases: ($k | map(.name))}])),
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
-       gh: $gh, diskFreeKb: $free, builderCap: $cap, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
+       gh: $gh, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waiting: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
        untimed: untimed, report: $report, routes: $routes, quarantined: $qt}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$READ"

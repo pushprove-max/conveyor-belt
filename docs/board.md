@@ -118,7 +118,8 @@ The Rules tab holds the settings:
 
 - which issues to build (the P0 to P3 switches, follow-ups and area labels). A main-red fix card is built whatever the
   P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
-- cards at once,
+- cards at once. A card that only waits on another card does not count, up to as many waiting cards as this
+  setting. The On the belt figure leaves these cards out, and a tap on it says how many wait,
 - the usage at which no new card starts,
 - the builder, reviewer and judge: each a CLI installed on the loop's machine, then a model, then an effort
   ([Models](configuration.md#models)),

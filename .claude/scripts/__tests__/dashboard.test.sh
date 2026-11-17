@@ -122,7 +122,7 @@ q '.panels | all(.[]; has("error") and has("data"))' "every part is {error, data
 [ -z "$(find "$OUT" -maxdepth 1 \( -name '.run.*' -o -name '.data.js.*' \) | head -n 1)" ] || fail "a collect leaves no temporary file beside data.js: $(ls -A "$OUT")"
 
 # --- a host with nothing on it: every list is a measured empty list, never null ---
-q '.panels.belt == {error: null, data: {cards: [], cap: 6, byRepo: {sample: {cap: 3}, widgetshop: {cap: 3}}}}' "an empty belt is an empty list, with the builder slots of both records and each record's own"
+q '.panels.belt == {error: null, data: {cards: [], cap: 6, waiting: 0, byRepo: {sample: {cap: 3}, widgetshop: {cap: 3}}}}' "an empty belt is an empty list, with the builder slots of both records and each record's own"
 # Its deck's slots are the head's "On the belt" figure, the Belt part's cards of its cap (issue 413: the deck read the
 # host's test-slot pool, "2/16 FREE" with 5 cards running, beside the tile's "5 of 13").
 q '.panels.belt3d == {error: null, data: {repos: ["sample", "widgetshop"], byRepo: {}, belt: [], queue: {next: [], held: [], waiting: []}, needs: [], landed: [],
@@ -578,9 +578,14 @@ q '.panels.machine.data.projects[1].models.judge == {on: false}' "a project whos
 # The whole machine paused (the host file's mode): the machine says so; no project's own state is rewritten.
 # Its cap is 4 here, under the projects' 3 and 2: the slots in force are the machine's 4, everywhere on the page.
 MP=$(jq -c '.paused = true | .cap = 4' <<<"$MC")
-answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$C3")" "$C_URL" 0
+# widgetshop's loop leaves one of its 3 cards out of its count against its cap, as it only waits on another card
+# (health.waiting, issue 201): the machine, the project, Belt 3D's deck and the On the belt tile (the Belt part's
+# waiting) count 1 + 2 slots in use, never 4.
+answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waiting = 1' <<<"$C3")")" "$C_URL" 0
 run
 q '.panels.machine.data | .state == "paused" and (.projects | map(.state)) == ["paused", "running"]' "a paused machine is paused; each project's state stays its own record's"
+q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used, .panels.belt.data.waiting] == [3, [1, 2], 3, 1]' \
+  "a card that only waits on another card holds no slot in the machine's, the project's and the deck's count, and the Belt part says how many wait"
 q '[.panels.machine.data.cap, .panels.belt.data.cap, .panels.belt3d.data.deck.cap] == [4, 4, 4]' "a machine cap under the projects' own caps together is the slots in force, the same in every part"
 # Belt 3D's deck reads out the machine's state as the machine part has it (its LOOP readout) (issue 393): a deck that
 # said LIVE on a paused machine would lie.

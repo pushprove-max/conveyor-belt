@@ -130,12 +130,15 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | join("\t")'
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
-# snapshot, with no wake put and nothing marked reported: the belt (a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
+# snapshot, with no wake put and nothing marked reported: the belt (its count, and while the loop runs its cards
+# building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
 # above), each "needs you: <text>". <project> names one record of mine; with none, every one of them.
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
-  "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt",
+  "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
+    + ((.health | objects | select((.building | type) == "number" and (.builderCap | type) == "number")
+      | "; building \(.building) of the cap \(.builderCap)\(if (.waiting // 0) > 0 then ", \(.waiting) waiting not counted" else "" end)") // ""),
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),

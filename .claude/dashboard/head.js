@@ -116,12 +116,16 @@
         read: (part, ctx) => cost(part('cost') && part('cost').cards, 'weekUsd', 'weekLeftOut', ctx) },
       { key: 'per', label: 'Per landed card', panel: 'cost', drop: 2,
         read: (part, ctx) => cost(part('cost') && part('cost').cards, 'perLandedUsd', 'perLandedLeftOut', ctx) },
-      // Cards building now of the slots in force; a card landed and waiting for its push holds no slot (belt.js).
+      // Cards building now of the slots in force; a card landed and waiting for its push holds no slot (belt.js), and
+      // nor does a card the loop leaves out of its count as it only waits on another card (the part's waiting).
       { key: 'belt', label: 'On the belt', panel: 'belt', drop: 5,
         read: (part) => {
           const b = part('belt');
-          const cards = b && Array.isArray(b.cards) ? b.cards.filter((c) => !(c && c.landed)).length : null;
-          return { value: cards, sub: cards !== null && n(b.cap) !== null ? `of ${b.cap}` : null };
+          const all = b && Array.isArray(b.cards) ? b.cards.filter((c) => !(c && c.landed)).length : null;
+          const waiting = all !== null ? Math.min(n(b.waiting) || 0, all) : 0;
+          const cards = all !== null ? all - waiting : null;
+          return { value: cards, sub: cards !== null && n(b.cap) !== null ? `of ${b.cap}` : null,
+            left: waiting > 0 ? `${plural(waiting, 'card waits', 'cards wait')} on another card: not counted` : null };
         } },
       // Issues ready to be picked, then those held: by the owner, by a label or by a rule as the Board splits the open
       // issues, or, without that split, as the queue counts them. The queue's `next` lists only the first

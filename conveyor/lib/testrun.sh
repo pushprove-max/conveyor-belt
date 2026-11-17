@@ -1310,14 +1310,15 @@ redtitles() {
 }
 # A card whose every failure is main's (verdicts()) waits in its test step until main is at another commit than
 # <main's commit>, its live record saying so and brought up to date as it waits (so `health` does not call it stuck).
+# It only sleeps there: <worktree>.idle stands meanwhile, so the loop does not count it against the builder cap (idle()).
 mainwait() { # <worktree> <main's commit> <the cases, as one text>
   local at; at=$(date -u +%FT%TZ)
   while [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" = "$2" ]; do
     jq -cn --arg at "$at" --arg c "$3" --arg s "${2:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
       action: "waiting for main to change: \($c) fail on main at \($s) too"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
-    sleep "$LIVE"
+    : > "$1.idle"; sleep "$LIVE"
   done
-  rm -f "$1.live"
+  rm -f "$1.live" "$1.idle"
 }
 # One run of the command <cmd> in the worktree, on the slot tests() holds. The report file an earlier run wrote
 # (<worktree>.report, reportask()) goes first: a runner that adds to it (tools/mochatimes.cjs) would otherwise give the
