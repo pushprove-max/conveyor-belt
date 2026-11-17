@@ -80,14 +80,15 @@ machineloop() {
   # Whether it is that already is asked of the kernel (subreaper), never read from its environment, which whoever
   # starts it sets: a variable that said so left it no subreaper, and the processes left with no parent ran on.
   # python3 starts with SIGPIPE and SIGXFSZ ignored, and every loop and session under it would run so: each is as
-  # this process has it.
+  # this process has it. This exec and each loop's start leave out the copy of stderr (LOGFD): the conveyor.sh each
+  # becomes makes its own, so a copy kept is one more fd held for good by the machine, its loops and their cards.
   if [ "$(uname -s)" = Linux ] && command -v python3 >/dev/null && ! subreaper; then
     exec python3 -I -c 'import ctypes, os, signal, sys
 if ctypes.CDLL(None).prctl(36, 1):  # PR_SET_CHILD_SUBREAPER
     sys.exit("conveyor: the machine\x27s Conveyor cannot be made the reaper of the processes it starts (prctl)")
 for s in signal.SIGPIPE, signal.SIGXFSZ:
     if not int(sys.argv[1], 16) >> (s - 1) & 1: signal.signal(s, signal.SIG_DFL)
-os.execvp(sys.argv[2], sys.argv[2:])' "$(sed -n 's/^SigIgn:[[:space:]]*//p' "/proc/$$/status")" "$BASH" "$HERE/conveyor.sh" machine
+os.execvp(sys.argv[2], sys.argv[2:])' "$(sed -n 's/^SigIgn:[[:space:]]*//p' "/proc/$$/status")" "$BASH" "$HERE/conveyor.sh" machine {LOGFD}>&-
   fi
   MACHINE_MARK=CONVEYOR_MACHINE_ID=$$.$RANDOM$RANDOM MACHINE_READERS=''; export "$MACHINE_MARK"
   mkdir -p "$MACH" || return 1
@@ -118,7 +119,7 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$(sed -n 's/^SigIgn:[[:space:]]*//p' "/pr
       ( set +m; cd "$m" 2>/dev/null || { echo "conveyor: the checkout $m of $r is not there" >&2; exit 1; }
         unset CONVEYOR_CARDS CONVEYOR_ADOPT CONVEYOR_KIDS
         if [ "$e" = checkout ]; then e=$m/conveyor/conveyor.sh; else e=$HERE/conveyor.sh; fi
-        CONVEYOR_MAIN=$m exec "$BASH" "$e" serve ) 8>&- >&"$o" 2>&1 {o}>&- &
+        CONVEYOR_MAIN=$m exec "$BASH" "$e" serve ) 8>&- {LOGFD}>&- >&"$o" 2>&1 {o}>&- &
       kid[$!]=$r; set +m; exec {o}>&-
     done <<<"$recs"
     sleep "$MACHINE_POLL" 8>&- & nap=$!; wait $nap

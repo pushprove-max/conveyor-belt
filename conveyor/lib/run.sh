@@ -327,7 +327,9 @@ run() { # [max-cards] [serve]
         for p in $(tree "$k"); do t=$(p_started "$p") && echo "$k $p $t"; done
       done | sort -u)
       echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${took[$k]:-$RAN}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')"
-      CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${took[$k]:-$RAN}"; done) exec "$BASH" "$new" serve
+      # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
+      # hundreds every card's test runner got fd 255, bash's own.
+      CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${took[$k]:-$RAN}"; done) exec "$BASH" "$new" serve {LOGFD}>&-
     fi
     if [ -n "$old" ] && [ "$running" = 0 ] && [ -z "$pusher" ]; then
       # A `run` ends here; a card that landed after this turn's push check is owed a push first, as below.

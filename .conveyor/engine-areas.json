@@ -414,6 +414,7 @@
 {"area": "run", "file": "conveyor/lib/run.sh"}
 {"area": "machine", "test": "machine.test.sh"}
 {"area": "machine", "test": "machineload.test.sh"}
+{"area": "machine", "test": "machinefds.test.sh"}
 {"area": "machine", "file": "conveyor/lib/machine.sh"}
 {"area": "install", "test": "install.test.sh"}
 {"area": "install", "test": "service.test.sh"}

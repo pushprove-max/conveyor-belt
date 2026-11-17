@@ -94,6 +94,11 @@ t_follow() {
   till '[ "$(loop health | jq -r .commit)" = "$A" ]' || fail "health does not name the commit the loop started on: $(loop health | jq -c .commit)"
   # No new commit: a whole turn goes by and the loop does not restart.
   turns 2; ! grep -q 'restarting\|moved on' "$STUB/serve.out" || fail "the loop restarted with no new commit: $(cat "$STUB/serve.out")"
+  # The fds of the loop open on its output, fewest of 5 looks (a builtin's redirection holds one more for a moment);
+  # Linux alone has /proc. Bug: each restart kept its copy of stderr (LOGFD), so after some hundreds of restarts every
+  # card's test runner got fd 255, bash's own, and its slot and lock cases failed.
+  copies() { local i f n m=''; for i in 1 2 3 4 5; do n=0; for f in /proc/$pid/fd/*; do [ ! "$f" -ef "$STUB/serve.out" ] || n=$((n + 1)); done; [ -n "$m" ] && [ "$m" -le $n ] || m=$n; sleep 0.1; done; echo "$m"; }
+  [ ! -d /proc/$pid/fd ] || fds=$(copies)
   # A new commit lands in the checkout while #7 is in flight: the loop restarts on it at once, in its own process,
   # and #7 carries on on $A; then #7 and #8 both land through the restarted loop, which restarts no more.
   git -C "$D" merge -q --ff-only "$B" || fail "the new commit did not land in the checkout"
@@ -101,6 +106,7 @@ t_follow() {
   grep -q "the checkout has moved on from this loop's $A" "$STUB/serve.out" && [ -z "$(st 'select(.issue == 7 and .step == "landed")')" ] \
     || fail "the loop waited for #7 before it restarted, or did not say why it restarts: $(cat "$STUB/serve.out")"
   till '[ "$(loop health | jq -r .commit)" = "$B" ]' || fail "health does not name the new commit after the restart: $(loop health | jq -c .commit)"
+  [ ! -d /proc/$pid/fd ] || [ "$(copies)" = "$fds" ] || fail "the restart kept a copy of the loop's stderr: $fds fds on its output before, $(copies) after"
   : > "$STUB/go"
   till '[ -n "$(st '"'"'select(.issue == 8 and .step == "landed")'"'"')" ] && [ -n "$(st '"'"'select(.issue == 7 and .step == "landed")'"'"')" ]' \
     || fail "#7 and #8 did not both land through the restarted loop: $(cat "$STUB/serve.out")"
