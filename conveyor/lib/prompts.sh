@@ -448,6 +448,12 @@ WIDE='the test command, given <n> test file(s), ran <ran> test files: it runs te
 # that fix it.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NARROW='the rule Whole suite in a card is off, and <why>; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file'
+# Why the bug-card check was stopped when, with that rule off, the test command was run with no list of test files to
+# find whether the change selects a test of its own (bugproof(), lib/testrun.sh), and reported <ran> test files, over
+# ten for each of the <n> that the test map and its links give the change. test.list and test.fileCommand do not change
+# this run.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NARROWALONE='The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported <ran> test files. That is over ten for each of the <n> test file(s) that the test map and .conveyor/test-links.json link to the change, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.'
 # What a card's test step says when, with that rule off, no test file is linked to its change (listcmd()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'

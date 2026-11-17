@@ -466,9 +466,10 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   fi
   TEST_RUN=$((SECONDS - w))
   # Given TEST_GIVEN files, a run reported far more (watch() stopped it, <worktree>.wide): it does not run again, and
-  # <worktree>.stop says why.
+  # <worktree>.stop says why. A run alone with no TEST_CMD was given no list (bugproof()): its reason says so (NARROWALONE).
   if [ -s "$1.wide" ]; then
-    narrowstop "the test command, given $TEST_GIVEN test file(s), reported $(<"$1.wide") test files: it runs test files it is not given, so its run was stopped" > "$1.stop"
+    if [ "${3:-}" = alone ] && [ -z "${TEST_CMD:-}" ]; then f=${NARROWALONE//'<n>'/$TEST_GIVEN}; printf '%s\n' "${f//'<ran>'/$(<"$1.wide")}" > "$1.stop"
+    else narrowstop "the test command, given $TEST_GIVEN test file(s), reported $(<"$1.wide") test files: it runs test files it is not given, so its run was stopped" > "$1.stop"; fi
     cat "$1.stop" >> "$1.test"; [ -n "$SLOT_HOME" ] || slot_free; slot_unask; return 1
   fi
   if [ $rc = 0 ] && [ -n "$p" ]; then
@@ -1170,6 +1171,13 @@ bugproof() { # <card> <worktree> <issue json>
           else echo "They pass with the fix, and the run without it failed (exit $rc): at least one fails without the fix, as it should."; fi
           echo 'The end of the run without the fix:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
       fi
+    elif [ -z "$stop" ] && [ -s "$mwt.stop" ]; then
+      # That run, asked alone, was stopped (tests(): <worktree>.stop): the check fails with that reason (exit 2), as
+      # above, not with the reason of the run before it.
+      stop=$(<"$mwt.stop"); BUGWHY=$stop; why=$(cat "$2.unfixed" 2>/dev/null)
+      { printf '%s\n' "$stop" "The change was run alone on main's code at $sha, with the fix, to find whether it selects a test of its own. The run was stopped there, so it proves nothing either way."
+        [ ${#fs[@]} = 0 ] || printf '%s\n' "$why"
+        echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
     fi
   elif [ ${#fs[@]} = 0 ]; then
     printf '%s.\n' "${BUGWHY^}" > "$2.unfixed"

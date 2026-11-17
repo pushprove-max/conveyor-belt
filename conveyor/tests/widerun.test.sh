@@ -87,11 +87,32 @@ t_wideoffnolist() {
 # (given no list: none; given files: each run) selects none, so the Done-when's b.test.sh is the proof: it passes with
 # the fix and fails without it.
 t_wideoffcomment() {
+  wideoffsel '[ -n "${CONVEYOR_TEST_FILES:-}" ] || echo "TESTRUN files=0 of=1" >> "$CONVEYOR_TEST_LOG/r"'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && grep -q '^- b.test.sh$' "$T/$CASE/unfixed" && grep -q '^They pass with the fix, and the run without it failed' "$T/$CASE/unfixed" \
+    || fail "the Done-when's test file was not the proof (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/unfixed" "$T/$CASE/run.out")"
+}
+
+# #322. Bug it catches: with the rule off, a change to c.sh (linked to b.test.sh) whose run, asked alone whether it
+# selects a test of its own, reports 30 test files was stopped, but the check dropped the stop's reason and failed as
+# a change with no test file (NOTEST), and that reason said the run was given a file and named settings the run skips.
+# It fails with exit 2, its result's first line the reason the run was stopped (NARROWALONE).
+t_wideoffalone() {
+  wideoffsel '[ -n "${CONVEYOR_TEST_FILES:-}" ] || { echo "TESTRUN files=30" >> "$CONVEYOR_TEST_LOG/r"; sleep 30; exit 1; }' # sleep: a long run, which the stop cuts
+  [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/unfixed" "$T/$CASE/run.out")"
+  # The run was given no list, and test.list and test.fileCommand do not change it: the reason says neither.
+  head -n 1 "$T/$CASE/unfixed" | grep -qxF 'The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported 30 test files. That is over ten for each of the 1 test file(s) that the test map and .conveyor/test-links.json link to the change, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.' \
+    || fail "the check's result does not begin with the reason the run was stopped: $(cat "$T/$CASE/unfixed")"
+}
+
+# The bug-card check of card c7 with the rule Whole suite in a card off and test.list env, on a change that adds a
+# comment to c.sh, which .conveyor/test-links.json links to b.test.sh (fails on main's c.sh). On main's code the test
+# command runs <given no list> and then each test file it is given. Writes $T/$CASE/unfixed and $T/$CASE/rc.
+wideoffsel() { # <given no list>
   local wt=$T/$CASE/cards/c7
   setup '[]'
   jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule could not be turned off"
   tune '.test.list = "env"'
-  printf '%s\n' '[ -n "${CONVEYOR_TEST_FILES:-}" ] || echo "TESTRUN files=0 of=1" >> "$CONVEYOR_TEST_LOG/r"' 'for f in ${CONVEYOR_TEST_FILES:-}; do if bash "$f"; then echo "-- ok $f"; else echo "-- FAIL $f"; exit 1; fi; done' > "$STUB/mainrun-cmd"
+  printf '%s\n' "$1" 'for f in ${CONVEYOR_TEST_FILES:-}; do if bash "$f"; then echo "-- ok $f"; else echo "-- FAIL $f"; exit 1; fi; done' > "$STUB/mainrun-cmd"
   echo 'echo main' > "$R/c.sh" && echo 'grep -q fixed c.sh' > "$R/b.test.sh" && echo '{"c.sh": ["b.test.sh"]}' > "$R/.conveyor/test-links.json" \
     && git -C "$R" add -f c.sh b.test.sh .conveyor/test-links.json && git -C "$R" commit -qm 'a linked test on main' || fail "main's files"
   git -C "$R" worktree add -q --detach "$wt" && echo '# fixed' >> "$wt/c.sh" && git -C "$wt" add -A || fail "the card's change could not be staged"
@@ -100,8 +121,6 @@ t_wideoffcomment() {
     names || exit 1
     bugproof c7 "$wt" "$(jq -cn '{number: 7, body: "## Done when\n- b.test.sh fails without the fix."}')"; echo $? > "$T/$CASE/rc"; cp "$wt.unfixed" "$T/$CASE/unfixed" ) \
     > "$T/$CASE/run.out" 2>&1 || fail "the check failed to run: $(cat "$T/$CASE/run.out")"
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && grep -q '^- b.test.sh$' "$T/$CASE/unfixed" && grep -q '^They pass with the fix, and the run without it failed' "$T/$CASE/unfixed" \
-    || fail "the Done-when's test file was not the proof (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/unfixed" "$T/$CASE/run.out")"
 }
 
 # D2. Bug it catches: setup did not suggest test.fileCommand for test files that run alone as plain scripts (`node
