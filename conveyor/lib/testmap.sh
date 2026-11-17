@@ -5,7 +5,8 @@
 # maprefresh()); a card's run maps the test files it adds (mapnew()).
 # The made map is the file test-map.json in the pack folder (mappath()): {commit (the commit it was made on), command
 # (the pack's test.command then), language, made (when), seconds (how long the run took), tests (the test files
-# mapped), sources: {<source file>: [<test file>, ...]}}.
+# mapped), sources: {<source file>: [<test file>, ...]}, notMapped: [{file, why}] (the test files its run could not
+# map: each failed under it, or runs only under another runner, mapcollect(); none are used to pick a card's tests)}.
 # The pack's test.map: unset, the made map; "off", no map (a card's tests are found by name); else a path from the
 # repository root of a map the project keeps itself, read in the card's worktree and never made or refreshed here
 # (mapread()).
@@ -103,15 +104,32 @@ mapone() { # <dir> <test file> <language>
 }
 # Runs <tests> (default: every test file of the language, maptests()) in <dir> under the language's coverage tool and
 # prints what each touched, one `<test file><TAB><file>` a line (a path from the root of <dir>, any file: mapwrite()
-# keeps the tracked source files). A run that fails (a test that fails, or the tool) fails it: its output's last lines
-# go to stderr. The run's output is in <tmp>/log. With MAPRUN set, it says how far it is (mapstart(), mapstep()): a
-# file at a time for Node, Ruby and Rust, a package's files at a time for Go; for Python, as the run's output names
-# its test files (mappyran()), looked at every 2 seconds while the suite runs.
+# keeps the tracked source files). A test file (Go: a package's) whose run fails is not mapped, and the others go on:
+# it is written to <tmp>/skipped, a line {file, why} each (why: the end of its output, mapskip()). So is a Node test
+# file whose imports show it runs only under another runner (mapother()), before it runs. It fails (its output's last
+# lines to stderr) when the tool fails, a Python suite fails, or no test file ran. The run's output is in <tmp>/log.
+# With MAPRUN set, it says how far it is (mapstart(), mapstep()): a file at a time for Node, Ruby and Rust, a package's
+# files at a time for Go; for Python, as the run's output names its test files (mappyran()), looked at every 2 seconds
+# while the suite runs.
 mapfail() { echo "$1 failed under coverage; the end of its output:" >&2; tail -n 20 "$2/log" >&2; return 1; } # <what> <tmp folder>
+# <test files> not mapped, with <why> (or, with none, the end of <tmp>/out: the output of the run that failed), each a
+# line of <tmp>/skipped.
+mapskip() { # <tmp folder> <why or ""> <test file>...
+  local tmp=$1 w=$2; shift 2
+  [ -n "$w" ] || w="failed under coverage; the end of its output:"$'\n'"$(tail -n 10 "$tmp/out" 2>/dev/null | cut -c 1-300)"
+  jq -nc --arg w "$w" '$ARGS.positional[] | {file: ., why: $w}' --args "$@" >> "$tmp/skipped"
+}
+# Why a Node <test file> in <dir> runs only under another runner, from its imports (exit 1 when it does not):
+# claude-code/testing, the test API of Claude Code's mod test runner, which node --test does not have.
+mapother() { # <dir> <test file>
+  grep -qE "(from|import|require\\()[[:space:]]*['\"]claude-code/testing['\"]" "$1/$2" 2>/dev/null || return 1
+  echo "it imports claude-code/testing, so it runs only under Claude Code's mod test runner"
+}
 mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
-  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 rc cmd m ts mod rx; shift 3
+  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 ok=0 rc cmd m ts mod rx w; shift 3
   ts=("$@"); [ $# -gt 0 ] || mapfile -t ts < <(maptests "$d" "$lang")
   [ ${#ts[@]} -gt 0 ] || { echo "no $lang test files are tracked" >&2; return 1; }
+  : > "$tmp/skipped" || return 1
   [ -z "${MAPRUN:-}" ] || mapstart ${#ts[@]}
   abs=$(cd "$d" && pwd -P) || return 1
   local -a run=(timeout --kill-after=30 "${TEST_TIMEOUT:-3600}" bash -c)
@@ -123,13 +141,17 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
       fi
       for t in "${ts[@]}"; do
         n=$((n + 1)); mkdir -p "$tmp/c$n" && cmd=$(mapone "$d" "$t" "$lang") || return 1
-        if [ "$lang" = node ]; then (cd "$d" && NODE_V8_COVERAGE=$tmp/c$n "${run[@]}" "$cmd") >> "$tmp/log" 2>&1 < /dev/null || { mapfail "$t" "$tmp"; return 1; }
-          cat "$tmp/c$n"/*.json 2>/dev/null | jq -r --arg r "file://$abs/" --arg t "$t" '.result[]?.url | strings | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"'
-        else (cd "$d" && CONVEYOR_MAP_COV=$tmp/c$n RUBYOPT="-r$tmp/cov.rb ${RUBYOPT:-}" "${run[@]}" "$cmd") >> "$tmp/log" 2>&1 < /dev/null || { mapfail "$t" "$tmp"; return 1; }
-          jq -r --arg r "$abs/" --arg t "$t" '.[]?.coverage | objects | to_entries[]
+        if [ "$lang" = node ] && w=$(mapother "$d" "$t"); then mapskip "$tmp" "$w" "$t"
+        elif [ "$lang" = node ]; then
+          if (cd "$d" && NODE_V8_COVERAGE=$tmp/c$n "${run[@]}" "$cmd") > "$tmp/out" 2>&1 < /dev/null; then ok=$((ok + 1))
+            cat "$tmp/c$n"/*.json 2>/dev/null | jq -r --arg r "file://$abs/" --arg t "$t" '.result[]?.url | strings | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"'
+          else mapskip "$tmp" '' "$t"; fi
+        elif (cd "$d" && CONVEYOR_MAP_COV=$tmp/c$n RUBYOPT="-r$tmp/cov.rb ${RUBYOPT:-}" "${run[@]}" "$cmd") > "$tmp/out" 2>&1 < /dev/null \
+          && jq -r --arg r "$abs/" --arg t "$t" '.[]?.coverage | objects | to_entries[]
             | select(.value | (if type == "object" then .lines else . end) | arrays | any(type == "number" and . > 0))
-            | .key | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/c$n/.resultset.json" || { mapfail "$t" "$tmp"; return 1; }
-        fi
+            | .key | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/c$n/.resultset.json" 2>> "$tmp/out"; then ok=$((ok + 1))
+        else mapskip "$tmp" '' "$t"; fi
+        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out"
         [ -z "${MAPRUN:-}" ] || mapstep $n
       done ;;
     python)
@@ -152,26 +174,35 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
       [ $rc = 0 ] || { mapfail 'the suite' "$tmp"; return 1; }
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov coverage json --rcfile="$tmp/rc" --show-contexts -o "$tmp/py.json") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'coverage json' "$tmp"; return 1; }
       [ -z "${MAPRUN:-}" ] || mapstep ${#ts[@]}
-      mappy "$abs" "$tmp/py.json" "${ts[@]}" ;;
+      ok=1; mappy "$abs" "$tmp/py.json" "${ts[@]}" ;;
     go)
       mod=$(cd "$d" && go list -m 2>>"$tmp/log") || { mapfail 'go list -m' "$tmp"; return 1; }
       # Each package that holds a test file, once: its profile is of its test files together.
       while IFS= read -r m; do
         n=$((n + 1)); rx=$([ "$m" = . ] && echo '^[^/]+$' || printf '^%s/[^/]+$' "$m")
-        (cd "$d" && "${run[@]}" "go test -count=1 -coverpkg=./... -coverprofile=$(printf %q "$tmp/go$n") ./$(printf %q "$m")") >> "$tmp/log" 2>&1 < /dev/null || { mapfail "./$m" "$tmp"; return 1; }
-        awk -v m="$mod/" 'NR > 1 && $NF > 0 { f = $1; sub(/:[^:]*$/, "", f); if (index(f, m) == 1) print substr(f, length(m) + 1) }' "$tmp/go$n" | sort -u \
-          | while IFS= read -r f; do printf '%s\n' "${ts[@]}" | grep -E "$rx" | while IFS= read -r t; do printf '%s\t%s\n' "$t" "$f"; done; done
+        if (cd "$d" && "${run[@]}" "go test -count=1 -coverpkg=./... -coverprofile=$(printf %q "$tmp/go$n") ./$(printf %q "$m")") > "$tmp/out" 2>&1 < /dev/null; then ok=$((ok + 1))
+          awk -v m="$mod/" 'NR > 1 && $NF > 0 { f = $1; sub(/:[^:]*$/, "", f); if (index(f, m) == 1) print substr(f, length(m) + 1) }' "$tmp/go$n" | sort -u \
+            | while IFS= read -r f; do printf '%s\n' "${ts[@]}" | grep -E "$rx" | while IFS= read -r t; do printf '%s\t%s\n' "$t" "$f"; done; done
+        else mapfile -t w < <(printf '%s\n' "${ts[@]}" | grep -E "$rx"); mapskip "$tmp" '' "${w[@]}"; fi
+        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out"
         [ -z "${MAPRUN:-}" ] || { k=$((k + $(printf '%s\n' "${ts[@]}" | grep -cE "$rx"))); mapstep $k; }
       done < <(printf '%s\n' "${ts[@]}" | sed -e 's|/[^/]*$||' -e 's|^[^/]*_test\.go$|.|' | sort -u) ;;
     rust)
       for t in "${ts[@]}"; do
         n=$((n + 1)); m=${t##*/}; m=${m%.rs}
-        (cd "$d" && "${run[@]}" "cargo llvm-cov --json --summary-only --test $(printf %q "$m") > $(printf %q "$tmp/rs$n.json")") >> "$tmp/log" 2>&1 < /dev/null || { mapfail "$t" "$tmp"; return 1; }
-        jq -r --arg r "$abs/" --arg t "$t" '.data[]?.files[]? | select(.summary.lines.covered > 0) | .filename | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/rs$n.json"
+        if (cd "$d" && "${run[@]}" "cargo llvm-cov --json --summary-only --test $(printf %q "$m") > $(printf %q "$tmp/rs$n.json")") > "$tmp/out" 2>&1 < /dev/null; then ok=$((ok + 1))
+          jq -r --arg r "$abs/" --arg t "$t" '.data[]?.files[]? | select(.summary.lines.covered > 0) | .filename | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/rs$n.json"
+        else mapskip "$tmp" '' "$t"; fi
+        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out"
         [ -z "${MAPRUN:-}" ] || mapstep $n
       done ;;
     *) echo "no coverage tool for $lang" >&2; return 1 ;;
   esac
+  # No test file ran: the run fails, saying so, with the first that could not be mapped.
+  [ "$ok" = 0 ] || return 0
+  jq -r 'select(.file) | "no test file could be mapped (each failed under coverage or runs only under another runner); the first, \(.file): \(.why)"' "$tmp/skipped" 2>/dev/null \
+    | head -n 12 | grep . >&2 || echo "no test file could be mapped" >&2
+  return 1
 }
 # The pairs (mapcollect()'s lines) of coverage.py's report <json> (coverage json --show-contexts) of a run in <dir>: a
 # context is a test function's dotted name (<module>.<class>.<function>), and its test file is the one of <tests> whose
@@ -197,12 +228,15 @@ mapv8() { # <dir, absolute> <folder> <test file>...
 # Writes the map of <dir> from <pairs> (mapcollect()'s lines): of each test, the tracked files it touched that are not
 # test files are its sources. With no <tests>, a new map, of every test the run mapped, on <dir>'s HEAD; with
 # <tests>, the map there (mappath()) with those tests mapped again: each taken out of every source and put back where
-# the run found it, the rest of the map (its commit) kept. Written beside it and moved in, so a reader never sees half.
-mapwrite() { # <dir> <pairs file> <language> <seconds> [<test file>...]
-  local d=$1 p=$2 lang=$3 sec=$4 f cmd sha; shift 4
+# the run found it, the rest of the map (its commit) kept. <not mapped> (mapcollect()'s <tmp>/skipped, or "" for none)
+# is its notMapped: with <tests>, each of them is taken out of the map's notMapped first, and one that is in <not
+# mapped> is not added to its tests (the next run of the file tries again). Written beside it and moved in, so a
+# reader never sees half.
+mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds> [<test file>...]
+  local d=$1 p=$2 nm=${3:-/dev/null} lang=$4 sec=$5 f cmd sha; shift 5
   f=$(mappath); packget test.command cmd && sha=$(git -C "$d" rev-parse HEAD) || return 1
   jq -n --rawfile p "$p" --rawfile all <(git -C "$d" -c core.quotePath=false ls-files) --rawfile ts <(git -C "$d" -c core.quotePath=false ls-files | testpaths) \
-    --slurpfile old <(if [ $# -gt 0 ]; then cat "$f" 2>/dev/null; fi) --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" '
+    --slurpfile old <(if [ $# -gt 0 ]; then cat "$f" 2>/dev/null; fi) --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" --slurpfile nm "$nm" '
     def ls: split("\n") | map(select(. != ""));
     (($all | ls) - ($ts | ls) | INDEX(.)) as $src
     | [$p | ls[] | split("\t") | select(length == 2 and $src[.[1]])] as $pairs
@@ -210,7 +244,8 @@ mapwrite() { # <dir> <pairs file> <language> <seconds> [<test file>...]
     | (if $only == [] then {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}}
        else ($old[0] // {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}})
          | .sources |= map_values(. - $only) | .tests -= $only end)
-    | .tests = (.tests + (if $only == [] then [$pairs[][0]] else $only end) | unique)
+    | .notMapped = ([.notMapped[]? | select(.file as $f | $only | index($f) | not)] + [$nm[] | objects] | unique_by(.file))
+    | .tests = (.tests + (if $only == [] then [$pairs[][0]] else $only - [.notMapped[].file] end) | unique)
     | reduce $pairs[] as $x (.; .sources[$x[1]] = ((.sources[$x[1]] // []) + [$x[0]] | unique))
     | .sources |= with_entries(select(.value != []))' --args "$@" > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
 }
@@ -224,8 +259,9 @@ mapcost() {
   else echo "Its time is not known (no whole-suite run is recorded): about as long as the whole suite, or more."; fi
 }
 # Makes the map of <dir> (setup's main checkout) with the whole suite under coverage
-# (mapcollect()), and says how many sources and tests it mapped and how long the run took; exit 1, saying why, when
-# the language has no tool, or the run fails: the map there is kept, and with none a card's tests are found by name.
+# (mapcollect()), and says how many sources and tests it mapped, how many test files it could not map, and how long
+# the run took; exit 1, saying why, when the language has no tool, or the run fails (the tool fails, or no test file
+# maps): the map there is kept, and with none a card's tests are found by name.
 # The run says how far it is as it goes, and why it failed when it does, in test-map.run.json (mapprogpath()).
 mapbuild() { # <dir>
   local lang tool tmp w=$SECONDS rc=0 sec MAPRUN=1
@@ -234,9 +270,10 @@ mapbuild() { # <dir>
   mapcollect "$1" "$lang" "$tmp" > "$tmp/pairs" 2> "$tmp/err" || rc=1
   [ $rc != 0 ] || [ -s "$tmp/pairs" ] || { echo 'it mapped no test file' > "$tmp/err"; rc=1; }
   sec=$((SECONDS - w))
-  if [ $rc = 0 ] && mapwrite "$1" "$tmp/pairs" "$lang" "$sec"; then
+  if [ $rc = 0 ] && mapwrite "$1" "$tmp/pairs" "$tmp/skipped" "$lang" "$sec"; then
     mapend
-    jq -r --arg tool "$tool" --arg f "$(mappath)" '"conveyor: wrote the test map \($f) with \($tool): \(.sources | length) source files, \(.tests | length) test files, in \(.seconds)s"' "$(mappath)"
+    jq -r --arg tool "$tool" --arg f "$(mappath)" '"conveyor: wrote the test map \($f) with \($tool): \(.sources | length) source files, \(.tests | length) test files\(.notMapped | length
+      | if . > 0 then ", \(.) not mapped (each with why in its notMapped)" else "" end), in \(.seconds)s"' "$(mappath)"
   else
     mapend "the run with $tool failed after ${sec}s: $(mapwhy "$tmp/err" || echo 'the map could not be written')"
     echo "conveyor: no test map: the run with $tool failed after ${sec}s; a card's tests are found by name: $(cat "$tmp/err")" >&2; rc=1
@@ -310,7 +347,8 @@ mapquit() {
   echo "conveyor: the build of the test map did not end within 40 s of its stop" >&2; return 1
 }
 # The Tests page's Test map part (the snapshot's testMap, lib/snapshot.sh): mapstate() of <dir>, with made and seconds
-# for a made map (when it was made, and how long its run took; null for a map the project keeps itself); tool (the
+# for a made map (when it was made, and how long its run took; null for a map the project keeps itself) and notMapped
+# (its test files the run could not map, [{file, why}]; [] for none or a map the project keeps itself); tool (the
 # coverage tool, else null) and toolWhy (why there is none, else null) unless it is off; a map the project keeps
 # itself has no tool, as a build of it is refused (mapask()), and toolWhy says so; suiteSec (the seconds of the
 # last whole-suite run recorded, mapsuitesec(), else null); and build (the last build by hand's record, else null; one
@@ -328,12 +366,13 @@ mapboard() { # <dir>
     b=$(jq -c '. + {state: "failed", reason: "its run stopped before it ended"} | del(.pid)' <<<"$b")
   fi
   jq -c --arg t "$t" --arg tw "$tw" --arg sec "$(mapsuitesec)" --argjson b "$b" --slurpfile m <(if [ "$st" = made ] && [ -z "$m" ]; then cat "$(mappath)" 2>/dev/null; fi) '.
-    + (if .state == "made" then {made: ($m[0].made // null), seconds: ($m[0].seconds // null)} else {} end)
+    + (if .state == "made" then {made: ($m[0].made // null), seconds: ($m[0].seconds // null), notMapped: [$m[0].notMapped[]? | {file, why}]} else {} end)
     + {tool: (if $t == "" then null else $t end), toolWhy: (if $tw == "" then null else $tw end), suiteSec: ($sec | tonumber? // null), build: $b}' <<<"$s"
 }
 # The test files of the change staged in <worktree> that the made map does not hold yet, after a card's run that
 # passed (tests()): each run alone under coverage and added to the map (mapwrite()), so the next card that changes
-# what it covers runs it. A run that fails adds nothing; the next run of the file tries again.
+# what it covers runs it. A file whose run fails is added to the map's notMapped alone (all failing, nothing is added);
+# the next run of the file tries again.
 mapnew() { # <worktree>
   local m lang tmp ts=()
   packget test.map m && [ -z "$m" ] && [ -s "$(mappath)" ] || return 0
@@ -341,7 +380,7 @@ mapnew() { # <worktree>
   mapfile -t ts < <(comm -12 <(git -C "$1" -c core.quotePath=false diff --cached --name-only --diff-filter=AM --no-renames HEAD -- 2>/dev/null | sort) <(maptests "$1" "$lang" | sort) \
     | grep -vxFf <(jq -r '.tests[]?' "$(mappath)") || :)
   [ ${#ts[@]} -gt 0 ] && tmp=$(mktemp -d) || return 0
-  if mapcollect "$1" "$lang" "$tmp" "${ts[@]}" > "$tmp/pairs" 2>/dev/null && mapwrite "$1" "$tmp/pairs" "$lang" 0 "${ts[@]}"; then
+  if mapcollect "$1" "$lang" "$tmp" "${ts[@]}" > "$tmp/pairs" 2>/dev/null && mapwrite "$1" "$tmp/pairs" "$tmp/skipped" "$lang" 0 "${ts[@]}"; then
     echo "conveyor: test map: mapped $(printf '%s, ' "${ts[@]}" | sed 's/, $//') on its first run"
   fi
   rm -rf "$tmp"; return 0
@@ -446,7 +485,11 @@ maprefresh() { # <worktree>
     go|rust|ruby) sec=$SECONDS; mapcollect "$1" "$lang" "$c" > "$c/pairs" 2> "$c/err" || { mapend "$(mapwhy "$c/err" || echo 'the coverage run failed')"; echo "conveyor: test map: not made again: $(cat "$c/err")"; rm -rf "$c"; return 0; }
       sec=$((SECONDS - sec)) ;;
   esac
-  if [ -s "$c/pairs" ] && mapwrite "$1" "$c/pairs" "$lang" "$sec"; then
+  # A Node or Python whole run says nothing of the files it could not map: those the map listed, still test files
+  # and still not mapped by this run, stay listed.
+  case $lang in node|python) jq -c --rawfile p "$c/pairs" '[$p | split("\n")[] | split("\t")[0]] as $m
+    | .notMapped[]? | select(.file as $f | ($ARGS.positional | index($f)) and ($m | index($f) | not))' "$(mappath)" --args "${ts[@]}" > "$c/skipped" 2>/dev/null || : ;; esac
+  if [ -s "$c/pairs" ] && mapwrite "$1" "$c/pairs" "$c/skipped" "$lang" "$sec"; then
     mapend
     jq -r '"conveyor: test map: made again from the whole run'\''s coverage: \(.sources | length) source files, \(.tests | length) test files"' "$(mappath)"
   else mapend "the whole run's coverage mapped no test file"; echo "conveyor: test map: not made again: the whole run's coverage mapped no test file"; fi

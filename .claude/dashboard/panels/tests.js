@@ -120,10 +120,11 @@
 // machine ({maxLoad, unread, cores, load}), testActions ({limit, actions, allowed:
 // the pack's models by CLI, offered for a CLI that lists none}), control (the control record: its tests, the Tests model),
 // clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), testMap
-// (conveyor/lib/testmap.sh mapboard(): state, as the map page shows it, with made and seconds; tool or toolWhy; suiteSec; build,
+// (conveyor/lib/testmap.sh mapboard(): state, as the map page shows it, with made, seconds and notMapped; tool or toolWhy; suiteSec; build,
 // the last build by hand's record; null from a snapshot without it, and the part is not shown), repos, others}.
 // The Test map part (#178): the map's state (made: the source and test files mapped, the commits behind main, when it
-// was made and how long it took; not made yet; off; failed with its reason). Build the test map (POST control {action:
+// was made and how long it took, and the test files it could not map, folded, each with why; not made yet; off;
+// failed with its reason). Build the test map (POST control {action:
 // testmap, args: [build]}, an admin's alone: the server refuses a member) names the coverage tool and the last
 // whole-suite run's time before the click. While a build waits for its test slot or runs, a bar (test files done of
 // all) and Stop (testmap stop); at its end, its result in place.
@@ -1954,7 +1955,9 @@
       const age = num(m.age) === null ? '' : m.age ? ` · ${m.age} ${m.age === 1 ? 'commit' : 'commits'} behind main` : ' · up to date with main';
       const when = typeof m.made === 'string' ? ` · made ${S.ctx.when(m.made)}` : '';
       const took = num(m.seconds) === null ? '' : `, in ${mmss(m.seconds)}`;
-      line.append(S.ctx.chip('Made', 'ok'), ` ${m.sources} source files and ${m.tests} test files mapped${age}${when}${took}.`);
+      const nm = Array.isArray(m.notMapped) ? m.notMapped.length : 0;
+      const not = nm ? `, ${nm} test ${nm === 1 ? 'file' : 'files'} not mapped` : '';
+      line.append(S.ctx.chip('Made', 'ok'), ` ${m.sources} source files and ${m.tests} test files mapped${not}${age}${when}${took}.`);
     } else if (m.state === 'off') {
       line.append(S.ctx.chip('Off', 'quiet'), ' The pack\'s test.map is "off": a card\'s tests are found by name. To turn it on, remove test.map from the pack, then build the map here or run setup.');
     } else if (m.state === 'failed') {
@@ -1963,6 +1966,15 @@
       line.append(S.ctx.chip('Not made yet', 'warn'), ' A card\'s tests are found by name until the map is made.');
     }
     el.append(line);
+    // The test files the made map could not map, each with why, folded.
+    if (m.state === 'made' && Array.isArray(m.notMapped) && m.notMapped.length) {
+      const d = h('details', 'tests-map-not');
+      d.append(h('summary', null, `Test files not mapped: ${m.notMapped.length}. The map does not use them to pick a card's tests.`));
+      const ul = h('ul', 'tests-list');
+      m.notMapped.forEach((x) => { const li = h('li', null, `${x.file}: `); li.append(h('pre', 'tests-out', String(x.why || 'no reason given'))); ul.append(li); });
+      d.append(ul);
+      el.append(d);
+    }
     // The last build's result, in place, once it has ended.
     if (b && !live && MAPS[b.state]) {
       const said = [num(b.start) !== null && num(b.end) !== null ? `in ${mmss(b.end - b.start)}` : null,

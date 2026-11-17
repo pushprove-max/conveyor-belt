@@ -35,6 +35,22 @@ test('Test map: the part shows made, not made yet, off, failed and no tool, at t
   assert.match(part(w).textContent, /No test map can be made: coverage\.py \(the coverage command\) is not installed\./);
 });
 
+// Bug it guards (#327): a map made with a test file it could not map (it failed under coverage, or runs only under
+// another runner) showed as fully made, with no word of which file was left out or why. The state line counts them;
+// a folded list names each with its reason and says the map does not use them; a map with none shows no list.
+test('Test map: the files not mapped are counted and listed, folded, with why', () => {
+  const w = boot({ tab: 'tests' });
+  const why = "it imports claude-code/testing, so it runs only under Claude Code's mod test runner";
+  deliver(w, withMap({ ...MADE, notMapped: [{ file: 'test/mod.test.tsx', why }] }));
+  assert.match(stateOf(w), /^Made 12 source files and 5 test files mapped, 1 test file not mapped · /);
+  const fold = part(w).querySelector('details.tests-map-not');
+  assert.ok(fold && !fold.open, 'the list is folded');
+  assert.equal(fold.querySelector('summary').textContent, "Test files not mapped: 1. The map does not use them to pick a card's tests.");
+  assert.deepEqual(Array.from(fold.querySelectorAll('li'), (li) => li.textContent), [`test/mod.test.tsx: ${why}`]);
+  next(w, withMap({ ...MADE, notMapped: [] }));
+  assert.equal(part(w).querySelector('details.tests-map-not'), null, 'no file left out, no list');
+});
+
 // Bug it guards: the owner could not build the map from the Board, nor see it go or stop it. Before the click the button
 // names the tool and the last whole-suite run's time; the click sends testmap build; the part shows it starting,
 // waiting for a slot, then a bar of the test files done, with Stop (testmap stop); at the end the result, in place.

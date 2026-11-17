@@ -239,8 +239,50 @@ t_testmapfail() {
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
   printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2" != "list -m" ] || { echo example.com/m; exit 0; }' 'exit 1' > "$STUB/go" && chmod +x "$STUB/go" || fail "the stub go"
   ! mapeng 'mapbuild "$R"' || fail "a run that failed made a map: $(cat "$T/$CASE/eng.out")"
-  mapeng 'mapstate "$R"' && jq -e '.state == "failed" and (.why | test("^the run with go test -coverprofile failed after [0-9]+s: \\./calc failed under coverage$"))' \
+  mapeng 'mapstate "$R"' && jq -e '.state == "failed" and (.why | test("^the run with go test -coverprofile failed after [0-9]+s: no test file could be mapped .*; the first, calc/calc_test\\.go: failed under coverage$"))' \
     "$T/$CASE/eng.out" > /dev/null || fail "the failed run's state does not say why: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#327): one test file that failed under the map's run stopped the build, and the project had no map
+# at all. The two files that pass are mapped; the one that fails is listed as not mapped with the end of its output,
+# which the Board's part (mapboard()) gives; the build says how many it could not map.
+t_testmapskip() {
+  nodemain
+  printf '%s\n' 'process.exit(1);' > "$R/test/c.test.js"
+  git -C "$R" commit -qam c || fail "the failing test could not be committed"
+  mapeng 'mapbuild "$R" && mapboard "$R" > "'"$T/$CASE/board"'"' || fail "one failing file stopped the build: $(cat "$T/$CASE/eng.out")"
+  grep -qE '^conveyor: wrote the test map .*: 3 source files, 2 test files, 1 not mapped .*, in [0-9]+s$' "$T/$CASE/eng.out" \
+    || fail "the build did not say it left a file not mapped: $(cat "$T/$CASE/eng.out")"
+  mapis '.tests == ["test/a.test.js", "test/b.test.js"] and .sources["src/a.js"] == ["test/a.test.js"]
+    and (.notMapped | length == 1 and .[0].file == "test/c.test.js" and (.[0].why | startswith("failed under coverage; the end of its output:\n") and contains("✖ test/c.test.js") and endswith("test failed'"'"'")))' \
+    "the two files that pass are not mapped, or the failing one is not listed with its output"
+  jq -e '.state == "made" and .notMapped[0].file == "test/c.test.js" and (.notMapped[0].why | endswith("test failed'"'"'"))' "$T/$CASE/board" > /dev/null \
+    || fail "the Board's part does not list the file not mapped with why: $(cat "$T/$CASE/board")"
+}
+
+# Bug it catches (#327): with every test file failing, the build must still fail, saying so, not write an empty map.
+t_testmapallfail() {
+  nodemain
+  printf '%s\n' 'echo "cannot run $1"; exit 1' > "$STUB/fails.sh"
+  tune '.test.fileCommand = "bash \"$STUB/fails.sh\""'
+  ! mapeng 'mapbuild "$R"' || fail "a run where every file failed made a map: $(cat "$T/$CASE/eng.out")"
+  [ ! -e "$R/.conveyor/test-map.json" ] || fail "a run where every file failed wrote a map: $(cat "$R/.conveyor/test-map.json")"
+  mapeng 'mapstate "$R"' && jq -e '.state == "failed" and (.why | test("^the run with V8 coverage failed after [0-9]+s: no test file could be mapped .*; the first, test/a\\.test\\.js: failed under coverage$"))' \
+    "$T/$CASE/eng.out" > /dev/null || fail "the failed run's state does not say why: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#327): a Claude Code mod test (it imports claude-code/testing) was run under node --test, failed,
+# and stopped the build. It is left out before it runs, and listed as not mapped with why.
+t_testmapother() {
+  nodemain
+  printf '%s\n' "import { test } from 'claude-code/testing';" "test('mod', () => {});" > "$R/test/mod.test.tsx"
+  printf '%s\n' 'echo "$1" >> "$STUB/ran"' 'exec node --test "$@"' > "$STUB/ran.sh"
+  tune '.test.fileCommand = "bash \"$STUB/ran.sh\""'
+  mapeng 'd=$(mktemp -d) && mapcollect "$R" node "$d" test/mod.test.tsx test/a.test.js > /dev/null && cat "$d/skipped"' \
+    || fail "the run failed: $(cat "$T/$CASE/eng.out")"
+  [ "$(cat "$STUB/ran")" = test/a.test.js ] || fail "the mod test was run, or the other was not: $(cat "$STUB/ran")"
+  jq -e '.file == "test/mod.test.tsx" and (.why | test("claude-code/testing"))' "$T/$CASE/eng.out" > /dev/null \
+    || fail "the mod test is not listed as not mapped with why: $(cat "$T/$CASE/eng.out")"
 }
 
 # Bug it catches (#176): /units could not tell a map not made yet from one made (and how far behind main), one turned
@@ -282,6 +324,21 @@ t_testmaprefresh() {
     || fail "the whole run's progress was not counted from its coverage files: $(cat "$T/$CASE/eng.out")"
   [ "$(sed -n '2,$p' "$T/$CASE/eng.out")" = $'{"state":"failed","why":"the whole test on main failed"}\n0' ] \
     || fail "a failed whole run did not say so, or its count kept running: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#327): a Node map made again from the whole run's coverage dropped the files the build could not
+# map, though the run mapped them no more than before; the Board then said nothing of them. A file the run does map
+# (test/b.test.js) leaves the list, or the Board keeps a reason that is no longer true.
+t_testmaprefreshkeep() {
+  nodemain; nodemap; tune '.test.command = "npm test"'
+  jq '.tests -= ["test/b.test.js", "test/c.test.js"]
+    | .notMapped = [{file: "test/b.test.js", why: "it failed once"}, {file: "test/c.test.js", why: "it failed"}, {file: "test/gone.test.js", why: "gone"}]' \
+    "$R/.conveyor/test-map.json" > "$T/$CASE/m" && mv "$T/$CASE/m" "$R/.conveyor/test-map.json" || fail "the map could not be written"
+  mapeng 'mapcovon "$R" > /dev/null && mapcovoff
+    for t in a b; do echo "{\"result\": [{\"url\": \"file://$(pwd -P)/test/$t.test.js\"}, {\"url\": \"file://$(pwd -P)/src/$t.js\"}]}" > "$R.mapcov/v8/coverage-$t.json"; done
+    maprefresh "$R"' && grep -qF 'test map: made again' "$T/$CASE/eng.out" || fail "the refresh made no map: $(cat "$T/$CASE/eng.out")"
+  mapis '.tests == ["test/a.test.js", "test/b.test.js"] and .notMapped == [{file: "test/c.test.js", why: "it failed"}]' \
+    "the refresh dropped the file not mapped, or kept one that is no test file now or that it mapped"
 }
 
 # Bug it catches (#176): a Python map's refresh counted only the engine runner's `-- ok` marks, so pytest's run stayed

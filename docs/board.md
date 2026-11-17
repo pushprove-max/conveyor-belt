@@ -326,8 +326,9 @@ against the cards of the commit before it, with the number of cards in each grou
 to mean anything.
 
 The Test map part shows the state of the [test map](configuration.md#the-test-map). A made map shows how many source
-files and test files it maps, how many commits it is behind main, when it was made and how long its run took. The
-other states are "Not made yet", "Off" and "Failed", with the reason. An admin can click **Build the test map** to
+files and test files it maps, how many commits it is behind main, when it was made and how long its run took. It
+also shows how many test files the map could not map. A folded list gives each of these files with the reason. The
+map does not use these files to pick the tests of a card. The other states are "Not made yet", "Off" and "Failed", with the reason. An admin can click **Build the test map** to
 make the map now. Before you click, the part names the coverage tool and the time of the last whole-suite run. The
 build runs your whole suite once on the build machine, on a test slot. While it runs, a bar shows how many test files
 have run, and **Stop** ends the build. When the build ends, the part shows its result. The Board refuses the button to

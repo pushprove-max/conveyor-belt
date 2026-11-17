@@ -225,8 +225,12 @@ test file runs with `test.fileCommand`, or with `test.command` and the file as `
 Node uses `node --test` and Ruby uses `rspec`.
 
 Setup writes the map to `.conveyor/test-map.json`, with the commit and the test command that it was made on. Setup
-then shows how many source files and test files it mapped, and how long the run took. If your language has no tool
-in the table, or if the run fails, setup tells you. Your cards then find their tests by name.
+then shows how many source files and test files it mapped, and how long the run took. For Node, Go, Rust and Ruby,
+if a test file fails under the run, the map does not include it, and the run continues with the other files. The map also does not include a
+Node test file that imports `claude-code/testing`, because that file runs only under the test runner of Claude Code.
+The map keeps a list of these files, each with the reason, and setup shows how many there are. If your language has
+no tool in the table, if the tool fails, or if no test file is mapped, setup tells you. Your cards then find their
+tests by name.
 
 To make the map by hand, run `conveyor.sh testmap build`, or click **Build the test map** on the Board's Tests page.
 The build runs on the build machine, on a test slot, and makes the map as setup does. The command returns when the
