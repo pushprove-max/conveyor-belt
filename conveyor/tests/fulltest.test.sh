@@ -231,6 +231,31 @@ t_pushnow() {
   [ "$(ftpushes)" = 2 ] && [ "$(wc -l < "$STUB/hookruns")" = 2 ] || fail "push-now with nothing unpushed changed something: $(cat "$STUB/hookruns")"
 }
 
+# Bug this guards (issue 240): a run whose process was killed left its running marker, nothing recorded it, and the
+# Foreman heard nothing: the owner thought the suite had run. Its end is now shown at once (the snapshot's suites, which
+# wakes the Foreman's watcher), and the next ask records it as an error with the reason and starts its own run.
+t_fulldead() {
+  setup '[]'
+  local pid s A
+  tune '.test.full = ". \"$STUB/full-cmd\""'
+  echo 'echo x >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
+  loop full-test > /dev/null || fail "the full test did not start"
+  wait_until '[ -s "$STUB/full-at" ] && jq -e .pid "$ST/fulltest.jsonl.running" > /dev/null' 'cat "$ST/fulltest.jsonl.log" "$ST/fulltest.jsonl.running"' \
+    || fail "the run did not start, or its marker names no process"
+  pid=$(jq .pid "$ST/fulltest.jsonl.running"); A=$(jq -r .sha "$ST/fulltest.jsonl.running")
+  kill -9 "$pid"; : > "$STUB/go"
+  wait_until '( flock -n 9 ) 9>>"$ST/fulltest.jsonl.lock"' 'ps -ef' || fail "the killed run's lock was not let go"
+  s=$(loop snapshot)
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, (.ended != null), (.reasons[0] | test("ended without a result: its process \\('"$pid"'\\) is gone"))]]' <<<"$s")" = "[[\"error\",\"$A\",true,true]]" ] \
+    || fail "the killed run is not shown as ended with no result: $(jq -c .suites <<<"$s")"
+  echo 'exit 0' > "$STUB/full-cmd"
+  loop full-test > /dev/null 2>&1 || fail "the next full test did not start after the killed run"
+  ftended 2
+  [ "$(ftl '[.kind, .state, .sha, (.reason // "" | test("ended without a result"))]' | paste -sd' ' -)" = "[\"run\",\"error\",\"$A\",true] [\"run\",\"passed\",\"$A\",false]" ] \
+    || fail "the killed run was not recorded as an error before the next run: $(cat "$ST/fulltest.jsonl")"
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | .state]' <<<"$(loop snapshot)")" = '["passed"]' ] || fail "the snapshot still shows the killed run"
+}
+
 # Bug this guards: Push now pushed while a full test run was under way (its push would race the run's own).
 t_pushnowbusy() {
   ftnow; local O0 out

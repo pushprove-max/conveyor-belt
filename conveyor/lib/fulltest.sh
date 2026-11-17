@@ -39,11 +39,25 @@
 # run's: each {case, line, runs: each run alone, passed, failed, timeout or killed, verdict: flaky, fix or declined, why,
 # issue, reused}; an anyway line's: those of the red run it pushed over), pushed ({ok, reason}; null: nothing was to be
 # pushed), by (who pushed anyway) and reused (a run's: null for a whole suite, else {sha, time, ran, kept}: the run
-# reused, the files rerun, none when nothing ran, and the passes kept). $FULLTEST.running holds {since, sha, how} while the lock is held, and, once a red
+# reused, the files rerun, none when nothing ran, and the passes kept). $FULLTEST.running holds {since, sha, how, pid:
+# the run's process} while the lock is held, and, once a red
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
 # times, also go to $SUITERUNS (suiterec(), lib/testrun.sh) for the Tests page.
+# A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the next ask records it as
+# an error line with the reason, then starts its own run.
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
+# The line $FULLTEST keeps (fullline()) for a run that ended with no result: its $FULLTEST.running is left, and the
+# lock is free (a run removes that file before its lock goes, so its process was killed, or the machine stopped). Its
+# time is when the run last wrote that file, so the snapshot (suites()), which shows it before the next ask records
+# it, and the record name one end. Fails when no such file reads. The caller holds the lock, or found it free.
+fulldead() {
+  local m t
+  m=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null) && t=$(p_stat "$FULLTEST.running") || return 1
+  jq -c --argjson t "${t#* }" '{time: ($t | todate), kind: "run", push: (.how != "run"), sha, state: "error",
+    reason: "the run ended without a result: its process\(if .pid then " (\(.pid))" else "" end) is gone, and it left its running marker of \(.since)",
+    exit: null, cases: [], pushed: null}' <<<"$m"
+}
 # How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
 # runner named as ended (cases/ok and cases/failed of its log folder, session.sh testdone()): {done, failed, cases: the
 # names of the failed ones, of: the cases it selected, the sum of its `TESTRUN cases=N` lines, null with none; files:
@@ -137,7 +151,7 @@ suiteadd() { # <line>
 }
 FULL_OUTSIDE='ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|Could not resolve host|Network is unreachable|Temporary failure in name resolution|Connection (refused|reset|timed out)|No space left on device|Disk quota exceeded|Cannot allocate memory|out of memory'
 fulltest() { # [push | anyway <run id> [--by <who>]]
-  local how=${1:-run} by=owner cmd lk sha o='' last=null id=${2:-}
+  local how=${1:-run} by=owner cmd lk sha o='' last=null id=${2:-} dead
   case $#:${1:-} in
     0: | 1:push | 2:anyway) ;;
     4:anyway) [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]] || how=bad; by=$4 ;;
@@ -149,6 +163,10 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
   [ -n "$cmd" ] || { echo "conveyor: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   mkdir -p "$CARDS/fulltest" && { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || { echo "conveyor: the full test's lock could not be made; nothing run" >&2; return 1; }
   flock -n "$lk" || { echo "conveyor: a full test run is already running$(jq -r '" (\(.how), since \(.since), on \(.sha[0:12]))"' "$FULLTEST.running" 2>/dev/null); this one is not started" >&2; return 2; }
+  if dead=$(fulldead); then
+    fullline "$dead" && rm -f "$FULLTEST.running" && echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2 \
+      || { echo "conveyor: a full test run that ended without a result could not be recorded; nothing run" >&2; return 1; }
+  fi
   if [ "$how" = anyway ]; then
     last=$(tail -n 1 "$FULLTEST" 2>/dev/null | jq -ce 'select(.kind == "run" and .state == "failed")' 2>/dev/null) \
       || { echo "conveyor: the last full test run is not a red one: there is nothing to push over; nothing pushed" >&2; return 2; }
@@ -163,6 +181,7 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
   # The run holds the lock (lk) to its end. It is given no other descriptor of this process's: the Board's ssh ends
   # with this process, not with the run.
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
+    jq -c --argjson p "$BASHPID" '. + {pid: $p}' "$FULLTEST.running" > "$FULLTEST.running.new" && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
     fullrun "$how" "$sha" "$cmd" "$o" "$by" "$last"; rm -f "$FULLTEST.running" ) > "$FULLTEST.log" 2>&1 < /dev/null 8>&- &
   exec {lk}>&-
   case $how in

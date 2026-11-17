@@ -19,7 +19,8 @@
 #     group's Foreman claimed in another checkout awaits the same issues of the same projects; one whose card has
 #     pushed wakes once, naming the commit it landed as. The Foreman only appends to it: what was dropped is counted in await-done-<repo>.txt
 #     ("<issue> <its lines in await-<repo>.txt then>"), so a line appended later awaits it again
-#   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit and failed cases
+#   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit, reasons and
+#     failed cases (a full test run whose process is gone, with no result: an error, with that reason)
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
@@ -61,7 +62,7 @@ SUITE='def took: if . < 3600 then "\(. / 60 | floor)m" else "\(. / 3600 | floor)
     | (.sha // "" | if . == "" then "no commit yet" else .[0:12] end) as $c
     | ([.cases | arrays | .[] | tostring] | if length > 20 then "\(.[:20] | join(", ")) and \(length - 20) more" else join(", ") end) as $f
     | if .ended == null then "\($k) running on \($c) for \((.since | fromdate? | $now - .) // null | if . == null then "?" else took end): \(.done // 0)\(if .of == null then "" else " of \(.of)" end) cases done, \(.failed // 0) failed\(if $f == "" then "" else ": \($f)" end)"
-      else "\($k) \(.state // "ended") on \($c) at \(.ended)\(if $f == "" then "" else "; failed cases: \($f)" end)" end;'
+      else "\($k) \(.state // "ended") on \($c) at \(.ended)\([.reasons | arrays | .[] | tostring] | if . == [] then "" else ": \(join("; "))" end)\(if $f == "" then "" else "; failed cases: \($f)" end)" end;'
 # The issues of a snapshot, or of its history ($hist: `conveyor.sh history`, null when not read), whose card pushed:
 # landed and not in health's unpushed, or in pushedCards. The snapshot holds only the newest of both lists (#544:
 # with 110 pushed today an awaited issue among the oldest was in neither, and never woke the Foreman).

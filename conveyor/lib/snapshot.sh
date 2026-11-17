@@ -259,8 +259,9 @@ CHECKRUN_SHOW='
 # its failed cases run alone, from those kept as its run ended), and says main moved once
 # main's head is not the one its suite started on (the record's main). A release record left
 # running with its lock free was ended from outside before it could say so: stopped, when the record was last written.
+# A full test's run left so is shown as the line the next ask records for it: an error, with its reason.
 suites() {
-  local r fr l t
+  local r fr l t m free
   if r=$(jq -ce 'objects | select(.kind == "release") | del(.pid)' "$CARDS/release/run.json" 2>/dev/null); then
     if [ "$(jq -r .ended <<<"$r")" = null ]; then
       if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
@@ -271,9 +272,14 @@ suites() {
           '. + $p | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi
-  if ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
+  # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that
+  # ends in between removes it, and one that starts in between writes a new one.
+  m=$(cat "$FULLTEST.running" 2>/dev/null); free=''
+  ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || free=1
+  if [ -z "$free" ] && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
     fr=$(jq -c --argjson p "$(suiteprog "$CARDS/fulltest/wt")" '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + (.counts // $p)' <<<"$fr")
-  elif l=$(tail -n 1 "$FULLTEST" 2>/dev/null | jq -ce 'select(.kind == "run")' 2>/dev/null); then
+  elif l=$({ [ -n "$free" ] && [ -n "$m" ] && [ "$(cat "$FULLTEST.running" 2>/dev/null)" = "$m" ] && fulldead; } \
+      || tail -n 1 "$FULLTEST" 2>/dev/null | jq -ce 'select(.kind == "run")' 2>/dev/null); then
     fr=$(jq -c '{kind: "full test", version: null, step: (if .push then "push" else "run" end), sha, since: null, ended: .time, state, done: null,
       failed: (.cases | length), cases: [.cases[].case], moved: false, reasons: (if .reason then [.reason] else [] end)}' <<<"$l")
   else fr=''; fi

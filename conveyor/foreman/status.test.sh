@@ -94,6 +94,18 @@ grep -qxF 'alpha: release 1.2.0 failed on abcdef012345 at 2026-11-15T11:59:00Z; 
   || fail "the wake does not name the result and the failed cases: $w"
 }
 
+# Issue 240: a full test run whose process was killed ends with no result (the snapshot's suites: an error, with its
+# reason). Bug it catches: the wake said only "full test error", so the Foreman could not tell the run never ended.
+t_suitedead() {
+CASE=suitedead; fixture suitedead
+snap '.suites = [{kind: "full test", version: null, step: "push", sha: "abcdef0123456789", since: null, ended: "2026-11-15T11:59:00Z",
+  state: "error", done: null, failed: 0, cases: [], moved: false, reasons: ["the run ended without a result: its process (4242) is gone"]}]'
+poll || fail "a full test run that ended with no result woke nothing: $(cat "$T/err")"
+w=$(cat "$FD"/pending/*.wake)
+grep -qxF 'alpha: full test error on abcdef012345 at 2026-11-15T11:59:00Z: the run ended without a result: its process (4242) is gone' <<<"$w" \
+  || fail "the wake does not say the run ended with no result: $w"
+}
+
 # Bug (#141): a main-red fix card is of issue 0, so the status, the wake and the Foreman's questions called it "#0".
 # They name it as health and the snapshot do (name: "Main is red (<commit>)"), and a card waiting on it the same way.
 t_mainred() {
@@ -147,6 +159,7 @@ grep -qF 'alpha: no snapshot for 2 minutes (the engine is stopped' "$FD"/pending
 }
 
 cases=(status wake suite mainred building slowlive slowdown)
+cases=(status wake suite suitedead mainred building)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0
