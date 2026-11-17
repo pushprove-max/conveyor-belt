@@ -32,14 +32,14 @@ V=A
 t=$(gh issue list --json title | jq -r '.[0].title'); echo "$V $t" >> "$SWE_FX/log"; echo $$ > "$SWE_FX/pid"
 while [ -e "$SWE_FX/hold" ]; do sleep 0.1; done
 mkdir -p "$CONVEYOR_MAIN/conveyor/state"
-rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
-  + (if $j == null then {} else {judge: $j} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }
+rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" --arg t "${5:-}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
+  + (if $j == null then {} else {judge: $j} end) + (if $t == "" then {} else {tail: $t} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }
 rec picked ok; rec build ok
 # The project name this checkout's loop takes, as the real engine names it (and its machine slot file after it).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
-if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J"; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
-rec review GO; rec test pass; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" commit -qam fix; rec landed ok; gh issue close 1
+if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
+rec review GO '' null 'no findings'; rec test pass '' null 'test output'; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" commit -qam fix; rec landed ok; gh issue close 1
 EOF
   # The functions and globals the stage map (bench/stagemap.sh) starts each stage from, one file a stage or two.
   printf '%s\n' 'session() { :; }' > "$e/conveyor/lib/session.sh"; printf '%s\n' 'reviewed() { :; }' > "$e/conveyor/lib/review.sh"
@@ -153,8 +153,12 @@ t_swediff() {
     || fail "diff did not name the flipped task, the review step and the totals: $out"
   jq -e --arg c "${EB:0:7}" '.flipped[0].changes | map(.title) == ["review: stricter findings"] and (.[0].commit | startswith($c))' <<<"$out" > /dev/null \
     || fail "diff did not name the engine commit that changed the review stage: $(jq -c .flipped[0].changes <<<"$out")"
-  jq -e '.flipped[0] | .b.findings == ["[P1] x.py:1 the fix is wrong", "[P1] x.py:1 still wrong"] and .b.fixRounds == 1 and (.reading | startswith("B blocked at review"))' <<<"$out" > /dev/null \
+  # Bug: findings came from the reason alone, which the record cuts short, not the NO-GO review's tail (its second line here).
+  jq -e '.flipped[0] | .b.findings == ["[P1] x.py:1 the fix is wrong", "[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason"] and .b.fixRounds == 1 and (.reading | startswith("B blocked at review"))' <<<"$out" > /dev/null \
     || fail "the flipped task's facts or the model's reading are missing: $(jq -c .flipped[0] <<<"$out")"
+  # Bug: every step's tail was saved, test output and GO reviews too, though Compare reads only a NO-GO review's.
+  cat "$B/results/$EB"/*.json | jq -se '[.[].steps[] | select(has("tail")) | .step + " " + .result] == ["review NO-GO"]' > /dev/null \
+    || fail "a tail was kept other than the NO-GO review's: $(cat "$B/results/$EB"/*.json | jq -sc '[.[].steps[] | select(has("tail"))]')"
   # Bug: the judge sessions on B's two reviews were left out of the task's sessions (build, 2 reviews, a fix: 4).
   jq -e '.flipped[0].b.sessions == 6' <<<"$out" > /dev/null || fail "the judge's sessions are not counted: $(jq -c .flipped[0].b <<<"$out")"
   grep -q '"apart":"review"' "$STUB/brief" || fail "the model was not given the facts: $(cat "$STUB/brief")"

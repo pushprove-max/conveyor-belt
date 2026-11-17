@@ -163,7 +163,7 @@ EOF
 # The final patch of a sandbox: what its main holds over the base commit.
 swe_patch() { git -C "$1/$SWE_MAIN" diff --binary "$2" "${3:-refs/heads/main}" --; } # <sb> <base> [<what>]
 # One task built by the engine in <eng> (its conveyor.sh). Prints the result's build part {sessions, tokens, minutes,
-# steps}, the patch in <sb>/patch.
+# steps}, the patch in <sb>/patch. A NO-GO review step keeps its tail (its findings): its reason is cut short.
 swe_build() { # <task json> <sb> <eng>
   local sb=$2 sst t0 base; base=$(jq -r .base <<<"$1"); t0=$(date +%s)
   mkdir -p "$sb/$SWE_MAIN/.conveyor" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
@@ -180,7 +180,7 @@ swe_build() { # <task json> <sb> <eng>
   jq -sc --argjson m "$(( $(date +%s) - t0 ))" 'map(select(.issue == 1 and (.step | IN("start", "picked", "worktree", "deps", "brief") | not))) as $s
     | {sessions: ($s | map(select(.step | IN("build", "review", "fix", "rebase"))) | length) + ($s | map(select(.judge | type == "object")) | length),
        tokens: ($s | map((.tokens.claude // 0) + (.tokens.codex // 0) + (.judge.tokens.claude // 0) + (.judge.tokens.codex // 0)) | add // 0),
-       minutes: ($m / 6 | round / 10), steps: ($s | map({step, result, reason, time, tokens}))}' "$sst/cards.jsonl" 2>/dev/null \
+       minutes: ($m / 6 | round / 10), steps: ($s | map({step, result, reason, time, tokens} + if .step == "review" and .result != "GO" and has("tail") then {tail} else {} end))}' "$sst/cards.jsonl" 2>/dev/null \
     || jq -nc --argjson m "$(( $(date +%s) - t0 ))" '{sessions: 0, tokens: 0, minutes: ($m / 6 | round / 10), steps: []}'
 }
 # One task given to Claude alone: one session on the issue in the sandbox's main, its change the patch. The session
@@ -300,7 +300,7 @@ SWE_STAGE='def stage: if . == "landed" then "land" elif . == "rebase" then "fix"
   def apart($a; $b): ($a | seq) as $x | ($b | seq) as $y | [range([$x, $y] | map(length) | max)] | map(select($x[.] == null or $y[.] == null
     or $x[.].step != $y[.].step or $x[.].result != $y[.].result)) | first as $i
     | if $i == null then null else ($x[$i] // $y[$i]) as $s | if $s.step == "blocked" then ($s.reason // "" | capture("^(?<s>build|review|fix|test|land)") .s // "land") else ($s.step | stage) end end;
-  def facts: {resolved, sessions, tokens, minutes, findings: [.steps[] | select(.step == "review" and .result != "GO") | .reason], fixRounds: ([.steps[] | select(.step == "fix")] | length),
+  def facts: {resolved, sessions, tokens, minutes, findings: [.steps[] | select(.step == "review" and .result != "GO") | .tail // .reason], fixRounds: ([.steps[] | select(.step == "fix")] | length),
     test: ([.steps[] | select(.step == "test") | .result] | last), blocked: ([.steps[] | select(.step == "blocked") | .reason] | last)};'
 swe_diff() { # <A> <B> [--json]
   local ca cb va vb d da db ids id fa fb st sm files=() flips='[]' ch why n e
