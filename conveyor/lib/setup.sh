@@ -160,6 +160,25 @@ setup() { # as SETUP_USAGE
       && "$HERE/lib/pack.sh" check "$PACK.new" && mv "$PACK.new" "$PACK" || { rm -f "$PACK.new"; return 1; }
     echo "conveyor: wrote the pack $PACK"
   fi
+  packget plugin.commit p plugin.follow f || return 1
+  if [ -z "$p$f" ] && [ -n "$pin" ]; then
+    p=$(git -C "$HERE" rev-parse HEAD 2>/dev/null) || { echo "conveyor: the pin could not be written: $HERE is in no git checkout, so its commit cannot be read" >&2; return 1; }
+    jq --arg c "$p" '.plugin = {commit: $c}' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pin could not be written" >&2; return 1; }
+    echo "conveyor: pinned Conveyor commit $p"
+  elif [ -z "$p$f" ]; then
+    f=releases; jq '.plugin = {follow: "releases"}' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pack's plugin could not be written" >&2; return 1; }
+    echo "conveyor: the project follows the plugin's releases"
+  fi
+  if [ -n "$f" ]; then take && enginepin p && [ -n "$p" ] || { echo "conveyor: no commit of the plugin's $f is taken on this machine; conveyor.sh doctor says why" >&2; return 1; }
+  else install "$p" || return 1; fi
+  # Before hostadd: once the host file names the project, a machine's service already running serves it.
+  heldstart || return 1
+  hostadd || return 1
+  # Before any other pack field is written: a machine's service on older Conveyor than the project's commit refuses
+  # a field its schema does not name, so it is started again on that commit first (servicerenew()).
+  servicerenew || return 1
   # dds is read only while the pack has neither: what the owner wrote in either is kept.
   if [ "$lk" = yes ] && [ ${#dds[@]} -gt 0 ]; then
     jq '.linkFromMain = $ARGS.positional' "$PACK" --args "${dds[@]}" > "$PACK.new" && mv "$PACK.new" "$PACK" \
@@ -200,19 +219,6 @@ setup() { # as SETUP_USAGE
       + if .format then "and Conveyor reads each test file'"'"'s clock seconds from its report (\(.format), \(if .env or .args then "which Conveyor asks it for at each run" else .path // "its output" end))"
         else "whose output gives no test times Conveyor can read; its option \(.option) would" end' <<<"$x"
   fi
-  packget plugin.commit p plugin.follow f || return 1
-  if [ -z "$p$f" ] && [ -n "$pin" ]; then
-    p=$(git -C "$HERE" rev-parse HEAD 2>/dev/null) || { echo "conveyor: the pin could not be written: $HERE is in no git checkout, so its commit cannot be read" >&2; return 1; }
-    jq --arg c "$p" '.plugin = {commit: $c}' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
-      || { rm -f "$PACK.new"; echo "conveyor: the pin could not be written" >&2; return 1; }
-    echo "conveyor: pinned Conveyor commit $p"
-  elif [ -z "$p$f" ]; then
-    f=releases; jq '.plugin = {follow: "releases"}' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
-      || { rm -f "$PACK.new"; echo "conveyor: the pack's plugin could not be written" >&2; return 1; }
-    echo "conveyor: the project follows the plugin's releases"
-  fi
-  if [ -n "$f" ]; then take && enginepin p && [ -n "$p" ] || { echo "conveyor: no commit of the plugin's $f is taken on this machine; conveyor.sh doctor says why" >&2; return 1; }
-  else install "$p" || return 1; fi
   mpsinstalled || { timeout 300 claude plugin install "$MPS" && mpsinstalled && echo "conveyor: installed the plugin $MPS, for /conveyor-belt:plan"; } \
     || { echo "conveyor: the plugin $MPS could not be installed (claude plugin install $MPS)" >&2; return 1; }
   # A virtualenv with no pip is what python3 -m venv leaves when ensurepip fails (no python3-venv): it is made again.
@@ -237,9 +243,6 @@ setup() { # as SETUP_USAGE
   x=$(git -C "$MAIN" rev-parse --path-format=absolute --git-path info/exclude) && mkdir -p "${x%/*}" \
     && { grep -qxF /conveyor/state/ "$x" 2>/dev/null || { { [ ! -s "$x" ] || [ -z "$(tail -c 1 "$x")" ] || echo >> "$x"; } && echo /conveyor/state/ >> "$x" && echo "conveyor: wrote /conveyor/state/ in git's exclude file $x, so git leaves out the state folder"; }; } \
     || { echo "conveyor: the state folder conveyor/state/ could not be added to git's exclude file" >&2; return 1; }
-  # Before hostadd: once the host file names the project, a machine's service already running serves it.
-  heldstart || return 1
-  hostadd || return 1
   for c in "${clis[@]}"; do mlocked routewrite "$c" || return 1; done
   [ "$fl" = no ] || setuplane fast || return 1
   if [ "$rl" = yes ]; then
@@ -777,7 +780,14 @@ doctor() {
   fi
   git -C "$CALLED" rev-parse --git-dir >/dev/null 2>&1 || { no "a git checkout of the project at $CALLED" "run conveyor.sh doctor in the project's checkout"; return 1; }
   if [ ! -e "$PACK" ]; then no "the pack $PACK" "run /conveyor-belt:setup"; return 1; fi
-  e=$("$HERE/lib/pack.sh" check "$PACK" 2>&1) || { no "a valid pack" "correct what the check names: ${e//$'\n'/; }"; return 1; }
+  # A field this engine does not know, in a pack for a newer commit (packnewer(), lib/prompts.sh): the pack is right,
+  # and the fix is to run the commit it names, not to correct the pack.
+  if ! e=$("$HERE/lib/pack.sh" check "$PACK" 2>&1); then
+    t=$(packnewer "$e"); t=${t#"conveyor pack: $PACK: "}
+    if [ -n "$t" ]; then no "a pack this Conveyor reads: ${t%%; run conveyor.sh install-service *}" "run ${t#*; run }"
+    else no "a valid pack" "correct what the check names: ${e//$'\n'/; }"; fi
+    return 1
+  fi
   ok "the pack $PACK"
   # The pack's test-file globs: they must find the project's tests (testcheck()).
   testcheck || bad=1
@@ -834,6 +844,12 @@ doctor() {
     no "the install of the pinned commit $p ($VERSIONS/$p is there and is not that commit as cloned)" \
       "remove it ($e), then run /conveyor-belt:setup, which installs it"
   else no "the install of the pinned commit $p" "run /conveyor-belt:setup, which installs it"; fi
+  # The machine's Conveyor on another commit, whose own check refuses this pack (a field its schema does not name):
+  # it starts the project's loop on that commit, which ends at once, so nothing of the project runs.
+  if IFS=$'\t' read -r e t c < <(machinerefuses) && [ -n "$e" ]; then
+    no "the machine's Conveyor reading this project's pack: it runs Conveyor commit $e, whose check refuses the pack ($t), so it does not serve the project" \
+      "run conveyor.sh install-service in $MAIN, which starts it again on the project's commit${c:+ $c}"
+  fi
   # A running loop on older code than its checkout's HEAD or, from an install, than the pin: a warning, as it restarts
   # on the new code by itself once its push is done.
   # The checkout is read on its own: @tsv escapes a backslash in a path, and read -r keeps that escape.

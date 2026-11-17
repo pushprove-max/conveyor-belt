@@ -16,8 +16,22 @@ packok() { # sets PACK_T and SCHEMA_T to the pack's and the schema's text, and c
   [ "$a$b" = 11 ] || { echo "conveyor pack: $PACK, or the schema $SCHEMA: not readable JSON: it holds a NUL byte" >&2; return 1; }
   [ "${#PACK_OK[@]}" = 2 ] && [ "$PACK_T" = "${PACK_OK[0]}" ] && [ "$SCHEMA_T" = "${PACK_OK[1]}" ] && return 0
   NAMED=''
-  packcheck "$PACK" "$PACK_T" "$SCHEMA_T" && packall || return 1
+  a=$(packcheck "$PACK" "$PACK_T" "$SCHEMA_T" 2>&1) || { printf '%s\n' "$a" >&2; packnewer "$a" >&2; return 1; }
+  packall || return 1
   PACK_OK=("$PACK_T" "$SCHEMA_T")
+}
+# The line an engine adds to its check's lines <lines> when they name a pack field its schema does not name: the pack
+# may be for newer Conveyor than this one (a service left on an older engine). It names the fields, this engine's
+# commit and the commit the project runs (the pack's plugin.commit, or the commit taken: ENGINE), read as plain JSON
+# (the pack does not pass this engine's check), which the machine's service should run. Nothing for other lines, nor
+# when the project runs this very commit, or names none: the field is then a mistake in the pack.
+packnewer() { # <lines>
+  local f p
+  f=$(sed -n 's/^conveyor pack: .*: \(\.[^:]*\): not a field of the schema$/\1/p' <<<"$1" | paste -sd, - | sed 's/,/, /g')
+  [ -n "$f" ] || return 0
+  p=$(jq -r '.plugin.commit | strings' "$PACK" 2>/dev/null); [ -n "$p" ] || p=$(jq -r '.commit | strings' "$ENGINE" 2>/dev/null)
+  [ -n "$p" ] && [ "$p" != "$OWN" ] || return 0
+  echo "conveyor pack: $PACK: this Conveyor ($([ -n "$OWN" ] && echo "commit $OWN" || echo "the code of $HERE")) does not know $f: the pack is for newer Conveyor, commit $p; run conveyor.sh install-service in $MAIN to start the machine's Conveyor on the project's commit"
 }
 # Every field the schema names, read from the checked text in one jq run (PACK_V: field to value, as packget gives it),
 # so a use of the same text, in this shell or a subshell started after, starts no program for it. A field the schema

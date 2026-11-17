@@ -299,7 +299,11 @@ stalenote() { # [live]
 # be stopped, or the machine's service does not start, each stopped so far is started again. The machine's service is
 # never written or started beside one left running: its loops beside that one's would pass the machine cap. It says
 # which, and install-service is run again once that one is seen to.
-# A machine service already running is left running.
+# A machine service already running is left running, unless its loop runs older Conveyor than the commit it is
+# written on (olderthan): then it is started again on that commit (systemctl --user restart; on macOS launchctl bootout,
+# then bootstrap, as the agent's file names another conveyor.sh), which ends every project's loop and the cards in
+# flight under it (they are picked again: revive()), and install-service then checks that the loop runs that commit
+# (servicecheck), and says so, or says it does not and why, and exits non-zero.
 # <unit or agent file> <its CONVEYOR_MAIN> <the conveyor.sh it runs>: 0 once its project is a record of the host
 # file. One with no CONVEYOR_MAIN serves the checkout its conveyor.sh is in (lib/paths.sh), unless that is an install.
 # A project served from its own checkout's code (the plugin's own belt) is recorded as run from it (hostadd checkout),
@@ -318,7 +322,7 @@ ownckout() {
     && [ "${s%/*}" != "$(cd "$VERSIONS" 2>/dev/null && pwd -P)" ] && echo "$s"
 }
 installservice() {
-  local repo pin code name=conveyor-machine f o m s uid why left=() olds=() stopped=() data=${VERSIONS%/conveyor/versions} conf=${XDG_CONFIG_HOME:-$HOME/.config}
+  local repo pin code name=conveyor-machine f o m s uid why re='' ck=0 i left=() olds=() stopped=() data=${VERSIONS%/conveyor/versions} conf=${XDG_CONFIG_HOME:-$HOME/.config}
   repo=$(cd "$CALLED" && cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd -P) \
     || { echo "conveyor: install-service runs in the checkout of a project to serve" >&2; return 1; }
   pin=$("$HERE/lib/pack.sh" get plugin.commit "$repo/.conveyor/project.json") && f=$("$HERE/lib/pack.sh" get plugin.follow "$repo/.conveyor/project.json") || return 1
@@ -339,6 +343,8 @@ installservice() {
       || { echo "conveyor: $repo runs Conveyor from its own checkout's $code, which has no machine's Conveyor to run: update that checkout, or pin a commit in its pack; no service was changed" >&2; return 1; }
     MAIN=$repo hostadd checkout || return 1
   fi
+  # The commit of a machine's loop running older Conveyor than the pin: it is started again on the pin.
+  [ -z "$pin" ] || { re=$(machinecommit) && olderthan "$re" "$pin"; } || re=''
   # Per system: the services of before (olds), and how one is stopped (oldstop: 1 when it could not be; one not
   # running is passed by: oldon) and started again (oldstart), and how the machine's is written and started (machinestart).
   if [ "$(uname -s)" = Darwin ]; then
@@ -378,7 +384,11 @@ installservice() {
 </dict>
 </plist>
 PLIST
-      launchctl print "gui/$uid/$name" >/dev/null 2>&1 || launchctl bootstrap "gui/$uid" "$f"
+      if [ -n "$re" ]; then
+        # bootout returns before the old loop has ended; bootstrap is refused until it has.
+        launchctl bootout "gui/$uid/$name" 2>/dev/null; i=0
+        until launchctl bootstrap "gui/$uid" "$f" 2>/dev/null; do [ $((i++)) -lt 20 ] || return 1; sleep 0.5; done
+      else launchctl print "gui/$uid/$name" >/dev/null 2>&1 || launchctl bootstrap "gui/$uid" "$f"; fi
     }
   else
     f=$conf/systemd/user/$name.service
@@ -416,7 +426,7 @@ RestartSec=10
 [Install]
 WantedBy=default.target
 UNIT
-      systemctl --user daemon-reload && systemctl --user enable --now "$name.service"
+      systemctl --user daemon-reload && systemctl --user enable --now "$name.service" && { [ -z "$re" ] || systemctl --user restart "$name.service"; }
     }
   fi
   [ ${#left[@]} = 0 ] || { echo "conveyor: the machine's Conveyor is not started while a per-project loop is left running beside it (${left[*]}): the two would pass the machine cap; no per-project service was stopped" >&2; return 1; }
@@ -443,8 +453,10 @@ UNIT
   # The service names the install by its path: listed in USES, so prune() keeps it.
   grep -qxF "$f" "$USES" 2>/dev/null || echo "$f" >> "$USES" || return 1
   echo "conveyor: $f runs $code machine for every project of $HOST"
+  [ -z "$re" ] || { echo "conveyor: the machine's Conveyor ran Conveyor commit $re, older than $pin: started it again on $pin"; servicecheck "$pin" || ck=1; }
   # A Board on older Conveyor than the project's is started again on it, as the machine's loop is.
   boardrenew || :
+  return $ck
 }
 # `conveyor.sh board`, in a project's checkout: the Board installed as this user's service (dashboard.sh --install),
 # reading this project, from the install of the commit the project runs (its pin, or the commit it took of the
@@ -517,14 +529,69 @@ boardloops() {
     c = substr(a, i + length(v)); b = substr(a, 1, i - 1)
     if (b ~ /(^|\/)bash( .*)? $/ && c ~ /^[0-9a-f]{40}\/\.claude\/scripts\/dashboard\.sh --loop$/) print $1 "\t" substr(c, 1, 40) }'
 }
+# Whether Conveyor commit <commit> is older than <the project's>: another commit, and not a newer one (the project's
+# commit is in its history: another project's newer install), as either install's history says.
+olderthan() { # <commit> <the project's>
+  local d
+  [ "$1" != "$2" ] || return 1
+  for d in "$VERSIONS/$1" "$VERSIONS/$2"; do git -C "$d" merge-base --is-ancestor "$2" "$1" 2>/dev/null && return 1; done
+  return 0
+}
+# The commit the machine's Conveyor runs (MACH/loop.json), while its loop runs; fails when none runs, or it runs a
+# checkout's code (no commit).
+machinecommit() {
+  local p t c
+  IFS=$'\t' read -r p t c < <(jq -r '[.pid, .started, .commit // ""] | @tsv' "$MACH/loop.json" 2>/dev/null) && [ -n "$c" ] && p_alive "$p" "$t" && echo "$c"
+}
+# After the machine's service was started again on <commit>: waits up to SERVICE_WAIT seconds for its loop
+# (MACH/loop.json) to run that commit, then says that it does, or that it does not, why, and where its log is (1).
+SERVICE_WAIT=${CONVEYOR_SERVICE_WAIT:-30}
+servicecheck() { # <commit>
+  local i=0 p t c=''
+  while :; do
+    IFS=$'\t' read -r p t c < <(jq -r '[.pid, .started, .commit // ""] | @tsv' "$MACH/loop.json" 2>/dev/null) && p_alive "$p" "$t" || c=''
+    [ -z "$c" ] || [ "$c" != "$1" ] || { echo "conveyor: the machine's Conveyor runs Conveyor commit $1 now (pid $p)"; return 0; }
+    [ $((i++)) -lt $((SERVICE_WAIT * 2)) ] || break; sleep 0.5
+  done
+  echo "conveyor: the machine's Conveyor does not run Conveyor commit $1 $SERVICE_WAIT s after its restart: $([ -n "$c" ] && echo "its loop (pid $p) runs Conveyor commit $c" || echo "no loop of it runs"); its log: $([ "$(uname -s)" = Darwin ] && echo "$HOME/Library/Logs/conveyor-machine.log" || echo "journalctl --user -u conveyor-machine.service")" >&2
+  return 1
+}
+# Whether the machine's Conveyor serves this project: a record of the host file names its main checkout.
+servedhere() { local m; while IFS=$'\t' read -r _ m _; do [ "$m" -ef "$MAIN" ] && return 0; done < <(projects 2>/dev/null); return 1; }
+# The machine's service, when it serves this project and its loop runs older Conveyor than the project's (enginepin):
+# install-service, run for this project, writes it on the project's commit, starts it again on it and checks that it
+# runs it. An old loop would refuse a pack field its schema does not name, and not serve the project. Run by setup
+# before it writes a pack field, and by the take command. Not from inside the machine's service (the loop's own
+# take): stopping the service ends the process that would start it again; it says what to run instead.
+servicerenew() {
+  local c p
+  servedhere && c=$(machinecommit) && enginepin p 2>/dev/null && [ -n "$p" ] && olderthan "$c" "$p" || return 0
+  if [ -n "${CONVEYOR_MACHINE_ID:-}" ]; then
+    echo "conveyor: the machine's Conveyor runs Conveyor commit $c, older than this project's $p: run conveyor.sh install-service in $MAIN to start it on $p" >&2
+    return 0
+  fi
+  echo "conveyor: the machine's Conveyor runs Conveyor commit $c, older than this project's $p: starting it again on $p"
+  (cd "$MAIN" && CONVEYOR_MAIN=$MAIN "$BASH" "$HERE/conveyor.sh" install-service </dev/null)
+}
+# What the machine's Conveyor makes of this project's pack, when it serves the project on another commit than this
+# one: that commit's own check of the pack (its install's pack.sh). When it refuses the pack, "<its commit> TAB <the
+# fields its schema does not name, or its check's lines> TAB <the project's commit (enginepin)>"; nothing when it
+# reads it. For doctor and health.
+machinerefuses() {
+  local c o f p=''
+  servedhere && c=$(machinecommit) && [ "$c" != "$OWN" ] && [ -f "$VERSIONS/$c/conveyor/lib/pack.sh" ] || return 0
+  o=$(bash "$VERSIONS/$c/conveyor/lib/pack.sh" check "$PACK" 2>&1) && return 0
+  f=$(sed -n 's/^conveyor pack: .*: \(\.[^:]*\): not a field of the schema$/\1/p' <<<"$o" | paste -sd, - | sed 's/,/, /g')
+  enginepin p 2>/dev/null || p=''
+  printf '%s\t%s\t%s\n' "$c" "${f:-${o//$'\n'/; }}" "$p"
+}
 # Each Board loop that runs older Conveyor than the project's (enginepin), "<pid> TAB <its commit> TAB <the project's>"
 # a line. A Board on a newer commit (the project's commit is in its history: another project's newer install) is left.
 boardold() {
-  local p pid c d
+  local p pid c
   enginepin p 2>/dev/null && [ -n "$p" ] || return 0
   while IFS=$'\t' read -r pid c; do
-    [ "$c" != "$p" ] || continue
-    for d in "$VERSIONS/$c" "$VERSIONS/$p"; do git -C "$d" merge-base --is-ancestor "$p" "$c" 2>/dev/null && continue 2; done
+    olderthan "$c" "$p" || continue
     printf '%s\t%s\t%s\n' "$pid" "$c" "$p"
   done < <(boardloops)
 }

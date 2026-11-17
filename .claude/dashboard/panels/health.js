@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside), limit | null (the
+// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -99,6 +99,13 @@ window.DASH_APP.panel({
       const loop = check(`Conveyor${of}`, r.loop ? ctx.chip('Running', 'ok') : off ? ctx.chip('Off', 'quiet') : ctx.chip('Stopped', 'bad'), off ? 'not meant to run' : null,
         r.newest ? 'last step recorded' : 'no step recorded', r.newest ? ctx.since(r.newest, ' ago') : null);
       if (!r.loop && !off) loop.next = `Start Conveyor again on ${ctx.machine}: its machine command starts every project.`;
+      // The machine's Conveyor runs an older commit, whose check refuses this project's pack: it does not run the project.
+      const so = r.serviceOld;
+      if (so && typeof so === 'object' && typeof so.commit === 'string') {
+        check(`Conveyor's version${of}`, ctx.chip('Too old for the pack', 'bad'),
+          plain(`Conveyor ${so.commit.slice(0, 12)} on ${ctx.machine} refuses the pack: ${so.refused || 'its check failed'}`)).next =
+          `Run conveyor.sh install-service in the project's checkout on ${ctx.machine}. It starts Conveyor again on ${typeof so.project === 'string' && so.project ? `the project's commit ${so.project.slice(0, 12)}` : "the project's commit"}.`;
+      }
       // A failing push: one line of how long and which check, its output under "Show output".
       if (r.pushFailingSince) {
         const e = r.pushError || {}, line = h('span', 'detail');

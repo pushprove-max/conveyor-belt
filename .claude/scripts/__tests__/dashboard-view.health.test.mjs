@@ -411,3 +411,18 @@ test('Health: a read refused with HTTP 401 says the login has expired and where 
   // The host's words only under the closed "Raw error".
   assert.doesNotMatch(Array.from(row.children).filter((n) => !n.matches('details.output')).map((n) => n.textContent).join(''), /HTTP 401/);
 });
+// Issue 185. Bug it catches: the machine's Conveyor ran an older commit that refused a pack field it did not know, and
+// Health showed no sign of it. The row is a fault that names the commit, the field and what to run; none without it.
+test("Health: the machine's Conveyor on an older commit that refuses the pack names the field and what to run", () => {
+  const w = boot();
+  const data = full();
+  data.panels.health.data.records[0].serviceOld = { commit: `090ab497${'0'.repeat(32)}`, refused: '.tests', project: `c4bc952b${'1'.repeat(32)}` };
+  deliver(w, data);
+  assert.equal(failingRows(w)[0], "Conveyor's version", 'a fault, first');
+  const row = dd(w, "Conveyor's version");
+  assert.match(row.textContent, /^Too old for the pack.*Conveyor 090ab4970000 on the build machine refuses the pack: \.tests/);
+  assert.match(row.querySelector('.check-next').textContent, /^Next: Run conveyor\.sh install-service in the project's checkout on the build machine\. It starts Conveyor again on the project's commit c4bc952b1111\.$/);
+  const ok = boot();
+  deliver(ok, full());
+  assert.equal(panel(ok, 'health').querySelector('dt[data-check="Conveyor\'s version"]'), null, 'no row while the machine reads the pack');
+});

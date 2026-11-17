@@ -280,6 +280,20 @@ Conveyor runs once per machine, and each project is a record of the host file. S
 (`conveyor.sh machine`), keeps a loop running for every record. `conveyor.sh install-service` installs it: a systemd
 user unit on Linux, a launchd agent on macOS. Install it while no card is in flight.
 
+When the service already runs, `install-service` writes its file on the project's commit. If the running service is
+on an older commit, `install-service` starts it again on the new one: `systemctl --user restart` on Linux, `launchctl
+bootout` and `launchctl bootstrap` on macOS. The restart stops every project's loop and the cards in flight. Conveyor
+picks those cards again, and their work is kept. Then `install-service` checks the commit that the service runs. It
+prints `the machine's Conveyor runs Conveyor commit <commit> now`. If the service is not on the new commit, it prints
+why and where the service's log is, and it exits with an error. Setup and `conveyor.sh take` do the same when they move
+the project to a newer commit than the service's. Setup does this before it writes a new field in the pack. An older
+Conveyor does not know a new field, and it does not run a project whose pack has one. When the service runs a
+command such as `take` itself, the command does not stop the service. It prints the `install-service` command to run.
+
+If the service runs a Conveyor that does not read the pack, its log names each field it does not know and the
+project's commit. `doctor` prints a `missing:` line, and the Board's Health shows "Conveyor's version" as "Too old for
+the pack". Each tells you to run `conveyor.sh install-service` in the project's checkout.
+
 Setup's last question is "Start Conveyor now as this machine's service?". Yes runs `install-service`. Beside it,
 when the Board is not running, setup asks "Start the Board now?". A Board that runs an older release than the
 project is not asked about: setup starts it again on the project's release. Yes runs `conveyor.sh board`, which starts the
