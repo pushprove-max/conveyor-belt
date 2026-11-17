@@ -51,6 +51,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
+  local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' ob='' # kw: keptway()'s answer for a kept patch; ob: the budget of its own its build proposes (ownbudget())
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
@@ -535,7 +536,7 @@ card() { # <card> <issue> [<branch> <tip>]
         # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
         began "$c" "$n" test
         [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
-        sec=$SECONDS; rc=0; ran=''; own=''; apart=''; TEST_BATCH=''; TEST_REFUSED=''
+        sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''
         # A test file its own run found over the time budget (slowtests()) is a note on its test line (slow), never a
         # finding: the card goes on with the pass. Only a test rule files an issue about it (testrulespass(), after the
         # test line is recorded).
@@ -600,11 +601,20 @@ card() { # <card> <issue> [<branch> <tip>]
         # change that no longer applies there is brought onto main by a session, even after the landing's rebuild.
         # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: no fix session, no
         # block and no wait for main. The card waits, holding no files, until the machine hold goes (holdwait()), then
-        # is fitted onto main as it is then and tested again, as after a wait for main.
+        # is fitted onto main as it is then and tested again, as after a wait for main. Before it waits, it is judged
+        # in the repair lane (repairlane(), issue 222): a card the lane passes goes on as a card whose tests passed;
+        # one that finds the lane held by another card waits until it is free, and is then tested and judged again.
         if [ "$held" = machine ]; then
-          echo "conveyor: card $c: a case it still fails is the machine's, not main's: it waits until the machine passes its controls again"
-          rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-          holdwait "$wt"; held=1
+          lane=0; repairlane "$c" "$wt" || lane=$?
+          if [ $lane = 0 ]; then
+            echo "conveyor: card $c: a case it still fails is the machine's, and the card repairs it: $REPAIRED"
+            repaired=$REPAIRED; held=''; rc=0; tmain=''
+          else
+            if [ $lane = 2 ]; then echo "conveyor: card $c: a case it still fails is the machine's: it waits for the repair lane, which another card holds"
+            else echo "conveyor: card $c: a case it still fails is the machine's, not main's, and the repair lane did not pass it ($REPAIRED): it waits until the machine passes its controls again"; fi
+            rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
+            holdwait "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
+          fi
         elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
           echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
           rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
@@ -624,7 +634,7 @@ card() { # <card> <issue> [<branch> <tip>]
         # round. Once before each fix round, so a card whose own change fails does not follow a busy main for ever.
         # caught is cleared, as after a wait on a red main above: a change that no longer applies on main is brought there
         # by a session, not put back on its old commit (settle()), where what failed would only run again as it did.
-        if [ -z "$tmain" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
+        if [ -z "$repaired" ] && [ -z "$tmain" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
           echo "conveyor: card $c: main moved since its commit: its change goes onto main as it is now, and what failed runs again there"
           tmain=1; rm -f "$wt.ready"; unmate; away=''; caught=''
           redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
@@ -634,18 +644,22 @@ card() { # <card> <issue> [<branch> <tip>]
           [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 2; }
           continue
         fi
-        tmain=''
-        [ -z "$tfix" ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
-        tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-        redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# The changed tests fail (exit '"$rc"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$wt.test" 2>/dev/null | tr -d '\000')" fix) \
-          || { block "$c" "$n" "$wt" "fix: $t"; return; }
-        checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-        continue 2
+        if [ -z "$repaired" ]; then
+          tmain=''
+          [ -z "$tfix" ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
+          tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
+          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# The changed tests fail (exit '"$rc"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$wt.test" 2>/dev/null | tr -d '\000')" fix) \
+            || { block "$c" "$n" "$wt" "fix: $t"; return; }
+          checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
+          continue 2
+        fi
       fi
       # Not run again when they passed on what its worktree still holds (that run has its own line): this line says it
       # reused that pass.
       # A batch that ran no case (batch(): TEST_BATCH) says so in selected: no case ran, and how many passes it kept.
-      if [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 "$sec")" --argjson r "$(firstrun "$wt" pass)" --argjson b "${TEST_BATCH:-null}" \
+      # A card the repair lane passed (repairlane()): its line says so, with the clean run of its changed tests.
+      if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 "$sec")" --arg r "$repaired" '$x + {reason: $r}')"
+      elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 "$sec")" --argjson r "$(firstrun "$wt" pass)" --argjson b "${TEST_BATCH:-null}" \
         --argjson s "$([ -z "$own" ] && echo '{}' || slowrec "$wt")" '$x + $r + $s | if $b then .selected += $b else . end')"
       else record "$c" "$n" test pass "$(jq -cn --argjson s "$sec" '{sec:$s,usage:{input:0,write:0,write1h:0,read:0,output:0},reused:true}')"; fi
       # The test rules read the line just recorded (lib/testrules.sh): with their switch off, they file nothing.

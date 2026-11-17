@@ -662,7 +662,7 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # that must pass on main again (the controls that failed, and the failing files that passed before with the same
 # inputs) and the cases. While it
 # stands the loop picks no card (machineheld(), run()) and a card whose failures are the machine's waits for it to go
-# (holdwait()); health shows it (machineHold), which wakes the Foreman once. A hold found while one stands adds its
+# (holdwait()), unless the repair lane passes it (repairlane()); health shows it (machineHold), which wakes the Foreman once. A hold found while one stands adds its
 # files and cases to it, its since kept. One writer at a time (a lock of its own).
 machinehold() { # <card> <main's commit> <the files, json> <the cases, json>
   local lock
@@ -692,20 +692,102 @@ machineprobe() {
   git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; rmdir "${wt%/*}" 2>/dev/null
   [ $rc = 0 ] || return 1
   { exec {lock}>>"$MACHINEHOLD.lock"; } 2>/dev/null && flock "$lock" || return 1
-  [ "$(jq -c .controls "$MACHINEHOLD" 2>/dev/null)" != "$(jq -c .controls <<<"$h")" ] || rm -f "$MACHINEHOLD"
+  [ "$(jq -c .controls "$MACHINEHOLD" 2>/dev/null)" != "$(jq -c .controls <<<"$h")" ] || rm -f "$MACHINEHOLD" "$MACHINEHOLD.lane"
   exec {lock}>&-
 }
 # A card whose failures are the machine's (verdicts(): machine, and none the card's) waits in its test step until the
 # hold goes (machineprobe()), its live record saying so and brought up to date as it waits, and <worktree>.idle
-# standing, as for a red main (mainwait()).
-holdwait() { # <worktree>
-  local at; at=$(date -u +%FT%TZ)
+# standing, as for a red main (mainwait()). Given lane, it waits for the repair lane (repairlane()) too: it ends as
+# soon as no other card holds the lane, so that the card is tested and judged again.
+holdwait() { # <worktree> [lane]
+  local at h; at=$(date -u +%FT%TZ)
   while [ -e "$MACHINEHOLD" ]; do
-    jq -cn --arg at "$at" --arg c "$(machineheld)" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
-      action: "waiting for the machine: \($c)"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
+    h=''; [ -z "${2:-}" ] || { h=$(repairholder); [ -n "$h" ] || break; }
+    jq -cn --arg at "$at" --arg c "$(machineheld)" --arg h "$h" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+      action: (if $h == "" then "waiting for the machine: \($c)" else "waiting for the repair lane: card \($h) is judged by the controls; \($c)" end)}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     : > "$1.idle"; sleep "$LIVE"
   done
   rm -f "$1.live" "$1.idle"
+}
+# The repair lane (issue 222). While the machine hold stands, a card whose failures are the machine's (verdicts():
+# machine, none the card's) may be a fix of the test step itself, which its own test step, run under the running
+# engine's harness, cannot pass. One card at a time takes the lane (<machine hold>.lane: {card, pid, started}, its
+# card's process; the lane is free when no live process holds it) and is judged by the hold's files instead
+# (repairproof()). A card that the lane passes lands; it keeps the lane until its process ends. A card that it does
+# not pass gives the lane up and waits for the hold to go (holdwait()). A card that finds the lane held waits until
+# it is free (holdwait() lane). Exit 0 when the card repairs the machine (REPAIRED says how), 1 when it does not
+# (REPAIRED says why), 2 when another card holds the lane. Called in the card's own process, never in $(...).
+repairlane() { # <card> <worktree>
+  local lock h r=2 me=$BASHPID st # me: this process; $BASHPID read inside $(...) is the substitution's own
+  REPAIRED=''
+  { exec {lock}>>"$MACHINEHOLD.lock"; } 2>/dev/null && flock "$lock" || return 2
+  if h=$(repairholder) && { [ -z "$h" ] || [ "$h" = "$1" ]; } && st=$(p_started "$me") && [ -n "$st" ]; then
+    jq -cn --arg c "$1" --argjson p "$me" --arg s "$st" '{card: $c, pid: $p, started: $s}' > "$MACHINEHOLD.lane.new" \
+      && mv -f "$MACHINEHOLD.lane.new" "$MACHINEHOLD.lane" && r=0
+  fi
+  exec {lock}>&-
+  [ $r = 0 ] || return 2
+  repairproof "$1" "$2" && return 0
+  { exec {lock}>>"$MACHINEHOLD.lock"; } 2>/dev/null && flock "$lock" && { [ "$(repairholder)" != "$1" ] || rm -f "$MACHINEHOLD.lane"; exec {lock}>&-; }
+  return 1
+}
+# The card that holds the repair lane; nothing when it is free (no lane, or its holder's process has ended).
+repairholder() {
+  local h
+  h=$(jq -r 'objects | "\(.card)\t\(.pid)\t\(.started)"' "$MACHINEHOLD.lane" 2>/dev/null) && [ -n "$h" ] || return 0
+  IFS=$'\t' read -r -a h <<<"$h"
+  ! p_alive "${h[1]}" "${h[2]}" || printf '%s\n' "${h[0]}"
+}
+# The repair lane's judgement of a card (repairlane()), in the shape of redproof(): the files of the machine hold run
+# in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.repair, each named `fail` in
+# the run's list, with the pack's test.command: first without the card's change, where they must fail, then with it
+# staged, where they must pass. Then the card's changed tests run in its own worktree (the command given the tests its
+# change touches, testsel(), and no list of earlier passes), and must pass. Each of the three runs is a clean one
+# (cleanrun()). Sets REPAIRED: what the runs showed.
+# shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
+repairproof() { # <card> <worktree>
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1
+  cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
+  cs=$(jq -r 'join(", ")' <<<"$cj")
+  if ! packget test.command cmd 2>/dev/null; then REPAIRED="the pack's test.command could not be read"
+  elif sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+    && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
+    && jq -r '.[] | "fail\t\(.)"' <<<"$cj" > "$mwt.rerun"; then
+    if cleanrun "$mwt" "$cmd" "$mwt.rerun"; then
+      REPAIRED="$cs passed on main's code at ${sha:0:12} without the change in a clean harness, so the change repairs nothing there"
+    elif ! out=$(git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>&1); then
+      REPAIRED="the change could not be applied to main's code at ${sha:0:12}, so $cs did not run with it: ${out:0:400}"
+    elif ! cleanrun "$mwt" "$cmd" "$mwt.rerun"; then
+      REPAIRED="$cs still failed with the change in a clean harness"
+    elif ! testfails "$mwt.test" 0 | jq -e --argjson c "$cj" '.passed as $p | all($c[]; IN($p[]))' >/dev/null 2>&1; then
+      REPAIRED="the run with the change passed, but its logs do not say that $cs passed in it"
+    elif ! { listcmd "$2" "$cmd" 2>"$2.test" && cleanrun "$2" "$LISTCMD"; }; then
+      REPAIRED="$cs failed on main's code at ${sha:0:12} without the change and passed with it, but the card's changed tests failed in a clean harness"
+    else
+      REPAIRED="repair lane: $cs failed on main's code at ${sha:0:12} without the change and passed with it, and the card's changed tests passed, each in a clean harness"; rc=0
+    fi
+  else
+    REPAIRED="$cs could not be run on main's code at ${sha:-a commit that could not be read}: ${out:0:400}"
+  fi
+  git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  return $rc
+}
+# One run of <command> in <worktree> in a clean harness (repairproof()): a session of its own (p_setsid), no file
+# descriptor above 2 of the loop's (closefds), and a minimal environment: the loop's PATH, HOME, USER, LOGNAME, LANG,
+# LC_ALL, TMPDIR and XDG_CONFIG_HOME, and the variables a run is given (README.md). CONVEYOR_TEST_SLOTS names the
+# worktree's own conveyor/lib/slots.sh when it has one (the engine's own repository: the harness the change may
+# repair), else the running engine's. It holds no test slot of the loop's: the runners take their own. Output in
+# <worktree>.test, progress logs in <worktree>.testlog; exit as the command's, under the test timeout.
+cleanrun() { # <worktree> <command> [<list>]
+  local lib=$HERE/lib e=() v pid
+  [ ! -f "$1/conveyor/lib/slots.sh" ] || lib=$1/conveyor/lib
+  for v in PATH HOME USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME; do [ -z "${!v+x}" ] || e+=("$v=${!v}"); done
+  rm -rf "$1.testlog" "$1.report"; mkdir "$1.testlog" 2>"$1.test" || return 1
+  (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
+    CONVEYOR_TEST_FILES="${TEST_FILES:-}" timeout --kill-after=30 "$TEST_TIMEOUT" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
+  pid=$!
+  watch $pid "$1.test" "$1.live" test
 }
 # The bug-card check (card(): a card whose issue has the pack's type label, labels.type, after its build and before its
 # review). The test files its staged change adds or changes (paths testpaths() takes for test files: the pack's

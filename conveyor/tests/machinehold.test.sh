@@ -155,7 +155,8 @@ t_machinecard() {
     || fail "the test line is not held with the verdict machine: $(tline 1 tojson)"
   [ ! -s "$ST/mainred.json" ] && ! grep -qs "waiting for main to change" "$T/$CASE/cards/"*.live \
     || fail "the machine's failure opened a main-red entry or a wait for main: $(cat "$ST/mainred.json" 2>&1)"
-  wait_until '[ -s "$STUB/looks" ]' 'cat "$STUB/run.out"' || fail "the loop did not look at the hold: $(cat "$STUB/run.out")"
+  # A look that has ended (its worktree gone): one still running when the plan changes below would pass at once.
+  wait_until '[ -s "$STUB/looks" ] && [ ! -e "$T/$CASE/cards/mainrun/machine" ]' 'cat "$STUB/run.out"' || fail "the loop did not look at the hold: $(cat "$STUB/run.out")"
   [ -e "$ST/machinehold.json" ] || fail "a look that failed the control ended the hold"
   sed -i '/^main fail three$/d' "$STUB/plan"
   wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
@@ -180,4 +181,105 @@ t_machineresume() {
   [ "$(cat "$STUB/looks" 2>&1)" = 'fail:c.test|' ] || fail "the loop did not run the control alone on main: $(cat "$STUB/looks" 2>&1)"
   [ ! -e "$ST/machinehold.json" ] || fail "the hold stayed after the control passed: $(cat "$ST/machinehold.json")"
   [ "$(st 'select(.step == "picked") | .issue')" = 7 ] || fail "the loop did not pick again once the control passed: $out"
+}
+
+# The repair lane (issue 222). Main has a harness of its own, conveyor/lib/slots.sh, whose harness() fails: under it
+# the control c.test fails ('broken fail three'). The card's own runs, under the running engine's harness, fail b.test's
+# flaky, and main's run fails it and c.test beside it: the verdict is machine, and the hold names c.test. A run in a
+# clean harness (CONVEYOR_TEST_SLOTS not the running engine's) adds a line to $STUB/clean: the folder it ran in,
+# whether the harness it was given passed, its session and its parent (the session's leader, `timeout`, in a session
+# of its own), the descriptors above 2 it holds, the CONVEYOR_MAIN it was given and the harness it was named.
+repairsetup() {
+  holdsetup '1 fail flaky' '2 fail flaky' 'main fail flaky' 'main fail three' 'broken fail three'
+  mkdir -p "$R/conveyor/lib" && echo 'harness() { return 1; }' > "$R/conveyor/lib/slots.sh" \
+    && git -C "$R" add -f conveyor &&git -C "$R" commit -qm "a harness that fails" || fail "main's harness could not be committed"
+  tune --arg s "$STUB" '.test.command = "STUB=\($s); " + .test.command | .tunables.poll = 1' # a clean run is given no STUB
+  holdpass $'c.test\tc.txt'
+  cat >> "$STUB/pre" <<EOF
+case \${CONVEYOR_TEST_SLOTS:-} in "$SRC"/*) ;; *)
+  if . "\$CONVEYOR_TEST_SLOTS" && harness; then n=mended; else n=broken; fi
+  fds=''; for f in /dev/fd/*; do f=\${f##*/}; [ "\$f" -le 2 ] || [ ! -e "/dev/fd/\$f" ] || fds="\$fds \$f"; done
+  echo "\${PWD##*/} \$n sid=\$(python3 -c 'import os; print(os.getsid(0))') ppid=\$PPID fds=[\${fds# }] main=\${CONVEYOR_MAIN-unset} slots=\${CONVEYOR_TEST_SLOTS#"\$PWD"/}" >> "\$STUB/clean" ;;
+esac
+EOF
+}
+# The clean runs' lines with what every clean run must show taken out: a session of its own, no descriptor above 2,
+# none of the loop's environment, and the worktree's own harness.
+cleanruns() { sed -E 's/ sid=([0-9]+) ppid=\1 fds=\[\] main=unset slots=conveyor\/lib\/slots.sh$//; s/^c[^ ]*-7/card/' "$STUB/clean" | tr '\n' ,; }
+
+# D1, D2, D4: a card whose change mends main's harness. Bug it catches: a fix to the test step was judged by the
+# harness it repairs, so it could never pass its own test step (two such cards were landed by hand). Its test step is
+# held by the machine; the repair lane runs c.test on main's code without the change (it fails) and with it (it
+# passes), then the card's changed tests, each in a clean harness that is the worktree's own; the card lands, though
+# the hold still stands.
+t_repairlands() {
+  repairsetup
+  local out lp
+  echo 'echo "harness() { return 0; }" > conveyor/lib/slots.sh' > "$STUB/build"
+  ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
+  # A card the lane does not pass waits for the machine: the control is mended then, so that the run ends.
+  wait_until '[ -n "$(st '"'"'select(.step == "landed") | .issue'"'"')" ] || grep -qs "waiting for the machine" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' \
+    || fail "the card neither landed nor waited: $(cat "$STUB/run.out")"
+  [ -n "$(st 'select(.step == "landed") | .issue')" ] || sed -i '/^main fail three$/d' "$STUB/plan"
+  wait "$lp"; out=$(cat "$STUB/run.out")
+  [ "$(cleanruns)" = 'card.repair broken,card.repair mended,card mended,' ] \
+    || fail "the repair lane did not run the control without and with the change, then the changed tests, each in a clean harness of the worktree's own: $(cat "$STUB/clean" 2>&1)"
+  [ "$(st 'select(.step == "test") | .result' | tr '\n' ,)" = 'held,pass,' ] && [[ $(tline 2 .reason) == "repair lane: c.test failed on main's code at "* ]] \
+    || fail "the card's test step was not passed by the repair lane: $(st 'select(.step == "test") | "\(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the repair card did not land: $out"
+  [ -e "$ST/machinehold.json" ] || fail "the repair lane ended the hold, which only the controls passing on main end"
+  loop check || fail "the record check refuses the repair lane's test line"
+}
+
+# A card the repair lane does not pass, built by $STUB/build: it gives the lane up, waits for the machine as before,
+# and lands only once the hold goes, on a test step of its own.
+repairheld() { # <the clean runs, as cleanruns() gives them> <why the lane did not pass it>
+  local lp
+  ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
+  wait_until 'grep -qs "waiting for the machine: the machine fails c.test" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' \
+    || fail "the card did not wait for the machine: $(cat "$STUB/run.out")"
+  [ "$(cleanruns)" = "$1" ] || fail "the lane's clean runs are not $1: $(cat "$STUB/clean" 2>&1)"
+  grep -qF "the repair lane did not pass it ($2)" "$STUB/run.out" || fail "the loop did not say why the lane did not pass the card: $(cat "$STUB/run.out")"
+  [ -z "$(st 'select(.step == "landed") | .issue')" ] || fail "a card that does not repair the machine landed while the hold stands"
+  [ -z "$(eng repairholder)" ] || fail "the card that did not pass kept the repair lane: $(cat "$ST/machinehold.json.lane")"
+  sed -i '/^main fail three$/d' "$STUB/plan"
+  wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
+  [ "$(st 'select(.step == "test") | "\(.result) \(.reason)"' | tr '\n' ,)" = 'held exit 1,pass ,' ] && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] \
+    || fail "the card did not land on a test step of its own once the hold went: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+# D1, D4: a card that does not mend the harness (its build changes a.txt). Bug it catches: a card let through the
+# lane by its change alone. c.test fails in the clean harness with the change too.
+t_repairnot() {
+  repairsetup
+  repairheld 'card.repair broken,card.repair broken,' 'c.test still failed with the change in a clean harness'
+}
+# D1: a card whose change makes the harness end the run at once with exit 0, so that nothing runs. Bug it catches: a
+# run that passed by running nothing taken for the controls passing. The lane asks the run's logs for c.test's pass.
+t_repairempty() {
+  repairsetup
+  echo 'echo "exit 0" > conveyor/lib/slots.sh' > "$STUB/build"
+  repairheld 'card.repair broken,' 'the run with the change passed, but its logs do not say that c.test passed in it'
+}
+
+# D1, D4: card c1 takes the repair lane through repairlane() and is judged (a repairproof() that does not end here).
+# Bugs it catches: two repair cards judged at once, each against a main the other changes; and a lane recorded with
+# the start time of a process other than c1's (c1's process starts over a second before it takes the lane, so the
+# two times differ), which another card takes for a free lane. A second card is refused the lane and waits, saying
+# so, until c1's process ends; then it stops waiting, though the hold stands, to be tested and judged again.
+t_repairwait() {
+  holdsetup
+  local sp hw rc=0
+  eng 'machinehold c1 "$(git rev-parse HEAD)" "[\"c.test\"]" "[\"b.test: flaky\"]"' || fail "the hold could not be written"
+  ( eng 'sleep 1.5; repairproof() { while :; do sleep 0.2; done; }; repairlane c1 "$CONVEYOR_CARDS/c1"' ) & sp=$! # sleep: c1's process must start over a second before it takes the lane, so the two start times differ
+  wait_until '[ "$(eng repairholder)" = c1 ]' || fail "card c1 did not hold the lane while its process runs: $(cat "$ST/machinehold.json.lane" 2>&1)"
+  sp=$(jq -r .pid "$ST/machinehold.json.lane") # c1's process, which holds the lane while it runs
+  eng 'repairlane c2 "$CONVEYOR_CARDS/c2"' || rc=$?
+  [ $rc = 2 ] || fail "a second card was not refused the lane c1 holds (exit $rc)"
+  mkdir -p "$T/$CASE/cards"; ( eng 'LIVE=1; holdwait "$CONVEYOR_CARDS/c2" lane' ) & hw=$!
+  wait_until 'grep -qs "waiting for the repair lane: card c1 is judged by the controls" "$T/$CASE/cards/c2.live"' || fail "the second card did not wait for the lane"
+  kill -0 "$hw" 2>/dev/null || fail "the second card stopped waiting while c1 held the lane"
+  kill "$sp"; wait "$sp" 2>/dev/null
+  wait_until '[ ! -e "$T/$CASE/cards/c2.live" ]' || fail "the second card did not stop waiting once c1's process ended"
+  wait "$hw" || fail "the second card's wait failed"
+  [ -e "$ST/machinehold.json" ] && [ -z "$(eng repairholder)" ] || fail "the hold went, or the lane is still held"
 }

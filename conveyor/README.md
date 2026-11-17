@@ -421,6 +421,16 @@ failure gets a verdict:
   waits in its Test step, its live record saying "waiting for the machine", and holds no build slot. When the hold
   goes, it is fitted onto main as it is now and its test step runs again. `health` shows the hold as `machineHold`,
   and the Foreman gets one wake for each hold that names the failing files.
+  The repair lane lets a change that repairs the test step itself land while the hold stands. The lane opens for a
+  card with a machine verdict and no card verdict, before it waits, and for one card at a time. The files of the
+  hold run on main's code at the card's commit, first without the card's change and then with it: they must fail
+  without the change and pass with it. Then the card's changed tests run with its change, and they must pass. Each
+  of these runs is clean: it runs in a session of its own, with a small set of environment variables and no open
+  file descriptor above 2, and `CONVEYOR_TEST_SLOTS` names the card's own `conveyor/lib/slots.sh` when the card has
+  one. A card that passes lands, and its test line starts "repair lane:". Its review is the same as for any card. A
+  card that does not pass gives up the lane and waits for the machine. A card that finds the lane in use waits, its
+  live record saying "waiting for the repair lane", until the process of the card in the lane ends. Then its test
+  step runs again.
 - **card**: it passed on main, or main's run did not run it (its worktree could not be made, or the command did not
   select it). The card goes to its fix session.
 - **flaky**: it failed on the first run and passed on the run again (Flaky tests, below).

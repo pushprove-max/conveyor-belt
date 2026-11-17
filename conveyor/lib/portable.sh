@@ -102,6 +102,12 @@ p_started() { local s; s=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) || return
 # reaped by its parent, keeps its start time but does not run.
 p_alive() { [ -n "$2" ] && [ "$(p_started "$1")" = "$2" ] && [[ $(ps -o stat= -p "$1" 2>/dev/null) != *Z* ]]; } # <pid> <started>
 
+# Runs <command> as the leader of a session of its own (no controlling terminal, a process group of its own) and
+# exits as it does: setsid on Linux; macOS has no setsid command, so perl's POSIX::setsid there.
+p_setsid() { # <command> [args]
+  if [ "$(uname -s)" = Darwin ]; then perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "$ARGV[0]: $!\n"' "$@"; else setsid -w "$@"; fi
+}
+
 # Every process, one line each: "<pid> <its parent's pid> <its command line>".
 p_procs() { ps -A -ww -o pid=,ppid=,args= 2>/dev/null; }
 
