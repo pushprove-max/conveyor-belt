@@ -10,6 +10,10 @@ two cards edit one report.
 - Alone: the file's cases and nothing else of the suite, through the runner (`bash conveyor/tests/<file>.test.sh`,
   which runs its own cases through `conveyor/conveyor.test.sh`). Its cases run side by side, as many as the machine's
   test slots allow, so the file's time is close to its slowest case's.
+- A card's Test step runs each case file the same way, as a test file of its own: its own process and test slot,
+  with only the cases the change selects of it, side by side with the other case files it selects. Each one pays
+  the runner's start-up once (about 0.4 CPU s on the build machine). Its result and its time name the case file, and
+  the time counts toward that file's own CPU budget only when the step ran all of the file's cases.
 - On the machine that runs the loop, with whatever else it runs at the time: the same machine and about the same load
   for the before and the after. Note the load average next to the times when it is far from usual.
 - Two numbers, before and after: the file's time (wall clock, from the first case started to the last ended) and its

@@ -201,6 +201,33 @@ t_mainredpartial() {
     || fail "a run of only some cases of the file did not count, or one without the case did: $(cat "$w/mainred.json" 2>&1)"
 }
 
+# Issue 214: a card's test step names an engine case file's cases under that file, where records made before named
+# them under the runner. Bugs it catches, in a fixture repo whose tests/b.test.sh runs its case `one` through the
+# runner r.test.sh (it names it): an open fix card's entry `r.test.sh: one` did not hold `tests/b.test.sh: one`, so a
+# second fix card started for the same case; the landing that broke it was not found, as the card that ran `one` (L1)
+# recorded it under the runner (ranCases), so a later landing (A) that did not run it went unnamed; and the old entry's
+# run on main (redrun()), whose result names tests/b.test.sh, gave no verdict for it.
+t_mainredold() {
+  local w=$T/$CASE r a h got
+  r=$w/r; mkdir -p "$r/tests" "$r/lib"; git -C "$r" init -q
+  land() { # <card> <issue> <file> <the case of r.test.sh its card ran, or none>
+    echo "$1" > "$r/$3"; git -C "$r" add -A; git -C "$r" commit -qm "$1"
+    jq -cn --arg c "$1" --argjson n "$2" --arg s "$(git -C "$r" rev-parse HEAD)" --arg k "$4" \
+      '{card: $c, issue: $n, step: "test", result: "pass", ranCases: {"r.test.sh": [$k]}}, {card: $c, issue: $n, step: "landed", result: "ok", sha: $s}' >> "$w/cards.jsonl"
+  }
+  printf '# run alone: bash ../r.test.sh\nt_one() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
+  land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD); h=$a
+  jq -cn '{reds: [{sha: "0ld", cases: [{case: "r.test.sh: one", file: "r.test.sh", files: ["tests/b.test.sh"]}], card: null}]}' > "$w/mainred.json"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+    stdb() { cat "$w/cards.jsonl"; }
+    tests() { :; }; testlogs() { echo log; }; testfails() { echo '{"files": [{"file": "tests/b.test.sh", "cases": [{"name": "one"}]}]}'; }
+    export MAINRED=$w/mainred.json
+    mainred c9 "tests/b.test.sh: one" tests/b.test.sh "$h" && brokeby tests/b.test.sh "$h" tests/b.test.sh one | jq -r .sha \
+      && redrun "$w/wt" "$(jq -c '[.reds[0].cases[0] | {name: .case, file, files, case: "one"}]' "$MAINRED")" | jq -r '.[0].verdict' ) || fail "mainred failed: $got"
+  [ "$(jq -c '[.reds[] | .sha]' "$w/mainred.json")" = '["0ld"]' ] || fail "the open fix card's entry named under the runner did not hold the case: $(cat "$w/mainred.json")"
+  [ "$got" = "$a"$'\n'fail ] || fail "the landing that broke it, or the old entry's verdict on main, was not found: '$got'"
+}
+
 # The engine's own functions, sourced as `run` sources them, in main's checkout: what a card's verdicts() and the
 # loop's pick call, without a card run (#597's cases call mainred() and pick() themselves).
 eng() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && eval "$1" ); }

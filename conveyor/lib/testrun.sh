@@ -883,7 +883,7 @@ bugproof() { # <card> <worktree> <issue json>
 # fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
 redproof() { # <card> <worktree>
   local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2
-  cs=$(jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, case: (.file as $f
+  cs=$(jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, files: [.files[]? | strings], case: (.file as $f
     | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null) \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
@@ -918,9 +918,11 @@ redproof() { # <card> <worktree>
 rednames() { # <verdict> <redrun() output>
   jq -r --arg v "$1" '[.[] | select(.verdict == $v) | "`\(.name)`"] | join(", ")' <<<"$2"
 }
-# One run of redproof(): the cases <cases json> ([{name, file, case}], case "" for a file that failed naming no case)
-# alone in <worktree>, each a `fail` line of the run's list (CONVEYOR_TEST_RERUN), as verdicts() runs them on main.
-# Prints the cases, each with its verdict: fail when the run's logs (testfails()) name it failed (or its file failed,
+# One run of redproof(): the cases <cases json> ([{name, file, files, case}], case "" for a file that failed naming no
+# case; files, the files that define it, mainred()) alone in <worktree>, each a `fail` line of the run's list
+# (CONVEYOR_TEST_RERUN), as verdicts() runs them on main. A case's result is under its file or, as a run names an
+# engine case file's case under that file where an entry made before issue 214 named the runner, under one of its
+# files. Prints the cases, each with its verdict: fail when the run's logs (testfails()) name it failed (or its file failed,
 # for a file alone, or ran out of time); pass when they name it passed (a line `ok <case>` under its file; a file alone,
 # when its file passed: a passing file whose named case did not run, as when the change renames it, is no proof of
 # that case); none when they name neither. A command that writes no logs says only its exit, of every case.
@@ -929,9 +931,10 @@ redrun() { # <worktree> <cases json>
   jq -r '.[] | if .case == "" then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
   tests "$1" test.command alone; rc=$?
   [ -z "$(testlogs "$1")" ] || t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'
-  jq -c --argjson t "$t" --argjson rc "$rc" 'map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)
-    elif any($t.files[]?; .file == $c.file and ($c.case == "" or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file then "fail"
-    elif ($c.case == "" and any($t.passed[]?; . == $c.file)) or any(($t.okcases // []) + ($t.passcases // []) | .[]; .file == $c.file and any(.cases[]?; . == $c.case)) then "pass"
+  jq -c --argjson t "$t" --argjson rc "$rc" 'def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
+    map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)
+    elif any($t.files[]?; (.file | of($c)) and ($c.case == "" or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file then "fail"
+    elif ($c.case == "" and any($t.passed[]?; . == $c.file)) or any(($t.okcases // []) + ($t.passcases // []) | .[]; (.file | of($c)) and any(.cases[]?; . == $c.case)) then "pass"
     else "none" end)})' <<<"$2"
 }
 # The test file of a speed-up issue (card()): an issue whose title starts SPEEDUP (or the title start given: OPTIMIZE),
@@ -1189,11 +1192,15 @@ noresult() { # <worktree> <exit> <file>...
 # they are made: redissue()); one an open fix card of an earlier commit holds (redopen()) starts nothing; else the
 # commit gets an entry of its own, which the loop picks ahead of the queue. When the case's file is one file and the
 # landing that broke it is known (brokeby()), the case's entry keeps it (landing: {sha, card, issue}), the brief names
-# it, and the entry keeps the links its fix card commits (links: testlinks()).
+# it, and the entry keeps the links its fix card commits (links: testlinks()). A case is the one an entry holds when
+# their names are the same, or when the entry's name is of a runner of the case's file (`<runner>: <case>`, its files
+# holding <its file>): an entry made when the engine's runner named its case files' cases as its own (before issue 214)
+# is the case its case file names now.
 MAINRED=${STATE%/*}/mainred.json
 mainred() { # <card> <case> <its file> <main's commit>
-  local lock rec c t k re f fs by
+  local lock rec c t k re f fs by same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
   [ -n "$4" ] || return 1
+  k=${2#"$3: "}; [ "$k" != "$2" ] || k=''
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null || { echo "conveyor: the main-is-red record could not be locked; $2 goes to no fix card" >&2; return 1; }
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be locked; $2 goes to no fix card" >&2; return 1; }
   rec=$(jq -ce '.reds | arrays' "$MAINRED" 2>/dev/null) || rec='[]'
@@ -1201,14 +1208,13 @@ mainred() { # <card> <case> <its file> <main's commit>
     while read -r c; do
       redopen "$c" || continue
       exec {lock}>&-; return 0
-    done < <(jq -r --arg c "$2" '.[] | select(any(.cases[]; .case == $c)) | .card // ""' <<<"$rec")
-  elif jq -e --arg s "$4" --arg c "$2" 'any(.[]; .sha == $s and any(.cases[]; .case == $c))' <<<"$rec" >/dev/null; then
+    done < <(jq -r --arg c "$2" --arg f "$3" --arg k "$k" "$same"'.[] | select(any(.cases[]; same($c; $f; $k))) | .card // ""' <<<"$rec")
+  elif jq -e --arg s "$4" --arg c "$2" --arg f "$3" --arg k "$k" "$same"'any(.[]; .sha == $s and any(.cases[]; same($c; $f; $k)))' <<<"$rec" >/dev/null; then
     exec {lock}>&-; return 0
   fi
-  # The case's file: a runner (the engine's conveyor/conveyor.test.sh) names its cases' failures as its own, so the
-  # test files at main's commit that define the case (`t_<case>()`, `<case>()` or the name quoted), the named file
-  # alone when it is one of them; else the named file (a failure naming no case, or one no test file defines).
-  k=${2#"$3: "}; [ "$k" != "$2" ] || k=''
+  # The case's file: a runner names its cases' failures as its own, so the test files at main's commit that define the
+  # case (`t_<case>()`, `<case>()` or the name quoted), the named file alone when it is one of them; else the named
+  # file (a failure naming no case, or one no test file defines).
   fs=()
   if [ -n "$k" ]; then
     re=$(sed 's/[][\\.*^$+?(){}|/]/\\&/g' <<<"$k")
@@ -1233,11 +1239,14 @@ mainred() { # <card> <case> <its file> <main's commit>
 # when no landing ran the file in the last TESTLINK_DEPTH commits (when it last passed is not known) or none is after it.
 TESTLINK_DEPTH=500
 brokeby() { # <test file> <main's commit> [<the file its run named the case under> <case>]
-  local l s by='' ran='' card iss
-  l=$(stdb ask lines cards 2>/dev/null | jq -rs --arg f "$1" --arg r "${3:-}" --arg c "${4:-}" '(map(select(.step == "test")) | group_by(.card)
+  local l s by='' ran='' card iss rn
+  # The runners the test file names (a case file runs itself through its runner): a run before issue 214 named the
+  # cases it ran of the engine's case files under their runner, conveyor/conveyor.test.sh.
+  rn=$(git show "$2:$1" 2>/dev/null | grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' | jq -cRn '[inputs] | unique') || rn='[]'
+  l=$(stdb ask lines cards 2>/dev/null | jq -rs --arg f "$1" --arg r "${3:-}" --arg c "${4:-}" --argjson rn "${rn:-[]}" '(map(select(.step == "test")) | group_by(.card)
       | map({key: .[0].card, value: any(.[]; (.why // {} | has($f)) or (.times // {} | has($f))
         or (.wholeSuite == true and ($f | startswith("conveyor/tests/")))
-        or ($c != "" and any(.ranCases // {} | objects | .[$r] | arrays | .[]; . == $c)))}) | from_entries) as $ran
+        or ($c != "" and any(.ranCases // {} | objects | to_entries[] | select(.key == $r or IN(.key | split("/")[-1]; $rn[])) | .value | arrays | .[]; . == $c)))}) | from_entries) as $ran
     | .[] | select(.step == "landed" and (.sha | type) == "string" and .sha != "") | "\(.sha) \(.card) \(.issue) \($ran[.card] // false)"' 2>/dev/null) || return 1
   while read -r s; do
     s=$(grep -m 1 "^$s " <<<"$l") || continue

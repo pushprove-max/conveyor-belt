@@ -46,7 +46,9 @@ echo one > "$R/conveyor/core.sh"; echo one > "$R/conveyor/x.sh"; echo one > "$R/
 echo '{"test": {"files": {"conveyor/conveyor.test.sh": {"cardMode": "CONVEYOR_RUNNER_STUB=1"}}}}' > "$R/.conveyor/project.json"
 echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
-ran() { rm -f "$R/ran"; (cd "$R" && bash .conveyor/test-changed.sh "$@") > "$T/out" 2>&1; echo $? > "$T/rc"; cat "$R/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//'; }
+# ran: the cases the runner stub was asked for, its runs' lines sorted and joined (each engine case file runs on its
+# own, side by side, so a selection of two files is two runs, in either order).
+ran() { rm -f "$R/ran"; (cd "$R" && bash .conveyor/test-changed.sh "$@") > "$T/out" 2>&1; echo $? > "$T/rc"; LC_ALL=C sort "$R/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//' | paste -sd' ' -; }
 mran2() { ran "$@" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//'; }
 sorted() { tr ' ' '\n' | grep . | sort | tr '\n' ' '; }
 # part <name> [m]: p_<name> in the background, in $T/<name> with its own copy of the scratch repo (R), and with m of
@@ -73,22 +75,22 @@ p_area() {
   # The test step's record of a failed run names the files that failed from this log, not from the output.
   mkdir "$T/steplog"; echo 'exit 1' > "$R/conveyor/conveyor.test.sh"
   CONVEYOR_TEST_LOG=$T/steplog ran > /dev/null
-  # It says too what it selected out of how many: the one test file, the runner, which changed, so all 3 cases; why
-  # it ran (each changed file that selected it), and that it ran every case file (issue 517), each as a file it
-  # started (issue 584).
-  [ "$(cat "$T/rc")" = 1 ] && [ "$(tr '\n' '|' < "$T/steplog/test-changed.log")" = "TESTRUN files=1 of=1|TESTRUN cases=3 of=3|== conveyor/conveyor.test.sh|TESTRUN why	conveyor/conveyor.test.sh	the card changed conveyor/conveyor.test.sh|TESTRUN why	conveyor/conveyor.test.sh	the card changed conveyor/x.sh|TESTRUN whole-suite|TESTRUN nested	conveyor/conveyor.test.sh	conveyor/tests/a.test.sh|TESTRUN nested	conveyor/conveyor.test.sh	conveyor/tests/b.test.sh|-- FAIL conveyor/conveyor.test.sh|" ] \
+  # It says too what it selected out of how many: the runner, which changed, so all 3 cases, out of the 2 case files,
+  # each a test file of its own (issue 214); why it ran (each changed file that selected it), and that it ran every
+  # case file (issue 517), each as a file it started (issue 584).
+  [ "$(cat "$T/rc")" = 1 ] && [ "$(tr '\n' '|' < "$T/steplog/test-changed.log")" = "TESTRUN files=1 of=2|TESTRUN cases=3 of=3|== conveyor/conveyor.test.sh|TESTRUN why	conveyor/conveyor.test.sh	the card changed conveyor/conveyor.test.sh|TESTRUN why	conveyor/conveyor.test.sh	the card changed conveyor/x.sh|TESTRUN whole-suite|TESTRUN nested	conveyor/conveyor.test.sh	conveyor/tests/a.test.sh|TESTRUN nested	conveyor/conveyor.test.sh	conveyor/tests/b.test.sh|-- FAIL conveyor/conveyor.test.sh|" ] \
     && ok "the test step's log says what it selected, names each file as it begins and how it ended" || no "test step log: exit $(cat "$T/rc"): $(cat "$T/steplog/test-changed.log" 2>&1)"
 }
 
 p_selected() {
   # A change no test touches selects nothing, and its log says so (the step records "nothing selected").
   mkdir "$T/nolog"; CONVEYOR_TEST_LOG=$T/nolog ran > /dev/null
-  [ "$(cat "$T/rc")" = 0 ] && [ "$(tr '\n' '|' < "$T/nolog/test-changed.log")" = "TESTRUN files=0 of=1|TESTRUN cases=0 of=3|" ] \
+  [ "$(cat "$T/rc")" = 0 ] && [ "$(tr '\n' '|' < "$T/nolog/test-changed.log")" = "TESTRUN files=0 of=2|TESTRUN cases=0 of=3|" ] \
     && ok "the test step's log of a change no test touches says nothing was selected" || no "nothing selected: exit $(cat "$T/rc"): $(cat "$T/nolog/test-changed.log" 2>&1)"
   echo two >> "$R/conveyor/x.sh"
   mkdir "$T/alog"; CONVEYOR_TEST_LOG=$T/alog ran > /dev/null
-  [ "$(head -n 2 "$T/alog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=1 of=1|TESTRUN cases=2 of=3|" ] \
-    && ok "the test step's log says it selected area a's 2 of the 3 cases" || no "area a's cases: $(cat "$T/alog/test-changed.log" 2>&1)"
+  [ "$(head -n 2 "$T/alog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=1 of=2|TESTRUN cases=2 of=3|" ] \
+    && ok "the test step's log says it selected area a's 2 of the 3 cases, in its 1 of the 2 case files" || no "area a's cases: $(cat "$T/alog/test-changed.log" 2>&1)"
 }
 
 # A Board test file's cases count too, selected and in all: its 2 node tests beside area a's 2 engine cases, of 5.
@@ -96,7 +98,7 @@ p_boardcount() {
   echo two >> "$R/conveyor/x.sh"
   mkdir -p "$R/board/__tests__"; printf "import test from 'node:test';\ntest('one', () => {});\ntest('two', () => {});\n" > "$R/board/__tests__/v.test.mjs"
   mkdir "$T/blog"; CONVEYOR_TEST_LOG=$T/blog ran > /dev/null
-  [ "$(head -n 2 "$T/blog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=2 of=2|TESTRUN cases=4 of=5|" ] \
+  [ "$(head -n 2 "$T/blog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=2 of=3|TESTRUN cases=4 of=5|" ] \
     && ok "the test step's log counts a Board test file's cases among those selected" || no "board cases: $(cat "$T/blog/test-changed.log" 2>&1)"
 }
 
@@ -105,7 +107,7 @@ shellfile() { mkdir -p "$R/tool"; printf 'check() { :; }\ncheck "one" 1 1\ncheck
 p_shellcount() {
   echo two >> "$R/conveyor/x.sh"; shellfile
   mkdir "$T/slog"; CONVEYOR_TEST_LOG=$T/slog ran > /dev/null
-  [ "$(head -n 2 "$T/slog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=2 of=2|TESTRUN cases=4 of=5|" ] \
+  [ "$(head -n 2 "$T/slog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=2 of=3|TESTRUN cases=4 of=5|" ] \
     && ok "the test step's log counts a shell test file's cases among those selected" || no "shell cases: $(cat "$T/slog/test-changed.log" 2>&1)"
   # Bug: with no time line, the loop could not tell a test file the card adds that runs over the time budget.
   # The engine's runner is no test file of its own: it times its case files (p_enginetime), never itself.
@@ -502,8 +504,8 @@ p_mainmoved() {
   rm -rf "$T/mlog"; mkdir "$T/mlog"; got=$(CONVEYOR_TEST_LOG=$T/mlog CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
   [ "$got" = "aone atwo " ] && ok "after main changed a file of an \"all\" area, only the runner's cases the change selects run" \
     || no "main changed core.sh: ran '$got': $(cat "$T/out")"
-  [ "$(sed -n 's/^TESTRUN why\t//p' "$T/mlog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/conveyor.test.sh:did not pass|conveyor/conveyor.test.sh:main changed conveyor/core.sh|" ] \
-    && ok "its log gives each reason a file ran" || no "why lines: $(cat "$T/mlog/test-changed.log")"
+  [ "$(sed -n 's/^TESTRUN why\t//p' "$T/mlog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/tests/a.test.sh:did not pass|conveyor/tests/a.test.sh:main changed conveyor/core.sh|" ] \
+    && ok "its log gives each reason a file ran, under the case file of those cases" || no "why lines: $(cat "$T/mlog/test-changed.log")"
   # Main changed the map: the map at HEAD is main's, so the case files it named anew (one now covering the change's
   # x.sh) cannot be told from it, and the runner's cases the change selects run though they passed.
   printf 'change\tabc\npass\tlib/w.test.sh\npass\tconveyor/conveyor.test.sh\nmain\t.conveyor/engine-areas.json\n' > "$T/rerun"
@@ -555,7 +557,7 @@ p_core() {
 # changed file that selected it as its reason, no area's name, and the log does not say every case file ran.
 p_firstwhy() {
   wchange; mkdir "$T/wlog"; got=$(CONVEYOR_TEST_LOG=$T/wlog ran | sorted)
-  [ "$got" = "aone atwo w " ] && [ "$(sed -n 's/^TESTRUN why\t//p' "$T/wlog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/conveyor.test.sh:the card changed conveyor/x.sh|lib/w.test.sh:the card changed lib/w.test.sh|" ] \
+  [ "$got" = "aone atwo w " ] && [ "$(sed -n 's/^TESTRUN why\t//p' "$T/wlog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/tests/a.test.sh:the card changed conveyor/x.sh|lib/w.test.sh:the card changed lib/w.test.sh|" ] \
     && ! grep -q 'TESTRUN whole-suite' "$T/wlog/test-changed.log" && ok "a first run's log says why each file ran, and no whole engine test for one area's change" \
     || no "x.sh and w.test.sh changed, first run's log: ran '$got': $(cat "$T/wlog/test-changed.log")"
 }
@@ -637,8 +639,8 @@ p_cover() {
     jq -cn --arg hk "$hk" --arg bg "$bg" '{file: ".claude/hooks/hk.sh", fn: "hka", test: $hk, case: "hc"}, {file: ".claude/hooks/hk.sh", fn: "hka", test: $hk, case: "ha"},
       {file: ".claude/hooks/hk.sh", fn: "hkb", test: $bg, case: "the hkb check"}') >> "$R/.conveyor/coverage.jsonl"
   git -C "$R" add -A && git -C "$R" commit -qm hooks
-  sed 's/echo a/echo A/; s/echo b/echo B/' "$R/.claude/hooks/hk.sh" > "$T/e" && cat "$T/e" > "$R/.claude/hooks/hk.sh"; got=$(ran | sort | paste -sd '|' -)
-  [ "$got" = "bg:the hkb check|hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"
+  sed 's/echo a/echo A/; s/echo b/echo B/' "$R/.claude/hooks/hk.sh" > "$T/e" && cat "$T/e" > "$R/.claude/hooks/hk.sh"; got=$(ran)
+  [ "$got" = "bg:the hkb check hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- .claude/hooks/hk.sh
   printf 'xthree() {\n  echo three\n}\n' >> "$R/conveyor/x.sh"; got=$(ran)
   [ "$got" = "aone atwo" ] && ok "D3: a function the coverage map does not hold runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
@@ -686,7 +688,7 @@ echo 'echo "${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/../ran"' > "$M
 cp "$R/.conveyor/project.json" "$M/.conveyor/"
 echo ran > "$M/.gitignore"
 git -C "$M" init -q && git -C "$M" add -A && git -C "$M" commit -qm init
-mran() { rm -f "$M/ran"; (cd "$M" && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; echo $? > "$T/rc"; cat "$M/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//'; }
+mran() { rm -f "$M/ran"; (cd "$M" && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; echo $? > "$T/rc"; LC_ALL=C sort "$M/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//' | paste -sd' ' -; }
 cases=$(ls "$M"/conveyor/tests/*.test.sh | wc -l)
 marea() { # <engine file>
   local f=$1 want got

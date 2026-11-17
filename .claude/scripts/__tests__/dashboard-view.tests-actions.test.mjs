@@ -215,9 +215,10 @@ test('Tests actions: Put back shows a runner-named flaky case on its case file a
     args: ['490', 'Put back from the Board\'s Tests page: the case "mergeclean" runs on card test steps again.'] } }]);
 });
 
-// Bug it guards: Keep off on an engine case file recorded the case file, while a card's run reads the cases kept off
-// only under the runner's name (.conveyor/test-changed.sh): the case still ran. Any other file keeps its own name.
-for (const [file, entry] of [[MERGE, 'conveyor/conveyor.test.sh: mergeclean'], [X, `${X}: mergeclean`]]) {
+// Bug it guards (issue 214): Keep off on an engine case file recorded the runner, conveyor/conveyor.test.sh, though a
+// card's run runs and names each case file as a test file of its own (.conveyor/test-changed.sh): the flaky list named
+// the runner. Each file, an engine case file too, keeps its own name.
+for (const [file, entry] of [[MERGE, `${MERGE}: mergeclean`], [X, `${X}: mergeclean`]]) {
   test(`Tests actions: Keep a case off of ${file} records ${entry}`, async () => {
     const w = boot({ tab: 'tests' });
     deliver(w, snap());

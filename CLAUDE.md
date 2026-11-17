@@ -52,6 +52,12 @@ These points cost the most when missed:
 - A new engine case goes in its area's file under `conveyor/tests/` (600 lines at most per file), never in
   `conveyor/conveyor.test.sh`. A new engine file gets one line in `.conveyor/engine-areas.json`, or the map check
   fails.
+- Each area file is a test file of its own. A card's Test step runs each area file it selects in its own process
+  and test slot, with only its chosen cases (the runner given that file's cases), side by side with the others. Its
+  result, failures, flaky entries and CPU time name the area file: the case relpass is
+  reported under `conveyor/tests/release.test.sh`.
+  `bash` on one area file (as `bash conveyor/tests/release.test.sh`) runs it by hand. `conveyor/conveyor.test.sh` runs every case: the
+  whole engine test.
 - A test file stays under the CPU budget (`conveyor/README.md`, The CPU budget of a test file). Why and how:
   `conveyor/tests/speed/README.md`.
 - No test starts a browser; Board tests use jsdom (`.conveyor/no-browser-tests.sh` fails a run that adds one).

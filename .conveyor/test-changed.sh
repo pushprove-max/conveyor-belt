@@ -84,9 +84,39 @@
 # (`TESTRUN sec<TAB><file><TAB><seconds><TAB><CPU seconds>`: clock, and user plus system of all it started), and each
 # engine case file whose every case the runner ran, as the runner ends (the sums of its cases' times:
 # CONVEYOR_TEST_TIMES), for the loop's CPU budget of a test file (conveyor/README.md).
+# The engine's runner above is the set of engine cases the selection picks; they run as their case files (issue 214):
+# each engine case file that holds some of them is a test file of its own, run with those cases alone (the runner,
+# given them, under that file's mark), side by side on the machine's test slots. Its log lines (`==`, `-- ok|FAIL`,
+# why, case, sec) name the case file, not the runner, and a list's lines naming either are read alike. The runner runs
+# as a file only to run every engine case file, whole-only or in its card mode.
 set -u
 unset CONVEYOR_SHELL_TEST_CASE
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
+# Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list
+# written before that names them under the runner, conveyor/conveyor.test.sh. Both are read as one: the selection
+# below picks the engine's cases as the runner's, and runs each case file of them on its own. An `ok`, `off` or
+# `fail` line of a case of an engine case file is read as the runner's line of that case; a `pass` line of an engine
+# case file as an `ok` line of each of its cases that no `fail` line names (it passed, so they are kept as passed),
+# unless a `fail` line names the file with no case. Any other line, and one of a case the file does not have (the
+# split check's run with no case, below), is read as it is.
+if [ -s "$RERUN" ]; then
+  rlist=$(mktemp); trap 'rm -f "$rlist"' EXIT
+  { grep -H '^t_[a-z0-9]*() {' conveyor/tests/*.test.sh 2>/dev/null | sed -n 's/^\([^:]*\):t_\([a-z0-9]*\)() {.*/\1\t\2/p' | sed 's/^/def\t/'
+    sed 's/^/rerun\t/' "$RERUN"; } | awk -F'\t' -v OFS='\t' '
+    $1 == "def" { def[$2 "\t" $3] = 1; of[$2] = of[$2] "\t" $3; next }
+    { l[++n] = $0; k[n] = $2; f[n] = $3; c[n] = $4
+      if ($2 == "fail") { if ($4 == "") whole[$3] = 1; else failed[$3 "\t" $4] = 1 } }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (f[i] !~ /^conveyor\/tests\/[^\/]+[.]test[.]sh$/) { print substr(l[i], 7); continue }
+        if (k[i] == "pass" && c[i] == "" && !(f[i] in whole)) {
+          m = split(substr(of[f[i]], 2), cs, "\t")
+          for (j = 1; j <= m; j++) if (!((f[i] "\t" cs[j]) in failed) && !(("conveyor/conveyor.test.sh\t" cs[j]) in failed)) print "ok", "conveyor/conveyor.test.sh", cs[j]
+        } else if ((k[i] == "ok" || k[i] == "off" || k[i] == "fail") && c[i] != "" && ((f[i] "\t" c[i]) in def)) print k[i], "conveyor/conveyor.test.sh", c[i]
+        else print substr(l[i], 7)
+      }
+    }' > "$rlist" && RERUN=$rlist
+fi
 MAP=.conveyor/engine-areas.json
 # The map is one fact a line, so two changes that each add a line to it merge with no conflict (the repository's
 # .gitattributes merges it keeping both sides): {"outside": <path>}, or of an area {"area": <name>} with one more key,
@@ -932,12 +962,14 @@ elif [ ${#area[@]} -gt 0 ] || [ ${#ccase[@]} -gt 0 ]; then
 fi
 }
 allcases() { sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u; }
+# casefiles <cases>: the engine case files that hold any of the cases (words), one a line.
+casefiles() { [ -n "${1// /}" ] && grep -lE "^t_($(tr ' ' '\n' <<<"$1" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; }
 pick "${changed[@]}"
 for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
 # The tests the engine chose for the change (#150): with the pack's test.list env, a card's run is given them in
 # CONVEYOR_TEST_FILES, one path a line (conveyor/lib/testrun.sh testsel(), reading .conveyor/engine-areas.json through
-# conveyor/lib/testmap.sh mapread(), as a user's card reads its map). Each runs: an engine case file as all its cases,
-# through the runner; another file whole. The selection above adds the tests it finds and the engine does not
+# conveyor/lib/testmap.sh mapread(), as a user's card reads its map). Each runs: an engine case file with all its
+# cases, as a test file of its own (below); another file whole. The selection above adds the tests it finds and the engine does not
 # (TESTS_OF, NAMED, the coverage map's parts), so no case it ran is lost. With no list (a session's run, or a change
 # the engine sends to the whole suite) the selection above is the run's.
 while IFS= read -r t; do
@@ -957,7 +989,7 @@ for t in "${!run[@]}"; do full[$t]=1; done; fullcases=$cases
 # the files a session changed in the card's change (the loop's `changed` lines), picked as the change's own are; and
 # those of the files main changed since the HEAD the list was made on (its `main` lines), only where the change's own
 # selection holds them too: a test file it selects, and of the engine's runner the cases both select.
-declare -A fresh=() why=() only=() nocase=()
+declare -A fresh=() why=() cwhy=() only=() nocase=()
 fcases=
 freshen() { # <reason> <only within the change's selection: 1, or empty> <file>...
   local w=$1 o=$2 f t c a
@@ -988,7 +1020,9 @@ freshen() { # <reason> <only within the change's selection: 1, or empty> <file>.
         elif [ -n "$fcases" ] && [ -n "$c" ]; then fcases=$(tr ' ' '\n' <<<"$fcases $c" | grep . | sort -u | tr '\n' ' ')
         else fcases=; fi
       fi
+      # Of the runner's chosen cases, the reason is also each engine case file's that holds one (cwhy: each runs on its own).
       fresh[$t]=1; why[$t]+="$w $f"$'\n'
+      [ "$t" != conveyor/conveyor.test.sh ] || [ -z "$c" ] || while IFS= read -r a; do cwhy[$a]+="$w $f"$'\n'; done < <(casefiles "$c")
       # An area that runs every engine case file selected the runner, and it runs them all for this file: the area's
       # name is a reason too.
       [ "$t" != conveyor/conveyor.test.sh ] || [ -n "$c" ] || for a in "${!allby[@]}"; do why[$t]+="the area $a runs all engine tests"$'\n'; done
@@ -1046,7 +1080,10 @@ if [ -s "$RERUN" ]; then
     left=$(tr ' ' '\n' <<<"${sel:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh)}" | grep . | grep -vFxf <(echo "$oks") | sort -u | tr '\n' ' ')
     if [ -n "$left" ]; then cases=$left; else unset "run[conveyor/conveyor.test.sh]"; fi
   fi
-  [ -n "$first" ] || for t in "${!run[@]}"; do why[$t]+=$'did not pass\n'; done
+  [ -n "$first" ] || for t in "${!run[@]}"; do
+    why[$t]+=$'did not pass\n'
+    [ "$t" != conveyor/conveyor.test.sh ] || [ -z "$cases" ] || while IFS= read -r af; do cwhy[$af]+=$'did not pass\n'; done < <(casefiles "$cases")
+  done
   # The tests of the files the session changed run beside what had not passed: a test file whole, and of the runner
   # the cases of their areas (all of them for an "all" area), added to its cases that had not passed.
   for t in "${!fresh[@]}"; do
@@ -1103,20 +1140,35 @@ enginewhole() {
     [ -z "$c" ] || grep -qxFf <(tr ' ' '\n' <<<"$cases" | grep .) <<<"$c" || return 1
   done
 }
-# A file the pack marks whole-only (wonly, above) is not run here: the whole test runs it. The runner's run of chosen
-# cases is no meta-runner's, and runs.
+# A file the pack marks whole-only (wonly, above) is not run here: the whole test runs it. The runner's chosen cases
+# are no meta-runner's run, and run, as their case files (below).
 for t in "${!run[@]}"; do
   [ -n "${wonly[$t]:-}" ] || continue
   [ "$t" != conveyor/conveyor.test.sh ] || enginewhole || continue
   unset "run[$t]"; printf 'TESTRUN whole-only\t%s\n' "$t" >> "$log"
   echo "== $t: not run: whole-only (test.files.\"$t\".wholeOnly in .conveyor/project.json), the nightly whole test runs it"
 done
-# What it selected and out of how many (the step's record, conveyor.sh testrec()): the test files it can run (an
-# engine case file is run by the engine's runner, never itself), and the cases: the engine's, and each node test file's
+# Each engine case file is a test file of its own (the owner, 2026-11-17; issue 214): the runner's chosen cases run as
+# the case files that hold them, each with its own cases alone (ecases), its own process, start-up, test slot and
+# result, so a failure, a red main, a flaky entry and a time name the case file, and a broken start-up of one file
+# fails no other file's cases. A file runs so as it runs alone (its first lines): the runner, which sources every case
+# file, given that file's cases, under that file's mark (below). The runner as a test file of its own runs only when it
+# runs every case file (enginewhole: whole-only, or its card mode).
+declare -A ecases=()
+if [ -n "${run[conveyor/conveyor.test.sh]:-}" ] && [ -n "$cases" ] && ! enginewhole; then
+  for t in conveyor/tests/*.test.sh; do
+    c=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t" | grep -xFf <(tr ' ' '\n' <<<"$cases" | grep .) | LC_ALL=C sort -u | tr '\n' ' ')
+    [ -n "$c" ] || continue
+    ecases[$t]=${c% }; run[$t]=1; unset "nocase[$t]"; why[$t]+=${cwhy[$t]:-}
+  done
+  unset "run[conveyor/conveyor.test.sh]"
+fi
+# What it selected and out of how many (the step's record, conveyor.sh testrec()): the test files it can run (each
+# engine case file, never the runner, which runs only in the nightly whole test), and the cases: the engine's, and each node test file's
 # test() and it() and each python one's def test_ (the Board's), and each Claude Code plugin test file's test() (the
 # /units mod's), and each other shell test file's t_ cases, check calls and ok calls, or 1 for a file that has none of
 # them (it runs as one case).
-nf=$(git ls-files -co --exclude-standard '*.test.sh' '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx' | grep -vc '^conveyor/tests/')
+nf=$(git ls-files -co --exclude-standard '*.test.sh' '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx' | grep -vcx conveyor/conveyor.test.sh)
 nc=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u | wc -l)
 filecases() { cat "$@" 2>/dev/null | grep -cE '^[[:space:]]*((test|it)\(|def test_)'; } # <node, python or plugin test files>
 shellcases() { # <shell test files>
@@ -1133,7 +1185,10 @@ mapfile -t shell < <(git ls-files -co --exclude-standard '*.test.sh' | grep -v '
 [ ${#shell[@]} = 0 ] || nc=$((nc + $(shellcases "${shell[@]}")))
 sc=0; [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || if [ -n "$cases" ]; then sc=$(wc -w <<<"$cases"); else sc=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u | wc -l); fi
 board=(); shell=()
-for t in "${!run[@]}"; do case $t in conveyor/conveyor.test.sh) ;; *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;; *) shell+=("$t") ;; esac; done
+for t in "${!run[@]}"; do
+  if [ -n "${ecases[$t]:-}" ]; then sc=$((sc + $(wc -w <<<"${ecases[$t]}"))); continue; fi
+  case $t in conveyor/conveyor.test.sh) ;; *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;; *) shell+=("$t") ;; esac
+done
 [ ${#board[@]} = 0 ] || sc=$((sc + $(filecases "${board[@]}")))
 [ ${#shell[@]} = 0 ] || sc=$((sc + $(shellcases "${shell[@]}")))
 echo "TESTRUN files=${#run[@]} of=$nf" >> "$log"; echo "TESTRUN cases=$sc of=$nc" >> "$log"
@@ -1142,10 +1197,12 @@ if [ -s "$RERUN" ]; then
   kc=0; board=(); shell=()
   for t in "${!full[@]}"; do
     if [ "$t" = conveyor/conveyor.test.sh ]; then
-      # Its cases of the selection that do not run (all of them when it does not run; none when it runs whole).
-      [ -n "${run[$t]:-}" ] && [ -z "$cases" ] && continue
+      # Its cases of the selection that do not run (all of them when it does not run; none when it runs whole), its
+      # chosen cases running in their case files (ecases) or through it.
+      r=; [ -z "${run[$t]:-}" ] && [ ${#ecases[@]} = 0 ] || r=1
+      [ -n "$r" ] && [ -z "$cases" ] && continue
       kc=$((kc + $(comm -23 <(tr ' ' '\n' <<<"${fullcases:-$(allcases)}" | grep . | sort -u) \
-        <([ -z "${run[$t]:-}" ] || tr ' ' '\n' <<<"$cases" | grep . | sort -u) | wc -l)))
+        <([ -z "$r" ] || tr ' ' '\n' <<<"$cases" | grep . | sort -u) | wc -l)))
     elif [ -z "${run[$t]:-}" ]; then
       case $t in *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;; *) shell+=("$t") ;; esac
     fi
@@ -1189,7 +1246,7 @@ nodecases() { # <node test file>
     if [ "$k" = ok ] || [ "$k" = off ]; then nargs+=("--test-skip-pattern=$p"); elif [ "$k" = fail ] && [ -n "${only[$1]:-}" ]; then nargs+=("--test-name-pattern=$p"); fi
   done < "$RERUN"
 }
-o=$(mktemp); trap 'rm -f "$o" "$o.times" "$o.cpu" "$o.hook" "$o.nested" "$o.plugin" "$o.part"' EXIT
+o=$(mktemp); trap 'rm -f "$o" "$o".* "${rlist:-}"' EXIT
 # A Claude Code plugin test file (*.test.ts, *.test.tsx: the /units mod's, in hooks/) runs under Claude Code's own
 # runner, `claude plugin test` on the plugin, which runs every such file of the plugin in one run. So it runs once, at
 # the first such file, in that file's box, and a file's result is its own part of that run's output: its `<file>:`
@@ -1202,20 +1259,24 @@ plugintest() { # <test file>
 }
 # The meta-runner hook (BASH_ENV, header above): a bash test file of this checkout, started whole under the mark of
 # another, writes `TESTRUN nested` to $o.nested. A test file's own start, and one of a scratch file no path here
-# ends, write nothing.
+# ends, write nothing. Under an engine case file's mark the runner is the file's own: it runs the file's cases, and
+# starts each case's keeper as itself, with no CONVEYOR_SHELL_TEST_CASE (conveyor/tests/lib.sh run_case).
 { printf '%s\n' 'case $0 in *.test.sh) if [ -n "${CONVEYOR_TEST_FILE:-}" ] && [ -z "${CONVEYOR_SHELL_TEST_CASE:-}" ]; then' \
     '  case $0 in */*) __n=$(cd "${0%/*}" 2>/dev/null && pwd -P)/${0##*/} ;; *) __n=$PWD/$0 ;; esac' \
-    '  case $__n in */"$CONVEYOR_TEST_FILE") ;; *) for __f in \'
+    '  case $CONVEYOR_TEST_FILE:$__n in *:*/"$CONVEYOR_TEST_FILE"|conveyor/tests/*.test.sh:*/conveyor/conveyor.test.sh) ;; *) for __f in \'
   git ls-files -co --exclude-standard '*.test.sh' | while IFS= read -r f; do printf '    %q \\\n' "$f"; done
   printf '%s\n' '    ; do case $__n in */"$__f") printf '"'TESTRUN nested\\t%s\\t%s\\n'"' "$CONVEYOR_TEST_FILE" "$__f" >> '"$(printf %q "$o.nested")"'; break ;; esac; done ;; esac' \
     '  unset __n __f; fi ;; esac'
 } > "$o.hook"
 # metaran <test file>: after it ran (or, for the engine runner's whole run, in its place), its nested starts to the log
-# and to METAREC; 1, and says why, when it started a test file and the pack gives it neither mark.
+# and to METAREC; 1, and says why, when it started a test file and the pack gives it neither mark. Its own lines alone:
+# engine case files run side by side, each under its own mark.
 metaran() {
-  [ -s "$o.nested" ] || return 0
-  cat "$o.nested" >> "$log"; cut -f2- "$o.nested" >> "$METAREC" 2>/dev/null
-  local in; in=$(cut -f3 "$o.nested" | LC_ALL=C sort -u | paste -sd' ' -); : > "$o.nested"
+  local in n
+  n=$(awk -F'\t' -v f="$1" '$2 == f' "$o.nested" 2>/dev/null); [ -n "$n" ] || return 0
+  printf '%s\n' "$n" >> "$log"; cut -f2- <<<"$n" >> "$METAREC" 2>/dev/null
+  in=$(cut -f3 <<<"$n" | LC_ALL=C sort -u | paste -sd' ' -)
+  awk -F'\t' -v f="$1" '$2 != f' "$o.nested" > "$o.nest2"; mv -f "$o.nest2" "$o.nested"
   [ -z "${cmode[$1]:-}${wonly[$1]:-}" ] || return 0
   echo "$1 starts other test files ($in): it is a meta-runner, and a card's test step does not run a whole suite. Give it one of two marks in .conveyor/project.json: test.files.\"$1\".cardMode, the NAME=VALUE that makes it run its own checks with a stub in place of the files it starts; or test.files.\"$1\".wholeOnly: true, so that it runs only in the nightly whole test"
   return 1
@@ -1242,8 +1303,42 @@ done
 # Each Board or shell test file runs in a box of its test slot's share of the machine, one core and the slot's share
 # of the memory (the engine's slot_box, the library the loop names, else this checkout's): with none to be had, as it
 # is. The engine's runner boxes each of its cases so itself, and the closure test each of its units.
-box=(); ! . "${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}" 2>/dev/null || ! declare -F slot_box >/dev/null || ! slot_pool 2>/dev/null || { slot_box; box=("${SLOT_BOX[@]}"); }
-for t in "${!run[@]}"; do
+slots=; box=()
+# shellcheck disable=SC1090 # the library the loop names
+! . "${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}" 2>/dev/null || ! declare -F slot_box >/dev/null || ! slot_pool 2>/dev/null || { slots=1; slot_box; box=("${SLOT_BOX[@]}"); }
+# The engine case files of the selection (ecases) start side by side before any other file runs, as the runner's cases
+# did: each is a worker of this run on a slot of the machine's pool (slot_take: this run's home slot to one at a time,
+# a slot of the pool to each beside it), pinned to its slot's core (slot_mine), and its runner runs its cases on that
+# slot and on what more of the pool it gets. With no pool to be had, they start side by side all the same. The cases
+# each one runs are logged as it starts (`TESTRUN case`), so a run that never ends keeps the passes of the cases it did
+# not run (conveyor.sh rerunlist()). Their output is read below once all have ended, so their nested starts (metaran)
+# are whole. Told to end (its timeout), this run tells each to end, as the runner tells its cases, and prints what each
+# not shown yet printed under its own `== ` line, begun and not ended in the log: the cases that passed stay passed,
+# and the run's timeout names the last of them.
+declare -A epid=() erc=() eout=() shown=()
+eend() {
+  trap "" TERM INT HUP; [ ${#epid[@]} = 0 ] || kill -TERM "${epid[@]}" 2>/dev/null; wait
+  for t in $(printf '%s\n' "${!epid[@]}" | LC_ALL=C sort); do
+    [ -z "${shown[$t]:-}" ] || continue
+    echo "== $t" >> "$log"; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"
+  done
+  exit 143
+}
+trap eend TERM INT HUP
+for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
+  for c in ${ecases[$t]}; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
+  k=${#epid[@]}
+  [ -z "$slots" ] || slot_take
+  ( [ -z "$slots" ] || slot_mine
+    exec env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
+      CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" bash conveyor/conveyor.test.sh ) > "$o.e$k" 2>&1 < /dev/null &
+  epid[$t]=$!; eout[$t]=$o.e$k
+  [ -z "$slots" ] || slot_free
+done
+for t in "${!epid[@]}"; do wait "${epid[$t]}"; erc[$t]=$?; done
+# The engine case files first, as they ran, then each other file.
+mapfile -t order < <(for t in "${!run[@]}"; do if [ -n "${ecases[$t]:-}" ]; then printf '0\t%s\n' "$t"; else printf '1\t%s\n' "$t"; fi; done | LC_ALL=C sort | cut -f2-)
+for t in "${order[@]}"; do
   r=ok; echo "== $t" >> "$log"
   # Why it runs (the step's record, conveyor.sh testrec()): one line a reason.
   printf '%s' "${why[$t]:-}" | awk -v t="$t" 'length { printf "TESTRUN why\t%s\t%s\n", t, $0 }' >> "$log"
@@ -1271,6 +1366,13 @@ for t in "${!run[@]}"; do
     # they run at once), for the loop's CPU budget of a test file (conveyor/README.md, The test step).
     [ ! -s "$o.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "$o.times" >> "$log"
     rm -f "$o.times"; marked "$t" || r=FAIL; metaran "$t" || r=FAIL
+  elif [ -n "${ecases[$t]:-}" ]; then
+    # An engine case file run on its own (above), with its chosen cases.
+    shown[$t]=1; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"; [ "${erc[$t]}" = 0 ] || r=FAIL
+    # Its time when it ran every case it has, timed by the runner (the sums of its cases' clock and CPU seconds, as
+    # they run at once), for the loop's CPU budget of a test file (conveyor/README.md, The test step).
+    [ ! -s "${eout[$t]}.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "${eout[$t]}.times" >> "$log"
+    marked "$t" || r=FAIL; metaran "$t" || r=FAIL
   else
     # Its CPU seconds are the shell's children's user and system times (`times`) after it, less those before: the
     # file's process tree, each process counted as it is waited for.

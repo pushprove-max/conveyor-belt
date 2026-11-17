@@ -315,9 +315,6 @@
   const NO_SEAT = 'Set the Tests model first.';
   const WAIT = 'Wait: the build machine did not answer the last change yet.';
   const SENDING = 'sent to the build machine, waiting for its answer.';
-  // The engine's runner runs each of its case files and names their cases as its own: a flaky entry and the `off` line
-  // a card's run reads (.conveyor/test-changed.sh, lib/flaky.sh flakyoff()) name the runner, not the case file.
-  const RUNNER = 'conveyor/conveyor.test.sh', CASE_FILE = /^conveyor\/tests\/[^/]+\.test\.sh$/;
   const ta = () => obj(S.d.testActions) || {};
   const ctlTests = () => (obj(S.d.control) ? S.d.control.tests : null);  // the control record's tests: {cli, model, effort}
   const actions = () => list(ta().actions).filter((a) => obj(a) && typeof a.id === 'string');
@@ -669,7 +666,7 @@
         field('keep-case', `Case of ${file} to keep off`, a.case, (v) => { a.case = v; }, { placeholder: 'The name of the case' }),
         field('keep-why', 'Why it is kept off', a.why, (v) => { a.why = v; }, { placeholder: 'Why it is kept off' }),
         button('Keep it off', 'btn-primary', 'keep-confirm', `Keep the case off: ${file}`, () => {
-          const c = `${CASE_FILE.test(file) ? RUNNER : file}: ${a.case.trim()}`, why = a.why.trim();
+          const c = `${file}: ${a.case.trim()}`, why = a.why.trim();
           if (!a.case.trim() || !why) { say('Type the case and why first.'); return; }
           if (c.length > SAID_MAX) { say(`The file and case are more than ${SAID_MAX} characters.`); return; }
           send('flaky-off', [c, why], () => `Kept off: ${c}.`, () => { S.ask = null; });
