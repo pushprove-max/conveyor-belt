@@ -109,6 +109,16 @@ test('D2: a run under way shows a progress bar of files done of all, the failed 
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
 });
 
+// Bug this guards (#253): a case stopped at its file's `# timeout:` limit showed only as a failed file, so a hung case
+// read as a plain failure.
+test('a failed run names each case that timed out as timed out, beside the failed files', async () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'failed', done: 140, of: 140, failed: 2, cases: ['stall', 'metrics'], timedout: ['metrics'],
+    files: { done: 140, of: 140, failed: ['conveyor/conveyor.test.sh'] } }));
+  assert.equal(stepOf(w, 'full-suite').dataset.state, 'failed');
+  assert.deepEqual(Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="timedout"] li'), (x) => x.textContent), ['metrics: timed out']);
+});
+
 // Bugs this guards: a suite passed on main's head offers no release; once a card lands it still offers one, of a main
 // the suite never tested; a release made shows as still to do.
 test('D3: passed on main\'s head, Release 1.0.0; a card lands, Main moved and Run again on the new main; released, Released', async () => {

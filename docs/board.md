@@ -234,7 +234,7 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
 1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
-   that failed. A full test run in progress shows here too. When the button is **Release**, the step also says what
+   that failed. A test case that ran out of time shows as "<case>: timed out". A full test run in progress shows here too. When the button is **Release**, the step also says what
    the button does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
 3. **Release**: the tag and the GitHub release.
 

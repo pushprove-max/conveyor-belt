@@ -119,6 +119,14 @@
       names.forEach((c) => ul.append(h('li', null, String(c))));
       out.push(ul);
     }
+    // The cases stopped at their file's time limit (the run's timedout), each said as timed out, not as a plain failure.
+    const late = list(x.timedout);
+    if (late.length) {
+      const ul = h('ul', 'release-cases');
+      ul.dataset.list = 'timedout';
+      late.forEach((c) => ul.append(h('li', null, `${c}: timed out`)));
+      out.push(ul);
+    }
     return out;
   }
 

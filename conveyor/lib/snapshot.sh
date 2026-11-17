@@ -23,7 +23,8 @@
 #   (the reason both buttons are off, else null), running ({since, sha, how} while a run or push holds its lock, else
 #   null) and last (the last line of its record, else null). suites is each whole-suite run, the release's and the
 #   full test's, in one shape (suites()): {kind ("release" or "full test"), version (a release's), step, sha, since,
-#   ended (null while under way), state, done, failed, cases (the failed cases' names), files ({done, of, failed}),
+#   ended (null while under way), state, done, failed, cases (the failed cases' names), timedout (a release's: those
+#   of them that timed out, suiteprog()), files ({done, of, failed}),
 #   moved, reasons}: the release
 #   record of commands/release-prep.sh, its cases counted as the suite runs; the full test's run under way, else its
 #   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, written,

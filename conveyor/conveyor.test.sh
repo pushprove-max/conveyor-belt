@@ -9,6 +9,15 @@ set -uo pipefail
 . "$(dirname "$0")/tests/lib.sh"
 for f in "$SRC"/tests/*.test.sh; do . "$f"; done
 ALL=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$SRC"/tests/*.test.sh | tr '\n' ' ')
+# Each case's limit in seconds, its file's `# timeout:` line, the same in a card's run of that file and in a
+# whole-suite run (run_case, case_keep): a case past it is stopped and fails as timed out, and the run goes on. In one
+# process for all cases, no file's limit applied: one hung case stood a release still for 43 minutes with no error.
+declare -A CASE_LIMITS=()
+# shellcheck disable=SC2034 # CASE_LIMITS is read by run_case (tests/lib.sh)
+while read -r LIMIT_CASE LIMIT_SEC; do CASE_LIMITS[$LIMIT_CASE]=$LIMIT_SEC; done < <(awk 'FNR == 1 { n = "" }
+  n == "" && /^# timeout: [0-9]+$/ { n = $3 }
+  n != "" && /^t_[a-z0-9]+\(\) \{/ { c = $0; sub(/^t_/, "", c); sub(/\(.*/, "", c); print c, n }' "$SRC"/tests/*.test.sh)
+unset LIMIT_CASE LIMIT_SEC
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${*:-$ALL}}; SEL=${SEL//,/ }
 # The selection is this run's, not its cases': a case that starts a runner of its own (t_slotwhole) names its cases, or
 # runs them all. The Test step's run again of the failed cases names them here (.conveyor/test-changed.sh).

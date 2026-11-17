@@ -56,11 +56,13 @@ RECS=$(mine) || exit 1
 # A whole-suite run of the snapshot's suites (a release's or the full test's) on one line: under way, its commit, how
 # long it has run, the cases done of the cases selected (the total when its runner gives it) and failed; ended, its result and commit; either way the failed cases by name.
 # The names are the cases its runner named as ended (fulltest.sh suiteprog()): an engine case by its own name, never
-# its file, so the line says cases, not files.
+# its file, so the line says cases, not files. A case stopped at its file's time limit (suiteprog()'s timedout) is
+# named "<case> (timed out)", not as a plain failure.
 SUITE='def took: if . < 3600 then "\(. / 60 | floor)m" else "\(. / 3600 | floor)h\(. % 3600 / 60 | floor)m" end;
   def suiteline($now): (if .kind == "release" then "release \(.version // "")" else "full test" end) as $k
     | (.sha // "" | if . == "" then "no commit yet" else .[0:12] end) as $c
-    | ([.cases | arrays | .[] | tostring] | if length > 20 then "\(.[:20] | join(", ")) and \(length - 20) more" else join(", ") end) as $f
+    | [.timedout | arrays | .[] | tostring] as $late
+    | ([.cases | arrays | .[] | tostring | if IN($late[]) then "\(.) (timed out)" else . end] | if length > 20 then "\(.[:20] | join(", ")) and \(length - 20) more" else join(", ") end) as $f
     | if .ended == null then "\($k) running on \($c) for \((.since | fromdate? | $now - .) // null | if . == null then "?" else took end): \(.done // 0)\(if .of == null then "" else " of \(.of)" end) cases done, \(.failed // 0) failed\(if $f == "" then "" else ": \($f)" end)"
       else "\($k) \(.state // "ended") on \($c) at \(.ended)\([.reasons | arrays | .[] | tostring] | if . == [] then "" else ": \(join("; "))" end)\(if $f == "" then "" else "; failed cases: \($f)" end)" end;'
 # The issues of a snapshot, or of its history ($hist: `conveyor.sh history`, null when not read), whose card pushed:

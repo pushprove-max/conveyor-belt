@@ -60,7 +60,8 @@ fulldead() {
 }
 # How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
 # runner named as ended (cases/ok and cases/failed of its log folder, session.sh testdone()): {done, failed, cases: the
-# names of the failed ones, of: the cases it selected, the sum of its `TESTRUN cases=N` lines, null with none; files:
+# names of the failed ones, timedout: those of them stopped at their file's `# timeout:` limit (cases/timedout,
+# tests/lib.sh run_case), of: the cases it selected, the sum of its `TESTRUN cases=N` lines, null with none; files:
 # {done, of, failed}: the files its runner named as ended (`-- ok <file>`, `-- FAIL <file>`), the sum of its
 # `TESTRUN files=N` lines (null with none) and the names of those that failed}. The
 # lines are read from the logs it wrote (session.sh testlogs()), or from its output when it wrote none, so a runner
@@ -73,9 +74,12 @@ suiteprog() { # <worktree>
     /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); fn += $1; fseen = 1 }
     /^-- ok / { print "ok\t" substr($0, 7) } /^-- FAIL / { print "failed\t" substr($0, 9) }
     END { print "of\t" (seen ? n + 0 : "null"); print "fof\t" (fseen ? fn + 0 : "null") }')
-  { find "$d/ok" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|ok\t|'; find "$d/failed" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|failed\t|'; } \
+  { find "$d/ok" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|ok\t|'; find "$d/failed" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|failed\t|'
+    find "$d/timedout" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|timedout\t|'; } \
     | jq -Rsc --arg ls "$ls" '($ls | [split("\n")[] | select(. != "") | split("\t")]) as $l | ($l | map(select(.[0] == "of" or .[0] == "fof") | {(.[0]): (.[1] | fromjson)}) | add) as $n
-      | [split("\n")[] | select(. != "") | split("\t")] | {done: length, of: $n.of, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort,
+      | [split("\n")[] | select(. != "") | split("\t")] | [.[] | select(.[0] == "timedout") | .[1]] as $late | map(select(.[0] != "timedout"))
+      | {done: length, of: $n.of, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort,
+        timedout: [.[] | select(.[0] == "failed" and IN(.[1]; $late[])) | .[1]] | sort,
         files: ($l | map(select(.[0] == "ok" or .[0] == "failed")) | {done: (map(.[1]) | unique | length), of: $n.fof, failed: [.[] | select(.[0] == "failed") | .[1]] | unique})}'
 }
 # The whole-suite results of each commit (issues 43 and 44), shared by every whole-suite run: Run full test suite and

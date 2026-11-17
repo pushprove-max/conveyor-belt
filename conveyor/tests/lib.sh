@@ -276,6 +276,7 @@ landed() { # <issue> [follow-ups json]: the landed line of an earlier card for t
 # the keeper's group or carries the case's mark (slot_watch).
 run_case() {
   local k='' s w mark='' end t0 sub=() CASE_WORKER=$BASHPID CASE_MARK=CONVEYOR_TEST_CASE_ID=$BASHPID.$RANDOM$RANDOM
+  local CASE_LIMIT=${CASE_LIMITS[$CASE]:-} # its file's `# timeout:` line (the runner), for its keeper (case_keep)
   slot_mine
   exec {w}> >(slot_watch "$CASE_MARK" > /dev/null 2>&1)
   # In a loop's test step, the case is named as running from here until it ends (conveyor.sh testcases()), so the
@@ -304,6 +305,9 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
   exec {w}>&-
   # A case that ended is named in cases/ok or cases/failed before its running mark goes (conveyor.sh watch()), so the
   # loop's live record counts the cases done and failed while the run goes on.
+  # One stopped at its limit (case_keep) is named in cases/timedout too, before it is named failed: a release's result
+  # says "timed out" for it (fulltest.sh suiteprog()).
+  [ -z "$mark" ] || [ ! -e "$T/$CASE.late" ] || { mkdir -p "${mark%/*}/timedout" && : > "${mark%/*}/timedout/$CASE"; }
   [ -z "$mark" ] || { end=failed; [ "$(cat "$T/$CASE.rc" 2>/dev/null)" != 0 ] || end=ok; mkdir -p "${mark%/*}/$end" && : > "${mark%/*}/$end/$CASE"; rm -f "$mark"; }
   [ -e "$T/$CASE.rc" ] || echo "FAIL [$CASE]: the case's keeper did not start, or was ended before the case was: $(cat "$T/$CASE.keeper" 2>/dev/null)" >> "$T/$CASE.out"
   [ "$(cat "$T/$CASE.rc" 2>/dev/null)" != 0 ] || echo "ok $CASE" >> "$T/$CASE.out"
@@ -345,7 +349,7 @@ case_cpu() { # <file>
 # the background stays in it), with the case's mark in its environment. A watcher tells the keeper to end when the
 # worker that started it is gone.
 case_keep() {
-  local p='' watch
+  local p='' watch timer='' rc
   trap 'trap "" TERM INT HUP; [ -z "$p" ] || case_end "$p"; exit 143' TERM INT HUP
   ( while kill -0 "$CASE_WORKER" 2>/dev/null; do
       command sleep 0.5
@@ -356,7 +360,16 @@ case_keep() {
   # a pool of one slot, testSlotsDir its own) gave every case's loop after it that pool, which held no slot of theirs,
   # and each card's test step waited for that one slot, "1 of 1 in use", for ever (the owner, 2026-11-14).
   set -m; ( set +m; export "$CASE_MARK" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG; "t_$CASE" ) > "$T/$CASE.out" 2>&1 & p=$!; set +m
-  wait "$p"; echo $? > "$T/$CASE.rc"
+  # Its limit (CASE_LIMIT: its file's `# timeout:` line, run_case): past it, the case's group is told to end and
+  # killed 3 s later, and the case fails as timed out ($T/$CASE.late), its exit 124. The others go on.
+  [ -z "${CASE_LIMIT:-}" ] || { ( z=''; trap '[ -z "$z" ] || kill "$z" 2>/dev/null; exit 0' TERM
+      command sleep "$CASE_LIMIT" & z=$!; wait "$z" # sleep: the case's time limit
+      : > "$T/$CASE.late"; kill -TERM -- "-$p" 2>/dev/null
+      command sleep 3 & z=$!; wait "$z"; kill -KILL -- "-$p" 2>/dev/null ) > /dev/null 2>&1 & timer=$!; } # sleep: the grace after TERM
+  wait "$p"; rc=$?
+  [ -z "$timer" ] || { kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null; }
+  [ ! -e "$T/$CASE.late" ] || { rc=124; echo "FAIL [$CASE]: timed out after $CASE_LIMIT s (its file's # timeout: line); the case and its process group were stopped" >> "$T/$CASE.out"; }
+  echo "$rc" > "$T/$CASE.rc"
   kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null
   case_end "$p"; exit 0
 }

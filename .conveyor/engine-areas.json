@@ -399,6 +399,7 @@
 {"area": "flaky", "test": "fulltest.test.sh"}
 {"area": "flaky", "file": "conveyor/lib/flaky.sh"}
 {"area": "fulltest", "test": "fulltest.test.sh"}
+{"area": "fulltest", "test": "casetimeout.test.sh"}
 {"area": "fulltest", "test": "flakybatch.test.sh"}
 {"area": "fulltest", "test": "releaserun.test.sh"}
 {"area": "fulltest", "test": "releaseboard.test.sh"}

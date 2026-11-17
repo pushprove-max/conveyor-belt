@@ -87,11 +87,13 @@ run='{kind: "release", version: "1.2.0", step: "release-prep", sha: "abcdef01234
   state: "running", done: 40, failed: 1, cases: ["stall"], moved: false, reasons: []}'
 snap ".belt = [$(card 3 One build)] | .suites = [$run]"
 poll && fail "a release run under way woke the Foreman: $(cat "$FD"/pending/*.wake)"
-snap ".belt = [$(card 3 One build)] | .suites = [$run + {ended: \"2026-11-15T11:59:00Z\", state: \"failed\", done: 140, failed: 2, cases: [\"stall\", \"metrics\"]}]"
+# Bug (#253): a case stopped at its file's `# timeout:` limit (timedout) read as a plain failure, so the Foreman could
+# not tell a hung case from a broken one.
+snap ".belt = [$(card 3 One build)] | .suites = [$run + {ended: \"2026-11-15T11:59:00Z\", state: \"failed\", done: 140, failed: 2, cases: [\"stall\", \"metrics\"], timedout: [\"metrics\"]}]"
 poll || fail "a release run that ended red woke nothing: $(cat "$T/err")"
 w=$(cat "$FD"/pending/*.wake)
-grep -qxF 'alpha: release 1.2.0 failed on abcdef012345 at 2026-11-15T11:59:00Z; failed cases: stall, metrics' <<<"$w" \
-  || fail "the wake does not name the result and the failed cases: $w"
+grep -qxF 'alpha: release 1.2.0 failed on abcdef012345 at 2026-11-15T11:59:00Z; failed cases: stall, metrics (timed out)' <<<"$w" \
+  || fail "the wake does not name the result and the failed cases, the timed-out one as timed out: $w"
 }
 
 # Issue 240: a full test run whose process was killed ends with no result (the snapshot's suites: an error, with its

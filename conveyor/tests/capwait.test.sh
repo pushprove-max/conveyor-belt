@@ -22,7 +22,9 @@ cwwaits() { jq -e '.waits.on' "$T/$CASE/cards/"*-"$1".live >/dev/null 2>&1; } # 
 cwpicked() { [ -n "$(st "select(.issue == $1 and .step == \"picked\") | .card")" ]; } # <issue>
 # The loop's own count at its last turn, as health gives it: "<building> <waiting>".
 cwcounts() { loop health | jq -r '"\(.building) \(.waitingCount)"'; }
-capwaitend() { loop control stop >/dev/null; wait "$lp" 2>/dev/null; kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; }
+# The holder goes before the loop is waited for: a card that waits on it ends only once it is gone, so the loop's stop
+# waited out the holder's 300 s, the case's whole limit (its file's `# timeout:` line).
+capwaitend() { loop control stop >/dev/null; kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; wait "$lp" 2>/dev/null; }
 
 # Bug it catches: a card that waited on a same-file card for minutes, using no CPU, still took one of the cap's slots,
 # so one fewer issue was built. With the cap at 1, #15 waits on c6-16, and #17 is picked meanwhile. Once the wait ends

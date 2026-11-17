@@ -38,7 +38,8 @@
 # {kind: "release", step (release-prep or release), version, since, ended (null while it runs), state (running, then
 # passed (release-prep), released (release), failed (the suite failed), refused (any other refusal) or stopped), sha
 # (the commit the suite runs or ran on, null before it), done, failed and cases (the cases ended, those failed and their
-# names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), moved (main moved while the suite
+# names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), timedout (those of them stopped
+# at their time limit, by name), moved (main moved while the suite
 # ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
 # (null for a whole suite; else {sha and time: the run it reused, ran: the files it reran, none when no test ran, kept:
 # the passes it kept}), reasons
