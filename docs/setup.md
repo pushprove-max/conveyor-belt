@@ -291,6 +291,9 @@ run `/conveyor-belt:setup` again in your project's checkout and answer yes.
 
 `doctor` names the Board's address when it runs. When it does not run, `doctor` prints a `warning:` line with the fix.
 
+The Board makes its certificate again each time it starts and finds the certificate missing or damaged. It writes one
+line to its log that says so. A browser that trusted the old certificate shows a warning once for the new one.
+
 When Conveyor runs on a build machine, the host file names it with `ssh` and a `host` that is not this machine. If a
 record has your project's name (the name of its checkout's folder), `doctor` prints `ok: the project <name> is served
 on the build machine <host>`. That record's `main` is the checkout on the build machine, so `doctor` prints no

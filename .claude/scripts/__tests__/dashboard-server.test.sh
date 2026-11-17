@@ -143,7 +143,12 @@ PATH=$M/libressl:$PATH cli make-cert >/dev/null && named || fail "explicit_certi
 SUM=$(cksum < "$CERT")
 cli make-cert >/dev/null && [ "$(cksum < "$CERT")" = "$SUM" ] || fail "make-cert: a second run with no --force must keep the certificate"
 cli make-cert --force >/dev/null && [ "$(cksum < "$CERT")" != "$SUM" ] || fail "make-cert: --force must make a new certificate"
-pass=$((pass + 6))
+# A certificate that names its curve but does not load with its key: the server exits at once on it. Bug caught
+# (#200): make-cert kept it, so the Board's loop restarted a server that failed on every start.
+SUM=$(cksum < "$CERT"); : > "$A/dashboard-tls/key.pem"
+got=$(cli make-cert) && [ "$(cksum < "$CERT")" != "$SUM" ] && "$PY" -c 'import ssl, sys; ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(*sys.argv[1:])' "$CERT" "$A/dashboard-tls/key.pem" \
+  && [[ $got == "certificate $CERT cannot be loaded with its key "* ]] || fail "unloadable_certificate_made_again: make-cert said '$got' and left a certificate that does not load"
+pass=$((pass + 7))
 serve
 # No password set: login refuses with the way to set one, and nothing else opens.
 got=$(login "$A/none" false x); [ "$got" = 503 ] && grep -q 'no dashboard user: run dashboard_server.py add-user <user> --admin' "$M/login.out" \

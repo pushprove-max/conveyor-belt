@@ -1013,13 +1013,31 @@ def cert_names_p256(path):
         return False
 
 
+def cert_problem():
+    """Why the certificate cannot serve the Board, or None when it can: missing, empty, not loadable with its key (the
+    server would exit at once on every start), or a key that does not name its curve."""
+    if not os.path.exists(CERT):
+        return 'is missing'
+    if os.path.getsize(CERT) == 0:
+        return 'is empty'
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(CERT, KEY)
+    except (OSError, ValueError) as e:  # ssl.SSLError is an OSError
+        return 'cannot be loaded with its key %s (%s)' % (KEY, e)
+    if not cert_names_p256(CERT):
+        return 'does not name its curve (prime256v1), so curl cannot check it'
+    return None
+
+
 def cli_make_cert(force):
-    # Not an error: dashboard.sh --install runs this every time, and restarts the Board on a certificate made again.
-    if os.path.exists(CERT) and not force:
-        if cert_names_p256(CERT):
+    # Not an error: dashboard.sh --install runs this every time, and restarts the Board on a certificate made again;
+    # dashboard.sh --loop runs it before each start of the server and logs the first line when it makes one.
+    if not force:
+        why = cert_problem()
+        if why is None:
             print('certificate kept: %s (--force makes a new one)' % CERT)
             return
-        print('certificate %s does not name its curve (prime256v1), so curl cannot check it: making it again' % CERT)
+        print('certificate %s %s: making a new one' % (CERT, why))
     host = re.sub(r'[^A-Za-z0-9-]', '', socket.gethostname().split('.')[0]) or 'localhost'
     os.makedirs(TLS, mode=0o700, exist_ok=True)
     old = os.umask(0o077)

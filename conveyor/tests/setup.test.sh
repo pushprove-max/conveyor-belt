@@ -19,6 +19,8 @@ sample() {
   coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
   # CLAUDE_CONFIG_DIR: Claude Code's folder, where its record of installed plugins is, the case's own (empty).
   export S=$T/$CASE/sample G=$T/$CASE/gh XDG_CONFIG_HOME=$T/$CASE/config CLAUDE_CONFIG_DIR=$T/$CASE/claude
+  # The Board's login store, the case's own: its certificate is beside it (boardup), never in ~/.claude/rulings.
+  export CONVEYOR_DASHBOARD_AUTH=$T/$CASE/rulings/dashboard-auth.json
   template sample samplemake && mkdir -p "$XDG_CONFIG_HOME/conveyor" "$XDG_DATA_HOME/conveyor" && cp -a "$FIXTURE.sample/sample" "$S" \
     && cp -a "$FIXTURE.sample/origin.git" "$T/$CASE/origin.git" && git -C "$S" remote set-url origin "$T/$CASE/origin.git" \
     && cp -a "$FIXTURE.sample/gh" "$G" && cp -a "$FIXTURE.sample/board-venv" "$XDG_DATA_HOME/conveyor/board-venv" \
@@ -420,9 +422,11 @@ without() { local p=$T/$CASE/without-${*// /-} d f n fs=(); local -A seen; mkdir
 # another, about 3 s a run, they made one case of 10 s.
 doctordone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin >/dev/null) || fail "setup exited non-zero"; }
 # The Board running (#108), for a doctor run with $T/$CASE/board first on PATH and CONVEYOR_DASHBOARD_PORT=8791: curl
-# gets its login page, under its own certificate (there, beside the login store), on the port the Board is set to.
+# gets its login page, under its own certificate (there, beside the case's login store, sample), on the port the Board
+# is set to.
 boardup() {
-  mkdir -p "$T/$CASE/board" "$HOME/.claude/rulings/dashboard-tls" && : > "$HOME/.claude/rulings/dashboard-tls/cert.pem" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
+  local tls; tls=$(dirname "${CONVEYOR_DASHBOARD_AUTH:?sample sets it}")/dashboard-tls
+  mkdir -p "$T/$CASE/board" "$tls" && : > "$tls/cert.pem" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
     && chmod +x "$T/$CASE/board/curl" || fail "the curl stub was not made"
 }
 # The pinned commit's install removed, as the fix of a damaged one leaves it.
@@ -436,7 +440,15 @@ t_doctor() {
   doctortests '{}' '{times: {"a.test": 1}}'
   # A service whose conveyor.sh is there (the machine's, on the pinned install) is no missing piece.
   mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
-  boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
+  # The Board's stand-in leaves a good certificate in the home's rulings folder as it is. Bug caught (#200): it emptied
+  # ~/.claude/rulings/dashboard-tls/cert.pem, the real Board's, which then failed on every start.
+  local h=$T/$CASE/home sum; mkdir -p "$h/.claude/rulings/dashboard-tls" \
+    && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=localhost \
+      -keyout "$h/.claude/rulings/dashboard-tls/key.pem" -out "$h/.claude/rulings/dashboard-tls/cert.pem" 2>/dev/null \
+    && sum=$(cksum < "$h/.claude/rulings/dashboard-tls/cert.pem") || fail "the good certificate was not made"
+  HOME=$h boardup
+  [ "$(cksum < "$h/.claude/rulings/dashboard-tls/cert.pem")" = "$sum" ] || fail "fixture_keeps_the_home_certificate: boardup changed the certificate in HOME's rulings folder"
+  out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
   grep -qx 'ok: the Board, running at https://localhost:8791/' <<<"$out" || fail "doctor did not name the running Board's address: $out"
   ! grep -q '^missing' <<<"$out" && grep -q '^ok: the pinned commit' <<<"$out" && grep -q '^ok: codex' <<<"$out" && grep -q '^ok: the terms file' <<<"$out" \
     && grep -q "^ok: segno, in the Board's virtualenv " <<<"$out" && ! grep -q 'no test times' <<<"$out" \

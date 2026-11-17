@@ -1172,6 +1172,15 @@ cycle() {
 }
 
 # The job's own manager restarts it; the label is the one install wrote.
+# cert -- the page server's certificate, kept when it loads, else made again by make-cert, with one line in the log
+# that says why (make-cert's first line). 1 when openssl could not make it; the server's own error then follows.
+cert() {
+  local out
+  out=$("$BOARD_PY" "$HERE/dashboard_server.py" make-cert 2>&1) \
+    || { echo "$(date +%FT%T) dashboard: could not make the HTTPS certificate: ${out//$'\n'/ }" >&2; return 1; }
+  [[ $out == 'certificate kept: '* ]] || echo "$(date +%FT%T) dashboard: ${out%%$'\n'*}" >&2
+}
+
 restart() {
   if [ "$(host_os)" = Darwin ]; then launchctl kickstart -k "gui/$(id -u)/$LABEL_PREFIX$NAME"
   else systemctl --user --no-block restart "$NAME.service"; fi
@@ -1248,9 +1257,11 @@ case "${1:-}" in
           { while kill -0 $$ 2>/dev/null; do alive; sleep 15; done; } & ALV=$!
           last=null
           while :; do
-            # Restarted here if it stopped. Its stderr stays in the log: "no certificate" must be seen.
+            # Restarted here if it stopped. Its stderr stays in the log: "no certificate" must be seen. Before each
+            # start, a certificate that is missing, empty or does not load is made again (cert): the server would
+            # exit at once on it, every cycle.
             [ -n "$SRV" ] && kill -0 "$SRV" 2>/dev/null \
-              || { "$BOARD_PY" "$HERE/dashboard_server.py" "$PORT" "$OUT" >/dev/null & SRV=$!; }
+              || { cert; "$BOARD_PY" "$HERE/dashboard_server.py" "$PORT" "$OUT" >/dev/null & SRV=$!; }
             # The live feed, restarted here too; its stderr (a stream that keeps failing) stays in the log. The temp
             # files a feed that ended mid-write left are removed first: no feed writes them now.
             [ -n "$STM" ] && kill -0 "$STM" 2>/dev/null \

@@ -1335,6 +1335,9 @@ idx_stat=$(stat -c '%i %Y' "$OUT/index.html")
 AUTHL=$T/auth; SRVPY=${DASH%/*}/dashboard_server.py; DPW='a long enough password'
 CONVEYOR_DASHBOARD_AUTH=$AUTHL/dashboard-auth.json "$PY" "$SRVPY" make-cert >/dev/null || fail "the loop's HTTPS certificate could not be made"
 printf '%s\n%s\n' "$DPW" "$DPW" | CONVEYOR_DASHBOARD_AUTH=$AUTHL/dashboard-auth.json "$PY" "$SRVPY" set-password max >/dev/null || fail "the loop's password could not be set"
+# The loop starts on an empty certificate, which the server cannot load. Bug caught (#200): the server failed on
+# every start and the Board stayed down; the loop must make it again, say so once in its log, and serve.
+: > "$AUTHL/dashboard-tls/cert.pem"
 DU=https://localhost:$port
 dcurl() { curl --cacert "$AUTHL/dashboard-tls/cert.pem" --resolve "localhost:$port:$lan" -b "$AUTHL/jar" "$@"; }
 # The loop itself brings the checkout forward each cycle, with no --update typed. Its origin is one commit
@@ -1355,6 +1358,8 @@ loop=$!
 stop() { kill "$loop" 2>/dev/null || true; fail "$1"; }
 wait_until 'dcurl -sf -m 1 -o /dev/null "$DU/login" || ! kill -0 "$loop" 2>/dev/null' || :
 dcurl -sf -m 1 -o /dev/null "$DU/login" || stop "the page is not served over https on $lan:$port: $(cat "$T/loop.log")"
+[ "$(grep -c "dashboard: certificate $AUTHL/dashboard-tls/cert.pem is empty: making a new one$" "$T/loop.log")" = 1 ] \
+  || stop "loop_makes_an_empty_certificate_again: the log must say once that the empty certificate was made again: $(cat "$T/loop.log")"
 [ "$(dcurl -s -m 2 -o /dev/null -w '%{http_code}' "$DU/index.html")" = 302 ] || stop "loop_serves_https_behind_login: the page opened without a login"
 [ "$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://$lan:$port/index.html")" = 000 ] || stop "loop_serves_https_behind_login: plain http got an answer"
 dcurl -sf -m 5 -c "$AUTHL/jar" -o /dev/null -X POST -H "Origin: $DU" -H 'Content-Type: application/json' \
