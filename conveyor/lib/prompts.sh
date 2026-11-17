@@ -457,6 +457,10 @@ NARROWALONE='The rule Whole suite in a card is off. The test command ran with no
 # What a card's test step says when, with that rule off, no test file is linked to its change (listcmd()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'
+# What a card's test step says when, with that rule off, more test files are linked to its change than the pack's
+# test.cardFiles (testcap()).
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+CAPPED='<left> of the <all> test files linked to the change did not run, as a card runs at most <max> (test.cardFiles), those that failed most recently first. The release'"'"'s whole-suite run covers them.'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTBACK='main'"'"'s code could not be put back, so the test files did not run without the fix'
 # shellcheck disable=SC2034 # used in lib/card.sh

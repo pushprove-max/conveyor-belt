@@ -142,3 +142,64 @@ t_narrowdoctor() {
     || fail "doctor did not warn of a pack with neither: $(cat "$T/$CASE/neither" "$T/$CASE/run.out")"
   [ ! -s "$T/$CASE/fc" ] && [ ! -s "$T/$CASE/on" ] || fail "doctor warned with test.fileCommand set, or the rule on: $(cat "$T/$CASE/fc" "$T/$CASE/on")"
 }
+
+# #311. Main holds <n> test files, t001.test.js to t<n>.test.js, which the card's change, an edit of lib/cartsum.js,
+# links to it (.conveyor/test-links.json, the worktree's); its test step runs as narrowrun() runs it. The records hold
+# the test lines <line>... first.
+caprun() { # <n> [<line>...]
+  local i f fs=()
+  narrowsetup args
+  [ $# -lt 2 ] || printf '%s\n' "${@:2}" >> "$ST/cards.jsonl"
+  for ((i = 1; i <= $1; i++)); do printf -v f 't%03d.test.js' "$i"; fs+=("$f"); echo x > "$R/$f"; done
+  git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
+  narrowrun "mkdir -p .conveyor && jq -cn '{\"lib/cartsum.js\": \$ARGS.positional}' --args ${fs[*]} > .conveyor/test-links.json && echo y >> lib/cartsum.js"
+}
+
+# D1, D2, D4. Bug it catches: a change linked to nearly every test file (a shared helper) ran all of them, about 45
+# minutes a card. 120 linked files run 50 (test.cardFiles' default): the two that failed most recently in a test step
+# on record, newest first, then the rest in order; the test line and output say 70 were left out and that the
+# release's run covers them, and the Board's step shows that note.
+t_narrowcap() {
+  caprun 120 '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t100.test.js","cases":[]}],"timeout":null}}' \
+    '{"card":"c2","issue":2,"step":"test","time":"2026-11-12T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t090.test.js","cases":[]}],"timeout":null}}'
+  local want note='70 of the 120 test files linked to the change did not run, as a card runs at most 50 (test.cardFiles), those that failed most recently first. The release'"'"'s whole-suite run covers them.'
+  want="args:t090.test.js t100.test.js $(printf 't%03d.test.js ' $(seq 1 48))"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "${want% }|env:" ] \
+    || fail "the card did not run 50 files, the recently failed first (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -r '.list | "\(.files) \(.left) \(.why)"' "$T/$CASE/cards/c7.rec")" = "50 70 $note" ] && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" \
+    || fail "the test step does not say what it left out: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+  # The Board's card track gives the passed step that note, which it shows: the test line goes through the card's row
+  # (jq/rows.jq, its log) and then its track (jq/track.jq), as the snapshot draws it.
+  [ "$(jq -c '{card: "c7", issue: 7, step: "picked", time: "2026-11-17T11:00:00Z"}, ({card: "c7", issue: 7, step: "test", result: "pass", time: "2026-11-17T12:00:00Z"} + .)' "$T/$CASE/cards/c7.rec" \
+      | jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg shut x -f "$SRC/jq/rows.jq" \
+      | jq -r "$(<"$SRC/jq/track.jq")"' .[0] | track(null; null) | .records[] | select(.name == "tests passed") | .why')" = "$note" ] \
+    || fail "the Board's test step does not show the note: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
+# D4. Bug it catches: the cap left files out, or said so, under the limit. 30 linked files all run, with no note.
+t_narrowcapunder() {
+  caprun 30
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "args:$(printf 't%03d.test.js ' $(seq 1 30) | sed 's/ $//')|env:" ] \
+    || fail "the card did not run its 30 linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .left, .why]' "$T/$CASE/cards/c7.rec")" = '[30,null,null]' ] && ! grep -q 'did not run' "$T/$CASE/cards/c7.test" \
+    || fail "a run under the limit has a note: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+}
+
+# D3. Bug it catches: the bug card's proof run on main gave the command every test file of the change, past the
+# limit. With test.cardFiles 2, a change adding three test files gives it two, the one that failed most recently
+# first, and the check's result says one was left out.
+t_narrowcapproof() {
+  local wt=$T/$CASE/cards/c7
+  setup '[]'; wholeoff; tune '.test.list = "env" | .test.cardFiles = 2'
+  printf '%s\n' 'printf %s "$CONVEYOR_TEST_FILES" > "$STUB/given"; exit 1' > "$STUB/mainrun-cmd"
+  echo '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"d.test.sh","cases":[]}],"timeout":null}}' >> "$ST/cards.jsonl"
+  git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" \
+    && for f in a c d; do printf '%s\n' '#!/usr/bin/env bash' 'grep -qx two a.txt' > "$wt/$f.test.sh"; done && git -C "$wt" add -A || fail "the card's change could not be staged"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
+    names || exit 1; bugproof c7 "$wt" '{"number":7}'; cp "$wt.unfixed" "$T/$CASE/unfixed" ) > "$T/$CASE/run.out" 2>&1 \
+    || fail "the check failed to run: $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$STUB/given" 2>&1)" = $'d.test.sh\na.test.sh' ] || fail "the proof run was not given the two files, d.test.sh first: $(cat "$STUB/given" "$T/$CASE/run.out" 2>&1)"
+  grep -qF '1 of the 3 test files linked to the change did not run, as a card runs at most 2 (test.cardFiles)' "$T/$CASE/unfixed" && ! grep -qx -- '- c.test.sh' "$T/$CASE/unfixed" \
+    || fail "the check's result does not say one file was left out: $(cat "$T/$CASE/unfixed")"
+}

@@ -184,8 +184,13 @@ change the runs of a release or of the full test suite. A card runs these test f
 
 - the test files of the list above;
 - for a change that would run the whole suite, the test files that the test map and `.conveyor/test-links.json` link
-  to the changed files, however many there are;
+  to the changed files;
 - for a changed document, the test files that the test map and `.conveyor/test-links.json` link to it.
+
+A card runs at most `test.cardFiles` of these test files (in `.conveyor/project.json`). If more are linked, the files
+that failed most recently in a test step run first, then the others in the order of the test map. The card's test
+step says how many files it left out, and that the release's whole-suite run covers them. The Board shows this note
+with the step. The check of a bug card on main's code uses the same limit.
 
 If no test file is linked to the change, the card runs no test. The card's test line says so, and the release's run
 covers the change.

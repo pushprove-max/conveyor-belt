@@ -520,8 +520,10 @@ it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed:
 `whole suite: <why>`); `/units` shows `changed: 7 files` or `whole suite`.
 All of this holds while the rule `wholeSuite` is on. Off (the default), a card's run never gets `mode: "whole"`: a
 change that would run the whole suite runs the test files the test map and the links give its files; one with none
-runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why": "..."}`; a list the command cannot be
-given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
+runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why": "..."}`. If more test files are
+linked than the pack's `test.cardFiles`, only that many run, and those that failed most recently run first. The list
+then has `left` (how many did not run) and a `why` that says the release's run covers them. The Board shows this note
+with the step. A list the command cannot be given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
 test step with a reason that names `test.list` and `test.fileCommand`. A run that reports more than ten test files for
 each it is given is stopped, and the card is blocked the same way; so is the bug-card check's run of `test.command`
 ([Whole suite in a card](../docs/configuration.md#whole-suite-in-a-card)).

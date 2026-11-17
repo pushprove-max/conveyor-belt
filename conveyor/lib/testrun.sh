@@ -394,7 +394,7 @@ cacheoff() { # <worktree>
 # test files for each it was given (TEST_GIVEN: watch() stops it, <worktree>.wide) does not run again and fails the
 # same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw='' LISTNONE='' TEST_GIVEN=${TEST_GIVEN:-}
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-}
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -481,6 +481,9 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # A pass on re-run goes to the flaky-test record now, before a later run (a batch's) clears <worktree>.first; so do
   # the cases of a run again that failed which passed in it (f: its failures).
   if [ -e "$1.first" ]; then if [ $rc = 0 ]; then flakyrun "$1"; else flakyrun "$1" "${f:-}"; fi; fi
+  # Linked test files over test.cardFiles were left out (listcmd(), testcap()): its output says how many, and that the
+  # release's run covers them.
+  [ -z "$CAPNOTE" ] || printf 'conveyor: %s\n' "$CAPNOTE" >> "$1.test"
   # A card's run that passed maps the test files its change adds or changes that the test map does not hold yet.
   [ $rc != 0 ] || [ -n "${2:-}" ] || [ "${3:-}" = alone ] || mapnew "$1" >> "$1.test"
   return $rc
@@ -497,7 +500,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # (only with one)} or {mode: "whole", why}. With no test.list, the command is as it is and no file is written.
 # All of that holds while the control record's rule "Whole suite in a card" (rules.wholeSuite, wholerule()) is on.
 # Off (the default), a card never runs the whole suite: the list is testsel()'s narrow one, every test file the test
-# map and the links give the changed files, however many, test.list set or not. A list of none runs nothing (LISTNONE
+# map and the links give the changed files, test.list set or not, up to the pack's test.cardFiles of them (testcap();
+# the list, {mode: "changed", files, by, left, why}, says how many were left out). A list of none runs nothing (LISTNONE
 # set; the list, {mode: "changed", files: 0, by, why}, says so). A command that can take the list (listwhy() names no
 # reason) is given it as above, and TEST_GIVEN is how many files it got (watch() stops a run that reports far more:
 # tests()); else, with test.fileCommand set, that command runs each file alone (filecmd() files); else nothing runs,
@@ -509,8 +513,9 @@ listcmd() { # <worktree> <command>
   if ! wholerule; then
     s=$(testsel "$1" narrow) || { narrowstop "the list of the card's tests could not be made: $s" > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
-    jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
-      + if $n == 0 then {why: $w} else {} end' > "$1.testlist" || return 1
+    testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
+    jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
+      + if $n == 0 then {why: $w} elif $l > 0 then {left: $l, why: $c} else {} end' > "$1.testlist" || return 1
     [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
     why=$(listwhy "$1" "$2" "$lm")
     if [ -z "$why" ] && [ "$lm" = runner ] && ! LISTCMD=$(runnercmd "$2" "$1" "${fs[@]}"); then why=$LISTCMD; LISTCMD=$2; fi
@@ -529,6 +534,29 @@ listcmd() { # <worktree> <command>
   if [ -n "$why" ]; then jq -cn --arg w "$why" '{mode: "whole", why: $w}' > "$1.testlist"
   else jq -cn --argjson n ${#fs[@]} --argjson b "$by" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end' > "$1.testlist"; fi || return 1
   listput "$2" "$lm" "${fs[@]}"
+}
+# Of the test files <file>... linked to a card's change (testsel() narrow: listcmd(); and those of the bug-card check,
+# bugproof()), while the rule Whole suite in a card is off, the ones a card runs, in CAPFILES: all of them up to the
+# pack's test.cardFiles; of more, that many: first those that failed most recently in a test step on record (the card
+# records' test lines: FAILURE and failedrun, lib/testfiles.sh), newest first, then the rest in the order given (the
+# test map's). CAPLEFT is how many it left out, CAPNOTE says so (CAPPED), empty when none: the release's run covers them.
+testcap() { # <file>...
+  local n fl ks=() defs refs
+  CAPFILES=("$@"); CAPLEFT=0; CAPNOTE=''
+  packget test.cardFiles n 2>/dev/null && [[ $n =~ ^[1-9][0-9]*$ ]] || n=50
+  [ $# -gt "$n" ] || return 0
+  testowners
+  fl=$({ olds; recs; } 2>/dev/null | jq -cRn --argjson defs "$defs" --argjson refs "$refs" "$OWNERS$FAILURE"'
+    [inputs | fromjson? | objects | select(.step == "test") | failedrun | (.time // "") as $t | failedfiles[] | {f: ., t: $t}]
+    | group_by(.f) | map(max_by(.t)) | sort_by(.t) | reverse | map(.f)') || fl='[]'
+  # A record that cannot be read leaves the given order: the first test.cardFiles files.
+  CAPFILES=("${@:1:n}")
+  fl=$(printf '%s\n' "$@" | jq -cRn --argjson fl "$fl" --argjson n "$n" '[inputs] as $all
+    | ($all | map({key: ., value: true}) | from_entries) as $have | [$fl[] | select($have[.])] as $f
+    | ($f | map({key: ., value: true}) | from_entries) as $first | ($f + [$all[] | select($first[.] | not)])[:$n]') \
+    && mapfile -t ks < <(jq -r '.[]' <<<"$fl") && [ ${#ks[@]} = "$n" ] && CAPFILES=("${ks[@]}")
+  CAPLEFT=$(($# - ${#CAPFILES[@]}))
+  CAPNOTE=${CAPPED//'<left>'/$CAPLEFT}; CAPNOTE=${CAPNOTE//'<all>'/$#}; CAPNOTE=${CAPNOTE//'<max>'/$n}
 }
 # Why <command> cannot be given a list of test files in the form test.list <form> names (listcmd()): no test.list,
 # none, placeholder with no `{files}` in the command, or args with a command that already names the test files its
@@ -1036,7 +1064,7 @@ inlinesplit() { # <worktree> <path> <kind json>
   rm -rf "$d"; return $rc
 }
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh='' wide='' wc stop='' gv pc
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh='' wide='' wc stop='' gv pc cn
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -1060,6 +1088,15 @@ bugproof() { # <card> <worktree> <issue json>
     inlinesplit "$2" "$f" "$k" > /dev/null; case $? in 0) ins+=("$f") iks+=("$k") ;; 3) sh=${sh:-$f} ;; esac
   done < <(inlinekinds "$2" 2>/dev/null)
   fs=("${tf[@]}" "${ins[@]}")
+  # The rule Whole suite in a card off: at most test.cardFiles of them run, as in the card's run (testcap()); the files
+  # left out are neither put on main's code nor named as run, and the result says so.
+  cn=''
+  if ! wholerule && testcap "${fs[@]}" && [ "$CAPLEFT" != 0 ]; then
+    cn=$CAPNOTE; declare -A kp=(); for f in "${CAPFILES[@]}"; do kp[$f]=1; done
+    mapfile -d '' -t tf < <(for f in "${tf[@]}"; do [ -z "${kp[$f]:-}" ] || printf '%s\0' "$f"; done)
+    for k in "${!ins[@]}"; do [ -n "${kp[${ins[k]}]:-}" ] || unset 'ins[k]' 'iks[k]'; done; ins=("${ins[@]}") iks=("${iks[@]}")
+    fs=("${CAPFILES[@]}")
+  fi
   if [ ${#fs[@]} = 0 ] && [ -n "$sh" ]; then
     BUGWHY=${SHARED//'<file>'/"$sh"}; printf '%s.\nIts inline tests were not run on main'"'"'s code.\n' "${BUGWHY^}" > "$2.unfixed"; return 1
   fi
@@ -1112,6 +1149,7 @@ bugproof() { # <card> <worktree> <issue json>
         [ -z "$alone" ] || printf '%s\n' "$NOTALONE"
         printf 'Its test files, %s on main'"'"'s code at %s without the fix:\n' "$([ -n "$alone" ] && echo 'given to the test command' || echo run)" "$sha"
         [ ${#tf[@]} = 0 ] || printf -- '- %s\n' "${tf[@]}"; [ ${#ins[@]} = 0 ] || printf -- '- %s (its inline tests, with the rest of its change taken out)\n' "${ins[@]}"
+        [ -z "$cn" ] || printf '%s\n' "${cn^}"
         if [ -n "$alone" ]; then echo "The command selected none of them, so none ran without the fix."
         elif [ -n "$stop" ]; then echo "The run was stopped there, so it proves nothing either way."
         elif [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
@@ -1149,7 +1187,8 @@ bugproof() { # <card> <worktree> <issue json>
       else
         # With the fix (staged above), then without it: the named files alone, each a `fail` line of the list.
         # The rule off, test.command is given them as test.list says or not run, and a run of it that reports far more
-        # files than it was given is stopped, as above.
+        # files than it was given is stopped, as above; at most test.cardFiles of them run (testcap()).
+        cn=''; wholerule || { testcap "${nf[@]}"; nf=("${CAPFILES[@]}"); cn=$CAPNOTE; }
         gv='' pc=''; [ "$fld" != test.command ] || wholerule || { gv=${#nf[@]}; if proofcmd "$mwt" "${nf[@]}"; then pc=$LISTCMD; else stop=$PROOFSTOP; fi; }
         if [ -n "$stop" ]; then fx=''
         else TEST_CMD=$pc TEST_GIVEN=$gv bugrun "$mwt" "$fld" "${nf[@]}"; fx=$?; fi
@@ -1162,7 +1201,7 @@ bugproof() { # <card> <worktree> <issue json>
         [ -n "$stop" ] || [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" || held=1
         { [ -z "$stop" ] || printf '%s\n' "$stop"
           printf 'The change selects no test of its own (every changed line is a comment, or it touches no code the test command knows), so the test files its issue'"'"'s Done-when names were run alone on main'"'"'s code at %s, with the fix and without it:\n' "$sha"
-          printf -- '- %s\n' "${nf[@]}"
+          printf -- '- %s\n' "${nf[@]}"; [ -z "$cn" ] || printf '%s\n' "${cn^}"
           if [ -n "$stop" ]; then echo "A run was stopped, so it proves nothing either way."
           elif [ "$fx" != 0 ]; then echo "They failed with the fix (exit $fx): $UNFIXED."
           elif [ -z "$rc" ]; then BUGWHY=$NOTBACK; echo "Main's code could not be put back without the fix, so they did not run without it."
