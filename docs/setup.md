@@ -265,6 +265,13 @@ run `/conveyor-belt:setup` again in your project's checkout and answer yes.
 
 `doctor` names the Board's address when it runs. When it does not run, `doctor` prints a `warning:` line with the fix.
 
+When Conveyor runs on a build machine, the host file names it with `ssh` and a `host` that is not this machine. If a
+record has your project's name (the name of its checkout's folder), `doctor` prints `ok: the project <name> is served
+on the build machine <host>`. That record's `main` is the checkout on the build machine, so `doctor` prints no
+`missing:` line for this checkout. Do not add a record for this checkout: Conveyor on this machine would then run a
+second loop on the same repository. Setup does not ask to start Conveyor as this machine's service. It says once that
+Conveyor for this project runs on the build machine.
+
 Before it adds the project to the host file, setup writes the project's control record. By default, new issues start
 held, and each issue that is open at setup is held. Thus the first loop builds nothing: it does not queue the backlog
 of the project. Setup and `conveyor.sh doctor` say

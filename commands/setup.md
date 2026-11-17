@@ -83,6 +83,9 @@ First install the requirements, then sign in, before step 1:
    the files you wrote). Do not run it yourself.
 5. When doctor printed no `missing:` line other than the `CLAUDE.md` and `AGENTS.md` ones, ask the user "Start Conveyor now as this machine's service?" (yes / no)
    and, beside it, when doctor printed the `warning: the Board is not running` line, "Start the Board now?" (yes / no).
+   But when doctor printed an `ok: the project <name> is served on the build machine <host>` line, do not ask the
+   first question and do not run `install-service`, as a service here would be a second Conveyor on the same
+   repository: say once that Conveyor for this project runs on the build machine `<host>`.
    On yes to the first, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" install-service` and show its output. On
    yes to the second, run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" board` and show its output: it asks for no
    password, as "No login on this device" lets this machine in; an admin password for other devices is set later on

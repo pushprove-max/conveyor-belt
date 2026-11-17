@@ -412,6 +412,7 @@
 {"area": "setup", "test": "setup.test.sh"}
 {"area": "setup", "test": "apiroute.test.sh"}
 {"area": "setup", "test": "boardone.test.sh"}
+{"area": "setup", "test": "buildhost.test.sh"}
 {"area": "setup", "test": "models.test.sh"}
 {"area": "setup", "test": "serve.test.sh"}
 {"area": "setup", "test": "adopt.test.sh"}

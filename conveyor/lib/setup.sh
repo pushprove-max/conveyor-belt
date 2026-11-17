@@ -692,8 +692,16 @@ doctor() {
     p=$(cd "$MAIN" 2>/dev/null && pwd -P) && e='' && while IFS= read -r t; do
       [ "$(cd "$t" 2>/dev/null && pwd -P)" != "$p" ] || { e=1; break; }
     done < <(jq -r '.records | arrays | .[] | objects | .main | strings' "$HOST")
-    [ -n "$e" ] || no "a record of the host file $HOST for this checkout $MAIN (the machine's Conveyor serves only the checkouts its records name)" \
-      "run /conveyor-belt:setup; when it says another record has this checkout's name, add {\"repo\": \"<name>\", \"main\": \"$MAIN\"} to the host file's records by hand"
+    # With a build machine named (hostfile.sh, the Board's reader: an ssh target and a host that is not this machine),
+    # Conveyor runs there, and the project's record names its checkout there under the name setup gives it (hostput):
+    # that record serves this checkout, and a record of this checkout would start a second engine on the repository.
+    # setup (commands/setup.md) offers no service on this machine when doctor prints this ok line.
+    t=${MAIN##*/}; t=${t//[^A-Za-z0-9._-]/-}; c=${HERE%/*}/.claude/scripts/hostfile.sh; h=''
+    [ -n "$e" ] || [ ! -f "$c" ] || ! jq -e --arg n "$t" 'any(.records | arrays | .[] | objects; .repo == $n)' "$HOST" >/dev/null \
+      || h=$(bash "$c" "$MAIN" 2>/dev/null | jq -r 'select(.local == false) | .host | strings')
+    if [ -n "$h" ]; then ok "the project $t is served on the build machine $h (its record of the host file $HOST): Conveyor for it runs there, not on this machine"
+    elif [ -z "$e" ]; then no "a record of the host file $HOST for this checkout $MAIN (the machine's Conveyor serves only the checkouts its records name)" \
+      "run /conveyor-belt:setup; when it says another record has this checkout's name, add {\"repo\": \"<name>\", \"main\": \"$MAIN\"} to the host file's records by hand"; fi
     # The Board reads the project as the host file says, by its own reader (dashboard.sh --check): on this machine, or
     # over ssh on a build machine the host file names. When it cannot, every Board panel says so: this names why.
     f=${HERE%/*}/.claude/scripts/dashboard.sh
