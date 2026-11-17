@@ -62,7 +62,8 @@
 # of runs even when no changed file selects it (the loop runs a card's failing cases on main, where nothing changed):
 # of the engine's runner, those cases, when the list names one of its cases; of a node test file, those cases alone; a
 # `fail` line naming no case (a file that failed naming none), the file whole; of an engine case file, each of its
-# cases, through the runner (the run of one file by hand: conveyor.sh testaction run).
+# cases, through the runner (the run of one file by hand: conveyor.sh testaction run), and with a case the file does
+# not have (the split check's conveyor-no-case), the runner with no case, timed as that file: its start-up.
 # A node test file it runs leaves out each case an `ok` line of the list names, as the runner does (the loop keeps a
 # flaky case off a card's run so: conveyor.sh flakyoff()); a Python or other shell test file has no case filter and
 # runs whole. A case an `off` line names (one the loop keeps off as flaky) is left out of the runner and of a node test
@@ -956,7 +957,7 @@ for t in "${!run[@]}"; do full[$t]=1; done; fullcases=$cases
 # the files a session changed in the card's change (the loop's `changed` lines), picked as the change's own are; and
 # those of the files main changed since the HEAD the list was made on (its `main` lines), only where the change's own
 # selection holds them too: a test file it selects, and of the engine's runner the cases both select.
-declare -A fresh=() why=() only=()
+declare -A fresh=() why=() only=() nocase=()
 fcases=
 freshen() { # <reason> <only within the change's selection: 1, or empty> <file>...
   local w=$1 o=$2 f t c a
@@ -1027,9 +1028,13 @@ if [ -s "$RERUN" ]; then
   # a node test file, those cases alone (only, below). A `fail` line naming no case (a file that failed naming none, or
   # ran out of time) runs its file whole, the runner too.
   whole=$(awk -F'\t' '$1 == "fail" && $3 == "" {print $2}' "$RERUN")
-  while IFS=$'\t' read -r k f _; do
+  while IFS=$'\t' read -r k f c; do
     [ "$k" = fail ] && [ -f "$f" ] && [ -z "${run[$f]:-}" ] || continue
-    case $f in conveyor/tests/*.test.sh) ! grep -qxF -- "$f" <<<"$whole" || { [ -z "$again" ] || { run[conveyor/conveyor.test.sh]=1; cases=$again; }; continue; } ;; esac
+    case $f in conveyor/tests/*.test.sh) ! grep -qxF -- "$f" <<<"$whole" || { [ -z "$again" ] || { run[conveyor/conveyor.test.sh]=1; cases=$again; }; continue; }
+      # A case the file does not have (the split check's run with no case selected, lib/testrun.sh splitstart():
+      # conveyor-no-case) runs the file's start-up alone: the runner with no case, timed as the file.
+      sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f" | grep -qxF -- "$c" || { run[$f]=1; nocase[$f]=1; continue; } ;;
+    esac
     if grep -qxF -- "$f" <<<"$whole"; then run[$f]=1; [ "$f" != conveyor/conveyor.test.sh ] || again=
     elif [ "$f" != conveyor/conveyor.test.sh ]; then run[$f]=1; only[$f]=1; elif [ -n "$again" ]; then run[$f]=1; cases=$again; fi
   done < "$RERUN"
@@ -1280,7 +1285,9 @@ for t in "${!run[@]}"; do
       *.mjs) nodecases "$t"; "${b[@]}" env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
       *.py) "${b[@]}" env "${mk[@]}" python3 "$t" ;;
       *.ts|*.tsx) plugintest "$t" ;;
-      *) "${b[@]}" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} bash "$t" ;;
+      # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
+      # the runner all its cases only when none is set) and in which the runner finds no case.
+      *) "${b[@]}" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
     esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     times >> "$o.cpu"

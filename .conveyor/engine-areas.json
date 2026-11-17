@@ -227,6 +227,7 @@
 {"area": "testrun", "test": "mainred.test.sh"}
 {"area": "testrun", "test": "bugproof.test.sh"}
 {"area": "testrun", "test": "splitcheck.test.sh"}
+{"area": "testrun", "test": "splitstart.test.sh"}
 {"area": "testrun", "test": "ownbudget.test.sh"}
 {"area": "testrun", "test": "flaky.test.sh"}
 {"area": "testrun", "test": "flakybatch.test.sh"}

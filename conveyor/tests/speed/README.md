@@ -50,7 +50,8 @@ The same three rules are in the card rules (`.conveyor/card-rules.md`), so every
 An Optimize card that splits a test file passes its check when every case passes, each new file is at or under its
 budget (the pack's `test.fileBudget`, or the file's own in `test.files`), and the new files' CPU seconds summed are at
 most the old file's on record plus a start-up allowance for each new file. The allowance is the CPU seconds of a run of
-a new file with no case selected, when that run names no case. A runner with no case filter runs the whole file, so
+a new file with no case selected, when that run names no case. An engine case file run so runs the runner with no
+case. A runner with no case filter runs the whole file, so
 then the allowance is the pack's `test.splitAllowance`, as it is when that run gives no CPU seconds. A split never makes the
 sum lower, so a split into too few files fails: the card's brief says how many files a split alone needs. Make the
 heavy cases faster, or make the split finer.

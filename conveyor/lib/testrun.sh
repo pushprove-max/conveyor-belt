@@ -1011,12 +1011,57 @@ speedbrief() { # <card> <worktree> <test file>
 # CPU seconds, or CPU seconds not lower than the median. Given the test files a split adds (optproof()), it runs them
 # too, with the file when the change keeps it: they must all pass, each must be at or under its budget, and their CPU
 # seconds summed (after) must be at most the file's median plus a start-up allowance for each file the split adds. The
-# allowance is the CPU seconds of a run of the first file the split adds with no case selected (a rerun line
-# `fail<TAB><file><TAB>conveyor-no-case`), made only when the sum is over the median, and kept only when that run names
-# no case while the run of the split named one of that file (a runner with no case filter runs the file whole); else,
-# or when that run gives no CPU seconds, the pack's test.splitAllowance. The reason names each file over its budget and by how much, and a sum over
-# its limit with the allowance and where it came from.
+# allowance (splitstart()) is measured only when the sum is over the median. The reason names each file over its
+# budget and by how much, and a sum over its limit with the allowance and where it came from: the file it was measured
+# on, or the pack's value and why it was not measured.
 NOCASE=conveyor-no-case
+# The start-up allowance of each file a split adds (speedproof()): the CPU seconds of a run of <file>, the first file
+# the split adds, with no case selected, printed as `<CPU s><TAB>measured: a run of <file> with no case`. A runner of
+# the pack's test.command that the engine knows (testrunner()) is run here, in <worktree>, on <file> alone, with its
+# own filter set to a case name no file has (NOCASE), and timed as tools/testtime.sh times a command (the user and
+# system time of all it starts): node --test (--test-name-pattern), pytest (-k; its exit 5 is "no case ran"), go test
+# (-run, on the package of <file>), cargo test (the test target of <file>, tests/<name>.rs, with a name filter) and
+# rspec (-e). Any other command (a project's own script, such as this repository's .conveyor/test-changed.sh, or a
+# runner the engine cannot filter) is run with the rerun line `fail<TAB><file><TAB>conveyor-no-case`, and that run is
+# used only when the run of the split named a case found in the text of <file> and this run names none: a command
+# that ignores the line runs the file whole, and its CPU seconds are not start-up. When no run can be used (a run that
+# fails, names a case or gives no CPU seconds), it prints `<the pack's test.splitAllowance><TAB>the pack's
+# test.splitAllowance: <why it was not measured>`.
+splitstart() { # <worktree> <file> <the pack's test.command> <the pack's test.splitAllowance> <cases the split's run named, one a line>
+  local r a=() p rc cpu='' why='' nc
+  r=$(testrunner "$3" "$1" 2>/dev/null) || r=''
+  case $r in named\ *) r=${r#named }; r=${r% *} ;; *) r=${r#* } ;; esac
+  case $r in
+    'node --test') a=(node --test "--test-name-pattern=^$NOCASE\$" "$2") ;;
+    pytest) p=pytest; [[ $3 =~ (python[0-9.]*[[:space:]]+-m[[:space:]]+)pytest ]] && p="${BASH_REMATCH[1]}pytest"
+      read -ra a <<<"$p"; a+=(-q -k "${NOCASE//-/_}" "$2") ;;
+    'go test') if [[ $2 == *_test.go ]]; then p=.; [[ $2 != */* ]] || p=./${2%/*}; a=(go test -count=1 -run "^$NOCASE\$" "$p")
+      else why="go test runs packages, and $2 is no *_test.go file"; fi ;;
+    'cargo test') if [[ $2 =~ ^tests/([^/]+)\.rs$ ]]; then a=(cargo test --test "${BASH_REMATCH[1]}" -- --exact "$NOCASE")
+      else why="cargo test runs test targets, and $2 is no tests/<name>.rs file"; fi ;;
+    rspec) p=rspec; [[ $3 =~ bundle[[:space:]]+exec[[:space:]]+rspec ]] && p='bundle exec rspec'
+      read -ra a <<<"$p"; a+=(-e "$NOCASE" "$2") ;;
+  esac
+  if [ ${#a[@]} != 0 ]; then
+    (cd "$1" && exec timeout --kill-after=10 600 bash "$HERE/tools/testtime.sh" "$2" -- "${a[@]}") > "$1.nocase" 2>&1 < /dev/null; rc=$?
+    cpu=$(tail -n 1 "$1.nocase" | sed -n 's/^TESTRUN sec\t[^\t]*\t[^\t]*\t\([0-9.]*\)$/\1/p')
+    if [ "$rc" != 0 ] && ! { [ "$r" = pytest ] && [ "$rc" = 5 ]; }; then why="the run of $2 with no case ($r) failed (exit $rc)"; cpu=''
+    elif [ -z "$cpu" ]; then why="the run of $2 with no case ($r) gave no CPU seconds"; fi
+    rm -f "$1.nocase"
+  elif [ -n "$why" ]; then :
+  elif [ -z "$5" ] || ! grep -qF -- "$5" "$1/$2" 2>/dev/null; then
+    why="the run of the split named no case of $2, so a run of it with no case cannot be told from a run of the whole file"
+  else
+    printf 'fail\t%s\t%s\n' "$2" "$NOCASE" > "$1.rerun"; tests "$1" test.command alone; rc=$?
+    nc=$(testfails "$1.test" "$rc" 2>/dev/null | jq -r '[(.okcases + .passcases)[]?.cases[]?, .files[]?.cases[]?.name | select(. != "")] | first // empty' 2>/dev/null)
+    if [ -n "$nc" ]; then why="the run of $2 with no case ran its case $nc: the test command runs the file whole"
+    elif [ "$rc" != 0 ]; then why="the run of $2 with no case failed (exit $rc)"
+    else cpu=$(timed "$1" 2>/dev/null | jq -r --arg f "$2" '.[$f].cpu | numbers' 2>/dev/null)
+      [ -n "$cpu" ] || why="the run of $2 with no case gave no CPU seconds"; fi
+  fi
+  if [ -n "$cpu" ]; then printf '%s\tmeasured: a run of %s with no case\n' "$cpu" "$2"
+  else printf "%s\tthe pack's test.splitAllowance: %s\n" "$4" "$why"; fi
+}
 # The version of this check (speedproof(), optproof()): raised by every change to what it passes. The blocked line of
 # a card it fails carries it (speedcheck, card()); once it rises, the loop retries each card an older version blocked
 # (speedretry(), lib/run.sh). Lines written before that carry none, and are told by their reasons: version 1's two
@@ -1024,9 +1069,9 @@ NOCASE=conveyor-no-case
 # version 2's three ("the file is not faster: ...; its budget is ...", "the split does not fit: ..." and "the file is
 # over the budget of its own that the build proposes: ...").
 # shellcheck disable=SC2034 # read by lib/card.sh and lib/run.sh
-SPEEDCHECK=2
+SPEEDCHECK=3
 speedproof() { # <card> <worktree> <issue json> <test file> [<test file the change adds>...]
-  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l b='' fs='{}' sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' prc
+  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l b='' fs='{}' sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -1055,16 +1100,11 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
     elif [ "$rc" != 0 ]; then why="the files of the split, $l, fail with the change (exit $rc)"
     elif [ -z "$after" ]; then why="the run of the files of the split, $l, with the change gave no CPU seconds for each"
     else
-      # The start-up allowance is measured only when the sum needs it, and only where the runner filters cases: the run
-      # of the split named a case in the text of $5, and the run with no case selected names none. A runner with no
-      # case filter runs the file whole, so its CPU seconds are not start-up.
+      # The start-up allowance is measured only when the sum needs it (splitstart()).
       if ! jq -en --argjson a "$after" --argjson b "$before" '$a <= $b' >/dev/null 2>&1; then
         cs=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '(.okcases + .passcases)[]?.cases[]?, .files[]?.cases[]?.name | select(. != "")' 2>/dev/null)
-        printf 'fail\t%s\t%s\n' "$5" "$NOCASE" > "$mwt.rerun"; tests "$mwt" test.command alone; prc=$?
-        [ -n "$cs" ] && grep -qF -- "$cs" "$mwt/$5" 2>/dev/null \
-          && [ -z "$(testfails "$mwt.test" "$prc" 2>/dev/null | jq -r '(.okcases + .passcases)[]?.cases[]?, .files[]?.cases[]?.name | select(. != "")' 2>/dev/null)" ] \
-          && al=$(timed "$mwt" 2>/dev/null | jq -r --arg f "$5" '.[$f].cpu | numbers' 2>/dev/null)
-        if [ -n "$al" ]; then alf="measured: a run of $5 with no case"; else al=$sa; alf="the pack's test.splitAllowance"; fi
+        packget test.command cmd 2>/dev/null || cmd=''
+        al=$(splitstart "$mwt" "$5" "$cmd" "$sa" "$cs" | tail -n 1); alf=${al#*$'\t'}; al=${al%%$'\t'*}
         lim=$(jq -n --argjson b "$before" --argjson a "$al" --argjson k "$(($# - 4))" '$b + $a * $k | . * 1000 | round / 1000')
         jq -en --argjson s "$after" --argjson m "$lim" '$s <= $m' >/dev/null 2>&1 \
           || over+="${over:+; }the files take $after CPU s summed, $(jq -n --argjson s "$after" --argjson m "$lim" '$s - $m | . * 1000 | round / 1000') over the $lim CPU s a split of $f may take: $before CPU s on record plus a start-up allowance of $al CPU s ($alf) for each of the $(($# - 4)) files it adds"

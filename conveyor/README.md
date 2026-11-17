@@ -505,11 +505,14 @@ line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`
 gives files that each fit the budget and run side by side. So the check of an Optimize card (Bug cards: the new tests
 fail without the fix, below) passes a split when every case passes, each new file is at or under its budget, and the
 CPU seconds summed are at most the old file's median on record plus a start-up allowance for each new file. The check
-measures the allowance: it runs the first new file with no case selected (a run-again line
-`fail<TAB><file><TAB>conveyor-no-case`, a case that no file has). It uses that run only when the run names no case
-and the run of the split named a case of that file. A runner with no case filter runs the whole file, so its CPU
-seconds are not start-up. When the run is not used or gives no CPU seconds, the allowance is the pack's
-`test.splitAllowance` (default 1). It measures only when the sum is over the old file's median.
+measures the allowance: it runs the first new file with no case selected. When the test command starts node --test,
+pytest, go test, cargo test or rspec, Conveyor runs that runner on the file itself, with the runner's own filter set
+to a case name that no file has (go test runs the file's package; cargo test needs a `tests/<name>.rs` file). Any
+other test command gets a run-again line `fail<TAB><file><TAB>conveyor-no-case`. Conveyor uses that run only when the
+run names no case and the run of the split named a case of that file. A command with no case filter runs the whole
+file, so its CPU seconds are not start-up. When the run is not used, fails or gives no CPU seconds, the allowance is
+the pack's `test.splitAllowance` (default 1). The reason of a refused split says which: the file the allowance was
+measured on, or the pack's value and why. It measures only when the sum is over the old file's median.
 
 **A budget of its own.** A file whose cases cannot fit the budget without losing what they test gets a budget of its
 own in `test.files`. The Board's Tests page sets it (`conveyor.sh test-settings file-budget`, below). The build of an

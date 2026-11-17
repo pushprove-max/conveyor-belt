@@ -74,10 +74,10 @@ t_splitsum() {
 
 # Bug it catches: a runner with no case filter runs the whole file for the run with no case selected, and its 6 CPU s
 # are taken as start-up, so a split of 13 passes against 10 + 2 x 6. That run named the case one, so the pack's
-# test.splitAllowance (1) counts, and the split is refused.
+# test.splitAllowance (1) counts, and the split is refused. The reason says why it was not measured.
 t_splitprobewhole() {
   PROBEWHOLE=1 splitrun "$SPLIT" '' 6 7 6 f1.test.sh f2.test.sh
-  [ "$RC" != 0 ] && [ "$WHY" = "the split does not fit: the files take 13 CPU s summed, 1 over the 12 CPU s a split of f.test.sh may take: 10 CPU s on record plus a start-up allowance of 1 CPU s (the pack's test.splitAllowance) for each of the 2 files it adds" ] \
+  [ "$RC" != 0 ] && [ "$WHY" = "the split does not fit: the files take 13 CPU s summed, 1 over the 12 CPU s a split of f.test.sh may take: 10 CPU s on record plus a start-up allowance of 1 CPU s (the pack's test.splitAllowance: the run of f1.test.sh with no case ran its case one: the test command runs the file whole) for each of the 2 files it adds" ] \
     || fail "a run with no case selected that ran the file's cases was taken as its start-up: exit $RC, $WHY"
 }
 
