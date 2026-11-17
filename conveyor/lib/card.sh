@@ -229,8 +229,15 @@ card() { # <card> <issue> [<branch> <tip>]
       sk=$OPTREVIEW; OWNBUDGET=${ob%%$'\t'*} optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
       # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
-      # build session cannot repair the runner.
+      # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (redproof()):
+      # one that does not hold is blocked with that reason (exit 2), and one whose every case passes on main without
+      # its change (exit 3) closes as already done, as nochange() closes a card, its change dropped.
       bugproof "$c" "$wt" "$issue"; trc=$?
+      if [ $trc = 3 ]; then
+        t=$(head -n 1 "$wt.unfixed") && out=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" '{reason: $r} + $e')") && locked append "$out" \
+          || { block "$c" "$n" "$wt" "build: $(head -n 1 "$wt.unfixed" 2>/dev/null) The engine could not write the closed line"; return; }
+        clean "$wt"; return
+      fi
       [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
       if [ $trc != 0 ]; then
         began "$c" "$n" build

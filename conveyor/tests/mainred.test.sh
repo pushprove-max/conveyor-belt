@@ -319,3 +319,69 @@ t_mainredland() {
   [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/closed" ] && [ ! -e "$STUB/comments" ] || fail "main-red filed, closed or commented on an issue: $(cat "$STUB/filed" "$STUB/closed" "$STUB/comments" 2>&1)"
   loop check || fail "the record check refuses the fix card's picked line"
 }
+
+# Issue 181: the bug-card check of a main-red fix card (redproof()) is main's own failing cases, not new tests. The
+# fixture's cases: `a.test: one` and the file c.test, failing naming no case; each passes when ok.txt holds its name
+# (`one`, `c.test`), a named case printing `ok <case>`; `gone:one` in ok.txt makes the case not run (as when the change
+# renames it) and its file pass. The run on main is a runner that logs each file a `fail` line of its list names, as the test step's
+# runner does, and keeps that list in $STUB/redlist. The fix card's entry holds both cases.
+redsetup() { # <ok.txt on main, or nothing>
+  setup "[$(issue 7 2026-01-01)]"
+  [ -z "$1" ] || { printf '%s\n' "$1" > "$R/ok.txt"; git -C "$R" add ok.txt; git -C "$R" commit -qm "ok.txt"; }
+  printf '%s\n' 'cp "$CONVEYOR_TEST_RERUN" "$STUB/redlist"; L=$CONVEYOR_TEST_LOG/r; rc=0' \
+    'while IFS=$'"'"'\t'"'"' read -r k f c; do' \
+    '  [ "$k" = fail ] || continue; echo "== $f" | tee -a "$L"' \
+    '  if grep -qx "${c:-$f}" ok.txt 2>/dev/null; then [ -z "$c" ] || echo "ok $c"; echo "-- ok $f" >> "$L"' \
+    '  elif [ -n "$c" ] && grep -qx "gone:$c" ok.txt 2>/dev/null; then echo "-- ok $f" >> "$L"' \
+    '  else echo "FAIL [${c:-$f}]: broken"; echo "-- FAIL $f" >> "$L"; rc=1; fi' \
+    'done < "$CONVEYOR_TEST_RERUN"' 'exit $rc' > "$STUB/mainrun-cmd"
+  local s; s=$(git -C "$R" rev-parse HEAD)
+  eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s" || fail "the cases were not recorded"
+}
+# The check alone (bugproof(), which calls redproof()) on a fix card cfix whose worktree holds <ok.txt> staged: its
+# exit and the first line of its result.
+redcheck() { # <ok.txt in the change>
+  local w=$T/$CASE/cards/cfix
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  git -C "$R" worktree add -q --detach "$w" HEAD && printf '%s\n' "$1" > "$w/ok.txt" && git -C "$w" add ok.txt || fail "the fix card's worktree could not be made"
+  eng 'bugproof cfix '"$w"' "$(redissue cfix)"; echo "exit $?"; head -n 1 '"$w"'.unfixed'
+}
+# Bug it catches: a right fix for a red main that adds no test (here, a fixture fix) was blocked: "the new tests pass
+# without the fix, so they do not prove it". Each case runs alone, as the test step runs it, fails without the change
+# and passes with it: the check holds.
+t_redproofnotest() {
+  redsetup ''
+  local got; got=$(redcheck $'one\nc.test')
+  [ "$(head -n 1 <<<"$got")" = "exit 0" ] && [[ $(tail -n 1 <<<"$got") == "Each case main fails at "*" fails there without the change and passes with it: \`a.test: one\`, \`c.test\`." ]] \
+    || fail "a red-main fix that adds no test did not pass the check: $got"
+  [ "$(cat "$STUB/redlist")" = $'fail\ta.test\tone\nfail\tc.test' ] || fail "the cases were not run alone, each a fail line of the list: $(cat "$STUB/redlist")"
+}
+# Bug it catches: a red-main fix that leaves a case failing passed the check, or was blocked without naming the case.
+t_redproofstill() {
+  redsetup ''
+  local got; got=$(redcheck one)
+  [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [ "$(tail -n 1 <<<"$got")" = '`c.test` still fails with the change.' ] \
+    || fail "a change that leaves c.test failing was not blocked naming it: $got"
+}
+# Bug it catches: a change that renames a failing case (so it no longer runs) passed the check, as its file's passing
+# run was read as the case passing, with no `ok one` from it.
+t_redproofgone() {
+  redsetup ''
+  local got; got=$(redcheck $'gone:one\nc.test')
+  [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [[ $(tail -n 1 <<<"$got") == "The run on main's code at "*" with the change gave no result for \`a.test: one\`, so it proves nothing either way." ]] \
+    || fail "a change after which the case did not run was not blocked naming it: $got"
+}
+# Bug it catches: a fix card whose cases pass on main without its change (main is no longer red for them) landed a
+# change that proves nothing, or was blocked. Its whole run: it closes as already done, its closed line naming the
+# cases, and nothing lands.
+t_redproofgreen() {
+  redsetup $'one\nc.test'
+  local s c; s=$(git -C "$R" rev-parse HEAD)
+  loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
+  c=$(st 'select(.step == "closed") | .card')
+  [[ $c == *-0 ]] && [ "$(st 'select(.step == "closed") | .reason')" = 'Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
+    || fail "the fix card did not close as already done, naming the cases: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ -z "$(st 'select(.step == "landed" or .step == "blocked")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$T/$CASE/cards/$c" ] \
+    || fail "the fix card landed, was blocked or left its worktree: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  loop check || fail "the record check refuses the closed line"
+}

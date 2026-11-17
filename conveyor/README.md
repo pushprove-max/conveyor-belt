@@ -348,7 +348,15 @@ failure gets a verdict:
   commit that changed the case's file (the test file at main's commit that defines the case, `t_<case>()`,
   `<case>()` or the name quoted, when the failure names a runner such as the engine's `conveyor/conveyor.test.sh`),
   and asks for the cases to pass on main; it is labelled as a P0 bug and builds, is reviewed, tested, landed and
-  pushed like any card. The Board shows it titled "Main is red: <cases>"; its commit names the cases and main's
+  pushed like any card. Its proof is the cases, not a new test. After its build, each case the card holds runs alone
+  on a test slot, as the test step runs it, on main's code at the commit the card was built on: first without the
+  change, then with it. Each case must fail without the change and pass with it. The card need not add a test, and
+  the check does not run a test that it adds (its test step does). When a case still fails with the change, the
+  card is blocked with "<case> still fails with the change", with no review. When every case passes without the
+  change, main is no longer red for them: the card closes as already done, with no review, and its change does not
+  land. Its `closed` line names the cases. When some cases pass without the change and others fail, or a run gives
+  no result for a case, the card is blocked, and the reason names the case.
+  The Board shows it titled "Main is red: <cases>"; its commit names the cases and main's
   commit. In place of an issue number, the Board, `foreman status` and the Foreman's wakes name it
   "Main is red (<commit>)". A case found failing on the same commit, while its card runs too, is added to that card (its title on the
   Board, and the reviews and fix sessions after it, name the case); a case an open fix card of an earlier commit
@@ -838,7 +846,8 @@ file that failed (a runner that stops the run with no test failing proves nothin
 result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
 that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:
 <the run's last lines>", with no second build session and no review. The review is shown the check's
-result. A card whose issue is not a bug, and a build that left no change, are not checked. A change to test files
+result. A card whose issue is not a bug, and a build that left no change, are not checked. A main-red fix card is
+checked by the cases that main fails, not by its tests (the **main** verdict, above). A change to test files
 alone (every path it changes is a test file, as in a fix to a test that main made wrong) is not checked either: it has
 no fix to take out, so its tests would run on the same code and pass, and the card would be blocked though correct.
 Its result says the change is test-only, and the review judges whether each changed test still checks what it was

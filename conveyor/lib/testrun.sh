@@ -654,6 +654,7 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # command's list (CONVEYOR_TEST_RERUN) as `fail<TAB><file>`, so the command (or test.fileCommand) runs them
 # alone, with the fix and then without it. At least one must fail without it, and they must pass with it. When the
 # issue names none, the check is skipped and holds: the result and the card's `bugproof` line (result skipped) say why.
+# A main-red fix card is not checked so: its proof is main's own failing cases (redproof(), its exits too).
 # That selection run is made only when the change adds or changes no test file, or its test files' run selected nothing.
 # The command of a run with the pack's test.fileCommand (tests()): each file its list (CONVEYOR_TEST_RERUN) names
 # `fail`, in order, runs alone with that command, the file's path added as its last argument and in CONVEYOR_TEST_FILE.
@@ -762,6 +763,8 @@ bugproof() { # <card> <worktree> <issue json>
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
+  # A main-red fix card (its entry in the main-red record names it) is proved by main's own failing cases (redproof()).
+  ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 || { redproof "$1" "$2"; return; }
   # A change to test files alone (every changed path, deleted ones too, is a test file: testpaths()) has no fix to take out:
   # its tests would run on the same code and pass, so it is not run. The review is told, and judges the tests.
   # The paths are counted, not tested with grep -q: under pipefail its early exit could fail the pipe and pass a change
@@ -867,6 +870,69 @@ bugproof() { # <card> <worktree> <issue json>
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -z "$nr$alone" ] || return 2
   [ -n "$held" ]
+}
+# The bug-card check of a main-red fix card (bugproof(): a card its entry in $MAINRED names, mainred()). Its proof is
+# main's own failing cases, not new tests: a right fix for a red main (a rename, a fixture fix) often adds none, or one
+# that cannot fail on main's code. Each case its entry holds as it is now runs alone on a test slot, as the test step
+# runs a card's failing cases on main (verdicts(), redrun()), in a worktree of the commit the card was built on (its
+# HEAD), $CARDS/mainrun/<card>.unfixed: first without the change, then with it staged. Each must fail without the
+# change and pass with it. Tests the change adds are not asked for and not run here (the test step runs them). Writes
+# the result in <worktree>.unfixed, which the review is shown; its first line is the reason when the check fails.
+# Exit 0 when the check holds; 3 when every case passes without the change (main is no longer red for them: card()
+# closes the card as already done); 2 when a case still fails with the change, a case passes without it while another
+# fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
+redproof() { # <card> <worktree>
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2
+  cs=$(jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, case: (.file as $f
+    | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null) \
+    || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
+  if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+    && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null); then
+    wo=$(redrun "$mwt" "$cs") || wo=''
+    if [ -z "$wo" ] || [ -n "$(rednames none "$wo")" ]; then
+      out="the run on main's code at $sha without the change gave no result for $(rednames none "${wo:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"
+    elif [ -z "$(rednames fail "$wo")" ]; then
+      out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change, so the card closes as already done"; rc=3
+    elif [ -n "$(rednames pass "$wo")" ]; then
+      out="$(rednames pass "$wo") passes on main's code at $sha without the change (main is no longer red for it), while $(rednames fail "$wo") fails there"
+    elif ! out=$(git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>&1); then
+      out="the change could not be applied to main's code at $sha, so the cases did not run with it: ${out:0:400}"
+    else
+      wi=$(redrun "$mwt" "$cs") || wi=''
+      if [ -n "$wi" ] && [ -n "$(rednames fail "$wi")" ]; then out="$(rednames fail "$wi") still fails with the change"
+      elif [ -z "$wi" ] || [ -n "$(rednames none "$wi")" ]; then
+        out="the run on main's code at $sha with the change gave no result for $(rednames none "${wi:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"
+      else out="each case main fails at $sha fails there without the change and passes with it: $(rednames pass "$wi")"; rc=0; fi
+    fi
+    { printf '%s\n' "${out^}."
+      echo 'This card fixes a red main, so its proof is the cases main fails, each run alone on main'"'"'s code without the change and then with it; it need not add a test.'
+      echo 'The end of the last run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
+  else
+    printf 'The cases main fails could not be run on main'"'"'s code at %s: %s\n' "${sha:-a commit that could not be read}" "${out:0:600}" > "$2.unfixed"
+  fi
+  git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  return $rc
+}
+# The cases of <verdict> in a run's result (redrun()), as `<case>`, joined by ", ".
+rednames() { # <verdict> <redrun() output>
+  jq -r --arg v "$1" '[.[] | select(.verdict == $v) | "`\(.name)`"] | join(", ")' <<<"$2"
+}
+# One run of redproof(): the cases <cases json> ([{name, file, case}], case "" for a file that failed naming no case)
+# alone in <worktree>, each a `fail` line of the run's list (CONVEYOR_TEST_RERUN), as verdicts() runs them on main.
+# Prints the cases, each with its verdict: fail when the run's logs (testfails()) name it failed (or its file failed,
+# for a file alone, or ran out of time); pass when they name it passed (a line `ok <case>` under its file; a file alone,
+# when its file passed: a passing file whose named case did not run, as when the change renames it, is no proof of
+# that case); none when they name neither. A command that writes no logs says only its exit, of every case.
+redrun() { # <worktree> <cases json>
+  local rc t=null
+  jq -r '.[] | if .case == "" then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
+  tests "$1" test.command alone; rc=$?
+  [ -z "$(testlogs "$1")" ] || t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'
+  jq -c --argjson t "$t" --argjson rc "$rc" 'map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)
+    elif any($t.files[]?; .file == $c.file and ($c.case == "" or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file then "fail"
+    elif ($c.case == "" and any($t.passed[]?; . == $c.file)) or any(($t.okcases // []) + ($t.passcases // []) | .[]; .file == $c.file and any(.cases[]?; . == $c.case)) then "pass"
+    else "none" end)})' <<<"$2"
 }
 # The test file of a speed-up issue (card()): an issue whose title starts SPEEDUP (or the title start given: OPTIMIZE),
 # as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing kept for the issue
