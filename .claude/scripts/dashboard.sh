@@ -150,7 +150,8 @@
 #           actions, each with its text, and allowed, the pack's models by CLI), control (the snapshot's control record: its tests is the Tests model), clis
 #           (the CLIs installed on the host, as the judge's role offers them), flaky (the snapshot's flaky cases) and
 #           testMap (the snapshot's: the Test map part, conveyor/lib/testmap.sh mapboard()), drift (the snapshot's:
-#           the latest drift watch, conveyor/bench/drift.sh, for the Benchmarks part);
+#           the latest drift watch, conveyor/bench/drift.sh, for the Benchmarks part) and bench (the snapshot's: the
+#           Benchmarks part, the SWE-bench runs' board.json, conveyor/bench/swe.sh swe_board());
 #           each null from a snapshot without it.
 #   metrics records (each record's measured totals, today and week) and cards (each card of the 7 days with
 #           its metrics: step timeline, seconds, tokens, dollars, findings; null from a snapshot without them), and
@@ -900,7 +901,8 @@ PANELS_JQ='
           | if (.failures | type) == "array" then .failures |= map(if type == "object" then tag($r) else . end) else . end
           | if (.optimize | type) == "array" then .optimize |= map(if type == "object" then tag($r) | shut($oi) else . end) else . end else . end) else . end),
         testActions: ((.snap.testActions | objects | {limit, actions, allowed}) // null), control: (.snap.control | objects // null), clis: ((.snap.modelSettings | objects | (.judge.clis // .reviewer.clis) | objects) // null),
-        flaky: (.snap.flaky | arrays // null), testMap: (.snap.testMap | objects // null), drift: (.snap.drift | objects // null)};
+        flaky: (.snap.flaky | arrays // null), testMap: (.snap.testMap | objects // null), drift: (.snap.drift | objects // null),
+        bench: (.snap.bench | objects // null)};
       {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null, machine: $ml} else testsOf end)
           + {repos: [$R[].repo], others: ([$R[] | select(.steered | not) | {key: .repo, value: testsOf}] | from_entries)})} end),
    # What Conveyor measured: the totals of each record for today, the 7 days and the 7 before them, each of the 7

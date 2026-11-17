@@ -1996,7 +1996,7 @@
   // Benchmarks: the latest drift watch of the project (`conveyor.sh bench drift`, the snapshot's drift): the ended cards
   // of the latest engine commit against those of the one before, a mean a card of each figure, and a group of fewer
   // than 5 cards called too small to mean anything.
-  function benchPart(dr) {
+  function driftPart(dr) {
     const h = S.ctx.h, el = h('section', 'tests-bench'), b = obj(dr.before) || {}, a = obj(dr.after) || {};
     const v = (x) => (typeof x === 'number' ? String(x) : '-');
     const sha = (g) => String(g.engine || '').slice(0, 8);
@@ -2008,6 +2008,111 @@
     (Array.isArray(dr.small) ? dr.small : []).filter((k) => k === 'before' || k === 'after').forEach((k) => {
       el.append(h('p', 'warn-note', `The ${k} group holds ${cards(k === 'before' ? b : a)}: too small to mean anything (fewer than 5 cards).`));
     });
+    return el;
+  }
+
+  // ---- the Benchmarks part (#236): SWE-bench Verified run through Conveyor (conveyor.sh bench swe) ----
+  // The snapshot's bench is the run's board.json (bench/swe.sh swe_board()): live (the run in progress or the last
+  // one), versions, presets, max, perTask (each arm's usual and worst-case sessions and minutes a task), soloKey (the
+  // key a Claude alone run takes now) and keys (each engine commit's, or Claude alone's, results by task, and at: their
+  // places in the pinned order). Before Start the part shows the sessions and minutes expected for the tasks of the n
+  // chosen that the version picked has not run yet; while a run goes, a bar of its tasks done with Stop; then the results side by side, one
+  // column a version, and Compare, which shows `bench swe diff` of two versions.
+  const BENCH = { n: 5, solo: false, engine: 'main', a: '', b: '', diff: null };  // the n, version and Compare pair picked, the last Compare's text
+  const keyName = (k) => (k.arm === 'solo' ? `Claude alone${k.model ? ` (${k.model})` : ''}` : `${k.version || 'commit'} ${String(k.engine || '').slice(0, 12)}`);
+  // How many tasks a difference must reach to be told from run-to-run noise (swe_noise(), bench/swe.sh).
+  function noise(n) {
+    const d = Math.ceil(Math.sqrt(2 * n));
+    return d >= n ? `With ${n} ${n === 1 ? 'task' : 'tasks'} only a total break shows: a difference under ${n} is within the noise.`
+      : `With ${n} tasks a difference under ${d} tasks is within the noise.`;
+  }
+  function benchPart(b) {
+    const h = S.ctx.h, el = h('section', 'tests-bench'), live = obj(b.live), max = num(b.max) || 500;
+    el.append(h('h3', 'board-head', 'Benchmarks: SWE-bench Verified'));
+    const running = live && live.state === 'running';
+    if (running) {
+      const line = h('p', 'tests-bench-state');
+      line.append(progress(`SWE-bench: ${live.done} of ${live.n} tasks`, num(live.done) || 0, num(live.n) || 0),
+        h('span', null, ` Running: ${live.done} of ${live.n} tasks done, ${live.resolved} resolved${live.current ? `, now ${live.current}` : ''} · ${live.arm === 'solo' ? 'Claude alone' : `engine ${live.version || String(live.engine || '').slice(0, 12)}`}.`));
+      el.append(line, button('Stop', 'btn-quiet', 'bench-stop', 'Stop the SWE-bench run', () => send('bench', ['stop'], (t) => `Stop sent: the SWE-bench run. ${t}`)));
+    } else {
+      if (live && live.state) {
+        const tasks = list(live.tasks), notRun = tasks.filter((t) => String(t.result).startsWith('not run')).length;
+        el.append(h('p', 'tests-bench-last', `Last run: ${live.state === 'done' ? 'ended' : live.state === 'guard' ? 'stopped at the usage guard' : 'stopped'} · ${live.resolved} of ${live.n} resolved${notRun ? `, ${notRun} not run` : ''} · ${live.arm === 'solo' ? 'Claude alone' : `engine ${live.version || ''} ${String(live.engine || '').slice(0, 12)}`.trim()}.`));
+      }
+      const ctl = h('div', 'tests-act-row');
+      list(b.presets).concat(b.presets ? [] : [1, 5, 20, 50]).forEach((p) => {
+        ctl.append(button(String(p), p === BENCH.n ? 'btn-primary' : 'btn-quiet', `bench-preset-${p}`, `${p} ${p === 1 ? 'task' : 'tasks'}`, () => { BENCH.n = p; draw(); }));
+      });
+      const box = h('input', 'tests-bench-n');
+      box.type = 'number'; box.min = '1'; box.max = String(max); box.value = String(BENCH.n); box.dataset.act = 'bench-n'; box.setAttribute('aria-label', 'Number of tasks');
+      box.addEventListener('change', () => { const v = Number(box.value); if (Number.isInteger(v) && v >= 1 && v <= max) BENCH.n = v; draw(); });
+      const pick = h('select', 'tests-bench-engine');
+      pick.dataset.act = 'bench-engine'; pick.setAttribute('aria-label', 'Engine version');
+      const versions = list(b.versions).filter((v) => obj(v) && typeof v.name === 'string');
+      (versions.some((v) => v.name === 'main') ? versions : [{ name: 'main' }].concat(versions)).forEach((v) => {
+        const o = h('option', null, v.name); o.value = v.name; pick.append(o);
+      });
+      const solo = h('option', null, 'Claude alone (no review or fix rounds)'); solo.value = '--solo'; pick.append(solo);
+      pick.value = BENCH.solo ? '--solo' : BENCH.engine;
+      pick.addEventListener('change', () => { BENCH.solo = pick.value === '--solo'; if (!BENCH.solo) BENCH.engine = pick.value; draw(); });
+      ctl.append(box, pick);
+      if (!b.versions) ctl.append(button('List versions', 'btn-quiet', 'bench-versions', 'List the released versions', () => send('bench', ['versions'], () => 'The versions are listed.')));
+      el.append(ctl);
+      const per = obj(obj(b.perTask) && b.perTask[BENCH.solo ? 'solo' : 'conveyor']) || (BENCH.solo ? { usual: 1, worst: 1, minutes: 8 } : { usual: 2, worst: 12, minutes: 20 });
+      // The tasks of the first n that the version picked (or Claude alone) already ran are reused: only the rest cost.
+      const commit = (versions.find((v) => v.name === BENCH.engine) || {}).commit;
+      const mine = list(b.keys).find((k) => obj(k) && (BENCH.solo ? k.key === b.soloKey : k.arm !== 'solo' && typeof commit === 'string' && k.engine === commit));
+      const reused = mine ? list(mine.at).filter((i) => Number.isInteger(i) && i < BENCH.n).length : 0, todo = BENCH.n - reused;
+      el.append(h('p', 'tests-bench-plan', `Expected for ${BENCH.n} ${BENCH.n === 1 ? 'task' : 'tasks'}: about ${Math.ceil(todo * per.usual)} sessions (worst case ${todo * per.worst}) and ${todo * per.minutes} minutes. ${reused ? `${reused} of them already ran on this version and are reused at no cost.` : 'Tasks already run on this version are reused and cost nothing.'} A run does not start while the usage guard is reached.`));
+      const go = button('Start', 'btn-primary', 'bench-start', `Run SWE-bench: ${BENCH.n} tasks`, () => {
+        send('bench', ['run', String(BENCH.n)].concat(BENCH.solo ? ['--solo'] : ['--engine', BENCH.engine]), (t) => `Started: ${t.replace(/^conveyor: /, '')}`);
+      });
+      el.append(go);
+    }
+    // The results, side by side: one row a task, one column a version (or Claude alone), the resolved count of each.
+    const keys = list(b.keys).filter((k) => obj(k) && obj(k.tasks));
+    if (keys.length) {
+      const ids = Array.from(new Set(keys.flatMap((k) => Object.keys(k.tasks)))).sort();
+      const t = h('table', 'tests-bench-table'), head = h('tr');
+      head.append(h('th', null, 'Task'), ...keys.map((k) => h('th', null, keyName(k))));
+      t.append(head);
+      ids.forEach((id) => {
+        const r = h('tr');
+        r.append(h('td', null, id), ...keys.map((k) => {
+          const x = obj(k.tasks[id]);
+          return h('td', null, x ? `${x.resolved ? 'Resolved' : 'Not resolved'} · ${x.sessions} sessions · ${x.tokens} tokens · ${x.minutes} min` : '—');
+        }));
+        t.append(r);
+      });
+      const tot = h('tr');
+      tot.append(h('th', null, 'Resolved'), ...keys.map((k) => { const xs = Object.values(k.tasks); return h('th', null, `${xs.filter((x) => obj(x) && x.resolved).length} of ${xs.length}`); }));
+      t.append(tot);
+      const wrap = h('div', 'tests-scroll');
+      wrap.append(t);
+      el.append(wrap);
+      const common = ids.filter((id) => keys.every((k) => k.tasks[id]));
+      if (keys.length > 1 && common.length) el.append(h('p', 'board-from', `On the ${common.length} tasks every column ran: ${noise(common.length)}`));
+      const engines = keys.filter((k) => k.arm !== 'solo' && typeof k.engine === 'string');
+      if (engines.length > 1) {
+        const cmp = h('div', 'tests-act-row');
+        const choose = (which, label) => {
+          const s = h('select', null);
+          s.dataset.act = `bench-${which}`; s.setAttribute('aria-label', label);
+          engines.forEach((k) => { const o = h('option', null, keyName(k)); o.value = k.engine; s.append(o); });
+          if (!engines.some((k) => k.engine === BENCH[which])) BENCH[which] = engines[which === 'a' ? 0 : 1].engine;
+          s.value = BENCH[which];
+          s.addEventListener('change', () => { BENCH[which] = s.value; });
+          return s;
+        };
+        cmp.append(choose('a', 'Version A'), choose('b', 'Version B'), button('Compare', 'btn-quiet', 'bench-compare', 'Compare the two versions', () => {
+          BENCH.diff = null;
+          send('bench', ['diff', BENCH.a, BENCH.b], () => 'Compared.', (text) => { BENCH.diff = text; });
+        }));
+        el.append(cmp);
+        if (BENCH.diff) el.append(h('pre', 'tests-bench-diff', BENCH.diff));
+      }
+    }
     return el;
   }
 
@@ -2028,6 +2133,8 @@
     if (!S.sel.size) { S.answers = null; if (asking('many')) S.ask = null; }
     const parts = [];
     if (obj(S.d.testMap)) parts.push(mapPart(S.d.testMap));
+    // The Benchmarks part, also before any run (the snapshot's bench is null then); not from an engine older than it.
+    if ('bench' in S.d) parts.push(benchPart(obj(S.d.bench) || {}));
     // Settings: the Tests model, Test limits and Auto-file, collapsed until opened; it stays as it was from one draw to
     // the next.
     const wasSet = el.querySelector('.tests-settings');
@@ -2053,7 +2160,7 @@
       parts.push(recent(files, gone));
       set.append(actionsHead(), limits(), autofile());
     }
-    if (obj(S.d.drift)) parts.push(benchPart(S.d.drift));
+    if (obj(S.d.drift)) parts.push(driftPart(S.d.drift));
     parts.push(set);
     const note = h('p', 'board-note tests-note');
     note.setAttribute('aria-live', 'polite');

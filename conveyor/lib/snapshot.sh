@@ -166,6 +166,9 @@
 #   (lib/testfiles.sh testspart() says what it holds); null when the pack cannot be read.
 # testMap: the Tests page's Test map part: the map's state, its coverage tool, the last whole-suite run's seconds and
 #   the last build by hand (lib/testmap.sh mapboard() says what it holds); null when the pack cannot be read.
+# bench: the Tests page's Benchmarks part: the SWE-bench runs' board.json (bench/swe.sh swe_board() says what it
+#   holds: the run in progress, the runs, each engine's results by task, the versions, the expected figures); null
+#   before any run.
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
 #   cacheWrite, in $ per million tokens), overrides (the pack's prices, added models and aliases, which win over it),
 #   names (each model's display name) and seen (each model ID the steps and the research lane's sessions of the last
@@ -828,8 +831,18 @@ snapshot() (
   testspart "$since" > "$d/tests" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
   # testMap: the Test map part (mapboard(), lib/testmap.sh).
   mapboard "$MAIN" > "$d/testmap" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
-  jq -c --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk
-    | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | def since: . + {since: $mv[.issue | tostring].at};
+  # bench: the Benchmarks part, board.json of `conveyor.sh bench swe` (bench/swe.sh); a run in progress whose process
+  # is gone (killed with no end written) is shown stopped, and soloKey is the key of the builder seat in force now
+  # (swe_solokey()), not the one board.json kept from its last write. No program starts before the first run.
+  echo null > "$d/bench"
+  if [ -s "$ST/bench/swe/board.json" ]; then
+    bp=$(jq -r 'objects | .live | objects | select(.state == "running") | .pid | numbers' "$ST/bench/swe/board.json" 2>/dev/null) || bp=''
+    bf=objects; [ -z "$bp" ] || kill -0 "$bp" 2>/dev/null || bf='.live.state = "stopped" | .live.current = null'
+    bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
+    jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
+  fi
+  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk
+    | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = $bn[0] | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1
   # The lists whole go to HISTORY, by a file of their own beside it and one rename, so a reader never sees half of one;

@@ -306,8 +306,14 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows, from top to bottom: the Test map, the figures, the table of test files, Test edits by cards,
-Removed by Optimize, Recent actions, Benchmarks, and Settings.
+The Tests tab shows, from top to bottom: the Test map, Benchmarks: SWE-bench Verified, the figures, the table of
+test files, Test edits by cards, Removed by Optimize, Recent actions, Benchmarks, and Settings.
+
+The Benchmarks: SWE-bench Verified part runs [SWE-bench Verified](benchmarks.md) through Conveyor. Pick 1, 5, 20 or
+50 tasks, or type any number up to 500, and pick main, a release, or Claude alone. Before you click **Start**, the part
+shows the sessions and minutes the run is expected to take. While the run goes, a bar shows the tasks done, and
+**Stop** ends it. The results of every version show side by side, one column a version, with a line that says how big
+a difference the number of tasks can show. **Compare** shows why two versions differ, task by task.
 
 The Benchmarks part shows the latest [drift watch](benchmarks.md#drift-watch): the cards of the latest engine commit
 against the cards of the commit before it, with the number of cards in each group. It says when a group is too small

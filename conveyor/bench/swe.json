@@ -1,0 +1,9 @@
+{
+  "dataset": "princeton-nlp/SWE-bench_Verified",
+  "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "seed": "conveyor-swe-1",
+  "tasks": 500,
+  "presets": [1, 5, 20, 50],
+  "minutes": {"conveyor": 20, "solo": 8},
+  "taskTimeout": 14400
+}

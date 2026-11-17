@@ -181,6 +181,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
+# or bench (the Tests page's Benchmarks: Start, Stop, List versions and Compare: `conveyor.sh bench swe <n> [--solo |
+# --engine <version>] | stop | versions | diff <version> <version>`),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
@@ -212,12 +214,16 @@ RULE = re.compile(r'(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
 RUN_ID = re.compile(r'[0-9a-f]{12}')  # a full test run's id, as conveyor.sh's full-test anyway takes it
 VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})')  # a release's, as conveyor.sh's release-run takes it
+# An engine a SWE-bench run builds with, and the number of its tasks, as conveyor.sh's bench swe takes them.
+BENCH_ENGINE = re.compile(r'main|v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})|[0-9a-f]{40}')
+BENCH_N = re.compile(r'[1-9][0-9]{0,2}')
 # every other action: 30 s. start outlasts conveyor.sh's 60 s `timeout 60 gh issue list` (control start), so the
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
-                   'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60}  # testaction and testmap stop wait up to 40 s for the end
+                   'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60,  # testaction and testmap stop wait up to 40 s for the end
+                   'bench': 600}  # bench diff makes one model call a flipped task; its stop waits up to 30 s for the end
 DEPENDS_MAX = 20  # the issues one `control depends` names
 # The condition the owner gives with their yes, or why they say no: one line of plain text.
 MAX_SAID = 300
@@ -402,6 +408,10 @@ def control_ok(body):
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testmap':  # the Tests page's Build the test map, or its Stop
         return v in (['build'], ['stop'])
+    if a == 'bench':  # the Tests page's Benchmarks: Start (n, then --solo or --engine <version>), Stop, List versions, Compare (two versions)
+        return v in (['stop'], ['versions']) or (n == 3 and v[0] == 'diff' and all(BENCH_ENGINE.fullmatch(x) for x in v[1:])) or (
+            2 <= n <= 4 and v[0] == 'run' and BENCH_N.fullmatch(v[1]) is not None and int(v[1]) <= 500
+            and (n == 2 or v[2:] == ['--solo'] or (n == 4 and v[2] == '--engine' and BENCH_ENGINE.fullmatch(v[3]) is not None)))
     if a == 'mutate':  # the Tests page's Mutation check: one test file or a list of them, to the front of the idle queue
         return 1 <= n <= TEST_FILES_MAX and all(TEST_FILE.fullmatch(x) for x in v)
     if a == 'testrules':  # the Tests page's Auto-file: the switch, a guard, or one setting of a rule
@@ -604,6 +614,14 @@ def control_script(action, args, main, today, record=None, user=None):
     if action == 'standing':
         # The record's pack's auto.standing: one kind on or off (conveyor.sh auto standing, which checks it).
         return '%s auto standing %s %s' % (conv, q(args[0]), q(args[1]))
+    if action == 'bench':
+        if args[0] == 'run':
+            # A run takes hours: it starts on the host and goes on after the answer. One the engine refuses at once (a
+            # run already going, the usage guard reached, a version it cannot take) answers its refusal.
+            return ('l=$(mktemp) || exit 1; %s bench swe %s > "$l" 2>&1 < /dev/null & p=$!; sleep 3; '
+                    'if kill -0 "$p" 2>/dev/null; then rm -f "$l"; echo "conveyor: the SWE-bench run started"; '
+                    'else wait "$p"; r=$?; cat "$l"; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in args[1:]))
+        return '%s bench swe %s' % (conv, ' '.join(q(x) for x in args))
     if action in ('testaction', 'testrules', 'testmap'):
         # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's;
         # a build of the test map starts on the host and returns (conveyor.sh testmap build), or is stopped.
@@ -1578,6 +1596,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if err:
                 return self.reply(*err)
             said = (run.stdout.strip().splitlines() or ['done'])[-1]
+        # Compare's answer is the whole comparison (totals, the tasks, each flipped task's facts); the ruling row keeps its last line.
+        answer = run.stdout.strip() if results is None and action == 'bench' and args[:1] == ['diff'] and run.stdout.strip() else said
         try:  # the ruling row names the Board user who did it, as /answer's does
             log_ruling('Board control: %s' % ' '.join([action] + args), said, user)
         except OSError:
@@ -1588,7 +1608,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # the change; the Board keeps the answer until such a snapshot comes.
         if results is not None:
             return self.json_reply(200, {'results': results}, {'X-Answered-At': str(math.ceil(time.time()))})
-        self.reply(200, said, {'X-Answered-At': str(math.ceil(time.time()))})
+        self.reply(200, answer, {'X-Answered-At': str(math.ceil(time.time()))})
 
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
