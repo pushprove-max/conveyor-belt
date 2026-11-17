@@ -89,7 +89,7 @@
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
-    steer: null, steerSent: null, cores: null };
+    steer: null, steerSent: null, cores: null, bare: null, bareFor: null, idle: null, shown: new Map() };
   // steer: the machine's Card work yields to you as the snapshot says (null: an engine that does not say); steerSent:
   // the value the host took from here, shown until a snapshot says it. cores: the machine's cores kept for the user as
   // the snapshot says ({reserved, slots, unavailable}; null: an engine that does not say).
@@ -1295,6 +1295,8 @@
     ['blocked', 'Blocked'], ['rule', 'Skipped by a rule'], ['approve', 'Waits for your yes']];
   const ISORTS = [['priority', 'Priority'], ['number', 'Number'], ['age', 'Age'], ['area', 'Area'], ['state', 'State']];
   const IFILTERS = ['iq', 'istate', 'iprio', 'iarea', 'ilabel', 'isort', 'idir'];
+  // The open issues' filters as the address holds them, as one text (S.shown keeps the ones each panel shows).
+  const filtersOf = (ctx) => JSON.stringify(IFILTERS.map((k) => ctx.param(k) || ''));
   function openIssues() {
     const d = S.d, c = ctl();
     if (!d.open || !Array.isArray(d.open.issues)) return null;
@@ -1363,8 +1365,10 @@
     li.append(box, S.ctx.issueLink(x), h('span', 'board-title', x.title || 'untitled'), h('span', 'rules-prio', prio(x)),
       h('span', 'board-from', x.areas.length ? x.areas.map(areaName).join(', ') : 'no area'));
     list(x.labels).filter((l) => !isArea(l)).forEach((l) => li.append(S.ctx.chip(l, 'quiet')));
-    li.append(h('span', 'board-from rules-age', Number.isNaN(t0) ? 'age not known' : `${S.ctx.dur((Date.now() - t0) / 1000)} old`),
-      S.ctx.chip(stateWord(x), { blocked: 'bad', you: 'warn', label: 'warn', next: 'ok', building: 'info' }[x.state] || 'quiet'));
+    // The age moves with the Board's clock (since), as a refresh that changes only readAt draws no row again.
+    const age = h('span', 'board-from rules-age', Number.isNaN(t0) ? 'age not known' : '');
+    if (!Number.isNaN(t0)) age.append(S.ctx.since(x.created, ' old'));
+    li.append(age, S.ctx.chip(stateWord(x), { blocked: 'bad', you: 'warn', label: 'warn', next: 'ok', building: 'info' }[x.state] || 'quiet'));
     const m = moveOf(x.issue);
     if (m) { if (!m.error) li.classList.add('is-pending'); li.append(moveNote(m)); }
     return li;
@@ -1383,7 +1387,9 @@
     search.type = 'search'; search.placeholder = 'Search number or title'; search.dataset.act = 'iq'; search.value = v.q;
     search.setAttribute('aria-label', 'Search the open issues by number or title');
     search.addEventListener('input', () => {
+      const was = filtersOf(S.ctx);
       S.ctx.params({ iq: search.value });
+      S.shown.forEach((f, id) => { if (f === was) S.shown.set(id, filtersOf(S.ctx)); });
       const fresh = issuesSection();
       el.replaceWith(fresh);
       const again = fresh.querySelector('[data-act="iq"]');
@@ -1925,6 +1931,7 @@
       const out = el.querySelector('.rules-produce');
       if (out) out.scrollTop = top;
       lock(el.querySelector('.rules'));
+      S.shown.set(id, filtersOf(S.ctx));
     });
     const to = keep && at.find(([id]) => id === keep.panel);
     if (to) {
@@ -1937,6 +1944,16 @@
   }
   // Each of the tab's panels works its length out again: rows came or went (a group opened, a search typed).
   const relength = () => S.at.forEach((p) => p.ctx.relength());
+
+  // The part as text without the readAt of each project's view (the part's own and each of others'), worked out once a part.
+  const noRead = (p) => (p && typeof p === 'object' && !Array.isArray(p) ? Object.assign({}, p, { readAt: undefined }) : p);
+  function bareOf(d) {
+    if (S.bareFor && S.bareFor[0] === d) return S.bareFor[1];
+    const o = d && d.others && typeof d.others === 'object' ? Object.fromEntries(Object.entries(d.others).map(([k, v]) => [k, noRead(v)])) : undefined;
+    const key = JSON.stringify(Object.assign(noRead(d) || {}, o ? { others: o } : {}));
+    S.bareFor = [d, key];
+    return key;
+  }
 
   // A new snapshot is the record and what it produces. It replaces the record the host answered with once the
   // collector began it at or after the answer (both times are the page host's clock); one begun before it would show
@@ -1951,13 +1968,30 @@
   // Every panel of the tab is drawn from the same part: the first of them to get a snapshot takes it and draws them
   // all; the others, given the same snapshot for the same project, draw only themselves.
   const render = (id) => (el, d, ctx) => {
+    // This panel shows S.d already, with the filters the address holds now (Back or Forward can bring others).
+    const drawn = S.at.has(id) && S.at.get(id).el === el && !!el.querySelector('.rules') && S.shown.get(id) === filtersOf(ctx);
     S.at.set(id, { el, ctx });
     // The panel acted in last (S.from), for the line that says what the action did (say): heard before the control's own handler.
     if (!S.heard.has(el)) { S.heard.add(el); ['click', 'input', 'change', 'keydown', 'drop'].forEach((t) => el.addEventListener(t, () => { S.from = id; }, true)); }
     const view = ctx.project(d), read = readOf(view, ctx);
     // The Rules show one project: with more than one on the host the Rules panel's heading names it, whatever Show says.
     if (id === PART) ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Rules: ${view.repo}` : null);
-    if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
+    if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) {
+      // A panel that shows a part with the same content (S.idle: the part drew nothing) draws nothing either.
+      if (drawn && S.idle === d) return;
+      draw(id); return;
+    }
+    // A part that differs from the one drawn only in when its records were read (readAt, new on every refresh) draws
+    // nothing while no change, turned-away snapshot or moved row waits on that time: drawing it again replaced an open
+    // select (Group by) for the same content (issue 294). It is still the part drawn (S.raw).
+    const key = bareOf(d);
+    if (drawn && S.d && S.bare === key && view.repo === S.d.repo && !(S.ctl || S.turned || S.moved.size)) {
+      S.raw = [d, read, view.repo]; S.d = view; S.read = read; S.ctx = ctx;
+      S.idle = d;
+      return;
+    }
+    S.idle = null;
+    S.bare = key;
     S.raw = [d, read, view.repo];
     // The machine's steer, whichever project is drawn (only the part's top names it); null from an older engine.
     S.steer = d && typeof d.steer === 'boolean' ? d.steer : null;

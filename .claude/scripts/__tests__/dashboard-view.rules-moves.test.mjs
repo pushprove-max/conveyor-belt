@@ -3,7 +3,7 @@
 // made after the change shows it. Bug: the row went at once, a snapshot made before the change drew it again as held,
 // and the next one took it away. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, boot, deliver, next, settle, full, act, record, rulesP, groupEl, issuesP, cases } from './dashboard-view.helpers.mjs';
+import { T0, boot, deliver, next, settle, full, act, record, rulesP, groupEl, issuesP, heldP, clone, tick, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -94,4 +94,81 @@ test('Rules: the Undo of a Queue holds the row again the same way: older snapsho
   next(w, snap(T0 + 40000));
   assert.ok(!issue().classList.contains('is-pending'), 'one made after it that holds it ends the wait');
   assert.equal(issue().querySelector('.rules-refused'), null);
+});
+
+// Issue 294: every watch refresh gives the Rules part a new readAt (when its record was read). Bug: the part then
+// differed from the one drawn, the tab was drawn again and the open Group by select was replaced, closing it.
+test('Rules: a refresh that changes only readAt keeps the Group by select in place; one that changes what it shows draws it again', () => {
+  const w = boot({ tab: 'rules' });
+  const d = snap(T0 - 60000);
+  d.panels.rules.data.readAt = new Date(T0 - 70000).toISOString();
+  deliver(w, d);
+  // A search typed first puts iq in the address without drawing the tab: the panels still show what they did.
+  const q = act(issuesP(w), 'iq');
+  q.value = '76';
+  q.dispatchEvent(new w.Event('input'));
+  const by = act(heldP(w), 'held-by');
+  by.focus();
+  const age = () => issuesP(w).querySelector('[data-issue="76"] .rules-age').textContent;
+  assert.equal(age(), '8 d 17 h old');
+  const again = clone(d);
+  again.updatedAt = new Date(T0 - 20000).toISOString();
+  again.panels.rules.data.readAt = new Date(T0 - 30000).toISOString();
+  next(w, again);
+  assert.equal(act(heldP(w), 'held-by'), by, 'the select the user has open is the same node');
+  assert.equal(w.document.activeElement, by);
+  // Bug (review of issue 294): the open issues' ages were set only when the rows were drawn, so with no row drawn
+  // again they stopped. An hour on, the age has moved.
+  tick(w, 3600000);
+  assert.equal(age(), '8 d 18 h old');
+  const moved = clone(again);
+  moved.panels.rules.data.cap = 7;
+  next(w, moved);
+  assert.notEqual(act(heldP(w), 'held-by'), by, 'a real change still draws the tab again');
+});
+
+// Bug (review of issue 294): a refresh that changed only readAt drew nothing and left the part drawn before it as the
+// one shown, so Back with the latest part was taken for that refresh and drew nothing: the address said iq=76 and the
+// list still used the later search.
+test('Rules: Back after a refresh that changes only readAt draws the open issues the address then searches for', () => {
+  const w = boot({ tab: 'rules' });
+  const d = snap(T0 - 60000);
+  d.panels.rules.data.readAt = new Date(T0 - 70000).toISOString();
+  deliver(w, d);
+  const q = act(issuesP(w), 'iq');
+  q.value = '77';
+  q.dispatchEvent(new w.Event('input'));
+  assert.equal(issuesP(w).querySelector('[data-issue="76"]'), null, 'the search for 77 hides #76');
+  const again = clone(d);
+  again.updatedAt = new Date(T0 - 20000).toISOString();
+  again.panels.rules.data.readAt = new Date(T0 - 30000).toISOString();
+  next(w, again);
+  w.history.replaceState(null, '', 'https://dash.test/index.html?tab=rules&iq=76');
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  assert.equal(act(issuesP(w), 'iq').value, '76');
+  assert.ok(issuesP(w).querySelector('[data-issue="76"]'), 'the list uses the search the address holds');
+});
+
+// Bug (second review of issue 294): a refresh that changed only readAt came while Overview was shown, and Back to
+// Rules then brought that part with another search in the address: it was taken for the refresh and drew nothing, so
+// the address said iq=76 and the list still used 77.
+test('Rules: Back from Overview after a refresh there that changes only readAt draws the open issues the address searches for', () => {
+  const w = boot({ tab: 'rules' });
+  const d = snap(T0 - 60000);
+  d.panels.rules.data.readAt = new Date(T0 - 70000).toISOString();
+  deliver(w, d);
+  const q = act(issuesP(w), 'iq');
+  q.value = '77';
+  q.dispatchEvent(new w.Event('input'));
+  assert.equal(issuesP(w).querySelector('[data-issue="76"]'), null, 'the search for 77 hides #76');
+  w.history.pushState(null, '', 'https://dash.test/index.html?tab=overview&iq=77');
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  const again = clone(d);
+  again.updatedAt = new Date(T0 - 20000).toISOString();
+  again.panels.rules.data.readAt = new Date(T0 - 30000).toISOString();
+  next(w, again);
+  w.history.replaceState(null, '', 'https://dash.test/index.html?tab=rules&iq=76');
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  assert.equal(act(issuesP(w), 'iq').value, '76');
+  assert.ok(issuesP(w).querySelector('[data-issue="76"]'), 'the list uses the search the address holds');
 });
