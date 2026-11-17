@@ -190,19 +190,26 @@ t=login-codex; [ -z "$k" ] || t=${!k:-}
 echo "401 Unauthorized"; exit 1
 EOF
   chmod +x "$STUB/claude" "$STUB/codex"
+  # A Codex that, as the real one does, prints its banner before it sends the call, and that a proxy refuses for a
+  # key (bug: the route check kept only the banner, so doctor did not see the 401 and printed no missing: line).
+  mkdir -p "$d/refuse"; printf '#!/usr/bin/env bash\ncat > /dev/null; echo "OpenAI Codex v0.169.0"; echo "--------"; echo "ERROR: unexpected status 401 Unauthorized"; exit 1\n' > "$d/refuse/codex"; chmod +x "$d/refuse/codex"
   out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$d/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     echo "claude session: $(PROXY_ROLE=builder proxyenv &&claude -p < /dev/null)"
     echo "codex session: $(PROXY_ROLE=reviewer codexargs &&codex exec "${CODEX_PX[@]}" - < /dev/null)"
-    echo "claude check: $(routecall claude "" "$(claudeproxy)" "")"
-    echo "codex check: $(routecall codex "" "$(codexproxyset)" "")"
+    echo "claude check: $(routecall claude "" "$(claudeproxy)" "" 2>/dev/null)"
+    echo "codex check: $(routecall codex "" "$(codexproxyset)" "" 2>/dev/null)"
     echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed"}' > "$d/s.out"
-    PROXY_ROLE=builder nostart 1 '{}' "$d/s.out" /dev/null claude m builder "" "$d/cards/x"; echo "why: ${NOSTART_WHY%%$'\n'*}" ) 2>&1 )
+    PROXY_ROLE=builder nostart 1 '{}' "$d/s.out" /dev/null claude m builder "" "$d/cards/x"; echo "why: ${NOSTART_WHY%%$'\n'*}"
+    PATH=$d/refuse:$PATH routecheck codex "" route "$(codexproxyset)" 2>/dev/null; echo " rc=$?" ) 2>&1 )
   [ "$(sed -n 1,4p <<<"$out")" = $'claude session: OK\ncodex session: OK\nclaude check: works\ncodex check: works' ] \
     || fail "a session or route check through a proxy that needs no key did not reach it with a stand-in token: $out"
   # A session through the proxy whose answer says an OAuth login expired: the reason names the proxy at its base URL
   # and says the login is Claude Code's own, with the command that signs it in, never a sign-in to the proxy.
   [ "$(sed -n 5p <<<"$out")" = "why: the proxy at $b refused the call: its answer says Claude Code's own sign-in expired (exit 1): run claude /login, or check the proxy and the key it is sent (conveyor.sh doctor makes one call through it), then conveyor.sh control resume" ] \
     || fail "the reason of an expired login through the proxy does not name the proxy and Claude Code's own login: $out"
+  grep -qF "and one call through it with none fails (ERROR: unexpected status 401 Unauthorized)" <<<"$out" \
+    && grep -qxF "missing: a key the service can find for the codex route through $b/v1; fix: put it in the variable that keyEnv names in the env of $CONVEYOR_CLAUDE_SETTINGS, or name a key file of mode 600 as keyFile of codexProxy in $XDG_CONFIG_HOME/conveyor/host.json rc=1" <<<"$out" \
+    || fail "doctor's check of a Codex proxy that refuses a call with no key did not say the key is missing: $out"
 }
 
 # The one-answer calls (the judge, askmodel(), a test action, a check session), each called alone in the engine shell

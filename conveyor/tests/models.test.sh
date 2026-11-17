@@ -267,7 +267,7 @@ proxy_start() { # <issue>: a main with that one issue, the stub proxy serving, C
   # which this case's machine fails), where a key's variable may meet doctor's own (t_proxykeys). Then the Anthropic
   # variables a card session gets from proxyenv(), called alone as the session's subshell calls it before claude starts.
   routes() { { modelsengine doctor routes || :; } | grep -E '^(builder|reviewer):'; }
-  doctorroutes() { { loop doctor || :; } | grep -E '^(builder|reviewer):'; }
+  doctorroutes() { { loop doctor 2>/dev/null || :; } | grep -E '^(builder|reviewer):'; }
   # Fails when the call does, so a direct session's empty list is never a call that did not run.
   pxenv() { local o; o=$(modelsengine run 'proxyenv && env') || return 1; grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ENABLE_TOOL_SEARCH)=' <<<"$o" | sort; return 0; }
   unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ENABLE_TOOL_SEARCH
@@ -322,9 +322,10 @@ t_proxy() {
     && [ "$(cat "$STUB/auth")" = "Bearer $PROXY_KEY"$'\n-' ] || fail "the key followed a redirect to another origin: $(cat "$STUB/auth")"
   cp "$T/$CASE/config.toml" "$CODEX_HOME/config.toml"
   out=$(doctorroutes)
-  # The key is only in this shell's environment, which the machine's service does not have: doctor says so, and
-  # calls through the proxy as the service does.
-  [ "$out" = "builder: m (claude) through $base, key in PROXY_KEY; the service finds no key: no PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and no key file named (keyFile), and one call through it works
+  # The key is only in this shell's environment, which the machine's service does not have: doctor calls through the
+  # proxy with none, as the service does, and as that call works it says the proxy needs no key (bug: it said "the
+  # service finds no key" and then that the call works, which read as a fault), with no missing: line.
+  [ "$out" = "builder: m (claude) through $base, key in PROXY_KEY; the proxy needs no key: one call through it with none works
 reviewer: gpt-6.10-sol (codex) through $base/v1, Codex's model_provider proxy, key in PROXY_KEY" ] || fail "doctor's routes: $out"
 }
 

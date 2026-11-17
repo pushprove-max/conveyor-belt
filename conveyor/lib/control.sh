@@ -285,8 +285,9 @@ keyfile() { # <path>
 # One real call to a provider's own API with a key, as a session makes it: anthropic, GET <base>/v1/models with the key
 # as x-api-key; openai, GET <base>/models with it as a Bearer token. The key goes to the call in its environment, never
 # on a command line, and is not sent on to a redirect. Prints "works", else "fails (<why>)", with what looks like a
-# credential in the API's words left out.
+# credential in the API's words left out. A progress line on stderr first, as the call can take up to 40 s.
 apicheck() { # <anthropic|openai> <base URL> <key>
+  echo "conveyor: checking the $([ "$1" = anthropic ] && echo Anthropic || echo OpenAI) API at $2 with one call (up to 40 s)..." >&2
   CONVEYOR_APIKEY=$3 timeout 40 python3 -I -c 'import json, os, re, sys, urllib.error, urllib.request
 api, base = sys.argv[1], sys.argv[2].rstrip("/")
 key = os.environ.pop("CONVEYOR_APIKEY")
@@ -389,10 +390,11 @@ codexpx() { # <base URL> [key variable]
 # session is: Claude's proxy as a Bearer token (ANTHROPIC_AUTH_TOKEN), its API (kind api) as ANTHROPIC_API_KEY;
 # Codex's in the variable keyEnv names, through its provider settings (codexpx()). The key goes in the call's
 # environment, never on a command line. A proxy (not kind api) with no key is sent the stand-in key (NOKEY), as a
-# session is (proxyenv(), codexargs()). Prints "works", else "fails (<the first line it wrote>)", with the key and what
-# looks like a credential left out, and fails.
+# session is (proxyenv(), codexargs()). Prints "works", else "fails (<the first line it wrote that reads as an error, else its first line>)", with the key and what
+# looks like a credential left out, and fails. A progress line on stderr first, as the call can take up to 120 s.
 routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route JSON> <key>]
   local d o rc k='' v=${4:-}
+  echo "conveyor: checking $1${2:+ ($2)} $([ -z "${3:-}" ] && echo "on its own login" || jq -r '"through \(.baseUrl // "https://api.anthropic.com")"' <<<"$3") with one call (up to 120 s)..." >&2
   d=$(mktemp -d) || { echo "fails (no folder for the call)"; return 1; }
   [ -z "${3:-}" ] || { k=$(jq -r '.keyEnv | strings' <<<"$3"); [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || k=''; }
   if [ -n "${3:-}" ] && [ -z "$v" ] && [ "$(jq -r .kind <<<"$3")" != api ]; then v=$NOKEY; [ "$1" = claude ] || k=$NOKEYENV; fi
@@ -409,7 +411,8 @@ routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route 
   rm -rf "$d"
   [ $rc != 0 ] || { echo works; return 0; }
   [ -z "${4:-}" ] || o=${o//"$4"/[left out]}
-  o=$(grep -m 1 '[^[:space:]]' <<<"$o" | sed -E 's/[A-Za-z0-9_-]{24,}/[left out]/g; s/;/,/g' | cut -c 1-200)
+  # The first line that reads as an error, else the first line: Codex prints its banner before it sends the call.
+  o=$({ grep -m 1 -iE 'error|unauthori|forbidden|\b40[13]\b' <<<"$o" || grep -m 1 '[^[:space:]]' <<<"$o"; } | sed -E 's/[A-Za-z0-9_-]{24,}/[left out]/g; s/;/,/g' | cut -c 1-200)
   echo "fails (${o:-exit $rc})"; return 1
 }
 # Codex's: the top-level model_provider of Codex's config.toml and that provider's base_url and env_key, as
@@ -512,15 +515,23 @@ codexready() {
 # For doctor, a part of a role's route line: what one real call on <cli> gives, as the machine's service makes it.
 # login: on the CLI's own login (routecall()). route: through the route set for the CLI (its JSON), with its key as the
 # service finds it (routekey() with no environment of the caller's): the provider's own API (kind api) called with that
-# key (apicheck()), a proxy through the CLI (routecall()). Fails when the call fails, or for the API when the service
-# finds no key (a proxy may need none).
+# key (apicheck()), a proxy through the CLI (routecall()). A proxy the service finds no key for is called with none:
+# when that call works, the proxy needs none and the line says so. When the API has no key, or a proxy refuses the call
+# with no key (an authentication error, not a proxy that is stopped), a second line follows: "missing: <the key>; fix: <where to put it>". Fails when the call fails, or for
+# the API when the service finds no key.
 routecheck() { # <claude|codex> <model> <login|route> [<route JSON>]
-  local s
+  local s kind
   if [ "$3" = login ]; then s=$(routecall "$1" "$2"); printf '; its login %s' "$s"; [ "$s" = works ]; return; fi
-  routekey "$4" service
+  kind=$(jq -r .kind <<<"$4"); routekey "$4" service
   if [ -n "$KEY_V" ]; then printf '; the service reads the key from %s' "$KEY_FROM"
-  else printf '; the service finds no key: %s' "$KEY_FROM"; [ "$(jq -r .kind <<<"$4")" != api ] || return 1; fi
-  if [ "$(jq -r .kind <<<"$4")" = api ]; then s=$(apicheck "$([ "$1" = claude ] && echo anthropic || echo openai)" "$(jq -r .baseUrl <<<"$4")" "$KEY_V"); printf ', and the API %s' "$s"
+  elif [ "$kind" != api ] && s=$(routecall "$1" "$2" "$4" ""); then printf '; the proxy needs no key: one call through it with none %s' "$s"; return 0
+  else printf '; the service finds no key: %s%s' "$KEY_FROM" "${s:+, and one call through it with none $s}"
+    # A proxy that fails for another reason (stopped, unreachable) is not shown as a missing key.
+    [ "$kind" = api ] || grep -qiE '401|403|unauthori|authenticat|forbidden|api key|x-api-key' <<<"$s" || return 1
+    printf '\nmissing: a key the service can find for the %s route through %s; fix: put it in %s in the env of %s, or name a key file of mode 600 as keyFile of %s in %s' \
+      "$1" "$(jq -r .baseUrl <<<"$4")" "$(jq -r '.keyEnv // "the variable that keyEnv names"' <<<"$4")" "$CLAUDE_SETTINGS" "$([ "$1" = claude ] && echo claudeProxy || echo codexProxy)" "$HOST"
+    return 1; fi
+  if [ "$kind" = api ]; then s=$(apicheck "$([ "$1" = claude ] && echo anthropic || echo openai)" "$(jq -r .baseUrl <<<"$4")" "$KEY_V"); printf ', and the API %s' "$s"
   else s=$(routecall "$1" "$2" "$4" "$KEY_V"); printf ', and one call through it %s' "$s"; fi
   [ "$s" = works ]
 }
@@ -569,6 +580,8 @@ routes() {
         else echo "$r: $m (codex) direct"; fi
       fi
     fi
+    # A missing: line fails doctor, as every one does, a fallback's whose login works too.
+    [[ ${c:-} != *$'\nmissing: '* ]] || rc=1
   done
   return $rc
 }

@@ -374,7 +374,10 @@ The `roles` of each route set the route of each role, `builder` (build, fix and 
 
 `conveyor.sh doctor` shows each role's route. For a second route, it says where the service reads the key, or that
 the service finds no key. For each part of a route that setup or the pack sets, it makes one call as the service makes
-it, and shows the result: the CLI's own login, the proxy through the CLI, or the API with the key.
+it, and shows the result: the CLI's own login, the proxy through the CLI, or the API with the key. A proxy that
+works with no key is shown as a proxy that needs no key. When the API has no key, or a proxy refuses a call with no
+key, doctor shows a `missing:` line that says where to put the key. Setup and doctor show a `conveyor: checking` line
+before each of these calls, because a call can take some time.
 
 The card's record and its timeline on the Board say which route each step used. The Board's Health shows each Claude
 route, the subscription login and the second route, with its state: works, expired, not set, fails, or not checked.
