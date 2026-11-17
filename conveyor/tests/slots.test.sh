@@ -33,10 +33,14 @@ teststep() { # <w>: exits as tests() returns
 # (a runner's: a slot for each worker, the run's home slot among them) never have more than 2 workers going, the
 # third card waits with its live record saying so, and all three pass (the Board's card saying it waits:
 # t_slotclock). A run's command is held to its slot's core (where the system can pin: taskset), so one that starts
-# workers without a slot each gets no core beyond its own.
+# workers without a slot each gets no core beyond its own, with a core kept for the user too (reserveCores; issue
+# 239: the run was started on all the cores left, taskset -c, after it was pinned, and saw them all).
 t_slots() {
-  local w i p=()
+  local w i p=() h
   slotpool 2; setup "[]"
+  h=$XDG_CONFIG_HOME/conveyor/host.json
+  ! command -v taskset >/dev/null || [ "$(nproc --all)" -lt 3 ] || { jq '.reserveCores = 1' "$h" > "$h.new" && mv -f "$h.new" "$h"; } \
+    || fail "the host file could not keep a core"
   for i in 7 8 9; do git -C "$R" worktree add -q --detach "$T/$CASE/cards/c$i" || fail "the worktree of c$i could not be made"; done
   # A worker counts the workers going as it starts. The first two runs' workers stay until a card is seen waiting
   # for a slot, so two runs are going at once whatever the machine's load.
