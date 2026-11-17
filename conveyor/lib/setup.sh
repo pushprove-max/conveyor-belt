@@ -181,22 +181,22 @@ setup() { # as SETUP_USAGE
   servicerenew || return 1
   # dds is read only while the pack has neither: what the owner wrote in either is kept.
   if [ "$lk" = yes ] && [ ${#dds[@]} -gt 0 ]; then
-    jq '.linkFromMain = $ARGS.positional' "$PACK" --args "${dds[@]}" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq '.linkFromMain = $ARGS.positional' "$PACK" --args "${dds[@]}" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the dependency folders could not be written as the pack's linkFromMain" >&2; return 1; }
     echo "conveyor: wrote the pack's linkFromMain: $(printf '%s, ' "${dds[@]}" | sed 's/, $//'), linked from the main checkout into each card's worktree"
   fi
   if [ -n "$ws" ] && [ -z "$wsx" ]; then
-    jq --arg s "$ws" '.worktree.setup = $s' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq --arg s "$ws" '.worktree.setup = $s' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: worktree.setup could not be written in the pack" >&2; return 1; }
     echo "conveyor: wrote the pack's worktree.setup: $ws, run in each card's worktree before its build and tests"
   fi
   if [ "$tpa" = yes ] && [ -n "$tp" ]; then
-    jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's tests.patterns could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's tests.patterns: $(jq -r 'join(", ")' <<<"$tp") ($(testcount "$tp") tracked files)"
   fi
   if [ "$tla" = yes ] && [ -n "$tl" ]; then
-    jq --arg l "${tl%% *}" '.test.list = $l' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq --arg l "${tl%% *}" '.test.list = $l' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's test.list could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's test.list: ${tl%% *} (the test command runs ${tl#* })"
   fi
@@ -205,7 +205,7 @@ setup() { # as SETUP_USAGE
   [ -z "$tmw" ] || echo "conveyor: no test map: $tmw; a card's tests are found by name"
   if [ "$tma" = yes ] && [ -n "$tmt" ]; then mapbuild "$MAIN" || :
   elif [ "$tma" = no ] && ! jq -e '.test.map' "$PACK" >/dev/null 2>&1; then
-    jq '.test.map = "off"' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq '.test.map = "off"' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's test.map could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's test.map: off; a card's tests are found by name"
   fi
@@ -213,7 +213,7 @@ setup() { # as SETUP_USAGE
   # no format: written again each run, so a report option added to the test command since is found.
   if ! jq -e '.test.report.format' "$PACK" >/dev/null 2>&1 && packget test.command x && x=$(reportguess "$x") && [ -n "$x" ] \
     && ! jq -e --argjson r "$x" '.test.report == $r' "$PACK" >/dev/null 2>&1; then
-    jq --argjson r "$x" '.test.report = $r' "$PACK" > "$PACK.new" && "$HERE/lib/pack.sh" check "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq --argjson r "$x" '.test.report = $r' "$PACK" > "$PACK.new" && "$HERE/lib/pack.sh" check "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's test.report could not be written" >&2; return 1; }
     jq -r '"conveyor: wrote the pack'"'"'s test.report: the test command runs \(.runner), "
       + if .format then "and Conveyor reads each test file'"'"'s clock seconds from its report (\(.format), \(if .env or .args then "which Conveyor asks it for at each run" else .path // "its output" end))"
@@ -233,7 +233,7 @@ setup() { # as SETUP_USAGE
   done <<<"$l"
   if [ -n "$sv" ]; then
     [ "$sv" = no ] || { names && firstsurvey; } || return 1
-    jq --argjson a "$([ "$sv" = yes ] && echo true || echo false)" '.test.firstSurvey = $a' "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    jq --argjson a "$([ "$sv" = yes ] && echo true || echo false)" '.test.firstSurvey = $a' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the answer to the first test-speed survey could not be saved in the pack" >&2; return 1; }
     echo "conveyor: saved the answer to the first test-speed survey ($sv) as the pack's test.firstSurvey"
   fi
@@ -248,7 +248,7 @@ setup() { # as SETUP_USAGE
   if [ "$rl" = yes ]; then
     # A pack an earlier setup wrote has no lanes.research, which the lane's create needs: PACK0's is written in.
     packget lanes.research x || return 1
-    [ -n "$x" ] || { jq ".lanes.research = ($PACK0).lanes.research" "$PACK" > "$PACK.new" && mv "$PACK.new" "$PACK" \
+    [ -n "$x" ] || { jq ".lanes.research = ($PACK0).lanes.research" "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       && echo "conveyor: wrote the research lane's model and effort as the pack's lanes.research"; } \
       || { rm -f "$PACK.new"; echo "conveyor: the research lane's model and effort could not be written in the pack" >&2; return 1; }
     setuplane research || return 1
@@ -334,6 +334,15 @@ agentfiles() {
     if [ -f "$MAIN/$f" ]; then echo "ok: $f, the project's instructions for $w"
     else echo "missing: $f at the root of $MAIN, the project's instructions for $w; fix: run /conveyor-belt:setup and answer yes when it asks to write it, or write it yourself"; fi
   done
+}
+# pinreads <commit> <new pack>: exit 0 when the project's commit (its install's pack.sh) reads the new pack. A field
+# this setup writes may not be in the schema of an older commit the project runs, whose engine would then refuse the
+# whole pack, so the field is not written: what its check says, and what to do, on stderr.
+pinreads() {
+  local o
+  o=$(bash "$VERSIONS/$1/conveyor/lib/pack.sh" check "$2" 2>&1) && return 0
+  echo "conveyor: Conveyor commit $1, which the project runs, cannot read the pack with this field (${o//$'\n'/; }); move the project to a newer commit of the plugin (the pack's plugin), or leave the field out, then run setup again" >&2
+  return 1
 }
 # setuplane fast|research: the lane made by its own create (`conveyor.sh lane <lane> create`, re-runnable: a lane
 # already there is left as it is), its output passed on, with its `made the` line, there only when the lane is new,

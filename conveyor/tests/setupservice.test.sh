@@ -39,3 +39,18 @@ t_setuprestart() {
   grep -qx "systemctl --user restart conveyor-machine.service" "$STUB/svc" && grep -qF "the machine's Conveyor runs Conveyor commit $N2 now (pid " <<<"$out" \
     || fail "take left the machine's loop on the commit before, or did not check it: $out $(cat "$STUB/svc")"
 }
+
+# Bug: with the pack pinned to an older commit whose schema has no tests field, and the service on that commit already
+# (so no restart helps), setup wrote tests.patterns anyway, and the engine on that commit refused the whole pack. Each
+# field setup writes is checked first by the pinned commit's own pack.sh.
+t_setupoldpin() {
+  local X out O; setupdone
+  (cd "$D" && jq 'del(.properties.tests)' conveyor/schema/pack.schema.json > "$T/$CASE/s" && cp "$T/$CASE/s" conveyor/schema/pack.schema.json \
+    && git commit -qam O && git revert --no-edit HEAD >/dev/null && git push -q origin HEAD:main) \
+    && O=$(git -C "$D" rev-parse HEAD~1) || fail "the commit with no tests field, and setup's newer one, were not made"
+  jq --arg o "$O" '.plugin = {commit: $o}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
+  mkdir -p "$S/src" && echo x > "$S/src/test-a.js" && echo x > "$S/src/test-b.js" && git -C "$S" add src && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -qm tests || fail "the test files"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-patterns yes 2>&1) && fail "setup on a pin with no tests field exited 0: $out"
+  ! jq -e 'has("tests")' "$S/.conveyor/project.json" >/dev/null && grep -qF "Conveyor commit $O, which the project runs, cannot read the pack with this field" <<<"$out" \
+    || fail "setup wrote tests.patterns into a pack pinned to a commit with no tests field, or did not say why: $out"
+}
