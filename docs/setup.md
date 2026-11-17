@@ -26,7 +26,7 @@ found and where.
   signed in, setup starts `claude auth login`.
 - The Codex CLI, signed in, for the Codex reviewer and the Codex builder models (`npm install -g @openai/codex`). When
   it is not signed in, setup starts `codex login`.
-- For the Board, an `openssl` whose `req` takes `-addext` (OpenSSL 1.1.1 or newer). It makes the Board's certificate.
+- For the Board, an `openssl` whose `req` takes `-addext`: OpenSSL 1.1.1 or newer, or the LibreSSL in macOS's `/usr/bin/openssl`. It makes the Board's certificate.
 - On macOS, Homebrew's coreutils, findutils, gnu-sed and grep. To install the Homebrew requirements by hand:
   `brew install bash jq coreutils findutils gnu-sed grep flock`.
 - Matt Pocock's skills, the plugin `mattpocock-skills` of the official marketplace. `/conveyor-belt:plan` reads it.

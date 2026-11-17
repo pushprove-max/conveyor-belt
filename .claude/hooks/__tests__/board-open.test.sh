@@ -108,13 +108,15 @@ CONVEYOR_DASHBOARD_AUTH=$T/forge/dashboard-auth.json "$PY" "$SRC/.claude/scripts
 for _ in $(seq 50); do curl -sk -o /dev/null "https://127.0.0.1:$FORGE/login" && break; sleep 0.1; done
 check "the forged service does serve the Board's login page" yes \
   "$(curl -sk "https://127.0.0.1:$FORGE/login" | grep -qF '<title>Conveyor Board</title>' && echo yes || echo no)"
+# Bug caught (#183): a listener that failed the certificate check was named "nothing serves", untrue for a running
+# Board whose certificate curl cannot check; the line says what failed, with curl's exit (60: an unknown issuer).
+CERTFAIL="conveyor: something answers on https://localhost:$FORGE/ but fails the check of the Board's certificate (curl exit 60), so it was not opened; fix: run conveyor.sh board in the project's checkout, which replaces a certificate that does not name its curve and restarts the Board|rc=0"
 check "another HTTPS service serving the Board's login page under its own certificate: named in one line, nothing opens" \
-  "conveyor: the Board is not running (nothing serves https://localhost:$FORGE/), so it was not opened|rc=0" \
-  "$(start startup "$T/repo" true "$FORGE" | paste -sd'|')"
+  "$CERTFAIL" "$(start startup "$T/repo" true "$FORGE" | paste -sd'|')"
 # A curl configuration that turns certificate checks off must not let the forged service through either.
 mkdir -p "$T/curlhome"; echo insecure > "$T/curlhome/.curlrc"
 check "the forged service, with the user's curl configuration saying insecure, still opens nothing" \
-  "conveyor: the Board is not running (nothing serves https://localhost:$FORGE/), so it was not opened|rc=0" \
+  "$CERTFAIL" \
   "$(CURL_HOME=$T/curlhome start startup "$T/repo" true "$FORGE" | paste -sd'|')"
 # A listener whose accept queue is full: a connect to it waits on, so the hook must not wait for it to hold the start.
 FULL=$(free_port)

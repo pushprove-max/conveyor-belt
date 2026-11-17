@@ -453,10 +453,18 @@ boardurl() {
 }
 # 0 when the Board answers on its port with its login page under its own certificate (board_open's check): another
 # service on the port is not the Board. -q skips the user's curl configuration, whose `insecure` would drop the check.
+# With no certificate yet, /dev/null is the CA file: curl refuses one that does not exist (exit 2), and a closed port
+# must still give 7. curl's exit is left in BOARD_CURL; boardcert reads it.
 boardup() {
-  [[ $(curl -q -s --cacert "$(dirname "$(boardauth)")/dashboard-tls/cert.pem" --max-time 2 "https://127.0.0.1:${CONVEYOR_DASHBOARD_PORT:-8790}/login" 2>/dev/null) \
-    == *'<title>Conveyor Board</title>'* ]]
+  local page ca
+  ca=$(dirname "$(boardauth)")/dashboard-tls/cert.pem
+  [ -f "$ca" ] || ca=/dev/null
+  page=$(curl -q -s --cacert "$ca" --max-time 2 "https://127.0.0.1:${CONVEYOR_DASHBOARD_PORT:-8790}/login" 2>/dev/null)
+  BOARD_CURL=$?
+  [ "$BOARD_CURL" = 0 ] && [[ $page == *'<title>Conveyor Board</title>'* ]]
 }
+# 0 when the last boardup reached a listener on the port that failed the TLS or certificate check (board_open's list).
+boardcert() { case ${BOARD_CURL:-} in 35|51|53|54|58|59|60|64|66|77|80|82|83|90|91) return 0 ;; *) return 1 ;; esac; }
 # The Board loops running on this machine from an install, "<pid> TAB <commit>" a line: a bash running
 # VERSIONS/<commit>/.claude/scripts/dashboard.sh --loop, as board() installs it. Its page server and live feed are its
 # children and end with it. A Board run from a checkout is not listed.

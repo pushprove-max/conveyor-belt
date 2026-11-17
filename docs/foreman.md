@@ -21,7 +21,9 @@ When `/conveyor-belt:foreman` or your words make a session the Foreman, the Boar
 `https://localhost:<port>/`. It opens once for each claim. A claim by the session that is already the Foreman, a
 resume, `/clear` or a compact opens no new tab. When the Board is not running, the claim says so in one line and
 names a file for the start's output. `conveyor.sh board` then starts the Board from your checkout, and the Board opens
-when it answers. The session is the Foreman all the same, also when the start fails. The plugin option `boardAutoOpen` (set in `/plugin`) turns this off, as it turns
+when it answers. The session is the Foreman all the same, also when the start fails. When something answers on the
+port but fails the check of the Board's certificate, the claim says that, with curl's exit code, and opens nothing.
+`conveyor.sh board` then replaces a certificate whose key does not name its curve and starts the Board again. The plugin option `boardAutoOpen` (set in `/plugin`) turns this off, as it turns
 off the Board that opens when a session starts.
 
 ## Status and wakes

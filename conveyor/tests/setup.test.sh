@@ -420,9 +420,9 @@ without() { local p=$T/$CASE/without-${*// /-} d f n fs=(); local -A seen; mkdir
 # another, about 3 s a run, they made one case of 10 s.
 doctordone() { sample; X=$D/conveyor/conveyor.sh; (cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin >/dev/null) || fail "setup exited non-zero"; }
 # The Board running (#108), for a doctor run with $T/$CASE/board first on PATH and CONVEYOR_DASHBOARD_PORT=8791: curl
-# gets its login page, under its own certificate, on the port the Board is set to.
+# gets its login page, under its own certificate (there, beside the login store), on the port the Board is set to.
 boardup() {
-  mkdir -p "$T/$CASE/board" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
+  mkdir -p "$T/$CASE/board" "$HOME/.claude/rulings/dashboard-tls" && : > "$HOME/.claude/rulings/dashboard-tls/cert.pem" && printf '#!/bin/sh\ncase "$*" in "-q -s --cacert "*/dashboard-tls/cert.pem" --max-time 2 https://127.0.0.1:8791/login") echo "<title>Conveyor Board</title>";; *) exit 7;; esac\n' > "$T/$CASE/board/curl" \
     && chmod +x "$T/$CASE/board/curl" || fail "the curl stub was not made"
 }
 # The pinned commit's install removed, as the fix of a damaged one leaves it.
@@ -563,11 +563,15 @@ t_doctorvenvnopip() {
   grep -qxF "missing: the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)" <<<"$out" \
     && ! grep -q 'for the Board, in its virtualenv' <<<"$out" || fail "doctor's fix for a virtualenv with no pip does not name python3-venv: $out"
 }
+# Its doctor run also has a Board that answers but fails the certificate check (curl exit 35, as macOS's curl gives
+# for a LibreSSL certificate with explicit curve parameters). Bug caught (#183): doctor said it was not running.
 t_doctorsnap() {
   local X out; doctordone; : > "$G/out"
-  mkdir -p "$T/$CASE/snap"; echo true > "$T/$CASE/snap/gh"
-  out=$(cd "$S" && CONVEYOR_GITHUB=$T/$CASE/snap bash "$X" doctor 2>&1)
+  mkdir -p "$T/$CASE/snap" "$T/$CASE/badcert"; echo true > "$T/$CASE/snap/gh"; printf '#!/bin/sh\nexit 35\n' > "$T/$CASE/badcert/curl"; chmod +x "$T/$CASE/badcert/curl"
+  out=$(cd "$S" && CONVEYOR_GITHUB=$T/$CASE/snap PATH=$T/$CASE/badcert:$PATH bash "$X" doctor 2>&1)
   grep -qx 'missing: gh signed in; fix: run /conveyor-belt:setup, which starts gh auth login' <<<"$out" || fail "doctor took a snapshot's word that gh is signed in: $out"
+  grep -qxF "warning: something answers on https://localhost:8790/ but fails the check of the Board's certificate (curl exit 35); fix: run conveyor.sh board in the project's checkout, which replaces a certificate that does not name its curve and restarts the Board" <<<"$out" \
+    || fail "doctor did not name the Board's certificate problem and its fix: $out"
 }
 # A private repo needs no terms file; with no host file, that is named; with no pack, setup is the fix.
 t_doctorprivate() {

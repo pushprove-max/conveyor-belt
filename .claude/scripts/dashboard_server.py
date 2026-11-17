@@ -51,7 +51,7 @@ a wrong password does. A trusted device skips both steps until it expires. Each 
 (`used`, written at most once every DEVICE_USED_EVERY seconds), which the account page lists.
 Command line, run by the owner with the Board's virtualenv's python3 (dashboard.sh's BOARD_PY), for the first user and
 for recovery:
-  dashboard_server.py make-cert [--force]             the certificate, once (825 days)
+  dashboard_server.py make-cert [--force]             the certificate, once (825 days); again when its key does not name its curve
   dashboard_server.py add-user <user> [--admin]       a user and their password (asked twice)
   dashboard_server.py set-role <user> admin|member    a user's role; ends their sessions
   dashboard_server.py set-password <user>             the password (asked twice); ends their sessions, keeps devices
@@ -995,15 +995,33 @@ def ask(prompt):
     return getpass.getpass(prompt) if sys.stdin.isatty() else sys.stdin.readline().rstrip('\n')
 
 
+# The DER of the OID 1.2.840.10045.3.1.7, the curve prime256v1 (P-256): a certificate whose key names its curve holds it.
+P256_OID = bytes.fromhex('06082a8648ce3d030107')
+
+
+def cert_names_p256(path):
+    """True when the certificate at path holds a key that names the curve prime256v1. LibreSSL (macOS's
+    /usr/bin/openssl) writes the curve's explicit parameters unless told not to, and curl refuses that certificate."""
+    try:
+        with open(path) as f:
+            return P256_OID in ssl.PEM_cert_to_DER_cert(f.read())
+    except (OSError, ValueError):
+        return False
+
+
 def cli_make_cert(force):
-    if os.path.exists(CERT) and not force:  # not an error: dashboard.sh --install runs this every time
-        print('certificate kept: %s (--force makes a new one)' % CERT)
-        return
+    # Not an error: dashboard.sh --install runs this every time, and restarts the Board on a certificate made again.
+    if os.path.exists(CERT) and not force:
+        if cert_names_p256(CERT):
+            print('certificate kept: %s (--force makes a new one)' % CERT)
+            return
+        print('certificate %s does not name its curve (prime256v1), so curl cannot check it: making it again' % CERT)
     host = re.sub(r'[^A-Za-z0-9-]', '', socket.gethostname().split('.')[0]) or 'localhost'
     os.makedirs(TLS, mode=0o700, exist_ok=True)
     old = os.umask(0o077)
     try:
-        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '825',
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256',
+                        '-pkeyopt', 'ec_param_enc:named_curve', '-nodes', '-days', '825',
                         '-keyout', KEY, '-out', CERT, '-subj', '/CN=%s.local' % host,
                         '-addext', 'subjectAltName=DNS:%s.local,DNS:localhost,IP:127.0.0.1' % host],
                        check=True, capture_output=True, text=True)

@@ -22,11 +22,20 @@ board_open() {
   # the Board's own self-signed certificate, found where dashboard_server.py keeps it (beside the login store), so
   # another HTTPS service cannot pass by serving the same page. -q (it must come first) skips the user's curl
   # configuration, whose `insecure` would drop that check. curl's exit 7 is a refused connection: nothing listens, so
-  # the Board is down and is started; any other service on the port is left alone.
+  # the Board is down and is started; any other service on the port is left alone. Before the first start there is no
+  # certificate yet, and curl refuses a --cacert file that does not exist (exit 2), so /dev/null is passed in its place:
+  # a closed port still gives 7. A TLS or certificate failure (a listener that fails the check) is "cert <curl exit>".
   board_page_() {
-    local page
-    page=$(curl -q -s --cacert "$(dirname "$auth")/dashboard-tls/cert.pem" --max-time 2 "https://127.0.0.1:$port/login")
-    case $? in 0) [[ $page == *'<title>Conveyor Board</title>'* ]] && echo board || echo none ;; 7) echo down ;; *) echo none ;; esac
+    local page rc ca
+    ca=$(dirname "$auth")/dashboard-tls/cert.pem
+    [ -f "$ca" ] || ca=/dev/null
+    page=$(curl -q -s --cacert "$ca" --max-time 2 "https://127.0.0.1:$port/login"); rc=$?
+    case $rc in
+      0) [[ $page == *'<title>Conveyor Board</title>'* ]] && echo board || echo none ;;
+      7) echo down ;;
+      35|51|53|54|58|59|60|64|66|77|80|82|83|90|91) echo "cert $rc" ;;
+      *) echo none ;;
+    esac
   }
   # The check runs in the background and opens the tab itself once the page answers; the caller waits half a second
   # at most for its verdict, so a listener that answers slowly or never (a full accept queue) cannot hold it. A port
@@ -42,6 +51,7 @@ board_open() {
   exec 3<&-
   case $verdict in
     none) echo "conveyor: the Board is not running (nothing serves $url), so it was not opened" ;;
+    cert\ *) echo "conveyor: something answers on $url but fails the check of the Board's certificate (curl exit ${verdict#cert }), so it was not opened; fix: run conveyor.sh board in the project's checkout, which replaces a certificate that does not name its curve and restarts the Board" ;;
     down)
       log=$(mktemp "${TMPDIR:-/tmp}/conveyor-board-start.XXXXXX") || log=/dev/null
       echo "conveyor: the Board is not running (nothing serves $url), so conveyor.sh board starts it; it opens when it answers (the start's output: $log)"

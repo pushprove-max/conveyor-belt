@@ -126,13 +126,24 @@ if kill -0 "$NC" 2>/dev/null; then kill "$NC"; fail "no_certificate_refuses_to_s
 wait "$NC" && fail "no_certificate_refuses_to_start: it exited 0"
 grep -q 'no certificate: run dashboard_server.py make-cert' "$M/nocert.err" || fail "no_certificate_refuses_to_start: said '$(cat "$M/nocert.err")'"
 pass=$((pass + 2))
-cli make-cert >/dev/null || fail "make-cert: could not make the certificate"
+# An openssl first on PATH that writes as LibreSSL (macOS's /usr/bin/openssl) does: a req not told
+# ec_param_enc:named_curve writes the curve's explicit parameters. Bug caught (#183): macOS's curl rejects that
+# certificate, so the Board never opened, and make-cert kept the bad certificate on every install.
+mkdir -p "$M/libressl" && printf '#!/usr/bin/env bash\nif [ "$1" = req ] && [[ " $* " != *" ec_param_enc:named_curve "* ]]; then set -- "$@" -pkeyopt ec_param_enc:explicit; fi\nexec %q "$@"\n' \
+  "$(type -P openssl)" > "$M/libressl/openssl" && chmod +x "$M/libressl/openssl" || fail "make-cert: the openssl wrapper was not made"
+named() { openssl x509 -in "$CERT" -noout -text | grep -q 'ASN1 OID: prime256v1'; }
+PATH=$M/libressl:$PATH cli make-cert >/dev/null || fail "make-cert: could not make the certificate"
+named || fail "make_cert_names_its_curve: under a LibreSSL-like openssl the key does not name prime256v1"
 [ "$(mode "$A/dashboard-tls/key.pem")" = 600 ] || fail "make-cert: the key is not mode 0600"
 openssl x509 -in "$CERT" -noout -ext subjectAltName | grep -q 'DNS:localhost.*IP Address:127.0.0.1' || fail "make-cert: the certificate does not name localhost and 127.0.0.1"
+# A kept certificate with explicit parameters (made before the fix) is made again with no --force.
+"$M/libressl/openssl" req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -keyout "$A/dashboard-tls/key.pem" -out "$CERT" -subj /CN=localhost 2>/dev/null \
+  && ! named || fail "make-cert: the explicit-parameter certificate was not made"
+PATH=$M/libressl:$PATH cli make-cert >/dev/null && named || fail "explicit_certificate_made_again: make-cert kept a certificate whose key does not name prime256v1"
 SUM=$(cksum < "$CERT")
 cli make-cert >/dev/null && [ "$(cksum < "$CERT")" = "$SUM" ] || fail "make-cert: a second run with no --force must keep the certificate"
 cli make-cert --force >/dev/null && [ "$(cksum < "$CERT")" != "$SUM" ] || fail "make-cert: --force must make a new certificate"
-pass=$((pass + 4))
+pass=$((pass + 6))
 serve
 # No password set: login refuses with the way to set one, and nothing else opens.
 got=$(login "$A/none" false x); [ "$got" = 503 ] && grep -q 'no dashboard user: run dashboard_server.py add-user <user> --admin' "$M/login.out" \

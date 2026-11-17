@@ -769,6 +769,7 @@ doctor() {
     no "the Board runs engine $t but the project has $c" "run /conveyor-belt:setup, which starts it again on $c, or conveyor.sh board in the project's checkout"
   elif ! command -v curl >/dev/null; then echo "not checked: the Board: it is checked with curl"
   elif boardup; then ok "the Board, running at $(boardurl)"
+  elif boardcert; then echo "warning: something answers on $(boardurl) but fails the check of the Board's certificate (curl exit $BOARD_CURL); fix: run conveyor.sh board in the project's checkout, which replaces a certificate that does not name its curve and restarts the Board"
   else echo "warning: the Board is not running (nothing serves $(boardurl)); fix: run /conveyor-belt:setup and answer yes to \"Start the Board now?\", or conveyor.sh board in the project's checkout"; fi
   agentfiles
   if ! command -v jq >/dev/null || ! type -P git >/dev/null; then

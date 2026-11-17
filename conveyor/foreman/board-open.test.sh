@@ -92,7 +92,24 @@ t_down() {
   [ "$(opened)" = "https://localhost:$dead/" ] || fail "the started Board did not open once, on localhost: $(opened)"
 }
 
-cases=(once again off down)
+# A fresh install: no certificate yet (its own login store's folder has no dashboard-tls) and no Board. Bug caught
+# (#183): curl 8.18 takes a --cacert file that does not exist for a usage error (exit 2, not 7), so the claim gave
+# "nothing serves ... not opened" and never started the Board. The start makes the certificate there, then serves.
+t_fresh() {
+  fixture fresh
+  local dead; dead=$(free_port)
+  export CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json; mkdir -p "$T/auth"
+  export CONVEYOR_BOARD_START_CMD="'$PY' '$SRC/../../.claude/scripts/dashboard_server.py' make-cert >/dev/null && { '$PY' '$SRC/../../.claude/scripts/dashboard_server.py' $dead '$B/out' >/dev/null 2>&1 & echo \$! > '$T/server'; }"
+  out=$(CONVEYOR_DASHBOARD_PORT=$dead bash "$SRC/foreman.sh" claim s1) || fail "the claim on a fresh install failed: $out"
+  [[ $(sed -n 2p <<<"$out") == "conveyor: the Board is not running (nothing serves https://localhost:$dead/), so conveyor.sh board starts it; it opens when it answers (the start's output: "*")" ]] \
+    || fail "the claim on a fresh install did not start the Board: $out"
+  WAIT_CEILING=30 wait_until '[ -s "$OPENED" ]' || fail "the Board started on a fresh install was not opened"
+  settle
+  kill "$(cat "$T/server")" 2>/dev/null
+  [ "$(opened)" = "https://localhost:$dead/" ] || fail "the Board started on a fresh install did not open once, on localhost: $(opened)"
+}
+
+cases=(once again off down fresh)
 pids=()
 for c in "${cases[@]}"; do (t_"$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & pids+=($!); done
 wait "${pids[@]}"
