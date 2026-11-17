@@ -85,8 +85,9 @@ card() { # <card> <issue> [<branch> <tip>]
       else
         mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
       fi
-      # Its commit trailers come with its patch (a card that lands from it has no session to write them again).
-      [ "$mode" = stale ] || cp "$fromk/$from.trailers" "$wt.trailers" 2>/dev/null || cp "$CARDS/$from.trailers" "$wt.trailers" 2>/dev/null
+      # Its commit trailers and the COVERED-BY lines of its replies (hollowproof()) come with its patch (a card that
+      # lands from it has no session to write them again, and its deleted hollow cases are checked again on them).
+      [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
     fi
   fi
   # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test
@@ -111,7 +112,7 @@ card() { # <card> <issue> [<branch> <tip>]
     case $kw in
       review) mode=session; note="resumed from the kept patch of card $from: the issue changed since its review: one session, then review" ;;
       build) git -C "$wt" reset -q --hard 2>/dev/null || { block "$c" "$n" "$wt" "worktree: the kept patch of card $from could not be taken out of the worktree"; return; }
-        rm -f "$wt.rerun" "$wt.trailers"; mode=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
+        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered"; mode=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
     esac
   fi
   # The test file of a speed-up or Optimize card (a bug card whose issue speedfile() names): its build is told the
@@ -296,6 +297,17 @@ card() { # <card> <issue> [<branch> <tip>]
         [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
         [ $trc = 0 ] || { block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
       fi
+    fi
+  elif [ -z "$br" ] && [ -z "$sf" ] && jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null 2>&1; then
+    # A retry with no build (land, review: its kept patch, after the owner's yes) of one of the Board's fix issues
+    # (#189) is checked as after a build: the kept change lands only on the proof of what lands (pk, pt), and a Make
+    # it run card only when its test step ran its file (mk).
+    if { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
+      || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk='' sk=''; false; }; then
+      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
+      pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
+    elif sf=$(speedfile "$issue" "$MAKERUN"); then
+      sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
     fi
   fi
   msg=$(jq -r --arg c "$c" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title) (#\(.number))\n\nCloses #\(.number)\nConveyor card \($c)"' <<<"$issue")

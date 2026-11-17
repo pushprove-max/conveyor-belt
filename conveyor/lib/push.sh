@@ -276,13 +276,14 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   [ -z "$f${5:-}$patch" ] || [ "$2" = 0 ] || err=$(gh_write issue comment "$2" --body "$body" 2>&1 >/dev/null) || if [ $? = 3 ]; then
     reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) not posted on the issue: ${err:0:600}]"
   else reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) could not be posted on the issue]"; fi
-  for f in out err review test testlog withdrawn approvals body trailers rounds rerun; do
+  # covered: the COVERED-BY lines of its replies (hollowproof()), which a retry that lands its kept patch is checked on.
+  for f in out err review test testlog withdrawn approvals body trailers rounds rerun covered; do
     [ -e "$3.$f" ] || continue
     if mkdir -p "$k" 2>/dev/null && mv -f "$3.$f" "$k/" 2>/dev/null; then kept=$k; else left=1; fi
   done
-  [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .err, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun]"; }
-  if [ -n "$hold" ]; then git worktree remove --force "$3" 2>/dev/null; rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".index "$3".msg "$3".review.new "$3".carried "$3".live "$3".live.tmp "$3".idle "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".covered "$3".stalled
-  elif [ -z "$stay" ]; then tidy "$3"; else rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".patch "$3".index "$3".msg "$3".review.new "$3".carried "$3".base "$3".live "$3".live.tmp "$3".idle "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".covered "$3".stalled; fi
+  [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .err, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun, .covered]"; }
+  if [ -n "$hold" ]; then git worktree remove --force "$3" 2>/dev/null; rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".index "$3".msg "$3".review.new "$3".carried "$3".live "$3".live.tmp "$3".idle "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled
+  elif [ -z "$stay" ]; then tidy "$3"; else rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".patch "$3".index "$3".msg "$3".review.new "$3".carried "$3".base "$3".live "$3".live.tmp "$3".idle "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled; fi
   # The session or review that failed: what it spent is on this line (spent, and its tokens), so it is priced.
   sp=$(jq -ce 'objects' "$3.spent" 2>/dev/null) || sp=null; rm -f "$3.spent"
   reading fresh >/dev/null 2>&1

@@ -104,3 +104,23 @@ t_hollowrefix() {
     fixproof c7 "$FXWT" "$(cat "$STUB/hollow-issue")" h.test.sh "$HOLLOWFIX"'
   [ "$RC" = 0 ] || fail "the check after a fix lost the build's COVERED-BY line: $WHY"
 }
+
+# A whole card, for what only it proves: a retry with no build (#232) keeps the COVERED-BY lines of the build's reply.
+# Bug it catches: a Fix hollow cases card whose build deleted its file, with a COVERED-BY line for each case, stopped
+# for the owner's yes; its block dropped those lines, so its retry with the yes, landing the kept patch with no build,
+# was blocked as if the deleted cases were uncovered.
+t_hollowlandyes() {
+  local i
+  i=$(issue 7 2026-01-01 bug | jq -c '.title = "Fix the hollow cases of the test file h.test.sh" | .body += "\n- HOLLOW: one | no-assert | it asserts nothing\n- HOLLOW: two | text-only | it only greps a file\n"')
+  setup "[$i]"
+  printf 't_one() { true; }\nt_two() { grep -q x f; }\n' > "$R/h.test.sh"; echo 't_three() { [ 1 = 1 ] || fail one; }' > "$R/g.test.sh"
+  git -C "$R" add h.test.sh g.test.sh && git -C "$R" commit -qm 'tests' && git -C "$R" push -q origin main || fail "main's files"
+  echo 'git rm -q h.test.sh; mkdir -p web; echo pay >> web/pay.ts; jq -cn '\''{type: "result", result: "COVERED-BY: g.test.sh: t_three | one\nCOVERED-BY: g.test.sh: t_three | two"}'\''' > "$STUB/build"
+  printf '%s\n' 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: GO' > "$STUB/review.1"
+  loop run > /dev/null || fail "first run exited non-zero"
+  st 'select(.step == "blocked") | .reason' | grep -q "^visible to customers or staff: needs .*'s yes" || fail "the card did not stop for the yes: $(st 'select(.step | IN("blocked", "landed"))')"
+  jq -c '[.body += "\nVisible change approved: r-11\n"]' <<<"$i" > "$STUB/issues.json"
+  loop retry 7 > /dev/null && loop run > /dev/null || fail "the retry exited non-zero"
+  st 'select(.step == "worktree") | .reason' | grep -q '^landing from the kept patch of card' || fail "the retry did not land from the kept patch: $(st 'select(.step == "worktree") | .reason')"
+  st 'select(.step == "landed")' | grep -q . || fail "the kept patch, its deleted cases covered, did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}

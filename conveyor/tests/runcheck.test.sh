@@ -60,3 +60,21 @@ t_deleterefix() {
     || fail "a Delete it card whose fix put the file back was not blocked before its next review: $(st 'select(.step | IN("blocked", "landed"))')"
   [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "the card was reviewed again on the file put back: $(wc -l < "$STUB/reviews") reviews"
 }
+
+# A whole card, for what only it proves: a retry with no build (#232) is checked as a build is.
+# Bug it catches: a Make it run card stopped for the owner's yes to a visible change; retried with the yes, it landed
+# from its kept patch with no build, so its proof checks were never set up, and it landed though its test step never
+# ran its file. It is blocked after that test step, saying so.
+t_runlandyes() {
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Make the test file f.test.sh run"')]"
+  echo 'echo never' > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a test' && git -C "$R" push -q origin main || fail "main's file"
+  echo 'echo "echo now" > f.test.sh; mkdir -p web; echo pay >> web/pay.ts' > "$STUB/build"
+  printf '%s\n' 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: GO' > "$STUB/review.1"
+  loop run > /dev/null || fail "first run exited non-zero"
+  st 'select(.step == "blocked") | .reason' | grep -q "^visible to customers or staff: needs .*'s yes" || fail "the card did not stop for the yes: $(st 'select(.step | IN("blocked", "landed"))')"
+  issue 7 2026-01-01 bug | jq -c '[.title = "Make the test file f.test.sh run" | .body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"
+  loop retry 7 > /dev/null && loop run > /dev/null || fail "the retry exited non-zero"
+  st 'select(.step == "worktree") | .reason' | grep -q '^landing from the kept patch of card' || fail "the retry did not land from the kept patch: $(st 'select(.step == "worktree") | .reason')"
+  [ "$(st 'select(.step == "blocked") | .reason' | tail -n 1)" = "test: the card's test step did not run the test file f.test.sh: the test command still does not run it, or it ran none of its cases" ] \
+    || fail "a Make it run card landed from its kept patch though its test step did not run its file: $(st 'select(.step | IN("blocked", "landed"))')"
+}
