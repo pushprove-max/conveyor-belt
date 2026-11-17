@@ -4,7 +4,8 @@
 # Release 1 runs from its computed closure alone (plan section 11): closure.sh's set, copied into an empty folder with
 # no host project's checkout reachable, runs every release-1 hook's tests, the Board's and the engine's. A file the set
 # misses fails here; so does a set that names a file it does not hold, and removing any one file of the set. In quick
-# mode (CONVEYOR_CLOSURE_QUICK=1) the tests from the copy are not run: every other check is (t_install).
+# mode (CONVEYOR_CLOSURE_QUICK=1) the tests from the copy are not run (t_install), and a sample of the set's files is
+# removed in turn, not each one (t_remove): every other check is.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P); TOP=$(cd "$SRC/../.." && pwd -P)
 # This file's own sed -i is a GNU call: on macOS it runs Homebrew's, as the engine's does (portable.sh).
@@ -80,7 +81,7 @@ t_pack() {
 # code ([ -f x ] || exit 1; . x), as if it were optional.
 t_required() {
   local d=$T/req l
-  install; mkdir -p "$d" && cp -a "$I/." "$d/" && rm -rf "$d/node_modules" || fail "cannot copy the install"
+  copyset "$d" || fail "cannot copy the set"
   for l in '[ -f "$HERE/lib/req1.sh" ] || exit 1; . "$HERE/lib/req1.sh"' \
     '[ -e "$HERE/lib/req2.sh" ] || { echo "no req2" >&2; exit 2; }; . "$HERE/lib/req2.sh"' \
     '[ ! -f "$HERE/lib/req3.sh" ] \&\& exit 1; . "$HERE/lib/req3.sh"' \
@@ -88,8 +89,8 @@ t_required() {
     sed -i "1a HERE=\$(dirname \"\$0\"); $l" "$d/conveyor/conveyor.sh"
   done
   for l in req1 req2 req3 opt1 opt2; do echo : > "$d/conveyor/lib/$l.sh"; done
-  ( cd "$d" && run git add -A && run git commit -qm req ) || fail "cannot commit the fixture"
-  (cd "$I" && run bash conveyor/tools/closure.sh "$d") > "$T/req.set" || fail "the closure of the fixture failed"
+  git -C "$d" init -q && git -C "$d" add -A || fail "cannot make the fixture a repository"
+  bash "$SRC/closure.sh" "$d" > "$T/req.set" || fail "the closure of the fixture failed"
   for l in req1 req2 req3; do grep -qxF "conveyor/lib/$l.sh" "$T/req.set" || fail "a file whose absence stops the code ($l) is left out"; done
   ! grep -E 'conveyor/lib/opt[12]\.sh' "$T/req.set" || fail "an optional file is in the set"
 }
@@ -360,9 +361,17 @@ t_remove() {
     rm -rf "$d" "$d.out" "$d.gone"
   }
   export -f gone
-  tr '\n' '\0' < "$SET" | xargs -0 -P "$J" -n $(( ($(wc -l < "$SET") + J - 1) / J )) bash -c 'eval "$BW_DECL"; gone "$@"' _ > "$T/removed"
+  # Quick mode (a card's test step) removes a sample, not every file: closure.sh itself and the first file of each
+  # other extension, as its walk tells a missing file before it reads one and reads each by its extension. A closure
+  # run a file was most of the file's CPU time (about 470 of them); the nightly whole test removes every file.
+  local rm=$T/rm.set
+  if [ -n "$QUICK" ]; then
+    { echo conveyor/tools/closure.sh; awk '{ b = $0; sub(/.*\//, "", b); e = match(b, /\.[^.]*$/) ? substr(b, RSTART) : "" } !(e in s) { s[e]; print }' "$SET" | grep -vxF conveyor/tools/closure.sh; } > "$rm"
+  else cp "$SET" "$rm"; fi
+  tr '\n' '\0' < "$rm" | xargs -0 -P "$J" -n $(( ($(wc -l < "$rm") + J - 1) / J )) bash -c 'eval "$BW_DECL"; gone "$@"' _ > "$T/removed"
   ! grep '^FAIL ' "$T/removed" || fail "removing a file of the set did not fail its closure"
-  [ "$(grep -c '^ok ' "$T/removed")" = "$(wc -l < "$SET")" ] || fail "not every file was removed in turn"
+  [ "$(grep -c '^ok ' "$T/removed")" = "$(wc -l < "$rm")" ] || fail "not every file was removed in turn"
+  echo "removed in turn: $(wc -l < "$rm") of the set's $(wc -l < "$SET") files"
 }
 
 # Bugs: a unit left a process running that had closed every descriptor it inherited (a program that starts another so:
