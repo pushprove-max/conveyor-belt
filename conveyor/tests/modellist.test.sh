@@ -34,6 +34,13 @@ t_modelcache() {
   [ "$out" = '[["gpt-9-new","gpt-6.1-sol"],["x"],"x"]' ] || fail "a pack's own models.allowed is not the list in force: $out"
 }
 
+# Bug: docs/configuration.md said the fallback list keeps the built-in Codex models on a host without Codex, where
+# modelsallowed() offers none (t_modelcache runs that); a reader set models.allowed for nothing. Text check: a doc page has no behaviour to run.
+t_modellistdoc() {
+  tr '\n' ' ' < "$SRC/../docs/configuration.md" | grep -q 'in place of the built-in Codex ones, and with no Codex models when Codex is not installed' \
+    || fail "docs/configuration.md does not say the fallback model list has no Codex models when Codex is not installed"
+}
+
 # Bug: a model the belt offered or ran with no price row showed no cost and nothing said so, until someone saw it.
 # Each such model gets one issue, held (the control record holds it), to add its price; a priced model gets none, and
 # a model gets no second issue at a later look, nor after the loop restarts. The test pack lists the stub models m and

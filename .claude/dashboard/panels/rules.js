@@ -1599,8 +1599,9 @@
     // Seen but not priced: an ID of the steps that no model and no alias prices (an OpenCode one keeps OpenCode's cost).
     const unpriced = seen.filter((x) => x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
     // Offered or run with no price: a model a role runs, or one the models.allowed in force offers a role (the pack's
-    // list when it sets one, else the built-in models with the host's Codex models in place of the built-in Codex ones:
-    // a model only a CLI's own list names is not one when the pack sets a list), that no
+    // list when it sets one, else the built-in models with the host's Codex models in place of the built-in Codex ones,
+    // and none of them when the host has no Codex, modelsallowed() in conveyor/lib/control.sh: a model only a CLI's
+    // own list names is not one when the pack sets a list), that no
     // model and no alias prices and no step has run yet (those are Seen but not priced). OpenCode's keep the cost OpenCode reports. A one-word name (sol, opus) is a family or an alias, no
     // model ID: the CLI runs a model of its own choice, so the name has no price to add. Conveyor files one issue to
     // add each (noprice()).

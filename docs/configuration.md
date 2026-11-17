@@ -457,7 +457,7 @@ listed under:
 
 A model that a seat runs, or that the project's model list has, can have no price. The model list is
 `models.allowed` when you set it. When you do not, it is Conveyor's built-in models, with the Codex models that Codex
-reports in place of the built-in Codex ones. The Rules tab shows such a
+reports in place of the built-in Codex ones, and with no Codex models when Codex is not installed. The Rules tab shows such a
 model under Model prices, in "Offered with no price". A model that only Codex reports, when you set
 `models.allowed`, is not on this list. A model that the sessions of the last 30 days used, and that no price prices, shows in
 "Seen but not priced". The loop files one held issue for each such model, "Model price missing: <model>", and does
