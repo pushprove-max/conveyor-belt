@@ -86,6 +86,21 @@ test('Tests row: the judge\'s report is folded under its one-line verdict, and t
   assert.equal((judge.textContent.match(/keep/gi) || []).length, 1, `the verdict once: ${judge.textContent}`);
 });
 
+// Bug it catches (#219): after a judge with a verdict and a newer one that failed, Overview said the first one's verdict
+// but Full report opened the failed one, so the report behind that verdict could not be read.
+test('Tests row: Full report opens the judge behind Overview\'s verdict when a newer judge failed', () => {
+  const failed = rec({ id: TA.ID2, state: 'failed', end: iso(Date.now()), verdict: null, text: 'the model stopped\n' });
+  const w = show(snap({ acts: [failed, judged('keep', REPORT)] }));
+  open(w, MERGE);
+  const line = pane(w, 'overview').querySelector('.tests-diag-verdict');
+  assert.equal(line.querySelector('.chip').textContent, 'keep');
+  act(line, 'judge-report').click();
+  const judge = pane(w, 'judge');
+  assert.deepEqual(Array.from(judge.querySelectorAll('.tests-box'), (b) => b.dataset.id), [TA.ID1], 'the report behind the verdict');
+  assert.ok(judge.querySelector('.tests-md').textContent.includes('no other test file checks'));
+  assert.equal(judge.querySelector('.tests-judge-newer').textContent, 'A newer judge ended with no verdict (Failed). It shows on Timeline.');
+});
+
 // Bug it catches: each snapshot built the panes new, so a reader part way down the Judge report was put back at its top.
 test('Tests row: a new snapshot keeps the place read in the opened tab\'s pane', () => {
   const d = snap({ acts: [judged('keep', REPORT)] });

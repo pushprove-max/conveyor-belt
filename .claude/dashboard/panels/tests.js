@@ -1414,11 +1414,14 @@
     el.append(bar, picked.length ? ul : h('p', 'board-from', all.length ? 'No event of this kind on record.' : 'No event on record.'));
     return el;
   }
-  // The Judge tab: the file's newest ended judge, its verdict said once at the top, then its full report (box()); and
-  // its hollow cases, each with its kind and reason.
+  // The Judge tab: the judge behind Overview's verdict (verdictOf()), else the file's newest ended judge, its verdict
+  // said once at the top, then its full report (box()); a note when a newer judge ended with no verdict; and its hollow
+  // cases, each with its kind and reason.
   function judgePane(f) {
-    const h = S.ctx.h, el = h('div', 'tests-acts tests-judge'), a = actions().find((x) => x.file === f.file && judged(x)), now = rowAction(f.file);
+    const h = S.ctx.h, el = h('div', 'tests-acts tests-judge'), newest = actions().find((x) => x.file === f.file && judged(x)), now = rowAction(f.file);
+    const a = verdictOf(f.file) || newest;
     if (now && now.action === 'judge' && !judged(now)) el.append(h('p', 'board-from', 'A judge of this file is under way: it shows on Overview until it ends.'));
+    if (newest && newest !== a) el.append(h('p', 'board-from tests-judge-newer', `A newer judge ended with no verdict (${ENDED[newest.state] || newest.state}). It shows on Timeline.`));
     if (a) el.append(box(a, f));
     else el.append(h('p', 'board-from', 'Not judged yet. Judge, on Overview, asks the Tests model whether this file is worth what it costs.'));
     const hollow = hollowOf(f);
