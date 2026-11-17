@@ -104,10 +104,11 @@ mapone() { # <dir> <test file> <language>
 # prints what each touched, one `<test file><TAB><file>` a line (a path from the root of <dir>, any file: mapwrite()
 # keeps the tracked source files). A run that fails (a test that fails, or the tool) fails it: its output's last lines
 # go to stderr. The run's output is in <tmp>/log. With MAPRUN set, it says how far it is (mapstart(), mapstep()): a
-# file at a time for Node, Ruby and Rust, a package's files at a time for Go, all at once for Python.
+# file at a time for Node, Ruby and Rust, a package's files at a time for Go; for Python, as the run's output names
+# its test files (mappyran()), looked at every 2 seconds while the suite runs.
 mapfail() { echo "$1 failed under coverage; the end of its output:" >&2; tail -n 20 "$2/log" >&2; return 1; } # <what> <tmp folder>
 mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
-  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 cmd m ts mod rx; shift 3
+  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 rc cmd m ts mod rx; shift 3
   ts=("$@"); [ $# -gt 0 ] || mapfile -t ts < <(maptests "$d" "$lang")
   [ ${#ts[@]} -gt 0 ] || { echo "no $lang test files are tracked" >&2; return 1; }
   [ -z "${MAPRUN:-}" ] || mapstart ${#ts[@]}
@@ -135,9 +136,19 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
       packget test.command cmd || return 1
       if [[ $cmd =~ ^(python3?|py)[[:space:]]+-m[[:space:]]+(.+)$ ]]; then m="-m ${BASH_REMATCH[2]}"
       elif [[ $cmd =~ ^pytest([[:space:]].*)?$ ]]; then m="-m pytest${BASH_REMATCH[1]}"; else m='-m pytest'; fi
+      # Its output names each test file (mappyran()) even where the command is quiet (pytest -q prints only dots,
+      # unittest without -v too): the last verbosity given wins.
+      if [ -n "${MAPRUN:-}" ]; then case $m in '-m pytest'|'-m pytest '*) m+=' --verbosity=0' ;; '-m unittest'|'-m unittest '*) m+=' -v' ;; esac; fi
       [ $# = 0 ] || m+=" $(printf '%q ' "${ts[@]}")"
       printf '[run]\ndynamic_context = test_function\nrelative_files = True\n' > "$tmp/rc" || return 1
-      (cd "$d" && COVERAGE_FILE=$tmp/py.cov "${run[@]}" "coverage run --rcfile=$(printf %q "$tmp/rc") $m") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'the suite' "$tmp"; return 1; }
+      if [ -n "${MAPRUN:-}" ]; then
+        printf '%s\n' "${ts[@]}" > "$tmp/tests" || return 1
+        while :; do mapstep "$(mappyran "$tmp/tests" "$tmp/log" | wc -l)"; sleep 2; done > /dev/null 2>&1 < /dev/null 8>&- &
+        k=$!
+      fi
+      (cd "$d" && COVERAGE_FILE=$tmp/py.cov "${run[@]}" "coverage run --rcfile=$(printf %q "$tmp/rc") $m") >> "$tmp/log" 2>&1 < /dev/null; rc=$?
+      [ "$k" = 0 ] || { kill "$k" 2>/dev/null; wait "$k" 2>/dev/null; rm -f "$(mapprogpath).$k"; } # and its count's file, if killed as it wrote
+      [ $rc = 0 ] || { mapfail 'the suite' "$tmp"; return 1; }
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov coverage json --rcfile="$tmp/rc" --show-contexts -o "$tmp/py.json") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'coverage json' "$tmp"; return 1; }
       [ -z "${MAPRUN:-}" ] || mapstep ${#ts[@]}
       mappy "$abs" "$tmp/py.json" "${ts[@]}" ;;
@@ -292,8 +303,8 @@ mapcovon() { # <worktree>
 # While a whole run with coverage on runs in <worktree> (mapcovon()), every 2 seconds, how many of its test files
 # (<worktree>.mapcov/tests) have run: Node's, those a V8 coverage file names (node --test runs each test file in a
 # process of its own, which writes its file as it ends; a file not yet whole is read again on the next look); Python's,
-# those the run's output names (pytest names each test file as it runs it, unittest -v each test's module, as
-# tests.test_a); and never fewer than the test files its runner marks as ended (suiteprog(), lib/fulltest.sh).
+# those the run's output names (mappyran()); and never fewer than the test files its runner marks as ended (suiteprog(),
+# lib/fulltest.sh).
 maptick() { # <worktree> <language>
   local wt=$1 lang=$2 c=$1.mapcov r f k got logs=()
   local -A seen=() ran=()
@@ -308,14 +319,20 @@ maptick() { # <worktree> <language>
         done ;;
       python)
         mapfile -t logs < <(find "$wt.testlog" -maxdepth 1 -type f 2>/dev/null); [ ${#logs[@]} -gt 0 ] || logs=("$wt.test")
-        while IFS= read -r k; do
-          [[ $k == *.py ]] || { k=${k%.}; k=${k//.//}.py; }
-          ran[$k]=1
-        done < <(sed 's/\.py$//; s|/|.|g; s/$/./' "$c/tests" | cat "$c/tests" - | grep -ohF -f - "${logs[@]}" 2>/dev/null | sort -u) ;;
+        while IFS= read -r k; do ran[$k]=1; done < <(mappyran "$c/tests" "${logs[@]}") ;;
     esac
     k=$(suiteprog "$wt" | jq '.files.done // 0'); [ "${k:-0}" -ge ${#ran[@]} ] 2>/dev/null || k=${#ran[@]}
     mapstep "$k"; sleep 2
   done
+}
+# The Python test files of <tests file> (one a line) that a run's <logs> name so far, one a line, once each: pytest
+# names each test file as it runs it, unittest -v each test's module (tests.test_a for tests/test_a.py).
+mappyran() { # <tests file> <log>...
+  local k
+  sed 's/\.py$//; s|/|.|g; s/$/./' "$1" | cat "$1" - | grep -ohF -f - "${@:2}" 2>/dev/null | sort -u | while IFS= read -r k; do
+    [[ $k == *.py ]] || { k=${k%.}; k=${k//.//}.py; }
+    echo "$k"
+  done | sort -u
 }
 mapcovoff() {
   [ -z "${MAPTICK:-}" ] || { kill "$MAPTICK" 2>/dev/null; wait "$MAPTICK" 2>/dev/null; unset MAPTICK; }

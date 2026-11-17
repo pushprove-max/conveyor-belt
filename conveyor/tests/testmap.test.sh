@@ -141,7 +141,9 @@ t_testmapdue() {
 # Bug it catches: a Python project got no map. coverage.py runs the suite once with dynamic contexts (a test function
 # each), and each context's module names its test file: src/calc.py goes to tests/test_calc.py alone, and src/util.py,
 # which both tests read, is shared. The stub coverage on PATH refuses a run without test_function contexts or a report
-# without them, and writes the report coverage.py writes.
+# without them, and writes the report coverage.py writes. While the suite runs, the test files its output names are
+# counted (bug, #182: the count stayed at 0 until the whole suite and its report had ended), and a quiet command
+# (pytest -q, which prints dots alone) is run at a verbosity that names them (bug: a quiet run's count stayed at 0).
 t_testmappython() {
   setup '[]'
   mkdir -p "$R/src" "$R/tests" && echo x > "$R/pyproject.toml" && for f in src/calc.py src/util.py tests/test_calc.py tests/test_other.py; do echo x > "$R/$f"; done
@@ -149,7 +151,11 @@ t_testmappython() {
   cat > "$STUB/coverage" <<'EOF'
 #!/usr/bin/env bash
 case $1 in
-  run) grep -qx 'dynamic_context = test_function' "${2#--rcfile=}" && echo "${*:3}" > "$STUB/cov-run" ;;
+  run) grep -qx 'dynamic_context = test_function' "${2#--rcfile=}" && echo "${*:3}" > "$STUB/cov-run" || exit 4
+    # As pytest: quiet (-q last) prints only dots; at verbosity 0 each test file's path, then its dots.
+    case " ${*:3} " in *' -q --verbosity=0 '*) echo 'tests/test_calc.py ..' ;; *) echo '..' ;; esac
+    for i in $(seq 50); do jq -e '.done == 1 and .of == 2' .conveyor/test-map.run.json > /dev/null 2>&1 && break; sleep 0.1; done
+    cat .conveyor/test-map.run.json > "$STUB/cov-prog" ;;
   json) [[ " $* " == *" --show-contexts "* ]] || exit 3; o=${!#}
     echo '{"files": {"src/calc.py": {"contexts": {"1": [""], "2": ["tests.test_calc.test_add"]}},
       "src/util.py": {"contexts": {"1": ["tests.test_calc.test_add", "test_other.TestOther.test_x"]}},
@@ -160,7 +166,8 @@ EOF
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" > "$STUB/got"' > "$STUB/pytest" && chmod +x "$STUB/coverage" "$STUB/pytest" || fail "the stubs"
   tune '.test.list = "args" | .test.command = "pytest -q"'
   mapeng 'mapbuild "$R"' || fail "the map was not made: $(cat "$T/$CASE/eng.out")"
-  [ "$(cat "$STUB/cov-run")" = '-m pytest -q' ] || fail "coverage did not run the test command's pytest: $(cat "$STUB/cov-run")"
+  [ "$(cat "$STUB/cov-run")" = '-m pytest -q --verbosity=0' ] || fail "coverage did not run the test command's pytest, at a verbosity that names its test files: $(cat "$STUB/cov-run")"
+  jq -e '.done == 1 and .of == 2' "$STUB/cov-prog" > /dev/null || fail "the run did not count the test file its output named while it ran: $(cat "$STUB/cov-prog")"
   mapis '.sources == {"src/calc.py": ["tests/test_calc.py"], "src/util.py": ["tests/test_calc.py", "tests/test_other.py"]} and .language == "python"' "the contexts did not map to their test files"
   maprun 'echo y >> src/calc.py'
   [ "$(cat "$STUB/got")" = '-q tests/test_calc.py' ] || fail "a change to src/calc.py did not run tests/test_calc.py alone: $(cat "$STUB/got")"
