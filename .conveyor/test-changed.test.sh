@@ -652,23 +652,24 @@ p_cover() {
   [ "$got" = "aone atwo" ] && ok "a function changed since the coverage map was traced runs the area" || no "xone changed since the trace: ran '$got': $(cat "$T/out")"
 }
 
-# Issue 598. Bug it catches: a change to lib/a.sh broke tests/b.test.sh, which no card changing lib/a.sh selects, so it
+# Issue 598. Bug it catches: a change to lib/a.sh broke tests/l.test.sh, which no card changing lib/a.sh selects, so it
 # landed and main went red. The link .conveyor/test-links.json keeps (from the landing that broke it) makes a later
-# card changing lib/a.sh run tests/b.test.sh, and an engine case file linked so, its cases through the runner; its log
+# card changing lib/a.sh run tests/l.test.sh, and an engine case file linked so, its cases through the runner; its log
 # names each one; a card changing only lib/c.sh runs neither. A link to a deleted test file is dropped without error.
+# (Not tests/b.test.sh: the map names b.test.sh, and two files of that name fail the map check, issue 332.)
 p_linked() {
   mkdir -p "$R/lib" "$R/tests" "$T/log"
   printf '#!/usr/bin/env bash\n:\n' > "$R/lib/a.sh"; printf '#!/usr/bin/env bash\n:\n' > "$R/lib/c.sh"
-  echo 'echo b >> "$(dirname "$0")/../ran"' > "$R/tests/b.test.sh"
-  echo '{"lib/a.sh": ["tests/b.test.sh", "tests/gone.test.sh", "conveyor/tests/b.test.sh"]}' > "$R/.conveyor/test-links.json"
+  echo 'echo b >> "$(dirname "$0")/../ran"' > "$R/tests/l.test.sh"
+  echo '{"lib/a.sh": ["tests/l.test.sh", "tests/gone.test.sh", "conveyor/tests/b.test.sh"]}' > "$R/.conveyor/test-links.json"
   git -C "$R" add -A && git -C "$R" commit -qm links
   echo ': two' >> "$R/lib/a.sh"; got=$(CONVEYOR_TEST_LOG=$T/log ran | sorted)
-  [ "$got" = "b bone " ] && [ "$(cat "$T/rc")" = 0 ] && ok "D2, D3: a card changing lib/a.sh runs its linked tests/b.test.sh and engine case file, and a link to a deleted file is dropped" \
+  [ "$got" = "b bone " ] && [ "$(cat "$T/rc")" = 0 ] && ok "D2, D3: a card changing lib/a.sh runs its linked tests/l.test.sh and engine case file, and a link to a deleted file is dropped" \
     || no "lib/a.sh changed: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
-  [ "$(grep '^TESTRUN linked' "$T/log/test-changed.log" | sort | tr '\n' '|')" = "TESTRUN linked	conveyor/tests/b.test.sh	lib/a.sh|TESTRUN linked	tests/b.test.sh	lib/a.sh|" ] \
+  [ "$(grep '^TESTRUN linked' "$T/log/test-changed.log" | sort | tr '\n' '|')" = "TESTRUN linked	conveyor/tests/b.test.sh	lib/a.sh|TESTRUN linked	tests/l.test.sh	lib/a.sh|" ] \
     && ok "D2: the log names each test file a link added and the changed file that linked it" || no "linked log: $(cat "$T/log/test-changed.log" 2>&1)"
   git -C "$R" checkout -q -- lib/a.sh; rm -f "$T/log/test-changed.log"; echo ': two' >> "$R/lib/c.sh"; got=$(CONVEYOR_TEST_LOG=$T/log ran)
-  [ -z "$got" ] && [ "$(cat "$T/rc")" = 0 ] && ! grep -q '^TESTRUN linked' "$T/log/test-changed.log" && ok "D2: a card changing only lib/c.sh does not run tests/b.test.sh" \
+  [ -z "$got" ] && [ "$(cat "$T/rc")" = 0 ] && ! grep -q '^TESTRUN linked' "$T/log/test-changed.log" && ok "D2: a card changing only lib/c.sh does not run tests/l.test.sh" \
     || no "lib/c.sh changed: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 

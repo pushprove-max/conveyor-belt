@@ -215,6 +215,15 @@ mapcheck() {
           - [$m.areas[].tests | arrays | .[] | "conveyor/tests/" + .] | .[]
           | "\(.): a case file no area of \($map) names; an area of the engine files it covers lists it")') \
     || bad="$MAP could not be read"
+  # A case file the map names by file name alone is, to the engine's map reader (lib/testmap.sh mapread()), the one
+  # test file of the repository with that name: with two (#332: standing.test.sh under conveyor/tests/ and
+  # conveyor/foreman/), the reader cannot read the map and every card runs without it.
+  [ -n "$AMAP" ] && bad=$bad${bad:+$'\n'}$(git ls-files -co --exclude-standard | grep -E '\.test\.' | while read -r f; do [ -e "$f" ] && echo "$f"; done \
+    | jq -Rrn --argjson m "$AMAP" --arg map "$MAP" '[inputs] as $ts
+      | [$m.areas[].tests | arrays[] | select(contains("/") | not)] | unique[] as $n
+      | [$ts[] | select(split("/")[-1] == $n)] | select(length > 1)
+      | "\($n): named in \($map), but \(length) test files have that name (\(join(", "))); the map cannot tell them apart: rename one"')
+  bad=${bad%$'\n'}
   [ -z "$bad" ] || { echo "engine area map check failed:"; echo "$bad"; return 1; }
 }
 # covage: how old the coverage map is (issue 527), with the map check: when it was traced (its oldest `traced` line, as
