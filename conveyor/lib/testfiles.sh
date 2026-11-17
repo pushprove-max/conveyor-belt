@@ -19,7 +19,7 @@
 #   fail or null}; [] for a file never run), lastRun ({sec, cpu, clockPerCpu, time, whole} of its newest run; null with
 #   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
-#   a step that passed on re-run counts with the failures of its first run: failedrun, FAILURE),
+#   a step that went again counts with the failures of its first run too: failedrun, FAILURE),
 #   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
 #   (FAILURE); tail is null past the newest TESTKEEP), caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
 #   so the fix went into the code; changedToPass when that commit changed the file),
@@ -74,10 +74,14 @@ OWNERS='def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]
 # card's own change made it fail: the test did its job); null when the line has none for it (a line written before
 # verdicts were kept). cases: the names of its failing cases that count for $f ([] for a file that failed naming no
 # case). tail: the last 1500 characters of the step's output (the line's tail), null with none. failedrun: a test
-# line as a failed step: a line that failed as it is; a line that passed on re-run (card(): `test pass` with the first
-# run's failures in rerun, firstrun()) with those failures as its own, their verdict flaky; no other line.
-FAILURE='def failedrun: if .result == "fail" then . elif .result == "pass" and (.rerun.failures | type) == "object"
-      then .failures = .rerun.failures else empty end;
+# line as a failed step: a line that failed, with its first run's failures (in rerun, firstrun(), when the run went
+# again) added to its own, so a case that passed on the run again (its verdict flaky) still counts while another file
+# failed again; a first run's time-out as its file failing naming no case; a line that passed on re-run (card():
+# `test pass` with the first run's failures in rerun) with those failures as its own; no other line.
+FAILURE='def failedrun: if .result == "fail" then (if (.rerun.failures | type) == "object"
+        then .failures.files = [(.failures.files | arrays | .[]), (.rerun.failures.files | arrays | .[]),
+          (.rerun.failures.timeout.file? | strings | {file: ., cases: []})] else . end)
+      elif .result == "pass" and (.rerun.failures | type) == "object" then .failures = .rerun.failures else empty end;
     def failure($f): [.verdicts | arrays | .[] | objects | select(any((.case | strings | caseowners[]); . == $f)) | .verdict | strings] as $v
     | {card, issue, time,
        verdict: (if any($v[]; . == "main") then "main" elif any($v[]; . == "flaky") then "flaky" elif any($v[]; . == "card") then "card" else null end),
