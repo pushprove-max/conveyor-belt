@@ -236,6 +236,24 @@ The pack's `plugin` names the engine the project runs, in one of three ways:
 Cards in flight end on the engine they started with. The loop moves to the new engine at its next pick. `conveyor
 doctor` says which release or commit the project is on, and whether a newer one is out.
 
+A machine that runs no loop moves too. The plugin's hooks and commands run from the engine the project took on that
+machine. At most once a minute, a hook starts a take in the background. The next hook runs on the new engine. When that
+take fails, the plugin's own copy of the engine does the take again, in case the fault is in the old engine. Each
+background take writes its output and exit code to `.git/conveyor-engine.log` in the main checkout, which keeps the
+last 10 takes and the last take that worked.
+
+When the project runs an older commit than the newest one it can take, `conveyor.sh doctor`, the Foreman's start and
+`/units` show one line:
+
+```text
+Conveyor runs an old engine here: commit 0543507, and the plugin's main is at 9f8e7d6 · last take that worked: 2026-11-16T05:10:00Z · last failure: <the reason> · to take it, run: cd <the main checkout> && bash <conveyor.sh> take
+```
+
+The line gives the commit the project runs, the newest commit, the time of the last background take that worked, the
+reason the last one failed, and the command that takes the newest commit now. Run that command in a terminal. If it
+fails too, its output says why. `doctor` reads the newest commit from GitHub. The Foreman and `/units` use the newest
+commit that the last take found.
+
 When a new commit or release fails its check, or lacks a hook that the project's `.claude/settings.json` calls through
 `shim.sh`, the project stays on the engine it has. Needs you on the Board names the commit and the reason. The entry
 goes when a later commit or release is taken.

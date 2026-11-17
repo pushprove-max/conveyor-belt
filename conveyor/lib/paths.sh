@@ -25,8 +25,12 @@ MAIN=${CONVEYOR_MAIN:-}
 # A project whose pack follows the plugin's main or its releases (plugin.follow) has its current engine on this machine
 # in ENGINE, in the main checkout's git folder, so no worktree, card or commit carries it: {commit: the newest commit
 # taken, release: its tag (following releases), taken: the commits taken here, oldest first, refused: {commit,
-# reason, since, release} while the newest commit of main (or newest release) failed its check (take(), lib/install.sh)}. shim.sh reads the same file.
+# reason, since, release} while the newest commit of main (or newest release) failed its check, head: {commit, name}
+# the newest commit the last take read (take(), lib/install.sh)}. shim.sh reads the same file.
 ENGINE=$MAIN/.git/conveyor-engine.json
+# The log of the takes shim.sh starts beside a hook, one JSON line each (shim.sh names the fields): stalenote() reads it.
+# shellcheck disable=SC2034 # read by lib/install.sh, which conveyor.sh sources beside this file
+ENGINELOG=$MAIN/.git/conveyor-engine.log
 # The files outside the installs that name one by its path (a research lane's settings, written by lanes/research.sh;
 # the machine's service, by install-service), one a line: prune() keeps each install one of them still names.
 USES=${VERSIONS%/*}/uses

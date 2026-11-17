@@ -8,6 +8,7 @@
 #   pluginbugs <how many> <file>: the plugin problems the Foreman noted (below), only when it noted one
 #   testmap <the test map's state, JSON>: as it is made, or its state, where Conveyor runs for this checkout (below), only
 #   with .conveyor/project.json here
+#   engine <one line>: the project runs an old engine on this machine (below), only when it does
 #   host <name> <how> <exit> [<path looked at>...], then for every record of the host file, in its order: <repo> <its
 #   snapshot, or null>
 # The lanes are the worktrees the host file names for this checkout's record (the record whose main is this checkout:
@@ -22,7 +23,7 @@
 # ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
 # is not understood).
 # Usage: units-fetch.sh [feed]. feed: the Board's live feed is fresh, so the board is the feed's: only the lanes, the
-# Foreman and the test map are read, and the host line is `host <empty> feed 0`.
+# Foreman, the test map and the engine are read, and the host line is `host <empty> feed 0`.
 set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
@@ -109,6 +110,12 @@ elif [ -f .conveyor/project.json ]; then
   t=${here##*/}; t=${t//[^A-Za-z0-9._-]/-}
   tmcmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg n "$t" 'first(.records[] | select(.repo == $n))
     | "tm=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) testmap 2>/dev/null) && case $tm in \"{\"*) printf \"testmap\\t%s\\n\" \"$tm\" ;; esac; "' <<<"$got" 2>/dev/null)
+fi
+# The project runs an old engine on this machine, where its hooks run (`conveyor.sh take stale`, lib/install.sh
+# stalenote(): no remote is read): engine <the line>, only when it does.
+if [ -f .conveyor/project.json ]; then
+  en=$(CONVEYOR_MAIN=$here timeout -k 2 20 bash "${BASH_SOURCE[0]%/*}/../conveyor/conveyor.sh" take stale 2>/dev/null) \
+    && [ -n "$en" ] && printf 'engine\t%s\n' "${en//$'\t'/ }"
 fi
 if [ "${1:-}" = feed ]; then
   [ -z "$tmcmd" ] || timeout -k 2 20 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$tmcmd" 2>/dev/null | grep -m1 '^testmap'$'\t'

@@ -147,6 +147,61 @@ t_followshim() {
   [ "$(hook)" = 'two input' ] || fail "the shim did not run the hook from the new engine: $(cat "$STUB/shim.err")"
 }
 
+# Bug (#179): a hook's background take threw its output and exit code away, so a project that follows main could stay
+# on an old engine for hours and nothing said why. Run as Claude Code runs a hook (CONVEYOR_HOOK=1), the shim ends at
+# once; the take it started then moves the project to main's new commit and keeps its run in the log.
+t_followhook() {
+  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  tune '.plugin = {follow: "main"}'
+  pushed "cp '$SRC/../shim.sh' shim.sh && printf '#!/bin/sh\necho ran\n' > probe.sh && chmod +x probe.sh"; X1=$NEW
+  bash "$D/conveyor/conveyor.sh" install "$X1" >/dev/null && takeby "$X1" >/dev/null || fail "the first commit was not taken"
+  pushed "echo two > two.txt"; X2=$NEW
+  # The shim's last look a minute gone: its next call starts a take.
+  touch -t 200001010000 "$R/.git/conveyor-engine.look"
+  out=$(echo '{}' | CONVEYOR_HOOK=1 CLAUDE_PROJECT_DIR=$R bash "$D/shim.sh" probe.sh 2>&1) && [ "$out" = ran ] \
+    || fail "the hook did not run, or the take wrote to its streams: $out"
+  wait_until '[ "$(engine .commit)" = "$X2" ] && [ -s "$R/.git/conveyor-engine.log" ]' 'cat "$R/.git/conveyor-engine.json" "$R/.git/conveyor-engine.log"' \
+    || fail "the hook's background take did not move the project to main's new commit, or kept no log"
+  jq -se --arg c "$X1" 'length == 1 and .[0].by == $c and .[0].exit == 0 and (.[0].time | fromdate) > 0' "$R/.git/conveyor-engine.log" >/dev/null \
+    || fail "the log does not keep the take's run by the engine that ran it: $(cat "$R/.git/conveyor-engine.log")"
+}
+
+# Bugs (#179): an engine whose own take is broken never leaves itself; a take that fails says nothing, so doctor, the
+# Foreman and /units do not name an old engine or why it stays.
+t_followhookfail() {
+  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  tune '.plugin = {follow: "main"}'
+  hook() { echo '{}' | CONVEYOR_HOOK=1 CLAUDE_PROJECT_DIR=$R bash "$D/shim.sh" probe.sh >/dev/null 2>&1; touch -t 200001010000 "$R/.git/conveyor-engine.look"; }
+  logged() { wait_until "[ \"\$(wc -l < '$R/.git/conveyor-engine.log' 2>/dev/null)\" -ge $1 ]" 'cat "$R/.git/conveyor-engine.log"' || fail "the log does not hold $1 takes"; }
+  # X1's own take fails at once; the project runs it.
+  pushed "cp '$SRC/../shim.sh' shim.sh && printf '#!/bin/sh\necho ran\n' > probe.sh && chmod +x probe.sh && sed -i '4i echo \"conveyor: a fault in this take\" >&2; exit 3' conveyor/commands/take.sh"; X1=$NEW
+  bash "$D/conveyor/conveyor.sh" install "$X1" >/dev/null && jq -n --arg c "$X1" '{commit: $c, taken: [$c]}' > "$R/.git/conveyor-engine.json" || fail "the broken commit was not made the project's engine"
+  pushed "git checkout -q HEAD~ -- conveyor/commands/take.sh"; X2=$NEW
+  # The plugin copy (at X2) takes in its place, and the log says so.
+  hook; logged 2
+  [ "$(engine .commit)" = "$X2" ] || fail "an engine whose take fails was not left: $(cat "$R/.git/conveyor-engine.json" "$R/.git/conveyor-engine.log")"
+  jq -se --arg c "$X1" '.[0].by == $c and .[0].exit == 3 and (.[0].output | test("a fault in this take"))
+      and .[1].by == "plugin copy" and .[1].exit == 0 and .[1].note == "the take by \($c) failed, so the plugin copy'"'"'s take ran"' "$R/.git/conveyor-engine.log" >/dev/null \
+    || fail "the log does not keep the failed take with its reason and the plugin copy's take after it: $(cat "$R/.git/conveyor-engine.log")"
+  # main moves on, and no take can install it: the reason is kept, and doctor names the old engine, the newest
+  # commit, when a take last worked, the reason and the command that takes it.
+  pushed "echo three > three.txt"; X3=$NEW
+  ok=$(jq -sr '.[1].time' "$R/.git/conveyor-engine.log")
+  # Bug: ten failed takes after the last that worked pushed it out of the log, and the line lost its time.
+  for i in 1 2 3 4 5 6 7 8 9 10; do jq -cn '{time: "2026-11-16T06:10:00Z", by: "x", exit: 1, output: "an older failure"}'; done >> "$R/.git/conveyor-engine.log"
+  chmod a-w "$V"; hook
+  wait_until '[ "$(tail -n 1 "$R/.git/conveyor-engine.log" | jq -r .by)" = "plugin copy" ]' 'cat "$R/.git/conveyor-engine.log"' || fail "the log does not hold the hook's takes"
+  chmod u+w "$V"
+  [ "$(engine .commit)" = "$X2" ] || fail "a commit that could not be installed was taken"
+  [ "$(wc -l < "$R/.git/conveyor-engine.log")" -eq 11 ] || fail "the log does not keep the last 10 takes and the last that worked: $(cat "$R/.git/conveyor-engine.log")"
+  out=$(cd "$R" && CONVEYOR_MAIN=$R bash "$V/$X2/conveyor/conveyor.sh" doctor 2>&1)
+  line=$(grep '^warning: Conveyor runs an old engine here' <<<"$out")
+  [ "$line" = "warning: Conveyor runs an old engine here: commit ${X2:0:7}, and the plugin's main is at ${X3:0:7} · last take that worked: $ok · last failure: conveyor: Conveyor commit $X3 of the plugin's main could not be installed: conveyor: commit $X3 could not be checked out from $D.git and verified · to take it, run: cd $R && bash $V/$X2/conveyor/conveyor.sh take" ] \
+    || fail "doctor does not name the old engine, the newest commit, the last take that worked, the failure and the fix: $out"
+  # The Foreman's start and /units print the same line, with no remote read.
+  [ "warning: $(CONVEYOR_MAIN=$R bash "$V/$X2/conveyor/conveyor.sh" take stale)" = "$line" ] || fail "take stale does not print doctor's line"
+}
+
 # Bug: a project that pins a commit has engines installed and switched when the plugin's main moves.
 t_followpin() {
   setup '[]'; coderepo; trap 'kill $pid 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; pid=''

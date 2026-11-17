@@ -139,6 +139,14 @@ mkdir -p "$M/bakery/.conveyor" && echo '{}' > "$M/bakery/.conveyor/project.json"
 echo "{\"pid\": $$, \"started\": 1700000000, \"done\": 3, \"of\": 8}" > "$M/bakery/.conveyor/test-map.run.json"
 same 'the test map being made: its files run of how many, and its start' \
   "$(printf 'testmap\t{"state":"running","done":3,"of":8,"started":1700000000}')" "$(fetch "$M/bakery" feed | grep '^testmap')"
+# Issue 179: a project that follows main and runs an older commit on this machine than the newest its last take read
+# gets doctor's line, feed or not. Bug it catches: a project stayed on an old engine for hours and /units said nothing.
+mkdir -p "$M/bakery/.git" && jq '.plugin = {follow: "main"}' "$DIR/../conveyor/lib/test-pack.json" > "$M/bakery/.conveyor/project.json"
+c1=$(printf '1%.0s' {1..40}) c2=$(printf '2%.0s' {1..40})
+jq -n --arg c "$c1" --arg h "$c2" '{commit: $c, taken: [$c], head: {commit: $h, name: "main"}}' > "$M/bakery/.git/conveyor-engine.json"
+same 'an old engine: the line that names it and the command that takes the newest commit' \
+  "$(printf "engine\tConveyor runs an old engine here: commit 1111111, and the plugin's main is at 2222222 · last take that worked: none in the log · last failure: none in the log · to take it, run: cd %s && bash %s/conveyor.sh take" "$M/bakery" "$(cd "$DIR/../conveyor" && pwd -P)")" \
+  "$(fetch "$M/bakery" feed | grep '^engine')"
 # When Conveyor for this checkout runs on a build machine, the map is that machine's: asked in the snapshots' ssh
 # command, of the record named as this checkout's folder, and printed before the host line, as parseFetch reads it;
 # with the feed, the map alone is asked over ssh. Bug it catches: /units showed this machine's map, which no run on the

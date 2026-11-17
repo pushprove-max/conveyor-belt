@@ -28,7 +28,8 @@
 #   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
 #   Claude Code process (cleared_). Then, for the
 #   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md), then its saved state: the DONE items of state.md archived
-#   (archive.py), a live summary built fresh (never saved), then state.md, cut to its 5000-byte cap.
+#   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
+#   built fresh (never saved), then state.md, cut to its 5000-byte cap.
 #   A session that was the Foreman and no longer is gets one line saying so, once, shown to the owner (systemMessage).
 #   Any other new session (source startup) in a project's main checkout (inmain; never a worktree, as a card's, a
 #   lane's or a reviewer's, nor a session with CONVEYOR_CARD or CONVEYOR_LANE set) takes the role by itself (auto):
@@ -338,6 +339,8 @@ EOF
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"
   # This project's (or group's) own rules, from its Foreman folder.
   if [ -s "$FD/rules.md" ]; then echo; echo "# $FD/rules.md (this project's Foreman rules)"; cat "$FD/rules.md"; fi
+  # The project runs an old engine here, and why (`conveyor.sh take stale`, from this install: no remote is read).
+  err=$(bash "$FHERE/../conveyor.sh" take stale 2>/dev/null) && [ -n "$err" ] && echo "# WARNING: $err"
   echo
   live
   [ -s "$s" ] || return 0

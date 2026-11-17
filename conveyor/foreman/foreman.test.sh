@@ -706,6 +706,23 @@ jq -c '.pushedCards = [{issue: 40}]' "$T/ask/alpha" > "$T/a" && mv "$T/a" "$T/as
 grep -qF 'alpha: #40 landed' "$FD"/pending/*.wake || fail "the awaited issue's landing was not named: $(cat "$FD"/pending/*.wake)"
 }
 
+t_stale() {
+CASE=stale
+# Bug caught (issue 179): a project that follows main stayed on an old engine for hours, its background take failing,
+# and the Foreman's start said nothing. alpha runs PIN2; the last take read PIN and failed.
+ready; fileask; unset CONVEYOR_FOREMAN
+jq '.plugin = {follow: "main"}' "$SRC/../lib/test-pack.json" > "$M/.conveyor/project.json"
+jq -n --arg c "$PIN2" --arg h "$PIN" '{commit: $c, taken: [$c], head: {commit: $h, name: "main"}}' > "$M/.git/conveyor-engine.json"
+printf '%s\n' '{"time":"2026-11-16T05:10:00Z","by":"x","exit":0,"output":""}' '{"time":"2026-11-16T06:10:00Z","by":"x","exit":1,"output":"conveyor: the plugin'"'"'s main could not be read from its remote\n"}' > "$M/.git/conveyor-engine.log"
+bash "$SRC/foreman.sh" claim s1 > /dev/null || fail "the claim failed"
+out=$(sess s1 resume | bash "$SRC/foreman.sh" start)
+[ "$(grep -c 'old engine' <<<"$out")" = 1 ] && grep -qxF "# WARNING: Conveyor runs an old engine here: commit ${PIN2:0:7}, and the plugin's main is at ${PIN:0:7} · last take that worked: 2026-11-16T05:10:00Z · last failure: conveyor: the plugin's main could not be read from its remote · to take it, run: cd $M && bash $(cd "$SRC/.." && pwd -P)/conveyor.sh take" <<<"$out" \
+  || fail "the Foreman's start does not give one line naming the old engine and why: $out"
+# Once the newest commit read is the one it runs, the line goes.
+jq -n --arg c "$PIN2" '{commit: $c, taken: [$c], head: {commit: $c, name: "main"}}' > "$M/.git/conveyor-engine.json"
+out=$(sess s1 resume | bash "$SRC/foreman.sh" start); [[ $out != *'old engine'* ]] || fail "the Foreman's start names an old engine on the newest commit: $out"
+}
+
 t_reopen() {
 CASE=reopen
 # A Foreman marked (as the case session leaves it), not in the launcher's environment, and the stand-in claude.
@@ -1090,7 +1107,7 @@ bash "$SRC/../privacy/check.sh" --terms "$TERMS" "$SRC"/* "$SRC/../../commands/"
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin ask_self session reopen projects projects_filing projects_groups remote words auto privacy)
+cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin ask_self session stale reopen projects projects_filing projects_groups remote words auto privacy)
 # (A case's own variables, as its loops' c, are its own: the case's name is in one none of them uses.)
 for one_case in "${cases[@]}"; do
   (CASE=${one_case//_/-}; fixture "$one_case"; "t_$one_case"; : > "$B/$one_case.passed") > "$B/$one_case.out" 2>&1 &

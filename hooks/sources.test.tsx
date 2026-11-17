@@ -692,3 +692,24 @@ test('with no run, one line with the map\'s state: made, not made yet, off, or f
   expect(tableText({ ...mapped({ state: 'off' }), snap: null, note: 'units: the Conveyor snapshot cannot be read (x)' }, 62)).toContain('\nTest map: off')
   expect(tableText(board(), 62)).not.toContain('Test map')
 })
+
+// Issue 179: the old-engine line, from the fetch's `engine` line, in /units and the pane. Bugs it catches: a project
+// stayed on an old engine for hours and /units said nothing; or the line was cut at the pane's width, so the command
+// that takes the newest commit could not be copied.
+test('an old engine: the whole line, wrapped between words at the width, the command at its end never cut', () => {
+  const cmd = 'cd /r/projects/bookstore && bash /r/home/.local/share/conveyor/versions/0123456789abcdef0123456789abcdef01234567/conveyor/conveyor.sh take'
+  const line = `Conveyor runs an old engine here: commit 0543507, and the plugin's main is at 9f8e7d6 · last take that worked: 2026-11-16T05:10:00Z · last failure: conveyor: the plugin's main could not be read from its remote · to take it, run: ${cmd}`
+  const text = fetched([['bookstore', snapshot()]], `engine\t${line}\nhost\tbuildbox\tssh\t0`)
+  const s = state(text, { engine: parseFetch(text)?.engine })
+  for (const lines of [tableText(s, 62).split('\n'), paneModel(s, 62, 0).map(plain)]) {
+    const at = lines.findIndex(l => l.startsWith('Conveyor runs an old engine'))
+    expect(at).toBeGreaterThan(-1)
+    const end = lines.findIndex((l, i) => i > at && !l.startsWith('  '))
+    const got = lines.slice(at, end)
+    expect(got.join(' ').replace(/ {2,}/g, ' ')).toBe(line)
+    // Only a word wider than the view (the engine's path) passes the width.
+    expect(got.every(l => cols(l) <= 62 || !l.trim().includes(' '))).toBe(true)
+  }
+  // A fetch with no engine line (the project runs the newest commit) shows none.
+  expect(tableText(board(), 62)).not.toContain('old engine')
+})

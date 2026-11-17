@@ -819,6 +819,8 @@ doctor() {
     elif [ -n "$p" ]; then ok "the project follows the plugin's $f: it runs Conveyor commit $p, $(behind "$p" "$f")"; fi
     e=$(jq -r '.refused | objects | "\(.commit): \(.reason)"' "$ENGINE" 2>/dev/null) || e=''
     [ -z "$e" ] || echo "warning: Conveyor commit ${e%%: *} of the plugin's $f was not taken: ${e#*: }"
+    # A newer commit that was not taken, and why (stalenote(), lib/install.sh).
+    e=$(stalenote live); [ -z "$e" ] || echo "warning: $e"
   fi
   if [ -z "$p" ] && [ -n "$f" ]; then no "a commit of the plugin's $f taken on this machine (the pack follows it)" "run /conveyor-belt:setup, which takes it"
   elif [ -z "$p" ]; then no "the pin (the pack's plugin.commit)" "run /conveyor-belt:setup"

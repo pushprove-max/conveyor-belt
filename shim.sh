@@ -47,11 +47,37 @@ if [ -z "$commit" ] && [ -n "$(jq -r '.plugin.follow // empty' "$pack" 2>/dev/nu
   # When this machine last looked at the plugin's main (the file's time): a take is started once a minute at most.
   look=$main/.git/conveyor-engine.look
   first=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/conveyor/conveyor.sh
+  # The log of the takes started beside a hook, next to the engine record (ENGINELOG, lib/paths.sh): one JSON line a
+  # take, the last 10 kept, and before them the newest that worked when none of them did: {time, by (the commit whose engine ran it, or "plugin copy"), exit, output (its last 2000
+  # characters), note}. doctor, the Foreman's start and /units read it (stalenote(), lib/install.sh).
+  log=$main/.git/conveyor-engine.log
+  # logged <conveyor.sh> <by> [<note>]: one take by that engine, kept in the log; returns its exit code. Its output
+  # goes to a file, not a pipe: a Board the take starts again keeps the take's streams open after the take ends.
+  logged() {
+    local o rc t
+    o=$(mktemp "$log.out.XXXXXX") || return 1
+    CONVEYOR_MAIN=$main bash "$1" take < /dev/null > "$o" 2>&1; rc=$?
+    # The newest take that worked is kept even when 10 failures came after it: the stale-engine line names its time.
+    t=$(mktemp "$log.XXXXXX") && { { [ ! -f "$log" ] || jq -cnR '[inputs | fromjson? | objects] | ([.[] | select(.exit == 0)] | last) as $ok
+        | .[-9:] | (if $ok != null and all(.[]; .exit != 0) then [$ok] + . else . end)[]' "$log"; } || :
+      jq -cn --arg by "$2" --argjson rc "$rc" --rawfile out "$o" --arg n "${3:-}" \
+        '{time: (now | todate), by: $by, exit: $rc, output: $out[-2000:]} + (if $n == "" then {} else {note: $n} end)'
+    } > "$t" && mv "$t" "$log" || rm -f "$t"
+    rm -f "$o"; return "$rc"
+  }
+  # bgtake <conveyor.sh> <by>: that take beside the hook, never waited for, with every stream away from the hook's,
+  # which Claude Code reads and waits on. When it fails and is not the plugin copy's own, the plugin copy's take runs
+  # next (the newest take code on this machine, which mends a fault in an old engine's own take) and the log says so.
+  bgtake() {
+    ( trap '' HUP
+      logged "$1" "$2" || [ "$1" -ef "$first" ] || logged "$first" "plugin copy" "the take by $2 failed, so the plugin copy's take ran"
+    ) < /dev/null > /dev/null 2>&1 &
+  }
   # A hook never waits for that first take (its lock and GitHub can take longer than the hook's timeout): it starts
   # the take beside it, once a minute at most, and runs with the guards off until the take ends.
   if [ -z "$commit" ] && [ -n "${CONVEYOR_HOOK:-}" ]; then
     if [ -z "$(find "$look" -mmin -1 2>/dev/null)" ] && touch "$look"; then
-      CONVEYOR_MAIN=$main nohup bash "$first" take < /dev/null > /dev/null 2>&1 &
+      bgtake "$first" "plugin copy"
     fi
   elif [ -z "$commit" ]; then
     touch "$look"; CONVEYOR_MAIN=$main bash "$first" take < /dev/null >&2; commit=$(engine)
@@ -62,10 +88,10 @@ fi
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || off "this project pins no Conveyor Belt commit; run /conveyor-belt:setup"
 dir=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$commit
 [ -f "$dir/$1" ] || off "the project's Conveyor commit $commit is not installed; run /conveyor-belt:setup"
-# A following project's take of main, by its current engine, with every stream away from the hook's, which Claude Code
-# reads and waits on; its outcome is in the engine record (refused: Needs you on the Board).
+# A following project's take of main, by its current engine (bgtake): its outcome is in the engine record (refused:
+# Needs you on the Board) and in the log.
 if [ -n "$look" ] && [ -f "$dir/conveyor/conveyor.sh" ] && [ -z "$(find "$look" -mmin -1 2>/dev/null)" ] && touch "$look"; then
-  CONVEYOR_MAIN=$main nohup bash "$dir/conveyor/conveyor.sh" take < /dev/null > /dev/null 2>&1 &
+  bgtake "$dir/conveyor/conveyor.sh" "$commit"
 fi
 # The path must stay inside the version folder once resolved, so neither a .. segment nor a symlink escapes it.
 real=$(realpath "$dir/$1") && root=$(realpath "$dir") && [[ $real == "$root"/* ]] \

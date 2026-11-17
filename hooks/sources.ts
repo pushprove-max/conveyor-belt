@@ -105,7 +105,7 @@ export type PluginBugs = { n: number; path: string }
 // commits it is behind main (null for a map the project keeps itself).
 export type TestMap = { state: 'running'; done: number; of: number; started: number | null } | { state: 'failed'; why: string } | { state: 'off' } | { state: 'none' }
   | { state: 'made'; sources: number; tests: number; age: number | null }
-export type State = { now: number; snap: Snap | null; note: string; notes: string[]; host: string; limit: Limit | null; fast: Fast; research: Research; foreman?: Foreman | null; pluginBugs?: PluginBugs | null; testMap?: TestMap | null }
+export type State = { now: number; snap: Snap | null; note: string; notes: string[]; host: string; limit: Limit | null; fast: Fast; research: Research; foreman?: Foreman | null; pluginBugs?: PluginBugs | null; testMap?: TestMap | null; engine?: string | null }
 
 const time = (v: unknown) => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null }
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -118,10 +118,11 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 // is local (one machine, or a record of the host file is this checkout) or ssh, else the reason nothing was asked:
 // nofile (with the paths of the host file looked at) or config. foreman: its line's fields after the word, where a Foreman is
 // expected (the fetch says which); null where none is. pluginBugs: `pluginbugs <how many> <file>`, null when the Foreman
-// noted none. testMap: `testmap <its state, JSON>` (testMapOf), null with no such line or one not understood.
-export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; pluginBugs: PluginBugs | null; testMap: TestMap | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
+// noted none. testMap: `testmap <its state, JSON>` (testMapOf), null with no such line or one not understood. engine:
+// `engine <line>`, the line that says the project runs an old engine on this machine; null when it does not.
+export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; pluginBugs: PluginBugs | null; testMap: TestMap | null; engine: string | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
 export const parseFetch = (stdout: string): Fetched | null => {
-  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, pluginBugs: null, testMap: null, host: null, records: [] }
+  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, pluginBugs: null, testMap: null, engine: null, host: null, records: [] }
   for (const line of stdout.split('\n')) {
     const f = line.split('\t')
     if (out.host) { if (f.length >= 2 && f[0]) out.records.push({ repo: f[0], json: f.slice(1).join('\t') }) }
@@ -132,6 +133,7 @@ export const parseFetch = (stdout: string): Fetched | null => {
     else if (f[0] === 'foreman') out.foreman = f.slice(1)
     else if (f[0] === 'pluginbugs' && /^[1-9]\d*$/.test(f[1] ?? '') && f[2]) out.pluginBugs = { n: Number(f[1]), path: f[2] }
     else if (f[0] === 'testmap') out.testMap = testMapOf(f.slice(1).join('\t'))
+    else if (f[0] === 'engine' && one(f.slice(1).join(' '))) out.engine = one(f.slice(1).join(' '))
     else if (f[0] === 'host') out.host = { name: f[1] ?? '', how: f[2] ?? '', rc: Number(f[3]), looked: f.slice(4).filter(Boolean) }
   }
   // An empty Research lane is one the host file does not name: the board still reads.
@@ -602,6 +604,21 @@ export const testMapModel = (s: State, w: number): Line[] => {
   return [fitWidth(line, w)]
 }
 
+// The old-engine line, in /units and the pane, as doctor prints it: wrapped at the width between words and never cut,
+// so the command that fixes it can be copied whole (a path wider than the view stays whole on its own line). A
+// wrapped line is indented two. None when the fetch printed none.
+export const engineModel = (s: State, w: number): Line[] => {
+  if (!s.engine) return []
+  const out: string[] = []
+  let cur = ''
+  for (const word of s.engine.split(' ')) {
+    const next = cur ? `${cur} ${word}` : `${out.length ? '  ' : ''}${word}`
+    if (cur.trim() && cols(next) > w) { out.push(cur); cur = `  ${word}` } else cur = next
+  }
+  if (cur) out.push(cur)
+  return out.map((t): Line => [{ t, c: C.bad }])
+}
+
 // The Research lane's run is its newest Claude session in the lane's worktree: working while that session wrote in the
 // last five minutes.
 const WORKING_MS = 5 * 60_000
@@ -839,6 +856,7 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
   ...headerModel(s, snap, w),
   ...(short ? [] : [[{ t: declinedTodayText(s, snap), d: true }] as Line]),
   ...foremanModel(s, w, true),
+  ...engineModel(s, w),
   ...testMapModel(s, w),
   ...suitesModel(s, snap).map(l => (short ? fitWidth(l, w) : l)), [],
   ...needsModel(s, snap, w, short), [],
@@ -852,10 +870,10 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
 
 // `/units`: every section in full. A snapshot that cannot be read is one plain line, and the Foreman indicator: the
 // Foreman's state is read from its folder, not from the snapshot.
-export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w, true), ...testMapModel(s, w)]).map(plain).join('\n')
+export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w, true), ...engineModel(s, w), ...testMapModel(s, w)]).map(plain).join('\n')
 
 // The side pane: the same sections, each item one line, the landed list cut to five.
-export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s), ...foremanModel(s, w, true), ...testMapModel(s, w)])
+export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s), ...foremanModel(s, w, true), ...engineModel(s, w), ...testMapModel(s, w)])
 
 // The band: the header with each section's count, the first thing that needs you, the belt, then the lanes set up on this machine.
 export const bandModel = (s: State, w: number, frame: number): Line[] => {

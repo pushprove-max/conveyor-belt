@@ -218,6 +218,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
     foreman: f ? foremanOf(f.foreman, await $.session.id().catch(() => '')) : null,
     pluginBugs: f ? f.pluginBugs : null,
     testMap: f ? f.testMap : null,
+    engine: f ? f.engine : null,
   }
   return { st, fedAt: fed && f ? fed.at : null, fedKey: fed && f ? fed.key : null }
 }

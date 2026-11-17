@@ -38,6 +38,10 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   - not made yet: `Test map: not made yet · run /conveyor-belt:setup to make it`.
   - off: `Test map: off`, when `test.map` is `off` in `.conveyor/project.json`.
   - failed: `Test map: failed: <why>`, when the last run that made the map failed, or stopped before it ended.
+- **An old engine**, in `/units` and the pane, above the test map: when the project runs an older Conveyor commit on
+  this machine than the newest one it can take, the line `doctor` prints (`Conveyor runs an old engine here: ...`), in
+  red. A narrow view wraps it between words, so the command at its end stays whole.
+  [Following releases or main](setup.md#following-releases-or-main-or-pinning-a-commit) tells what it means.
 
   A checkout with no `.conveyor/project.json` shows no test map line
   ([The test map](configuration.md#the-test-map)).

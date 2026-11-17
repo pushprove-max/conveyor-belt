@@ -140,6 +140,13 @@ taken() {
   local f h u n why t
   packget plugin.follow f || return 1; [ -n "$f" ] || return 0
   IFS=$'\t' read -r u h n < <(headof "$f") && [ -n "$h" ] || { echo "conveyor: the plugin's $f could not be read from its remote" >&2; return 1; }
+  # The commit read is kept (head) when it changed, so stalenote() can say, with no remote read, that a newer one is
+  # there to take.
+  if [ "$h" != "$(jq -r '.head.commit // ""' "$ENGINE" 2>/dev/null)" ]; then
+    t=$(mktemp "$ENGINE.XXXXXX") || return 1
+    { cat "$ENGINE" 2>/dev/null || :; } | jq -n --arg c "$h" --arg n "$n" '((input? | objects) // {}) + {head: {commit: $c, name: $n}}' > "$t" \
+      && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
+  fi
   if [ "$h" != "$(jq -r '.commit // ""' "$ENGINE" 2>/dev/null)" ] && [ "$h" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ]; then
     why=$(install "$h" "$u" 2>&1 >/dev/null) || { echo "conveyor: Conveyor commit $h of the plugin's $n could not be installed: $why" >&2; return 1; }
     if ! why=$("$VERSIONS/$h/conveyor/lib/pack.sh" check "$PACK" 2>&1); then why="its check of the pack failed: ${why//$'\n'/; }"
@@ -149,7 +156,7 @@ taken() {
     # A record that is not there, empty or not JSON is begun again. Following releases, the release's tag is kept
     # beside its commit (release), for doctor.
     { cat "$ENGINE" 2>/dev/null || :; } | jq -n --arg c "$h" --arg r "$why" --arg v "${n#release }" --arg f "$f" '(input? | objects) // {}
-      | if $r == "" then {commit: $c, taken: ((.taken // []) - [$c] + [$c])} + (if $f == "releases" then {release: $v} else {} end)
+      | if $r == "" then {commit: $c, taken: ((.taken // []) - [$c] + [$c]), head} + (if $f == "releases" then {release: $v} else {} end)
       else . + {refused: ({commit: $c, reason: $r[0:1500], since: (now | todate)} + (if $f == "releases" then {release: $v} else {} end))} end' > "$t" \
       && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
     if [ -z "$why" ]; then echo "conveyor: took Conveyor commit $h of the plugin's $n: the loop restarts on it at its next pick"
@@ -239,6 +246,26 @@ behind() { # <commit> <branch>
     && n=$(git -C "$d" rev-list --count "$1..FETCH_HEAD" 2>/dev/null)
   rm -rf "$d"
   echo "${n:-some} commit$([ "$n" = 1 ] || echo s) behind the plugin's $2 ($h)"
+}
+# The one line doctor, the Foreman's start and /units show while a pack that follows the plugin's main or its
+# releases runs a commit here that is not the newest it could take: the commit it runs, that newest one, the time of
+# the last take that worked and the last failure's reason (from ENGINELOG, the takes shim.sh starts beside a hook),
+# and the command that takes it now. The newest commit is read from the remote with `live` (headof), else (or when
+# that read fails) the one the last take read (ENGINE's head). Nothing for a pinned pack, one with no commit taken
+# here, or when the newest commit is the one it runs or the one refused (doctor and Needs you name that one).
+stalenote() { # [live]
+  local f c h n ok why
+  packget plugin.follow f 2>/dev/null && [ -n "$f" ] || return 0
+  c=$(jq -r '.commit // empty | strings' "$ENGINE" 2>/dev/null) && [ -n "$c" ] || return 0
+  { [ "${1:-}" = live ] && IFS=$'\t' read -r _ h n < <(headof "$f") && [ -n "$h" ]; } \
+    || IFS=$'\t' read -r h n < <(jq -r '.head | objects | [.commit, .name] | select(all(type == "string")) | @tsv' "$ENGINE" 2>/dev/null) || return 0
+  [ -n "$h" ] && [ "$h" != "$c" ] && [ "$h" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ] || return 0
+  IFS=$'\t' read -r ok why < <(jq -nRr '[inputs | fromjson? | objects] as $l
+    | [([$l[] | select(.exit == 0)] | last | .time // "none in the log"),
+       ([$l[] | select(.exit != 0)] | last | if . == null then "none in the log"
+         else (.output // "" | tostring | split("\n") | map(select(test("\\S"))) | last) // "it ended with exit code \(.exit)" end)] | @tsv' \
+    "$ENGINELOG" 2>/dev/null)
+  echo "Conveyor runs an old engine here: commit ${c:0:7}, and the plugin's $n is at ${h:0:7} · last take that worked: ${ok:-none in the log} · last failure: ${why:-none in the log} · to take it, run: cd $(printf %q "$MAIN") && bash $(printf %q "$HERE/conveyor.sh") take"
 }
 # The machine's one user service (docs/setup.md, Run): it runs `machine` (machineloop) from the install of the commit pinned
 # by the pack of the current repo (the main checkout of the folder this was called from), or of its current engine
