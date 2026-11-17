@@ -1226,7 +1226,8 @@ failing check blocks it, as at its turn), and the card whose turn comes runs the
 other ready cards waiting to land that share a file with it, or with a card taken before (in turn), up to the pack's
 `landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: another card
 waits on it only when its change does not apply together with the whole batch's. The batch is
-in `order` first, then by when each card became ready, the card whose turn it is among them. Their changes are applied
+in `order` first, then by when each card became ready, the card whose turn it is among them; a stacked card (below)
+goes after the card it is stacked on. Their changes are applied
 one on another in that order and tested once. That run reuses each card's passed tests: it
 does not run a case that a card passed on its own change, unchanged since (the same patch-id as when it passed), when
 no other card of the run selects that case, nor a case the last batch run that passed passed for cards still in this
@@ -1261,6 +1262,16 @@ meanwhile, and it claims again once it is ready (its review and tests passed and
 the cards that were waiting for its files when it gave way. The Board shows it as "fitting onto main (gave way to
 #N)", N being the card that took its turn, or as "gave way to #N while fixing" when its tests failed and it gave way
 for their fix; its live record names that card too (gaveWay). A card that has given way 3 times keeps its next turn.
+
+With batches on (`landBatch` over 1), a card that would wait on a card that holds its files does not sleep. It is
+stacked on that card: its change is put on main plus the holder's change, with the one session it needs to fit there,
+and it is reviewed and tested there while the holder goes on. When the holder's tests pass, the holder's batch takes
+the stacked card after the holder, and both land in one batch. When the holder's tests fail, the stacked card waits no
+more: it is fitted onto main alone, reviewed and tested there, and lands. The holder is then fitted onto it after its
+fix. A stacked card whose checks or tests fail on the holder's change is not blocked or sent to a fix for that: it
+waits, and runs them again where it goes next. When the holder's change changes after the stack, the card is stacked
+again once; after that it waits on the holder. A card whose issue names the holder's issue in a `Depends on:` line is
+never stacked: it waits.
 
 A card's tests are not run again only because main moved. When main moved since its checks
 and tests ran (while it was away, during its tests or before its landing), its change is put on main as it is then.

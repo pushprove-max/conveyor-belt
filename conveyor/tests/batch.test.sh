@@ -37,6 +37,10 @@ EOF
   echo '8 9' > "$STUB/ready"; tune --arg h "$STUB/hold" '.checks = [$h]'
 }
 cardof() { st "select(.issue == $1 and .step == \"picked\") | .card"; } # <issue>: its card id
+# A line of the review stub for cases about cards that wait on #7: #8's and #9's reviews take away the change #7's
+# claim keeps, so they wait on #7 at their claims and are not stacked on it (stackto() reads that change).
+# shellcheck disable=SC2016 # run by the review stub
+NOSTACK='case $n in 8|9) rm -f ../*-7.cpatch ;; esac'
 batchruns() { grep -c "tests a batch of" <<<"$out"; } # the batch test runs the loop said it made
 
 # The owner (2026-11-12): eight cards that shared files landed one after another, each on its own 10 to 25 minute
@@ -152,6 +156,7 @@ elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 1
 else case $PWD in *-7) sed -i '10s/.*/seven/;20s/.*/seven/' a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
 EOF
   echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; exit 1; }' >> "$STUB/test-cmd"
+  echo "$NOSTACK" >> "$STUB/review-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
   grep -q "card $c8 waits on card $c7, which changes the same files: a.txt" <<<"$out" && grep -q "card $c9 waits on card $c7, which changes the same files: a.txt" <<<"$out" \
@@ -187,10 +192,12 @@ t_batchapart() {
 # another part of the file waited on the batch's card for the whole test run. #7 (lines 10 and 20) holds a.txt; #8
 # appends a line and #9 changes line 10, so both wait on #7 and its batch is those two, its own patch left out. #10
 # changes line 3 and claims a.txt while that batch is tested: it applies with #8 and #9, and does not wait on #7.
+# #7, then fitted onto main, may find #10 holding a.txt and be stacked on it (a session that brings #7 onto main or
+# onto a stack's base changes line 1 alone). Bug it catches too: #10 then waited on #7, an older card stacked on it.
 t_batchleftout() {
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]"; : > "$STUB/overlap"
   cat > "$STUB/build" <<'EOF'
-if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven/ a.txt
+if grep -q '^# Main moved: apply the same change\|^# Stacked: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven/ a.txt
 else case $PWD in *-7) sed -i '10s/.*/seven/;20s/.*/seven/' a.txt ;; *-8) echo eight >> a.txt ;; *-9) sed -i 10s/.*/nine/ a.txt ;; *) sed -i 3s/.*/ten/ a.txt ;; esac; fi
 EOF
   echo '[ "$n" != 10 ] || while [ -d "$STUB" ]; do ls ../*-8.batch >/dev/null 2>&1 && break; sleep 0.1; done' >> "$STUB/review-cmd"
@@ -199,6 +206,7 @@ EOF
   # until #7, left out of its batch, has given way to be fitted: until then #7 still holds a.txt, and #10 claiming
   # again in that moment would wait on it for a reason this case is not about.
   echo 'case $PWD in *-10) [ -e "$STUB/ten" ] || { : > "$STUB/ten"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 || break; sleep 0.1; done; } ;; esac' >> "$STUB/test-cmd"
+  echo "$NOSTACK" >> "$STUB/review-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9); c10=$(cardof 10)
   grep -q "card $c7 tests a batch of 2: $c8 $c9" <<<"$out" || fail "#7 did not test a batch of #8 and #9: $out"
@@ -445,4 +453,29 @@ t_batchmovedagain() {
   done
   [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ "$(cat "$R/other.txt")" = other ] || fail "main does not hold the two changes and the other file: $(cat "$R/a.txt")"
   [ "$(cat "$R/third.txt")" = third ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main is dirty, or a worktree or mark is left"
+}
+
+# The owner (2026-11-17): a card that changed the holder's files slept on it for hours, through the holder's fixes.
+# #7 holds a.txt and changes its line 20; #8 appends a line, which does not apply with #7's change, so #8 is told to
+# wait on #7. It is stacked instead: one session brings its change onto main plus #7's change (the session finds
+# #7's line there), it is reviewed again and tests there while #7 holds a.txt, and #7's batch takes it after #7: one
+# batch run, main gets #7's commit then #8's. Bug it catches too: the batch put #8, ready first, before #7, and #8's
+# change, made on #7's, does not apply on main alone, so #8 left the batch.
+t_stackbatch() {
+  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; : > "$STUB/overlap"; echo 8 > "$STUB/ready"
+  cat > "$STUB/build" <<'EOF'
+if grep -q '^# Stacked: apply the same change' "$STUB/brief"; then tail -n 1 a.txt > "$STUB/stackline"; echo eight >> a.txt
+else case $PWD in *-7) sed -i 20s/.*/seven/ a.txt ;; *) echo eight >> a.txt ;; esac; fi
+EOF
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  c7=$(cardof 7); c8=$(cardof 8)
+  grep -q "card $c8 is stacked on card $c7" <<<"$out" && [ "$(cat "$STUB/stackline" 2>/dev/null)" = seven ] \
+    || fail "#8 was not stacked onto main plus #7's change: $(cat "$STUB/stackline" 2>/dev/null): $out"
+  st 'select(.issue == 8 and .step == "fix") | .reason' | grep -qF "stacked on card $c7" && [ "$(st 'select(.issue == 8 and .step == "review") | .result' | wc -l)" = 2 ] \
+    || fail "#8's stack session is not on its record, or #8 was not reviewed again after it: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  grep -q "card $c7 tests a batch of 2: $c7 $c8" <<<"$out" && [ "$(batchruns)" = 1 ] || fail "#7 did not test one batch of itself, then #8: $out"
+  [ "$(st 'select(.step == "landed") | "\(.issue) \(.batch | join(" "))"' | tr '\n' ,)" = "7 $c7 $c8,8 $c7 $c8," ] \
+    && [ "$(git -C "$R" log --reverse --format=%s HEAD~2..HEAD | tr '\n' ,)" = "feat(product): title 7 (#7),feat(product): title 8 (#8)," ] \
+    || fail "#7 and #8 did not land as one batch, #7 first: $(st 'select(.step == "landed")')"
+  [ "$(tail -n 2 "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold both changes, or a mark is left: $(cat "$R/a.txt"; ls "$T/$CASE/cards")"
 }

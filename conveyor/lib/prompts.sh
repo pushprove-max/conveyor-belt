@@ -291,6 +291,14 @@ files), and the card'"'"'s change no longer applies to it. This worktree has bee
 not hold the card'"'"'s change. Apply the same change, the card'"'"'s own patch, on top of main as it is now. The patch
 is the file named below: read it there, in parts if it is large (`git apply --3way <file>` applies what still fits).
 Resolve the conflict and change nothing else: keep what main has gained, and add nothing the patch does not hold.'
+# The same session for a card stacked on another (stackto(), lib/claim.sh); @CARD@ is that card.
+# shellcheck disable=SC2034 # used in lib/claim.sh
+STACKED='# Stacked: apply the same change on top of main and the change of card @CARD@
+Card @CARD@ changes the same files as this card and lands first. This card lands with it, after it. This worktree has
+been reset to main with the change of card @CARD@ and does not hold the change of this card. Apply the same change, the
+card'"'"'s own patch, on top of it. The patch is the file named below: read it there, in parts if it is large (`git
+apply --3way <file>` applies what still fits). Resolve the conflict and change nothing else: keep the change of card
+@CARD@, and add nothing the patch does not hold.'
 # What the one review of a port is told, after REVIEW: the kept patch finished its review loop on the blocked
 # card and only a landing conflict stopped it, so only what the port changed is reviewed again. The path of the file
 # that holds that difference follows it (the path, never the difference: a prompt must not grow with the diff).

@@ -240,11 +240,12 @@ t_givewaypast() {
 
 # A card whose tests fail once: #7 changes a.txt's first and last lines and adds `broken`, which fails the tests; the
 # session for that fix runs $STUB/fixing, keeps #7's claim, its live record and a snapshot, then removes `broken` and
-# puts the last line back. #8 appends a line, which does not apply together with #7's change to the last line. Each run of
+# puts the last line back. #8 appends a line, which does not apply together with #7's change to the last line (a
+# session that brings #8 onto another base appends it there, with no wait). Each run of
 # #7's tests keeps its claim and the last line of its a.txt (testclaim.<n>, testlast.<n>), and the first runs
 # $STUB/firsttest before it fails.
 gwfixsetup() { # <issues json>
-  setup "$1"; tune '.landBatch = 8'; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
+  setup "$1"; tune '.landBatch = 8'; for i in 1 2 3 4 5; do echo "$GO" > "$STUB/review.$i"; done
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   { printf 'SRC=%q\n' "$SRC"; cat <<'EOF'; } > "$STUB/build"
 if grep -q '^# The changed tests fail' "$STUB/brief"; then
@@ -253,7 +254,8 @@ if grep -q '^# The changed tests fail' "$STUB/brief"; then
   rm -f broken; sed -i 20s/.*/20/ a.txt
 else case $PWD in
   *-7) sed -i '1s/.*/seven/;20s/.*/seven-20/' a.txt; : > broken ;;
-  *) while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done; echo eight >> a.txt ;;
+  *) grep -q '^# Stacked\|^# Main moved' "$STUB/brief" || while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done
+    echo eight >> a.txt ;;
 esac; fi
 EOF
   cat >> "$STUB/test-cmd" <<'EOF'
@@ -267,13 +269,16 @@ EOF
 }
 
 # The owner: "why are other cards waiting for it? can't they go in front". #7 holds a.txt and its tests fail while #8,
-# reviewed and its own tests passed, waits on it: an hour of fix, review and tests would pass before #8 could land.
-# #7 gives way before its fix session (its claim, its live record and the Board name #8, "while fixing"), #8 lands
-# during that session (#7's re-run of its failed tests, which fails again, still holds a.txt), and #7, fixed and reviewed, tests holding nothing, claims a.txt again, is brought onto #8's
-# main, tests there and lands: both changes are on main. Never two cards hold a.txt at once.
+# reviewed, waits on it: an hour of fix, review and tests would pass before #8 could land. #8 is stacked on #7 (the
+# owner, 2026-11-17): brought onto main plus #7's change and reviewed there, its tests there fail on #7's `broken`, which
+# is not #8's to fix: it waits on, untested (stackred). #7's tests fail; #7 gives way before its fix session (its
+# claim, its live record and the Board name #8, "while fixing"), and #8, stacked on a card that failed, is brought onto
+# main alone, reviewed and tested there, and lands alone during that session (#7's re-run of its failed tests, which
+# fails again, still holds a.txt). #7, fixed and reviewed, tests holding nothing, claims a.txt again, is brought onto
+# #8's main, tests there and lands: both changes are on main. Never two cards hold a.txt at once.
 t_givewayfix() {
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
-  echo 'while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break; sleep 0.1; done' > "$STUB/firsttest"
+  echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break; sleep 0.1; done' > "$STUB/firsttest"
   echo "$GWLANDED"'; while [ -d "$STUB" ]; do jq -e .gaveWay "$PWD.live" >/dev/null 2>&1 && break; sleep 0.1; done' > "$STUB/fixing"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(jq -c .held "$STUB/testclaim.1" 2>/dev/null)" = true ] || fail "#7 did not hold a.txt through its first tests: $(cat "$STUB/testclaim.1" 2>/dev/null)"
@@ -293,6 +298,12 @@ t_givewayfix() {
     || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
   [ "$(st 'select(.issue == 7 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false false true " ] \
     || fail "#7's landing on the tests it ran after its fix does not say it reused them: $(st 'select(.issue == 7 and .step == "test")')"
+  c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
+  grep -q "card $c8 is stacked on card $c7" <<<"$out" && grep -q "card $c8: its checks or tests failed on main with the change of card $c7" <<<"$out" \
+    || fail "#8 was not stacked on #7, or its tests there did not fail on #7's change: $out"
+  [ "$(st 'select(.issue == 8 and .step == "fix") | .reason' | cut -c1-14 | tr '\n' ,)" = "stacked on car,main moved sin," ] \
+    && [ -z "$(st 'select(.issue == 8 and .step == "test" and .result == "fail")')" ] && [ "$(st 'select(.issue == 8 and .step == "landed") | .batch')" = null ] \
+    || fail "#8 was not brought onto main alone after its stack, or was sent to a fix for #7's failure, or did not land alone: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or claim is left: $(ls "$T/$CASE/cards")"
 }
 
@@ -312,4 +323,68 @@ t_givewayfixalone() {
   [ "$(cat "$STUB/runs7")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] || fail "#7 was not tested three times (the failed run, its re-run, after the fix) and reviewed twice: $(cat "$STUB/runs7") runs, $(wc -l < "$STUB/reviews") reviews"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 " ] && [ "$(head -n 1 "$R/a.txt")" = seven ] && [ ! -e "$R/broken" ] \
     && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#7 did not land as fixed, or something is left: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+
+# Stacking is bounded (stackto()): a card stacked on a holder whose change kept changing would be ported and reviewed
+# again each time. #8 waits on #7: it is stacked onto main plus #7's kept change; with that change the same, not
+# again; changed, once more (restacks 1); changed again, not: #8 waits, as before stacking. Bug it catches too: a card
+# whose issue says `Depends on: #7` was stacked; it only waits.
+t_stackonce() {
+  setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"; git -C "$R" worktree add -q "$CARDS/c7-7" -b card-7 main
+  # stackto() as the engine has it, and what it calls; the pack's landBatch at its default.
+  eval "$(sed -n '/^stackto() {/,/^}/p; /^merge3() {/,/^}/p' "$SRC/lib/claim.sh")"
+  # shellcheck disable=SC2034 # read by DEPS
+  local MAX_DEPTH=2 BRANCH=main b
+  eval "$(sed -n '/^DEPS=/,/unique;'"'"'$/p' "$SRC/lib/prompts.sh")"
+  packget() { printf -v "$2" 8; }
+  st8() { (cd "$R" && stackto c8-8 "$CARDS/c8-8" '{"on":"c7-7","paths":["a.txt"]}' "${1:-{\}}"); } # [#8's issue json]
+  keep7() { sed -i "$1s/.*/seven/" "$CARDS/c7-7/a.txt"; git -C "$CARDS/c7-7" diff > "$CARDS/c7-7.cpatch"; } # <a line #7 changes too>
+  keep7 1
+  b=$(st8) && [ "$(git -C "$R" show "$b:a.txt" | head -n 1)" = seven ] && [ "$(git -C "$R" rev-parse "$b^")" = "$(git -C "$R" rev-parse main)" ] \
+    && [ "$(jq -c '[.on, .restacks, .base]' "$CARDS/c8-8.stack")" = "[\"c7-7\",0,\"$b\"]" ] || fail "#8 was not stacked onto main plus #7's change: $b $(cat "$CARDS/c8-8.stack")"
+  ! st8 >/dev/null || fail "#8 was stacked again on #7's change as it was"
+  keep7 2
+  b=$(st8) && [ "$(git -C "$R" show "$b:a.txt" | sed -n 2p)" = seven ] && [ "$(jq -c .restacks "$CARDS/c8-8.stack")" = 1 ] \
+    || fail "#8 was not stacked once more on #7's changed change: $b $(cat "$CARDS/c8-8.stack")"
+  keep7 3
+  ! st8 >/dev/null || fail "#8 was stacked a third time: it should wait"
+  rm -f "$CARDS/c8-8.stack"
+  ! st8 '{"body":"Fix it.\nDepends on: #7"}' >/dev/null && [ ! -e "$CARDS/c8-8.stack" ] || fail "#8, whose issue depends on #7, was stacked on it"
+}
+
+# A card stacked on a holder lands after it. Bug: the holder, claiming again, waited on the card stacked on it, an
+# older waiting card whose change fits main, and the stacked card then left its stack to land first (a session and a
+# review for nothing). #8, picked first, is stacked on #7 (its worktree on main plus #7's change, its own change on line
+# 10, no kept change, so it overlaps #7): #7's claim does not wait on it; on another base, #8 is an older card that
+# waits, ready, and #7 waits for it, as before. #7, having given way 3 times, gives way once more for a test fix while
+# #8 is stacked on it, so #8 goes on; with no card stacked on it, it keeps its claim.
+t_stackfirst() {
+  setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 8 7; do
+    git -C "$R" worktree add -q "$CARDS/c$n-$n" -b "card-$n" main
+    echo "{\"card\":\"c$n-$n\",\"issue\":$n,\"step\":\"picked\"}" >> "$ST/cards.jsonl"
+  done
+  sed -i 1s/1/seven/ "$CARDS/c7-7/a.txt"; git -C "$CARDS/c7-7" add -A
+  sed -i 1s/1/seven/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" commit -qam "main plus #7's change"
+  sed -i 10s/10/eight/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" add -A
+  echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"passed\":false}" > "$CARDS/c8-8.claim"
+  jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
+  # claim(), giveway() and what they call, as the engine has them, run from main's checkout.
+  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
+  # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
+  local HERE=$SRC GIVEWAY=3
+  ctl() { cat "$ST/control.json"; }
+  w=$(cd "$R" && STATE=$ST/cards.jsonl BRANCH=main claim c7-7 "$CARDS/c7-7" $$) || fail "claim failed"
+  [ -z "$w" ] && [ "$(jq -c .held "$CARDS/c7-7.claim")" = true ] || fail "#7 waited on #8, stacked on it: $w $(cat "$CARDS/c7-7.claim")"
+  jq -c '.base = "another"' "$CARDS/c8-8.stack" > "$CARDS/c8-8.stack.new" && mv "$CARDS/c8-8.stack.new" "$CARDS/c8-8.stack"
+  w=$(cd "$R" && STATE=$ST/cards.jsonl BRANCH=main claim c7-7 "$CARDS/c7-7" $$) || fail "claim failed"
+  [ "$(jq -r .on <<<"$w")" = c8-8 ] || fail "#7 did not wait on #8, older and ready, no longer on its stack: $w"
+  jq -c '.held = true | .gave = 3' "$CARDS/c7-7.claim" > "$CARDS/c7-7.claim.new" && mv "$CARDS/c7-7.claim.new" "$CARDS/c7-7.claim"
+  (giveway c7-7 "$CARDS/c7-7" fixing) && [ "$(jq -c '[.held, .away, .fixing, .gave]' "$CARDS/c7-7.claim")" = '[false,true,true,4]' ] \
+    || fail "#7, given way 3 times, did not give way for its test fix with #8 stacked on it: $(cat "$CARDS/c7-7.claim")"
+  jq -c '.held = true | .gave = 3' "$CARDS/c7-7.claim" > "$CARDS/c7-7.claim.new" && mv "$CARDS/c7-7.claim.new" "$CARDS/c7-7.claim"; rm -f "$CARDS/c8-8.stack"
+  ! (giveway c7-7 "$CARDS/c7-7" fixing) && [ "$(jq -c .held "$CARDS/c7-7.claim")" = true ] || fail "#7, given way 3 times, gave way with no card stacked on it"
 }

@@ -88,6 +88,13 @@ to a main that moved lands on the tests it already passed, with no second run an
 run again on main. A change that had to be reworked to fit is reviewed and tested again (`conveyor/README.md`,
 Same-file cards).
 
+With batches on (the pack's `landBatch` over 1), a card whose change does not apply with the change of the card that
+holds its files does not wait for that card to land. It is stacked: its change is put on main plus the other card's
+change, then reviewed and tested there. When the other card passes its tests, the two land in one batch, the other
+card first. When the other card fails its tests, the stacked card is put on main alone and lands first. When the other
+card's change changes, the card is stacked again once; after that it waits. A card whose issue has a `Depends on:`
+line that names the other card's issue waits.
+
 ## Push
 
 By default, Conveyor lands each card and pushes when you press
