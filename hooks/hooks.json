@@ -101,11 +101,25 @@
             "type": "command",
             "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh words",
             "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/waiter.sh --check",
+            "timeout": 30
           }
         ]
       }
     ],
     "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/waiter.sh --check",
+            "timeout": 30
+          }
+        ]
+      },
       {
         "matcher": "AskUserQuestion",
         "hooks": [

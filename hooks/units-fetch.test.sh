@@ -113,13 +113,15 @@ trap 'kill -- -"${WP:-0}" 2>/dev/null; rm -rf "$T"' EXIT
 foreman() { fetch "$M/bakery" feed | grep '^foreman' || echo 'no foreman line'; }
 waiter
 same 'D1: the role, a live waiter on the current install and its four watchers' \
-  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:up' "$WP" "$A" "$A")" "$(foreman)"
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:up\tlistening' "$WP" "$A" "$A")" "$(foreman)"
 kill -- -"$WP"; wait "$WP" 2>/dev/null
+# Issue 215: and why it ended, from the last line of its log, written over a minute ago.
+echo "2026-11-15T00:00:00Z $WP ended: the session's process 77 has ended" > "$FD/waiter.log"; touch -t 200001010000 "$FD/waiter.log"
 same 'D3: a waiter.pid whose waiter has exited is no live waiter' \
-  "$(printf 'foreman\ts1\t%s\t%s\ts1\t0\t%s\t' "$WP" "$A" "$A")" "$(foreman)"
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t0\t%s\t\tdown: the session'"'"'s process 77 has ended' "$WP" "$A" "$A")" "$(foreman)"
 waiter idle
 same 'a watcher that is not running is down' \
-  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:down' "$WP" "$A" "$A")" "$(foreman)"
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:down\tlistening' "$WP" "$A" "$A")" "$(foreman)"
 kill -- -"$WP"; wait "$WP" 2>/dev/null
 # D4: no role mark and no launcher settings: no Foreman is expected, so no line (the other machines above have no
 # Foreman folder at all, and their whole output has none).
@@ -127,7 +129,7 @@ kill -- -"$WP"; wait "$WP" 2>/dev/null
 same 'D4: a Foreman folder with no role and no setup prints no line' 'no foreman line' "$(foreman)"
 echo '{}' > "$FD/settings.json"
 same 'a set-up Foreman whose role no session holds still prints its line' \
-  "$(printf 'foreman\t\t%s\t%s\ts1\t0\t%s\t' "$WP" "$A" "$A")" "$(foreman)"
+  "$(printf 'foreman\t\t%s\t%s\ts1\t0\t%s\t\tdown: the session'"'"'s process 77 has ended' "$WP" "$A" "$A")" "$(foreman)"
 # Issue 139: the plugin problems the Foreman noted (stop.sh writes one "- " line each) are counted, with the file, so
 # /units can say so; the file's heading is no problem. Bug it catches: a noted problem /units never showed.
 printf '# Plugin problems\n\n- 2026-11-16T10:00:00Z · card #7 · a · evidence: -\n- 2026-11-16T11:00:00Z · card - · b · evidence: -\n' > "$FD/plugin-bugs.md"

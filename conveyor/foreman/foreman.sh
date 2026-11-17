@@ -6,7 +6,8 @@
 # what needs them: it files issues,
 # clears blocked cards and takes every decision to the owner; it builds nothing itself. Its hooks are the plugin's own
 # (hooks/hooks.json, run in every session through the shim): start at SessionStart; stop.sh state, stop.sh reply and
-# waiter.sh (asyncRewake) at Stop; filing before a Bash call and filed after it, failed or not. Each stands down in
+# waiter.sh (asyncRewake) at Stop; waiter.sh --check after each prompt and each tool call, which starts the waiter
+# again when none runs; filing before a Bash call and filed after it, failed or not. Each stands down in
 # any session but the Foreman's (lib.sh foreman).
 # setup (`conveyor.sh setup --foreman`, re-runnable; CONVEYOR_MAIN names the main checkout): checks the host file's
 #   records, makes this project's Foreman's folder ($FD: `foreman` in its state folder, a group's in its first

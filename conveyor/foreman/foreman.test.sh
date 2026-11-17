@@ -19,7 +19,13 @@ t=$(jq -r '.terms // empty' "$HOST0" 2>/dev/null); [[ $t != "~/"* ]] || t=$HOME/
 . "$SRC/../lib/portable.sh"; p_tools
 # Each case (t_<case>) runs side by side with the others, on a host of its own made by fixture in $B/<case> (T); a
 # case that goes on from what another left (the Foreman set up, a name, a mark) makes that itself first.
-B=$(mktemp -d); trap 'rm -rf "$B" "$TERMS"' EXIT
+B=$(mktemp -d)
+# A waiter that delivers a wake leaves a waiter listening (waiter.sh handoff), which ends with the session's process:
+# here a stand-in, ended with the test, and no child of it, so the wait for the cases below does not wait for it.
+# unheld ends that waiter at once, where its stand-in watcher would go on putting wakes.
+export CONVEYOR_FOREMAN_SESSION_PID; CONVEYOR_FOREMAN_SESSION_PID=$(sleep 600 > /dev/null 2>&1 & echo $!) # sleep: the stand-in for the session's process
+trap 'kill $CONVEYOR_FOREMAN_SESSION_PID; rm -rf "$B" "$TERMS"' EXIT
+unheld() { kill "$(cut -d' ' -f1 "$FD/waiter.pid")" 2>/dev/null; flock -w 10 "$FD/waiter.lock" true; }
 # Bug (issue 452): with no CONVEYOR_MAIN, the engine runs for the checkout of the folder it runs in (foreman/lib.sh,
 # the git common dir). A draft of t_auto ran `foreman.sh claim a3a3a3a3-0000` in the folder the test was started
 # from, a card's worktree, so the claim went to the real main checkout's conveyor/state/foreman. Every case runs
@@ -99,8 +105,9 @@ jq -e '.env.CONVEYOR_FOREMAN == "1" and .env.CLAUDE_CODE_PROMPT_CACHE_TTL == "1h
 # The Foreman's hooks are the plugin's own, so a session started any way (claude --continue, an IDE) runs them; the
 # launcher's settings hold none, or its session would run each twice.
 P=$SRC/../../hooks/hooks.json
-for h in 'SessionStart foreman.sh start' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse foreman.sh filing' 'PostToolUse foreman.sh filed' 'PostToolUseFailure foreman.sh filed'; do
-  jq -e --arg e "${h%% *}" --arg h "shim.sh conveyor/foreman/${h#* }" '[.hooks[$e][]? | select(($e | test("ToolUse") | not) or .matcher == "Bash") | .hooks[].command | endswith($h)] | any' "$P" >/dev/null \
+for h in 'SessionStart foreman.sh start' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse foreman.sh filing' 'PostToolUse foreman.sh filed' 'PostToolUseFailure foreman.sh filed' \
+  'UserPromptSubmit waiter.sh --check' 'PostToolUse waiter.sh --check'; do # issue 215: a dead waiter is started again by the session's next prompt or tool call
+  jq -e --arg e "${h%% *}" --arg h "shim.sh conveyor/foreman/${h#* }" '[.hooks[$e][]? | select(($e | test("ToolUse") | not) or .matcher == "Bash" or .matcher == null) | .hooks[].command | endswith($h)] | any' "$P" >/dev/null \
     || fail "no plugin hook runs $h"
 done
 jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("waiter.sh")) | .asyncRewake] == [true]' "$P" >/dev/null || fail "the waiter does not wake the session"
@@ -217,6 +224,7 @@ compgen -G "$FD/pending/*.wake" >/dev/null && fail "a relayed wake stayed pendin
 # A watcher that puts a wake while the waiter waits wakes the session with it.
 got=$(echo '{}' | CONVEYOR_FOREMAN_WATCHERS="echo 'Alert: disk full' > $FD/pending/x.wake"$'\nsleep 30' bash "$SRC/waiter.sh" 2>&1 >/dev/null) # sleep: a stand-in watcher that goes on after its alert
 [ "$got" = 'Alert: disk full' ] || fail "the waiter did not relay a watcher's wake: $got"
+unheld
 # A stuck card whose step the engine ended for no progress and runs once more says what the engine did, and wakes
 # again though the card was already reported stuck.
 rm -f "$FD"/pending/*.wake
@@ -646,6 +654,7 @@ rm -f "$T/w1"; out=$(sess s1 | CONVEYOR_FOREMAN_WATCHERS="echo \$\$ > $T/w1" bas
 [ "$rc" = 0 ] && [ ! -e "$T/w1" ] || fail "the first session's waiter started watchers at its next stop (exit $rc): $out"
 out=$(sess s2 | CONVEYOR_FOREMAN_WATCHERS=". $SRC/lib.sh && echo 'Alert: moved' | pending_put" bash "$SRC/waiter.sh" 2>&1 >/dev/null); rc=$?
 [ "$rc" = 2 ] && [ "$out" = 'Alert: moved' ] || fail "the new Foreman's waiter did not run its watchers (exit $rc): $out"
+unheld
 out=$(sess s1 resume | bash "$SRC/foreman.sh" start)
 # Plain stdout at SessionStart reaches only Claude: the owner sees the line only as the systemMessage.
 [ "$(wc -l <<<"$out")" = 1 ] && jq -e '.systemMessage | contains("no longer the Foreman")' <<<"$out" >/dev/null \

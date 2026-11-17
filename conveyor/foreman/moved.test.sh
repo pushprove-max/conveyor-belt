@@ -10,7 +10,9 @@ set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d) || exit 1
 wp=''
-trap '[ -z "$wp" ] || kill "$wp" 2>/dev/null; wait 2>/dev/null; rm -rf "$T"' EXIT
+# The waiter a delivering waiter leaves listening (waiter.sh handoff) ends with the session's process: a stand-in here.
+sleep 600 & export CONVEYOR_FOREMAN_SESSION_PID=$! # sleep: the stand-in for the session's process, ended with the test
+trap 'kill $CONVEYOR_FOREMAN_SESSION_PID; [ -z "$wp" ] || kill "$wp" 2>/dev/null; wait 2>/dev/null; rm -rf "$T"' EXIT
 fail() { echo "FAIL [moved]: $*" >&2; exit 1; }
 A=$(printf 'a%.0s' {1..40}) B=$(printf 'b%.0s' {1..40})
 export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data

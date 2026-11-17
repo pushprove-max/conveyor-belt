@@ -22,7 +22,8 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).
 - **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
-  session`, `no waiter running`, `waiter on an old install`, `watcher down: <name>`). In `/units` and the pane a dim
+  session`, `waiter starting again`, `waiter down: <why>`, `no waiter running`, `waiter on an old install`, `watcher
+  down: <name>`; `docs/foreman.md` says what each one means). In `/units` and the pane a dim
   line under it gives the session that has the role, the waiter's process and version, and the state of each watcher.
   A narrow view wraps that line onto more lines, so no watcher is lost.
   The band shows the Foreman line alone, and the status line starts with it. A project where no session has the

@@ -541,13 +541,15 @@ export const fastText = (s: State): string => {
 }
 // The Foreman indicator for the session `sid`, from the fetch's foreman fields: <session the role mark names> <waiter
 // pid> <its commit, - from a checkout> <its session> <1: that waiter runs> <the commit the project runs now> <each
-// watcher name:up|down>. Listening: this session holds the role, and its waiter runs from the install the project
-// runs now with every watcher up. An install is old only when both commits are named and differ: a waiter from a
+// watcher name:up|down> <the waiter's state, lib.sh waiter_state: listening, starting again, or down: <why>>.
+// Listening: this session holds the role, and its waiter runs from the install the project runs now with every
+// watcher up. With no waiter running, the state says whether one is starting again (it ended under a minute ago) or
+// is down and why. An install is old only when both commits are named and differ: a waiter from a
 // checkout, or a project that names no commit, never moves (waiter.sh moved).
 const COMMIT = /^[0-9a-f]{40}$/
 export const foremanOf = (f: string[] | null, sid: string): Foreman | null => {
   if (!f) return null
-  const [mark = '', pid = '', commit = '', wsid = '', live = '', cur = '', watch = ''] = f
+  const [mark = '', pid = '', commit = '', wsid = '', live = '', cur = '', watch = '', state = ''] = f
   const watchers = watch.split(' ').filter(Boolean).map(w => w.split(':'))
   const running = live === '1' && !!sid && wsid === sid
   const detail = [
@@ -557,7 +559,7 @@ export const foremanOf = (f: string[] | null, sid: string): Foreman | null => {
   ].join(' · ')
   const down = watchers.find(([, st]) => st !== 'up')
   const why = !sid || mark !== sid ? 'not the Foreman session'
-    : !running ? 'no waiter running'
+    : !running ? (state === 'starting again' ? 'waiter starting again' : state.startsWith('down: ') ? `waiter ${state}` : 'no waiter running')
     : COMMIT.test(commit) && COMMIT.test(cur) && commit !== cur ? 'waiter on an old install'
     : down ? `watcher down: ${down[0]}`
     : ''

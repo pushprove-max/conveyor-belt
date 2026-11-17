@@ -158,7 +158,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 # building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
-# above), each "needs you: <text>". <project> names one record of mine; with none, every one of them.
+# above), each "needs you: <text>". <project> names one record of mine; with none, every one of them. Last, the Foreman's
+# waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
     + ((.health | objects | select((.building | type) == "number" and (.builderCap | type) == "number")
@@ -185,6 +186,7 @@ if [ "${1:-}" = --status ]; then
     [ "${PIPESTATUS[0]}" = 0 ] || echo "needs you: unknown, the snapshot holds no health record"
   done <<<"$RECS"
   [ "$n" -gt 0 ] || { echo "foreman status: $2 is none of this Foreman's projects ($(cut -f1 <<<"$RECS" | paste -sd' ' -))" >&2; exit 2; }
+  echo "waiter: $(waiter_state)"
   exit 0
 fi
 

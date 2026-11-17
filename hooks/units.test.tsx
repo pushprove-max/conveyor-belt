@@ -1021,6 +1021,10 @@ const notListening: [string, string[], string][] = [
   ['D2: the role is held by another session', ['other', '4242', COMMIT_A, 'other', '1', COMMIT_A, UP], 'not the Foreman session'],
   ['D2: the role is held by no session', ['', '', '', '', '0', COMMIT_A, ''], 'not the Foreman session'],
   ['D3: no live waiter', ['me', '4242', COMMIT_A, 'me', '0', COMMIT_A, ''], 'no waiter running'],
+  // Issue 215: the owner saw the watcher as down while it was only being started again, and never why one was down.
+  ['a waiter that ended under a minute ago', ['me', '4242', COMMIT_A, 'me', '0', COMMIT_A, '', 'starting again'], 'waiter starting again'],
+  ['a waiter down for over a minute, with why', ['me', '4242', COMMIT_A, 'me', '0', COMMIT_A, '', "down: the session's process 77 has ended"],
+    "waiter down: the session's process 77 has ended"],
   ['D3: the waiter names a commit other than the project\'s current one', ['me', '4242', COMMIT_B, 'me', '1', COMMIT_A, UP], 'waiter on an old install'],
   ['a watcher has exited and not come back', ['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, 'conveyor:up limit:up alerts:up idle:down'], 'watcher down: idle'],
 ]

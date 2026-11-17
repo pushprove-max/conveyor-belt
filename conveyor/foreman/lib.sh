@@ -124,6 +124,26 @@ claim_() {
     || { echo "foreman: the previous Foreman's waiter (pid $pid) did not stop" >&2; return 1; }
 }
 
+# waiter_state: the Foreman's waiter now, one line. "listening" while the pid waiter.pid names runs waiter.sh; else,
+# from the last line of waiter.log (waiter.sh log), "starting again" for a minute after it was written, then
+# "down: <why the waiter ended>". A waiter killed with no chance to write leaves another line last, which says nothing
+# of when it ended: the first read that finds it so writes its end line then, so the minute counts from that read.
+waiter_state() {
+  local pid='' line t
+  { read -r pid _ < "$FD/waiter.pid"; } 2>/dev/null
+  if [[ $pid =~ ^[0-9]+$ ]] && ps -o args= -p "$pid" 2>/dev/null | grep -q '/conveyor/foreman/waiter\.sh'; then echo listening; return; fi
+  line=$(tail -n 1 "$FD/waiter.log" 2>/dev/null)
+  [ -n "$line" ] || { echo 'down: no waiter has run yet; the end of the next turn starts one'; return; }
+  case ${line#* * } in
+    'ended: '*) ;;
+    *) printf '%s %s ended: it was killed with no time to say why (its last line: %s)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${pid:--}" "${line#* * }" >> "$FD/waiter.log" ;;
+  esac 2>/dev/null
+  line=$(tail -n 1 "$FD/waiter.log" 2>/dev/null)
+  t=$(p_stat "$FD/waiter.log" | cut -d' ' -f2)
+  [ $(( $(date +%s) - ${t:-0} )) -gt 60 ] || { echo 'starting again'; return; }
+  echo "down: ${line#* * ended: }"
+}
+
 # ask <repo> <main> <command> [<argument>...]: one Conveyor command (snapshot, health, control ...) of a record, by
 # the commit its own pack pins (or its current engine, for a pack that follows the plugin's main), run over ssh at
 # the host file's ssh target when it names one, else on this machine.

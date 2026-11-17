@@ -59,11 +59,14 @@ fi
 # folder holding a role mark (session) that names a session, or its launcher's settings (settings.json). The line:
 #   foreman <session the mark names> <waiter.pid's pid> <its commit, - from a checkout> <its session> <1 when that pid
 #   runs conveyor/foreman/waiter.sh, else 0> <the commit the project runs now, as waiter.sh moved() reads it, empty when
-#   none> <each watcher, name:up or name:down, while the waiter runs>
+#   none> <each watcher, name:up or name:down, while the waiter runs> <the waiter's state: listening, starting again
+#   or down: <why>, as lib.sh waiter_state reads it from waiter.pid and waiter.log>
 # The waiter writes waiter.pid only once it holds waiter.lock, and holds it while it runs, so a live waiter.sh by that
 # pid holds the lock: the lock is not tried here, as a try that held it while a waiter started would make that waiter
 # stand down. A watcher is up while a child of the waiter runs its watch-<name>.sh. Nothing is started or written.
-fd=$(export CONVEYOR_MAIN=$here; . "${BASH_SOURCE[0]%/*}/../conveyor/foreman/lib.sh" > /dev/null 2>&1 && printf '%s' "$FD")
+fd='' wstate=''
+{ IFS= read -r fd; IFS= read -r wstate; } < <(export CONVEYOR_MAIN=$here
+  . "${BASH_SOURCE[0]%/*}/../conveyor/foreman/lib.sh" > /dev/null 2>&1 && printf '%s\n%s\n' "$FD" "$(waiter_state)")
 if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
   mark='' wpid='' wcommit='' wsid='' live=0 watch=''
   { read -r mark _ < "$fd/session"; } 2>/dev/null
@@ -81,7 +84,7 @@ if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
   fi
   cur=$(jq -r '.plugin.commit // empty | strings' .conveyor/project.json 2>/dev/null)
   [ -n "$cur" ] || cur=$(jq -r '.commit // empty | strings' .git/conveyor-engine.json 2>/dev/null)
-  printf 'foreman\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mark" "$wpid" "$wcommit" "$wsid" "$live" "$cur" "$watch"
+  printf 'foreman\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mark" "$wpid" "$wcommit" "$wsid" "$live" "$cur" "$watch" "$wstate"
 fi
 # The plugin problems the Foreman noted (conveyor/foreman/stop.sh, one "- " line each in plugin-bugs.md), printed only
 # when there is one: pluginbugs <how many> <the file>.

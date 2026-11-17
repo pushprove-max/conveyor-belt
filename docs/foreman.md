@@ -37,6 +37,7 @@ see only that project. It shows:
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
   error and a problem of the engine
+- last, the Foreman's waiter: `waiter: listening`, `waiter: starting again` or `waiter: down: <why>`
 
 The Foreman uses this command for its status checks. Its rules also tell it to run short commands in the foreground,
 to put several checks into one command, and to read an image only when you ask or a check needs it.
@@ -83,7 +84,10 @@ that the Foreman's watchers still use. A later update deletes it, after those wa
 - **Foreman not listening**, in the colour for a warning, with the reason:
   - `not the Foreman session`: another session has the Foreman role, or no session has it. In the Foreman's own
     session, run `/conveyor-belt:foreman` to take the role again.
-  - `no waiter running`: no waiter runs for this session. The next end of a turn starts it.
+  - `waiter starting again`: the waiter stopped less than a minute ago. The next one starts on its own (see below).
+  - `waiter down: <why>`: no waiter has run for more than a minute. `<why>` is the reason the last one gave when it
+    stopped. Your next message to the Foreman starts it again.
+  - `no waiter running`: the waiter that runs is not this session's.
   - `waiter on an old install`: the waiter runs from a version that the project does not use now.
   - `watcher down: <name>`: one of the watchers (`conveyor`, `limit`, `alerts` or `idle`) stopped and did not start
     again.
@@ -93,6 +97,19 @@ version, and the state of each watcher. A project where no session has the role 
 Foreman line. The line comes from
 the files in the Foreman's folder and from the process list of this machine. It does not start the waiter, and it
 does not ask the host.
+
+## The watcher recovers by itself
+
+The waiter wakes the Foreman by ending. Before it ends, it starts a new waiter. The new waiter listens while the
+Foreman answers the wake. A wake that comes during that turn waits. The Foreman gets it when the turn ends, and gets
+it once.
+
+When the waiter stops for any other reason, the next prompt or tool call of the Foreman session starts it again. A
+check of the waiter's process runs at each of them. It starts a waiter only when none runs, and only one. When the
+session is idle, no check runs, and the waiter stays down until your next message. The file `waiter.log` in the
+Foreman's folder (`foreman` in the folder that `conveyor.sh state-dir` prints) has a line each time a waiter starts and each time
+one stops, with the reason. A waiter that was killed has no time to write its reason. Its start line is then the last
+line.
 
 ## The Foreman on your own machine
 
