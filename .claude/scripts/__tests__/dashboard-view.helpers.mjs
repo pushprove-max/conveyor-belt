@@ -275,8 +275,11 @@ export const CARD_METRICS = { queueSec: 3600, slotSec: 60, buildSec: 600, review
   ] };
 // The snapshot's tests part (conveyor/lib/testfiles.sh testspart(), as dashboard.sh tags its runs): three files. e2e is
 // over the budget but slow on purpose; merge is over it, slower than usual, waits (2.5 times its CPU on the clock),
-// flaky, failed in 2 steps and has an issue; the Board one is faster than its median. 39 test steps in 7 days.
+// flaky, failed in 2 steps (from before verdicts were kept: both count for Fails often) and has an issue; the Board
+// one is faster than its median. 39 test steps in 7 days.
 const run = (cpu, sec, n, h) => ({ cpu, sec, card: `c${h}-${n}`, time: iso(T0 - h * 3600000), issue: n, repo: 'sample', url: `${P}/${n}` });
+// A failed test step of a file (#188), as the snapshot's failures has it: its card's issue n, h hours ago, its verdict.
+export const fail = (n, h, verdict, cases = ['mergeclean'], tail = null) => ({ card: `c${h}-${n}`, issue: n, time: iso(T0 - h * 3600000), verdict, cases, tail, repo: 'sample', url: `${P}/${n}` });
 const file = (o) => ({ runs: [], timedRuns: 6, failedSteps: 0, flaky: 0, issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, slower: false, ...o });
 export const TESTS = {
   settings: { fileBudget: 8, slowIssues: false, slower: { share: 0.25, runs: 3, minRuns: 5 }, files: { 'conveyor/tests/e2e.test.sh': { slowOnPurpose: 'runs the whole loop' } } },
@@ -284,7 +287,8 @@ export const TESTS = {
     file({ file: 'conveyor/tests/e2e.test.sh', cpu: 40, median: 39, change: 0.026, runs: [run(40, 30, 509, 1)], lastRun: { sec: 30, cpu: 40, clockPerCpu: 0.75 },
       slowOnPurpose: 'runs the whole loop', over: true, usual: 39 }),
     file({ file: 'conveyor/tests/merge.test.sh', cpu: 12, median: 6, change: 1, runs: [run(12, 30, 509, 1), run(11.5, 14, 451, 2), run(11, null, 435, 3)],
-      lastRun: { sec: 30, cpu: 12, clockPerCpu: 2.5 }, timedRuns: 7, failedSteps: 2, flaky: 1, issue: 480, over: true, usual: 6, slower: true }),
+      lastRun: { sec: 30, cpu: 12, clockPerCpu: 2.5 }, timedRuns: 7, failedSteps: 2, flaky: 1, issue: 480, over: true, usual: 6, slower: true,
+      failures: [fail(451, 2, null), fail(435, 3, null)] }),
     file({ file: '.claude/scripts/__tests__/x.test.mjs', cpu: 2, median: 4, change: -0.5, runs: [run(2, 2.2, 509, 1)], lastRun: { sec: 2.2, cpu: 2, clockPerCpu: 1.1 },
       over: false, usual: 4 }),
   ],

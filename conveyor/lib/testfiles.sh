@@ -18,8 +18,10 @@
 #   gives none; card (null for a whole-suite run), time, whole (a whole-suite run), and a whole-suite run's result: ok,
 #   fail or null}; [] for a file never run), lastRun ({sec, cpu, clockPerCpu, time, whole} of its newest run; null with
 #   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
-#   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it),
-#   caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
+#   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
+#   a step that passed on re-run counts with the failures of its first run: failedrun, FAILURE),
+#   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
+#   (FAILURE); tail is null past the newest TESTKEEP), caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
 #   so the fix went into the code; changedToPass when that commit changed the file),
 #   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), budget and budgetFrom (file: its own;
 #   project: test.fileBudget), slowOnPurpose (its reason, else null), over (cpu over its budget; false with no cpu), usual (the median of
@@ -66,6 +68,22 @@ OWNERS='def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]
     def caseowners: index(": ") as $i | if $i == null then [.] else owners(.[:$i]; .[$i + 2:]) end;
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
         | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings)] | unique;'
+# One failed test line, as a failure of the file $f it counts for (failedfiles), read with OWNERS: {card, issue, time,
+# verdict, cases, tail}. verdict: the test line's verdicts (verdicts(), lib/testrun.sh) of the cases that count for $f,
+# main when one of them failed on main too, else flaky when one failed and then passed when run again, else card (the
+# card's own change made it fail: the test did its job); null when the line has none for it (a line written before
+# verdicts were kept). cases: the names of its failing cases that count for $f ([] for a file that failed naming no
+# case). tail: the last 1500 characters of the step's output (the line's tail), null with none. failedrun: a test
+# line as a failed step: a line that failed as it is; a line that passed on re-run (card(): `test pass` with the first
+# run's failures in rerun, firstrun()) with those failures as its own, their verdict flaky; no other line.
+FAILURE='def failedrun: if .result == "fail" then . elif .result == "pass" and (.rerun.failures | type) == "object"
+      then .failures = .rerun.failures else empty end;
+    def failure($f): [.verdicts | arrays | .[] | objects | select(any((.case | strings | caseowners[]); . == $f)) | .verdict | strings] as $v
+    | {card, issue, time,
+       verdict: (if any($v[]; . == "main") then "main" elif any($v[]; . == "flaky") then "flaky" elif any($v[]; . == "card") then "card" else null end),
+       cases: [.failures.files | arrays | .[] | objects | (.file | strings) as $x | .cases | arrays | .[] | (.name | strings) as $n
+         | select(any(owners($x; $n)[]; . == $f)) | $n] | unique,
+       tail: ((.tail | strings | .[-1500:]) // null)};'
 # What a card did to the test files it changed that main already had (#76), written on its landed line as testedits:
 # one entry a file, {file, read, removedAsserts, changedExpected, skipsAdded, timeoutsRaised, casesDeleted}. The one
 # table of patterns, a language a row: the file name endings it reads and the jq regular expressions of an assertion,
@@ -228,7 +246,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
-    --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) "$OWNERS"'
+    --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) "$OWNERS$FAILURE"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
@@ -253,7 +271,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            mutantsAfter: (if $l == null then null else [$mu[] | select(.file == $o.file and .state == "done" and .at > $l.time)] | max_by(.at) | mutsaid end)};
     # The asked list of the mutation checks (lib/mutate.sh mutask()): each file to its place, 1 first.
     ($mq | split("\n") | map(select(. != "")) | to_entries | map({key: .value, value: (.key + 1)}) | from_entries) as $place
-    | (reduce ($ls[] | select(.result == "fail") | failedfiles[]) as $f ({}; .[$f] += 1)) as $failed
+    # The failed test steps of each file (FAILURE: failedrun), newest first.
+    | (reduce ($ls | reverse[] | failedrun) as $l ({}; reduce ($l | failedfiles[]) as $f (.; .[$f] += [$l | failure($f)]))) as $failed
     # Each failed test step of a card that landed, for each file it failed in: caught when the landed commit left the
     # file as it was (the fix went into the code), changed to pass when it changed the file.
     | (reduce ($cr[] | select(.step == "landed" and (.card | type == "string"))) as $l ({}; .[$l.card] = $l.sha)) as $land
@@ -274,7 +293,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
            runs: ($r[-$keep:] | reverse | map(del(.file))),
            lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} end),
-           timedRuns: ($c | length), runsOnRecord: ($r | length), wholeOnly: $wo, failedSteps: ($failed[$f] // 0),
+           timedRuns: ($c | length), runsOnRecord: ($r | length), wholeOnly: $wo, failedSteps: ($failed[$f] // [] | length),
+           failures: ($failed[$f] // [] | to_entries | map(.value + if .key < $keep then {} else {tail: null} end)),
            caught: ($catch[$f].caught // 0), changedToPass: ($catch[$f].changed // 0),
            flaky: ($flaky[$f] // 0),
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),

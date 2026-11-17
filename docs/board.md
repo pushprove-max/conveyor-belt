@@ -321,6 +321,23 @@ often that happened. A step of a card that did not land counts neither way. A fi
 and no catch shows "Never caught anything" in grey text, which is not a status chip. A file that never fails may
 check nothing.
 
+A file shows "Fails often" when 2 or more card Test steps failed in it for a reason outside the card's own change.
+Conveyor gives each failure a verdict. Flaky: the case failed, then passed when it ran again. Main: the case failed on
+main too. Card: the card's own change made it fail, so the test did its job. Fails often counts the flaky and main
+failures, and the failures from before Conveyor kept verdicts ("no verdict on record"). It never counts a card
+failure. The status of the file says the kinds in grey text, for example "Failed: 1 flaky, 1 failed on main too".
+Card failures show apart, as "caught 3 card changes". Point at that text to see the cards. Overview of an open row
+lists each failure with its time, its kind, its card and its failing cases.
+
+To fix a file that fails often, open its row and click **Fix failures**. The button shows when the file has a flaky or
+main failure. It opens the same issue preview as Optimize, with the title "Fix the failures of the test file
+<file>". The issue lists the failing cases, their kinds and the end of their output, and the causes that Judge found.
+It asks a card to make the file pass every time and keep what it tests. Its Done-when asks that the failing cases
+pass in 10 runs in a row of the file alone on a test slot, and in a run with the other files of the suite. Before
+the card goes to review, Conveyor runs the file alone 10 times in a row with the change. When one run fails, the card
+is blocked, and the reason names that run. Judge can help first: it reads the recent failures of the file, and its
+verdict is stabilise when it finds the cause in the test (shared state, timing, order, environment or a fixture).
+
 A file with hollow cases shows "Hollow". A hollow case passes but proves nothing. The kinds are `mock-echo` (it only
 checks that a mock gives back what the mock was told to give), `text-only` (it only checks that a file contains some
 text), `no-assert` (it has no assertion) and `defined-only` (it only checks that a value is defined or truthy). For a
@@ -348,20 +365,22 @@ Mutation. Overview shows first. Use the left and right arrow keys to move betwee
 Overview starts with a box that says what state the file is in: how far over its budget it is, after which Optimize
 cards and by how much each one changed it, and whether its runs are slower or faster than usual. Under it is the
 verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
-buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Raise this file's
-budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
+buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Fix failures** (on a file
+with a flaky or main failure), **Raise this file's budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
 Raise this file's budget… when Judge said keep, Run while an Optimize issue of the file is open, and Optimize in other
 cases. Six tiles follow: the CPU seconds now with the budget, the last 4 runs as bars, the last Optimize as a
 percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs
 caught and the mutants caught (or "not checked"). Point at a bar, or move the keyboard focus to it, to see its CPU
-seconds. Last, the 3 latest events, with a button that opens the Timeline.
+seconds. The failures of the file come next, when it has any. Last, the 3 latest events, with a button that opens
+the Timeline.
 
 The Timeline lists every event of the file, newest first: its runs (each with its card's issue, or "whole suite" and
 its result), its Optimize issues, the test edits of landed cards and the runs of Judge. The filter chips All, Runs,
 Optimize, Test edits and Judge show one kind of event. A test edit shows the issue of its card, as a link, and its
 time. A weakened edit has the chip "Weakened".
 
-The Judge tab shows the newest result of Judge: its verdict once at the top, then its full report. The Mutation tab
+The Judge tab shows the newest result of Judge: its verdict once at the top, then its full report. When Judge names
+the causes of the failures, the tab lists each one as "<case> | <kind> | <reason>". The Mutation tab
 shows the mutation check of the file. A tab's content is never taller than the window under the page head: a long
 one scrolls inside its tab.
 
@@ -389,7 +408,8 @@ with its mutants and its time, then its result). Optimize on a file that runs ot
 no issue. The text of Judge and Explain the
 slowdown shows as formatted text: paragraphs, bold, lists and code. Copy copies the text as the model wrote it. A
 Judge result starts with "Verdict:" and the verdict. When the verdict is speed up, split, merge or delete, click
-"Optimize with this verdict" to open the Optimize issue with that verdict and its text. The page scrolls to the
+"Optimize with this verdict" to open the Optimize issue with that verdict and its text. When the verdict is
+stabilise, the same button opens the Fix failures issue, with the causes that Judge found. The page scrolls to the
 issue, which shows the verdict, and the cursor is in its text.
 
 The Timeline lists each Optimize issue filed for the file, and each older "Speed up the test file" issue. Each shows

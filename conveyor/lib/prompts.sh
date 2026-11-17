@@ -464,6 +464,13 @@ test files a split adds, were run alone with the change, on a test slot: they mu
 than its median on record; the files of a split must each be at or under their budget, and their CPU seconds summed at
 most the file'"'"'s median plus a start-up allowance for each file the split adds. Judge whether the tests still test all
 that the file tested before. Its result:'
+# What the review of a Fix failures card (steadyproof(), card()) is told before the check's result.
+# shellcheck disable=SC2034 # used in lib/card.sh
+STEADYREVIEW='# The Fix failures check
+This issue makes one test file pass reliably and keeps what it tests, so no test must fail on main'"'"'s code without
+the change. After the build, the file was run alone with the change, on a test slot, 10 runs in a row: each must pass.
+Judge whether the change removes the cause of its failures, and whether the file still tests all that it tested
+before: a case deleted, skipped or weakened so that it passes is a finding. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.

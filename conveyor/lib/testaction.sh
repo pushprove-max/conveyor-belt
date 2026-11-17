@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Test actions (README.md, Test actions): `conveyor.sh testaction <judge|explain> <test file>` asks the Tests seat
 # (the control record's tests: {cli, model, effort}) about one test file of the project, in one headless session that
-# needs no code review and files no issue: judge (is the file worth its cost: keep, speed up, split, merge or delete)
+# needs no code review and files no issue: judge (is the file worth its cost: keep, speed up, split, merge or delete;
+# or stabilise, when its failures have a cause in the test)
 # or explain (which card and what cause made it slower). With no Tests seat set it starts nothing and says why (exit 2).
 # The session is given the file, its recorded times from the test lines of the card records (times, clocks, timed, slow) and
 # from the whole-suite runs, as the Tests page shows them, the
-# cards that ran it and its flaky entries (testfacts()). It reads a copy of main as it is at the ask, a worktree of
+# cards that ran it, its flaky entries and its recent failures (testfacts()). It reads a copy of main as it is at the ask, a worktree of
 # that commit whose files it cannot write ($CARDS/testactions/<id>, removed when it ends), and finds a gh that refuses
 # every call first on its PATH; a Claude session has only Read, Grep and Glob, a Codex one its read-only sandbox and an
 # OpenCode one the review's read-only agent (ocrun()). The ask returns once the session has started, or is queued
@@ -14,9 +15,10 @@
 # ask, the one it reads), start (the ask while it is
 # queued, then its start), end (null while it runs), state (queued, running, done, stopped, failed or timed out), cli,
 # model, effort, limit (TESTACTION_TIMEOUT, the seconds it
-# may run), verdict (judge: the word its text's last line names, VERDICT: <keep | speed up | split | merge | delete>,
-# else "no verdict"; explain: null), hollow and hollowSkipped (judge: the hollow cases its HOLLOW lines name, and the
-# HOLLOW lines that could not be read: tahollow()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
+# may run), verdict (judge: the word its text's last line names, VERDICT: <keep | speed up | split | merge | delete |
+# stabilise> (taverdict()), else "no verdict"; explain: null), hollow and hollowSkipped (judge: the hollow cases its HOLLOW lines name, and the
+# HOLLOW lines that could not be read: tahollow()), causes (judge: the causes of its failures its CAUSE lines name,
+# tacauses()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
 # session's text, written as the session writes it; <id>.events and <id>.err, the CLI's output and its errors. All of
 # it stays after the session ends. `conveyor.sh testaction stop <id>` ends that one session and no other, or takes a
 # queued one off, unstarted.
@@ -24,21 +26,33 @@
 TESTACTS=${STATE%/*}/testactions
 # shellcheck disable=SC2034 # used in lib/mutate.sh and lib/testfiles.sh
 MUTS=$TESTACTS/mutations # the mutation checks' records (lib/mutate.sh)
-TAVERDICTS='keep|speed up|split|merge|delete'
+TAVERDICTS='keep|speed up|split|merge|delete|stabilise'
 # The text of a session's output line: Claude's assistant text (stream-json), Codex's agent message (exec --json),
 # OpenCode's text part (run --format json); each ended by a newline.
 TATEXT='fromjson? // empty | objects | if .type == "assistant" then .message.content[]? | select(.type == "text") | .text | strings | . + "\n"
   elif .type == "item.completed" and .item.type == "agent_message" then .item.text | strings | . + "\n"
   elif .type == "text" then .part.text | strings | . + "\n" else empty end'
-TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), or delete it. Give the evidence for your choice: its recorded times below, what it tests, and whether another test already proves the same behaviour. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, name each hollow case of the file, a case that passes without proving anything, on a line of its own: HOLLOW: <case> | <kind> | <one-line reason>. The kind is one of: mock-echo (it only checks that a mock returned what the mock was told to return), text-only (it only checks that a file contains some text), no-assert (it has no assertion), defined-only (it only checks that a value is defined or truthy). Give no HOLLOW line when no case is hollow. End your answer with one line: VERDICT: <keep | speed up | split | merge | delete>"
-# A judge's HOLLOW lines, from its text: {hollow: [{case, kind, reason}], hollowSkipped: the lines that start HOLLOW:
-# and do not read as a case, a kind of TAHOLLOW and a reason}. A line may start with the marks of a list, quote or
-# emphasis, as the VERDICT line may.
+TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), delete it, or stabilise it. Give the evidence for your choice: its recorded times below, what it tests, whether another test already proves the same behaviour, and why it failed in its recent failures below. A failure with the verdict card is the test doing its job: the change of that card broke what the test checks. Choose stabilise when its failures with the verdict flaky or main have a cause in the test itself: shared state, timing, order, environment or a fixture. For stabilise, name the cause of each failing case on a line of its own: CAUSE: <case> | <kind> | <one-line reason>. The kind is one of: shared state, timing, order, environment, fixture. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, name each hollow case of the file, a case that passes without proving anything, on a line of its own: HOLLOW: <case> | <kind> | <one-line reason>. The kind is one of: mock-echo (it only checks that a mock returned what the mock was told to return), text-only (it only checks that a file contains some text), no-assert (it has no assertion), defined-only (it only checks that a value is defined or truthy). Give no HOLLOW line when no case is hollow. End your answer with one line: VERDICT: <keep | speed up | split | merge | delete | stabilise>"
+# A judge's lines `<tag>: <case> | <kind> | <reason>`, from its text: each {case, kind, reason}, or false for a line
+# that starts with the tag and does not read as a case, one of the kinds and a reason. A line may start with the marks
+# of a list, quote or emphasis, as the VERDICT line may.
+tatagged() { # <tag> <kinds, as a regex's alternatives> <text file>
+  jq -Rnc --arg t "$1:" --arg k "$2" '[inputs | sub("^[\\s*`_>-]+"; "") | select(startswith($t))
+      | (capture("^" + $t + "\\s*(?<case>.*?\\S)\\s*\\|\\s*(?<kind>" + $k + ")\\s*\\|\\s*(?<reason>.*?[^\\s*`_])[\\s*`_]*$") // false)]' "$3"
+}
+# Its HOLLOW lines: {hollow: [{case, kind, reason}], hollowSkipped: the HOLLOW lines that do not read}.
 TAHOLLOW='mock-echo|text-only|no-assert|defined-only'
-tahollow() { # <text file>
-  jq -Rnc --arg k "$TAHOLLOW" '[inputs | sub("^[\\s*`_>-]+"; "") | select(startswith("HOLLOW:"))
-      | (capture("^HOLLOW:\\s*(?<case>.*?\\S)\\s*\\|\\s*(?<kind>" + $k + ")\\s*\\|\\s*(?<reason>.*?[^\\s*`_])[\\s*`_]*$") // false)]
-    | {hollow: map(objects), hollowSkipped: map(select(. == false)) | length}' "$1"
+tahollow() { tatagged HOLLOW "$TAHOLLOW" "$1" | jq -c '{hollow: map(objects), hollowSkipped: map(select(. == false)) | length}'; } # <text file>
+# Its CAUSE lines (#188): {causes: [{case, kind, reason}]}, the cause in the test of each failing case a stabilise
+# verdict names; a CAUSE line that does not read is left out.
+TACAUSE='shared state|timing|order|environment|fixture'
+tacauses() { tatagged CAUSE "$TACAUSE" "$1" | jq -c '{causes: map(objects)}'; } # <text file>
+# Its verdict: the word its last line that is not blank names (VERDICT: <one of TAVERDICTS>), in lower case; "no
+# verdict" when that line names none.
+taverdict() { # <text file>
+  local v
+  v=$(grep -v '^[[:space:]]*$' "$1" | tail -n 1 | sed -nE "s/^[[:space:]*\`_>-]*VERDICT:[[:space:]*\`_]*($TAVERDICTS)([^[:alpha:]].*)?$/\1/Ip")
+  jq -cn --arg v "${v,,}" 'if $v == "" then "no verdict" else $v end'
 }
 TAEXPLAIN="Explain the slowdown of one test file of this project. From its recorded times below, find when it became slower, which card's change made it slower, and what in that change is the cause. Read the repository and its history as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state."
 # `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (an Optimize issue,
@@ -133,7 +147,10 @@ tastart() { # <id>
     p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
       + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
       + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
-      + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)' <<<"$facts")"
+      + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)
+      + "\n\nIts recent failures, newest first (the test steps that failed in it; verdict card: the change of that card made it fail; main: it failed on main too; flaky: it failed and then passed when run again; none on record: a step from before verdicts were kept), each with its failing cases and the end of the output of its test step:\n"
+      + (if .failures == [] then "none" else .failures | map("- \(.time), card \(.card) (#\(.issue)), verdict \(.verdict // "none on record"), failing cases: \(if .cases == [] then "none named" else .cases | join(", ") end)"
+          + (if .tail then "\n  The end of its output:\n" + (.tail | split("\n") | map("    " + .) | join("\n")) else "" end)) | join("\n") end)' <<<"$facts")"
     # The session's runner holds no descriptor of this process's (nor the queue's lock): the Board's ssh ends with this
     # process, not with it.
     ( trap - TERM; trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2; tarun "$r" "$wt" "$p" ) >> "$f.err" 2>&1 < /dev/null 8>&- {TALOCK}>&- &
@@ -149,15 +166,22 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), timed and slow parts for
 # the file, and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}; cards: the
-# cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>")}.
+# cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
+# failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
+# them (FAILURE and failedrun, lib/testfiles.sh):
+# {card, issue, time, verdict, cases, tail}}.
+TAFAILS=5
 testfacts() { # <file>
-  local fl
+  local fl defs refs
   fl=$(jq -c --arg f "$1" '[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": ")))]' "$FLAKY" 2>/dev/null) || fl='[]'
-  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --argjson fl "$fl" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) '[inputs | fromjson? | objects | select(.step == "test")
-      | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first),
+  testowners
+  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --argjson fl "$fl" --argjson n "$TAFAILS" --argjson defs "$defs" --argjson refs "$refs" \
+    --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) "$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
+    | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
+    | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first),
          slow: ([.slow | arrays | .[] | objects | select(.file == $f)] | first)} | select(.times != null or .clocks != null or .timed != null or .slow != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
-    | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl}'
+    | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails}'
 }
 # The worktree a session read, gone: made writable again, then removed.
 tadrop() { chmod -R u+w "$1" 2>/dev/null; git -C "$MAIN" worktree remove --force "$1" 2>/dev/null; rm -rf "$1"; git -C "$MAIN" worktree prune 2>/dev/null; } # <worktree>
@@ -202,9 +226,9 @@ tarun() { # <the record> <worktree> <prompt>
   elif [ $rc = 0 ]; then state=done
   else state=failed; why=$(jq -cn --arg r "exit $rc: $(tail -n 5 "$f.err" 2>/dev/null)" '$r[0:600]'); fi
   if [ "$(jq -r .action <<<"$r")" = judge ]; then
-    v=$(grep -v '^[[:space:]]*$' "$f.txt" | tail -n 1 | sed -nE "s/^[[:space:]*\`_>-]*VERDICT:[[:space:]*\`_]*($TAVERDICTS)([^[:alpha:]].*)?$/\1/Ip")
-    v=$(jq -cn --arg v "${v,,}" 'if $v == "" then "no verdict" else $v end')
+    v=$(taverdict "$f.txt")
     hv=$(tahollow "$f.txt" 2>/dev/null) || hv='{"hollow": [], "hollowSkipped": 0}'
+    hv=$(jq -c --argjson c "$(tacauses "$f.txt" 2>/dev/null || echo '{"causes": []}')" '. + $c' <<<"$hv")
   fi
   taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" --argjson hv "$hv" '. + {end: $t, state: $s, verdict: $v} + $hv + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"

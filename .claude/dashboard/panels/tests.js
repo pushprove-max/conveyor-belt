@@ -33,13 +33,15 @@
 // A row opens (#130, the owner's mockup D) to the tabs Overview (open first), Timeline (N), Judge and Mutation, each
 // tied to its pane. Overview: the diagnosis box (its state: over budget by how much, after which Optimize cards and by
 // how much each changed it, its trend; the judge's verdict chip with its reason in one line and Full report, which
-// opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Raise this file's budget…, Run
-// and More, the next step suggested, nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
+// opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Fix failures, Raise this file's
+// budget…, Run and More, the next step suggested, nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
 // now with its budget, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
-// bugs caught, mutants) and its 3 latest events with a link to the Timeline. Timeline: every event newest first (its
+// bugs caught, mutants), its failures (#188: the card changes it caught, apart, then each failed test step with its
+// kind, card and cases) and its 3 latest events with a link to the Timeline. Timeline: every event newest first (its
 // runs, each with its card's issue or "whole suite" with its result; its Optimize issues; its test edits by their
 // issue, Weakened marked; its judge runs), with the filter chips All, Runs, Optimize, Test edits and Judge. Judge: its
-// newest ended judge, its verdict once at the top, then its report (without its VERDICT line), and its hollow cases.
+// newest ended judge, its verdict once at the top, then its report (without its VERDICT line), its hollow cases and
+// the causes of its failures (its CAUSE lines).
 // Mutation: its check. A pane is never taller than the window under the page head (app.css). Its Optimize issues
 // (#74): each issue the Board filed for it (the snapshot's optimize: Optimize, and older speed-up, issues), with its
 // "#NN" link and its state (open, building, blocked with the reason, landed with the commit, closed without landing);
@@ -93,7 +95,8 @@
 // text the snapshot cut to its end loses nothing seen before), with Stop (testaction stop <id>, that action alone) and
 // Copy. Queued, a bar, "Queued, N ahead" and Stop. Ended, its
 // result with its time, CLI, model and effort; a judge's starts with "Verdict: <word>" and its chip, and, for speed
-// up, split, merge or delete, "Optimize with this verdict", which opens the Optimize preview with that verdict and its
+// up, split, merge, delete or stabilise, "Optimize with this verdict", which opens the Optimize preview (for stabilise,
+// the Fix failures preview, #188) with that verdict and its
 // text, on Overview, scrolled to, with the cursor at the start of its body; the preview shows the verdict. The text of a judge or explain is formatted (md(): paragraphs, bold, lists, inline code and code blocks; any
 // other markup as typed), a run's output as typed; Copy copies the raw text. Recent actions, collapsed until opened,
 // counts the running and queued actions in its heading and lists each kept action and each Optimize issue, newest
@@ -119,7 +122,7 @@
   const BUDGET = /^[1-9][0-9]{0,5}(\.[0-9]{1,3})?$/;  // CPU seconds, as dashboard_server.py's BUDGET and `conveyor.sh test-settings` take them
   const REASON_MAX = 300;  // a reason, as dashboard_server.py's said_ok takes it
   const WAITS = 2;         // a file waits more than it works when its last run took more than this times its CPU time
-  const FAILS = 2;         // a file fails often when this many test steps or more failed in it
+  const FAILS = 2;         // a file fails often when this many test steps or more failed in it, not counting those a card's own change made fail (failsOf())
   const NEVER = 20;        // a file with this many runs on record or more and no catch shows "Never caught anything"
   const HOST = 'Host file: this machine, all projects';
   const PACK = 'Pack file: this project';
@@ -200,7 +203,7 @@
     return MARKS.filter(([k]) => ({
       over: f.over === true && !f.slowOnPurpose, slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
-      fails: (num(f.failedSteps) || 0) >= FAILS, hollow: hollowOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
+      fails: notCard(f).length >= FAILS, hollow: hollowOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
       runner, whole: runner, never: !list(f.runs).length, wall: wallOnly(f),
     })[k]);
   }
@@ -336,6 +339,28 @@
   const hollowSaid = (x) => `${x.case} (${x.kind})${typeof x.reason === 'string' && x.reason ? `: ${x.reason}` : ''}`;
   // The judge's newest verdict for a file, when one is kept.
   const verdictOf = (file) => actions().find((a) => a.file === file && a.action === 'judge' && a.state === 'done' && typeof a.verdict === 'string' && a.verdict !== 'no verdict') || null;
+  // The causes of its failures (#188) that its newest judge with a verdict named on CAUSE lines: [{case, kind, reason}].
+  const causesOf = (file) => { const v = verdictOf(file); return list(v && v.causes).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string'); };
+  const causeSaid = (x) => `${x.case} | ${x.kind} | ${typeof x.reason === 'string' ? x.reason : ''}`;
+
+  // ---- its failures (#188): the snapshot's failures, its failed test steps, newest first, each with its verdict ----
+  // A failure the card's own change made (verdict card) is the test doing its job: it never counts for Fails often.
+  // flaky (it failed, then passed when run again) and main (it failed on main too) do, and so does one with no verdict
+  // on record (a step from before verdicts were kept).
+  const failsOf = (f) => list(f.failures).filter((x) => obj(x) && (x.verdict === null || ['card', 'main', 'flaky'].includes(x.verdict)));
+  const caughtOf = (f) => failsOf(f).filter((x) => x.verdict === 'card');
+  const notCard = (f) => failsOf(f).filter((x) => x.verdict !== 'card');
+  // The failures Fix failures acts on: those with a cause outside a card's change.
+  const fixable = (f) => failsOf(f).filter((x) => x.verdict === 'flaky' || x.verdict === 'main');
+  const KIND = { flaky: 'flaky', main: 'failed on main too', card: 'caught a card change' };
+  const kindSaid = (v) => KIND[v] || 'no verdict on record';
+  const casesSaid = (x) => (list(x.cases).filter((c) => typeof c === 'string').join(', ') || 'no case named');
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  // Its failures that count for Fails often, by kind, in words: "2 flaky, 1 failed on main too".
+  function failKinds(f) {
+    const xs = notCard(f), n = (v) => xs.filter((x) => x.verdict === v).length;
+    return [[n('flaky'), 'flaky'], [n('main'), 'failed on main too'], [n(null), 'with no verdict on record']].filter(([k]) => k > 0).map(([k, w]) => `${k} ${w}`).join(', ');
+  }
 
   // ---- mutation checks (#79): the snapshot's mutation (a file's newest check) and mutationPlace (its place in the asked list) ----
   const MUT_WHY = 'A check starts only when no card needs a test slot.';
@@ -532,8 +557,9 @@
     flush();
     return el;
   }
-  // The verdicts that Optimize acts on: each is one of the fixes an Optimize card picks.
-  const ACTIONABLE = ['speed up', 'split', 'merge', 'delete'];
+  // The verdicts that Optimize acts on: each is one of the fixes an Optimize card picks; stabilise (#188) is Fix
+  // failures' (draftFix()).
+  const ACTIONABLE = ['speed up', 'split', 'merge', 'delete', 'stabilise'];
   // A judge's text without its last line when that is its VERDICT line (as lib/testaction.sh reads it): the verdict
   // line above the text says it once (#130). Copy still copies the text as written.
   const unverdict = (text) => {
@@ -571,10 +597,12 @@
       line.append(verdictChip(a.verdict));
       if (ACTIONABLE.includes(a.verdict)) {
         // The preview is on the Overview tab: it opens there, scrolled to, with the cursor in its body (#130).
-        const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `Optimize ${a.file}: preview an issue with this verdict`, () => {
-          S.ask = draftIssue(f, a); S.tabs.set(dk(f.file), 'overview'); S.keep = { act: 'issue-body', file: f.file, scroll: true }; draw();
+        const fix = a.verdict === 'stabilise';
+        const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `${fix ? 'Fix failures' : 'Optimize'} ${a.file}: preview an issue with this verdict`, () => {
+          S.ask = fix ? draftFix(f, a) : draftIssue(f, a); S.tabs.set(dk(f.file), 'overview'); S.keep = { act: 'issue-body', file: f.file, scroll: true }; draw();
         });
-        if (f.wholeOnly === true) { b.disabled = true; b.title = RUNNER_WHY; }
+        // A runner is held to no budget, so no Optimize; its failures are its own, so Fix failures holds.
+        if (f.wholeOnly === true && !fix) { b.disabled = true; b.title = RUNNER_WHY; }
         line.append(' ', b);
       }
       parts.push(line);
@@ -621,6 +649,40 @@
     }
     return { kind: 'issue', repo: S.d.repo, file, title: `Optimize the test file ${file}`, body: lines.join('\n'), verdict: v ? v.verdict : null };
   }
+  // A Fix failures issue's draft (#188): the title the engine knows it by (FIXFAILS, lib/testrun.sh), what to do, its
+  // failures that no card's change caused (flaky or main) with their failing cases, the cause lines of a judge (the one
+  // given, else the file's newest with a verdict), the end of each failure's output as far as the body holds, and the
+  // Done-when that the card's check (steadyproof()) holds it to. Each line is printable, as in draftIssue().
+  function draftFix(f, given) {
+    const file = f.file, v = given || verdictOf(file), xs = fixable(f), line = (l) => l.replace(/\p{C}/gu, ' ').trimEnd();
+    const names = [...new Set(xs.flatMap((x) => list(x.cases).filter((c) => typeof c === 'string')))];
+    const causes = list(v && v.causes).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
+    const done = ['', 'Done when:', names.length
+      ? line(`- The cases that failed (${names.slice(0, 10).join(', ')}${names.length > 10 ? ` and ${names.length - 10} more` : ''}) succeed in 10 runs in a row of this file alone on a test slot.`)
+      : '- The file succeeds in 10 runs in a row alone on a test slot.',
+    `- ${names.length ? 'They succeed' : 'It succeeds'} in a run beside the other files of the suite.`];
+    const head = ['Make this test file succeed reliably, and keep what it tests. Fix the cause of its failures, in the test or in the code it tests; do not delete, skip or weaken a case so that it succeeds.',
+      '', 'Its failures that no card\'s change caused, newest first (flaky: it failed, then passed when run again; failed on main too: it failed on main as well):'];
+    // A list of items: as many as the body holds with the Done-when, with room for a line that counts the rest.
+    const add = (items, said) => {
+      const at = items.findIndex((x) => { const l = line(said(x)); if (head.concat(l, done).join('\n').length + 40 > BODY_MAX) return true; head.push(l); return false; });
+      if (at >= 0) head.push(`- and ${items.length - at} more`);
+    };
+    add(xs, (x) => `- ${x.time}, card ${num(x.issue) ? `#${x.issue}` : x.card}: ${kindSaid(x.verdict)}. Failing cases: ${casesSaid(x)}.`);
+    if (causes.length) { head.push('', 'The causes the judge named:'); add(causes, (x) => `- CAUSE: ${causeSaid(x)}`); }
+    // The end of each failure's output, newest first, while the body holds it; the last one cut to its end.
+    const tails = [];
+    let room = BODY_MAX - head.concat(done).join('\n').length - 40;
+    for (const x of xs.filter((y) => typeof y.tail === 'string' && y.tail.trim())) {
+      const top = `The end of the output of card ${num(x.issue) ? `#${x.issue}` : x.card} (${x.time}):`, text = x.tail.split('\n').map(line).join('\n').trim();
+      const need = top.length + text.length + 2;
+      if (room < top.length + 40) break;
+      if (need <= room) { tails.push('', top, text); room -= need; continue; }
+      tails.push('', top, `…${Array.from(text).slice(-(room - top.length - 3)).join('')}`);
+      break;
+    }
+    return { kind: 'issue', what: 'Fix failures', repo: S.d.repo, file, title: `Fix the failures of the test file ${file}`, body: head.concat(tails, done).join('\n'), verdict: v && v.verdict === 'stabilise' ? v.verdict : null };
+  }
   // What ran a run, in words (#130): a whole-suite run with its result, as the Runs list says it, or the card's issue;
   // never a card's id, nor "card null".
   const runBy = (r) => (r.whole === true ? `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`
@@ -647,7 +709,7 @@
         field('issue-title', 'Title of the issue', a.title, (v) => { a.title = v; }, { max: TITLE_MAX }),
         field('issue-body', 'Text of the issue', a.body, (v) => { a.body = v; }, { area: true, max: BODY_MAX }),
         button('File this issue', 'btn-primary', 'issue-file', `File this issue about ${file}`, () => {
-          const t = a.title.trim(), b = a.body.trim(), k = dk(file), note = (state, text = '') => S.notes.set(k, { what: 'Optimize', state, text });
+          const t = a.title.trim(), b = a.body.trim(), k = dk(file), note = (state, text = '') => S.notes.set(k, { what: a.what || 'Optimize', state, text });
           const why = !t || /[\r\n]/.test(t) ? 'Type a title of one line first.' : !b ? 'Type the text of the issue first.' : S.busy ? WAIT : null;
           if (why) { note('refused', why); draw(); say(why); return; }
           note('sending');
@@ -749,8 +811,8 @@
     }
     return look(f) && !v ? 'judge' : 'run';
   }
-  // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Raise this file's budget…, Run
-  // and More; the next step suggested is the primary one.
+  // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Fix failures (with failures no
+  // card's change caused), Raise this file's budget…, Run and More; the next step suggested is the primary one.
   function stepButtons(f) {
     const h = S.ctx.h, file = f.file, now = h('div', 'tests-act-row tests-steps'), noSeat = !tmodel(), next = nextStep(f);
     const btn = (key, text, act, label, fn) => button(text, `${key === next ? 'btn-primary' : 'btn-quiet'} tests-act`, act, label, fn);
@@ -766,7 +828,12 @@
     // Its budget's editor, as Set a budget for this file in More opens it.
     const raise = btn('budget', 'Raise this file\'s budget…', 'raise-budget', `Set a budget for ${file}`, () => { S.edit.add(`${dk(file)}|budget`); S.keep = { act: 'file-budget-field', file }; draw(); });
     if (f.wholeOnly === true) { raise.disabled = true; raise.title = RUNNER_WHY; }
-    now.append(judge, opt, raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
+    // Fix failures (#188), on a file with failures no card's change caused: the same preview as Optimize, of a Fix
+    // failures issue (draftFix()).
+    const fix = fixable(f).length ? btn('fix', 'Fix failures', 'fix-failures', `Fix failures: preview an issue about ${file}`, () => {
+      S.notes.delete(dk(file)); S.ask = draftFix(f); S.keep = { act: 'issue-title', file }; draw();
+    }) : null;
+    now.append(judge, opt, ...(fix ? [fix] : []), raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
     if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
     return now;
   }
@@ -1428,15 +1495,47 @@
       hollow.forEach((x) => ul.append(h('li', 'tests-hollow-case', hollowSaid(x))));
       el.append(h('p', 'board-head', 'Hollow cases'), ul);
     }
+    // The causes of its failures the judge named (#188), each as its CAUSE line gave it.
+    const causes = causesOf(f.file);
+    if (causes.length) {
+      const ul = h('ul', 'tests-runs tests-causes');
+      ul.setAttribute('aria-label', `Causes of the failures of ${f.file}`);
+      causes.forEach((x) => ul.append(h('li', 'tests-cause', causeSaid(x))));
+      el.append(h('p', 'board-head', 'Causes of its failures'), ul);
+    }
+    return el;
+  }
+  // Its failures (#188), on Overview: the card changes it caught, apart, with their cards; then each failed test step,
+  // newest first: when, its kind, its card and its failing cases. null with none.
+  function failures(f) {
+    const h = S.ctx.h, xs = failsOf(f), caught = caughtOf(f);
+    if (!xs.length) return null;
+    const el = h('div', 'tests-failures');
+    el.append(h('p', 'board-head', 'Failures'));
+    if (caught.length) {
+      const p = h('p', 'tests-fact tests-caught-list', `Caught ${plural(caught.length, 'card change', 'card changes')} (the test did its job; not counted as Fails often): `);
+      caught.forEach((x, i) => p.append(...(i ? [', '] : []), S.ctx.issueLink(x)));
+      el.append(p);
+    }
+    const ul = h('ul', 'tests-runs tests-fail-list');
+    ul.setAttribute('aria-label', `Failed test steps of ${f.file}, newest first`);
+    xs.forEach((x) => {
+      const li = h('li', 'tests-fail');
+      li.dataset.verdict = x.verdict === null ? 'none' : x.verdict;
+      li.append(h('span', 'board-from', S.ctx.when(x.time)), ' · ', h('span', 'board-label', kindSaid(x.verdict)), ' · card ', S.ctx.issueLink(x), ` · ${casesSaid(x)}`);
+      ul.append(li);
+    });
+    el.append(ul);
     return el;
   }
   function more(f) {
     const h = S.ctx.h, el = h('div', 'tests-more'), file = f.file, on = tabOf(file), all = events(f), opt = optRuns(f), any = anyIssueUrl([f]);
-    // Overview: the diagnosis, the rest of its actions, the editors picked, the tiles and the 3 latest events.
-    const ov = h('div', 'tests-overview'), acts = rowActions(f);
+    // Overview: the diagnosis, the rest of its actions, the editors picked, the tiles, its failures and the 3 latest events.
+    const ov = h('div', 'tests-overview'), acts = rowActions(f), fl = failures(f);
     ov.append(diagnosis(f));
     if (acts) ov.append(acts);
     ov.append(...editors(f), tiles(f));
+    if (fl) ov.append(fl);
     const latest = h('div', 'tests-latest'), ul = h('ul', 'tests-runs tests-tl');
     ul.setAttribute('aria-label', `The latest events of ${file}`);
     all.slice(0, 3).forEach((x) => ul.append(eventLine(x, opt, any, false)));
@@ -1593,7 +1692,25 @@
       const cell = (x, cls) => { const td = h('td', cls); td.append(x); return td; };
       // The status: chips; its issue as a link; Runs other test files and Whole suite only as grey text.
       const chips = h('span', 'rules-marks');
-      marks(f).forEach(([k, words, tone]) => chips.append(k === 'issue' ? issueOf(f, any) : k === 'runner' || k === 'whole' ? h('span', 'tests-quiet', words) : S.ctx.chip(words, tone)));
+      // The kinds of its failures (#188) follow the place of Fails often: those that count for it, and apart, the card
+      // changes it caught, with their cards on hover.
+      const at = MARKS.findIndex((m) => m[0] === 'fails');
+      let told = false;
+      const tell = () => {
+        if (told) return;
+        told = true;
+        if (notCard(f).length) chips.append(h('span', 'tests-quiet tests-fail-kinds', `Failed: ${failKinds(f)}`));
+        if (caughtOf(f).length) {
+          const c = h('span', 'tests-quiet tests-caught-cards', `caught ${plural(caughtOf(f).length, 'card change', 'card changes')}`);
+          c.title = `Its test did its job: ${caughtOf(f).map((x) => (num(x.issue) ? `#${x.issue}` : String(x.card))).join(', ')}`;
+          chips.append(c);
+        }
+      };
+      marks(f).forEach(([k, words, tone]) => {
+        if (MARKS.findIndex((m) => m[0] === k) > at) tell();
+        chips.append(k === 'issue' ? issueOf(f, any) : k === 'runner' || k === 'whole' ? h('span', 'tests-quiet', words) : S.ctx.chip(words, tone));
+      });
+      tell();
       // A grey fact, not a problem chip: a file that never fails may check nothing.
       if ((num(f.runsOnRecord) || 0) >= NEVER && num(f.caught) === 0) chips.append(h('span', 'tests-quiet tests-never', 'Never caught anything'));
       const fileCell = cell(check, 'tests-file');

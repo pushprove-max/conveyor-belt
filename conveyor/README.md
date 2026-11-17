@@ -665,7 +665,11 @@ and the test files of main's checkout, and holds:
   `test.files` entry has `wholeOnly: true`), `failedSteps` (the card test steps that failed in it: it was a failed file, a runner such as
   `conveyor/conveyor.test.sh` named a failed case that the file defines (`t_<case>()` or `<case>()` in main's
   checkout) and the file names that runner, or the run timed
-  out in it; a case the named file defines itself is that file's alone), `caught` and `changedToPass` (those of
+  out in it; a case the named file defines itself is that file's alone), `failures` (those steps, newest first, each
+  `{card, issue, time, verdict, cases, tail}`: `verdict` is `main` when a case of the file failed on main too, else
+  `flaky` when one failed and then passed when run again, else `card` when the card's own change made it fail, and
+  null on a step from before verdicts were kept; `cases` names its failing cases; `tail` holds the last 1,500
+  characters of the step's output, on the 5 newest steps only), `caught` and `changedToPass` (those of
   its failed steps whose card landed: `caught` when the landed commit did not change the file, so the fix went into
   the code; `changedToPass` when it changed the file; a landed commit that main's checkout does not have counts
   neither way), `flaky` (its entries in the flaky-test record, its cases' entries too, the
@@ -1069,8 +1073,11 @@ A test action asks a model about one test file of the project, in one headless s
 and files no issue (or runs the file by hand, with no session: `testaction run`, below):
 
 - `conveyor.sh testaction judge <test file>`: is the file worth its cost? The session answers keep, speed up, split,
-  merge with another file (it names that file), or delete, with its evidence, and ends with a line
-  `VERDICT: <keep | speed up | split | merge | delete>`. Before that line it names each hollow case of the file, a case
+  merge with another file (it names that file), delete, or stabilise, with its evidence, and ends with a line
+  `VERDICT: <keep | speed up | split | merge | delete | stabilise>`. Stabilise is for a file whose failures with the
+  verdict flaky or main have a cause in the test: shared state, timing, order, environment or a fixture. The session
+  names the cause of each failing case on a line `CAUSE: <case> | <kind> | <one-line reason>`. The kind is
+  `shared state`, `timing`, `order`, `environment` or `fixture`. Before that line it names each hollow case of the file, a case
   that passes but proves nothing, on a line `HOLLOW: <case> | <kind> | <one-line reason>`. The kind is `mock-echo`
   (it only checks that a mock gives back what it was told to give), `text-only` (it only checks that a file contains
   some text), `no-assert` (it has no assertion) or `defined-only` (it only checks that a value is defined or truthy).
@@ -1082,7 +1089,8 @@ seats are (any model name, listed by that CLI or not; an effort left out is medi
 command starts no session and says why (exit 2).
 
 The session is given the file; its recorded times, from the test lines of the card records (`times`, `timed` and
-`slow`); the cards that ran it; and its entries on the flaky-test record. It may read the repo: it runs in a copy of
+`slow`); the cards that ran it; its entries on the flaky-test record; and its 5 newest failed test steps, each with
+its verdict (card, main, flaky, or none on record), its card, its failing cases and the end of the step's output. It may read the repo: it runs in a copy of
 main as it is at the ask (a worktree under the cards folder, removed when the session ends), whose files it cannot
 write. It may not write to the repo, file an issue or change state: a Claude session has only Read, Grep and Glob, a
 Codex one its read-only sandbox, an OpenCode one the review's read-only agent, and the `gh` first on its PATH refuses
@@ -1103,7 +1111,8 @@ Each action keeps two files in `testactions/` of the state folder, which stay af
   seconds, so the Board can show time used against it), `verdict` (judge: the verdict word, or `no verdict` when the
   text's last line names none; explain: null), `hollow` and `hollowSkipped` (judge: its `HOLLOW` lines as
   `[{case, kind, reason}]`, and how many lines that start `HOLLOW:` could not be read, with no case, no kind of the
-  four or no reason; such a line is left out and fails nothing), `pid` while it runs, and `reason` for a failed one.
+  four or no reason; such a line is left out and fails nothing), `causes` (judge: its `CAUSE` lines as
+  `[{case, kind, reason}]`; a line that cannot be read is left out), `pid` while it runs, and `reason` for a failed one.
 
 `conveyor.sh testaction stop <id>` stops that one running action, and no other; its record says stopped. One time
 limit applies to every action: the pack's `tunables.testActionTimeout`, 900 seconds by default. An action that runs
@@ -1134,7 +1143,10 @@ issue through the GitHub write path, with the pack's type and its last priority,
 issue as done. A file main does not have, a title of more than one line, or an empty body files nothing and exits 2.
 The Tests page files an Optimize issue with it: its title starts "Optimize the test file <file>", and its body holds
 the file's numbers, its hollow cases and the newest verdict of Judge this test, with its text (above, Bug cards: the new tests fail
-without the fix, for the check of its card).
+without the fix, for the check of its card). It files a Fix failures issue the same way: its title starts "Fix the
+failures of the test file <file>". The bug-card check does not apply to such a card. The file runs alone 10 times in
+a row with the change, each run on a test slot. When one run fails, the card is blocked before its review, and the
+reason names that run and its failing cases. The review is shown the result.
 
 The snapshot's `testActions` holds `seat` (the Tests seat, or null), `limit` and `actions`: the records of the 20
 newest actions, running and kept, and of each file's newest older judge with a verdict, newest first; the other

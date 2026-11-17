@@ -252,12 +252,16 @@ card() { # <card> <issue> [<branch> <tip>]
     # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
     # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when its file is not faster, a split does not fit
     # its budgets, or a file does not pass, the card is blocked with that reason and no review, its blocked line
-    # carrying the check's version (SPEEDCHECK, lib/testrun.sh).
+    # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
+    # FIXFAILS) is checked by steadyproof(): when its file fails in one of its runs in a row, the card is blocked
+    # naming that run, with no review.
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       OWNBUDGET=${ob%%$'\t'*} speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$OPTIMIZE"); then
       sk=$OPTREVIEW; OWNBUDGET=${ob%%$'\t'*} optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+    elif sf=$(speedfile "$issue" "$FIXFAILS"); then
+      sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
       # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
       # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (redproof()):

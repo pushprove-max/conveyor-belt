@@ -45,13 +45,24 @@ t_tajudge() {
   # showed its runs: the whole-suite runs ($SUITERUNS) are in its recorded times too.
   jq -cn '{time: "2026-11-03T00:00:00Z", how: "full", sha: "", files: {"tests/x.test.sh": {result: "ok", sec: 50, cpu: 45.5}, "tests/other.test.sh": {result: "ok", sec: 1, cpu: 1}}}' > "$ST/suiteruns.jsonl"
   echo '{"entries":[{"case":"tests/x.test.sh: one","source":"c2-6","time":"2026-11-02T00:00:00Z","card":"c2-6","issue":6}],"filed":[]}' > "$ST/flaky.json"
+  # Its failed test steps (#188): one failed on main too, with the end of its output; one the card's own change caused;
+  # and one of another file.
+  { jq -cn '{card: "c3-8", issue: 8, step: "test", time: "2026-11-04T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "tests/x.test.sh", cases: [{name: "two"}]}], timeout: null},
+      verdicts: [{case: "tests/x.test.sh: two", verdict: "main"}], tail: "ok one\nnot ok two: port 8080 in use"}'
+    jq -cn '{card: "c4-9", issue: 9, step: "test", time: "2026-11-05T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "tests/x.test.sh", cases: [{name: "one"}]}], timeout: null},
+      verdicts: [{case: "tests/x.test.sh: one", verdict: "card"}], tail: "not ok one"}'
+    jq -cn '{card: "c5-10", issue: 10, step: "test", time: "2026-11-05T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "tests/other.test.sh", cases: [{name: "three"}]}], timeout: null},
+      verdicts: [{case: "tests/other.test.sh: three", verdict: "flaky"}], tail: "not ok three"}'
+    # and one that passed on re-run (a `test pass` line, its first run's failures in rerun): the flaky failure.
+    jq -cn '{card: "c6-11", issue: 11, step: "test", time: "2026-11-06T00:00:00Z", result: "pass", rerun: {exit: 1, failures: {files: [{file: "tests/x.test.sh", cases: [{name: "four"}]}], timeout: null}},
+      verdicts: [{case: "tests/x.test.sh: four", verdict: "flaky"}]}'; } >> "$ST/cards.jsonl"
   # No Tests seat: no session starts, and the command says why.
   out=$(loop testaction judge tests/x.test.sh 2>&1); [ $? = 2 ] && grep -q 'no Tests seat is set' <<<"$out" || fail "a judge with no Tests seat was not refused, saying why: $out"
   [ ! -e "$STUB/ta-args" ] && [ ! -d "$ST/testactions" ] || fail "a judge with no Tests seat started a session: $(cat "$STUB/ta-args" 2>&1)"
   loop control tests claude m-tests high > /dev/null || fail "control tests was refused"
   # Its hollow cases (#77): two HOLLOW lines that read, and one with no kind, skipped and counted.
   printf '%s\n' 'It runs the whole loop for one check.' 'HOLLOW: reads the pack | mock-echo | it checks the stub returns what the stub was given' \
-    '- HOLLOW: `one` | no-assert | it asserts nothing' 'HOLLOW: two | it only prints' 'VERDICT: split' > "$STUB/ta-last"
+    '- HOLLOW: `one` | no-assert | it asserts nothing' 'HOLLOW: two | it only prints' 'CAUSE: two | shared state | it binds the fixed port 8080' 'CAUSE: one | luck | no kind' 'VERDICT: split' > "$STUB/ta-last"
   id=$(loop testaction judge tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the judge did not start: $id"
   # While the session runs: its text so far is in the file, and its record says running.
   wait_until "grep -q 'first words' '$ST/testactions/$id.txt'" "cat '$ST/testactions/$id.txt' '$ST/testactions/$id.err'" || fail "the text written so far is not in the text file while the session runs"
@@ -61,6 +72,12 @@ t_tajudge() {
   grep -qF 'Test file: tests/x.test.sh' <<<"$out" && grep -qF '"times":41.5' <<<"$out" && grep -qF '"clocks":44' <<<"$out" \
     && grep -qF '{"time":"2026-11-03T00:00:00Z","whole":true,"how":"full","cpu":45.5,"sec":50,"result":"ok"}' <<<"$out" && grep -qF '"budget":8' <<<"$out" && grep -qF 'c1-5 (#5)' <<<"$out" \
     && grep -qF 'tests/x.test.sh: one' <<<"$out" && ! grep -qF 'other.test.sh' <<<"$out" || fail "the prompt does not name the file, its recorded times (its card runs and whole-suite runs), the cards that ran it and its flaky entries alone: $out"
+  # Bug it catches (#188): the judge was given no failure, so it could not say why the file fails. It is given each
+  # recent failure of the file alone, newest first: its verdict, card, failing cases and the end of its output; a step
+  # that passed on re-run too.
+  [[ $out == *$'\n- 2026-11-06T00:00:00Z, card c6-11 (#11), verdict flaky, failing cases: four\n- 2026-11-05T00:00:00Z, card c4-9 (#9), verdict card, failing cases: one\n  The end of its output:\n    not ok one\n- 2026-11-04T00:00:00Z, card c3-8 (#8), verdict main, failing cases: two\n  The end of its output:\n    ok one\n    not ok two: port 8080 in use'* ]] \
+    && ! grep -qF 'not ok three' <<<"$out" && grep -qF 'CAUSE: <case> | <kind> | <one-line reason>' <<<"$out" && grep -qF 'VERDICT: <keep | speed up | split | merge | delete | stabilise>' <<<"$out" \
+    || fail "the prompt does not give the failures of the file alone, with their verdicts, cards, cases and output, and ask for CAUSE lines and stabilise: $out"
   : > "$STUB/ta-go"
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json'" || fail "the record still says running after the session ended"
   [ "$(tarec "$id" '[.state, .cli, .model, .effort, .verdict, (.end | type), has("pid")] | tojson')" = '["done","claude","m-tests","high","split","string",false]' ] \
@@ -70,6 +87,9 @@ t_tajudge() {
   [ "$(tarec "$id" '[.hollow, .hollowSkipped] | tojson')" = '[[{"case":"reads the pack","kind":"mock-echo","reason":"it checks the stub returns what the stub was given"},{"case":"`one`","kind":"no-assert","reason":"it asserts nothing"}],1]' ] \
     || fail "the record does not hold the two hollow cases and the one HOLLOW line skipped: $(cat "$ST/testactions/$id.json")"
   grep -qF 'HOLLOW: <case> | <kind> | <one-line reason>' "$STUB"/ta-prompt.* || fail "the prompt does not ask for the hollow cases"
+  # Bug it catches (#188): the causes the judge named were lost in its text; a CAUSE line with no kind is left out.
+  [ "$(tarec "$id" '.causes | tojson')" = '[{"case":"two","kind":"shared state","reason":"it binds the fixed port 8080"}]' ] \
+    || fail "the record does not hold the one CAUSE line that reads: $(cat "$ST/testactions/$id.json")"
   grep -q 'first words' "$ST/testactions/$id.txt" && grep -q 'VERDICT: split' "$ST/testactions/$id.txt" || fail "the text file did not grow to the session's whole text: $(cat "$ST/testactions/$id.txt")"
   # It tried to file an issue and to write a file of the repo: both failed, and the repo is as it was.
   [ "$(cat "$STUB/ta-tries")" = $'gh 1\nwrite 1' ] && [ ! -e "$STUB/filed" ] || fail "the session filed an issue or wrote a file: $(cat "$STUB/ta-tries" "$STUB/filed" 2>&1)"
@@ -120,6 +140,16 @@ EOF
   grep -q -- '-m custom-9 ' "$STUB/ta-args" || fail "the session did not start with the model the CLI does not list: $(cat "$STUB/ta-args")"
   [ "$(tarec "$id" '[.cli, .model, .effort, .verdict] | tojson')" = '["codex","custom-9","medium","no verdict"]' ] || fail "the record of a judge with no verdict line: $(cat "$ST/testactions/$id.json")"
   grep -q 'Its setup is slow' "$ST/testactions/$id.txt" || fail "a Codex session's text is not in the text file: $(cat "$ST/testactions/$id.txt")"
+}
+
+# Bug this guards (#188): a judge had no verdict for a file whose failures have a cause in the test, so it said keep;
+# its stabilise verdict, as a model writes it (marked bold, in capitals), read as "no verdict".
+t_taverdict() {
+  local f=$T/taverdict.txt out
+  printf '%s\n' 'Two cases share a port.' 'CAUSE: two | shared state | the fixed port' '**VERDICT: Stabilise**' > "$f"
+  out=$(STATE=$T/taverdict/state . "$SRC/lib/testaction.sh" && taverdict "$f") && [ "$out" = '"stabilise"' ] || fail "a stabilise verdict does not read: $out"
+  printf '%s\n' 'VERDICT: stable' > "$f"
+  out=$(STATE=$T/taverdict/state . "$SRC/lib/testaction.sh" && taverdict "$f") && [ "$out" = '"no verdict"' ] || fail "a word that is no verdict reads as one: $out"
 }
 
 # Bug this guards: a session that never ended held its action running for ever.

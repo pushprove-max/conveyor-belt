@@ -529,6 +529,7 @@ PUSHING='[{"card": "c0-98", "issue": 98, "title": "Landed, being pushed", "step"
 # The machine's load limit is 20 here, and its 16 cores are at a load of 31.5 (#462).
 ML=$(jq -c '.maxLoad = 20' <<<"$MC")
 answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .health.machineNow = {cores: 16, load: 31.5} | .tests = {files: [{file: "a.test.sh", cpu: 3, runs: [{cpu: 3, card: "c5-12"}, {cpu: 2, card: "odd"}],
+    failures: [{card: "c6-13", issue: 13, verdict: "card", cases: ["one"]}],
     optimize: [{issue: 70, time: "2026-11-01T00:00:00Z", state: "landed", sha: "abc1234", fix: "sped up", into: [], before: 10, after: 4, since: 3.5, sinceRuns: 2},
       {issue: 71, state: "open"}, {issue: 72, state: "open"}]}]} | .open.issues = [{issue: 71}]
   | .testActions = {limit: 900, actions: [{id: "0123456789ab", action: "judge", file: "a.test.sh", state: "running", text: "first words"}], allowed: {claude: ["m1", "m2"]}}
@@ -549,6 +550,9 @@ q '.panels.tests.data | .machine == {maxLoad: 20, unread: false, cores: 16, load
 q '.panels.tests.data.tests.files[0].optimize | map([.issue, .state, .sha, .before, .after, .url])
   == [[70, "landed", "abc1234", 10, 4, "'"$PU"'/70"], [71, "open", null, null, null, "'"$PU"'/71"], [72, "closed", null, null, null, "'"$PU"'/72"]]' \
   "the Tests part names a file's landed Optimize issue, its state, commit, before and after CPU s, with its issue's link, and a closed one as closed"
+# Bug (#188): a file's failures reached the Tests page with no link, so "caught 1 card change" could not open the card.
+q '.panels.tests.data.tests.files[0].failures | map([.card, .verdict, .url]) == [["c6-13", "card", "'"$PU"'/13"]]' \
+  "the Tests part gives each failure of a file its issue's link"
 # Bug (#521): the Tests page's actions had no action, text, Tests model, CLI or flaky case to show. Each project's own reach it.
 # Bug (#594): nor the pack's models by CLI, so a CLI that lists none (Claude Code) offered no model.
 q '.panels.tests.data | (.testActions.actions | map([.id, .text])) == [["0123456789ab", "first words"]] and .testActions.limit == 900

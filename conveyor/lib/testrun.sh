@@ -1164,6 +1164,46 @@ optproof() { # <card> <worktree> <issue json> <test file>
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   return 0
 }
+# The check of a Fix failures card (#188; card(): a bug card whose issue speedfile() names with FIXFAILS, as the
+# Board's Fix failures files it), in place of the bug-card check: the card makes its test file pass reliably and keeps
+# what it tests, so no test must fail on main's code. The file runs alone STEADYRUNS times in a row, each run on a
+# test slot, on the commit the card was built on with its staged change ($CARDS/mainrun/<card>.steady). Every run must
+# pass; the reason it does not names the run that failed, its exit, the cases its runner named and the end of its
+# output. A change that removes the file does not hold. Writes the result in <worktree>.unfixed, which the review is
+# shown, its first line the reason when the check does not hold (card() blocks the card with it). Fails when the
+# check does not hold.
+# shellcheck disable=SC2034 # FIXFAILS is used in lib/card.sh
+FIXFAILS='Fix the failures of the test file ' STEADYRUNS=10
+steadyproof() { # <card> <worktree> <test file>
+  local mwt=$CARDS/mainrun/$1.steady f=$3 sha out='' rc=0 i=0 bad='' why='' cs tl='' ls
+  rm -f "$2.unfixed"
+  # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
+  git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
+  if [ ! -e "$2/$f" ]; then why="the change removes the test file $f: a Fix failures card keeps it and what it tests"
+  elif sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+    && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
+      && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index; } 2>&1 < /dev/null); then
+    # Alone: its list names every other test file of the commit as passed, as a run of one file alone does (tests()),
+    # so a command that selects the change's tests (as this project's does) runs none of them.
+    ls=$(git -C "$mwt" -c core.quotePath=false ls-files 2>/dev/null | testpaths | grep -vxF -- "$f" | awk '{ print "pass\t" $0 }')
+    while [ -z "$bad" ] && [ "$i" -lt "$STEADYRUNS" ]; do
+      i=$((i + 1))
+      { [ -z "$ls" ] || printf '%s\n' "$ls"; printf 'fail\t%s\n' "$f"; } > "$mwt.rerun"; tests "$mwt" test.command alone; rc=$?
+      [ "$rc" = 0 ] || bad=$i
+    done
+    if [ -n "$bad" ]; then
+      cs=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[.files[]?.cases[]?.name | select(. != "")] | unique | join(", ")' 2>/dev/null)
+      tl=$(tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000')
+      why="the test file $f failed in run $bad of $STEADYRUNS with the change, alone on a test slot (exit $rc)${cs:+: its failing cases: $cs}"
+    fi
+  else why="the test file $f could not be run with the change: ${out:0:300}"; fi
+  { if [ -n "$why" ]; then printf '%s\n' "$why"
+    else printf 'This issue makes the test file %s pass reliably. Run alone with the change, on a test slot, it passed in each of %s runs in a row.\n' "$f" "$STEADYRUNS"; fi
+    [ -z "$tl" ] || { echo 'The end of the output of the run that failed:'; echo '```'; printf '%s\n' "$tl"; echo '```'; }; } > "$2.unfixed"
+  git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  [ -z "$why" ]
+}
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
 # own check refused the run) proves nothing. A command that writes no logs says no more than its exit.
