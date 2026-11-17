@@ -403,7 +403,8 @@ snapcopy() { # [<open issues json>]
 # A summary made anew from a whole file that is not empty is said on stderr first, before that long work: card
 # records rewritten (a retry, as `control resume` makes for the cards a sign-in failure blocked) or a new engine
 # leave it to be made anew, and on a long history the snapshot then runs past a reader's wait (the Foreman's 45 s),
-# which has only a killed run that said nothing.
+# which has only a killed run that said nothing. The message names those causes only when a summary was kept and no
+# longer fits: with none kept yet (the first snapshot) it says so instead.
 snaprows() { # <records file> <kept> <to>
   local k size h1 h2 o s n=-1 src=$1
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
@@ -414,7 +415,10 @@ snaprows() { # <records file> <kept> <to>
   { read -r h1 h2 o s && [ "$h1 $h2" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] && [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; } < "$3.sum" && n=$o
   if [ "$n" = "$size" ]; then tail -n +2 "$3.sum" > "$3.rows" || return 1
   else
-    [ "$n" -ge 0 ] || [ "$size" = 0 ] || echo "conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer" >&2
+    if [ "$n" -lt 0 ] && [ "$size" != 0 ]; then
+      if [ -s "$3.sum" ]; then echo "conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer" >&2
+      else echo "conveyor: the snapshot is being made from the whole card records (no summary of them is kept yet); this one takes longer" >&2; fi
+    fi
     : > "$3.kept"
     if [ "$n" -ge 0 ]; then
       # The cards the new lines name (as JSON strings), their lines, and the kept rows of the other cards. A row line

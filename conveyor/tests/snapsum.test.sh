@@ -45,7 +45,11 @@ t_snaprows() {
   local one
   snapsum_engine
   snapsum_line c1 5 picked 2026-03-02T00:00:00Z ok '' >> "$ST/cards.jsonl"; snapsum_line c1 5 blocked 2026-03-02T00:10:00Z blocked 'build: failed' >> "$ST/cards.jsonl"
-  snapsum_snap cards.jsonl rows; snapsum_snap retried.jsonl old
+  snapsum_snap cards.jsonl rows 2> "$D/err1"; snapsum_snap retried.jsonl old
+  # Bug (#291): the first snapshot, with no summary kept yet, said a retry, a resume or an engine change had rewritten
+  # the records, which sends a reader after a cause that never happened.
+  grep -qxF 'conveyor: the snapshot is being made from the whole card records (no summary of them is kept yet); this one takes longer' "$D/err1" \
+    || fail "the first snapshot did not say that no summary is kept yet: $(cat "$D/err1")"
   [ "$(snapsum_ran cards.jsonl)" = 1 ] && [ "$(snapsum_ran retried.jsonl)" = 1 ] || fail "the first snapshot did not make the rows of each file once: $(tr '\n' ' ' < "$D/rows")"
   one=$(cat "$D/d/rows")
   [ "$(jq -c 'map([.card, .step])' <<<"$one")" = '[["c1","blocked"]]' ] || fail "the blocked card is not in the first rows: $one"
