@@ -214,7 +214,11 @@ t_followtakeok() {
   # A newer commit the last take read, not taken yet: the project runs an old engine.
   t=$(jq --arg h "$B" '.head = {commit: $h, name: "main"}' "$R/.git/conveyor-engine.json") && printf '%s\n' "$t" > "$R/.git/conveyor-engine.json" \
     || fail "the record's head was not moved"
+  # Bug (#193): reading the line (/units, the Foreman's start) made the state folder, its record files and the cards folder.
+  rm -rf "$ST" "$(dirname "$R")/conveyor-cards" || fail "the state folder was not removed"
   line=$(CONVEYOR_MAIN=$R bash "$V/$A/conveyor/conveyor.sh" take stale)
+  [ ! -e "$ST" ] && [ ! -e "$(dirname "$R")/conveyor-cards" ] \
+    || fail "take stale made local engine state: $(ls -d "$ST" "$(dirname "$R")/conveyor-cards" 2>/dev/null)"
   ok=$(sed -n 's/.* · last take that worked: \([^ ]*\) · .*/\1/p' <<<"$line")
   [[ $ok =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] && [[ ! $ok < $before ]] \
     || fail "the line does not name the time of the take run by hand (after $before): $line"
