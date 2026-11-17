@@ -21,10 +21,8 @@
 #   median is 0 or null), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
 #   gives none; card (null for a whole-suite run), time, whole (a whole-suite run), and a whole-suite run's result: ok,
 #   fail or null}; [] for a file never run), lastRun ({sec, cpu, clockPerCpu, time, whole} of its newest run; null with
-#   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record), olderRuns (its runs on record
-#   before those in runs, newest first, as runs has them) and olderEdits (the test edits of it on record before the
-#   newest TESTKEEP that edits, below, holds, newest first, as edits has them), for the Board's Timeline, which lists
-#   every event of a file, wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
+#   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record; its older runs and test edits are
+#   not here but in testolder(), below, so the part does not grow with every run), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
 #   a step that went again counts with the failures of its first run too: failedrun, FAILURE),
 #   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
@@ -253,8 +251,42 @@ TESTLINE='select(test("\"step\":\"(test|picked|bugproof|blocked|closed|landed|re
     elif .step == "landed" then {sha, testedits} elif .step == "bugproof" then {speed} elif .step == "blocked" then {reason}
     elif .step == "review" then {reason: (.reason | if type == "string" then [split("\n")[] | select(test("^COVERED-BY: [^\\s:]+: "))] | join("\n") else . end)}
     else {} end'
+# The retried lines, then the card records, as the Tests part reads them (TESTLINE), each from its summary (linesum());
+# nothing when they cannot be read.
+testlines() {
+  local td
+  td=$(mktemp -d) || return 1
+  { olds > "$td/old" && recs > "$td/rec" && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$td/rec" "$STATE.tests" "$td/r" "$TESTLINE" \
+      && cat "$td/o" "$td/r"; } 2>/dev/null
+  rm -rf "$td"
+}
+# The runs of the test files on record, in no order, as the Tests part and testolder() read them: each card test
+# line's times and clocks ($ls) and each whole-suite run ($su), {file, cpu, sec, card, time, whole, and a whole-suite
+# run's result}; and each test edit of a landed line ($cr, the lines oldest first), newest first, with its card, issue
+# and time.
+# shellcheck disable=SC2016 # jq's variables, not the shell's
+RUNDEFS='def testruns($ls; $su): ($ls[] | . as $l | (.times | objects) as $t | ($l.clocks | objects // {}) as $k | $t + $k | keys[] as $f
+        | select(($t[$f] | type) == "number" or ($k[$f] | type) == "number")
+        | {file: $f, cpu: (($t[$f] | numbers) // null), sec: (($k[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
+       ($su[] | . as $w | .files | objects | to_entries[] | select(.value | type == "object")
+        | {file: .key, cpu: ((.value.cpu | numbers) // null), sec: ((.value.sec | numbers) // null), card: null, time: $w.time, whole: true,
+           result: ((.value.result | strings) // null)});
+  def alledits($cr): [$cr | reverse[] | select(.step == "landed" and (.testedits | type == "array")) | . as $l
+        | .testedits[] | objects | select(.file | type == "string") | {card: $l.card, issue: $l.issue, time: $l.time} + .];'
+# testolder <test file> -- the runs and test edits of one test file that the Tests part leaves out (its runs and edits
+# hold the newest TESTKEEP), for the Board's Timeline, which asks for them when it is opened (`conveyor.sh history test
+# <file>`, GET /older of the page server): {file, olderRuns, olderEdits}, each newest first, as runs and edits have
+# them. The snapshot does not carry them, so it does not grow with every run on record (#251).
+testolder() {
+  local ln
+  ln=$(testlines) || return 1
+  printf '%s\n' "$ln" | jq -cRn --arg f "$1" --argjson keep "$TESTKEEP" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) "$RUNDEFS"'
+    [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
+    | [testruns($ls; $su) | select(.file == $f)] | sort_by(.time) as $r
+    | {file: $f, olderRuns: ($r[:-$keep] | reverse | map(del(.file))), olderEdits: ([alledits($cr)[] | select(.file == $f)][$keep:])}'
+}
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp td
+  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp
   packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
@@ -262,11 +294,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   testowners
-  # The retried lines, then the card records, as the part reads them (TESTLINE), each from its summary (linesum()).
-  td=$(mktemp -d) || return 1
-  { olds > "$td/old" && recs > "$td/rec" && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$td/rec" "$STATE.tests" "$td/r" "$TESTLINE" \
-      && ln=$(cat "$td/o" "$td/r"); } 2>/dev/null || ln=''
-  rm -rf "$td"
+  ln=$(testlines) || return 1
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
   # call (a commit main's checkout does not have is left out). A path is a commit's key only when it is one of the
   # commits asked for.
@@ -281,7 +309,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
     --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$OWNERS$FAILURE"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$OWNERS$FAILURE$RUNDEFS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
@@ -314,23 +342,14 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | (reduce ($ls[] | select(.result == "fail" and (.card | type == "string")) | ($ch[0][$land[.card] | strings] // null) as $d | select($d != null)
         | failedfiles[] | [., IN($d[])]) as [$f, $ed] ({}; if $ed then .[$f].changed += 1 else .[$f].caught += 1 end)) as $catch
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
-    | [$cr | reverse[] | select(.step == "landed" and (.testedits | type == "array")) | . as $l
-        | .testedits[] | objects | select(.file | type == "string") | {card: $l.card, issue: $l.issue, time: $l.time} + .] as $alledits
-    | (reduce $alledits[] as $e ({}; .[$e.file] += [$e])) as $editsof
-    | [($ls[] | . as $l | (.times | objects) as $t | ($l.clocks | objects // {}) as $k | $t + $k | keys[] as $f
-        | select(($t[$f] | type) == "number" or ($k[$f] | type) == "number")
-        | {file: $f, cpu: (($t[$f] | numbers) // null), sec: (($k[$f] | numbers) // null), card: $l.card, time: $l.time, whole: false}),
-       ($su[] | . as $w | .files | objects | to_entries[] | select(.value | type == "object")
-        | {file: .key, cpu: ((.value.cpu | numbers) // null), sec: ((.value.sec | numbers) // null), card: null, time: $w.time, whole: true,
-           result: ((.value.result | strings) // null)}),
-       ($all[], $ta[].file | {file: ., none: true})]
+    | alledits($cr) as $alledits
+    | [testruns($ls; $su), ($all[], $ta[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud | ($own.wholeOnly == true) as $wo
         | (if ($c | length) >= $mn and ($c | length) > $rn then $c[:-$rn] | median else null end) as $usual
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
-           runs: ($r[-$keep:] | reverse | map(del(.file))), olderRuns: ($r[:-$keep] | reverse | map(del(.file))),
-           olderEdits: (($editsof[$f] // [])[$keep:]),
+           runs: ($r[-$keep:] | reverse | map(del(.file))),
            lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} end),
            timedRuns: ($c | length), runsOnRecord: ($r | length), wholeOnly: $wo, failedSteps: ($failed[$f] // [] | length),
            failures: ($failed[$f] // [] | to_entries | map(.value + if .key < $keep then {} else {tail: null} end)),

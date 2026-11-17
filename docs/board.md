@@ -430,7 +430,9 @@ the Timeline.
 The Timeline lists every event of the file, newest first: its runs (each with its card's issue, or "whole suite" and
 its result), its Optimize issues, the test edits of landed cards and the runs of Judge. The filter chips All, Runs,
 Optimize, Test edits and Judge show one kind of event. A test edit shows the issue of its card, as a link, and its
-time. A weakened edit has the chip "Weakened".
+time. A weakened edit has the chip "Weakened". When you open the Timeline, the Board reads the older runs and test
+edits of the file from the machine Conveyor runs on, and adds them below the newest. While it reads, the Timeline says
+so. If the read fails, the Timeline gives the reason, and the Board reads again the next time you open the Timeline.
 
 The Judge tab shows the newest result of Judge: its verdict once at the top, then its full report. When Judge names
 the causes of the failures, the tab lists each one as "<case> | <kind> | <reason>". The Mutation tab

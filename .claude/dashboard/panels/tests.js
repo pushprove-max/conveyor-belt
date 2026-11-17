@@ -174,6 +174,7 @@
     mutAsked: new Map(), // the files a Mutation check was asked for here, by dk(file): the time asked, until the snapshot names them
     tabs: new Map(),     // the tab open on an opened row, by dk(file): overview (with none), timeline, judge or mutation
     tl: new Map(),       // the filter of an opened row's Timeline, by dk(file): all (with none), runs, optimize, edits or judge
+    older: new Map(),    // a file's older runs and test edits, by dk(file), read when its Timeline is opened: {stamp, busy, data, error}
     uid: 0,              // a counter for the ids that tie a row's tabs to their panes
     settingsOpen: false };  // the Settings section is open
 
@@ -1455,7 +1456,10 @@
   // ---- an opened row (#130, the owner's mockup D): the tabs Overview, Timeline (N), Judge and Mutation ----
   const TABS = [['overview', 'Overview'], ['timeline', 'Timeline'], ['judge', 'Judge'], ['mutation', 'Mutation']];
   const tabOf = (file) => S.tabs.get(dk(file)) || 'overview';
-  const showTab = (file, k) => { S.tabs.set(dk(file), k); S.keep = { act: `tab-${k}`, file }; draw(); };
+  const showTab = (file, k) => {
+    if (k === 'timeline' && (S.older.get(dk(file)) || {}).error) S.older.delete(dk(file));  // a failed read is tried again
+    S.tabs.set(dk(file), k); S.keep = { act: `tab-${k}`, file }; draw();
+  };
   const COUNT = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
   // Its budget, as in force or as saved here and not yet in a snapshot: its CPU s (null: none) and in words.
   function budgetOf(f) {
@@ -1540,12 +1544,27 @@
   // ---- its events: runs, Optimize issues, test edits and judge runs, newest first ----
   const KINDS = [['all', 'All'], ['runs', 'Runs'], ['optimize', 'Optimize'], ['edits', 'Test edits'], ['judge', 'Judge']];
   const EVENT = { runs: 'Run', optimize: 'Optimize', edits: 'Test edit', judge: 'Judge' };
-  // A file's runs and test edits are its newest few (runs, the snapshot's edits) and the older ones on record
-  // (olderRuns, olderEdits: lib/testfiles.sh testspart()), so the Timeline keeps every event a sixth one would push out.
+  // A file's runs and test edits are its newest few (runs, the snapshot's edits) and the older ones on record, which
+  // the snapshot does not carry (#251): read from the page server (GET older: `conveyor.sh history test <file>` on the
+  // build machine) when its Timeline is opened, and again when a newer run or edit pushes one of the newest out (the
+  // stamp: its runs on record and the cards of its newest edits). A failed read is tried again when the Timeline is
+  // opened again.
+  const olderStamp = (f) => [f.runsOnRecord].concat(editsOf().filter((e) => e.file === f.file).map((e) => e.card)).join('|');
+  function readOlder(f) {
+    const key = dk(f.file), repo = S.d.repo, was = S.older.get(key), stamp = olderStamp(f);
+    if (typeof repo !== 'string' || (was && (was.busy || was.stamp === stamp))) return;
+    const o = { stamp, busy: true, data: was ? was.data : null, error: null };
+    S.older.set(key, o);
+    window.fetch(`older?repo=${encodeURIComponent(repo)}&file=${encodeURIComponent(f.file)}`)
+      .then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(new Error(String(t).trim() || `the server answered ${r.status}`)))))
+      .then((x) => { if (obj(x)) o.data = x; else o.error = 'the answer did not read'; }, (e) => { o.error = e && e.message ? e.message : 'no answer'; })
+      .then(() => { o.busy = false; if (S.older.get(key) === o) draw(); });
+  }
   function events(f) {
-    return list(f.runs).concat(list(f.olderRuns)).filter(obj).map((r) => ({ kind: 'runs', t: r.time, r }))
+    const od = obj((S.older.get(dk(f.file)) || {}).data) || {};
+    return list(f.runs).concat(list(od.olderRuns)).filter(obj).map((r) => ({ kind: 'runs', t: r.time, r }))
       .concat(optsOf(f).map((o) => ({ kind: 'optimize', t: o.state === 'landed' && o.landed ? o.landed : o.time, o })),
-        editsOf().filter((e) => e.file === f.file).concat(list(f.olderEdits).filter((e) => obj(e) && e.file === f.file))
+        editsOf().filter((e) => e.file === f.file).concat(list(od.olderEdits).filter((e) => obj(e) && e.file === f.file))
           .map((e) => ({ kind: 'edits', t: e.time, e })),
         actions().filter((a) => a.file === f.file && judged(a)).map((a) => ({ kind: 'judge', t: a.end || a.start, a })))
       .sort((x, y) => (Date.parse(y.t) || 0) - (Date.parse(x.t) || 0));
@@ -1595,6 +1614,9 @@
     ul.setAttribute('aria-label', `Events of ${f.file}, newest first`);
     picked.forEach((x) => ul.append(eventLine(x, opt, any, true)));
     el.append(bar, picked.length ? ul : h('p', 'board-from', all.length ? 'No event of this kind on record.' : 'No event on record.'));
+    const o = S.older.get(dk(f.file));
+    if (o && o.busy) el.append(h('p', 'board-from tests-tl-older', 'Reading the older runs and test edits…'));
+    else if (o && o.error) el.append(h('p', 'board-from tests-tl-older', `The Board could not read the older runs and test edits: ${o.error}`));
     return el;
   }
   // The Judge tab: the judge behind Overview's verdict (verdictOf()), else the file's newest ended judge, its verdict
@@ -1648,6 +1670,7 @@
     return el;
   }
   function more(f) {
+    if (tabOf(f.file) === 'timeline') readOlder(f);
     const h = S.ctx.h, el = h('div', 'tests-more'), file = f.file, on = tabOf(file), all = events(f), opt = optRuns(f), any = anyIssueUrl([f]);
     // Overview: the diagnosis, the rest of its actions, the editors picked, the tiles, its failures and the 3 latest events.
     const ov = h('div', 'tests-overview'), acts = rowActions(f), fl = failures(f);

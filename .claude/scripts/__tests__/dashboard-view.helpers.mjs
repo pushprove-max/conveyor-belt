@@ -160,6 +160,13 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       w.workAsks = (w.workAsks || 0) + 1;
       return Promise.resolve(w.workReply || { ok: false, status: 404, text: () => Promise.resolve('no work reading') });
     }
+    // The Tests page's older runs of a file (GET older?repo=…&file=…): w.olderReply is the server's answer; with none,
+    // a file with no older run or edit. w.olderAsks lists the addresses asked.
+    if (/^older\?/.test(url)) {
+      assert.equal(opt, undefined, 'the older runs are read with a plain GET');
+      (w.olderAsks = w.olderAsks || []).push(url);
+      return Promise.resolve(w.olderReply || { ok: true, status: 200, json: () => Promise.resolve({ olderRuns: [], olderEdits: [] }) });
+    }
     assert.ok(['answer', 'restart', 'control', 'machine'].includes(url), `the page writes to nothing but its own answer, restart, control and machine addresses: ${url}`);
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');

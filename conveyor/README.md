@@ -1465,7 +1465,10 @@ Every snapshot also writes those lists whole to `history.json` in the state fold
 that file. The Board does not read it with the live feed: its Landed, Metrics, Cost and Declined panels ask the page
 server for it (`GET /history`) when they are drawn, at most once a minute, and show the older entries from it beside
 the live ones. The Foreman's watcher asks for it when an issue it awaits is in neither `pushedCards` nor
-`metrics.cards` of the snapshot, so a push past the cut still wakes it. The Control tab's Landed today column shows the newest, and links to the Overview's Landed today for
+`metrics.cards` of the snapshot, so a push past the cut still wakes it.
+The snapshot's tests part keeps the newest 5 runs and test edits of each test file. `conveyor.sh history test <file>`
+prints the older ones of one file. The Board's Tests page asks the page server for them (`GET /older`) when you open
+the Timeline of that file. The Control tab's Landed today column shows the newest, and links to the Overview's Landed today for
 the older ones.
 
 ## Belt 3D

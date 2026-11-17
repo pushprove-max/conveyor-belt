@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work] -- the collector of the Conveyor dashboard (the
+# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older] -- the collector of the Conveyor dashboard (the
 # strip-down to Conveyor). It writes one file, data.js in dashboard/ of the state folder (`conveyor.sh state-dir`)
 # (`window.DASH = {...};`), which the static page in .claude/dashboard/ reads, through the page server's /events as it
 # changes, or every 15 s when that stream is not open. No model call, ever.
@@ -883,7 +883,7 @@ PANELS_JQ='
    # The Tests page, of the same records (repo null when none is steered; repos and others as the Board'"'"'s): each
    # record'"'"'s tests (its snapshot'"'"'s, testspart() of conveyor/lib/testfiles.sh; null from a snapshot without it or
    # whose pack does not read) and the machine'"'"'s Load limit (mload), the same in every record'"'"'s. Each run of a
-   # file (runs and olderRuns) is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link,
+   # file is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link (older runs: --older),
    # and so is each of its Optimize issues (optimize: the Board'"'"'s filings, their state and proof numbers) and each of
    # its failures (failures: its failed test steps, each with its issue) with its issue'"'"'s url.
    tests: (if $R == null then {error: $cerr, data: null} else ($R | mload) as $ml
@@ -893,7 +893,7 @@ PANELS_JQ='
       def shut($o): if $o != null and .state == "open" and (.issue | IN($o[]) | not) then .state = "closed" else . end;
       def testsOf: . as $r | (.snap.open.issues | if type == "array" then [.[].issue] else null end) as $oi
         | {repo, machine: $ml, tests: (.snap.tests | if type != "object" then null
-        elif (.files | type) == "array" then .files |= map(if type == "object" then (.runs |= runsOf($r)) | (.olderRuns |= runsOf($r))
+        elif (.files | type) == "array" then .files |= map(if type == "object" then (.runs |= runsOf($r))
           | if (.failures | type) == "array" then .failures |= map(if type == "object" then tag($r) else . end) else . end
           | if (.optimize | type) == "array" then .optimize |= map(if type == "object" then tag($r) | shut($oi) else . end) else . end else . end) else . end),
         testActions: ((.snap.testActions | objects | {limit, actions, allowed}) // null), control: (.snap.control | objects // null), clis: ((.snap.modelSettings | objects | (.judge.clis // .reviewer.clis) | objects) // null),
@@ -1092,6 +1092,27 @@ work() {
   jq -ce --arg h "$host" '{host: $h, groups: (.groups | sort_by(-.cpu) | map(.processes |= map(.command |= .[:200]))),
        other: (.other | map(.command |= .[:200]))}' "$RUN/work" 2>"$RUN/err-work" \
     || { echo "dashboard: $host gave no work reading" >&2; return 1; }
+}
+
+# --older <repo> <test file>: the older runs and test edits of one test file of a record, which the snapshot leaves
+# out: its `conveyor.sh history test <file>` and its origin's address, in one command to the host (hostof, onhost), as
+# {file, olderRuns, olderEdits}, each run tagged with its card's issue and that issue's url as the Tests part's runs
+# are. The page server gives it at GET /older, which the Tests page asks for when a file's Timeline is opened; never
+# kept.
+older() {
+  local host main engine target recs why remote cmd
+  hostof || { echo "dashboard: no older runs: $why" >&2; return 1; }
+  cmd=$(jq -er --arg r "$1" --arg f "$2" --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | select(.repo == $r) | .main | strings)
+      | "CONVEYOR_MAIN=\(@sh) bash \($e | @sh) history test \($f | @sh) && { git -C \(@sh) remote get-url origin 2>/dev/null || echo; }"' <<<"$recs") \
+    || { echo "dashboard: no older runs: the host file names no record $1" >&2; return 1; }
+  RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
+  onhost "$cmd" > "$RUN/older" 2>"$RUN/err-older" \
+    || { echo "dashboard: $host gave no older runs: $(tail -n 1 "$RUN/err-older" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
+  jq -ceRs --arg r "$1" 'split("\n") as $l | ($l[1] | (capture("github\\.com[:/](?<p>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(\\.git)?$") | "https://github.com/\(.p)") // null) as $u
+    | $l[0] | fromjson | objects | select((.olderRuns | type) == "array" and (.olderEdits | type) == "array")
+    | .olderRuns |= map(objects | (.issue = ([.card | strings | capture("-(?<n>[1-9][0-9]{0,8})$").n | tonumber][0] // null))
+        | . + {repo: $r, url: (if $u != null and .issue != null then "\($u)/issues/\(.issue)" else null end)})' "$RUN/older" 2>"$RUN/err-older" \
+    || { echo "dashboard: $host gave no older runs" >&2; return 1; }
 }
 
 # view_files -- the page's files, relative to .claude/dashboard: the page, its core, its tab icon and one file per panel.
@@ -1324,8 +1345,11 @@ case "${1:-}" in
              history || exit 1 ;;
   --work) mkdir -p "$OUT" || exit 1
           work || exit 1 ;;
+  --older) [ $# = 3 ] || { echo "usage: dashboard.sh --older <repo> <test file>" >&2; exit 2; }
+           mkdir -p "$OUT" || exit 1
+           older "$2" "$3" || exit 1 ;;
   --check) check || exit 1 ;;
   "") mkdir -p "$OUT" || exit 1
       render || { echo "dashboard: collection FAILED; data.js keeps the last snapshot" >&2; exit 1; } ;;
-  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--check]" >&2; exit 2 ;;
+  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--check]" >&2; exit 2 ;;
 esac

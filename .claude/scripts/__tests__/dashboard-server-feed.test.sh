@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# The page server's work for each open page (issue 566), by function: GET /events, GET /history and GET /work called on a
+# The page server's work for each open page (issue 566), by function: GET /events, GET /history, GET /work and GET /older called on a
 # stand-in request, with no server, socket or login. Every open page did again work one could do for all: each /events
 # connection serialised every panel of data.js (about 1.1 MB) on each update, and each GET /history started bash,
 # every 60 s a page, though dashboard.sh kept the answer for 60 s.
@@ -132,6 +132,31 @@ bad = Page()
 ds.Handler.work(bad)
 check(bad.code == 502 and 'gave no work reading' in bad.text and bad.out.getvalue() == b'',
       'work: a failed reading is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
+
+# D4 (#251). Bugs: data.js carried every older run of every test file, so the Tests page's Timeline must read one
+# file's from the server; GET /older ran dashboard.sh --older for another repo or file than the page asked for, or for
+# one of a shape the Board never names; a failed read reached the page as a file with no older run.
+started.clear()
+ds.run_script = lambda *a, **k: (started.append(a[0]), subprocess.CompletedProcess(a[0], 0, '{"file":"t/a.test.sh","olderRuns":[],"olderEdits":[]}\n', ''))[1]
+older = Page()
+older.path = '/older?repo=sample&file=t%2Fa.test.sh'
+ds.Handler.older(older)
+check(started == [started[0]] and started[0][-3:] == ['--older', 'sample', 't/a.test.sh'] and older.code == 200
+      and json.loads(older.out.getvalue())['olderRuns'] == [],
+      'older: an ask runs dashboard.sh --older for its repo and file and gives its answer: %r %s' % (started, older.code))
+started.clear()
+for q in ('repo=sample&file=-x.test.sh', 'repo=a%20b&file=a.test.sh', 'repo=sample'):
+    bad = Page()
+    bad.path = '/older?' + q
+    ds.Handler.older(bad)
+    check(bad.code == 400, 'older: %s is refused: %s' % (q, bad.code))
+check(started == [], 'older: a refused ask starts no process: %r' % started)
+ds.run_script = lambda *a, **k: subprocess.CompletedProcess(a[0], 1, '', 'dashboard: devbox gave no older runs: refused\n')
+bad = Page()
+bad.path = '/older?repo=sample&file=a.test.sh'
+ds.Handler.older(bad)
+check(bad.code == 502 and 'gave no older runs' in bad.text and bad.out.getvalue() == b'',
+      'older: a failed read is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
 
 for f in fail:
     print('FAIL: ' + f, file=sys.stderr)

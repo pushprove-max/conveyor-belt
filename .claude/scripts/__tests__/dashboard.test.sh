@@ -339,6 +339,26 @@ w=$(wrun) || fail "--work exited non-zero"
 w=''; ! w=$(wrun 2>/dev/null) && [ -z "$w" ] || fail "a host that gave no work reading was passed off as an idle machine: $w"
 ) & started work
 
+# --- --older (#251): the older runs and test edits of one test file, which data.js no longer carries: the named
+# record's `conveyor.sh history test <file>` in one host command, each run with its card's issue link as the Tests
+# part's runs have (#217: an older run with no link had no issue on the Timeline). Bugs: another record was asked; the
+# file reached the host unquoted; a host that gives no answer is passed off as a file with no older run ---
+( fresh older
+jq -cn '{file: "a b.test.sh", olderRuns: [{cpu: 1, card: "c4-11"}, {cpu: 2, card: null, whole: true}], olderEdits: [{card: "c3-9", file: "a b.test.sh"}]}' > "$T/ssh-out"
+echo 'git@github.com:o/w.git' >> "$T/ssh-out"
+: > "$T/ssh-calls"
+orun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" \
+  CONVEYOR_DASHBOARD_DIR="$OUT" timeout 20 bash "$DASH" --older "$@"; }
+o=$(orun widgetshop 'a b.test.sh') || fail "--older exited non-zero"
+[ "$(jq -c '[.file, (.olderRuns | map([.card, .issue, .url, .repo])), (.olderEdits | map(.card))]' <<<"$o")" = '["a b.test.sh",[["c4-11",11,"https://github.com/o/w/issues/11","widgetshop"],[null,null,null,"widgetshop"]],["c3-9"]]' ] \
+  || fail "--older does not give the file's older runs, each with its card's link: $o"
+[ "$(wc -l < "$T/ssh-calls")" = 1 ] && grep -q "CONVEYOR_MAIN='/srv/cd' bash .*conveyor.sh' history test 'a b.test.sh'" "$T/ssh-calls" \
+  || fail "--older does not ask the host once, for the named record and the file quoted: $(cat "$T/ssh-calls")"
+o=''; ! o=$(orun nosuch a.test.sh 2>/dev/null) && [ -z "$o" ] || fail "a record the host file does not name gave older runs: $o"
+: > "$T/ssh-out"
+o=''; ! o=$(orun widgetshop a.test.sh 2>/dev/null) && [ -z "$o" ] || fail "a host that gave no older runs was passed off as a file with none: $o"
+) & started older
+
 # --- cards on both records: every row names its repo and links to that repo's issue ---
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
@@ -553,7 +573,7 @@ with_machine() { jq -c --argjson m "$1" '.health.machine = $m' <<<"$2"; } # <mac
 PUSHING='[{"card": "c0-98", "issue": 98, "title": "Landed, being pushed", "step": "push", "stepAt": "'"$(ago 60)"'", "landed": true, "usd": 1, "reading": true}]'
 # The machine's load limit is 20 here, and its 16 cores are at a load of 31.5 (#462).
 ML=$(jq -c '.maxLoad = 20' <<<"$MC")
-answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .health.machineNow = {cores: 16, load: 31.5} | .health.steer = false | .health.cores = {reserved: [14, 15], slots: 14, unavailable: null} | .tests = {files: [{file: "a.test.sh", cpu: 3, runs: [{cpu: 3, card: "c5-12"}, {cpu: 2, card: "odd"}], olderRuns: [{cpu: 1, card: "c4-11"}],
+answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .health.machineNow = {cores: 16, load: 31.5} | .health.steer = false | .health.cores = {reserved: [14, 15], slots: 14, unavailable: null} | .tests = {files: [{file: "a.test.sh", cpu: 3, runs: [{cpu: 3, card: "c5-12"}, {cpu: 2, card: "odd"}],
     failures: [{card: "c6-13", issue: 13, verdict: "card", cases: ["one"]}],
     optimize: [{issue: 70, time: "2026-11-01T00:00:00Z", state: "landed", sha: "abc1234", fix: "sped up", into: [], before: 10, after: 4, since: 3.5, sinceRuns: 2},
       {issue: 71, state: "open"}, {issue: 72, state: "open"}]}]} | .open.issues = [{issue: 71}]
@@ -569,8 +589,6 @@ q '.panels.tests.data | .machine == {maxLoad: 20, unread: false, cores: 16, load
   and (.tests.files | map([.file, .cpu])) == [["a.test.sh", 3]] and .others.widgetshop.tests == null
   and (.tests.files[0].runs | map([.card, .issue, .url])) == [["c5-12", 12, "'"$PU"'/12"], ["odd", null, null]]' \
   "the Tests part names the machine's load limit, cores and load, the same for every project, and each project's own test files, each run with its card's link"
-# #217: the Timeline lists a file's older runs (olderRuns) too; one with no link had no issue on the Timeline.
-q '.panels.tests.data.tests.files[0].olderRuns | map([.card, .issue, .url]) == [["c4-11", 11, "'"$PU"'/11"]]' "each older run has its card's link too"
 # Issue 194: the Rules tab sets whether card work yields to the user, a setting of the machine (the host file's steer).
 # One record's health says it is off, the other's (an older snapshot) says nothing: the Rules part shows it off, never
 # on for the record that did not say.
@@ -1240,7 +1258,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 RETIRED='\b([u]nits?|[s]eats?|[p]ass(es)?|[m]erge queue|[c]hain)\b'

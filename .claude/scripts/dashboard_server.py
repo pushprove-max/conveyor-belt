@@ -29,6 +29,8 @@ back to reading data.js every 15 s while it has none.
 the page asks for it when its Landed, Metrics, Cost or Declined panel is drawn, at most once a minute.
 `GET /work`, behind the login too, gives what keeps the Conveyor host busy now (dashboard.sh --work): the Health
 panel asks for it when the owner opens Work now or reads it again.
+`GET /older?repo=<repo>&file=<test file>`, behind the login too, gives the older runs and test edits of one test file
+that data.js no longer carries (dashboard.sh --older): the Tests page asks for it when that file's Timeline is opened.
 
 The login: users in dashboard-auth.json beside the ruling log (env CONVEYOR_DASHBOARD_AUTH), each with a name, a
 role (admin or member), an scrypt hash, when it was created and last logged in, its MFA state and its trusted
@@ -103,6 +105,7 @@ RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because t
 HISTORY_TTL = 60       # GET /history serves dashboard.sh's copy while it is this young, with no process (its HISTORY_TTL)
 HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
 WORK_LIMIT = 90        # GET /work: dashboard.sh --work's one ssh command (its SSH_LIMIT, 60 s) and the merge
+OLDER_LIMIT = 90       # GET /older: dashboard.sh --older's one ssh command (its SSH_LIMIT, 60 s) and the tagging
 ANSWER_KEYS = {'id', 'answer', 'askedAt', 'repo'}
 DECISION_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$')
 ASKED_AT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
@@ -1591,6 +1594,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.history()
         if path == '/work':
             return self.work()
+        if path == '/older':
+            return self.older()
         if path in ('/me', '/users'):
             return self.users_get(path)
         if path == '/me/qr':
@@ -1801,6 +1806,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--work'], WORK_LIMIT)
         except subprocess.TimeoutExpired:
             return self.reply(502, 'the work reading did not come in %d s' % WORK_LIMIT)
+        except OSError as e:
+            return self.reply(502, 'could not start dashboard.sh: %s' % e)
+        if run.returncode != 0:
+            return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
+        body = run.stdout.encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def older(self):
+        """GET /older?repo=<repo>&file=<test file>: the older runs and test edits of one test file, which data.js does
+        not carry: dashboard.sh --older's JSON, read afresh on each ask (the Tests page asks when a file's Timeline is
+        opened). 400 for a repo or file of another shape, 502 with the reason when it gives none."""
+        if not self.authed():
+            return self.reply(401, 'log in to see the older runs')
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        repo, file = (q.get('repo') or [''])[0], (q.get('file') or [''])[0]
+        if not REPO.fullmatch(repo) or not TEST_FILE.fullmatch(file):
+            return self.reply(400, 'no repo or test file of the shape the Board names')
+        try:
+            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--older', repo, file], OLDER_LIMIT)
+        except subprocess.TimeoutExpired:
+            return self.reply(502, 'the older runs did not come in %d s' % OLDER_LIMIT)
         except OSError as e:
             return self.reply(502, 'could not start dashboard.sh: %s' % e)
         if run.returncode != 0:

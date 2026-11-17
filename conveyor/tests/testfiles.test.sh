@@ -350,11 +350,32 @@ t_tfcaught() {
 # missed), a deleted test file left out, a new test file counted as an edit of one main had, or an unread kind left
 # out; and a Tests part with no list of them, or one that grows with every card that lands.
 # #217: runs holds a file's newest five runs alone, so the sixth took the first off the Board's Timeline, which lists
-# every event of a file: olderRuns holds the runs before them, newest first, as runs has them.
+# every event of a file: `conveyor.sh history test <file>` (testolder()) gives the runs before them, newest first, as
+# runs has them, and those of that file alone.
 t_tfolderruns() {
-  setup '[]'; tf_runs e.test 1 2 3 4 5 6 7
-  got=$(tf_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "e.test") | [[.runs[].cpu], (.olderRuns | map([.cpu, .card]))]')
-  [ "$got" = '[[7,6,5,4,3],[[2,"c-e.test-1"],[1,"c-e.test-0"]]]' ] || fail "e.test's runs and older runs: $got"
+  setup '[]'; tf_runs e.test 1 2 3 4 5 6 7; tf_runs other.test 9 9 9 9 9 9 9
+  got=$(tf_in testspart 2026-11-09 | jq -c '.files[] | select(.file == "e.test") | [.runs[].cpu]')
+  [ "$got" = '[7,6,5,4,3]' ] || fail "e.test's runs: $got"
+  got=$(loop history test e.test | jq -c '[.file, (.olderRuns | map([.cpu, .card])), .olderEdits]') || fail "history test exited non-zero"
+  [ "$got" = '["e.test",[[2,"c-e.test-1"],[1,"c-e.test-0"]],[]]' ] || fail "e.test's older runs: $got"
+}
+
+# #251: the Tests part carried every older run (olderRuns) and test edit (olderEdits) of each file, so data.js grew
+# with each test run until /units, which caps it, stopped reading it. Bug caught: a part that grows with the runs on
+# record: one built from 80 runs of a file is the size of one built from 40 (the second 40 are the first again, so
+# the newest five are of the same size).
+t_tfpartsize() {
+  local one two
+  setup '[]'
+  # shellcheck disable=SC2046 # 40 words, one a run
+  tf_runs e.test $(printf '3 %.0s' {1..40})
+  one=$(tf_in testspart 2026-11-09) || fail "the part of 40 runs"
+  # shellcheck disable=SC2046
+  tf_runs e.test $(printf '3 %.0s' {1..40})
+  two=$(tf_in testspart 2026-11-09) || fail "the part of 80 runs"
+  [ "$(jq -c '.files[] | select(.file == "e.test") | [.runsOnRecord, (.runs | length), has("olderRuns"), has("olderEdits")]' <<<"$two")" = '[80,5,false,false]' ] \
+    || fail "the part of 80 runs: $(jq -c '.files[] | select(.file == "e.test")' <<<"$two" | cut -c1-600)"
+  [ "${#two}" = "${#one}" ] || fail "the part grew with the runs on record: ${#one} bytes for 40 runs, ${#two} for 80"
 }
 
 t_tfedits() {
@@ -392,7 +413,7 @@ t_tfedits() {
   [ "$got" = '[["c-6",6,"a.test.mjs"],["c-5",5,"a.test.mjs"],["c-4",4,"a.test.mjs"],["c-3",3,"a.test.mjs"],["c-2",2,"a.test.mjs"],["c-1",7,"a.test.py"],["c-1",7,"bool.test.mjs"],["c-1",7,"gone.test.sh"],["c-1",7,"msg.test.mjs"],["c-1",7,"multi.test.mjs"],["c-1",7,"re.test.mjs"],["c-1",7,"s.test.sh"]]' ] \
     || fail "the Tests part's edits, newest first, a file's newest five: $got"
   # #217: the sixth edit pushed the first out of edits, and so off the Board's Timeline, which lists every event of a
-  # file: each file's olderEdits holds the edits before its newest five, newest first.
-  got=$(jq -c '[.files[] | select(.file | IN("a.test.mjs", "bool.test.mjs")) | [.file, (.olderEdits | map([.card, .issue, .removedAsserts]))]]' <<<"$part")
+  # file: testolder() gives the edits of a file before its newest five, newest first.
+  got=$(for f in a.test.mjs bool.test.mjs; do tf_as history testolder "$f"; done | jq -sc 'map([.file, (.olderEdits | map([.card, .issue, .removedAsserts]))])')
   [ "$got" = '[["a.test.mjs",[["c-1",7,1]]],["bool.test.mjs",[]]]' ] || fail "each file's older edits: $got"
 }

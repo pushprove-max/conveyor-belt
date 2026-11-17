@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh history`: the lists the snapshot cuts to their newest, whole, as the last snapshot left them (history(),
-# lib/snapshot.sh), sourced by conveyor.sh.
+# lib/snapshot.sh); `conveyor.sh history test <test file>`: the older runs and test edits of one test file, which the
+# snapshot leaves out (testolder(), lib/testfiles.sh). Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1
@@ -20,4 +21,8 @@
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
 names || exit 1
-[ $# = 1 ] || { echo "usage: conveyor.sh history" >&2; exit 2; }; history
+case $#:${2:-} in
+  1:) history ;;
+  3:test) testolder "$3" ;;
+  *) echo "usage: conveyor.sh history [test <test file>]" >&2; exit 2 ;;
+esac

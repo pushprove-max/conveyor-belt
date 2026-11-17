@@ -5,7 +5,7 @@
 // with its verdict said once; Optimize with this verdict scrolled to with the cursor in its body; the preview's Last
 // runs without "card null". Shared setup: dashboard-view.helpers.mjs (TA.snap(): the three files of TESTS).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, act, cases, iso, T0, P, TA, css } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, act, cases, iso, T0, P, TA, css, settle } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { MERGE, rec, snap, opened, open } = TA;
@@ -166,22 +166,55 @@ test('Tests row: the arrows move between the tabs; the Timeline lists every even
   assert.equal(only[0].querySelector('.chip').textContent, 'keep');
 });
 
-// Bug it catches (#217): the snapshot's runs and edits hold a file's newest five alone, so a sixth run or test edit
-// took the oldest off the Timeline; the older ones (olderRuns, olderEdits) are listed too, oldest last.
-test('Tests row: the Timeline lists the older runs and test edits on record after the newest', () => {
-  const d = landed(), t = d.panels.tests.data.tests, f = t.files.find((x) => x.file === MERGE);
+// Bugs it catches (#217, #251): the snapshot's runs and edits hold a file's newest five alone, so a sixth run or test
+// edit took the oldest off the Timeline; and the snapshot carried every older run of every file, so data.js grew with
+// no bound. The older ones are read from the page server for one file when its Timeline is opened, not before, and
+// listed after the newest, oldest last.
+test('Tests row: opening the Timeline reads the file\'s older runs and test edits and lists them after the newest', async () => {
+  const d = landed(), t = d.panels.tests.data.tests;
   const edit = (n, h) => ({ card: `c${h}-${n}`, issue: n, time: iso(T0 - h * 3600000), file: MERGE, read: true, removedAsserts: 0, changedExpected: 0, skipsAdded: 0, timeoutsRaised: 0, casesDeleted: 0 });
   t.edits = [edit(44, 1.5)];
-  Object.assign(f, { olderRuns: [{ cpu: 9, sec: 20, card: 'c20-401', issue: 401, url: `${P}/401`, time: iso(T0 - 20 * 3600000), whole: false }],
-    olderEdits: [edit(402, 21)] });
   const w = show(d);
+  w.olderReply = { ok: true, status: 200, json: () => Promise.resolve({ file: MERGE,
+    olderRuns: [{ cpu: 9, sec: 20, card: 'c20-401', issue: 401, url: `${P}/401`, time: iso(T0 - 20 * 3600000), whole: false }], olderEdits: [edit(402, 21)] }) };
   open(w, MERGE);
+  assert.equal(w.olderAsks, undefined, 'nothing is read before the Timeline is opened');
+  act(opened(w, MERGE), 'tab-timeline').click();
+  assert.deepEqual(w.olderAsks, [`older?repo=${encodeURIComponent(d.panels.tests.data.repo)}&file=${encodeURIComponent(MERGE)}`]);
+  assert.equal(pane(w, 'timeline').querySelector('.tests-tl-older').textContent, 'Reading the older runs and test edits…');
+  await settle(); await settle();
   const tl = pane(w, 'timeline');
   assert.deepEqual(words(tl.querySelectorAll('[data-filter]')), ['All 7', 'Runs 4', 'Optimize 1', 'Test edits 2', 'Judge 0']);
   const items = Array.from(tl.querySelectorAll('.tests-tl-item'));
   assert.deepEqual(items.map((li) => li.dataset.kind), ['runs', 'edits', 'runs', 'optimize', 'runs', 'runs', 'edits']);
   assert.match(items[5].textContent, /#401/);
   assert.match(items[6].textContent, /#402/);
+  assert.equal(tl.querySelector('.tests-tl-older'), null, 'no reading line once it is read');
+  assert.equal(w.olderAsks.length, 1, 'a redraw does not read it again');
+  // A newer run pushes the oldest of the newest five out of the snapshot: the older ones are read again, else that
+  // run would be on neither list.
+  const d2 = landed(), f2 = d2.panels.tests.data.tests.files.find((x) => x.file === MERGE);
+  d2.panels.tests.data.tests.edits = [edit(44, 1.5)];
+  f2.runsOnRecord = (f2.runsOnRecord || 0) + 1;
+  next(w, d2);
+  assert.equal(w.olderAsks.length, 2, 'a run pushed out of the newest reads the older ones again');
+});
+
+// Bug it catches (#251): a read of the older runs that failed left the Timeline looking whole, with the oldest
+// events missing and nothing said.
+test('Tests row: a failed read of the older runs is said on the Timeline', async () => {
+  const w = show(landed());
+  w.olderReply = { ok: false, status: 502, text: () => Promise.resolve('dashboard: devbox gave no older runs: refused\n') };
+  open(w, MERGE);
+  act(opened(w, MERGE), 'tab-timeline').click();
+  await settle(); await settle();
+  assert.equal(pane(w, 'timeline').querySelector('.tests-tl-older').textContent,
+    'The Board could not read the older runs and test edits: dashboard: devbox gave no older runs: refused');
+  assert.deepEqual(words(pane(w, 'timeline').querySelectorAll('[data-filter]')).slice(0, 1), ['All 4'], 'the newest events still show');
+  assert.equal(w.olderAsks.length, 1, 'a redraw does not ask again after a failure');
+  act(opened(w, MERGE), 'tab-overview').click();
+  act(opened(w, MERGE), 'tab-timeline').click();
+  assert.equal(w.olderAsks.length, 2, 'opening the Timeline again tries the read again');
 });
 
 // jsdom lays nothing out, so this reads the rule. Bug it catches: the page head, which stays at the top of the
