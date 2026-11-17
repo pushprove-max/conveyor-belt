@@ -36,10 +36,10 @@ adoptserve() {
 # of a card that landed during that push; a forged adoption takes the run lock beside a running loop.
 t_adopt() {
   adoptsetup "[$(issue 5 2025-12-31), $(issue 6 2026-01-01), $(issue 7 2026-01-02), $(issue 8 2026-01-03)]"
-  # Each card changes a file of its own, but #9 changes #7's. The reviews of #5 and #8, and the tests of #7 (past its
+  # Each card changes a file of its own, but #9 changes #7's. The reviews of #5, #8 and #9, and the tests of #7 (past its
   # claim on f7.txt, at its landing step), are held until $STUB/go.<issue>.
   echo 'n=${PWD##*-}; [ "$n" != 9 ] || n=7; echo two >> "f$n.txt"' > "$STUB/build"
-  echo 'n=${PWD##*-}; case $n in 5|8) : > "$STUB/reviewing.$n"; while [ -d "$STUB" ]; do [ -e "$STUB/go.$n" ] && break; sleep 0.5; done ;; esac' > "$STUB/review-cmd"
+  echo 'n=${PWD##*-}; case $n in 5|8|9): > "$STUB/reviewing.$n"; while [ -d "$STUB" ]; do [ -e "$STUB/go.$n" ] && break; sleep 0.5; done ;; esac' > "$STUB/review-cmd"
   echo 'case $PWD in *-7) : > "$STUB/testing.7"; while [ -d "$STUB" ]; do [ -e "$STUB/go.7" ] && break; sleep 0.5; done ;; esac' >> "$STUB/test-cmd"
   # The first push is held until $STUB/pushgo, the second until $STUB/pushgo2; every push says when it starts and ends.
   cat > "$R/.git/hooks/pre-push" <<'EOF2'
@@ -68,12 +68,13 @@ EOF2
   ! grep -q restarting "$STUB/serve.out" && [ -z "$(st 'select(.issue == 9)')" ] || fail "the loop restarted or picked during its push: $(cat "$STUB/serve.out")"
   # #5 lands while the push runs. The push ends: the loop restarts at once, without a push for #5 (that one is held,
   # and the new loop makes it), with #7 still in its tests and #8 in review, and picks #9 into the one free slot of cap 3; #10
-  # stays queued, as the adopted cards count against the cap.
+  # stays queued, as the adopted cards count against the cap. #9's review is held meanwhile: past it, #9 waits on #7
+  # (below), and a card that only waits leaves its slot free (idle()), so #10 would then be picked by right.
   : > "$STUB/go.5"; till '[ "$(ends 5)" = landed ]' || fail "#5 did not land during the push: $(cat "$STUB/serve.out")"
   loop control cap 3 >/dev/null; : > "$STUB/pushgo"
   till 'grep -q restarting "$STUB/serve.out"' || fail "the loop waited for a push of #5 before it restarted: $(cat "$STUB/pushlog" "$STUB/serve.out")"
   : > "$STUB/pushgo2"
-  till '[ -n "$(card 9)" ]' || fail "the restarted loop did not pick #9 into the free slot: $(cat "$STUB/serve.out")"
+  till '[ -n "$(card 9)" ] && [ -e "$STUB/reviewing.9" ]' || fail "the restarted loop did not pick #9 into the free slot: $(cat "$STUB/serve.out")"
   turns 2; [ -z "$(card 10)" ] || fail "the restarted loop picked #10 past cap 3 beside the adopted #7 and #8: $(cat "$STUB/serve.out")"
   # That said, #10 leaves the queue: building and landing it would prove nothing more.
   jq -c 'map(select(.number != 10))' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
@@ -86,6 +87,7 @@ EOF2
     && fail "a serve with a forged adoption ran beside the restarted loop"; grep -q 'already running' <<<"$out" || fail "forged adoption: $out"
   # The adopted #7 still holds its file: #9 is reviewed, then waits on it to land. Health and the Board see both
   # adopted cards as on the belt.
+  : > "$STUB/go.9"
   till 'grep -q "card $(card 9) waits on card $(card 7)" "$STUB/serve.out"' && [ -n "$(st 'select(.issue == 9 and .step == "review")')" ] \
     || fail "#9 did not wait on the adopted #7's claim after its review: $(cat "$STUB/serve.out")"
   h=$(loop health); [ "$(jq -c --arg a "$(card 7)" --arg b "$(card 8)" '[.loop, (.stuck | map(select(.card == $a or .card == $b)) | length)]' <<<"$h")" = '[true,0]' ] \
