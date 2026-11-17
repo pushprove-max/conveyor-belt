@@ -72,6 +72,28 @@ t_busytree() {
   out=$(busyfn busy_why 999 2>&1 <<<"$tab"); [ $? = 1 ] && grep -q 'no process is 999' <<<"$out" || fail "why of no process: $out"
 }
 
+# Bug: the card's own engine process (card(), which works in the project's main folder, not the worktree) and what it
+# starts there were given to no card, as ownership read only working folders; its worktree record names its pid. A pid
+# a closed card's record names, or one that started at another time (a reused pid), owns nothing.
+t_busyenginepid() {
+  busycards
+  local p q r w tab out s=/user.slice/user@1000.service/app.slice
+  sleep 60 & p=$! # sleep: a stand-in for the open card's engine process, never waited on; killed below
+  sleep 60 & q=$! # sleep: a stand-in for a closed card's engine process, never waited on; killed below
+  sleep 60 & r=$! # sleep: a stand-in for a reused pid, never waited on; killed below
+  jq -cn --argjson p "$p" --arg t "$(p_started "$p")" --argjson q "$q" --arg u "$(p_started "$q")" --argjson r "$r" '
+    {card: "c20261117T000001-main-5", issue: 5, step: "worktree", pid: $p, started: $t},
+    {card: "c20261117T000002-main-6", issue: 6, step: "worktree", pid: $q, started: $u},
+    {card: "c20261117T000003-main-7", issue: 7, step: "worktree", pid: $r, started: "Thu Jan  1 00:00:00 1970"}' >> "$ST/cards.jsonl"
+  tab=$(printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$p" 1 1.0 "$R" "$s/conveyor.service" 'bash conveyor.sh run' \
+    900 "$p" 1.0 "$R" "$s/conveyor.service" 'git fetch' "$q" 1 1.0 "$R" "$s/conveyor.service" 'bash closed' \
+    "$r" 1 1.0 "$R" "$s/conveyor.service" 'bash reused')
+  out=$(for w in "$p" 900 "$q" "$r"; do busyfn busy_why "$w" --json <<<"$tab" | jq -c '.[0] | [.card, .step]'; done | tr '\n' ' ')
+  kill "$p" "$q" "$r" 2>/dev/null
+  [ "$out" = '["c20261117T000001-main-5","build"] ["c20261117T000001-main-5","build"] [null,null] [null,null] ' ] \
+    || fail "the card's engine process in the main folder and its child there are not the card's, or a closed card's or a reused pid is: $out"
+}
+
 # Bug: why and work read only the cards folder of the project they were run for, so another record's card work on the
 # machine (a second project of the host file) was named as no card's.
 t_busyrecords() {

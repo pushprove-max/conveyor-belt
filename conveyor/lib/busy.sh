@@ -5,7 +5,9 @@
 # A card owns a process when the process, or the nearest process above it, works in the card's folder under the cards
 # folder of any project of the host file's records (its worktree, or a folder beside it named after it, as a review's
 # <card>.rv, or a main run's mainrun/<card>, mainrun/<card>.speed and the like): a test runner's worker that works in
-# /tmp is the card's through its parents. A worktree removed under a process still names it (Linux reads it as
+# /tmp is the card's through its parents. An open card also owns its own engine process (the pid its worktree record
+# names, while it runs and started then), which works in the project's main folder, and so what that process starts
+# there. A worktree removed under a process still names it (Linux reads it as
 # "<folder> (deleted)"). An open card's process is in its card's live step; a process in a card test run's systemd
 # slice (steer_words: conveyor_steer_<pid>.slice) with no live step to name (no card owns it, or its open card has no
 # live record) is in a test step. The card is open while its records name no end (landed, closed, blocked) and the loop
@@ -53,7 +55,8 @@ busy_table() { # <seconds>
 
 # The processes of the table on stdin (busy_table's lines) as one JSON array, each {pid, ppid, cpu (null with no look),
 # command, parents (the pids above it, nearest first), card (its owner's id, else null), project (its owner's repo,
-# else null), test (it is in a card test run's slice)}, read with the projects <records> (busy_recs: [{repo, cards}]).
+# else null), test (it is in a card test run's slice)}, read with the projects <records> (busy_recs: [{repo, cards,
+# pids}]).
 # The processes of this command (the shell <self> and all under it) are left out.
 busy_procs() { # <records> <self>
   jq -Rn --argjson rs "$1" --argjson me "$2" '
@@ -62,9 +65,10 @@ busy_procs() { # <records> <self>
          command: (.[5:] | join(" "))}] as $all
     | ($all | map({key: (.pid | tostring), value: .}) | from_entries) as $by
     | def up: [limit(64; recurse($by[(.ppid | tostring)] // empty; .pid > 1)) | .pid] | .[1:];
-      def card: .cwd as $w | first($rs[] | .cards as $c | select($w | startswith($c + "/")) | .repo as $r | $w[($c | length) + 1:]
+      def card: (.pid | tostring) as $p | (.cwd as $w | first($rs[] | .cards as $c | select($w | startswith($c + "/")) | .repo as $r | $w[($c | length) + 1:]
         | split("/") | (if .[0] == "mainrun" then .[1] // "" else .[0] end) | sub(" \\(deleted\\)$"; "") | split(".")[0]
-        | select(test("^c[0-9]{8}T[0-9]{6}-([A-Za-z0-9-]*-)?[0-9]+$")) | {card: ., project: $r});
+        | select(test("^c[0-9]{8}T[0-9]{6}-([A-Za-z0-9-]*-)?[0-9]+$")) | {card: ., project: $r}))
+        // first($rs[] | .repo as $r | (.pids // {})[$p] // empty | {card: ., project: $r});
     [$all[] | . + {parents: up} | select(.pid != $me and (.parents | index($me) | not))
       | ([.] + [.parents[] | $by[tostring] // empty]) as $line
       | (first($line[] | card) // {card: null, project: null}) as $o
@@ -90,20 +94,34 @@ busy_cards() { # <cards> <records file> <id>...
   echo "$o"
 }
 
+# The engine processes of the open cards of <records file> (a card's last worktree record's pid, while its records name
+# no end and that pid runs and started when the record says), as one JSON object {"<pid>": "<card>"}.
+busy_pids() { # <records file>
+  local id p t o='{}'
+  while IFS=$'\t' read -r id p t; do
+    p_alive "$p" "$t" || continue
+    o=$(jq -c --arg k "$p" --arg c "$id" '.[$k] = $c' <<<"$o")
+  done < <(jq -rn 'reduce (inputs | objects | select((.card | type) == "string")) as $r ({};
+      .[$r.card] |= ((. // {}) | if ($r.step | IN("landed", "closed", "blocked")) then .ended = true else . end
+        | if $r.step == "worktree" and ($r.pid | type) == "number" then .pid = $r.pid | .started = ($r.started // "") else . end))
+    | to_entries[] | select(.value.ended != true and .value.pid != null) | [.key, .value.pid, .value.started] | @tsv' 2>/dev/null < "$1")
+  echo "$o"
+}
+
 # The projects of the host file's records (projects(), lib/machine.sh), this one first, as one JSON array of {repo,
-# cards (its cards folder, as the kernel names it), read (its card records)}. Another record's folders are those its
+# cards (its cards folder, as the kernel names it), read (its card records), pids (busy_pids)}. Another record's folders are those its
 # own commands use (its `conveyor.sh state-dir`, and the cards folder's name kept there); a record whose cards folder
 # was never made has no cards, and is left out.
 busy_recs() {
   local me o r m e st k c
   me=$(cd "$MAIN" 2>/dev/null && pwd -P) || me=$MAIN
   c=$(cd "$CARDS" 2>/dev/null && pwd -P) || c=$CARDS
-  o=$(jq -cn --arg r "$REPO" --arg c "$c" --arg d "$READ" '[{repo: $r, cards: $c, read: $d}]')
+  o=$(jq -cn --arg r "$REPO" --arg c "$c" --arg d "$READ" --argjson p "$(busy_pids "$READ")" '[{repo: $r, cards: $c, read: $d, pids: $p}]')
   while IFS=$'\t' read -r r m e; do
     [ "$(cd "$m" 2>/dev/null && pwd -P)" != "$me" ] || continue
     st=$(env -u CONVEYOR_CARDS CONVEYOR_MAIN="$m" bash "$HERE/conveyor.sh" state-dir 2>/dev/null) && k=$(keptcards "$st/cards-folder") \
       && c=$(cd "$(dirname "$m")/$k" 2>/dev/null && pwd -P) || continue
-    o=$(jq -c --arg r "$r" --arg c "$c" --arg d "$st/cards.jsonl" '. + [{repo: $r, cards: $c, read: $d}]' <<<"$o")
+    o=$(jq -c --arg r "$r" --arg c "$c" --arg d "$st/cards.jsonl" --argjson p "$(busy_pids "$st/cards.jsonl")" '. + [{repo: $r, cards: $c, read: $d, pids: $p}]' <<<"$o")
   done < <(projects)
   echo "$o"
 }
