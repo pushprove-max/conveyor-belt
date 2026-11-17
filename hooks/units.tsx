@@ -189,9 +189,9 @@ const nameFeedDir = ($: EngineInterface, cwd: string) => (naming ??= (async () =
 })().finally(() => { naming = undefined }))
 
 // One poll. Whatever fails, the views get a state: a fetch that cannot run is the one "cannot be read" line. With the
-// live feed fresh, the board is the feed's and the fetch asks no host. fedAt: the feed file's write time when the
-// board is the feed's. A feed folder not yet named is asked for again; while it is unnamed the board is the host's,
-// with a note that says so.
+// live feed fresh, the board is the feed's and the fetch asks the host for no snapshot (only for a build machine's
+// test map). fedAt: the feed file's write time when the board is the feed's. A feed folder not yet named is asked for
+// again; while it is unnamed the board is the host's, with a note that says so.
 const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fedAt: number | null; fedKey: string | null }> => {
   if (!feedDir) await nameFeedDir($, cwd)
   const got = await readFeed($).catch(() => null)
@@ -217,6 +217,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
     // The fetch reads the Foreman's folder; whether this session is the one it names is the session's own id.
     foreman: f ? foremanOf(f.foreman, await $.session.id().catch(() => '')) : null,
     pluginBugs: f ? f.pluginBugs : null,
+    testMap: f ? f.testMap : null,
   }
   return { st, fedAt: fed && f ? fed.at : null, fedKey: fed && f ? fed.key : null }
 }

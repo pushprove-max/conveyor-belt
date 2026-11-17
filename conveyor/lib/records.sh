@@ -3,8 +3,8 @@
 # `install`, `install-service`, `board`, `setup` and `doctor` make none either: they run before a project has one,
 # install-service and board for the project they were called from. (Setup's label creation goes through gh_write, which makes the
 # folder's privacy/ for its record of what it checked.) `state-dir` names the folder and makes nothing: the review gate
-# asks it on a machine Conveyor may not run on. `lane research` makes only the lane's own folder in it. CALLED is the
-# folder it was called from.
+# asks it on a machine Conveyor may not run on. `testmap` only reads, for /units, which writes nothing. `lane research`
+# makes only the lane's own folder in it. CALLED is the folder it was called from.
 CALLED=$PWD
 # Keeps the cards folder's name, and takes the name kept. One command at a time (the flock) keeps the name it chose
 # when no name is kept, and a file that holds no name (an empty one, say) is no name kept: it is replaced, whole,
@@ -17,7 +17,7 @@ keepcards() {
   ( flock 9 && { keptcards "$CARDSNAME" >/dev/null || { printf '%s\n' "${CARDS##*/}" > "$CARDSNAME.$$" && mv -f "$CARDSNAME.$$" "$CARDSNAME"; }; } ) 9>>"$CARDSNAME" \
     && kept=$(keptcards "$CARDSNAME") && CARDS=$(dirname "$MAIN")/$kept
 }
-{ [[ ${1:-} =~ ^(pick|install|install-service|board|setup|doctor|state-dir|machine)$ ]] || [ "${1:-}:${2:-}" = lane:research ] || { mkdir -p "${STATE%/*}" && keepcards && mkdir -p "$CARDS" && : >> "$STATE" && : >> "$RETRIED"; }; } && cd "$MAIN" || exit 1
+{ [[ ${1:-} =~ ^(pick|install|install-service|board|setup|doctor|state-dir|machine|testmap)$ ]] || [ "${1:-}:${2:-}" = lane:research ] || { mkdir -p "${STATE%/*}" && keepcards && mkdir -p "$CARDS" && : >> "$STATE" && : >> "$RETRIED"; }; } && cd "$MAIN" || exit 1
 
 # Every append and every pick holds one flock on the state file itself, so lines never interleave.
 # LOCKHELD tells what runs under it that the lock is held (check(), views.sh): a second flock on the file would wait for ever.

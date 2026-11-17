@@ -232,7 +232,7 @@ relsuite() { # <command name> <commit>
   relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" \
     '. + $p | .moved = $mv | .state = $st'
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
-  if [ $rc = 0 ]; then maprefresh "$wt" || :; else rm -rf "$wt.mapcov"; fi
+  if [ $rc = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi
   git worktree remove --force "$wt" 2>/dev/null
   if [ $rc = 0 ] && [ "$u" != null ] && [ "$(jq '.ran | length' <<<"$u")" = 0 ]; then
     state=success desc=$(jq -r '"The whole suite (test.full) passed on the build machine: reused the green run of \(.time) on \(.sha[0:12])"' <<<"$u")

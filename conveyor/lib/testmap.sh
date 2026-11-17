@@ -10,6 +10,46 @@
 # repository root of a map the project keeps itself, read in the card's worktree and never made or refreshed here
 # (mapread()).
 mappath() { echo "${PACK%/*}/test-map.json"; }
+# The run that makes the map, while it runs (setup's, mapbuild(); a refresh, mapcovon() to maprefresh()), says how far
+# it is in test-map.run.json beside the map (mapprogpath()): {pid, started, done, of}: the engine process it runs in,
+# when it started (seconds since 1970), and how many of its test files have run, of how many. A run that makes the map
+# removes the file; one that fails leaves {failed: <why>} (mapend()). /units reads it (mapstate()). A card's run of the
+# test files it adds (mapnew()) writes none: MAPRUN, set by the caller, turns it on in mapcollect().
+mapprogpath() { echo "${PACK%/*}/test-map.run.json"; }
+# The file written, whole, from jq's output with <jq arguments>; with none (or jq failing), left as it was. The file
+# beside it is named by the writing process (the count of a refresh writes it too, mapcovon()).
+mapput() { # <jq arguments>...
+  local f t; f=$(mapprogpath); t=$f.$BASHPID
+  jq -c "$@" > "$t" 2>/dev/null && mv -f "$t" "$f" || { rm -f "$t"; return 1; }
+}
+# A run's progress that cannot be written never fails the run.
+mapstart() { mapput -n --argjson p "$$" --argjson of "$1" '{pid: $p, started: (now | floor), done: 0, of: $of}' || :; } # <of>
+mapstep() { mapput -e --argjson d "$1" 'select(.pid) | .done = $d' "$(mapprogpath)" || :; } # <done>: only while the file is a run's
+# Why a run failed, in one line: the first of its <stderr file> (mapfail()'s, without the output it introduces); exit 1
+# with none.
+mapwhy() { head -n 1 "$1" 2>/dev/null | sed 's/; the end of its output:$//' | grep .; }
+mapend() { if [ $# = 0 ]; then rm -f "$(mapprogpath)"; else mapput -n --arg w "$1" '{failed: $w}'; fi; } # [<why it failed>]
+# The test map's state, as /units shows it (`conveyor.sh testmap`, hooks/units-fetch.sh), one JSON object:
+# {state: "running", done, of, started} while a run makes it (test-map.run.json, its process alive); {state: "failed",
+# why} after a run that failed, or whose process ended before it said how (killed), or for a map mapread() cannot
+# read; {state: "off"} with test.map off (a failed run before it is no matter); {state: "none"} with no made map; else {state: "made", sources, tests, age}:
+# how many source and test files it maps, and how many commits it is behind <dir>'s HEAD (mapread(); null for a map of
+# the project's own). A pack that cannot be read gives none (exit 1).
+mapstate() { # <dir>
+  local p pid m out
+  p=$(jq -ce 'objects' "$(mapprogpath)" 2>/dev/null) && pid=$(jq -r '.pid | numbers' <<<"$p")
+  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then jq -c '{state: "running", done, of, started}' <<<"$p"; return 0; fi
+  packget test.map m 2>/dev/null || return 1
+  [ "$m" != off ] || { echo '{"state":"off"}'; return 0; }
+  if [ -n "$p" ]; then
+    if [ -n "${pid:-}" ]; then echo '{"state":"failed","why":"its run stopped before it ended"}'
+    else jq -c '{state: "failed", why: (.failed | strings // "")}' <<<"$p"; fi
+    return 0
+  fi
+  out=$(mapread "$1") || { jq -nc --arg w "$out" '{state: "failed", why: $w}'; return 0; }
+  [ -n "$out" ] || { echo '{"state":"none"}'; return 0; }
+  jq -c '{state: "made", sources: (.sources | length), tests: ([.sources[][]] | unique | length), age}' <<<"$out"
+}
 # The language whose coverage tool makes the map, from the files at the root of <dir>: go, rust, ruby, node or python;
 # nothing for another.
 maplang() { # <dir>
@@ -63,12 +103,14 @@ mapone() { # <dir> <test file> <language>
 # Runs <tests> (default: every test file of the language, maptests()) in <dir> under the language's coverage tool and
 # prints what each touched, one `<test file><TAB><file>` a line (a path from the root of <dir>, any file: mapwrite()
 # keeps the tracked source files). A run that fails (a test that fails, or the tool) fails it: its output's last lines
-# go to stderr. The run's output is in <tmp>/log.
+# go to stderr. The run's output is in <tmp>/log. With MAPRUN set, it says how far it is (mapstart(), mapstep()): a
+# file at a time for Node, Ruby and Rust, a package's files at a time for Go, all at once for Python.
 mapfail() { echo "$1 failed under coverage; the end of its output:" >&2; tail -n 20 "$2/log" >&2; return 1; } # <what> <tmp folder>
 mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
-  local d=$1 lang=$2 tmp=$3 abs t n=0 cmd m ts mod rx; shift 3
+  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 cmd m ts mod rx; shift 3
   ts=("$@"); [ $# -gt 0 ] || mapfile -t ts < <(maptests "$d" "$lang")
   [ ${#ts[@]} -gt 0 ] || { echo "no $lang test files are tracked" >&2; return 1; }
+  [ -z "${MAPRUN:-}" ] || mapstart ${#ts[@]}
   abs=$(cd "$d" && pwd -P) || return 1
   local -a run=(timeout --kill-after=30 "${TEST_TIMEOUT:-3600}" bash -c)
   case $lang in
@@ -86,6 +128,7 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
             | select(.value | (if type == "object" then .lines else . end) | arrays | any(type == "number" and . > 0))
             | .key | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/c$n/.resultset.json" || { mapfail "$t" "$tmp"; return 1; }
         fi
+        [ -z "${MAPRUN:-}" ] || mapstep $n
       done ;;
     python)
       # The module and arguments of the test command (python -m <module> ..., pytest ...), else pytest.
@@ -96,6 +139,7 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
       printf '[run]\ndynamic_context = test_function\nrelative_files = True\n' > "$tmp/rc" || return 1
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov "${run[@]}" "coverage run --rcfile=$(printf %q "$tmp/rc") $m") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'the suite' "$tmp"; return 1; }
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov coverage json --rcfile="$tmp/rc" --show-contexts -o "$tmp/py.json") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'coverage json' "$tmp"; return 1; }
+      [ -z "${MAPRUN:-}" ] || mapstep ${#ts[@]}
       mappy "$abs" "$tmp/py.json" "${ts[@]}" ;;
     go)
       mod=$(cd "$d" && go list -m 2>>"$tmp/log") || { mapfail 'go list -m' "$tmp"; return 1; }
@@ -105,12 +149,14 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
         (cd "$d" && "${run[@]}" "go test -count=1 -coverpkg=./... -coverprofile=$(printf %q "$tmp/go$n") ./$(printf %q "$m")") >> "$tmp/log" 2>&1 < /dev/null || { mapfail "./$m" "$tmp"; return 1; }
         awk -v m="$mod/" 'NR > 1 && $NF > 0 { f = $1; sub(/:[^:]*$/, "", f); if (index(f, m) == 1) print substr(f, length(m) + 1) }' "$tmp/go$n" | sort -u \
           | while IFS= read -r f; do printf '%s\n' "${ts[@]}" | grep -E "$rx" | while IFS= read -r t; do printf '%s\t%s\n' "$t" "$f"; done; done
+        [ -z "${MAPRUN:-}" ] || { k=$((k + $(printf '%s\n' "${ts[@]}" | grep -cE "$rx"))); mapstep $k; }
       done < <(printf '%s\n' "${ts[@]}" | sed -e 's|/[^/]*$||' -e 's|^[^/]*_test\.go$|.|' | sort -u) ;;
     rust)
       for t in "${ts[@]}"; do
         n=$((n + 1)); m=${t##*/}; m=${m%.rs}
         (cd "$d" && "${run[@]}" "cargo llvm-cov --json --summary-only --test $(printf %q "$m") > $(printf %q "$tmp/rs$n.json")") >> "$tmp/log" 2>&1 < /dev/null || { mapfail "$t" "$tmp"; return 1; }
         jq -r --arg r "$abs/" --arg t "$t" '.data[]?.files[]? | select(.summary.lines.covered > 0) | .filename | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/rs$n.json"
+        [ -z "${MAPRUN:-}" ] || mapstep $n
       done ;;
     *) echo "no coverage tool for $lang" >&2; return 1 ;;
   esac
@@ -167,16 +213,19 @@ mapcost() {
 # Makes the map of <dir> (setup's main checkout) with the whole suite under coverage
 # (mapcollect()), and says how many sources and tests it mapped and how long the run took; exit 1, saying why, when
 # the language has no tool, or the run fails: the map there is kept, and with none a card's tests are found by name.
+# The run says how far it is as it goes, and why it failed when it does, in test-map.run.json (mapprogpath()).
 mapbuild() { # <dir>
-  local lang tool tmp w=$SECONDS rc=0 sec
+  local lang tool tmp w=$SECONDS rc=0 sec MAPRUN=1
   lang=$(maplang "$1"); tool=$(maptool "$lang" "$1") || { echo "conveyor: no test map: $tool; a card's tests are found by name" >&2; return 1; }
   tmp=$(mktemp -d) || return 1
   mapcollect "$1" "$lang" "$tmp" > "$tmp/pairs" 2> "$tmp/err" || rc=1
   [ $rc != 0 ] || [ -s "$tmp/pairs" ] || { echo 'it mapped no test file' > "$tmp/err"; rc=1; }
   sec=$((SECONDS - w))
   if [ $rc = 0 ] && mapwrite "$1" "$tmp/pairs" "$lang" "$sec"; then
+    mapend
     jq -r --arg tool "$tool" --arg f "$(mappath)" '"conveyor: wrote the test map \($f) with \($tool): \(.sources | length) source files, \(.tests | length) test files, in \(.seconds)s"' "$(mappath)"
   else
+    mapend "the run with $tool failed after ${sec}s: $(mapwhy "$tmp/err" || echo 'the map could not be written')"
     echo "conveyor: no test map: the run with $tool failed after ${sec}s; a card's tests are found by name: $(cat "$tmp/err")" >&2; rc=1
   fi
   rm -rf "$tmp"; return $rc
@@ -217,9 +266,10 @@ mapdue() { # <dir>
 # it would). maprefresh() makes the map from it after a pass; mapcovoff() turns it off. A Go, Rust or Ruby run cannot
 # collect coverage a test file at a time so: after it passes, maprefresh() runs its tests again under the language's
 # tool, as setup does (mapcollect()), and the run says so. A pack whose test.map is set (off, or a map of its own) has
-# none to refresh.
+# none to refresh. A Node or Python run says how far it is (mapstart(), maptick()) at once and then every 2 seconds,
+# until mapcovoff().
 mapcovon() { # <worktree>
-  local m why lang c=$1.mapcov
+  local m why lang n c=$1.mapcov
   rm -rf "$c"; packget test.map m && [ -z "$m" ] || return 0
   why=$(mapdue "$1") || return 0
   lang=$(jq -r '.language // ""' "$(mappath)")
@@ -234,9 +284,41 @@ mapcovon() { # <worktree>
     *) echo "conveyor: test map: due, as $why, but a ${lang:-such} whole run cannot collect its coverage: remove $(mappath) and run setup to make it again"; return 0 ;;
   esac
   echo "$lang" > "$c/lang" && date +%s > "$c/start" || return 1
+  maptests "$1" "$lang" > "$c/tests" && n=$(wc -l < "$c/tests") && mapstart $((n))
+  maptick "$1" "$lang" > /dev/null 2>&1 < /dev/null 8>&- &
+  MAPTICK=$!
   echo "conveyor: test map: the whole run collects coverage to make it again, as $why"
 }
+# While a whole run with coverage on runs in <worktree> (mapcovon()), every 2 seconds, how many of its test files
+# (<worktree>.mapcov/tests) have run: Node's, those a V8 coverage file names (node --test runs each test file in a
+# process of its own, which writes its file as it ends; a file not yet whole is read again on the next look); Python's,
+# those the run's output names (pytest names each test file as it runs it, unittest -v each test's module, as
+# tests.test_a); and never fewer than the test files its runner marks as ended (suiteprog(), lib/fulltest.sh).
+maptick() { # <worktree> <language>
+  local wt=$1 lang=$2 c=$1.mapcov r f k got logs=()
+  local -A seen=() ran=()
+  r="file://$(cd "$wt" && pwd -P)/" || return 1
+  while :; do
+    case $lang in
+      node) for f in "$c"/v8/*.json; do
+          [ -e "$f" ] && [ -z "${seen[$f]:-}" ] || continue
+          got=$(jq -r --arg r "$r" '.result[]?.url | strings | select(startswith($r)) | ltrimstr($r)' "$f" 2>/dev/null) || continue
+          seen[$f]=1
+          while IFS= read -r k; do ran[$k]=1; done < <(grep -xF -f "$c/tests" <<<"$got")
+        done ;;
+      python)
+        mapfile -t logs < <(find "$wt.testlog" -maxdepth 1 -type f 2>/dev/null); [ ${#logs[@]} -gt 0 ] || logs=("$wt.test")
+        while IFS= read -r k; do
+          [[ $k == *.py ]] || { k=${k%.}; k=${k//.//}.py; }
+          ran[$k]=1
+        done < <(sed 's/\.py$//; s|/|.|g; s/$/./' "$c/tests" | cat "$c/tests" - | grep -ohF -f - "${logs[@]}" 2>/dev/null | sort -u) ;;
+    esac
+    k=$(suiteprog "$wt" | jq '.files.done // 0'); [ "${k:-0}" -ge ${#ran[@]} ] 2>/dev/null || k=${#ran[@]}
+    mapstep "$k"; sleep 2
+  done
+}
 mapcovoff() {
+  [ -z "${MAPTICK:-}" ] || { kill "$MAPTICK" 2>/dev/null; wait "$MAPTICK" 2>/dev/null; unset MAPTICK; }
   unset NODE_V8_COVERAGE COVERAGE_PROCESS_START COVERAGE_FILE
   [ -z "${MAPCOV_PATH+x}" ] || { if [ -n "$MAPCOV_PATH" ]; then export PYTHONPATH=$MAPCOV_PATH; else unset PYTHONPATH; fi; unset MAPCOV_PATH; }
 }
@@ -244,7 +326,7 @@ mapcovoff() {
 # run's coverage (Go, Rust, Ruby: from a run of its tests under the language's tool, mapcollect()), saying what it
 # mapped; a run whose coverage maps no test file, or that fails, keeps the map there, and says so.
 maprefresh() { # <worktree>
-  local c=$1.mapcov lang abs sec ts=()
+  local c=$1.mapcov lang abs sec ts=() MAPRUN=1
   [ -s "$c/lang" ] || return 0
   lang=$(cat "$c/lang"); sec=$(( $(date +%s) - $(cat "$c/start") ))
   abs=$(cd "$1" && pwd -P) && mapfile -t ts < <(maptests "$1" "$lang")
@@ -252,13 +334,20 @@ maprefresh() { # <worktree>
     node) mapv8 "$abs" "$c/v8" "${ts[@]}" > "$c/pairs" ;;
     python) (cd "$1" && export COVERAGE_FILE=$c/py.cov && coverage combine --rcfile="$c/rc" && coverage json --rcfile="$c/rc" --show-contexts -o "$c/py.json") > "$c/log" 2>&1 < /dev/null \
       && mappy "$abs" "$c/py.json" "${ts[@]}" > "$c/pairs" ;;
-    go|rust|ruby) sec=$SECONDS; mapcollect "$1" "$lang" "$c" > "$c/pairs" 2> "$c/err" || { echo "conveyor: test map: not made again: $(cat "$c/err")"; rm -rf "$c"; return 0; }
+    go|rust|ruby) sec=$SECONDS; mapcollect "$1" "$lang" "$c" > "$c/pairs" 2> "$c/err" || { mapend "$(mapwhy "$c/err" || echo 'the coverage run failed')"; echo "conveyor: test map: not made again: $(cat "$c/err")"; rm -rf "$c"; return 0; }
       sec=$((SECONDS - sec)) ;;
   esac
   if [ -s "$c/pairs" ] && mapwrite "$1" "$c/pairs" "$lang" "$sec"; then
+    mapend
     jq -r '"conveyor: test map: made again from the whole run'\''s coverage: \(.sources | length) source files, \(.tests | length) test files"' "$(mappath)"
-  else echo "conveyor: test map: not made again: the whole run's coverage mapped no test file"; fi
+  else mapend "the whole run's coverage mapped no test file"; echo "conveyor: test map: not made again: the whole run's coverage mapped no test file"; fi
   rm -rf "$c"
+}
+# A whole run on main that collected coverage (mapcovon()) but makes no map from it, as it failed or ran short: its
+# coverage is dropped, and the map's run is said to have failed, with <why>.
+mapstop() { # <worktree> <why>
+  [ -e "$1.mapcov" ] || return 0
+  rm -rf "$1.mapcov"; mapend "$2"
 }
 # The map a card's change in <worktree> is read against (testsel()), as {by, sources: {<source>: [<test file>]}, shared:
 # [<source>], age}: none (no output) with test.map off, or no made map. by is "map"; age is how many commits the made

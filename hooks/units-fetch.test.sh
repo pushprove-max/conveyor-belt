@@ -132,5 +132,32 @@ same 'a set-up Foreman whose role no session holds still prints its line' \
 # /units can say so; the file's heading is no problem. Bug it catches: a noted problem /units never showed.
 printf '# Plugin problems\n\n- 2026-11-16T10:00:00Z · card #7 · a · evidence: -\n- 2026-11-16T11:00:00Z · card - · b · evidence: -\n' > "$FD/plugin-bugs.md"
 same 'the plugin problems noted: how many, and the file' "$(printf 'pluginbugs\t2\t%s' "$FD/plugin-bugs.md")" "$(fetch "$M/bakery" feed | grep '^pluginbugs')"
+# Issue 176: while the test map is made, the progress the engine writes beside it (conveyor/lib/testmap.sh) is read,
+# feed or not; a checkout with no project settings (the machines above) prints no testmap line. Bug it catches: /units
+# never showed a map's run, so a setup or refresh that ran for many minutes looked like nothing.
+mkdir -p "$M/bakery/.conveyor" && echo '{}' > "$M/bakery/.conveyor/project.json"
+echo "{\"pid\": $$, \"started\": 1700000000, \"done\": 3, \"of\": 8}" > "$M/bakery/.conveyor/test-map.run.json"
+same 'the test map being made: its files run of how many, and its start' \
+  "$(printf 'testmap\t{"state":"running","done":3,"of":8,"started":1700000000}')" "$(fetch "$M/bakery" feed | grep '^testmap')"
+# When Conveyor for this checkout runs on a build machine, the map is that machine's: asked in the snapshots' ssh
+# command, of the record named as this checkout's folder, and printed before the host line, as parseFetch reads it;
+# with the feed, the map alone is asked over ssh. Bug it catches: /units showed this machine's map, which no run on the
+# build machine makes or refreshes, so it read "being made" or "not made yet" forever; or, with the Board's live feed
+# fresh, it showed no map at all.
+machine buildmap
+printf '%s\n' '#!/usr/bin/env bash' 'while [ "$1" = -o ]; do shift 2; done' 'bash -c "$2"' > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
+# The stub engine's testmap names the checkout it was asked of; its snapshot is the fixture's, as above.
+printf '%s\n' '#!/usr/bin/env bash' '[ "$1" != testmap ] || { echo "{\"state\":\"made\",\"of\":\"$CONVEYOR_MAIN\"}"; exit 0; }' \
+  '[ "$1" = snapshot ] || exit 2' "awk -F'\\t' -v r=\"\${CONVEYOR_MAIN##*/}\" '\$1 == r { sub(/^[^\\t]*\\t/, \"\"); print }' '$T/two.txt'" > "$M/clone/conveyor/conveyor.sh"
+mkdir -p "$M/dev/bakery/.conveyor" && echo '{}' > "$M/dev/bakery/.conveyor/project.json"
+echo "{\"pid\": $$, \"started\": 1700000000, \"done\": 3, \"of\": 8}" > "$M/dev/bakery/.conveyor/test-map.run.json"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" \
+  '{host: "lab", ssh: "owner@lab", main: $c, records: [{repo: "gadgetlab", main: $g}, {repo: "bakery", main: $b}]}'
+got=$(fetch "$M/dev/bakery")
+same 'a build machine: its map, of the record named as this checkout, before the host line' \
+  "$(printf 'testmap\t{"state":"made","of":"%s"}\nhost\tlab\tssh\t0' "$M/bakery")" "$(grep -E '^(testmap|host)' <<<"$got")"
+same 'a build machine: every record still has its snapshot' 'gadgetlab bakery' "$(sed -n '/^host/,$p' <<<"$got" | sed 1d | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+same 'a build machine with the feed: its map still, and no snapshots' \
+  "$(printf 'testmap\t{"state":"made","of":"%s"}\nhost\t\tfeed\t0' "$M/bakery")" "$(fetch "$M/dev/bakery" feed | grep -E '^(testmap|host|gadgetlab|bakery)')"
 
 [ "$fails" = 0 ] || exit 1

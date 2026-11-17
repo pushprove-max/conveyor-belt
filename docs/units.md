@@ -28,6 +28,19 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
   done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). When the run
   ends, the line shows the result (`passed 3m ago`) for 10 minutes, then it goes away.
+- **The test map**, in `/units` and the pane, under the head: one line. While setup or a whole run on main makes the
+  map, the line shows the test files run so far, the time so far and a bar
+  (`Test map: 12 of 40 test files · 3m ▰▰▰▱▱▱▱▱▱▱`). A narrow view cuts the text and keeps the bar. After the run, the
+  line shows the state of the map:
+  - made: the source and test files that it maps, and how many commits it is behind main
+    (`Test map: 120 source, 40 test files · 3 commits behind main`). A map that your project keeps has no count of
+    commits.
+  - not made yet: `Test map: not made yet · run /conveyor-belt:setup to make it`.
+  - off: `Test map: off`, when `test.map` is `off` in `.conveyor/project.json`.
+  - failed: `Test map: failed: <why>`, when the last run that made the map failed, or stopped before it ended.
+
+  A checkout with no `.conveyor/project.json` shows no test map line
+  ([The test map](configuration.md#the-test-map)).
 - **The judge**, in `/units` only: a card (needing you, on the belt or landed) whose latest review the judge ran on has
   a dim line `judge: 2 accepted, 1 declined`, with ` · GO from declines only` when the GO came from the judge declining
   every finding. A latest review the judge did not run on (off, failed, nothing to judge) has no such line.
@@ -127,15 +140,20 @@ job here, or no state folder), each poll asks again, the board is read from the 
 While that file is fresh (written in the last 30 s), the board is read from it: once a second the mod looks at it, and
 a file that changed is drawn at once (a rewrite that only moved its heartbeat, `stream.heardAt`, is not built into a
 board again), so a card's step or a control change is in the views within about 2 seconds; the minute's fetch then
-asks no host (it still reads the lanes). A stream that is down keeps its last board, with one line under it:
+asks no host for the snapshots (it still reads the lanes and the test map). A stream that is down keeps its last board, with one line under it:
 `units: the live stream is down (<why>); the board is as <host> was at <time>`. With no fresh file the fetch reads the
 snapshot as above.
 
-Then two reads on this machine:
+Then three reads on this machine:
 
 - The 7-day limit, from the Board's data file `data.js` in the same folder as the feed (its health panel's
   `panels.health.data.limit.usedPct` and `.resetsAt`), read again only when the file's write time changes; with no
   folder named, `usage limit not read`.
+- The test map of the session's checkout, from `conveyor.sh testmap` of the plugin's own copy of Conveyor: the run
+  that makes the map writes how far it is in `.conveyor/test-map.run.json`, beside the map. When Conveyor for this
+  checkout runs on a build machine, the map is that machine's: `conveyor.sh testmap` runs there, in the same `ssh`
+  command as the snapshots, for the record with this checkout's folder name. While the board comes from the live
+  feed, an `ssh` command asks for the map only.
 - The Research lane's last activity: the newest write to a Claude session log of its folder
   (`~/.claude/projects/<that path with dashes>/*.jsonl`, under `$CLAUDE_CONFIG_DIR` in place of `~/.claude` when that
   is set; a name over 200 characters is cut to its first 200, a dash and a hash, as Claude Code names the folder); it

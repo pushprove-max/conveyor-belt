@@ -69,12 +69,14 @@ maintest() {
   full=$(jq -r '.full | numbers' <<<"$was")
   if [ $rc = 0 ] && [ -n "$full" ] && [ $((ran * 10)) -lt $((full * 9)) ]; then
     short="ran $ran of about $full cases"
+    mapstop "$wt" "the whole test on main $short"
     tail=$(sed 's/\x1b\[[0-9;]*m//g' "$wt.test" 2>/dev/null | tail -n 20); cases='["a short run: under 90% of the cases of its last full run"]'
   elif [ $rc = 0 ]; then
     maprefresh "$wt" || :
     git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
     mainput "$(jq -c --arg s "$sha" --argjson r "$ran" '. + {sha: $s, pass: $s, fail: null, full: $r}' <<<"$was")"; return
   else
+    mapstop "$wt" "the whole test on main failed"
     f=$(testfails "$wt.test" "$rc" test.main) || f='{"files":[]}'
     # Each named case alone, MAIN_ALONE times: one that passes every time is flaky; the others are the failure.
     while IFS= read -r u; do

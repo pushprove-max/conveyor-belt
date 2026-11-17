@@ -658,3 +658,37 @@ test('the seat is main (where the Foreman runs) or a worker worktree; no folder 
   expect(seatFromGit('/r/main/.git/worktrees/u\n/r/main/.git\n/r/cards/c1-3864\n')).toEqual({ seat: 'worker', main: '/r/main' })
   expect(seatFromGit('')).toBe(null)
 })
+
+// Issue 176: the test map's line in /units and the pane, from the fetch's `testmap` line. Bug it catches: a map's run of
+// many minutes showed nothing, and a map made, not made, off or failed all looked alike (no line).
+const mapped = (json: object) => {
+  const text = fetched([['bookstore', snapshot()]], `testmap\t${JSON.stringify(json)}\nhost\tbuildbox\tssh\t0`)
+  return state(text, { testMap: parseFetch(text)?.testMap })
+}
+const mapLine = (lines: string[]) => lines.find(l => l.startsWith('Test map')) ?? ''
+test('while the map is made, a bar with the test files run of how many and the time so far; a narrow view keeps the bar', () => {
+  const s = mapped({ state: 'running', done: 12, of: 40, started: NOW / 1000 - 180 })
+  const line = mapLine(tableText(s, 62).split('\n'))
+  expect(line).toMatch(/^Test map: 12 of 40 test files · 3m +▰▰▰▱▱▱▱▱▱▱$/)
+  expect(cols(line)).toBe(62)
+  expect(mapLine(paneModel(s, 62, 0).map(plain))).toBe(line)
+  const narrow = mapLine(paneModel(s, 30, 0).map(plain))
+  expect(narrow).toMatch(/^Test map: .*… +▰▰▰▱▱▱▱▱▱▱$/)
+  expect(cols(narrow)).toBe(30)
+})
+
+test('with no run, one line with the map\'s state: made, not made yet, off, or failed with its reason; it fits a narrow pane', () => {
+  const lines = (json: object, w = 62) => mapLine(paneModel(mapped(json), w, 0).map(plain))
+  expect(lines({ state: 'made', sources: 120, tests: 40, age: 3 })).toBe('Test map: 120 source, 40 test files · 3 commits behind main')
+  expect(lines({ state: 'made', sources: 1, tests: 1, age: 0 })).toBe('Test map: 1 source, 1 test file · up to date with main')
+  expect(lines({ state: 'made', sources: 7, tests: 2, age: null })).toBe('Test map: 7 source, 2 test files')
+  expect(lines({ state: 'none' })).toBe('Test map: not made yet · run /conveyor-belt:setup to make it')
+  expect(lines({ state: 'off' })).toBe('Test map: off')
+  expect(lines({ state: 'failed', why: 'the whole test on main failed' })).toBe('Test map: failed: the whole test on main failed')
+  expect(mapLine(tableText(mapped({ state: 'off' }), 62).split('\n'))).toBe('Test map: off')
+  const narrow = lines({ state: 'none' }, 30)
+  expect(narrow.endsWith('…') && cols(narrow) === 30).toBe(true)
+  // With no board read, the line is still shown; a fetch with no testmap line (no project settings) shows none.
+  expect(tableText({ ...mapped({ state: 'off' }), snap: null, note: 'units: the Conveyor snapshot cannot be read (x)' }, 62)).toContain('\nTest map: off')
+  expect(tableText(board(), 62)).not.toContain('Test map')
+})

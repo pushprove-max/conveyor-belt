@@ -6,6 +6,8 @@
 #   fast norecord | none | unread | ok <branch> <commits ahead of the default branch> <tracked files changed> <first subject>
 #   foreman <its role, waiter and watchers> (below), only where a Foreman is expected
 #   pluginbugs <how many> <file>: the plugin problems the Foreman noted (below), only when it noted one
+#   testmap <the test map's state, JSON>: as it is made, or its state, where Conveyor runs for this checkout (below), only
+#   with .conveyor/project.json here
 #   host <name> <how> <exit> [<path looked at>...], then for every record of the host file, in its order: <repo> <its
 #   snapshot, or null>
 # The lanes are the worktrees the host file names for this checkout's record (the record whose main is this checkout:
@@ -19,8 +21,8 @@
 # ssh to the host file's ssh target. A record whose snapshot fails prints null; the others still print. how: local or
 # ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
 # is not understood).
-# Usage: units-fetch.sh [feed]. feed: the Board's live feed is fresh, so the board is the feed's: only the lanes and
-# the Foreman are read, and the host line is `host <empty> feed 0`.
+# Usage: units-fetch.sh [feed]. feed: the Board's live feed is fresh, so the board is the feed's: only the lanes, the
+# Foreman and the test map are read, and the host line is `host <empty> feed 0`.
 set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
@@ -84,19 +86,43 @@ fi
 # when there is one: pluginbugs <how many> <the file>.
 n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0
 [ "$n" -eq 0 ] || printf 'pluginbugs\t%s\t%s\n' "$n" "$fd/plugin-bugs.md"
-[ "${1:-}" != feed ] || { printf 'host\t\tfeed\t0\n'; exit 0; }
+# Which machine and which checkout, as the Board reads them: hostfile.sh, the one reader of the host file.
+got='' ok=1 host='' main='' engine='' target=''
+if [ -e "$cfg" ]; then
+  got=$(bash "${BASH_SOURCE[0]%/*}/../.claude/scripts/hostfile.sh" "$here"); ok=$?
+  { IFS= read -r -d '' host; IFS= read -r -d '' main; IFS= read -r -d '' engine; IFS= read -r -d '' target; } \
+    < <(jq -j '(.host // ""), "\u0000", (.main // ""), "\u0000", (.engine // ""), "\u0000", (.target // ""), "\u0000"' <<<"$got" 2>/dev/null)
+fi
+# The snapshots are asked over ssh with a build machine, unless this checkout is a record of the host file or its main.
+remote=0; [ "$ok" != 0 ] || [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef "$main" ] || remote=1
+# The test map of this checkout's project (`conveyor.sh testmap`, lib/testmap.sh mapstate()): testmap <its state, one
+# JSON object>, printed only in a checkout with Conveyor's project settings, and read where Conveyor runs for it. Here,
+# by this copy of Conveyor, unless the snapshots come from a build machine: then that machine's, in the same ssh
+# command, of the record named as this checkout's folder (the record doctor names it served by, lib/setup.sh), and none
+# when no record has that name. When the board is the feed's, the snapshots are not asked, but the map still is, over
+# ssh on its own: the feed has no map. This machine's own map is never shown then.
+tmcmd=''
+if [ -f .conveyor/project.json ] && [ "$remote" = 0 ]; then
+  tm=$(CONVEYOR_MAIN=$here timeout -k 2 20 bash "${BASH_SOURCE[0]%/*}/../conveyor/conveyor.sh" testmap 2>/dev/null) \
+    && [[ $tm == '{'* ]] && printf 'testmap\t%s\n' "$tm"
+elif [ -f .conveyor/project.json ]; then
+  t=${here##*/}; t=${t//[^A-Za-z0-9._-]/-}
+  tmcmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg n "$t" 'first(.records[] | select(.repo == $n))
+    | "tm=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) testmap 2>/dev/null) && case $tm in \"{\"*) printf \"testmap\\t%s\\n\" \"$tm\" ;; esac; "' <<<"$got" 2>/dev/null)
+fi
+if [ "${1:-}" = feed ]; then
+  [ -z "$tmcmd" ] || timeout -k 2 20 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$tmcmd" 2>/dev/null | grep -m1 '^testmap'$'\t'
+  printf 'host\t\tfeed\t0\n'; exit 0
+fi
 
 [ -e "$cfg" ] || { printf 'host\t\tnofile\t0\t%s\t%s\n' "$mine" "$cfg"; exit 0; }
-# Which machine and which checkout, as the Board reads them: hostfile.sh, the one reader of the host file.
-got=$(bash "${BASH_SOURCE[0]%/*}/../.claude/scripts/hostfile.sh" "$here"); ok=$?
-host='' main='' engine='' target=''
-{ IFS= read -r -d '' host; IFS= read -r -d '' main; IFS= read -r -d '' engine; IFS= read -r -d '' target; } \
-  < <(jq -j '(.host // ""), "\u0000", (.main // ""), "\u0000", (.engine // ""), "\u0000", (.target // ""), "\u0000"' <<<"$got" 2>/dev/null)
 [ "$ok" = 0 ] || { printf 'host\t%s\tconfig\t0\n' "$host"; exit 0; }
 # Every name and path is quoted for the shell (@sh), here or on the host.
 cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '.records[]
   | "printf \"%s\\t\" \(.repo | @sh); { CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot 2>/dev/null || echo null; }; "' <<<"$got")
-if [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef "$main" ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
-else out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$cmd" 2>/dev/null); rc=$?; how=ssh
+if [ "$remote" = 0 ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
+else out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$tmcmd$cmd" 2>/dev/null); rc=$?; how=ssh
+  # The build machine's testmap line comes first, and goes before the host line, as parseFetch reads it.
+  if [ -n "$tmcmd" ] && [[ $out == testmap$'\t'* ]]; then printf '%s\n' "${out%%$'\n'*}"; [[ $out == *$'\n'* ]] && out=${out#*$'\n'} || out=''; fi
 fi
 printf 'host\t%s\t%s\t%s\n%s\n' "$host" "$how" "$rc" "$out"

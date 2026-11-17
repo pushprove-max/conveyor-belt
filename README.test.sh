@@ -20,6 +20,11 @@ PAGES=("$R" "$SRC"/docs/*.md)
 want='Requirements Install Set_up Start The_Board Tests /units Foreman License'
 got=$(sed -n 's/^## //p' "$R" | tr ' ' _ | grep -xF -f <(tr ' ' '\n' <<<"$want") | tr '\n' ' ')
 [ "${got% }" = "$want" ] || fail "the README's sections are not, in this order: $want (it has: $got)"
+# Bug (#176): a new user skipped the test map at setup, and every card ran the whole suite. The section right after
+# Set up says what the map does and links its settings (a page has no behaviour to run, so its text is checked).
+[ "$(sed -n 's/^## //p' "$R" | grep -A1 -xF 'Set up' | sed -n 2p)" = 'The test map' ] || fail "the README's section after Set up is not The test map"
+awk '/^## / { on = ($0 == "## The test map"); next } on' "$R" | grep -qF '](docs/configuration.md#the-test-map)' \
+  || fail "the README's test map section does not link docs/configuration.md#the-test-map"
 # Bug (#638): the front page did not name the Tests page, one of the Board's main parts. Its Tests section links it.
 awk '/^## / { on = ($0 == "## Tests"); next } on' "$R" | grep -qF '](docs/board.md#tests-page)' \
   || fail "the README's Tests section does not link docs/board.md#tests-page"

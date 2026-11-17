@@ -53,9 +53,17 @@ mapis() { # <jq filter that must hold of the made map> <what>
 # Bug it catches: with no map, a change to src/a.js could only be matched to tests by name, and a change to a file no
 # test is named after ran the whole suite. The map, made with V8 coverage a test file at a time, sends src/a.js to
 # test/a.test.js alone, and the test line says the list came from the map, made on the commit the card is on.
+# Bug it catches too (#176): /units could not show how far the map's run was. Each test file's run sees the run's
+# progress file say how many files ran before it, of how many, with the engine's process and the start; a run that
+# made the map leaves none (a run still shown as going).
 t_testmapnode() {
   nodemain
+  printf '%s\n' 'jq -c . "$R/.conveyor/test-map.run.json" >> "$STUB/seen"' 'exec node --test "$@"' > "$STUB/seen.sh"
+  tune '.test.fileCommand = "bash \"$STUB/seen.sh\""'
   mapeng 'mapbuild "$R"' || fail "the map was not made: $(cat "$T/$CASE/eng.out")"
+  jq -se 'map([.done, .of]) == [[0, 3], [1, 3], [2, 3]] and all(.pid > 1 and .started > 0)' "$STUB/seen" > /dev/null \
+    || fail "the run's progress was not written as each file ran: $(cat "$STUB/seen" 2>&1)"
+  [ ! -e "$R/.conveyor/test-map.run.json" ] || fail "a run that made the map left its progress: $(cat "$R/.conveyor/test-map.run.json")"
   grep -qE '^conveyor: wrote the test map .* with V8 coverage: 3 source files, 3 test files, in [0-9]+s$' "$T/$CASE/eng.out" \
     || fail "the map's run did not say what it mapped and how long it took: $(cat "$T/$CASE/eng.out")"
   mapis '.sources == {"src/a.js": ["test/a.test.js"], "src/b.js": ["test/b.test.js"], "src/util.js": ["test/a.test.js", "test/b.test.js", "test/c.test.js"]}
@@ -199,17 +207,90 @@ t_testmapgo() {
   stubmap go 'case "$1 $2" in
   "list -m") echo example.com/m ;;
   "test -count=1") f=${4#-coverprofile=}; [ "$3" = -coverpkg=./... ] || exit 3
+    jq -c "[.done, .of]" "$R/.conveyor/test-map.run.json" >> "$STUB/seen"
     case $5 in ./calc) printf "mode: set\nexample.com/m/calc/calc.go:1.1,2.2 1 1\nexample.com/m/util/util.go:1.1,2.2 1 1\nexample.com/m/other/other.go:1.1,2.2 1 0\n" > "$f" ;;
       ./util) printf "mode: set\nexample.com/m/util/util.go:1.1,2.2 1 1\n" > "$f" ;; *) exit 4 ;; esac ;;
   *) exit 2 ;;
 esac' '{"calc/calc.go": ["calc/calc_test.go"], "util/util.go": ["calc/calc_test.go", "util/util_test.go"]}' \
     go.mod calc/calc.go calc/calc_test.go util/util.go util/util_test.go other/other.go
+  # The run's progress (#176) counts a package's test files once its package has run.
+  [ "$(cat "$STUB/seen")" = $'[0,2]\n[1,2]' ] || fail "the Go run's progress was not a package at a time: $(cat "$STUB/seen")"
   # A Go whole run cannot collect coverage a test file at a time, so a due map was never made again after a whole run
   # (the test on main, the release check): after it passes, the packages' tests run under coverage and remake it.
   tune '.test.command = "go test ./..."'
   mapeng 'mapcovon "$R" && maprefresh "$R"' && grep -qF 'test map: made again' "$T/$CASE/eng.out" || fail "a due Go map was not made again: $(cat "$T/$CASE/eng.out")"
   mapis '.command == "go test ./..." and .sources == {"calc/calc.go": ["calc/calc_test.go"], "util/util.go": ["calc/calc_test.go", "util/util_test.go"]}' \
     "the due Go map was not made again from the coverage run"
+  [ ! -e "$R/.conveyor/test-map.run.json" ] || fail "a refresh that made the map left its progress: $(cat "$R/.conveyor/test-map.run.json")"
+}
+
+# Bug it catches (#176): a map's run that failed showed in /units as no map, or as still running. It leaves why it
+# failed, which the map's state (mapstate(), what /units reads) gives.
+t_testmapfail() {
+  setup '[]'
+  mkdir -p "$R/calc" && for f in go.mod calc/calc.go calc/calc_test.go; do echo x > "$R/$f"; done
+  git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
+  printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2" != "list -m" ] || { echo example.com/m; exit 0; }' 'exit 1' > "$STUB/go" && chmod +x "$STUB/go" || fail "the stub go"
+  ! mapeng 'mapbuild "$R"' || fail "a run that failed made a map: $(cat "$T/$CASE/eng.out")"
+  mapeng 'mapstate "$R"' && jq -e '.state == "failed" and (.why | test("^the run with go test -coverprofile failed after [0-9]+s: \\./calc failed under coverage$"))' \
+    "$T/$CASE/eng.out" > /dev/null || fail "the failed run's state does not say why: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#176): /units could not tell a map not made yet from one made (and how far behind main), one turned
+# off, one being made, or one whose run was killed (its process gone) and so will never end.
+t_testmapstate() {
+  local dead
+  setup '[]'
+  echo x > "$R/a.js" && git -C "$R" add -A && git -C "$R" commit -qm a || fail "main's files could not be committed"
+  sleep 0 & dead=$!; wait "$dead" # sleep: no time passes; it only gives the pid of a process that has ended
+  mapeng 'mapstate "$R"
+    jq -n --arg c "$(git -C "$R" rev-parse HEAD)" "{commit: \$c, sources: {\"a.js\": [\"t/a.test.js\", \"t/b.test.js\"], \"b.js\": [\"t/b.test.js\"]}}" > "$(mappath)"
+    echo y >> "$R/a.js" && git -C "$R" commit -qam y && mapstate "$R"
+    mapend "an earlier run failed" && tune ".test.map = \"off\"" && mapstate "$R"
+    echo "{\"pid\": $$, \"started\": 100, \"done\": 2, \"of\": 5}" > "$(mapprogpath)" && mapstate "$R"
+    tune "del(.test.map)" && echo "{\"pid\": '"$dead"', \"started\": 100, \"done\": 2, \"of\": 5}" > "$(mapprogpath)" && mapstate "$R"' \
+    || fail "the states could not be read: $(cat "$T/$CASE/eng.out")"
+  # Turned off, a failed run before is no matter; a run going is shown whatever the setting.
+  [ "$(cat "$T/$CASE/eng.out")" = '{"state":"none"}
+{"state":"made","sources":2,"tests":2,"age":1}
+{"state":"off"}
+{"state":"running","done":2,"of":5,"started":100}
+{"state":"failed","why":"its run stopped before it ended"}' ] || fail "the map's states are not these: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#176): a refresh of a Node or Python map is the whole run on main itself, which said nothing of how
+# far it was; and a whole run that failed left the map shown as being made. While it runs, the test files run so far
+# are counted; mapcovoff() stops the count, and a run that makes no map says why. node --test marks no file as ended in
+# its output: a file is counted once the V8 coverage file of its process is written whole (bug: the count read only
+# the engine runner's `-- ok` marks, so it stayed at 0 for node --test).
+t_testmaprefresh() {
+  nodemain; nodemap; tune '.test.command = "npm test"'
+  # test/a.test.js's process has ended; test/b.test.js's file is still being written. The count is looked at for up to 5 s.
+  mapeng 'mapcovon "$R" > /dev/null
+    echo "{\"result\": [{\"url\": \"file://$(pwd -P)/test/a.test.js\"}, {\"url\": \"file://$(pwd -P)/src/a.js\"}]}" > "$R.mapcov/v8/coverage-1.json"
+    echo "{\"result\": [{\"url\": \"file://$(pwd -P)/test/b.test.js\"" > "$R.mapcov/v8/coverage-2.json"
+    for i in $(seq 50); do s=$(mapstate "$R"); [[ $s != *"\"done\":1"* ]] || break; sleep 0.1; done; echo "$s"; mapcovoff
+    mapstop "$R" "the whole test on main failed"; mapstate "$R"; jobs -p | wc -l' || fail "the refresh could not run: $(cat "$T/$CASE/eng.out")"
+  sed -n 1p "$T/$CASE/eng.out" | jq -e '.state == "running" and .done == 1 and .of == 3' > /dev/null \
+    || fail "the whole run's progress was not counted from its coverage files: $(cat "$T/$CASE/eng.out")"
+  [ "$(sed -n '2,$p' "$T/$CASE/eng.out")" = $'{"state":"failed","why":"the whole test on main failed"}\n0' ] \
+    || fail "a failed whole run did not say so, or its count kept running: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#176): a Python map's refresh counted only the engine runner's `-- ok` marks, so pytest's run stayed
+# at 0. The files the run's output names so far are counted: pytest's file path, unittest -v's module (tests.test_b).
+t_testmaprefreshpy() {
+  setup '[]'
+  mkdir -p "$R/tests" && for f in pyproject.toml tests/test_a.py tests/test_b.py tests/test_c.py; do echo x > "$R/$f"; done
+  git -C "$R" add -A && git -C "$R" commit -qm python || fail "main's files could not be committed"
+  jq -n --arg c "$(git -C "$R" rev-parse HEAD)" '{commit: $c, command: "an older command", language: "python", tests: [], sources: {}}' \
+    > "$R/.conveyor/test-map.json" && tune '.test.command = "pytest"' || fail "the map could not be written"
+  printf '%s\n' 'tests/test_a.py ..F.                    [ 40%]' 'test_x (tests.test_b.TestB.test_x) ... ok' > "$R.test"
+  mapeng 'mapcovon "$R" > /dev/null
+    for i in $(seq 50); do s=$(mapstate "$R"); [[ $s != *"\"done\":2"* ]] || break; sleep 0.1; done; echo "$s"; mapcovoff' \
+    || fail "the refresh could not run: $(cat "$T/$CASE/eng.out")"
+  jq -e '.state == "running" and .done == 2 and .of == 3' "$T/$CASE/eng.out" > /dev/null \
+    || fail "the Python run's progress was not counted from its output: $(cat "$T/$CASE/eng.out")"
 }
 
 # Bug it catches: a Rust project got no map. Each test binary (tests/<name>.rs) runs under cargo llvm-cov: a file

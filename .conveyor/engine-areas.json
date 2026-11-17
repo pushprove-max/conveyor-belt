@@ -250,6 +250,7 @@
 {"area": "testmap", "test": "setup.test.sh"}
 {"area": "testmap", "test": "maintest.test.sh"}
 {"area": "testmap", "file": "conveyor/lib/testmap.sh"}
+{"area": "testmap", "file": "conveyor/commands/testmap.sh"}
 {"area": "fnclash", "test": "testcountrunner.test.sh"}
 {"area": "fnclash", "file": "conveyor/tools/fnclash.sh"}
 {"area": "claim", "test": "samefile.test.sh"}
