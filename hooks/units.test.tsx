@@ -90,8 +90,10 @@ const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<st
 
 const start = ($: any, seat: keyof typeof SEATS) => $.session.start({ cwd: SEATS[seat][1], ...SESSION })
 const units = ($: any, args = '') => $.command.run({ command: 'units', args, origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 100 } }).then((r: any) => r.text as string)
-const draw = async ($: any, component: 'AbovePrompt' | 'Pane') => {
-  const ui = await $.ui.mount({ plugin: 'conveyor-belt', surface: 'terminal', component, requestId: component === 'Pane' ? 'units' : 'band', props: component === 'Pane' ? { title: 'Conveyor', isFocused: false, bodyColumns: 72, placement: 'dock' } : { hasSurvey: false } })
+// props: the Pane's own, where a case sets its width (a `viewport` in them is the event's, not a prop).
+const draw = async ($: any, component: 'AbovePrompt' | 'Pane', props?: Record<string, unknown>) => {
+  const { viewport, ...given } = props ?? (component === 'Pane' ? { title: 'Conveyor', isFocused: false, bodyColumns: 72, placement: 'dock' } : { hasSurvey: false })
+  const ui = await $.ui.mount({ plugin: 'conveyor-belt', surface: 'terminal', component, requestId: component === 'Pane' ? 'units' : 'band', props: given, ...(viewport ? { viewport } : {}) })
   const texts = ((await ui.findAll({ type: 'Text' })) as { text: string }[]).map(t => t.text)
   await ui.unmount()
   return texts.join('')
@@ -211,6 +213,28 @@ test('the band and the pane show the board in short form, and the status line it
   expect(pane).not.toContain('RESEARCH LANE')
   expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
   expect(w.opened).toEqual(['units'])
+})
+
+// Bug it catches (#286): the pane drew at 72 columns at most, so a wide pane cut titles and narrowed the track, and a
+// render with no bodyColumns (a surface that gives the pane's size as viewport) fell back to the 56-column layout.
+test('the pane draws at the width it is given, over 72 too, from bodyColumns or else viewport, and at 56 with neither', async ($, on) => {
+  const title = 'Benchmark: run SWE-bench Verified on the engine and chart each card next to the last run'
+  const steps = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'].map((name, i) => ({ name, state: i < 2 ? 'done' : i === 2 ? 'now' : 'todo', sec: i < 2 ? 60 : null }))
+  const card = { ...BELT, title, track: { steps, at: 2, label: 'fixing', since: ago(1), reason: null, files: null } }
+  world(on, 'main', answer(snapshot({ belt: [card] })))
+  await start($, 'main')
+  await units($)
+  const at = (size: object) => draw($, 'Pane', { title: 'Conveyor', isFocused: false, placement: 'dock', ...size })
+  for (const wide of [await at({ bodyColumns: 120 }), await at({ viewport: { columns: 120, rows: 40 } })]) {
+    expect(wide).toContain(title)
+    expect(wide).toContain('✓ Build 1m ━━ ✓ Review 1m ━━ ▶ Fix')
+    // The head row is padded to the pane width and ends at the host: its length is the width the pane drew at.
+    expect(wide.match(/^.*?● buildbox/)?.[0]).toHaveLength(120)
+  }
+  const narrow = await at({})
+  expect(narrow).not.toContain(title)
+  expect(narrow).toContain('✓ Build 1m━✓ Review 1m━▶ Fix')
+  expect(narrow.match(/^.*?● buildbox/)?.[0]).toHaveLength(56)
 })
 
 test('main fetches at the start and once a minute', async ($, on) => {

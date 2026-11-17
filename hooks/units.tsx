@@ -489,7 +489,9 @@ export const register: Register = (on, options) => {
     const s = (await read($, state)) as State | null
     const { Box, Text } = $.ui.resolve(e)
     if (!s) return <Text dimColor>{WAITING}</Text>
-    const w = Math.max(40, Math.min(72, Number(e.props.bodyColumns) || 56))
+    // The pane's own width, with no upper limit: the terminal gives it as `bodyColumns`; a surface that leaves that
+    // out gives the pane's size as `viewport`. 56 only when neither is given.
+    const w = Math.max(40, Number(e.props.bodyColumns) || Number(e.viewport?.columns) || 56)
     const f = await read($, frame)
     return (
       <Box flexDirection="column">
