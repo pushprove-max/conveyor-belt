@@ -253,6 +253,19 @@ slot_box() {
   timeout 10 "${SLOT_BOX[@]}" true >/dev/null 2>&1 </dev/null || SLOT_BOX=()
 }
 
+# Closes every descriptor from 3 up this shell holds, whatever its number, but those named. A shell that inherited
+# many takes its lock and slot descriptors above 255, so a loop up to 255 left them open in the process that should
+# hold none. /dev/fd lists the shell's own descriptors on Linux and macOS (the one the listing itself opens is closed
+# again before the loop reaches it).
+closefds() { # [<fd to keep>...]
+  local f k
+  for f in /dev/fd/*; do
+    f=${f##*/}; [[ $f =~ ^[0-9]+$ ]] && [ "$f" -ge 3 ] || continue
+    for k; do [ "$f" != "$k" ] || continue 2; done
+    eval "exec $f>&-" 2>/dev/null
+  done
+}
+
 # Run by a runner before slot_free, once its worker has ended, for a worker that ran as a process group of its own
 # (the loop's test command, under timeout): a process of that group still alive may have closed the descriptor that
 # holds the slot (a program that closes all it inherits before it starts another), and would run on with the slot
@@ -260,9 +273,8 @@ slot_box() {
 # last process has ended: it holds no other descriptor of the runner's (a lock, or a pipe the runner's caller reads
 # to its end), and the runner waits on it nowhere.
 slot_left() { # <process group>
-  local f
   pgrep -g "$1" >/dev/null 2>&1 || return 0
-  ( for ((f = 3; f < 256; f++)); do [ "$f" = "$SLOT_FD" ] || eval "exec $f>&-"; done
+  ( closefds "$SLOT_FD"
     while pgrep -g "$1" >/dev/null 2>&1; do sleep 0.5; done ) </dev/null >/dev/null 2>&1 &
   disown $!
 }
@@ -277,7 +289,7 @@ slot_left() { # <process group>
 slot_watch() { # <mark>
   local f g
   trap '' TERM
-  for ((f = 3; f < 256; f++)); do [ "$f" = "$SLOT_FD" ] || eval "exec $f>&-"; done
+  closefds "$SLOT_FD"
   read -r g; cat > /dev/null
   # The processes' environments are read into a variable: a search started for the mark would carry it itself.
   while pgrep -g "${g:-none}" >/dev/null 2>&1 || { f=$(ps axeww -o pid= -o command= 2>/dev/null); [[ $f == *" $1"* ]]; }; do sleep 0.5; done

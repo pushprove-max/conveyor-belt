@@ -1469,8 +1469,8 @@ treediff() { # <worktree> <from> <to>
 # it is sent ALRM, its own timer's signal, so it ends the run as on its own timeout: TERM to the command's group, KILL
 # 30 s later, exit 124. It holds no descriptor of the loop's (a lock, the slot) while it runs.
 testclock() { # <timeout's pid> <turn wait file>
-  local f s=$SECONDS w
-  for ((f = 3; f < 256; f++)); do eval "exec $f>&-"; done
+  local s=$SECONDS w
+  closefds
   exec </dev/null >/dev/null 2>&1
   while sleep 1; do
     w=$(cat "$2" 2>/dev/null); [[ $w =~ ^[0-9]{1,9}$ ]] || w=0

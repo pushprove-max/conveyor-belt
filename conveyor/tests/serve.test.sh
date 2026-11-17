@@ -98,6 +98,7 @@ t_follow() {
   # Linux alone has /proc. Bug: each restart kept its copy of stderr (LOGFD), so after some hundreds of restarts every
   # card's test runner got fd 255, bash's own, and its slot and lock cases failed.
   copies() { local f n m=''; for _ in 1 2 3 4 5; do n=0; for f in /proc/$pid/fd/*; do [ ! "$f" -ef "$STUB/serve.out" ] || n=$((n + 1)); done; [ -n "$m" ] && [ "$m" -le $n ] || m=$n; sleep 0.1; done; echo "$m"; } # sleep: samples the fd count over half a second, as a re-exec settles; nothing to wait for
+  copies() { local f n m=''; for _ in 1 2 3 4 5; do n=0; for f in /proc/$pid/fd/*; do [ ! "$f" -ef "$STUB/serve.out" ] || n=$((n + 1)); done; [ -n "$m" ] && [ "$m" -le $n ] || m=$n; sleep 0.1; done; echo "$m"; } # sleep: the looks are spread over 0.5 s
   [ ! -d /proc/$pid/fd ] || fds=$(copies)
   # A new commit lands in the checkout while #7 is in flight: the loop restarts on it at once, in its own process,
   # and #7 carries on on $A; then #7 and #8 both land through the restarted loop, which restarts no more.
