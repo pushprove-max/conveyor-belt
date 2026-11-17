@@ -26,7 +26,10 @@
 # - docs/releases/<version>.md is on that commit, is not empty, and passes the notes style check (tools/notes-check.sh);
 # - the privacy check (privacy/check.sh, with the host file's terms file, as gh_write() runs it) finds nothing in the
 #   tracked files, nor in the changes since the newest tag: each commit's message and added lines, so a hit a later
-#   commit removed is still one (a sign-off or co-author trailer's email that is the commit's own is not: relmessage);
+#   commit removed is still one (a sign-off or co-author trailer's email that is the commit's own is not: relmessage).
+#   With --allow-commit <sha> (any number) --by <who>, the owner's choice: a hit in a named commit already on the
+#   remote's default branch is passed over (printed before the release; the record's allowed is {by, commits}); a
+#   named commit not on it is refused;
 # - the whole suite passed on that commit: the newest conveyor/release-suite status is success (release-prep's
 #   pass), else this command runs the suite, as release-prep does, once every other check has passed.
 #   With --anyway --by <who> (the owner's choice to release over a red suite), in its place: release-prep's suite ran
@@ -50,7 +53,8 @@
 # the passes it kept}), reasons
 # (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree
 # `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
-# and anyway (a release made over it: red with by, else null)}. A release after a passed release-prep of the same
+# and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
+# commits: {by, commits}, else null)}. A release after a passed release-prep of the same
 # version keeps that run's suite (sha, done, failed, cases, moved, reused, since); one after a failed release-prep of
 # it keeps that suite too, its files and timedout, and makes red of it; one after a refused release of it keeps that
 # one's (all but moved), and its red.
@@ -160,7 +164,7 @@ relstart() { # <command name> <version>
     elif .step == "release-prep" and .state == "failed" then {since, sha, done, failed, cases, moved, reused, files, timedout, red: {sha, files: (.files.failed // []), cases}}
     elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null} + $w' > "$RELRUN.new" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   unset CONVEYOR_RELEASE_PID # the suite's own commands are no part of this run's record
 }
@@ -281,9 +285,9 @@ releaseprep() { # <version>
   echo "conveyor: release-prep: the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
   return 1
 }
-RELBY='' # release --anyway --by <who>: who releases over release-prep's failed suite
+RELBY='' RELANY='' RELALLOW=() # release [--anyway] [--allow-commit <sha>]... --by <who>: the owner's choices, and who made them
 release() { # <version>
-  local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=() red='' body='' known=''
+  local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=() red='' body='' known='' a f allow=() passed=()
   local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-}
   [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
   unset CONVEYOR_RELEASE_SHA
@@ -309,6 +313,13 @@ release() { # <version>
   elif ! out=$(git show "$sha:$notes" | "$HERE/tools/notes-check.sh" - "$notes"); then
     why+=("the release notes break the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)")
   fi
+  # --allow-commit: a commit named by the owner whose hits the commit check passes over, only when it is already on
+  # $REMOTE/$BRANCH (pushed history, which only a rewrite could change). The tracked-files check passes over nothing.
+  for a in "${RELALLOW[@]}"; do
+    if ! f=$(git rev-parse -q --verify "$a^{commit}"); then why+=("--allow-commit $a: there is no such commit")
+    elif ! git merge-base --is-ancestor "$f" "refs/remotes/$REMOTE/$BRANCH"; then why+=("--allow-commit $a: ${f:0:12} is not on $REMOTE/$BRANCH, so its hits are not passed over")
+    else allow+=("$f"); fi
+  done
   terms=$(termsfile)
   if [ -z "$terms" ] && termsnamed; then why+=("the host file's terms file cannot be read, so the privacy check cannot be made")
   else
@@ -318,6 +329,7 @@ release() { # <version>
       while read -r c; do
         { relmessage "$c"; git show --format= --no-color --no-ext-diff --text -U0 --diff-merges=first-parent "$c" | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)'; } \
           | "$HERE/privacy/check.sh" ${terms:+--terms "$terms"} - > /dev/null; rc=${PIPESTATUS[1]} # the check's own: grep finding no added line is no hit
+        if [ "$rc" = 1 ] && [[ " ${allow[*]} " == *" $c "* ]]; then passed+=("$c"); continue; fi
         [ "$rc" = 0 ] || hits+=("${c:0:12}$([ "$rc" = 1 ] || echo ' (the check failed)')")
       done < <(git rev-list "$last..$sha")
       [ ${#hits[@]} = 0 ] || why+=("the privacy check finds something in commits since $last: ${hits[*]} (run conveyor/privacy/check.sh on each to see where)")
@@ -326,7 +338,7 @@ release() { # <version>
   name=$(jq -r .name "$P" 2>/dev/null) && [ -n "$(jq --arg n "$name" '.plugins[] | select(.name == $n)' "$M" 2>/dev/null)" ] \
     || why+=("$M has no entry for the plugin $P names")
   # Over a red suite: only release-prep's failed suite of this version on this very commit (the record's red).
-  if [ -n "$RELBY" ]; then
+  if [ -n "$RELANY" ]; then
     red=$(jq -ce '.red | objects' "$RELRUN" 2>/dev/null) || red=''
     if [ -z "$red" ]; then why+=("--anyway: release-prep's suite of $v did not run and fail on ${sha:0:12}, so there is no failed suite to release over: run release-prep $v")
     elif [ "$(jq -r .sha <<<"$red")" != "$sha" ]; then
@@ -345,6 +357,7 @@ release() { # <version>
     fi
   fi
   if [ ${#why[@]} != 0 ]; then printf 'conveyor: release: refused, nothing tagged or released: %s\n' "${why[@]}" >&2; return 1; fi
+  [ ${#passed[@]} = 0 ] || echo "conveyor: release: the privacy check passes over its hits in ${passed[*]}, on $REMOTE/$BRANCH, by $RELBY"
   # The suite last: it takes the longest, and a refusal above needs none of it.
   if [ -n "$red" ]; then
     # No suite runs and no status is posted: conveyor/release-suite stays the failure release-prep posted.
@@ -371,7 +384,8 @@ release() { # <version>
     || { relundo; echo "conveyor: release: the release commits or the tag could not be made; they are undone, nothing pushed" >&2; return 1; }
   git push -q --atomic "$REMOTE" "HEAD:refs/heads/$BRANCH" "refs/tags/v$v" < /dev/null \
     || { relundo; echo "conveyor: release: $BRANCH and v$v could not be pushed (did $REMOTE/$BRANCH move?); the release commits and the tag are undone, nothing released" >&2; return 1; }
-  # Pushed, the release is out: the record says it went over the failed suite, and who said so.
+  # Pushed, the release is out: the record says it went over the failed suite, or passed over named commits, and who said so.
+  [ ${#passed[@]} = 0 ] || relrec --arg by "$RELBY" --argjson c "$(printf '%s\n' "${passed[@]}" | jq -Rn '[inputs]')" '.allowed = {by: $by, commits: $c}'
   # Its GitHub release's body is the notes, then the known failures, in a scratch file outside the cards folder (gh_write
   # writes that folder's path as <cards>).
   if [ -n "$red" ]; then
@@ -422,11 +436,20 @@ releasestop() {
 }
 shift
 if [ "$CMD_ARG" = release ]; then
-  [ "${1:-}" != --help ] || { echo "usage: conveyor.sh release <version: X.Y.Z> [--anyway --by <who>]"; echo "$RELHELP"; exit 0; }
-  # --anyway --by <who>: the owner's release over release-prep's failed suite, under a name of one line.
-  if [ $# = 4 ] && [ "$2" = --anyway ] && [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]]; then RELBY=$4; set -- "$1"; fi
-  [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf 'usage: conveyor.sh release <version: X.Y.Z> [--anyway --by <who>]\n%s\n' "$RELHELP" >&2; exit 2; }
-  relrun release "$1"
+  RELUSE='usage: conveyor.sh release <version: X.Y.Z> [--anyway] [--allow-commit <sha>]... [--by <who>: with --anyway or --allow-commit]'
+  [ "${1:-}" != --help ] || { echo "$RELUSE"; echo "$RELHELP"; exit 0; }
+  # --anyway: the owner's release over release-prep's failed suite; --allow-commit <sha> (any number): a pushed commit
+  # whose privacy hits the owner passes over. Either needs --by <who>, a name of one line, and --by needs one of them.
+  ver=${1:-}; shift
+  while [ $# -gt 0 ]; do
+    if [ "$1" = --anyway ]; then RELANY=1; shift
+    elif [ $# -ge 2 ] && [ "$1" = --allow-commit ] && [[ $2 =~ ^[0-9a-f]{7,40}$ ]]; then RELALLOW+=("$2"); shift 2
+    elif [ $# -ge 2 ] && [ "$1" = --by ] && [[ $2 == *[![:space:]]* && $2 != *$'\n'* ]]; then RELBY=$2; shift 2
+    else break; fi
+  done
+  [ $# = 0 ] && { [ -n "$RELBY" ] && [ -n "$RELANY${RELALLOW[*]}" ] || [ -z "$RELBY$RELANY${RELALLOW[*]}" ]; } \
+    && [[ $ver =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf '%s\n%s\n' "$RELUSE" "$RELHELP" >&2; exit 2; }
+  relrun release "$ver"
 elif [ "$CMD_ARG" = release-run ]; then
   if [ "$*" = stop ]; then releasestop
   else

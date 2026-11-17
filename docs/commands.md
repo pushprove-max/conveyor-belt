@@ -164,6 +164,9 @@ GitHub and releases:
   ([Releases](releases.md)). Only the owner decides a release: the Foreman runs it only after the owner says yes in
   chat. `release <version> --anyway --by <who>` releases over the failed suite of `release-prep` on the same commit
   ([A release over a failed suite](releases.md#a-release-over-a-failed-suite)).
+  `release <version> --allow-commit <sha> [--allow-commit <sha>...] --by <who>` lets the privacy check pass over the
+  named commits that are already on `main` on GitHub
+  ([Pushed commits the privacy check finds](releases.md#pushed-commits-the-privacy-check-finds)).
 - `release-run <version>` is the Board's **Release**: `release` alone when the suite of that version passed on the
   head of `main` and `main` did not move after it, else `release-prep`, then `release` when the suite passes.
   `release-run prep <version>` is its **Draft notes** and **Run suite**: `release-prep` alone, which releases nothing.

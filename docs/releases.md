@@ -48,7 +48,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    - the version is not higher than the newest tag, or its tag exists,
    - the checkout is not at the head of `main` on GitHub, or it has changes that are not committed,
    - there is no notes file, or the notes break a rule of the style that the style check reads,
-   - the privacy check finds something in the tracked files or in a commit since the last tag,
+   - the privacy check finds something in the tracked files or in a commit since the last tag (for a commit that is
+     already on GitHub, see [Pushed commits the privacy check finds](#pushed-commits-the-privacy-check-finds)),
    - the whole test suite does not pass on the commit. When the newest `conveyor/release-suite` status on the commit
      is a pass (step 4), the suite does not run again. Otherwise the command runs it. To release over a failed suite,
      see [A release over a failed suite](#a-release-over-a-failed-suite).
@@ -78,6 +79,21 @@ nothing.
 On the Board, the Release panel shows **Release anyway** beside a failed suite on the head of `main`. The first click
 shows the failed files and cases. The second click runs `conveyor.sh release-run anyway <version>`, with you, the Board
 user, as `<who>`.
+
+## Pushed commits the privacy check finds
+
+The privacy check reads the message and the added lines of each commit since the last tag. A commit that is already
+on `main` on GitHub stays in its history. Only a history rewrite and a force push can remove it. When the owner
+decides to keep that history, run:
+
+`conveyor.sh release <version> --allow-commit <sha> [--allow-commit <sha>...] --by <who>`
+
+Name each commit that the refusal lists, and the person who decided as `<who>`. The privacy check then passes over
+the named commits. It passes over a named commit only when that commit is on `main` on GitHub. If a named commit is
+not there, the command stops and releases nothing. A finding in a commit that you do not name still stops the
+release, and the check of the tracked files does not change. Before it releases, the command prints the commits it
+passed over. The record of the release (`release/run.json` in the cards folder) keeps these commits and `<who>`. You
+can use `--allow-commit` together with `--anyway`, with one `--by`.
 
 ## A release from the Board
 

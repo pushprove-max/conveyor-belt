@@ -227,6 +227,27 @@ t_cutprivacy() {
   cutrefused 1.1.0 'privacy check finds something in the tracked files.*old.txt:1: email' \
     "privacy check finds something in commits since v1.0.0: ${c:0:12} ${b:0:12} ${h:0:12} \(run"
 }
+# --allow-commit: hits in pushed commits (a, b) the owner keeps, as only a history rewrite could remove them.
+# Bugs: no way to release over them; a named commit passes over a hit in one not named (b), or one not on origin/main
+# (x, a commit main does not hold) is passed over too; the release does not keep which commits it passed over, and who
+# said so; --allow-commit is taken with no --by.
+t_cutallow() {
+  local O a b x out AT=@; cutsetup true
+  a=$(git -C "$R" commit -q --allow-empty -m "fix: ask someone${AT}gmail.com" && git -C "$R" rev-parse HEAD) \
+    && b=$(git -C "$R" commit -q --allow-empty -m "fix: ask other${AT}gmail.com" && git -C "$R" rev-parse HEAD) \
+    && x=$(git -C "$R" commit-tree -p "$b" -m "side: someone${AT}gmail.com" "$b^{tree}") \
+    && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
+  out=$(loop release 1.1.0 --allow-commit "${a:0:12}" 2>&1); [ $? = 2 ] && grep -q 'usage: conveyor.sh release' <<<"$out" || fail "--allow-commit with no --by was taken: $out"
+  out=$(loop release 1.1.0 --allow-commit "${a:0:12}" --by 'the owner' 2>&1); [ $? = 1 ] \
+    && grep -q "privacy check finds something in commits since v1.0.0: ${b:0:12} (run" <<<"$out" || fail "a hit in a commit not named was passed over, or the named one still refused: $out"
+  out=$(loop release 1.1.0 --allow-commit "${a:0:12}" --allow-commit "${b:0:12}" --allow-commit "${x:0:12}" --by 'the owner' 2>&1); [ $? = 1 ] \
+    && grep -q "refused, nothing tagged or released: --allow-commit ${x:0:12}: ${x:0:12} is not on origin/main" <<<"$out" || fail "a named commit not on origin/main was not refused: $out"
+  [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" 2>/dev/null || fail "a refused --allow-commit was tagged or released"
+  out=$(loop release 1.1.0 --allow-commit "${a:0:12}" --allow-commit "${b:0:12}" --by 'the owner' 2>&1) || fail "the release with only named, pushed hits was refused: $out"
+  grep -qF "passes over its hits in $b $a, on origin/main, by the owner" <<<"$out" && [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "the release did not say what it passed over, or was not tagged: $out"
+  jq -e --arg a "$a" --arg b "$b" '.state == "released" and .allowed == {by: "the owner", commits: [$b, $a]}' "$T/$CASE/cards/release/run.json" > /dev/null \
+    || fail "the release's record does not keep the commits passed over and who said so: $(cat "$T/$CASE/cards/release/run.json")"
+}
 # The suite, the last check. Bugs: a release cut on a failing suite, or with the suite run on another commit than the one
 # to release; a commit made in the checkout while the suite ran (a card landed there) tagged and pushed unchecked, or
 # the run's record not saying main moved, so the Board's Release panel offers no run on the new main and shows no
