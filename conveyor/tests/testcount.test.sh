@@ -27,7 +27,8 @@ C=$CONVEYOR_TEST_LOG/cases; mkdir -p "$C/ok" "$C/failed"; : > "$C/ok/a"; : > "$C
 while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done
 EOF
   } > "$STUB/test-cmd"
-  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch testlogs testcases testdone; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.2
+  # shellcheck disable=SC2034 # LIVE is read by watch(), defined by the eval
+  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch testlogs testcases testdone testprogress; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.2
     (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash "$STUB/test-cmd" > "$w.test" 2>&1 < /dev/null) &
     watch $! "$w.test" "$w.live" test ) > "$T/$CASE/run.out" 2>&1 & run=$!
   wait_until "jq -e --argjson w '$3' '.$2 == \$w' '$w.live'" "cat '$w.live'" \

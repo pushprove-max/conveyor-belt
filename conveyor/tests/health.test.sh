@@ -129,7 +129,7 @@ c7at() { # <epoch seconds> <step>...
 # CONVEYOR_TEST_LOG) and its live record in $w.live. Sets run (the watch's pid) and w.
 c7watch() { # <step> <command file>
   local f; w=$T/$CASE/cards/c7-7; f=$w.out; [ "$1" != test ] || f=$w.test; mkdir -p "$w.testlog"
-  ( . "$SRC/lib/portable.sh"; eval "$(for g in watch testlogs testcases testdone; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done)"
+  ( . "$SRC/lib/portable.sh"; eval "$(for g in watch testlogs testcases testdone testprogress; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done)"
     # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
     LIVE=0.5 STUCK=1200; (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash "$2" < /dev/null) > "$f" 2>&1 &
     watch $! "$f" "$w.live" "$1" ) > "$T/$CASE/run.out" 2>&1 & run=$!

@@ -334,7 +334,8 @@ t_setuplaneoldpack() {
 # Bug (#630): a new user had to write the host file and a terms file by hand before setup, and doctor named a missing
 # terms file though it is optional. On a machine with no host file and no Conveyor but the plugin copy setup runs
 # from ($D, as the plugin's own folder), setup with its answers writes the host file with the project as a record and
-# the pack, and doctor then prints only ok: lines, with no terms file anywhere.
+# the pack, and doctor then prints no fault, with no terms file anywhere: only ok: lines, each seat's route and check
+# progress, and the one warning that the new pack sets neither test.list nor test.fileCommand.
 t_setupfresh() {
   local X out; sample; X=$D/conveyor/conveyor.sh; rm "$XDG_CONFIG_HOME/conveyor/host.json" "$T/$CASE/terms"
   # A service whose conveyor.sh is there is no missing piece (as in t_doctor).
@@ -345,9 +346,13 @@ t_setupfresh() {
     || fail "setup did not write the host file with the project as its record, and the pack: $(cat "$XDG_CONFIG_HOME/conveyor/host.json" 2>&1)"
   # The Board started after setup (as setup asks the owner to), so doctor has no warning that it is not running.
   boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
-  # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:), which is information, not a check.
-  ! grep -qvE '^(ok|builder|reviewer): ' <<<"$out" && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
-    || fail "doctor after setup printed a line that is not ok:, or did not say the terms file is optional: $out"
+  # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:) and the progress line of each seat's
+  # check call, which are information, not a check; and the one warning a fresh pack is meant to get: setup sets no
+  # test.list or test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
+  ! grep -vE '^(ok|builder|reviewer): |^conveyor: checking .* with one call \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
+    | grep -qvxF 'warning: the rule Whole suite in a card is off, and the pack sets neither test.list nor test.fileCommand, so a card whose change has tests stops at its test step; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file' \
+    && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
+    || fail "doctor after setup printed a line that is not ok:, a seat's route or check progress, or the test.list warning, or did not say the terms file is optional: $out"
 }
 
 # Bug (#111): setup wrote no control record, so the loop read the defaults (new issues start in the Queue) and queued
