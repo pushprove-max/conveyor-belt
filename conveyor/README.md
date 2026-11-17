@@ -176,7 +176,7 @@ rewrites a call after the guards' turn is not seen by them.
 ## Codex builder
 
 The builder seat (build, fix and rebase sessions) can run on Codex, as the reviewer and the judge already can. Choose
-it with `conveyor.sh control model codex <model> [effort]` (a model `codex debug models` lists, or any name typed in, which fails in the card when Codex cannot run it; a family name, such
+it with `conveyor.sh control model codex <model> [effort]` (a model Codex lists, from its models cache or `codex debug models`, or any name typed in, which fails in the card when Codex cannot run it; a family name, such
 as `sol`, runs the newest of it, as for a review) or in the Board's Builder row on the Rules tab; the pack's
 `models.allowed["codex-builder"]` can name one as the seat's default. It takes Codex's efforts. The Codex CLI must be on PATH and
 signed in, its `exec` must have `--dangerously-bypass-hook-trust` (Codex 0.167 has it), and `node` must be on PATH for

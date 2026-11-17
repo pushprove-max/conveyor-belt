@@ -245,7 +245,7 @@ overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL 
 # started, 1 with why on stdout (nothing else is printed there).
 askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
   local d=$1 p=$5 s a agent model acct rc
-  s=$(seat builder "$4") && jqget "$s" agent agent model model && packget models.allowed a 2>/dev/null \
+  s=$(seat builder "$4") && jqget "$s" agent agent model model && modelsallowed a \
     || { echo "no builder model"; return 1; }
   model=$(jq -r --arg g "$agent" --arg m "$model" "$OKMODELS"'okmodels("builder")[$g] // [] | last // $m' <<<"$a") || model=''
   case $agent in

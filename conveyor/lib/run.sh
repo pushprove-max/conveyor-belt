@@ -298,9 +298,10 @@ run() { # [max-cards] [serve]
       utried=$SECONDS; ( mutnext ) 8>&- < /dev/null & muter=$!
     fi
     # The monthly test-speed survey's issue (survey(), lib/survey.sh), looked at once a minute, in the loop itself: a
-    # look is a date and a pack read, and files at most one issue a month.
+    # look is a date and a pack read, and files at most one issue a month. With it, the models with no price (noprice(),
+    # lib/control.sh), in this shell, which keeps what it last looked at: one held issue for each, once.
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
-      stried=$SECONDS; survey 8>&- < /dev/null
+      stried=$SECONDS; survey 8>&- < /dev/null; noprice 8>&- < /dev/null || :
     fi
     running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}") + ${#took[@]})); waits=''
     # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at

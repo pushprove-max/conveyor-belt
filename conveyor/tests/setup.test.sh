@@ -485,6 +485,10 @@ t_doctorreport() {
 }
 t_doctormissing() {
   local X out; doctordone
+  # The owner's models.allowed names Codex models (a new pack names none, and follows the CLIs this host has), so the
+  # reviewer is Codex's gpt-6.1-sol on a host with no Codex: the seat that cannot start (#593 below).
+  jq '.models.allowed = {claude: ["claude-opus-5-5"], codex: ["gpt-6.1-sol"], "claude-reviewer": ["claude-opus-5-5"]}' "$S/.conveyor/project.json" > "$T/$CASE/p" \
+    && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the pack was not rewritten"
   rm "$T/$CASE/terms" "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"; : > "$G/out"; uninstalled; echo segno > "$G/nopkg"
   local gone=d791d168d791d168d791d168d791d168d791d168; mkdir -p "$XDG_CONFIG_HOME/systemd/user" \
     && printf '[Service]\nExecStart="/bin/bash" "%s" serve\n' "$V/$gone/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service"

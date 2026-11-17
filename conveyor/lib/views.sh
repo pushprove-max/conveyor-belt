@@ -199,7 +199,7 @@ cards() {
 # "schema default", "control record", "seed" (the control record leaves it to the seed, CTL0), or "none" for a pack
 # field left out that has no default}.
 homes() { # <control record>
-  local a; packget models.allowed a 2>/dev/null || a=null
+  local a; modelsallowed a || a=null
   jq -c --slurpfile p "$PACK" --slurpfile s "$HERE/schema/pack.schema.json" --argjson c "$1" --argjson e "$EFFORTS" \
       --argjson d "$CAP0" "$SETTINGS"'
     (first(seatnow("builder"; $c)) // null) as $b | (first(seatnow("reviewer"; $c)) // null) as $r | settings($c; $e; {}) as $m

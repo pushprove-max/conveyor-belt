@@ -74,6 +74,7 @@
 {"area": "control", "test": "codex.test.sh"}
 {"area": "control", "test": "control.test.sh"}
 {"area": "control", "test": "clis.test.sh"}
+{"area": "control", "test": "modellist.test.sh"}
 {"area": "control", "test": "models.test.sh"}
 {"area": "control", "test": "accounts.test.sh"}
 {"area": "control", "test": "accountsother.test.sh"}

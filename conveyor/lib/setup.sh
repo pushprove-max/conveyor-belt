@@ -5,7 +5,8 @@
 # in (none passed: it says which it needs and writes nothing); test.full, the full test suite the Board's Push landed
 # runs, is the test command too (given no list, it runs whole), so a new install can push what it lands;
 # test.slowIssues is false (it files nothing: the test
-# rules, test.rules, replace it, and with no test.rules their switch is off and no rule is on); every other field is PACK0's, the default branch
+# rules, test.rules, replace it, and with no test.rules their switch is off and no rule is on); models.allowed is
+# not written, so the project follows the models the CLIs report (modelsallowed()); every other field is PACK0's, the default branch
 # origin's (never the checked-out branch, which may be a feature branch: when origin's cannot be read, nothing is
 # written). A pack already there is never rewritten: one that fails the check stops setup.
 # The plugin, when the pack names none: the plugin's releases, followed (plugin.follow), or with --pin the commit of
@@ -14,9 +15,7 @@
 # that the repo lacks is created (GitHub's label names are not case-sensitive), through gh_write.
 PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: "bug", priorities: ["P0", "P1", "P2"],
     areaPrefix: "area:", nonProductAreas: []},
-  linkFromMain: [], push: {env: {}}, remote: "origin",
-  models: {allowed: {claude: ["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5"], codex: ["gpt-6.1-sol", "gpt-6-astra"],
-    "claude-reviewer": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"]}},
+  linkFromMain: [], push: {env: {}}, remote: "origin", models: {},
   lanes: {research: {model: "claude-fable-5-2", effort: "medium"}},
   privacy: {mode: "public"}, auto: {standing: []}}'
 # The question "Run a first test-speed survey now?" (conveyor/README.md, The first survey): answered by --survey yes|no,
@@ -571,7 +570,7 @@ ANTHROPIC_API=${CONVEYOR_ANTHROPIC_API:-https://api.anthropic.com}
 OPENAI_API=${CONVEYOR_OPENAI_API:-https://api.openai.com/v1}
 declare -A APIKEY=([claude]=ANTHROPIC_API_KEY [codex]=OPENAI_API_KEY) APINAME=([claude]=Anthropic [codex]=OpenAI) PROXYKEY=([claude]=CLAUDE_PROXY_KEY [codex]=CODEX_PROXY_KEY)
 # setup()'s route questions, in its own variables (its locals, read and set here). Each role's CLI now, in rcli: the
-# pack's seat, or with no pack yet the seat PACK0's models give. Each of those CLIs, Claude or Codex, with no route set
+# pack's seat, or with no pack yet the seat the built-in models (MODELS0) give. Each of those CLIs, Claude or Codex, with no route set
 # (Claude: no claudeProxy in the host file or the pack; Codex: installed, no codexProxy in the host file) is checked:
 # first where its provider's API key is kept (ak, the key; akf, where: settings, a key file's path or none, as
 # --claude-key or --codex-key answers it, empty while a key is found and not answered). With no key found and no
@@ -594,7 +593,7 @@ routeask() {
   local -A off=() pxok=() desc=()
   for r in builder reviewer; do
     if [ -e "$PACK" ]; then s=$(seat "$r" 2>/dev/null) || s=''
-    else s=$(jq -cn "$PACK0 | .models.allowed" | jq -c --arg r "$r" --argjson c null "$SEATNOW"'[try seatnow($r; $c)] | first // empty' 2>/dev/null) || s=''; fi
+    else s=$(jq -c --arg r "$r" --argjson c null "$SEATNOW"'[try seatnow($r; $c)] | first // empty' <<<"$MODELS0" 2>/dev/null) || s=''; fi
     rcli[$r]=$(jq -r '.agent // empty' <<<"$s" 2>/dev/null)
   done
   for c in claude codex; do

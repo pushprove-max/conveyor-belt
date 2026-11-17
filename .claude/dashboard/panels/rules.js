@@ -1583,6 +1583,21 @@
     const inUse = (m) => roles.has(m) || sessions.has(m);
     // Seen but not priced: an ID of the steps that no model and no alias prices (an OpenCode one keeps OpenCode's cost).
     const unpriced = seen.filter((x) => x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
+    // Offered or run with no price: a model a role runs, or one the Rules tab offers a role (each CLI's own list, the
+    // pack's for a CLI that lists none), that no model and no alias prices and no step has run yet (those are Seen but
+    // not priced). OpenCode's keep the cost OpenCode reports. A one-word name (sol, opus) is a family or an alias, no
+    // model ID: the CLI runs a model of its own choice, so the name has no price to add. Conveyor files one issue to
+    // add each (noprice()).
+    const offered = new Set(roles.keys());
+    ROLES.forEach((k) => {
+      const s = ms[k];
+      if (!s) return;
+      [s.clis, s.allowed].forEach((by) => Object.entries(by && typeof by === 'object' ? by : {}).forEach(([c, o]) => {
+        if (c !== 'opencode') list(by === s.clis ? o && o.models : o).forEach((m) => { if (typeof m === 'string' && m) offered.add(m); });
+      }));
+    });
+    const ran = new Set(seen.map((x) => x.model));
+    const noPrice = [...offered].filter((m) => !m.startsWith('opencode:') && !/^[a-z]{2,}$/.test(m) && !isModel(canon(m)) && !aliasTo.has(m) && !ran.has(m)).sort();
     const known = models.filter((m) => providerOf(m, over[m]) !== 'opencode').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     const norm = (s) => s.toLowerCase().replace(/\./g, '-');
     const likely = (id) => {
@@ -1816,6 +1831,19 @@
       });
       el.append(box);
     }
+    if (noPrice.length) {
+      const box = h('div', 'rules-prices-noprice');
+      box.append(h('h4', 'rules-price-title', 'Offered with no price'));
+      noPrice.forEach((m) => {
+        const line = h('div', 'rules-item rules-noprice');
+        line.dataset.model = m; line.dataset.group = `price:${m}`; line.dataset.find = m.toLowerCase();
+        const by = roles.get(m);
+        line.append(h('span', null, `${m} (no price${by ? `; in use by ${by.join(', ')}` : ''})`),
+          ...thisIs(m), button('Add as new model', 'btn-quiet', 'price-new', `Add ${m} as a model of its own`, () => { S.priceAdd = addDraft(m); draw(); }));
+        box.append(line);
+      });
+      el.append(box);
+    }
     const own = models.filter((m) => providerOf(m, over[m]) !== 'opencode');
     const used = own.filter(inUse).sort((a, b) => PROVIDERS.findIndex(([k]) => k === providerOf(a, over[a])) - PROVIDERS.findIndex(([k]) => k === providerOf(b, over[b])) || byFamily(a, b));
     if (used.length) el.append(group('use', 'In use by this project', used.map(row), [], ''));
@@ -1848,7 +1876,7 @@
       el.querySelectorAll('.rules-price-family').forEach((r) => {
         r.hidden = !!q && !Array.from(r.closest('table').querySelectorAll(`.rules-price[data-family="${r.dataset.family}"]`)).some((x) => !x.hidden);
       });
-      el.querySelectorAll('.rules-price-group, .rules-prices-unpriced').forEach((g) => { g.hidden = !!q && !g.querySelector('[data-find]:not([hidden])'); });
+      el.querySelectorAll('.rules-price-group, .rules-prices-unpriced, .rules-prices-noprice').forEach((g) => { g.hidden = !!q && !g.querySelector('[data-find]:not([hidden])'); });
       if (q) el.querySelectorAll('details.rules-price-older').forEach((d) => { if (d.querySelector('[data-find]:not([hidden])')) d.open = true; });
     }
     filter();

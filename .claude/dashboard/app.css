@@ -647,9 +647,9 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
    and a row open in Edit with its fields in place. */
 .rules-prices-top { margin-bottom: var(--sp-3); }
 .rules-price-search { flex: 2 1 24ch; }
-.rules-price-group, .rules-prices-unpriced, .rules-price-addform { margin-bottom: var(--sp-4); }
+.rules-price-group, .rules-prices-unpriced, .rules-prices-noprice, .rules-price-addform { margin-bottom: var(--sp-4); }
 .rules-price-title { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); font-weight: 700; }
-.rules-prices-unpriced { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warn); border-left-width: 4px; border-radius: var(--radius-sm); }
+.rules-prices-unpriced, .rules-prices-noprice { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warn); border-left-width: 4px; border-radius: var(--radius-sm); }
 .rules-prices-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .rules-prices-table th, .rules-prices-table td { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--surface-2); text-align: left; vertical-align: top; }
 .rules-prices-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }

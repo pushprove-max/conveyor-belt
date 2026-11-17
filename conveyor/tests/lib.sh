@@ -32,6 +32,11 @@ unset CARDCTL CONVEYOR_CARD_SETTINGS CONVEYOR_OPENCODE_GUARD CONVEYOR_CODEX_GUAR
 export XDG_STATE_HOME=$T/state
 # The loop asks for a weekly limit reading while a card runs: never Claude's own here; a case sets its own.
 export CONVEYOR_LIMIT_CMD=false
+# `serve` asks which models have no price (noprice(), lib/control.sh): here the answer fails, so no loop files an issue
+# for the stub models the test pack lists; a case of that look sets its own.
+export CONVEYOR_NOPRICE_CMD=false
+# Codex's models cache (climodels(), lib/control.sh) is never this machine's own: a case writes its own there.
+export CODEX_HOME=$T/codex-home
 # The same-file check before a pick (overlap(), lib/pick.sh) is never a model call here: it fails, so each issue is
 # picked as it is. A case of that check sets its own (deps.test.sh).
 export CONVEYOR_OVERLAP_CMD=false

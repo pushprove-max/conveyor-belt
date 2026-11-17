@@ -339,7 +339,7 @@ Each other value of a new project starts on Conveyor's default values (`conveyor
 With the default push rule, Conveyor lands each card and pushes when you press "Push landed" on the Board, or on its
 own once you turn push on in the Rules tab.
 Only the keys it leaves out take those defaults. `default` sets a value back: for example `conveyor.sh control cap off`
-or `conveyor.sh control model default`. For a seat, the default is the pack's first model for it (`models.allowed`).
+or `conveyor.sh control model default`. For a seat, the default is the pack's first model for it (`models.allowed`, or with no list set the models that the CLIs report: [Models](#models)).
 
 A model set with its CLI runs as set, whether the pack's `models.allowed` lists it or not. A model set without a CLI
 must be one that `models.allowed` lists for the seat; if it is not, the seat runs on its default. A seat whose
@@ -408,13 +408,19 @@ the same family. Left at default, the judge runs on another CLI than the reviewe
 
 The host asks each CLI for its models:
 
-- Codex: `codex debug models`.
+- Codex: the models that your Codex account can use, from Codex's models cache (`models_cache.json` in `~/.codex`, or
+  in `CODEX_HOME` when you set it). Codex gets the list again when it runs, so a new model shows up with no edit.
+  When there is no cache, the host asks `codex debug models`.
 - OpenCode: `opencode models`, one `<provider>/<model>` a line.
-- Claude Code has no command that lists its models (its `--model` takes an alias such as `opus`, or a full name). The
-  Board gives its seats a field for the name.
+- Claude Code has no command and no file that lists the models your account can use (its `--model` takes an alias
+  such as `opus`, or a full name). For Claude, the Board offers the list that comes with Conveyor, and a field for
+  any other name.
 
 `conveyor.sh clis` reads the lists again and prints them. The Board does not offer a CLI that is not installed. A seat
 set to a CLI that the host no longer has is marked on the Board, and the loop starts no card on it.
+
+Set `models.allowed` in the pack to keep your own list. When you do not set it (setup does not), the project uses
+the models that the CLIs report: Codex's from its models cache, and for Claude the list that comes with Conveyor.
 
 The pack's `models.allowed` limits nothing. Its first model for a seat is the seat's default, run by the CLI it is
 listed under:
@@ -422,6 +428,12 @@ listed under:
 - for the builder: `claude`, `opencode` (as `opencode:<provider>/<model>`) and `codex-builder`
   (`models.allowed["codex-builder"]`),
 - for the reviewer and the judge: `codex`, `claude-reviewer` and `opencode`.
+
+A model that a seat runs, or that the Board offers, can have no price. The Rules tab shows it under Model prices, in
+"Offered with no price". The loop files one held issue for each such model, "Model price missing: <model>", and does
+not file it again. A Codex family name, such as `sol`, is not a model ID: the check uses the model that Codex runs for
+it. Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. An OpenCode model
+does not need a price: the Board shows the cost that OpenCode reports.
 
 To use OpenCode for a seat:
 

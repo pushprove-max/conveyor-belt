@@ -195,6 +195,26 @@ test('Rules: an ID seen but not priced is listed, and This is… adds it as an a
   assert.match(rowOf(w, 'claude-sonnet-4-6').querySelector('.board-from').textContent, /also: claude-sonnet-4\.6$/);
 });
 
+// Bug: a model the Board offers a role (a CLI's own list, as Codex's models cache gives it, or the pack's), or one a
+// role runs, with no price row showed nowhere: its cost was missing with nothing to say so. Each is named as having no
+// price, with the roles it is in use by; a priced one, an alias of one, an OpenCode one and one already seen in steps are not.
+// Nor is a Codex family name (sol): it is no model ID, and Codex runs a priced model for it.
+test('Rules: a model offered or in force with no price is named as having no price', async () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = JSON.parse(JSON.stringify(PRICES));
+  d.panels.rules.data.modelSettings.reviewer.model = 'gpt-6.3-sol';
+  d.panels.rules.data.modelSettings.reviewer.allowed.codex.push('sol');
+  d.panels.rules.data.modelSettings.reviewer.clis.codex.models.push('gpt-6.3-sol', 'proxy/sonnet', 'claude-sonnet-4.6');
+  deliver(w, d);
+  const box = prices(w).querySelector('.rules-prices-noprice');
+  assert.equal(box.querySelector('.rules-price-title').textContent, 'Offered with no price');
+  assert.deepEqual(Array.from(box.querySelectorAll('.rules-noprice'), (x) => x.firstChild.textContent),
+    ['claude-fable-5-2 (no price)', 'gpt-6.1-terra (no price)', 'gpt-6.3-sol (no price; in use by reviewer)']);
+  act(box.querySelector('[data-model="gpt-6.3-sol"]'), 'price-new').click();
+  assert.equal(act(prices(w).querySelector('.rules-price-addform'), 'price-add-model').value, 'gpt-6.3-sol');
+});
+
 // Bug: a model ID that is an alias, or a model the pack renames, shown as the raw ID elsewhere on the Board. A running
 // card on an alias shows the display name of the model it means; Metrics' cost by model shows the name the pack gives.
 test('Board: a card running on an alias ID, and the cost by model, show the model\'s display name', () => {

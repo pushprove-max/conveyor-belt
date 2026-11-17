@@ -129,7 +129,7 @@ jqget() { # <json> <key> <variable> [<key> <variable>]...
 declare -gA SEAT_V=(); SEAT_K=''
 seat() { # <builder|reviewer|judge> [the control record, when the caller has read it]
   local a c=${2:-} x CTL_V; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
-  packget models.allowed a 2>/dev/null || return 1
+  modelsallowed a || return 1
   if [ "$SEAT_K" != "$c"$'\037'"$a" ]; then
     # Each seat on its own (try): one that fails to work out is none, as it was read alone.
     mapfile -d '' -t x < <(jq -j --argjson c "$c" "$SEATNOW$JUDGENOW"'([try seatnow("builder"; $c)] | first) as $b | ([try seatnow("reviewer"; $c)] | first) as $r
@@ -156,20 +156,99 @@ judgeseat() { seat judge; }
 # The finding kinds always accepted (a JSON array), when the control record's judge is on (`control judge on`).
 # Nothing, and a failure, when it is off or the record does not read.
 judgeon() { local c; c=$(ctl 2>/dev/null) && jq -ce 'select(.judgeOn) | .judgeAlways' <<<"$c"; }
-# progs: the programs the pack's models.allowed lists a model for, one per line (doctor's).
+# The models.allowed in force, in the variable named: the pack's, as packget gives it, when it sets one (the owner's
+# list); else the models this host's CLIs report: Codex's as the host's report has them (hostclis(), climodels()), none
+# when Codex is not installed, and for Claude, which reports none, the built-in MODELS0's, as are Codex's while an
+# installed Codex has reported none (or the report cannot be read). Worked out in
+# one jq run and kept, keyed on the report's text (MODELS_K), so a step that asks again starts no program for it.
+# Fails when the pack does not read.
+MODELS_K=()
+modelsallowed() { # <variable>
+  local m_
+  packget models.allowed m_ 2>/dev/null || return 1
+  if [ -z "$m_" ]; then
+    hostclis >/dev/null 2>&1 || HOST_R=''
+    if [ "${#MODELS_K[@]}" = 2 ] && [ "${MODELS_K[0]}" = "$HOST_R" ]; then m_=${MODELS_K[1]}
+    else
+      m_=$(jq -cn --argjson d "$MODELS0" --argjson h "${HOST_R:-null}" '$h.codex as $x
+        | $d | if ($x | type) == "array" and ($x | length) > 0 then .codex = $x
+          elif ($h | type) == "object" and ($h | has("codex") | not) then .codex = [] else . end') || return 1
+      MODELS_K=("$HOST_R" "$m_")
+    fi
+  fi
+  printf -v "$1" '%s' "$m_"
+}
+# A model the belt runs or offers that has no price (docs/configuration.md, Models): the Board cannot show its cost,
+# so Conveyor files one issue to add the price, held (the control record holds it, as `control hold` does), once for
+# each model whatever the loop's turns or restarts: $NOPRICE keeps {filed: [{model, issue, at}]}. The models: those of
+# the models.allowed in force (modelsallowed()), the Codex models the host's report lists (the Board offers them), and
+# those run: the builder's, the reviewer's and the judge's seats, the Tests seat and the research lane's model. Which
+# have no price is dashboard_limit.py's (unpriced: the built-in table with the pack's prices over it; an OpenCode
+# model keeps the cost OpenCode reports, so it is never one). `serve` looks once a minute (run()), and asks that only
+# when the models or the pack's prices changed since the last look that filed all it had to (NOPRICE_K), so a filing
+# GitHub did not take is tried again at the next look. One look at a time (a lock of its own). CONVEYOR_NOPRICE_CMD,
+# when set, runs in place of dashboard_limit.py unpriced, as bash -c; one that fails files nothing.
+NOPRICE=${STATE%/*}/noprice.json
+NOPRICE_CMD=${CONVEYOR_NOPRICE_CMD:-python3 $(printf %q "$HERE/../.claude/scripts/dashboard_limit.py") unpriced}
+NOPRICE_K=''
+noprice() {
+  local a c p r ms k miss m n out lock x y cli rc=0
+  modelsallowed a || return 1
+  hostclis >/dev/null 2>&1 || HOST_R=''
+  if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi
+  packget prices p lanes.research r 2>/dev/null || return 1
+  # Each model with its CLI. A seat the record and pack leave unset (no judge, say) adds none, and fails no look.
+  x=$({ for m in builder reviewer judge; do seat "$m" "$c" 2>/dev/null || :; done; } | jq -rs --argjson a "$a" --argjson h "${HOST_R:-null}" --argjson c "$c" \
+      --argjson r "${r:-null}" '[(.[] | [.agent, .model]), ($a | objects | to_entries[] | (if .key == "codex" or .key == "codex-builder" then "codex" else "" end) as $k
+        | .value[]? | [$k, .]), ($h.codex[]? | ["codex", .]), ($c.tests | objects | if .cli == "opencode" then ["", "opencode:" + .model] else [.cli, .model] end),
+        ($r | objects | ["claude", .model])] | map(select(.[1] | strings)) | unique[] | map(. // "") | join("\u001f")') || return 1
+  # A one-word name (sol, opus) is a family or an alias, no model ID: Codex runs a family's newest model (codexmodel()),
+  # which is the one to price; one that resolves to none runs nothing (codexready() says so), and Claude's CLI
+  # resolves its aliases itself, so neither is looked at.
+  # Fields split on \037, no whitespace: IFS whitespace would drop an empty CLI field and read the model as the CLI.
+  ms=$(while IFS=$'\037' read -r cli m; do
+      if [[ $m =~ ^[a-z]{2,}$ ]]; then [ "$cli" != codex ] || ! y=$(codexmodel "$m" 2>/dev/null) || printf '%s\n' "$y"; else printf '%s\n' "$m"; fi
+    done <<<"$x" | jq -Rsc '[splits("\n") | select(length > 0)] | unique') || return 1
+  k=$ms$'\037'$p
+  [ "$k" != "$NOPRICE_K" ] || return 0
+  miss=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" '{prices: $p, models: $m}' | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && jq -e 'arrays' <<<"$miss" >/dev/null 2>&1 || return 1
+  { exec {lock}>>"$NOPRICE.lock"; } 2>/dev/null || return 1
+  flock -n "$lock" || { exec {lock}>&-; return 0; }
+  while IFS= read -r m; do
+    [ -n "$m" ] && ! jq -e --arg m "$m" 'any(.filed[]?; .model == $m)' "$NOPRICE" >/dev/null 2>&1 || continue
+    out=$(gh_write issue create --title "Model price missing: $m" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --body "Conveyor runs or offers the model \`$m\`, and no price row prices it, so the Board cannot show what it costs. The Board's Rules tab shows it under Model prices as having no price.
+
+Add its price: on the Board's Rules tab, Model prices, Add model (or This is…, when it is another ID of a model that has a price), or with \`conveyor.sh prices add $m <provider> <name> <input> <output> <cache read>\`, each price in dollars per million tokens from the provider's price page.
+
+Done when: the Board's Model prices shows a price for \`$m\`." 2>&1) \
+      && n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && n=${n##*/} && [ -n "$n" ] \
+      || { echo "conveyor: the issue for the price of $m could not be filed: ${out:0:300}" >&2; rc=1; continue; }
+    jq -c --arg m "$m" --argjson n "$n" --arg at "$(clock)" '.filed = [.filed[]?, {model: $m, issue: $n, at: $at}]' <<<"$(jq -ce 'objects' "$NOPRICE" 2>/dev/null || echo '{}')" \
+      > "$NOPRICE.new" && mv -f "$NOPRICE.new" "$NOPRICE" \
+      || { rm -f "$NOPRICE.new"; echo "conveyor: the issue #$n for the price of $m was filed, but $NOPRICE could not be written" >&2; rc=1; continue; }
+    locked control hold "$n" >/dev/null 2>&1 || { echo "conveyor: the issue #$n for the price of $m was filed, but could not be held" >&2; rc=1; }
+    echo "conveyor: filed #$n, Model price missing: $m (held)"
+  done < <(jq -r '.[]' <<<"$miss")
+  exec {lock}>&-
+  [ "$rc" != 0 ] || NOPRICE_K=$k
+  return $rc
+}
+# progs: the programs the models.allowed in force lists a model for, one per line (doctor's).
 progs() {
   local a
-  packget models.allowed a && jq -r '(if (.claude // []) + (.["claude-reviewer"] // []) | any(strings) then "claude" else empty end),
+  modelsallowed a && jq -r '(if (.claude // []) + (.["claude-reviewer"] // []) | any(strings) then "claude" else empty end),
       (if (.codex // []) + (.["codex-builder"] // []) | any(strings) then "codex" else empty end), (if .opencode // [] | any(strings) then "opencode" else empty end)' <<<"$a"
 }
 # The models a CLI has registered on this host, as a JSON array, read from the CLI itself; fails when it offers no
-# list or its list cannot be read. Codex: `codex debug models`, its model catalog, the slugs it shows a user
-# (visibility list). OpenCode: `opencode models`, one <provider>/<model> a line. Claude Code has no command that lists
-# its models (its --model takes an alias or a full name): none.
+# list or its list cannot be read. Codex: the models its account can use, the slugs it shows a user (visibility list),
+# from its models cache (models_cache.json in CODEX_HOME, which Codex fetches again as it runs), else from `codex debug
+# models`, its model catalog. OpenCode: `opencode models`, one <provider>/<model> a line. Claude Code has no command
+# that lists its models (its --model takes an alias or a full name): none.
 climodels() { # <cli>
+  local list='[.models[]? | select((.visibility // "list") == "list") | .slug | strings] | select(length > 0)'
   case $1 in
-    codex) timeout 20 codex debug models < /dev/null 2>/dev/null \
-      | jq -ce '[.models[]? | select((.visibility // "list") == "list") | .slug | strings] | select(length > 0)' 2>/dev/null ;;
+    codex) jq -ce "$list" "${CODEX_HOME:-$HOME/.codex}/models_cache.json" 2>/dev/null \
+      || timeout 20 codex debug models < /dev/null 2>/dev/null | jq -ce "$list" 2>/dev/null ;;
     opencode) timeout 20 opencode models < /dev/null 2>/dev/null | jq -Rsce '[splits("\n") | select(test("^[^/[:space:]]+/[^[:space:]]+$"))] | select(length > 0)' 2>/dev/null ;;
     *) return 1 ;;
   esac
@@ -591,7 +670,7 @@ routes() {
 # it}; efforts likewise.
 inforce() { # [efforts] [the control record, when the caller has read it]
   local a c=${2:-}; [ -n "$c" ] || c=$(ctl 2>/dev/null) || c=null
-  packget models.allowed a 2>/dev/null || a=null
+  modelsallowed a || a=null
   jq -c --argjson c "$c" --arg k "$([ -z "${1:-}" ] && echo model || echo effort)" "$SEATNOW"'(first(seatnow("builder"; $c)) // {}) as $b
     | (first(seatnow("reviewer"; $c)) // {}) as $r | {claude: ($b[$k] // null), codex: ($r[$k] // null)}' <<<"$a"
 }
@@ -626,7 +705,7 @@ SETTINGS="$SEATNOW$JUDGENOW$MISSING"'def settings($c; $e; $h): . as $a | (first(
            choices: ($a | [okmodels("reviewer")[][]]), allowed: bycli($a | okmodels("reviewer")), efforts: (if $j == null then [] else $e[$j.agent] end), default: $ok[0], clis: offer("judge"; $h), missing: gone($j)} end)};'
 modelsettings() { # [the control record, when the caller has read it]
   local a c=${1:-}; [ -n "$c" ] || c=$(ctl 2>/dev/null) || c=null
-  packget models.allowed a 2>/dev/null || { echo null; return; }
+  modelsallowed a || { echo null; return; }
   jq -c --argjson c "$c" --argjson e "$EFFORTS" --argjson h "$(hostclis)" "$SETTINGS"'settings($c; $e; $h)' <<<"$a" 2>/dev/null || echo null
 }
 # The cap in force: the control record's, else the seed's (CAP0); nothing when the record does not read.

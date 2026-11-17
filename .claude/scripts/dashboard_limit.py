@@ -27,6 +27,8 @@
       The same, for the cards of <cards-file>, one a line (conveyor.sh snapshot): the priced cards go to
       <priced-file>, one a line, and the rest of the part to stdout. <kept> is a summary of the cards priced last
       time: a card whose line has not changed since is not priced again (card_costs).
+  dashboard_limit.py unpriced  < {prices, models: [...]}
+      The model IDs of models that no price row prices, the pack's prices put over the table (unpriced), as a JSON list.
 
 Every figure comes from that reading or from Claude Code's own transcripts; a
 figure with no source is null, never 0 or an estimate. Dollars are list-price
@@ -685,6 +687,26 @@ def lane_models(projects, worktree, since):
     return {m: len(s) for m, s in out.items()}
 
 
+def known(m):
+    """The price row a model ID is priced at (the ID, or it with no [1m] and no date at its end, through the pack's
+    aliases), or None when the table has no row for it."""
+    if not isinstance(m, str):
+        return None
+    for c in (m, re.sub(r"\[[^]]*\]$", "", m), re.sub(r"-\d{8}$", "", re.sub(r"\[[^]]*\]$", "", m))):
+        if canon(c) in PRICES:
+            return canon(c)
+    return None
+
+
+def unpriced(part):
+    """Of the model IDs `models` names, those with no price row (known), after the part's `prices` (the pack's) are
+    put over the table: what Conveyor files an issue for (noprice(), lib/control.sh). An OpenCode model keeps the cost
+    OpenCode reports, so it is never one."""
+    use_prices(part.get("prices") if isinstance(part.get("prices"), dict) else {})
+    ms = part.get("models") if isinstance(part.get("models"), list) else []
+    return sorted({m for m in ms if isinstance(m, str) and m and not m.startswith("opencode:") and known(m) is None})
+
+
 def card_costs(part, lines=None, kept=None, dest=None):
     """Conveyor's cards priced: each finished session (build, fix, rebase) and review (Codex too) at the list
     price of the model that ran it, from the token split its record line holds. A finished step is priced only at the
@@ -734,13 +756,6 @@ def card_costs(part, lines=None, kept=None, dest=None):
     folder), taken out of the part, adds the model IDs its sessions ran from that time on (lane_models), one session
     each: they are no card's step, and an ID only they ran would never reach Seen but not priced.
     """
-    def known(m):
-        if not isinstance(m, str):
-            return None
-        for c in (m, re.sub(r"\[[^]]*\]$", "", m), re.sub(r"-\d{8}$", "", re.sub(r"\[[^]]*\]$", "", m))):
-            if canon(c) in PRICES:
-                return canon(c)
-        return None
 
     def ran(step):
         st = step.get("stats") if isinstance(step.get("stats"), dict) else {}
@@ -1551,6 +1566,9 @@ def main(argv):
         return 0
     if len(argv) == 2 and argv[1] == "cards":
         json.dump(card_costs(json.load(sys.stdin)), sys.stdout)
+        return 0
+    if len(argv) == 2 and argv[1] == "unpriced":
+        json.dump(unpriced(json.load(sys.stdin)), sys.stdout)
         return 0
     if len(argv) == 5 and argv[1] == "cardlines":
         json.dump(card_costs(json.load(sys.stdin), *argv[2:5]), sys.stdout)

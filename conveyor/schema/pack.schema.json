@@ -187,11 +187,10 @@
     "defaultBranch": { "type": "string", "minLength": 1 },
     "models": {
       "type": "object",
-      "required": ["allowed"],
       "additionalProperties": false,
       "properties": {
         "allowed": {
-          "description": "Default models for the builder and the reviewer, by the program that runs them: the first for a seat is its default. They limit nothing the control record sets (a CLI installed on the host and a model it has registered: docs/configuration.md, Models).",
+          "description": "Default models for the builder and the reviewer, by the program that runs them: the first for a seat is its default. They limit nothing the control record sets (a CLI installed on the host and a model it has registered: docs/configuration.md, Models). With none set, the project follows the models the CLIs report: Codex's from its models cache, Claude's the built-in list.",
           "type": "object",
           "required": ["claude", "codex", "claude-reviewer"],
           "additionalProperties": false,
