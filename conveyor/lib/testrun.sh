@@ -1323,6 +1323,9 @@ voidrun() { # <worktree> <exit>
   fi
   [ ${#l[@]} -gt 0 ] && ! grep -qE '^(TESTRUN |== |-- )' "${l[@]}" 2>/dev/null \
     && { echo "exit $2: the runner's logs name no test it ran"; return 0; }
+  # Logs that name tests it ran are a result: the command failed on a check of its own (a lint, shellcheck, a map
+  # check), which its output says and a fix session can act on (#195 was blocked three times for its own warnings).
+  [ ${#l[@]} -eq 0 ] || return 1
   packget test.command cmd 2>/dev/null && [ -n "$cmd" ] && testfails "$1.test" "$2" \
     | jq -e --arg c "$cmd" '.files != [] and all(.files[]; .file == $c and .cases == [])' > /dev/null 2>&1 || return 1
   echo "exit $2: the run named no test that failed, only the test command"
