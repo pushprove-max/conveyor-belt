@@ -49,15 +49,19 @@ test('Benchmarks: the cost before Start leaves out the tasks of the first n that
   const w = boot({ tab: 'tests' });
   const r = { resolved: true, sessions: 2, tokens: 100, minutes: 3 };
   const five = Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((x) => [`p__${x}`, r]));
-  deliver(w, withBench({ ...BASE, soloKey: 'solo-m', keys: [
-    { key: EB, arm: 'conveyor', engine: EB, version: 'main', tasks: five, at: [0, 1, 2, 3, 4] },
+  const EC = 'c'.repeat(40);
+  deliver(w, withBench({ ...BASE, soloKey: 'solo-m', versions: BASE.versions.concat({ name: 'v1.1.0', commit: EC }), keys: [
+    { key: EA, arm: 'conveyor', engine: EA, version: 'v1.2.0', tasks: five, at: [0, 1, 2, 3, 4] },
     { key: 'solo-m', arm: 'solo', engine: null, model: 'm', tasks: { p__a: r }, at: [0] }] }));
+  const pick = act(part(w), 'bench-engine');
+  pick.value = 'v1.2.0'; pick.dispatchEvent(new w.Event('change'));
   assert.match(plan(w), /^Expected for 5 tasks: about 0 sessions \(worst case 0\) and 0 minutes\. 5 of them already ran on this version and are reused at no cost\./);
   act(part(w), 'bench-preset-20').click();
   assert.match(plan(w), /^Expected for 20 tasks: about 38 sessions \(worst case 90\) and 300 minutes\. 5 of them already ran/);
-  const pick = act(part(w), 'bench-engine');
-  pick.value = 'v1.2.0'; pick.dispatchEvent(new w.Event('change'));
-  assert.match(plan(w), /^Expected for 20 tasks: about 50 sessions \(worst case 120\) and 400 minutes\. Tasks already run/, 'another version reuses none of main\'s');
+  // Another release: its commit is looked up and differs, so none of v1.2.0's results are counted.
+  const other = act(part(w), 'bench-engine');
+  other.value = 'v1.1.0'; other.dispatchEvent(new w.Event('change'));
+  assert.match(plan(w), /^Expected for 20 tasks: about 50 sessions \(worst case 120\) and 400 minutes\. Tasks already run/,'another version reuses none of v1.2.0\'s');
   const solo = act(part(w), 'bench-engine');
   solo.value = '--solo'; solo.dispatchEvent(new w.Event('change'));
   assert.match(plan(w), /^Expected for 20 tasks: about 19 sessions \(worst case 19\) and 152 minutes\. 1 of them already ran/);
@@ -79,6 +83,22 @@ test('Benchmarks: a run going shows a bar of its tasks done, and Stop sends benc
   next(w, withBench({ ...BASE, live: { state: 'stopped', arm: 'conveyor', engine: EB, version: 'main', n: 5, done: 2, resolved: 1, tasks: [{ id: 'a', result: 'resolved' }, { id: 'b', result: 'not run: its Docker image could not be fetched or built' }] } }));
   assert.match(part(w).querySelector('.tests-bench-last').textContent, /^Last run: stopped · 1 of 5 resolved, 1 not run · engine main b{12}\.$/);
   assert.ok(act(part(w), 'bench-start'), 'Start is offered again');
+});
+
+// Bug it guards (#317): the cost for main came from main's commit in the kept version list, but Start sends --engine
+// main, which the engine reads again; once main moved on, the Board said 0 sessions for a run that builds every task,
+// and List versions, which reads main again, was gone once a list was kept.
+test('Benchmarks: the cost for main counts every task, and List versions stays offered once a list is kept', async () => {
+  const w = boot({ tab: 'tests' });
+  const r = { resolved: true, sessions: 2, tokens: 100, minutes: 3 };
+  const five = Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((x) => [`p__${x}`, r]));
+  deliver(w, withBench({ ...BASE, keys: [{ key: EB, arm: 'conveyor', engine: EB, version: 'main', tasks: five, at: [0, 1, 2, 3, 4] }] }));
+  assert.equal(act(part(w), 'bench-engine').value, 'main');
+  assert.match(plan(w), /^Expected for 5 tasks: about 13 sessions \(worst case 30\) and 100 minutes\. Main's commit is read when the run starts: tasks that commit already ran are reused at no cost\./);
+  w.reply = reply('[]');
+  act(part(w), 'bench-versions').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['versions']]);
+  await settle();
 });
 
 // Bug it guards: the results of two versions could not be read side by side, nor told from noise, nor compared. The

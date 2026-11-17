@@ -2057,14 +2057,20 @@
       pick.value = BENCH.solo ? '--solo' : BENCH.engine;
       pick.addEventListener('change', () => { BENCH.solo = pick.value === '--solo'; if (!BENCH.solo) BENCH.engine = pick.value; draw(); });
       ctl.append(box, pick);
-      if (!b.versions) ctl.append(button('List versions', 'btn-quiet', 'bench-versions', 'List the released versions', () => send('bench', ['versions'], () => 'The versions are listed.')));
+      // Offered also once a list is kept: main's commit in it is the one read when it was listed, and moves on.
+      ctl.append(button('List versions', 'btn-quiet', 'bench-versions', 'List the released versions', () => send('bench', ['versions'], () => 'The versions are listed.')));
       el.append(ctl);
       const per = obj(obj(b.perTask) && b.perTask[BENCH.solo ? 'solo' : 'conveyor']) || (BENCH.solo ? { usual: 1, worst: 1, minutes: 8 } : { usual: 2, worst: 12, minutes: 20 });
       // The tasks of the first n that the version picked (or Claude alone) already ran are reused: only the rest cost.
-      const commit = (versions.find((v) => v.name === BENCH.engine) || {}).commit;
+      // Not for main: Start sends --engine main, which the engine reads again, and main may have moved past the commit
+      // in the kept list, so a quote from that commit could say 0 sessions for a run that builds every task.
+      const main = !BENCH.solo && BENCH.engine === 'main';
+      const commit = main ? null : (versions.find((v) => v.name === BENCH.engine) || {}).commit;
       const mine = list(b.keys).find((k) => obj(k) && (BENCH.solo ? k.key === b.soloKey : k.arm !== 'solo' && typeof commit === 'string' && k.engine === commit));
       const reused = mine ? list(mine.at).filter((i) => Number.isInteger(i) && i < BENCH.n).length : 0, todo = BENCH.n - reused;
-      el.append(h('p', 'tests-bench-plan', `Expected for ${BENCH.n} ${BENCH.n === 1 ? 'task' : 'tasks'}: about ${Math.ceil(todo * per.usual)} sessions (worst case ${todo * per.worst}) and ${todo * per.minutes} minutes. ${reused ? `${reused} of them already ran on this version and are reused at no cost.` : 'Tasks already run on this version are reused and cost nothing.'} A run does not start while the usage guard is reached.`));
+      const reuse = main ? 'Main\'s commit is read when the run starts: tasks that commit already ran are reused at no cost.'
+        : reused ? `${reused} of them already ran on this version and are reused at no cost.` : 'Tasks already run on this version are reused and cost nothing.';
+      el.append(h('p', 'tests-bench-plan', `Expected for ${BENCH.n} ${BENCH.n === 1 ? 'task' : 'tasks'}: about ${Math.ceil(todo * per.usual)} sessions (worst case ${todo * per.worst}) and ${todo * per.minutes} minutes. ${reuse} A run does not start while the usage guard is reached.`));
       const go = button('Start', 'btn-primary', 'bench-start', `Run SWE-bench: ${BENCH.n} tasks`, () => {
         send('bench', ['run', String(BENCH.n)].concat(BENCH.solo ? ['--solo'] : ['--engine', BENCH.engine]), (t) => `Started: ${t.replace(/^conveyor: /, '')}`);
       });
