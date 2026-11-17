@@ -36,7 +36,8 @@
 // many a label holds. Groups start closed, largest first; one opens to five issues, then "Show 5 more"
 // and "Show all (M)" (the page's shared long list). Queue releases an issue the record holds; on one a label holds it removes the label
 // and queues it, as the Board's "Remove the label and queue it", after saying so with a first click. Queue
-// all asks once, naming the count and how many a label holds, and leaves those out unless asked. A search by number
+// all asks once, naming the count and how many a label holds, and leaves those out unless asked. A row these, Hold or
+// their Undo move shows as moved until a snapshot made after the change shows it (moveJudge). A search by number
 // or title opens the groups with matches. Every change is POST control; the record the host answers with shows at
 // once, and What these rules produce waits for the next snapshot: this file never computes the queue.
 // The guard rule, as everywhere on the Board: a change easily undone (a switch, a cap, a pin, Queue, Hold) acts on one
@@ -73,7 +74,7 @@
   const PART = 'rules', HELD_P = `${PART}-held`;
   const S = { d: null, ctl: null, ctlAt: null, was: {}, guessed: false, floor: null, read: null, turned: false, refused: null,
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
-    open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, unlabeled: new Set(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
+    open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set() };
   // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
@@ -167,6 +168,44 @@
     if (!Object.keys(one).length) delete all[repo];
     draftsKeep();
   };
+
+  // ---- the issues an action here moved (Queue, Queue all, Hold, a label removed, and their Undo) ----
+  // By project and issue: {repo, issue, action ('release', 'hold' or 'unlabel'), labels (those unlabel removes), out (sent,
+  // not answered yet), at (when the host answered, as post gives it; null: no time), error (why it did not move, in words)}.
+  // A moved row shows as moved until a snapshot begun at or after the answer (with no time, the next one) shows the move;
+  // an older snapshot does not bring it back. That first snapshot does not show the move, or the host refused it: the row
+  // comes back with the error beside it, until a snapshot shows the move or it is moved again.
+  const MOVES = { release: 'Not queued', hold: 'Not held', unlabel: 'Label not removed' };  // the start of each error
+  const moveOf = (n) => S.moved.get(`${S.d.repo}#${n}`) || null;
+  const pendingMove = (n) => { const m = moveOf(n); return m && !m.error ? m : null; };
+  function moveMark(repo, action, args, o) {
+    const a = list(args);
+    (action === 'unlabel' ? a.slice(0, 1) : a).forEach((n) => S.moved.set(`${repo}#${Number(n)}`,
+      Object.assign({ repo, issue: Number(n), action, labels: action === 'unlabel' ? a.slice(1) : [], out: false, at: null, error: null }, o)));
+  }
+  // Whether the snapshot view shows the move m.
+  function moveShown(view, m) {
+    const rows = list(view.open && view.open.held).concat(list(view.held).map((x) => Object.assign({ reasons: [{ kind: 'you' }] }, x))).filter((x) => x && x.issue === m.issue);
+    if (m.action === 'unlabel') return !rows.some((x) => list(x.reasons).some((r) => r && r.kind === 'label' && m.labels.includes(r.label)));
+    const c = view.control && typeof view.control === 'object' ? view.control : null;
+    const mine = c ? list(c.held).includes(m.issue) : rows.some((x) => list(x.reasons).some((r) => r && r.kind === 'you'));
+    return m.action === 'hold' ? mine : !mine;
+  }
+  // A new snapshot of the project view, begun at read: each move it is new enough to show is done, or failed.
+  function moveJudge(view, read) {
+    S.moved.forEach((m, k) => {
+      if (m.repo !== view.repo || m.out) return;
+      const shown = moveShown(view, m);
+      if (m.error) { if (shown) S.moved.delete(k); return; }
+      if (m.at !== null && (read === null || read < m.at)) return;
+      if (shown) S.moved.delete(k);
+      else m.error = `${MOVES[m.action]}: the first update after the change still shows it ${m.action === 'hold' ? 'not held' : m.action === 'unlabel' ? 'with the label' : 'held'}.`;
+    });
+  }
+  // The words beside a moved row: while it waits for a snapshot, and when it failed.
+  const moveNote = (m) => (m.error ? S.ctx.h('span', 'rules-refused', m.error)
+    : S.ctx.h('span', 'board-from board-sent', m.action === 'unlabel' ? 'Label removed: it goes into the queue in about a minute.'
+      : `${m.action === 'hold' ? 'Held' : 'Queued'}: this shows in about a minute.`));
 
   // A change in words, for the head.
   function words(action, args) {
@@ -271,7 +310,11 @@
         if (guess && repo === S.d.repo) S.d = was.d;
         put(guess ? { guessed: false, ctl: was.shown, ctlAt: at !== null ? at : was.at, refused: { row: guess[1], text } } : { guessed: false });
       };
+      // An issue it moves shows as moved while it is out (moveMark).
+      const moves = (o) => { if (MOVES[action]) moveMark(repo, action, args, o); };
+      if (MOVES[action]) { moves({ out: true }); draw(); }
       return post(action, args, repo).then((res) => {
+        moves(res.ok ? { at: res.at } : { error: `${MOVES[action]}: ${S.ctx.refusal(res.said)}` });
         if (!res.ok) { back(res.said, res.at); tell(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
         put({ guessed: false });
         // A model price saved shows at once (pricesSection), its Undo's too.
@@ -288,7 +331,7 @@
         // The host's record, else the guess: it stands until a snapshot begun at or after the answer (render).
         if (res.rec || guess) put(Object.assign(res.rec ? { ctl: res.rec } : {}, { ctlAt: res.rec ? res.at : null }));
         return next();
-      }, (e) => { back('the host did not answer', null); throw e; });
+      }, (e) => { moves({ error: `${MOVES[action]}: the host did not answer.` }); back('the host did not answer', null); throw e; });
     };
     const free = (ok) => { S.busy = false; draw(); return ok; };
     return next().then((ok) => {
@@ -426,7 +469,8 @@
       const others = list(x.reasons).filter((r) => r && r.kind !== 'you');
       const holds = others.filter((r) => r.kind === 'label' && typeof r.label === 'string').map((r) => r.label);
       const you = mine.has(x.issue);
-      if (!you && !holds.length) return;
+      // A row moved here stays, shown as moved, until a snapshot shows the move (moveJudge).
+      if (!you && !holds.length && !pendingMove(x.issue)) return;
       const rest = others.filter((r) => r.kind !== 'label');
       const how = holds.length ? (rest.length ? null : 'unlabel') : 'release';
       out.push(Object.assign({}, x, { holds, you, how, rest }));
@@ -485,18 +529,18 @@
       return;
     }
     S.armed = null;
-    send('unlabel', [String(x.issue)].concat(x.holds), () => { S.unlabeled.add(x.issue); });
+    send('unlabel', [String(x.issue)].concat(x.holds));
   }
   // Queue a whole group: the ones the record holds, in batches; with the labelled ones, their labels removed one by one.
   function queueAll(g, withLabels) {
-    const free = g.items.filter((x) => x.how === 'release' && !S.unlabeled.has(x.issue)).map((x) => String(x.issue));
-    const labelled = withLabels ? g.items.filter((x) => x.how === 'unlabel' && !S.unlabeled.has(x.issue)) : [];
+    const free = g.items.filter((x) => x.how === 'release').map((x) => String(x.issue));
+    const labelled = withLabels ? g.items.filter((x) => x.how === 'unlabel' && !pendingMove(x.issue)) : [];
     const steps = [];
     for (let i = 0; i < free.length; i += RELEASE_MAX) steps.push(['release', free.slice(i, i + RELEASE_MAX)]);
     labelled.forEach((x) => steps.push(['unlabel', [String(x.issue)].concat(x.holds)]));
     S.asking = null; S.withLabels = false;
     if (!steps.length) { draw(); say('You cannot queue anything in this group from here.'); return; }
-    run(steps, `queued ${plural(free.length + labelled.length, 'issue', 'issues')} of ${g.name}`, () => { labelled.forEach((x) => S.unlabeled.add(x.issue)); });
+    run(steps, `queued ${plural(free.length + labelled.length, 'issue', 'issues')} of ${g.name}`);
   }
 
   // ---- left: one row a rule ----
@@ -1059,8 +1103,10 @@
     li.dataset.issue = String(x.issue);
     li.append(S.ctx.issueLink(x), h('span', 'board-title', x.title || 'untitled'), h('span', 'rules-prio', prio(x)));
     x.holds.forEach((l) => li.append(S.ctx.chip(l, 'warn')));
-    if (S.unlabeled.has(x.issue)) { li.classList.add('is-pending'); li.append(h('span', 'board-from board-sent', 'Label removed: it goes into the queue in about a minute.')); }
-    else if (x.how === 'release') li.append(button('Queue', 'btn-quiet', 'queue', `Queue ${t}: release it from the hold`, () => queueOne(x)));
+    const m = moveOf(x.issue);
+    if (m && !m.error) { li.classList.add('is-pending'); li.append(moveNote(m)); return li; }
+    if (m) li.append(moveNote(m));
+    if (x.how === 'release') li.append(button('Queue', 'btn-quiet', 'queue', `Queue ${t}: release it from the hold`, () => queueOne(x)));
     else if (x.how === 'unlabel') {
       const armed = S.armed === x.issue, what = `${x.holds.length === 1 ? 'the label' : 'the labels'} ${x.holds.join(', ')}`;
       const b = button(armed ? `Click again: remove ${what} on GitHub` : 'Queue', armed ? 'board-danger' : 'btn-quiet', 'queue',
@@ -1241,6 +1287,8 @@
     list(x.labels).filter((l) => !isArea(l)).forEach((l) => li.append(S.ctx.chip(l, 'quiet')));
     li.append(h('span', 'board-from rules-age', Number.isNaN(t0) ? 'age not known' : `${S.ctx.dur((Date.now() - t0) / 1000)} old`),
       S.ctx.chip(stateWord(x), { blocked: 'bad', you: 'warn', label: 'warn', next: 'ok', building: 'info' }[x.state] || 'quiet'));
+    const m = moveOf(x.issue);
+    if (m) { if (!m.error) li.classList.add('is-pending'); li.append(moveNote(m)); }
     return li;
   }
   function issuesSection() {
@@ -1817,7 +1865,8 @@
       if (S.ctlAt !== null) S.floor = S.ctlAt;
       S.ctl = null; S.ctlAt = null; S.was = {};
     }
-    S.d = view; S.turned = false; S.unlabeled.clear();
+    S.d = view; S.turned = false;
+    moveJudge(view, read);
     draw();
   };
 
@@ -1841,7 +1890,7 @@
     // answer is shown or a snapshot was turned away (as the Board's).
     same(el, d, ctx) {
       const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
-      if ((S.ctl || S.turned) && read !== S.read) render(id)(el, d, ctx);
+      if ((S.ctl || S.turned || S.moved.size) && read !== S.read) render(id)(el, d, ctx);
     },
   }));
 }());
