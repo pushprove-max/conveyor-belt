@@ -526,3 +526,53 @@ t_mainrednochangered() {
     && [ -z "$(st 'select(.card == "cfix" and (.step | IN("closed", "review", "start")))')" ] \
     || fail "the fix card whose cases still fail on main was not blocked naming the run, or went to review: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }
+
+# Issue 358: mainwait() alone, card c9 waiting on `a.test: one` at main's commit, its live record checked every LIVE
+# (2) seconds. The case's entry (redsetup's, which holds c.test too, its fix card not picked) is of main's commit
+# before, as mainred() leaves a case failing at a later commit with that entry: a wait that looked only at main's
+# commit's entry never saw it go. Sets s, main's commit, and mw, the waiting process; its output goes to $STUB/mw.out.
+mwstart() {
+  redsetup ''
+  git -C "$R" commit -q --allow-empty -m "main moves, still red"
+  s=$(git -C "$R" rev-parse HEAD); mkdir -p "$T/$CASE/cards"
+  ( eng 'LIVE=2; mainwait "$CONVEYOR_CARDS/c9" '"$s"' "a.test: one"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
+  wait_until "grep -qs 'waiting for main to change: a.test: one fail on main at ${s:0:12} too' '$T/$CASE/cards/c9.live'" 'cat "$STUB/mw.out"' \
+    || fail "the card did not wait for main, saying on what"
+}
+# Bug it catches: the owner removed a wrong main-red entry with main unchanged, and the card waited on until the loop
+# was stopped. The case leaves the record (c.test, which the card does not wait on, stays): the wait ends within one
+# LIVE interval (the ceiling: LIVE and a second's slack), and the card goes on to test again (card()).
+t_mainwaitcleared() {
+  local s mw
+  mwstart
+  jq -c '.reds[0].cases |= map(select(.case != "a.test: one"))' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  WAIT_CEILING=3 wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once its case left the main-red record"
+  wait "$mw"; [ ! -e "$T/$CASE/cards/c9.live" ] && [ ! -e "$T/$CASE/cards/c9.idle" ] || fail "the ended wait left its live record or wait mark"
+}
+# Bug it catches: the case's fix card closed as already done (its cases pass on main: bugproof(), nochange()) with main
+# unchanged, its entry left in the record, and the card waited on. Picked, the fix card holds the wait; closed, it ends
+# within one LIVE interval.
+t_mainwaitfixclosed() {
+  local s mw l
+  mwstart
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  l=$(jq -r .last "$T/$CASE/cards/c9.live")
+  wait_until "[ \"\$(jq -r .last '$T/$CASE/cards/c9.live' 2>/dev/null)\" != '$l' ]" || fail "the waiting card's live record was not brought up to date"
+  [ -z "$(cat "$STUB/mw.out")" ] || fail "the wait ended while the case's fix card was open: $(cat "$STUB/mw.out")"
+  eng 'append "$(line cfix 0 closed ok "{\"reason\":\"already done\"}")"' || fail "the fix card's closed line could not be written"
+  WAIT_CEILING=3 wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once the case's fix card closed"
+  wait "$mw"
+}
+# Bug it catches: a wait that ended on its own with main still red and its entry standing (the card tested again for
+# nothing, every LIVE). The live record is brought up to date, so the wait has checked again, and it still waits;
+# then main moves, which ends it.
+t_mainwaitstays() {
+  local s mw l
+  mwstart
+  l=$(jq -r .last "$T/$CASE/cards/c9.live")
+  wait_until "[ \"\$(jq -r .last '$T/$CASE/cards/c9.live' 2>/dev/null)\" != '$l' ]" || fail "the waiting card's live record was not brought up to date"
+  [ -z "$(cat "$STUB/mw.out")" ] && [ -e "$T/$CASE/cards/c9.live" ] || fail "the wait ended with its entry standing and main unchanged: $(cat "$STUB/mw.out")"
+  echo m > "$R/m.txt"; git -C "$R" add m.txt; git -C "$R" commit -qm "main moves"
+  wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once main moved"
+  wait "$mw"
+}

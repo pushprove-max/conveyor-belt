@@ -1936,13 +1936,27 @@ redissue() { # <card>
 redtitles() {
   jq -ce '[.reds[]? | select(.card) | {key: .card, value: ("Main is red: " + ([.cases[].case] | join(", ")))[0:200]}] | from_entries' "$MAINRED" 2>/dev/null || echo '{}'
 }
+# Whether the main-red record (mainred()) holds main red for any of <case>...: an entry of any commit lists one, and
+# its fix card is not picked yet or is still open (redopen()), as mainred() files a case (a case failing at a later
+# commit goes to the open fix card of an earlier one). An entry whose fix card landed, or closed as already done
+# (bugproof(), nochange()), holds it no more.
+redlisted() { # <case>...
+  local card
+  while read -r card; do redopen "$card" < /dev/null && return 0; done \
+    < <(jq -r --args '.reds[]? | select(any(.cases[]?; .case | IN($ARGS.positional[]))) | .card // ""' "$@" < "$MAINRED" 2>/dev/null)
+  return 1
+}
 # A card whose every failure is main's (verdicts()) waits in its test step until main is at another commit than
 # <main's commit>, its live record saying so and brought up to date as it waits (so `health` does not call it stuck).
 # It only sleeps there: <worktree>.idle stands meanwhile, so the loop does not count it against the builder cap (idle()).
-mainwait() { # <worktree> <main's commit> <the cases, as one text>
-  local at; at=$(date -u +%FT%TZ)
-  while [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" = "$2" ]; do
-    jq -cn --arg at "$at" --arg c "$3" --arg s "${2:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+# It ends too once the main-red record ($MAINRED) holds main red for none of <case>... (redlisted(); issue 358: the
+# owner or the Foreman removed a wrong entry, or its fix card closed as already done), when it held one as the wait
+# began; a wait on cases the record did not hold (mainred() could not write them) ends only as main moves.
+mainwait() { # <worktree> <main's commit> <case>...
+  local at c listed=''; at=$(date -u +%FT%TZ); c=$(jq -rn '$ARGS.positional | join(", ")' --args "${@:3}")
+  ! redlisted "${@:3}" || listed=1
+  while [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" = "$2" ] && { [ -z "$listed" ] || redlisted "${@:3}"; }; do
+    jq -cn --arg at "$at" --arg c "$c" --arg s "${2:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
       action: "waiting for main to change: \($c) fail on main at \($s) too"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     : > "$1.idle"; sleep "$LIVE"
   done

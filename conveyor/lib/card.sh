@@ -26,7 +26,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
   local cr # cr: a failed test line's carried part (carriedrec())
-  local mainsec=0 mw # mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
+  local mainsec=0 mw mwon # mwon: main's commit and the cases it waits on there (mainwait()); mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' # kw: keptway()'s answer for a kept patch
@@ -593,7 +593,8 @@ card() { # <card> <issue> [<branch> <tip>]
         elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
           echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
           rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-          mw=$SECONDS; mainwait "$wt" "$(jq -r .mainRun.sha <<<"$t")" "$(jq -r '[.verdicts[] | select(.verdict == "main") | .case] | join(", ")' <<<"$t")"; held=1
+          mapfile -t mwon < <(jq -r '.mainRun.sha, (.verdicts[] | select(.verdict == "main") | .case)' <<<"$t")
+          mw=$SECONDS; mainwait "$wt" "${mwon[@]}"; held=1
           mainsec=$((mainsec + SECONDS - mw))
         fi
         if [ -n "$held" ]; then
