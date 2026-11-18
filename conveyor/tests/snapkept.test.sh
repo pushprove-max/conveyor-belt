@@ -164,3 +164,13 @@ t_snapkeptgithub() {
   for _ in $(seq 100); do [ ! -e "$STUB/answered" ] || break; sleep 0.2; done
   snapkept_built
 }
+
+# Bug (#468): a snapshot with no `watch` feed asked GitHub whether gh is signed in, but not whether GitHub answers, so
+# its health said ghReached false with gh auth status succeeding. The stub's gh is signed in and answers; then its gh
+# auth status times out ($STUB/unreached): signed in, not reached.
+t_snapkeptreach() {
+  setup "[$(issue 1 2026-11-01)]"; mkdir -p "$ST"
+  [ "$(loop snapshot --fresh | jq -c '.health | [.gh, .ghReached]')" = '[true,true]' ] || fail "a signed-in gh that GitHub answers is not reached: $(ls "$ST/snapgh")"
+  : > "$STUB/unreached"
+  [ "$(loop snapshot --fresh | jq -c '.health | [.gh, .ghReached]')" = '[true,false]' ] || fail "a gh auth status that timed out reads as GitHub reached"
+}

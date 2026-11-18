@@ -49,7 +49,12 @@ snapask() { # <since> [nowait]
     if i=$(openissues "$FIELDS" 2>/dev/null); then printf '%s\n' "$i" > "$SNAPGH/issues.new" && mv -f "$SNAPGH/issues.new" "$SNAPGH/issues"
     else rm -f "$SNAPGH/issues"; fi
     [[ $i != *"\"$BUILT\""* ]] || { labelled > "$SNAPGH/labelled.new" && mv -f "$SNAPGH/labelled.new" "$SNAPGH/labelled"; }
-    { ghok && echo true || echo false; } > "$SNAPGH/gh.new" && mv -f "$SNAPGH/gh.new" "$SNAPGH/gh"
+    local g=false r=false; ! ghok || g=true
+    # Whether GitHub answers too (health's ghReached): the build reads SNAPGH as a feed, and a feed with no ghreach
+    # reads as GitHub not reached. Health reads it only when signed in, so it is asked only then.
+    [ "$g" = false ] || ! ghreach || r=true
+    echo "$g" > "$SNAPGH/gh.new" && mv -f "$SNAPGH/gh.new" "$SNAPGH/gh"
+    echo "$r" > "$SNAPGH/ghreach.new" && mv -f "$SNAPGH/ghreach.new" "$SNAPGH/ghreach"
     hostclis due >/dev/null 2>&1 || :
     local c CTL_V; if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi
     [ "$(jq -r .guard <<<"$c" 2>/dev/null)" = null ] || guardread "$c" ask > /dev/null 2>&1 || :
