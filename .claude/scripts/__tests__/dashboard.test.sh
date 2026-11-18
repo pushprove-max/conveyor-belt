@@ -378,7 +378,8 @@ o=''; ! o=$(orun widgetshop a.test.sh 2>/dev/null) && [ -z "$o" ] || fail "a hos
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
 cards_fixture() {
-TODAY=$(date -u +%Y%m%d) TODAY_ISO=$(date -u +%Y-%m-%d)
+# One read of the clock: a card id and its landing time from two reads were a day apart across midnight.
+TODAY_ISO=$(date -u +%Y-%m-%d); TODAY=${TODAY_ISO//-/}
 P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "Button copy", "sentence": "Staff see a new button.", "since": "'"$(ago 600)"'"}],
                         "blocked": [{"card": "c2-13", "issue": 13, "title": "Broken", "reason": "tests failed twice", "since": "'"$(ago 900)"'",
                                      "track": {"records": [{"name": "tests failed", "state": "failed", "failures": {"files": [{"file": "a.test", "cases": [{"name": "adds up"}]}]}}]},
@@ -1427,7 +1428,19 @@ rm -f "$BIN/systemctl"
 
 # --- the loop serves the page to other machines on the LAN, and its server ends with it (a leftover would hold
 # the port against the next job) ---
-port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])')
+# The port is free when picked and the server binds it later. A port the kernel handed out (bind to 0) is in the
+# ephemeral range, where any outgoing connection, or another test's bind to 0, can take it in that gap and the server
+# fails to start; a free port below that range is only taken by a bind that names it.
+port=$(python3 -c '
+import random, socket
+try: low = int(open("/proc/sys/net/ipv4/ip_local_port_range").read().split()[0])
+except OSError: low = 49152
+while True:
+    p = random.randrange(10000, low)
+    with socket.socket() as s:
+        try: s.bind(("", p))
+        except OSError: continue
+    print(p); break')
 lan=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
 [ -n "$lan" ] || fail "no LAN address to test the page from"
 rm -f "$OUT/data.js"  # a fresh install: the page is up before the first collect lands
@@ -1491,11 +1504,12 @@ dcurl -sf -m 5 "$DU/data.js" > "$T/served.js" || stop "data.js must be served be
 head -c 14 "$T/served.js" | grep -qF 'window.DASH = ' || stop "the served data.js must assign window.DASH"
 # alive.js is the loop's heartbeat: the page tells a slow cycle (heartbeat fresh, data.js old) from a stopped
 # collector (no heartbeat) by it. The first cycle's end stamps its length.
-wait_until 'grep -qE "\"lastCycleSec\":[0-9]+" "$OUT/alive.js" 2>/dev/null || ! kill -0 "$loop" 2>/dev/null' || :
-grep -qE '"lastCycleSec":[0-9]+' "$OUT/alive.js" 2>/dev/null || stop "the loop must write alive.js with the cycle it timed: $(cat "$OUT/alive.js" 2>&1)"
-sed -e '1s/^window\.DASH_ALIVE = //' -e '$s/;$//' "$OUT/alive.js" \
+# One copy is waited on and checked: a heartbeat that read the cycle before it was timed can replace alive.js after.
+wait_until 'cp "$OUT/alive.js" "$T/alive.js" 2>/dev/null && grep -qE "\"lastCycleSec\":[0-9]+" "$T/alive.js" || ! kill -0 "$loop" 2>/dev/null' || :
+grep -qE '"lastCycleSec":[0-9]+' "$T/alive.js" 2>/dev/null || stop "the loop must write alive.js with the cycle it timed: $(cat "$T/alive.js" 2>&1)"
+sed -e '1s/^window\.DASH_ALIVE = //' -e '$s/;$//' "$T/alive.js" \
   | jq -e '(.at | fromdateiso8601) > 0 and (.cycleStartedAt | fromdateiso8601) > 0 and (.lastCycleSec | type) == "number"' >/dev/null \
-  || stop "alive.js must assign window.DASH_ALIVE = {at, cycleStartedAt, lastCycleSec}: $(cat "$OUT/alive.js")"
+  || stop "alive.js must assign window.DASH_ALIVE = {at, cycleStartedAt, lastCycleSec}: $(cat "$T/alive.js")"
 wait_until 'grep -qxF -- "--user --no-block restart dashboard.service" "$T/systemctl-calls" || ! kill -0 "$loop" 2>/dev/null' || :
 grep -qxF -- '--user --no-block restart dashboard.service' "$T/systemctl-calls" \
   || stop "loop_runs_the_update: the cycle must restart the service on new code: $(cat "$OUT/update.json" "$T/loop.log" 2>&1)"
