@@ -134,13 +134,25 @@
     const s = c.steps[c.at];
     return c.at === 0 && s && s.replyFix === 'now' ? 'Build · reply check fix' : c.at === 1 && s && num(s.n) && s.n >= 1 ? `Review ${s.n}` : c.at === 2 && s && num(s.n) && s.n > 1 ? `Fix ${s.n}` : NAMES[c.at];
   }
-  // A running card's test run, as far as it has got: its cases, else its files.
+  // A running card's test run, as far as it has got: the file that runs now, which of how many, and its time on it
+  // (#433: the cases of the files that ended are no total, so they are not shown); else its cases, else its files.
   function progress(c) {
     if (c.kind !== 'run' || c.at !== 3) return null;
+    const f = c.files, on = f && f.now && typeof f.now === 'object' && str(f.now.file) ? f.now : null;
+    if (on) {
+      const at = Date.parse(on.at), failed = c.tests && num(c.tests.failed) ? c.tests.failed : 0;
+      const t = Number.isNaN(at) ? '' : `, ${view.ctx.took(Math.max(0, (Date.now() - at) / 1000))}`;
+      return { text: `file ${Math.min(f.run + 1, f.of)} of ${f.of}: ${on.file}${t}${failed ? `, ${failed} failed` : ''}`, share: f.run / f.of, failed: failed > 0 };
+    }
     if (c.tests) return { text: `Test ${c.tests.done}/${c.tests.of}${num(c.tests.failed) && c.tests.failed ? `, ${c.tests.failed} failed` : ''}`, share: c.tests.done / c.tests.of, failed: num(c.tests.failed) && c.tests.failed > 0 };
     if (c.files) return { text: `Test files ${c.files.run}/${c.files.of}`, share: c.files.run / c.files.of, failed: false };
     return null;
   }
+  // A Test step on its second run or later: which run, and the time of all its runs (the earlier ones' seconds, the
+  // step's sec, and this one's), apart from this run's time: " · 3rd run, 2 h 06 min in all". '' else.
+  const nth = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+  const runs = (c, s) => (c.kind === 'run' && s.name === 'Test' && num(s.n) && s.n > 1 && !Number.isNaN(c.since)
+    ? ` · ${nth(s.n)} run, ${view.ctx.took((num(s.sec) ? s.sec : 0) + Math.max(0, (Date.now() - c.since) / 1000))} in all` : '');
   function status(c) {
     if (c.kind === 'run') {
       const p = progress(c);
@@ -411,13 +423,18 @@
     chip.append(h('i'), say(c));
     const six = h('ol', 'b3-six');
     c.steps.forEach((s, i) => {
-      const li = h('li', `s-${s.state}`), when = s.state === 'done' && num(s.sec) ? ctx.took(s.sec) : s.state === 'now' ? `${time(c)} so far` : s.state === 'todo' ? '' : s.state;
+      const li = h('li', `s-${s.state}`), when = s.state === 'done' && num(s.sec) ? ctx.took(s.sec) : s.state === 'now' ? `${time(c)} so far${runs(c, s)}` : s.state === 'todo' ? '' : s.state;
       li.append(h('span', null, MARK[s.state]), i === c.at && c.kind === 'run' ? stepName(c) : i === 0 && s.state === 'done' && s.replyFix === 'done' ? 'Build · reply check fixed' : s.name, h('em', null, when));
       six.append(li);
     });
     const parts = [h('div', 'b3-eyebrow', KIND[c.kind]), head, h('p', 'b3-ttl', c.title || 'untitled'), chip, six];
-    const tests = c.tests;
-    if (tests) {
+    const tests = c.tests, p = progress(c);
+    if (p && c.files && c.files.now) {
+      const pb = h('div', 'b3-pb'), bar = h('i');
+      fill(bar, p.share);
+      pb.append(bar);
+      parts.push(h('h3', null, 'Tests'), pb, h('p', null, p.text));
+    } else if (tests) {
       const pb = h('div', 'b3-pb'), bar = h('i');
       fill(bar, tests.done / tests.of);
       pb.append(bar);

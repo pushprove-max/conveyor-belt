@@ -55,7 +55,8 @@ endall() { # <pid>
   kill -KILL -- "-$1" 2>/dev/null; kill -KILL "${ps[@]}" 2>/dev/null; :
 }
 # The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote
-# (cases null when its `TESTRUN cases=` lines add up to 0);
+# (cases null when its `TESTRUN cases=` lines add up to 0), and now, the file that runs now: the last a `== <file>` line
+# began that no `-- ok|FAIL <file>` line has ended since (left out when none);
 # run is never above of: a run that ran more test files than it selected has over too, how many more.
 # Each test file counts once, by its name (a file run again, or named in two logs, is one). A runner that prints both
 # a `-- ok|FAIL <file>` line and vitest's line for each file names it in two ways (web/src/a.test.ts and
@@ -69,7 +70,8 @@ testprogress() { # <output file> [log...]
     n == 1 && logs > 0 { next }
     /^-- (ok|FAIL) / { # the name without the padding and the times a runner may put around it (`-- ok   a.test.ts 0s`)
       k = $0; sub(/^-- (ok|FAIL) +/, "", k); sub(/[ \r]+$/, "", k); while (sub(/ +[0-9][0-9.]*m?s$/, "", k)) ;
-      if (k != "") { named[n, k] = 1; names[n] = 1 } }
+      if (k != "") { named[n, k] = 1; names[n] = 1; delete open[k] } }
+    /^== / { k = $0; sub(/^== +/, "", k); sub(/[ \r]+$/, "", k); if (k != "") open[k] = ++began }
     /^ (✓|❯|×|↓) [^ ]+ \([0-9]+ tests?[ |)]/ { vitest[n, $2] = 1 }
     /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); of += $1; seen = 1 }
     /^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); cof += $1 }
@@ -77,7 +79,10 @@ testprogress() { # <output file> [log...]
       for (i in named) { split(i, p, SUBSEP); if (!(p[2] in ran)) { ran[p[2]] = 1; run++ } }
       for (i in vitest) { split(i, p, SUBSEP); if (!(p[1] in names) && !(p[2] in ran)) { ran[p[2]] = 1; run++ } }
       over = seen && run > of ? run - of : 0
-      printf "{\"run\":%d,\"of\":%s,\"cases\":%s%s}\n", (over ? of : run), (seen ? of + 0 : "null"), (cof > 0 ? cof + 0 : "null"), (over ? ",\"over\":" over : "") }'
+      # now: the file begun last that has not ended (the backslash doubled by "&&", as each awk reads it alike).
+      last = 0; for (k in open) if (open[k] > last) { last = open[k]; cur = k }
+      if (last) { gsub(/\\/, "&&", cur); gsub(/"/, "\\\"", cur); cur = ",\"now\":\"" cur "\"" }
+      printf "{\"run\":%d,\"of\":%s,\"cases\":%s%s%s}\n", (over ? of : run), (seen ? of + 0 : "null"), (cof > 0 ? cof + 0 : "null"), (over ? ",\"over\":" over : ""), cur }'
 }
 
 # Waits for a running step and keeps its live record (README.md) while it runs; returns the step's exit. Only
@@ -92,9 +97,12 @@ testprogress() { # <output file> [log...]
 # Its cases (tests: {done, of, failed}) are counted only when `TESTRUN cases=N` lines say how many were selected
 # (several add up) and that is above 0, else tests is null (#385: a run of whole files prints cases=0): done and
 # failed are the cases its runner named as ended (testdone()).
+# files.now ({file, at}) names the file that runs now (testprogress() now) and when this watch first saw it begin, so
+# a slow file and a hung run can be told apart (#433); left out while no file runs.
 # A test run's `progress` (which health reads beside `last`, so the Foreman calls no running test step stuck while it
 # moves) is when the run began, then when a case of its runner last began or ended (testcases(), testdone()); its
-# `list` is the list of tests the command was given (<worktree>.testlist, tests()).
+# `list` is the list of tests the command was given (<worktree>.testlist, tests()); its `before` is the seconds of the
+# run before it in the same Test step (TEST_BEFORE: tests() runs the failed cases again at once), left out on a first.
 # A review's tokens are not in its stream before its turn ends: Codex writes the running total (`token_count`) to the
 # session file it keeps under its home, named after the thread the stream opens with. rollout() finds that file.
 rollout() { # <a review's events file>; prints the session file of that review, nothing when there is none yet
@@ -124,8 +132,9 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
-  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) '{step: $s, at: (now | todate), last: null, turns: 0}
-      + (if $s == "test" then {progress: (now | todate), files: {run: 0, of: null}, tests: null} + (if $tl[0] | type == "object" then {list: $tl[0]} else {} end) else {} end)
+  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) --arg b "${TEST_BEFORE:-}" '{step: $s, at: (now | todate), last: null, turns: 0}
+      + (if $s == "test" then {progress: (now | todate), files: {run: 0, of: null}, tests: null} + (if $tl[0] | type == "object" then {list: $tl[0]} else {} end)
+          + (if $b == "" then {} else {before: ($b | tonumber)} end) else {} end)
       + (if $m == "" then {} else {model: $m} end) + (if $w == "" then {} else {stalled: $w} end)') \
     && printf '%s\n' "$st" > "$out"
   while :; do
@@ -149,7 +158,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       [ "$cs $dn" = "${size#* }" ] || st=$(jq -c '.progress = (now | todate)' <<<"$st")
       size="${now% *} $cs $dn"
       new=$(testprogress "$f" "${logs[@]}" \
-        | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: ({run, of: (.of // $st.list.files)} + if .over then {over} else {} end),
+        | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: ({run, of: (.of // $st.list.files)} + (if .over then {over} else {} end)
+              + (.now as $f | if $f == null then {} elif $st.files.now.file == $f then {now: $st.files.now} else {now: {file: $f, at: (now | todate)}} end)),
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
       # A run given TEST_GIVEN test files (the rule Whole suite in a card off: a card's run and the bug-card check,

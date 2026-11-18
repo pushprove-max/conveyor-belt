@@ -62,8 +62,9 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
                # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (verdicts()).
                verdicts: (if .step == "test" then .verdicts else null end), mainSec: (if .step == "test" then .mainRun.sec else null end),
-               # A test line that passed only when what had not passed ran again (tests()).
-               rerun: (if .step == "test" and .result == "pass" and .rerun != null then true else null end),
+               # A test line whose failed cases ran again at once (tests()): two runs (track.jq runs); on a pass line,
+               # it passed only when what had not passed ran again.
+               rerun: (if .step == "test" and .rerun != null then true else null end),
                # A test line whose list left linked test files out (testcap(), testrun.sh), or ran only the changed cases of
                # the card's own test files (owncases(), testrun.sh): its note, which the track shows, and how many were left out.
                list: (if .step == "test" and ((.list.left? // 0) > 0 or .list.cases? != null) then {left: .list.left, why: .list.why} else null end),

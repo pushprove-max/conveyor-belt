@@ -154,6 +154,25 @@ test('belt3d: a card in Test shows its cases run and their bar, else its files, 
   assert.equal(lane(w, 3).now.querySelector('.b3-l1').textContent, 'Test · 3 min', 'the time moves on each second, in place');
 });
 
+// Issue 433. Bug it catches: a card running its test files one at a time read "Test 25/25, 3 failed" with a full bar
+// (the cases of the files that had ended, taken as the whole) and named no file, so a slow file and a hung run looked
+// the same; and the Test step's time was all its runs' added up. Its third run, given 3 files, 2 min into the second:
+// the lane says "file 2 of 3: <name>, 2 min", the failed count, its bar at 1/3, no "Test n/n"; its details give this
+// run's time and, apart, all three runs' time (an hour before it, and these 2 min).
+test('belt3d: a card running its test files one at a time shows the file that runs, which of how many and its time; its third run apart from all', async () => {
+  const w = await open3d(full());
+  const steps = trackOf('++->..', 'tests').steps.map((s, i) => (i === 3 ? { ...s, n: 3, sec: 3600 } : s));
+  const files = { run: 1, of: 3, now: { file: 'conveyor/tests/b.test.sh', at: iso(T0 - 120000) } };
+  next(w, floor({ belt: [runCard('c1-1', 1, 'tests', { track: { steps, at: 3, since: iso(T0 - 120000), tests: { done: 25, of: 25, failed: 3 }, files } })] }));
+  const t = lane(w, 1).now;
+  assert.deepEqual([t.querySelector('.b3-l1').textContent, t.querySelector('.b3-pbar i').style.transform], ['file 2 of 3: conveyor/tests/b.test.sh, 2 min, 3 failed', 'scaleX(0.333)']);
+  assert.ok(t.classList.contains('fail'), 'failed cases turn the bar red');
+  w.scene3d.o.pick('sample:c1-1');
+  const box = b3(w).querySelector('.b3-detail');
+  assert.equal(box.querySelectorAll('.b3-six li')[3].querySelector('em').textContent, '2 min so far · 3rd run, 1 h 02 min in all');
+  assert.ok(box.textContent.includes('file 2 of 3: conveyor/tests/b.test.sh, 2 min, 3 failed') && !/\b25 of 25\b|Test 25\/25/.test(box.textContent), box.textContent);
+});
+
 // Issue 423: a card that went back a step is amber between the two steps. What its lane shows: the way back the scene
 // draws (amber from the step it went back to to the one it left, the ghost on the one it left), "← back to <step>", its
 // crate's round badge, and its status's second line with the time in ET.

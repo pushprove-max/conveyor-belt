@@ -60,13 +60,14 @@
 #   Fix, Test, Land, Push, each {name, state, sec}: done, now, skipped (the card did not need it: Fix after a GO, Build
 #   of a card landed from a kept patch), failed or todo, with its measured seconds. Build is the set-up (worktree,
 #   dependencies, brief) and the build, never the time the issue sat queued; Review and Fix are every round (n: how
-#   many, the one in progress counted; Review has of, the rule's count); Test is to come again after a run that failed;
+#   many, the one in progress counted; Review has of, the rule's count); Test is to come again after a run that failed
+#   (while it runs, n: the run that goes now, its sec the earlier runs' seconds);
 #   Land holds the rebuild after a conflict and the filing of follow-ups; Push is the push of main and the close of
 #   the issue (followups: how many were filed). at is the place of the step in progress (null on a card that has
 #   ended), label what it is doing ("review 2 of 3", "fix after review 1", "filing follow-ups", "rebuilding after a
 #   conflict", and after the landing "pushing", "push failed; it is tried again", "waiting for GitHub to close the
 #   issue"; "Landed, waiting for Push landed", at null, while push is off and its commit is not pushed), since when that began (the live record's at while it runs), reason why Push failed (the push's error, or the issue left open), files a test
-#   run's {run, of}, tests its cases {done, of, failed} (null when its command said no count: a line
+#   run's {run, of}, with now {file, at} the file that runs now and when it began (session.sh watch()), tests its cases {done, of, failed} (null when its command said no count: a line
 #   `TESTRUN cases=N`; done and failed are the cases its runner named as ended, session.sh watch()), list the list of
 #   tests it was given ({mode: "changed", files, by: "map" or "name", age: the made test map's commits behind} or
 #   {mode: "whole", why}; null with no test.list: testrun.sh tests()), grown {before, after} the files of its change
@@ -486,7 +487,7 @@ snapshot() (
   # it runs (its live record there, the card open, its last line no start), it is the card's proof, the step in progress.
   jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson proof "$(proofs)" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '(map($live[.card] as $v | $proof[.card] as $p
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
-      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end
+      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits, before} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end
       | if ($p | type) == "object" and .result == "" and (.x.log | last | .step != "start") then .proof = ($p | {at, files, tests, list, action}) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$d/rows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read

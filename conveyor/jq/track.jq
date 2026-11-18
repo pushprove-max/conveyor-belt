@@ -90,7 +90,8 @@
           # only when the cases that did not pass ran again (tests()) are drawn so (rerun), never as a plain pass; a line
           # that reused a pass (card(): reused) keeps what the pass it reused was.
           # Its runs' seconds waiting for a test slot and running, added up (a line that does not give them adds none).
-          elif $l.step == "test" then add(3) | .s[3].state = (if $l.result == "pass" then "done" else "todo" end)
+          # runs: the runs the lines record; a line with rerun (tests() ran the failed cases again at once) is two.
+          elif $l.step == "test" then add(3) | .runs = (.runs // 0) + (if $l.rerun != null then 2 else 1 end) | .s[3].state = (if $l.result == "pass" then "done" else "todo" end)
             | .s[3].rerun = (if $l.result == "pass" and $l.reused == true then .s[3].rerun == true else $l.result == "pass" and $l.rerun != null end)
             | if ($l.wait | type) == "number" and ($l.run | type) == "number" then .s[3].wait = (.s[3].wait // 0) + $l.wait | .s[3].run = (.s[3].run // 0) + $l.run else . end
           # The landing that met a conflict ran until the rebuild began: those seconds are the landing's.
@@ -122,7 +123,12 @@
             state: (if .state == "todo" and $i < $top and ($i != 4 or $u.closed) then "skipped" else .state end), sec}
           + (if $i == 0 and $six == 0 and $u.rc then {replyFix: "now"} elif $i == 0 and .replyFix != null then {replyFix} else {} end)
           + (if $i == 1 then {n: ($u.rev + (if $six == 1 then 1 else 0 end)), of: $of} elif $i == 2 then {n: ($u.fix + (if $six == 2 and ($u.rc | not) then 1 else 0 end))}
+             # A running Test step: n, the run that goes now (its sec is the earlier runs' seconds, added up: #433). A
+             # run again of the failed cases in the same step (the live record's before, session.sh watch()) is one
+             # more, and the first run's seconds are in sec: no test line has them yet.
              elif $i == 3 then (if .wait != null then {wait, run} else {} end) + (if .rerun == true and .state == "done" then {rerun: true} else {} end)
+               + (if $six == 3 then ($c.live.before | if $kind == "test" and type == "number" then . else null end) as $b
+                   | {n: (($u.runs // 0) + 1 + (if $b == null then 0 else 1 end))} + (if $b == null then {} else {sec: ((.sec // 0) + $b)} end) else {} end)
              elif $i == 5 and $u.filed != null then {followups: $u.filed} else {} end)],
          at: $six, label: $label, since: (if $at == null then null elif $kind == "proof" then ($c.proof.at | strings) // $last.time else ($c.live.at | strings) // $last.time end),
          reason: $why,

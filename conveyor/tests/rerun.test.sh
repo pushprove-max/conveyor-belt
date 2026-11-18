@@ -98,7 +98,12 @@ tline() { st 'select(.step == "test") | tojson' | sed -n "$1p" | jq -r "$2"; } #
 # card's test line says it passed on re-run and which case had failed, never a plain pass.
 t_rerunpass() {
   rerunsetup '1 fail flaky'
+  # The run again's live record, once watch() has written it (#433).
+  # shellcheck disable=SC2016 # expanded where the test command sources it
+  echo '[ "$n" != 2 ] || { v=${CONVEYOR_TEST_LOG%.testlog}.live; i=0; until jq -e .before "$v" > /dev/null 2>&1 || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; cp "$v" "$STUB/live.2"; }' > "$STUB/pre" # sleep: the stub test command's own poll, run where wait.sh is not loaded
   loop run 1 > /dev/null || fail "run exited non-zero"
+  # Bug it catches (#433): the run again restarted the live record, so the Board and /units lost the first run's time.
+  jq -e '.before | type == "number"' "$STUB/live.2" > /dev/null || fail "the run again's live record has not the first run's seconds: $(cat "$STUB/live.2")"
   [ "$(ran 1)" = "one two flaky three" ] || fail "the first run did not run the whole selection: $(ran 1)"
   [ "$(ran 2)" = flaky ] || fail "the run again did not run the failed case alone: $(ran 2)"
   [ "$(ran 3)" = "" ] || fail "a third run ran: $(ran 3)"

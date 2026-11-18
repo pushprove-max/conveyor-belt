@@ -56,7 +56,7 @@ export type Need = Card & Times & { yes: boolean; text: string; since: number | 
 // todo with its measured seconds (Review and Fix with their rounds n, Review with the rule's of, Push with the
 // follow-ups filed). at is the step in progress (null on a card that has ended), label what it is doing, since when that
 // began, reason why Push failed. No time is estimated from past cards. A track of any other shape (an older loop's) is none.
-// files: the test files run of all in the Test step, and over: how many more ran than were selected (run is never above of); tests: its tests done of all, and failed (none until it gives them).
+// files: the test files run of all in the Test step, over: how many more ran than were selected (run is never above of), and now: the file that runs now and when it began; tests: its tests done of all, and failed (none until it gives them).
 // list: the list of tests that step's run was given: the files its change touches (changed, files: how many) or the
 // whole suite (null when the pack sets no test.list). grown: the files of its change before and after it was split for
 // its size (null when it was not).
@@ -64,7 +64,7 @@ const STATES = ['done', 'now', 'skipped', 'failed', 'todo'] as const
 export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as const
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
 export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null }
-export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null; over: number | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
+export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null; over: number | null; now: { file: string; at: number | null } | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
 // reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0; atEnd: in
 // that time the running session's route reports no usage until its step ends: "cost shown when the step ends".
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
@@ -195,7 +195,8 @@ const trackOf = (v: any): Track | null => {
     steps: v.steps.map((x: any): Step => ({ name: one(x.name), state: x.state, sec: num(x.sec), n: num(x.n), of: num(x.of), followups: num(x.followups),
       replyFix: x.replyFix === 'now' || x.replyFix === 'done' ? x.replyFix : null })),
     at: at !== null && v.steps[at] ? at : null, label: one(v.label), since: time(v.since), reason: one(v.reason) || null,
-    files: v.files && typeof v.files === 'object' && num(v.files.run) !== null ? { run: v.files.run, of: num(v.files.of), over: num(v.files.over) } : null,
+    files: v.files && typeof v.files === 'object' && num(v.files.run) !== null ? { run: v.files.run, of: num(v.files.of), over: num(v.files.over),
+      now: v.files.now && typeof v.files.now === 'object' && one(v.files.now.file) ? { file: one(v.files.now.file), at: time(v.files.now.at) } : null } : null,
     tests: v.tests && typeof v.tests === 'object' && [v.tests.done, v.tests.of, v.tests.failed].every(x => num(x) !== null) ? { done: v.tests.done, of: v.tests.of, failed: v.tests.failed } : null,
     list: v.list?.mode === 'changed' && num(v.list.files) !== null ? { mode: 'changed', files: v.list.files } : v.list?.mode === 'whole' ? { mode: 'whole' } : null,
     grown: v.grown && typeof v.grown === 'object' && num(v.grown.before) !== null && num(v.grown.after) !== null ? { before: v.grown.before, after: v.grown.after } : null,
@@ -508,8 +509,13 @@ const doingText = (t: Track | null, since: number | null, now: number): string =
   if (at === 5 && t!.steps[5].state === 'failed') return `push failed${s ? ` ${s}` : ''}`
   // The follow-ups are filed before the landing, as part of Land, so the track never steps back.
   if (at === 4 && t!.label === 'filing follow-ups') return `filing follow-ups${s ? ` ${s}` : ''}`
-  return at === null ? (s ? `${s} in this step` : '') : `${DOING[at]}${s ? ` ${s}` : ''}`
+  // A Test step on its second run or later: s is this run's time, and the time of all its runs (the earlier ones', the
+  // step's sec, and this one's) is said apart: "testing 11m · 3rd run, 2h 6m in all" (#433).
+  const n = at === 3 ? t!.steps[3].n : null
+  const runs = n !== null && n > 1 && since !== null ? ` · ${nth(n)} run, ${fmtStep((t!.steps[3].sec ?? 0) + Math.max(0, Math.round((now - since) / 1000)))} in all` : ''
+  return at === null ? (s ? `${s} in this step` : '') : `${DOING[at]}${s ? ` ${s}` : ''}${runs}`
 }
+const nth = (n: number) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`
 // A follow-up's title is the finding it was filed for ("[P2] .claude/dashboard/panels/board.js:40 The board shows a
 // stale snapshot when ..."); its short title says what it fixes: the file's name and the finding's first words ("Board:
 // Board shows a stale snapshot"). A title that is not a finding is kept, and cut at the width where it is shown.
@@ -748,14 +754,16 @@ const verdicts = (rs: Review[]): Seg[][] => rs.map(r => {
 })
 
 // The running step's live fields: `    now Bash: npm test · 3 turns · last output 4s ago`. None when it streams nothing.
-// The Test step runs no model, so in place of its turns it shows how far the tests are: `142 of 205 tests ·
-// 2 failed`, else `3 of 6 test files` (and ` · 15 more files than selected` when more ran), else nothing.
+// The Test step runs no model, so in place of its turns it shows how far the tests are: the file that runs now and its
+// time on it, `file 2 of 3: conveyor/tests/b.test.sh, 4m, 2 failed` (#433: the cases of the files that ended are no
+// total), else `142 of 205 tests · 2 failed`, else `3 of 6 test files` (and ` · 15 more files than selected` when more ran), else nothing.
 const liveLine = (b: Belt, now: number, w: number): Line[] => {
   const l = b.live
   if (!l || (!l.action && l.turns === null && l.lastOutputAt === null)) return []
   const ago = l.lastOutputAt === null ? '' : fmtStep((now - l.lastOutputAt) / 1000)
   const t = b.track, tests = t?.tests, files = t?.files
   const progress = t?.at !== 3 ? (l.turns === null ? '' : count(l.turns, 'turn'))
+    : files?.now && files.of !== null ? `file ${Math.min(files.run + 1, files.of)} of ${files.of}: ${files.now.file}${files.now.at === null ? '' : `, ${fmtStep(Math.max(0, (now - files.now.at) / 1000))}`}${tests?.failed ? `, ${tests.failed} failed` : ''}`
     : tests ? `${tests.done} of ${tests.of} tests${tests.failed ? ` · ${tests.failed} failed` : ''}`
     : files ? `${files.run}${files.of === null ? '' : ` of ${files.of}`} test files${files.over ? ` · ${count(files.over, 'more file')} than selected` : ''}` : ''
   // The Test step's list: the changed tests (how many files) or the whole suite.

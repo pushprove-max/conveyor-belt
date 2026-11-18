@@ -377,7 +377,7 @@ cacheoff() { # <worktree>
 # with no test.fileCommand, does not run and fails with <worktree>.stop saying why; and a run that reports more test
 # files than it was given (TEST_GIVEN, with TEST_ADDS for a test command's own picks: watch() ends it, <worktree>.wide) does not run again and fails the same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -463,7 +463,10 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     # The first run's coverage report, which the run again may write over: kept for uncovered() (covkeep()).
     covkeep "$1"
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
-      checkskept "$1"; [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
+      # The first run's seconds go in the run again's live record (watch(): before), so the views still count them (#433).
+      checkskept "$1"; [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"
+      # shellcheck disable=SC2034 # TEST_BEFORE is read by watch() in lib/session.sh
+      TEST_BEFORE=$((SECONDS - w)); testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
     else rc=1; fi
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
@@ -1114,21 +1117,27 @@ runnernote() { # <paths>
 # CONVEYOR_TEST_FILES names, one a line, but for each the list keeps as passed (a `pass` line): a run again after a
 # failure runs only the files that did not pass. A list with a `changed` or `main` line (rerunsince(): a fix or main
 # changed code since those passes) keeps none: every file runs, as any of them may test that code.
+# The files to run are listed first, and `TESTRUN files=<n>` is logged before the first runs (#433): a file's own run
+# prints its own count, so without it the live record had no count of the files while they ran.
 filecmd() { # <the pack's test.fileCommand> [files]
   local q; q=$(printf %q "$1")
   if [ "${2:-}" = files ]; then
-    printf '%s\n' 'n=0 r=0 t=$'"'"'\t'"'"' c=; l=$CONVEYOR_TEST_LOG/files' \
+    printf '%s\n' 'fs=() r=0 t=$'"'"'\t'"'"' c=; l=$CONVEYOR_TEST_LOG/files' \
       '! grep -qE "^(changed|main)$t" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null || c=1' \
       'while IFS= read -r f; do' \
-      '  [ -n "$f" ] && { [ -n "$c" ] || ! grep -qxF "pass$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null; } || continue; n=$((n + 1)); echo "== $f" | tee -a "$l"'
+      '  [ -n "$f" ] && { [ -n "$c" ] || ! grep -qxF "pass$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null; } || continue; fs+=("$f")' \
+      'done <<< "${CONVEYOR_TEST_FILES:-}"'
   else
-    printf '%s\n' 'n=0 r=0; l=$CONVEYOR_TEST_LOG/files' \
+    printf '%s\n' 'fs=() r=0; l=$CONVEYOR_TEST_LOG/files' \
       'while IFS=$'"'"'\t'"'"' read -r k f _; do' \
-      '  [ "$k" = fail ] || continue; n=$((n + 1)); echo "== $f" | tee -a "$l"'
+      '  [ "$k" = fail ] || continue; fs+=("$f")' \
+      'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"'
   fi
-  printf '%s\n' "  if CONVEYOR_TEST_FILE=\$f bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null; then echo \"-- ok \$f\" | tee -a \"\$l\"; else echo \"-- FAIL \$f\" | tee -a \"\$l\"; r=1; fi"
-  if [ "${2:-}" = files ]; then printf '%s\n' 'done <<< "${CONVEYOR_TEST_FILES:-}"'; else printf '%s\n' 'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"'; fi
-  printf '%s\n' 'echo "TESTRUN files=$n" >> "$l"; exit $r'
+  printf '%s\n' 'echo "TESTRUN files=${#fs[@]}" >> "$l"' \
+    'for f in "${fs[@]}"; do' \
+    '  echo "== $f" | tee -a "$l"' \
+    "  if CONVEYOR_TEST_FILE=\$f bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null; then echo \"-- ok \$f\" | tee -a \"\$l\"; else echo \"-- FAIL \$f\" | tee -a \"\$l\"; r=1; fi" \
+    'done' 'exit $r'
 }
 # The test files a run of the bug-card check in <worktree> ran (testprogress(): its files.run and over), when that
 # is far more than the <n> test files it was given: over ten for each. Nothing when it ran no more.

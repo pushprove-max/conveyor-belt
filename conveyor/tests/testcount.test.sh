@@ -110,6 +110,32 @@ t_testcountwide() {
   : > "$STUB/go"; wait $run; : # the stop ends the run, so its exit is that of an ended run
 }
 
+# Bug it catches (#433): a card's Test step in one-file mode (test.fileCommand, lib/testrun.sh filecmd()) looked stuck:
+# each file's own run prints its own count, so the live record had no count of the files given (files.of null), and
+# nothing named the file that ran or since when. The card's fourth run, given 3 files and held in the second: the live
+# record says 1 of 3 ended and names the second with the time it began, and the snapshot's track passes that on, with
+# the run's number on Test (n 4), which the views show apart from the earlier runs' seconds (Test's sec).
+# The first Test step ran twice (its line has rerun: two runs, not one, or n is 3). The fourth run is the run again of
+# a second Test step (TEST_BEFORE, lib/testrun.sh tests()): no test line has the second step's first run yet, so
+# without the live record's before the snapshot lost it (n 3, sec 0).
+t_testcountfile() {
+  # shellcheck disable=SC2034 # TEST_BEFORE is read by watch() (lib/session.sh), which countrun runs
+  local got w=$T/$CASE/cards/c7.live TEST_BEFORE=120
+  eval "$(sed -n '/^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
+  # shellcheck disable=SC2016 # the file command's text, expanded where it runs
+  CONVEYOR_TEST_FILES=$'t/a.test.sh\nt/b.test.sh\nt/c.test.sh' countrun "$(filecmd 'w() { case "$1" in */b.test.sh) while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done ;; esac; }; w' files)" \
+    files.now.file '"t/b.test.sh"'
+  got=$(jq -c '.files | [.run, .of, (.now.at | fromdate | type)]' "$w")
+  [ "$got" = '[1,3,"number"]' ] || { : > "$STUB/go"; wait $run; fail "the live record of the second of 3 files: $(cat "$w")"; }
+  # One failed Test step that ran twice (rerun) before the one that goes (the last line, start:test), at the same time:
+  # its seconds are 0, so Test's sec is the second step's first run's 120.
+  jq -cs '.[:-1] + [.[-1] | del(.of) | .step = "test" | .result = "fail" | .rerun = {exit: 1, failures: {of: null, files: [], timeout: null}}] + [.[-1]] | .[]' "$ST/cards.jsonl" > "$ST/cards.new" \
+    && mv "$ST/cards.new" "$ST/cards.jsonl"
+  got=$(loop snapshot --fresh | jq -c '.belt[0].track | [.files.run, .files.of, .files.now.file, .steps[3].n, .steps[3].sec]')
+  [ "$got" = '[1,3,"t/b.test.sh",4,120]' ] || { : > "$STUB/go"; wait $run; fail "the snapshot's track of the fourth run, in its second file: $got"; }
+  : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+
 # testprogress() (lib/session.sh) over <output> and <log>... in $T/$CASE: the function itself, with no watch.
 progress() { # <output> [<log>...]
   ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^testprogress() {/,/^}/p' "$SRC/lib/session.sh")"; cd "$T/$CASE" && testprogress "$@" )

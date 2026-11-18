@@ -853,6 +853,25 @@ test('a card in its Test step draws its tests, or else its test files, in place 
     '    86 of 86 test files · 15 more files than selected · last output 23s ago'])
 })
 
+// Bug it catches (#433): a card running its test files one at a time read "25 of 25 tests" (the cases of the files that
+// had ended, taken as the whole) and named no file, so a slow file and a hung run looked the same; and its Test step's
+// time was all its runs' added up. Its third run, given 3 files, 2 minutes into the second: its line names the file,
+// which of how many and its time on it, with the failed count and no case total; the step's time is this run's (1m),
+// and all three runs' time (an hour before it, and this run's) is said apart.
+test('a card running its test files one at a time draws the file that runs and its time; its third run apart from all its runs', async ($, on) => {
+  const steps = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'].map((name, i) => ({ name, state: i < 3 ? 'done' : i === 3 ? 'now' : 'todo', sec: i < 3 ? 30 : i === 3 ? 3600 : null, ...(i === 3 ? { n: 3 } : {}) }))
+  const track = { steps, at: 3, label: 'tests', since: ago(1), reason: null, tests: { done: 25, of: 25, failed: 3 },
+    files: { run: 1, of: 3, now: { file: 'conveyor/tests/b.test.sh', at: ago(2) } } }
+  const live = { action: '', turns: 0, lastOutputAt: new Date(NOW - 23_000).toISOString() }
+  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt: [{ ...BELT, live, track }] })) })
+  await start($, 'main')
+  await w.clock.settle()
+  const out = await units($)
+  expect(out.split('\n').filter(l => l.includes('last output'))).toEqual(['    file 2 of 3: conveyor/tests/b.test.sh, 2m, 3 failed · last output 23s ago'])
+  expect(out).toContain('testing 1m · 3rd run, 1h 1m in all')
+  expect(out).not.toMatch(/25 of 25/)
+})
+
 // Bug it catches (#147): /units did not say whether a card's test step ran the tests its change touched or the whole
 // suite. Its card's line names the list the run was given (the track's list) before how many files ran.
 test('a card in its Test step names the changed tests it was given, or the whole suite, in its line', async ($, on) => {
