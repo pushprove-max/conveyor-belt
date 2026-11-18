@@ -4,7 +4,8 @@
 # browser layout tests ran a Chromium per case side by side, timed out Board cards on a busy machine and blocked them
 # for hours. Exit 1, naming each line, when a tracked or new file under conveyor/ or .claude/ (outside conveyor/state)
 # starts or names a browser for a test: playwright, puppeteer, a headless Chrome or Chromium, or CONVEYOR_BROWSER.
-# test-changed.sh runs it on every test run; no-browser-tests.test.sh is its own test.
+# test-changed.sh runs it on every test run (in one-file mode in a test step, once a tree); no-browser-tests.test.sh
+# is its own test.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 pat='playwright|puppeteer|chrome-headless|headless[-_ ]?(chrome|chromium|shell)|--headless|CONVEYOR_BROWSER|chromium\.launch'

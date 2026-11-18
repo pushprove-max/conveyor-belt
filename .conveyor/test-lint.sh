@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The test lint: no test sleeps a set time and then checks that something happened (on a busy machine it has not
-# happened yet, and the test fails). test-changed.sh runs it on every run; test-lint.test.sh is its own test.
+# happened yet, and the test fails). test-changed.sh runs it on every run (in one-file mode in a test step, once
+# a tree); test-lint.test.sh is its own test.
 # Usage: test-lint.sh [<file>...]   (default: every shell test file under conveyor/ and .claude/scripts/__tests__/:
 # each *.test.sh, and the shared files of conveyor/tests/). Exit 1, naming each line, when a line calls sleep and the
 # sleep is none of these:

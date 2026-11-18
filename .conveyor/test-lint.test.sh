@@ -31,9 +31,9 @@ results() {
   done
 }
 
-# That this checkout's own tests pass the lint is not checked here: test-changed.sh lints them on every run (the last
-# case below proves it does, and fails on a sleep-then-check), and the lint of the whole checkout was nine tenths of
-# this file's time.
+# That this checkout's own tests pass the lint is not checked here: test-changed.sh lints them on every run, or
+# once a tree in one-file mode (the last case below proves it does, and fails on a sleep-then-check), and the lint of
+# the whole checkout was nine tenths of this file's time.
 
 # A sleep, then a check: on one line, on the next line, and in a script the test writes.
 fails sleep-then-check 2 'start &' 'sleep 2; [ -e "$T/done" ] || fail "not done"'
@@ -120,17 +120,18 @@ passes no-sleep '# sleep 2 here would hide a slow start' 'rm "$BIN/sleep"; stub 
 bash "$HERE/test-lint.sh" "$T/none.test.sh" > "$T/out" 2>&1 && no "a file that is not there passed the lint" \
   || { grep -q 'could not be read' "$T/out" && ok "a file that cannot be read fails the lint" || no "an unreadable file: $(cat "$T/out")"; }
 
-# test-changed.sh runs the lint on every run: a sleep-then-check in a test file fails the run, whatever changed.
+# test-changed.sh runs the lint on every run (in one-file mode in a test step, once a tree): a sleep-then-check in a
+# test file fails the run, whatever changed.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "core", "file": "conveyor/core.sh"}' '{"area": "core", "tests": "all"}' '{"area": "a", "file": "conveyor/x.sh"}' \
   '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo one > "$R/conveyor/core.sh"; echo one > "$R/conveyor/x.sh"; printf 't_one() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'exit 0' > "$R/conveyor/conveyor.test.sh"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@example.com commit -qm init
-(cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE && bash .conveyor/test-changed.sh) > "$T/out" 2>&1 \
+(cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILES BASH_ENV CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh) > "$T/out" 2>&1 \
   && ok "a run with no sleep-then-check passes" || no "a clean run failed: $(cat "$T/out")"
 printf 't_one() {\n  sleep 2; [ -e x ] || fail "no x"\n}\n' > "$R/conveyor/tests/a.test.sh"
-if (cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; then
+if (cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILES BASH_ENV CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; then
   no "a run with a sleep-then-check in a test passed"
 else grep -q '^conveyor/tests/a.test.sh:2: ' "$T/out" && ok "a run with a sleep-then-check fails, naming the line" || no "the failed run does not name the line: $(cat "$T/out")"; fi
 

@@ -109,4 +109,21 @@ counts=$(sed -n 's/^TESTRUN files=\([0-9]*\) .*/\1/p' "$T/fc.out" | paste -sd' '
   && [ "$counts" = "1 1 1" ] && jq -e '.run == 3 and .of == 3 and .over == null' "$T/fc.json" > /dev/null \
   || no "the engine's file loop did not run each listed file once, counted once: '$got', exit $(cat "$T/rc"), progress $(cat "$T/fc.json" 2>/dev/null): $(cat "$T/fc.out")"
 
+# Issue 422: the checks run once a tree in a test step. Bug: each one-file run of a step ran the map check, the test
+# lint and shellcheck again on the same tree, so a 50-file card ran them 50 times. A stub shellcheck counts its calls
+# and finds a warning on x.sh's changed line 2: three runs of one tree (one log folder) call it once, and each prints
+# the warning and fails, the later two from the kept result; a run after the tree changes calls it again.
+mkdir -p "$T/bin"
+printf '%s\n' '#!/usr/bin/env bash' "echo call >> '$T/sc.calls'" 'echo "conveyor/x.sh:2:1: warning: stub [SC2154]"' > "$T/bin/shellcheck"
+chmod +x "$T/bin/shellcheck"; rm -f "$T/sc.calls"
+calls() { wc -l < "$T/sc.calls" 2>/dev/null | tr -d ' '; }
+for f in hooks/h.test.sh conveyor/tests/a.test.sh "$B"; do
+  got=$(PATH=$T/bin:$PATH one tree "$f")
+  [ "$(calls)" = 1 ] && [ "$(cat "$T/rc")" = 1 ] && grep -q '^conveyor/x.sh:2:1: warning: stub' "$T/out" && [ "${got%%:*}" = "$f" ] \
+    || no "one tree's one-file run of $f did not run its file and report the one shellcheck run's failure: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"), ran '$got': $(cat "$T/out")"
+done
+echo three >> "$R/conveyor/x.sh"
+PATH=$T/bin:$PATH one tree hooks/h.test.sh > /dev/null
+[ "$(calls)" = 2 ] && [ "$(cat "$T/rc")" = 1 ] || no "a changed tree's one-file run did not run the checks again: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"): $(cat "$T/out")"
+
 [ $fails = 0 ] && echo "ok - test-changed runs one given test file alone" || exit 1

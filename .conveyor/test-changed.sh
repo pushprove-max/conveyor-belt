@@ -9,8 +9,9 @@
 # Exit 1 if any fails or none ran for a changed source file that has tests.
 # The engine: each engine source file is in one area of .conveyor/engine-areas.json, which names the case files
 # (conveyor/tests/) that cover it ("all": every one). In a build or fix session an engine change runs only the cases of
-# its areas' files, and of each changed case file, and so does the loop's test step (CONVEYOR_TEST_LOG set: conveyor.sh tests()). Every run first checks the map: an engine source file (a file under conveyor/ that is not
-# a test and not in its "outside" list) in no area, or in two, an area whose tests are not "all" or a non-empty list,
+# its areas' files, and of each changed case file, and so does the loop's test step (CONVEYOR_TEST_LOG set: conveyor.sh tests()).
+# Every run first checks the map (in one-file mode in a test step, once a tree: issue 422, below): an engine source
+# file (a file under conveyor/ that is not a test and not in its "outside" list) in no area, or in two, an area whose tests are not "all" or a non-empty list,
 # or a file or case file it names that does not exist, fails it. So does a file under conveyor/lib/ in an "all" area
 # with no `why` (each engine file names its own case files; "all" is for what every case runs through, and says why),
 # and a case file under conveyor/tests/ that no area names in a list (it would run on no engine file's change).
@@ -56,6 +57,7 @@
 # and with neither mark it is not run, and fails; its run of chosen cases is not, and runs whatever its mark.
 # Every run also runs the test lint (.conveyor/test-lint.sh): a sleep-then-check in any test file fails the run.
 # And shellcheck on the changed .sh files: a warning on a line the change added or changed fails the run (below).
+# In one-file mode in a test step these checks run once a tree, and later runs of that tree reuse their result.
 # A run again of the same change (conveyor.sh tests(): CONVEYOR_TEST_RERUN names what passed and what failed) runs
 # no file that passed, and of the engine's runner only the cases that failed, when the run before named them, else
 # those of its selection that did not print `ok <case>` (a runner killed part-way). A file the list names failed cases
@@ -98,8 +100,8 @@ unset CONVEYOR_SHELL_TEST_CASE
 # the cases CONVEYOR_TEST_CASES names of it, `<file><TAB><case>` lines, when it names any),
 # a shell test file that selects its cases as the runner does with the cases CONVEYOR_TEST_CASES names of it, and
 # any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
-# run makes (the map check, the test lint, shellcheck) still run. A path that is no file fails at once, before any of it,
-# as does a runner of the whole suite (issue 382: the engine's runner, this script and the full test's), which is no
+# run makes (the map check, the test lint, shellcheck) still run, once a tree in a test step (issue 422, below). A
+# path that is no file fails at once, before any of it, as does a runner of the whole suite (issue 382: the engine's runner, this script and the full test's), which is no
 # test file.
 ONE=
 if [ "${1:-}" = --file ]; then
@@ -278,16 +280,19 @@ metarunners() {
   done
 }
 if [ "${1:-}" = --check ]; then mapcheck; r=$?; covage; metarunners; exit $r; fi
-rc=0
+mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
+# checks: the checks every run makes (the map check, the test lint, no browser tests, shellcheck), printing what they
+# find; exit 1 when one fails. In one-file mode in a test step they run once a tree (below), not on every run.
+checks() {
+local rc=0 scfiles bang nobang keep new f
 mapcheck || rc=1
 covage
-# The test lint, on every run too: a test that sleeps a set time and then checks fails the run (test-lint.sh).
+# The test lint, with the map check: a test that sleeps a set time and then checks fails the run (test-lint.sh).
 bash .conveyor/test-lint.sh || rc=1
-# No browser tests (no-browser-tests.sh, the owner's order of 2026-11-14), on every run too.
+# No browser tests (no-browser-tests.sh, the owner's order of 2026-11-14), with the map check too.
 bash .conveyor/no-browser-tests.sh || rc=1
-mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
-# The shellcheck of each changed .sh file, on every run too (issue 525): a warning or error (-S warning) on a line the
-# change added or changed (every line of a new file) fails the run, printed with its file and line; one on a line it
+# The shellcheck of each changed .sh file, with the map check too (issue 525): a warning or error (-S warning) on a
+# line the change added or changed (every line of a new file) fails the run, printed with its file and line; one on a line it
 # did not touch does not (the engine's files hold old ones). A file with no #! line is read as bash, as the engine's
 # sourced files are. With no shellcheck, it says so once and the run goes on.
 scfiles=(); bang=(); nobang=()
@@ -306,6 +311,32 @@ elif [ ${#scfiles[@]} -gt 0 ]; then
     | awk -F: -v k="$keep" 'BEGIN { n = split(k, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
       ($1 ":" $2) in keep || ($1 ":all") in keep')
   [ -z "$new" ] || { echo "shellcheck: a new warning on a line this change added or changed:"; echo "$new"; rc=1; }
+fi
+return $rc
+}
+# treekey: the commit and the tree of the worktree (its tracked and untracked files, as the checks read them), which
+# the checks' result depends on; exit 1 when git cannot say.
+treekey() {
+  local ix h t r
+  h=$(git rev-parse HEAD 2>/dev/null) && ix=$(mktemp) || return 1
+  cp "$(git rev-parse --git-path index)" "$ix" 2>/dev/null || rm -f "$ix"
+  t=$(GIT_INDEX_FILE=$ix git add -A 2>/dev/null && GIT_INDEX_FILE=$ix git write-tree 2>/dev/null); r=$?
+  rm -f "$ix"; [ $r = 0 ] && [ -n "$t" ] && echo "$h-$t"
+}
+# In one-file mode under the loop's test step (issue 422: test.fileCommand runs once for each listed file), the checks
+# run once a tree: the first run keeps their output and exit in checks/<treekey>.out and .rc of the step's log folder
+# (a folder: the files at its top are the step's logs), and a later run of the same tree prints them again, saying so,
+# and fails as they did. A changed tree, or a key git cannot give, runs them.
+rc=0; ck=
+if [ -n "$ONE" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ] && tk=$(treekey); then ck=$CONVEYOR_TEST_LOG/checks/$tk; fi
+if [ -n "$ck" ] && [ -s "$ck.rc" ] && [ -f "$ck.out" ]; then
+  cat "$ck.out"; echo "test-changed: the checks of this tree ran in an earlier one-file run of this step: its result is kept"
+  [ "$(cat "$ck.rc")" = 0 ] || rc=1
+elif [ -n "$ck" ] && mkdir -p "${ck%/*}" && co=$(mktemp "$ck.XXXXXX"); then
+  checks > "$co" 2>&1 || rc=1
+  cat "$co"; mv "$co" "$ck.out"; echo $rc > "$ck.rc.$$" && mv "$ck.rc.$$" "$ck.rc"
+else
+  checks || rc=1
 fi
 declare -A run=() area=() ccase=() allby=()
 # The parts of a test file the coverage map selects (covof): npart, of the pick under way; tparts, of every pick; and
