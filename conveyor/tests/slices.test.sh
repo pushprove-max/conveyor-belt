@@ -3,9 +3,9 @@
 # timeout: 120
 # Engine cases (#270): the rule Split large issues (splitcheck(), umbrellas(), lib/slices.sh) with a stub judge
 # (CONVEYOR_SPLIT_CMD: the prompt on its stdin, $STUB/answer its answer, a line in $STUB/judged per call). Each case
-# calls the engine's functions as card() and the loop call them; only the shadow case and the two of a grown change
+# calls the engine's functions as card() and the loop call them; only the shadow case and the three of a grown change
 # run a whole card, as only a card proves that a split verdict in shadow still builds and lands the issue as one card,
-# and that card() asks about a grown change before its review and lands what the answer leaves.
+# and that card() asks about a grown change before a review, once a card, and lands what the answer leaves.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -274,6 +274,22 @@ t_slicesgrown() {
   mv "$STUB/cards.new" "$ST/cards.jsonl"
   fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" all | jq -c "[.[].number]"'
   [ "$(cat "$T/$CASE/run.out")" = '[]' ] || fail "a run limited to a retried parent that blocked again still waits on its size slice: $(cat "$T/$CASE/run.out")"
+}
+
+# On, grown in a fix: the build makes one file, the first review is a NO-GO, and the fix session after it makes FIVE;
+# the judge is asked before the second review, and the card lands the core files alone. Bug caught: a card asked only
+# before its first review (growcheck() on pass 1 alone) let a change that grew in a fix be reviewed and land whole.
+t_slicesgrownfix() {
+  grown on; echo 'main s1' > "$R/src/s1.sh"; git -C "$R" add src && git -C "$R" commit -qm s1 || fail "main's src/s1.sh"
+  echo "if grep -q 'wrong word' \"\$STUB/brief\" && ! grep -q '^# The change was split for its size' \"\$STUB/brief\"; then $FIVE
+    elif [ ! -e src/c1.sh ]; then echo c1 > src/c1.sh; fi" > "$STUB/build"
+  printf '%s\n' '[P1] src/c1.sh:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  loop run 1 >/dev/null
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card of issue 7 did not land: $(st .step | tr '\n' ' ')"
+  [ "$(judged)" = 1 ] && [ "$(st 'select(.step == "review" or .step == "grown") | .step' | tr '\n' ' ')" = 'review grown review ' ] \
+    || fail "a change that grew in a fix was not checked before its next review ($(judged) judge calls): $(st .step | tr '\n' ' ')"
+  [ "$(landedfiles)" = 'src/c1.sh src/c2.sh src/c3.sh ' ] && [ "$(jq -sc 'map(.title)' "$STUB/filed")" = '["the rest"]' ] \
+    || fail "the card grown in a fix did not land only the core files: $(landedfiles) $(cat "$STUB/filed" 2>/dev/null)"
 }
 
 # Shadow: the judge's answer is recorded on the grown line, and the card lands its change as it was: nothing filed,
