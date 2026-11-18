@@ -442,6 +442,8 @@ t_sweseats() {
   grep -q "^Resolved 1 of 1 with Conveyor, Codex builds on engine main ($EB); not run: 0\.$" <<<"$out" || fail "the seats arm did not resolve the task on main's engine: $out"
   jq -e '.model == {cli: "codex", model: "x"} and .reviewer == {cli: "claude", model: "m"} and (has("account") | not)' "$SWE_FX/control.seen" > /dev/null \
     && jq -e '.models.allowed.codex | index("x")' "$SWE_FX/pack.seen" > /dev/null || fail "the engine was not given the arm's seats: $(cat "$SWE_FX/control.seen") $(jq -c .models "$SWE_FX/pack.seen")"
+  # Bug: the engine in the container ran the project's own test command, not the task's (its cmd in the task list).
+  jq -e '.test == {command: "true", survey: false}' "$SWE_FX/pack.seen" > /dev/null || fail "the engine's pack does not hold the task's test command: $(jq -c .test "$SWE_FX/pack.seen")"
   [ -s "$B/results/conveyor-seats-$EB/$(sweorder | head -n 1).json" ] || fail "the seats arm's results are not kept apart from the conveyor arm's: $(ls "$B/results")"
 }
 
