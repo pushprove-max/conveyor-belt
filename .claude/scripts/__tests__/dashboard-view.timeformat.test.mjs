@@ -2,7 +2,7 @@
 // The Board's Time (12-hour or 24-hour) and Date (mm/dd/yyyy or dd/mm/yyyy), set in Customize (issue 458): the times
 // and dates the panels write follow them, and a change shows at once. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { STORE, T0, $, boot, panel, deliver, next, full, saved, clone, issuesP, cases } from './dashboard-view.helpers.mjs';
+import { STORE, T0, $, boot, panel, deliver, next, full, saved, clone, issuesP, cases, iso, trackOf } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -62,6 +62,31 @@ test('Needs you: a waiting card\'s time tooltip follows a change of Time at once
   assert.equal(tipOf(), '11/09/2026, 11:50:00');
   assert.equal(field(), typed, 'the decision\'s row is the same');
   assert.equal(field().value, 'Ship on Monday');
+});
+
+// Needs you keeps a blocked card's row through a redraw, and with it its "Every step". Bug it catches (review of issue
+// 458): after Time is set to 24-hour, its steps' tips, its line and its earlier attempt's line still say AM or PM; or it
+// is drawn again closed, so the reader loses the step they had open.
+test('Needs you: a blocked card\'s open "Every step" follows a change of Time at once, and stays open', () => {
+  const w = boot();
+  const data = full();
+  const records = [{ name: 'building', state: 'done', sec: 600, at: iso(T0 - 1500000) }, { name: 'stopped', state: 'failed', sec: 5, at: iso(T0 - 900000), why: 'the tests failed' }];
+  const prior = { card: 'c2-10', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 1200, reason: 'tests failed', track: trackOf('++++!.', '', { at: null, since: null }) };
+  Object.assign(data.panels.needs.data.cards.blocked[0], { track: { ...trackOf('++!...', ''), at: null, records }, earlier: [prior] });
+  deliver(w, data);
+  const det = () => panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"] details.track-detail');
+  const said = () => [det().querySelector(':scope > details.tl-earlier > summary').textContent, det().querySelector(':scope > .tl-total').textContent,
+    det().querySelector(':scope > ol.timeline > li .tl-tip').textContent];
+  det().open = true;
+  det().querySelector(':scope > details.tl-earlier').open = true;
+  assert.deepEqual(said(), ['Earlier attempt: 11:00 AM to 11:20 AM, 20 min, ended: tests failed', '20 min from 11:25 AM to 11:45 AM, 10 min of it in steps',
+    'Build: done, 10 min, 11:25 AM to 11:35 AM']);
+  w.document.getElementById('customize-open').click();
+  pick(w, 'time', '24-hour');
+  assert.deepEqual(said(), ['Earlier attempt: 11:00 to 11:20, 20 min, ended: tests failed', '20 min from 11:25 to 11:45, 10 min of it in steps',
+    'Build: done, 10 min, 11:25 to 11:35']);
+  assert.equal(det().open, true, '"Every step" stays open');
+  assert.equal(det().querySelector(':scope > details.tl-earlier').open, true, 'its earlier attempt stays open');
 });
 
 // Rules draws nothing for a refresh that changes only readAt (issue 294). Bug it catches (review of issue 458): a

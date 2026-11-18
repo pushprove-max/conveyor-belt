@@ -489,6 +489,11 @@
     root.querySelectorAll('time[data-since]').forEach((el) => {
       if (el.dataset.form !== f) { el.title = stamp(Date.parse(el.dataset.since), { date: true, seconds: true }); el.dataset.form = f; }
     });
+    // A kept "Every step" (Needs you's) has clock times in its steps' tips, its line and its earlier attempts' lines:
+    // one drawn in another Time or Date is drawn again from its own data, and keeps what was open in it.
+    root.querySelectorAll('details.track-detail:not(.tl-earlier)').forEach((det) => {
+      if (det.dataset.form !== f && det.redraw) det.replaceWith(det.redraw());
+    });
   }
   // An issue a Depends on: line names: #N in this project, or "owner/repo#N" (a string) in another repository.
   function depRef(n) { return typeof n === 'string' ? n : `#${n}`; }
@@ -952,6 +957,8 @@
     det.append(sum, ...before, total, ol);
     det.hidden = !ol.children.length && !before.length;
     det.open = Boolean(was && was.open);
+    det.dataset.form = form();
+    det.redraw = () => trackDetail(t, card, det, earlier, repoUrl, repo);
     return det;
   }
 
