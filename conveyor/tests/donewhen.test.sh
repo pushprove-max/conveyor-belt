@@ -174,8 +174,9 @@ t_dwnotes() {
 }
 
 # Bugs: an issue with no `## Done when` is checked, or its reviewer is given Done-when lines; its build line loses the
-# session's tokens and stats (with no Done-when file, the reply's D<n> lines read as two JSON arrays, which jq's
-# --argjson refuses, and the line was written bare, the loop's log showing only jq's own error).
+# session's model, tokens and stats (with no Done-when file, the reply's D<n> lines read as two JSON arrays, which jq's
+# --argjson refuses, and the line was written bare, the loop's log showing only jq's own error: the build and fix lines
+# of the cards the engine files, which have no Done-when, were left unpriced on the Board, issue 452).
 t_dwnone() {
   # #10: no `## Done when`: no check, and a reply with no section lands.
   dwsetup "$(issue 10 2026-01-04)"
@@ -183,7 +184,7 @@ t_dwnone() {
   loop run --only 10 > /dev/null 2> "$STUB/run.err" || fail "run of #10 exited non-zero"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.issue == 10) | select(has("doneWhen"))')" = '' ] && [ -n "$(st 'select(.issue == 10 and .step == "landed") | .sha')" ] \
     || fail "an issue with no Done when section was checked, or did not land: $(st 'select(.issue == 10)')"
-  [ "$(st 'select(.issue == 10 and .step == "build") | .usage.read == 999 and .tokens.claude > 0')" = true ] && ! grep -q 'invalid JSON text' "$STUB/run.err" \
+  [ "$(st 'select(.issue == 10 and .step == "build") | .model == "m" and .usage.read == 999 and .tokens.claude > 0')" = true ] && ! grep -q 'invalid JSON text' "$STUB/run.err" \
     || fail "the build line of an issue with no Done when section lost the session's fields: $(st 'select(.issue == 10 and .step == "build")') $(cat "$STUB/run.err")"
   ! grep -q "Done-when lines" "$STUB/asked" || fail "the reviewer of #10 was given Done-when lines"
 }

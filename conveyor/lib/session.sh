@@ -257,6 +257,22 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
 # added from the answers themselves, each answer once (the usage of its last event). modelUsage and duration_api_ms
 # are the session's totals so far: the last result's and the largest are taken.
 SESSIONREAD=$(<"$HERE/jq/sessionread.jq")
+# A Claude session's fields when its output holds no token usage: Claude Code's own transcript of that session is
+# read with SESSIONREAD (each answer once: the usage of its last event), and its tokens, usage and the models that ran
+# take the place of unread, so the step is priced. The transcript is <account folder, ~/.claude for the default
+# login>/projects/<the worktree's real path, each character but a letter or digit made ->/<session id>.jsonl, the
+# id the output's events name. Fields that hold a usage, an output that names no session, and a transcript that is
+# missing or holds no whole usage leave the fields as they are (unread says why).
+transcribed() { # <the step's fields> <output file> <worktree> <account folder, "" for the default login>
+  local id p t u
+  if jq -e '(.usage | type) != "object"' <<<"$1" >/dev/null 2>&1 \
+    && id=$(jq -rRn 'first(inputs | fromjson? | objects | .session_id | strings | select(test("^[0-9A-Za-z-]+$")))' "$2" 2>/dev/null) && [ -n "$id" ] \
+    && p=$(cd "$3" 2>/dev/null && pwd -P) && t=${4:-$HOME/.claude}/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$p")/$id.jsonl && [ -s "$t" ] \
+    && u=$(jq -cRn --arg m "$(jq -r '.model // ""' <<<"$1")" --arg e "" --argjson s 0 "$SESSIONREAD" "$t" 2>/dev/null | tail -n 1 \
+      | jq -ce 'select((.usage | type) == "object" and .unread == null) | {tokens, usage, stats: (.stats // {} | {models, byModel, cacheHit})}' 2>/dev/null); then
+    jq -c --argjson u "$u" 'del(.unread) + {tokens: $u.tokens, usage: $u.usage} | .stats = ((.stats // {}) + $u.stats)' <<<"$1"
+  else printf '%s\n' "$1"; fi
+}
 # An OpenCode session's output (`opencode run --format json`) gives the same fields (opencoderead.jq), and a Codex
 # session's (`codex exec --json`) too (codexread.jq).
 OPENCODEREAD=$(<"$HERE/jq/opencoderead.jq")
@@ -540,6 +556,7 @@ session1() {
     jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
       || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the session output could not be read", ok: false}
           | if $e == "" then del(.effort) else . end')
+    [ "$agent" != claude ] || f=$(transcribed "$f" "$1.out" "$1" "$dir")
     [ -z "$x" ] && [ -e "$1.stalled" ] || break
     x=$(jq -c --arg r "stalled at ${3:-build}: no progress since $(<"$1.stalled")" '{reason: $r, spent: del(.ok)}' <<<"$f")
     echo "conveyor: card ${1##*/}: its ${3:-build} made no progress for ${STUCK}s: ended, and run once more after ${REVIEW_PAUSE}s" >&2

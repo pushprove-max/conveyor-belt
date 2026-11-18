@@ -112,14 +112,27 @@ line() { # <card> <issue> <step> <result> [extra json]
 # A line's tail (a blocked line's output, a NO-GO review's findings): its last 60 lines, each whole, so no line loses what it says and identical lines stay
 # identical (the Board folds them).
 TAIL='split("\n") | .[-60:] | join("\n")'
+# A build, fix or rebase line written with no price to read (no usage: its output held none, or the session's fields
+# were lost and the line written bare; or unread) keeps that session's output, which clean() removes as the card
+# ends, beside the card's kept work: $ST/kept/<card>/<card>.<step>.out (-2, -3 and so on for a later one), so the
+# cause can be read.
+outkeep() { # <card> <step> <the line>
+  local d=$ST/kept/$1 f n=1
+  case $2 in build | fix | rebase) ;; *) return 0 ;; esac
+  jq -e '(.usage | type) != "object" or (.unread | type) == "string"' <<<"$3" >/dev/null 2>&1 && [ -s "$CARDS/$1.out" ] || return 0
+  f=$d/$1.$2.out; while [ -e "$f" ]; do n=$((n + 1)); f=$d/$1.$2-$n.out; done
+  mkdir -p "$d" 2>/dev/null && cp "$CARDS/$1.out" "$f" 2>/dev/null \
+    || echo "conveyor: card $1: its $2 line has no price to read, and its output could not be kept in $d" >&2
+}
 # A step's line is always written: one whose extra fields are not one JSON object is written without them,
 # and says so (unread, with the start of what they were), so the card goes on. A line that cannot be written at all
 # (twice, a second apart) ends the card as blocked (block keeps its change as a patch and removes its worktree), so
-# a card is never left open with its worktree behind; then this process stops.
+# a card is never left open with its worktree behind; then this process stops. A build, fix or rebase line with no
+# price to read keeps its session's output (outkeep).
 record() { # <card> <issue> <step> <result> [extra json]
   local l
   l=$(line "$@" 2>/dev/null) || l=$(line "$1" "$2" "$3" "$4" "$(jq -cn --arg x "${5:0:300}" '{unread: ("the fields of this line were not one JSON object, so they were left out: " + $x)}')" 2>/dev/null) || l=''
-  [ -n "$l" ] && { locked append "$l" || { sleep 1; locked append "$l"; }; } && return 0
+  [ -n "$l" ] && { locked append "$l" || { sleep 1; locked append "$l"; }; } && { outkeep "$1" "$3" "$l"; return 0; }
   echo "conveyor: cannot record $1 $3" >&2
   [ "$3" = blocked ] || [ ! -d "$CARDS/$1" ] || block "$1" "$2" "$CARDS/$1" "conveyor: the engine could not write the $3 line of this card to the card records"
   exit 1
