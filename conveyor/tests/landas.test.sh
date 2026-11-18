@@ -147,6 +147,20 @@ t_prbutton() {
   [ "$(la_prst 8)" = OPEN ] && [ "$(la_prst 7)" = MERGED ] || fail "the push after the merge opened no new pull request: $(cat "$STUB/pr-calls")"
   [ "$(jq -r .body "$STUB/pr.8" | grep -o '^Closes #[0-9]*' | paste -sd ' ')" = 'Closes #2' ] || fail "the new pull request does not hold only the card landed since: $(jq -r .body "$STUB/pr.8")"
 }
+# Issue 464. Bug it catches: when a card landed on main here after the push (main and origin's default branch have
+# diverged), Merge left main without origin's merge commit (prff() did not merge it in with remerge()), so the next
+# push to conveyor/landing would not hold the merge, or main would lose the landed card.
+t_prdiverge() {
+  local out c2 o
+  setup "[$(issue 1 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  la_land 2; c2=$(git -C "$R" rev-parse main)
+  out=$(loop pr merge 2>&1) || fail "pr merge failed with an unpushed card on main: $out"
+  o=$(git -C "$T/$CASE/origin" rev-parse main)
+  [ "$(git -C "$R" rev-parse main^1 main^2 2>&1 | paste -sd ' ')" = "$c2 $o" ] || fail "main here is not card 2 merged with origin's default branch after the merge: $(git -C "$R" log --format='%H %P %s' -3 main) / origin $o"
+  [ -z "$(git -C "$R" status --porcelain --untracked-files=no)" ] && [ "$(cat "$R/f2.txt")" = 2 ] || fail "main's checkout does not hold the merge: $(git -C "$R" status --porcelain)"
+}
 # Bugs it catches: a merge GitHub refuses (checks, conflicts) taken as done: the pull request dropped from the Board,
 # main here moved or its issues closed; or the refusal shown with no reason, to the owner or the Foreman (health).
 t_prrefused() {
