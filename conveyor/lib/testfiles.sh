@@ -300,15 +300,36 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   testowners
   # The cases each test file of main's checkout defines, by file: the `t_<case>() {` lines the runner selects
   # (conveyor/conveyor.test.sh: a case name of a-z and 0-9 only, so a t_left_stays helper is no case), outside a
-  # heredoc (a fixture's cases, written into a scratch file, are not the file's own). Comment lines start no heredoc.
+  # heredoc (a fixture's cases, written into a scratch file, are not the file's own). Only a << outside quotes and
+  # comments starts a heredoc.
   cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" '
+    # The end word of the first heredoc opener on line s, or "" (sets dash for a <<- opener): a scan that keeps the
+    # quote it is in (S single, A dollar-single, D double, P a $( or a parenthesis, N none) and stops at a comment, so a
+    # << inside quotes is text, not an opener (#370).
+    function opener(s,   i, n, c, t, st, top, h) {
+      n = length(s); top = 0; st[0] = "N"
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1); t = st[top]
+        if (t == "S") { if (c == q) top--; continue }
+        if (t == "A") { if (c == "\\") i++; else if (c == q) top--; continue }
+        if (c == "\\") { i++; continue }
+        if (t == "D") { if (c == "\"") top--; else if (substr(s, i, 2) == "$(") { st[++top] = "P"; i++ }; continue }
+        if (substr(s, i, 2) == "$" q) { st[++top] = "A"; i++ }
+        else if (c == q) st[++top] = "S"
+        else if (c == "\"") st[++top] = "D"
+        else if (c == "(") st[++top] = "P"
+        else if (c == ")") { if (top > 0) top-- }
+        else if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;|&(]/)) return ""
+        else if (substr(s, i, 3) == "<<<") i += 2
+        else if (substr(s, i, 2) == "<<" && match(substr(s, i), "^<<-?[ \t]*[\"" q "\\\\]?[A-Za-z_][A-Za-z0-9_]*")) {
+          h = substr(s, i, RLENGTH); dash = (h ~ /^<<-/); sub(/^<<-?[ \t]*/, "", h); gsub("[\"" q "\\\\]", "", h); return h }
+      }
+      return ""
+    }
     FNR == 1 { end = "" }
     end != "" { l = $0; if (dash) sub(/^\t+/, "", l); if (l == end) end = ""; next }
     /^t_[a-z0-9]+\(\) \{/ { c = $0; sub(/^t_/, "", c); sub(/\(.*/, "", c); print FILENAME "\t" c }
-    /^[ \t]*#/ { next }
-    { s = $0; gsub(/<<</, "", s)
-      if (match(s, "<<-?[ \t]*[\"" q "]?[A-Za-z_][A-Za-z0-9_]*")) {
-        h = substr(s, RSTART, RLENGTH); dash = (h ~ /^<<-/); sub(/^<<-?[ \t]*/, "", h); gsub("[\"" q "]", "", h); end = h } }' 2>/dev/null) \
+    { end = opener($0) }' 2>/dev/null) \
     | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'
   ln=$(testlines) || return 1
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
