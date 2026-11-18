@@ -131,20 +131,16 @@ const LONG = '[P2] src/services/fold-cutover-preflight.ts:338 The hash check acc
 const LONG_WHY = 'The proof runs with `componentInnerBoxes: 2`, and the manifest range at shared/taxonomy/verification-pipeline-capture-fields.ts:239 (`[1, 0, 1, \'integer\']`) says no.';
 // A finding the review gave an id ("[E1]") between its level and its file, as the fix reviews do.
 const TAGGED = '[P2] [E1] conveyor/lib/snapshot.sh:716 The snapshot drops a line. Proof: Run it twice.';
-// One draw for every case below: they read its rows and change nothing.
-let drawn;
-const rowsLong = () => {
-  if (drawn) return drawn;
+// One case, so one Board render: cases share no state, as the runner (dashboard-view.helpers.mjs) gives each case to
+// whichever of its workers is free, and these checks only read the rows.
+test('Declined: a finding and its reason draw a level badge, a file link, a bold claim, a Proof label, and code and paths as code', () => {
   const w = boot();
   const data = full();
   data.panels.declined.data.lines = [line({ finding: LONG, why: LONG_WHY, by: 'owner', round: null, findings: null }),
     line({ id: 'd00000000000b', finding: TAGGED, why: 'not worth it', by: 'owner', round: null, findings: null })];
   deliver(w, data);
-  drawn = { long: rowOf(w, LONG.replaceAll('`', '')), tagged: rowOf(w, TAGGED) };
-  return drawn;
-};
-test('Declined: a finding draws a level badge, a file link, a bold claim, a Proof label, and code and paths as code', () => {
-  const f = rowsLong().long.querySelector('.declined-finding');
+  const long = rowOf(w, LONG.replaceAll('`', ''));
+  const f = long.querySelector('.declined-finding');
   const badge = f.querySelector('.declined-head .declined-level');
   assert.equal(badge.textContent, '[P2]');
   assert.equal(badge.dataset.level, 'P2', 'the badge takes the P2 colour');
@@ -164,27 +160,22 @@ test('Declined: a finding draws a level badge, a file link, a bold claim, a Proo
   // Bug: the Declined styles took the class names of the review rows in Show output and Health (.finding-head,
   // .finding-at, .finding-proof), so each one's rules changed the other's layout.
   assert.equal(f.querySelector('.finding-head, .finding-at, .finding-proof'), null, "the review rows' class names are not used");
-});
-// Bug: a finding with a review id after its level ("[P2] [E1] <file>:<line>") lost its badge, bold claim and Proof.
-test('Declined: a finding with a review id after its level keeps its badge, file link, bold claim and Proof', () => {
-  const f = rowsLong().tagged.querySelector('.declined-finding');
-  assert.equal(f.querySelector('.declined-level').dataset.level, 'P2');
-  assert.equal(f.querySelector('.declined-ids').textContent, '[E1] ');
-  assert.equal(f.querySelector('.declined-head a.declined-at').href, `${REPO}/blob/HEAD/conveyor/lib/snapshot.sh#L716`);
-  assert.equal(f.querySelector('strong.declined-claim').textContent, 'The snapshot drops a line. ');
-  assert.equal(f.querySelector('.declined-proof-label').textContent, 'Proof: ');
-  assert.equal(f.textContent, TAGGED, 'the text is the finding as written');
-});
-test('Declined: a reason draws its backticked spans as code and a bare file path as a code link', () => {
-  const r = rowsLong().long.querySelector('.reason');
+  // The reason: its backticked spans are code and a bare file path is a code link.
+  const r = long.querySelector('.reason');
   assert.deepEqual(Array.from(r.querySelectorAll('code:not(a code)'), (c) => c.textContent), ['componentInnerBoxes: 2', "[1, 0, 1, 'integer']"]);
   assert.deepEqual(Array.from(r.querySelectorAll('a.why-at'), (a) => [a.href, a.textContent]),
     [[`${REPO}/blob/HEAD/shared/taxonomy/verification-pipeline-capture-fields.ts#L239`, 'shared/taxonomy/verification-pipeline-capture-fields.ts:239']]);
-});
-test('Declined: the finding and its reason, drawn, are the stored text without its backticks', () => {
-  const row = rowsLong().long;
-  assert.equal(row.querySelector('.declined-finding').textContent, LONG.replaceAll('`', ''));
-  assert.equal(row.querySelector('.why-text').textContent, LONG_WHY.replaceAll('`', ''));
+  // The finding and its reason, drawn, are the stored text without its backticks.
+  assert.equal(f.textContent, LONG.replaceAll('`', ''));
+  assert.equal(long.querySelector('.why-text').textContent, LONG_WHY.replaceAll('`', ''));
+  // Bug: a finding with a review id after its level ("[P2] [E1] <file>:<line>") lost its badge, bold claim and Proof.
+  const t = rowOf(w, TAGGED).querySelector('.declined-finding');
+  assert.equal(t.querySelector('.declined-level').dataset.level, 'P2', 'a review id after the level: the badge is kept');
+  assert.equal(t.querySelector('.declined-ids').textContent, '[E1] ');
+  assert.equal(t.querySelector('.declined-head a.declined-at').href, `${REPO}/blob/HEAD/conveyor/lib/snapshot.sh#L716`);
+  assert.equal(t.querySelector('strong.declined-claim').textContent, 'The snapshot drops a line. ');
+  assert.equal(t.querySelector('.declined-proof-label').textContent, 'Proof: ');
+  assert.equal(t.textContent, TAGGED, 'the text is the finding as written');
 });
 
 // Audit UX14. Bug: a line left the panel 7 days after its time with no word before, and said "More than 7 days old"
