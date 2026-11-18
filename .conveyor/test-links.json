@@ -1,6 +1,7 @@
 {
   ".conveyor/engine-areas.json": [
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/models.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "commands/setup.md": [
@@ -169,6 +170,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/testrun.sh": [
+    "conveyor/tests/models.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/views.sh": [
@@ -254,5 +256,8 @@
   ],
   "docs/demo/timeline.test.mjs": [
     "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/redpickbig.test.sh": [
+    "conveyor/tests/models.test.sh"
   ]
 }

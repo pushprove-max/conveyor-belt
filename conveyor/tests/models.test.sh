@@ -267,7 +267,9 @@ proxy_start() { # <issue>: a main with that one issue, the stub proxy serving, C
   # which this case's machine fails), where a key's variable may meet doctor's own (t_proxykeys). Then the Anthropic
   # variables a card session gets from proxyenv(), called alone as the session's subshell calls it before claude starts.
   routes() { { modelsengine doctor routes || :; } | grep -E '^(builder|reviewer):'; }
-  doctorroutes() { { loop doctor 2>/dev/null || :; } | grep -E '^(builder|reviewer):'; }
+  # Doctor runs in the project's checkout, as a user runs it: started in the case's own folder (no checkout), it stops at
+  # "missing: a git checkout of the project" before its route lines.
+  doctorroutes() { { (cd "$R" && loop doctor) 2>/dev/null || :; } | grep -E '^(builder|reviewer):'; }
   # Fails when the call does, so a direct session's empty list is never a call that did not run.
   pxenv() { local o; o=$(modelsengine run 'proxyenv && env') || return 1; grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ENABLE_TOOL_SEARCH)=' <<<"$o" | sort; return 0; }
   unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ENABLE_TOOL_SEARCH
