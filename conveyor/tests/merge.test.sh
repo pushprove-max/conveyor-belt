@@ -390,3 +390,49 @@ t_mergereadmewait() {
     && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
     || fail "#7 was reviewed again after its landing claim merged README.md alone: $(st "select(.issue == 7) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
 }
+
+# The fast resolver (the owner, 2026-11-18, #381): a card's change and main both changed l4 of a.txt. One judge call
+# (a stub here, its answer <answer>) merges the conflict before any fitting session. Sets w (the worktree), onto (main's
+# commit), mt (the merge with its markers) and rc (fastfit's exit).
+fastcase() { # <answer>, as the judge writes it
+  eval "$(sed -n '/^inconflicts() {/,/^}/p; /^FASTFIT_ASK=/p; /^fastfit() {/,/^}/p' "$SRC/lib/claim.sh")"
+  HERE=$SRC; FASTANSWER=$1; w=$T/$CASE/w
+  judgeon() { [ -z "${FASTOFF:-}" ]; }
+  judgecall() { : > "$T/$CASE/called"; printf '%s\n' "$3" > "$T/$CASE/asked"; printf '%s\n' "$FASTANSWER" > "$1.judge"; }
+  mkdir -p "$w" && git -C "$w" init -q && seq 9 | sed 's/^/l/' > "$w/a.txt" && git -C "$w" add -A && git -C "$w" commit -qm base
+  sed -i 's/^l4$/seven/' "$w/a.txt" && git -C "$w" diff --binary > "$w.patch" && git -C "$w" checkout -q -- a.txt
+  sed -i 's/^l4$/main4/' "$w/a.txt" && git -C "$w" commit -qam "main moves" && onto=$(git -C "$w" rev-parse HEAD)
+  ! git -C "$w" apply --3way --index "$w.patch" >/dev/null 2>&1 || fail "the case's change did not conflict with main"
+  git -C "$w" add -A && mt=$(git -C "$w" write-tree) && git -C "$w" reset -q --hard "$onto"
+  fastfit "$w" a.txt "$onto" "$mt"; rc=$?
+}
+
+# A good answer: both lines are kept, the change is staged on main's commit, no marker is left, and the judge was given
+# the conflict with its base.
+t_fastfit() {
+  fastcase '{"1": "main4\nseven"}'
+  [ $rc = 0 ] || fail "the fast resolver did not fit a conflict its answer merged"
+  [ "$(git -C "$w" rev-parse HEAD)" = "$onto" ] && [ "$(git -C "$w" show :a.txt | sed -n 4,5p | tr '\n' ' ')" = "main4 seven " ] \
+    || fail "the merged change is not staged on main: $(git -C "$w" show :a.txt 2>&1 | tr '\n' ' ')"
+  ! grep -qE '^(<{7}|={7}|>{7})' "$w/a.txt" || fail "a conflict marker was left: $(cat "$w/a.txt")"
+  grep -qx '||||||| base' "$T/$CASE/asked" && grep -qx 'l4' "$T/$CASE/asked" || fail "the judge was not shown the base of the conflict: $(cat "$T/$CASE/asked")"
+}
+
+# An answer that leaves a marker, gives no text for the conflict, or is no JSON: no fit, and the worktree is main again
+# for the session.
+t_fastfitbad() {
+  local a
+  for a in '{"1": "main4\n=======\nseven"}' '{"2": "x"}' 'I could not merge it.'; do
+    fastcase "$a"
+    [ $rc != 0 ] || fail "the fast resolver fitted with the answer: $a"
+    [ "$(git -C "$w" rev-parse HEAD)" = "$onto" ] && [ -z "$(git -C "$w" status --porcelain)" ] \
+      || fail "the worktree was not put back on main after the answer $a: $(git -C "$w" status --porcelain | tr '\n' ' ')"
+    rm -rf "$w" "$w.patch" "$w.judge"
+  done
+}
+
+# With the judge off in the control record, the fast resolver asks nothing: the session fits the card, as before.
+t_fastfitoff() {
+  FASTOFF=1 fastcase '{"1": "main4\nseven"}'
+  [ $rc != 0 ] && [ ! -e "$T/$CASE/called" ] || fail "the fast resolver ran with the judge off"
+}

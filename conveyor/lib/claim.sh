@@ -158,6 +158,34 @@ unionfit() { # <worktree> <files that conflict, one a line> <test files, one a l
   rm -f "$a"
   [ $rc = 0 ] && ! git -C "$1" diff --cached --quiet && [ "$(unionx "$1" "$3")" = "$4" ]
 }
+# The fast resolver (the owner, 2026-11-18, #381): a three-way merge of the card's change (<worktree>.patch) onto main
+# that left conflicts is first given to one judge call (judgecall(), lib/review.sh: the judge seat, no tools), with the
+# judge on in the control record: only the conflicts (diff3 style, the base between the two sides) and a few lines
+# around each go to it, numbered by lib/fastfit.py, and it answers with the merged text of each. That text is written in
+# their place. It fits when no conflict marker is left, the lines changed are only inside the conflicts (inconflicts())
+# and a change is left. Else, or when the call fails, the worktree is put back on <onto> and the session fits the card,
+# as before. The merged files' parse check and the card's tests run before it lands; it is not reviewed again.
+FASTFIT_ASK='Two changes to the same lines of code clash in a three-way merge. In each conflict below, the lines from `<<<<<<< ours` to `|||||||` are main as it is now (another change already landed), the lines from `|||||||` to `=======` are the base both changes started from, and the lines from `=======` to `>>>>>>> theirs` are the card'"'"'s change. Write, for each conflict, the lines that keep both changes: what main added or changed and what the card added or changed. Keep the code style. Do not read or change any file. Answer with one JSON object and nothing else: each key a conflict'"'"'s number as a string, each value the text that replaces that whole conflict, its markers included, with no markers in it. Give every conflict a value.'
+fastfit() { # <worktree> <files that conflict, one a line> <onto: main's commit> <the merge with its conflict markers, a tree>
+  local d f q rc=1
+  judgeon >/dev/null 2>&1 && [ -n "$2" ] && [ -n "$4" ] && d=$(mktemp -d) || return 1
+  printf '%s\n' "$2" > "$d/files"
+  # The merge again, its conflicts marked diff3 style, the files saved before the judge call puts the worktree back.
+  git -C "$1" -c merge.conflictStyle=diff3 apply --3way --index "$1.patch" >/dev/null 2>&1
+  while IFS= read -r f; do mkdir -p "$d/t/$(dirname "$f")" && cp -- "$1/$f" "$d/t/$f" || break; done <<<"$2"
+  if [ -z "$f" ] || [ -f "$d/t/$f" ]; then
+    git -C "$1" reset -q --hard "$3" 2>/dev/null && q=$(python3 "$HERE/lib/fastfit.py" prompt "$d/t" "$d/files" 2>/dev/null) \
+      && CALLSTEP=fix CALLACT='the fast resolver merges the conflicts' judgecall "$1" "$FASTFIT_ASK" "$q" >/dev/null 2>&1 \
+      && { git -C "$1" -c merge.conflictStyle=diff3 apply --3way --index "$1.patch" >/dev/null 2>&1; :; } \
+      && python3 "$HERE/lib/fastfit.py" apply "$1" "$d/t" "$d/files" "$1.judge" 2>/dev/null \
+      && git -C "$1" add -A 2>/dev/null \
+      && ! git -C "$1" diff --cached -U0 | grep -qE '^\+(<{7}|\|{7}|={7}|>{7})( |$)' \
+      && inconflicts "$1" "$4" "$2" && ! git -C "$1" diff --cached --quiet && rc=0
+  fi
+  rm -rf "$d"
+  [ $rc = 0 ] || git -C "$1" reset -q --hard "$3" 2>/dev/null
+  return $rc
+}
 # After a merge at landing (settle(): a clean three-way merge, a union merge or the session that brings the card onto
 # main; card(): the rebuild and the port), before any test runs: every file the staged change at <worktree> changes
 # and keeps still parses (git called #415's merge clean, and it left a test file with two openings and one end). A file
@@ -416,6 +444,14 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       fi
       err=$(git -C "$3" reset -q --hard "$onto" 2>&1) \
         || { block "$1" "$2" "$3" "$5: the engine could not remove the three-way merge of the card onto main:${err:0:300}"; return 1; }
+    fi
+    # The fast resolver (fastfit()): one judge call merges the conflicts, with no fitting session and no second review
+    # (the owner's pick, 2026-11-18): as after a union merge, its tests are not taken as passed (testedhere()), so the
+    # merged files' parse check and its tests run on them before it lands.
+    if fastfit "$3" "$cf" "$onto" "$mt"; then
+      [ ! -e "$3.ready" ] || { jq -c 'del(.tested)' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready"
+      echo "conveyor: card $1: the fast resolver merged its conflicts with main in $(printf '%s' "$cf" | grep -c .) file(s), with no fitting session; its tests run again on the merged files"
+      parsecheck=1; rm -f "$3.base"; return $moved
     fi
     if [ -n "$caught" ]; then
       err=$(git -C "$3" reset -q --hard "$old" 2>&1 && git -C "$3" apply --index "$3.patch" 2>&1) \

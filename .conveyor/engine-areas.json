@@ -329,6 +329,7 @@
 {"area": "claim", "test": "budgetwait.test.sh"}
 {"area": "claim", "test": "testpaths.test.sh"}
 {"area": "claim", "file": "conveyor/lib/claim.sh"}
+{"area": "claim", "file": "conveyor/lib/fastfit.py"}
 {"area": "push", "test": "serve.test.sh"}
 {"area": "push", "test": "pushslot.test.sh"}
 {"area": "push", "test": "adopt.test.sh"}

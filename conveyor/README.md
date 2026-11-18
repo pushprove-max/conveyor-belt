@@ -1323,8 +1323,13 @@ project and with no setting. It counts when no conflict is left, in a code file 
 its test files are the same. Its changed tests, those test files among them, then run once more before it lands, as
 its earlier pass no longer counts: two edits to one test that do not work together fail there and send the card to its
 fix.
-Only when the merge leaves a conflict (an earlier landing changed the same lines, of a documentation file too), or does
-not leave the card's change, does one session bring it onto main, and it is reviewed again; unless the clash is in
+When the merge leaves a conflict and the judge is on in the control record, the fast resolver tries first: one judge
+call (the judge seat, no tools) gets only the conflicts, each with its base and a few lines around it, and answers with
+the merged text of each. It counts when no conflict marker is left, only lines inside the conflicts changed and a change
+is left. The merged files are checked to parse and the card's tests run on them before it lands, with no fitting
+session and no second review. When the answer does not count, or the call fails, the session below fits the card, as before.
+Only when the merge leaves a conflict that the fast resolver does not fit (an earlier landing changed the same lines,
+of a documentation file too), or does not leave the card's change, does one session bring it onto main, and it is reviewed again; unless the clash is in
 documentation files (`*.md`) alone (a README: the change outside them still merges onto main) and that session left the
 change outside them as it was reviewed: then its review and, when they passed on that change, its tests stand, and only
 its product checks run before it lands. Landing is one card, or one batch of cards (below), at a time.
