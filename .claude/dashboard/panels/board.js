@@ -722,7 +722,10 @@
     });
     const open = S.seats && S.seats.issue === n;
     const b = button('Settings', 'btn-quiet', 'seats', `The builder, reviewer and judge of ${t}`, () => {
-      S.seats = open ? null : { issue: n, repo: S.d.repo, draft: Object.fromEntries(SEATS.map(([k]) => [k, { model: own[k] ? own[k].model : '', effort: own[k] && own[k].effort ? own[k].effort : '' }])) };
+      // base: the seats as the form opened, so Save sends only a seat changed in the form, not one that changed since
+      // (an Apply while the form is open).
+      const at = () => Object.fromEntries(SEATS.map(([k]) => [k, { model: own[k] ? own[k].model : '', effort: own[k] && own[k].effort ? own[k].effort : '' }]));
+      S.seats = open ? null : { issue: n, repo: S.d.repo, draft: at(), base: at() };
       draw();
     });
     b.setAttribute('aria-expanded', String(!!open));
@@ -760,8 +763,8 @@
       f.append(row);
     });
     f.append(button('Save', 'btn-quiet', 'seats-save', `Save the settings of #${n}`, () => {
-      const own = ownSeats(n);
-      const changes = SEATS.map(([k]) => k).filter((k) => (d[k].model || '') !== (own[k] ? own[k].model : '') || (d[k].model && (d[k].effort || '') !== (own[k] && own[k].effort ? own[k].effort : '')))
+      const was = S.seats.base;
+      const changes = SEATS.map(([k]) => k).filter((k) => d[k].model !== was[k].model || (d[k].model && d[k].effort !== was[k].effort))
         .map((k) => (d[k].model ? [String(n), k, d[k].model].concat(d[k].effort ? [d[k].effort] : []) : [String(n), k, 'clear']));
       if (!changes.length) { say('Nothing changed.'); return; }
       sendAll(changes, S.seats.repo).then((ok) => { if (ok) S.seats = null; });

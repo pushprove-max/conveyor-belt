@@ -66,6 +66,29 @@ test('Pick for me shows the judge\'s settings with a reason each, sends nothing 
   assert.deepEqual(pickLines(w, 22), [], 'an applied pick leaves the card');
 });
 
+// Bug (#461): Save compared the open form with the card's settings as they stood at Save, so after Pick for me and
+// Apply, the reviewer and judge the form still showed as Project's were sent as clear, undoing the Apply.
+test('Save after an Apply in the open form sends only the seat changed in the form', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  deliver(w, d);
+  act(bcard(w, 22), 'seats').click();
+  w.reply = answer(JSON.stringify(PICK));
+  act(bcard(w, 22), 'seats-pick').click();
+  await settled();
+  const seat = (k) => ({ model: PICK[k].model, effort: PICK[k].effort });
+  w.reply = answer(JSON.stringify({ ...clone(d.panels.board.data.control), cards: { 22: { builder: seat('builder'), reviewer: seat('reviewer'), judge: seat('judge') } } }));
+  act(bcard(w, 22), 'seats-apply').click();
+  await settled();
+  assert.equal(w.posts.splice(0).length, 4, 'the pick and the three seats of the Apply');
+  assert.equal(seatLine(w, 22).querySelectorAll('.is-own').length, 3, 'the applied seats are the card\'s own');
+  const form = bcard(w, 22).querySelector('.board-seats-form');
+  setTo(w, act(form, 'seat-model-builder'), 'claude-opus-5-5');
+  act(form, 'seats-save').click();
+  await settled();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['22', 'builder', 'claude-opus-5-5']]);
+});
+
 // Bugs: a blocked card, or one waiting for a yes, had no Settings or Pick for me, so its seats could not be set before
 // its Retry; and a card's own seat with no effort of its own showed the project's effort where the card's CLI does not
 // take it (a Codex judge under a Claude judge at max), not the medium its session runs at (cardfit, lib/control.sh).
