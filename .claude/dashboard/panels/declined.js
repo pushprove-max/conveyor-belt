@@ -7,8 +7,8 @@
 // into the finding it means (why, below). "File as issue" (confirmed by a second click: it costs a build) files the
 // finding as an ordinary issue, through POST /control build with the line's repository and id; the line is greyed in
 // place at once, and built is that issue once it is filed, the line then saying so in place of the button. "Dismiss"
-// (one line, on a second click that says it is for good) and "Dismiss all shown (n)" (in the panel's heading,
-// confirmed by a second click: the n open lines drawn) mark lines dismissed, through POST /control dismiss, one a
+// (one line, on a second click that says it is for good), "Dismiss all shown (n)" and "Dismiss all (n)" (in the panel's
+// heading, confirmed by a second click: the n open lines drawn; every line the panel counts, drawn or not) mark lines dismissed, through POST /control dismiss, one a
 // project (400 lines at most a request): they leave the panel and its count at once, and stay in the list. The
 // reviewer is told the reasons of the lines not built, dismissed or not,
 // so it does not raise them again. An open line with 2 days or less before it leaves the panel (7 days after its time)
@@ -25,10 +25,10 @@
   // has the line in its rest).
   // filed: the lines the host filed here, greyed until a list shows them built.
   const armed = new Set(), said = new Map(), busy = new Set(), gone = new Map(), filed = new Set();
-  let allSaid = ''; // the host's answer to "Dismiss all shown", when it refused
-  // The keys of the lines "Dismiss all shown" was first clicked for; a second click sends them only while the same
-  // lines are drawn, so a click never dismisses lines its count did not name.
-  let allArmed = null;
+  let allSaid = ''; // the host's answer to "Dismiss all shown" or "Dismiss all", when it refused
+  // By button: the keys of the lines "Dismiss all shown" or "Dismiss all" was first clicked for; a second click sends
+  // them only while they are still its targets, so a click never dismisses lines its count did not name.
+  const allArmed = {};
   const key = (x) => `${x.repo}:${x.id}`;
   const shown = (d) => d.lines.filter((x) => !gone.has(key(x)));
   // Every line, newest first (kept together by project when the lists are sorted so); one of the rest that is neither
@@ -269,7 +269,7 @@
       };
       const view = ctx.param('declined');
       const lines = view === 'all' ? every(d, ctx) : view ? every(d, ctx).filter((x) => x.card === view) : shown(d);
-      // The rows drawn now ("Dismiss all shown" takes their open lines, no more).
+      // The rows drawn now ("Dismiss all shown" takes their open lines, no more; "Dismiss all" takes every line counted).
       let drawn = [];
       const bar = h('p', 'foot');
       const btn = (text, act, quiet) => { const b = h('button', quiet ? 'btn btn-quiet' : 'btn', text); b.type = 'button'; b.dataset.act = act; return b; };
@@ -279,28 +279,42 @@
       if (view === 'all') bar.append(h('span', null, 'Every line: dismissed, filed and older ones too. '));
       else if (view) bar.append(h('span', null, lines.length ? `Showing the ${lines.length === 1 ? 'line' : `${lines.length} lines`} of ${typeof lines[0].name === 'string' && lines[0].name ? lines[0].name : `#${lines[0].issue}`} only. ` : 'No line of that card is in the list. '));
       else if (!lines.length) bar.append(h('span', null, 'Nothing to look at: you dismissed or filed each line, or the line is more than 7 days old. '));
-      // "Dismiss all shown (n)", in the panel's heading and coloured as a warning, unlike the harmless buttons below:
-      // the first click asks, the second sends the n open lines drawn, and only while those same lines are drawn. It
-      // cannot be undone, and its second-click text says so.
-      const all = btn('', 'dismiss-all');
-      all.classList.add('btn-warn');
-      const targets = () => drawn.filter((x) => open(x) && !busy.has(key(x)));
+      // "Dismiss all shown (n)" and "Dismiss all (n)", in the panel's heading and coloured as a warning, unlike the
+      // harmless buttons below: the first click asks, the second sends the n lines its count named, and only while
+      // those same lines are its targets. "Dismiss all shown" takes the open lines drawn; "Dismiss all", on the panel's
+      // own list (not a card's lines or every line), takes every line the panel counts, drawn or not. They cannot be
+      // undone, and the second-click text says so.
       const ids = (xs) => xs.map(key).join(' ');
+      const bulks = [
+        { act: 'dismiss-all', label: 'Dismiss all shown', where: 'shown', targets: () => drawn.filter((x) => open(x) && !busy.has(key(x))) },
+        { act: 'dismiss-every', label: 'Dismiss all', where: 'in the panel, drawn or not', targets: () => (view ? [] : shown(d).filter((x) => open(x) && !busy.has(key(x)))) },
+      ];
       const drawAll = () => {
-        const xs = targets();
-        if (allArmed !== null && allArmed !== ids(xs)) allArmed = null;
-        const n = xs.length === 1 ? 'the line' : `the ${xs.length} lines`;
-        all.textContent = allArmed !== null ? `Click again to dismiss ${n} for good` : `Dismiss all shown (${xs.length})`;
-        all.setAttribute('aria-pressed', String(allArmed !== null));
-        said0.textContent = allArmed !== null ? `Click again to dismiss ${n} shown: they leave the panel, and the reviewer still does not raise them again.` : allSaid;
-        ctx.headActs(...(xs.length ? [all] : []));
+        let ask = '';
+        bulks.forEach((u) => {
+          u.xs = u.targets();
+          if (allArmed[u.act] && allArmed[u.act] !== ids(u.xs)) allArmed[u.act] = null;
+          const on = Boolean(allArmed[u.act]);
+          const n = u.xs.length === 1 ? 'the line' : `the ${u.xs.length} lines`;
+          u.b.textContent = on ? `Click again to dismiss ${n} for good` : `${u.label} (${u.xs.length})`;
+          u.b.setAttribute('aria-pressed', String(on));
+          if (on) ask = `Click again to dismiss ${n} ${u.where}: they leave the panel, and the reviewer still does not raise them again.`;
+        });
+        said0.textContent = ask || allSaid;
+        ctx.headActs(...bulks.filter((u) => u.xs.length).map((u) => u.b));
       };
-      all.addEventListener('click', () => {
-        const xs = targets();
-        if (!xs.length) return;
-        if (allArmed !== ids(xs)) { allArmed = ids(xs); drawAll(); return; }
-        allArmed = null; all.disabled = true; allSaid = 'Sending…'; said0.textContent = allSaid;
-        dismiss(xs, (bad) => { allSaid = bad.length ? `Not dismissed: ${bad.join('; ')}` : ''; });
+      bulks.forEach((u) => {
+        u.b = btn('', u.act);
+        u.b.classList.add('btn-warn');
+        u.b.addEventListener('click', () => {
+          const xs = u.targets();
+          if (!xs.length) return;
+          // One button armed at a time, so the note says what the next click sends.
+          if (allArmed[u.act] !== ids(xs)) { bulks.forEach((o) => { allArmed[o.act] = null; }); allArmed[u.act] = ids(xs); drawAll(); return; }
+          bulks.forEach((o) => { allArmed[o.act] = null; o.b.disabled = true; });
+          allSaid = 'Sending…'; said0.textContent = allSaid;
+          dismiss(xs, (bad) => { allSaid = bad.length ? `Not dismissed: ${bad.join('; ')}` : ''; });
+        });
       });
       if (view === 'all') { const b = btn("Show the panel's lines", 'declined-panel', true); b.addEventListener('click', () => go(null)); bar.append(b); }
       else { const b = btn('Show every line', 'declined-all', true); b.addEventListener('click', () => go('all')); bar.append(b); }

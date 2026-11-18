@@ -1465,8 +1465,9 @@ greyed, with a "Dismissed", "Built" or "Expired" tag beside its issue number. A 
 on that card's lines alone, dismissed ones too, tagged the same, with a "Back to the list" button. A line with 2 days
 or less before it leaves the panel says when ("Expires in 1 d 4 h"). "File as issue", confirmed by a second click
 (`conveyor.sh declined build <id>`), files the finding as an ordinary issue that names it, with no follow-up label, so it
-is picked as any new issue is; the line keeps the issue's number (`built`), and a second ask files nothing. "Dismiss"
-and "Dismiss all shown (n)", in the panel's heading and confirmed by a second click (`conveyor.sh declined dismiss
+is picked as any new issue is; the line keeps the issue's number (`built`), and a second ask files nothing. "Dismiss",
+"Dismiss all shown (n)" and "Dismiss all (n)" (every line the panel counts, shown or not), in the panel's heading
+and confirmed by a second click (`conveyor.sh declined dismiss
 [--by <who>] <id>...`), take lines off the panel: each keeps who dismissed it and when (`dismissed`) and stays in the
 list, so the reviewer is still told not to raise it.
 

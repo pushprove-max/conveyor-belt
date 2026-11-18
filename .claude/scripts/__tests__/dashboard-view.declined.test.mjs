@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Declined panel: how a reason is drawn; what an F<n> of the judge's reason means; when a line leaves the panel; "Dismiss all shown (n)".
+// The Declined panel: how a reason is drawn; what an F<n> of the judge's reason means; when a line leaves the panel; "Dismiss all shown (n)" and "Dismiss all (n)".
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { T0, iso, boot, panel, deliver, next, settle, full, tick, P, cases } from './dashboard-view.helpers.mjs';
@@ -265,4 +265,64 @@ test('Declined: a main-red fix card\'s lines are shown by its name, never as "#0
   assert.match(text, /Showing the line of Main is red \(0123456789ab\) only/);
   assert.doesNotMatch(text, /#0\b/);
   assert.equal(rowOf(w, '[P1] a.txt:2 the old word again').querySelector('.issue').textContent, 'Main is red (0123456789ab)');
+});
+
+// Issue 457: "Dismiss all (n)" takes every line the panel counts, drawn or not. n open lines of one project, the
+// newest first, the panel at its own size (it draws fewer).
+const many = (n) => Array.from({ length: n }, (_, i) => line({ id: `d${i.toString(16).padStart(12, '0')}`, time: iso(T0 - (i + 1) * 60000), finding: `[P3] f${i}.txt:1 a nit`, round: null, findings: null }));
+const every = (w) => panel(w, 'declined').querySelector('.panel-head button[data-act="dismiss-every"]');
+const count = (w) => w.document.querySelector('#panel-declined .panel-count').textContent;
+
+// Bug: the only bulk button dismissed the lines drawn (5 at Small), so a panel of 111 took one click a screenful.
+test('Declined: "Dismiss all (n)" sends every open line, drawn or not, in one request, and the count drops to 0', async () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = many(12);
+  deliver(w, data);
+  assert.ok(panel(w, 'declined').querySelectorAll('.rows > .row').length < 12, 'the panel draws fewer lines than it counts');
+  assert.equal(count(w), '12');
+  assert.equal(every(w).textContent, 'Dismiss all (12)');
+  assert.ok(every(w).classList.contains('btn-warn'), 'coloured as a warning');
+  every(w).click();
+  await settle();
+  assert.equal(w.posts.length, 0, 'the first click only asks');
+  assert.equal(every(w).textContent, 'Click again to dismiss the 12 lines for good');
+  every(w).click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'dismiss', args: many(12).map((x) => x.id), repo: 'sample' } }]);
+  assert.equal(count(w), '0');
+  assert.equal(every(w), null, 'nothing left to dismiss');
+});
+
+// The host takes at most 400 ids in one dismiss (dashboard_server.py control_ok). Bug: 401 lines in one request are
+// refused whole, and none is dismissed.
+test('Declined: "Dismiss all (n)" over 401 lines sends them 400 at most a request, each id once', async () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = many(401);
+  deliver(w, data);
+  every(w).click(); every(w).click();
+  await settle();
+  const posts = w.posts.splice(0);
+  assert.deepEqual(posts.map((p) => [p.body.repo, p.body.args.length]), [['sample', 400], ['sample', 1]]);
+  assert.deepEqual(posts.flatMap((p) => p.body.args), many(401).map((x) => x.id), 'every line, each once');
+  assert.equal(count(w), '0');
+});
+
+// Bug: a line that arrives between the two clicks is dismissed though the count the owner confirmed did not name it.
+test('Declined: "Dismiss all (n)" never dismisses a line that arrived between its two clicks', async () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = many(8);
+  deliver(w, data);
+  every(w).click();
+  await settle();
+  const more = full();
+  more.panels.declined.data.lines = [line({ id: 'd00000000002a', finding: '[P2] new.txt:1 a new line', round: null, findings: null })].concat(many(8));
+  next(w, more);
+  assert.equal(every(w).textContent, 'Dismiss all (9)', 'disarmed, with the new count');
+  every(w).click();
+  await settle();
+  assert.equal(w.posts.length, 0, 'the click after the change only asks again');
+  assert.equal(count(w), '9', 'the new line is not dismissed');
 });

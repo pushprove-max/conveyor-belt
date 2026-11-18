@@ -70,6 +70,13 @@ serves the Board, because its requests come from a loopback address. An admin se
 A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
 each panel. It never hides Needs you.
 
+The Declined panel's heading has two buttons that dismiss lines for good. **Dismiss all shown (n)** dismisses the
+lines that the panel shows now. **Dismiss all (n)** dismisses every line that the panel counts, also the lines it does
+not show. Click the button, then click it again. If the lines that the button counts change before the second click,
+the button shows the new count and you must click two times again. A new line changes the count of **Dismiss all**.
+It changes the count of **Dismiss all shown** only if the panel shows the new line. The lines leave the panel and its count. **Show every line** still shows
+them, marked Dismissed.
+
 **Restart the Board's feed** is in each place that tells you to press it:
 
 - A panel that could not read its data shows the button next to its error text.
