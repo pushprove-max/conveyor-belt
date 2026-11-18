@@ -64,7 +64,7 @@ t_tfpart() {
 # (conveyor/conveyor.test.sh) and a file never run were missing, and no whole-suite run reached the page.
 t_tfrunner() {
   setup '[]'; mkdir -p "$R/cases"; tune '.test.files = {"w.test.sh": {wholeOnly: true}}'
-  printf '# run.test.sh\nt_rone() {\n  :\n}\nt_rthree() {\n  :\n}\n' > "$R/cases/r.test.sh"; printf '# run.test.sh\nt_rtwo() {\n  :\n}\n' > "$R/cases/q.test.sh"
+  printf '# run.test.sh\nt_rone() {\n  :\n}\nrhelp() {\n  :\n}\nt_r_help() { :; }\n# <<EOF\nt_rthree() {\n  cat <<'"'"'X'"'"' > f\nt_rfix() {\nX\n}\n' > "$R/cases/r.test.sh"; printf '# run.test.sh\nt_rtwo() {\n  :\n}\n' > "$R/cases/q.test.sh"
   printf 't_rone() {\n  :\n}\n' > "$R/cases/solo.test.sh"; printf '# other.test.sh\nt_rone() {\n  :\n}\n' > "$R/cases/o.test.sh"
   touch "$R/c.test.sh" "$R/w.test.sh" "$R/n.test.sh" "$R/zz.test.sh"
   git -C "$R" add cases c.test.sh w.test.sh n.test.sh zz.test.sh && git -C "$R" commit -qm tests || fail "main's test files"
@@ -91,6 +91,14 @@ t_tfrunner() {
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
   [ "$(jq -c '[.files[] | select(.file | startswith("cases/")) | {file, failedSteps, flaky}]' <<<"$got")" = '[{"file":"cases/r.test.sh","failedSteps":1,"flaky":1},{"file":"cases/q.test.sh","failedSteps":1,"flaky":1},{"file":"cases/solo.test.sh","failedSteps":0,"flaky":1},{"file":"cases/o.test.sh","failedSteps":0,"flaky":0}]' ] \
     || fail "the runner's cases: $(jq -c '[.files[] | {file, failedSteps, flaky}]' <<<"$got")"
+  # Bug it catches (#272): the Board's search found no file by a case it defines (capwaittests in capwait.test.sh),
+  # as the part named a file's cases only in its failures. Each file has the cases it defines: q.test.sh's rtwo is not
+  # r.test.sh's; r.test.sh's helpers rhelp and t_r_help (a name the runner does not select) and the case rfix its
+  # heredoc writes are no cases (the search showed them as cases); a comment's <<EOF starts no heredoc, so rthree is
+  # found; and c.test.sh, which defines none (its failed case one is not defined there), has [].
+  [ "$(jq -c '[.files[] | select(.file | IN("cases/r.test.sh", "cases/q.test.sh", "c.test.sh")) | {file, cases}]' <<<"$got")" \
+    = '[{"file":"cases/r.test.sh","cases":["rone","rthree"]},{"file":"c.test.sh","cases":[]},{"file":"cases/q.test.sh","cases":["rtwo"]}]' ] \
+    || fail "each file's own cases: $(jq -c '[.files[] | {file, cases}]' <<<"$got")"
   # Bug it catches (#188): "Fails often" counted every failed step, also those the card's own change caused (the test
   # did its job). Each failure carries the verdict of the cases that count for the file (main before flaky before
   # card; a line's other verdicts are not the file's), its cases, its card and the end of its output.

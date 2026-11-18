@@ -12,7 +12,8 @@ const CARD = 'lib/c.test.sh', WHOLE = 'conveyor/conveyor.test.sh', NEVER = 'lib/
 const at = (h) => new Date(T0 - h * 3600000).toISOString();
 // CARD: one card run, flaky (so it needs a look and comes first with no sort), 2 CPU s in 600 s of clock. WHOLE:
 // wholeOnly and slow on purpose, one whole-suite run that failed, 400 CPU s in 487 s. NEVER: no run, flaky (it needs a
-// look, yet comes last: it has no time) and with issue #77. The snapshot's order: highest CPU s first.
+// look, yet comes last: it has no time) and with issue #77. The snapshot's order: highest CPU s first. CARD defines
+// the cases capwaittests and libcheck (its cases).
 const file = (o) => ({ cpu: null, median: null, change: null, runs: [], lastRun: null, timedRuns: 0, wholeOnly: false, failedSteps: 0, flaky: 0,
   issue: null, slowOnPurpose: null, usual: null, slower: false, ...o });
 const PART = { ...clone(TESTS), settings: { ...clone(TESTS.settings), files: { [WHOLE]: { wholeOnly: true, slowOnPurpose: 'runs every engine case' } } }, slower: [],
@@ -21,7 +22,7 @@ const PART = { ...clone(TESTS), settings: { ...clone(TESTS.settings), files: { [
     file({ file: WHOLE, cpu: 400, median: 400, change: 0, wholeOnly: true, timedRuns: 1, slowOnPurpose: 'runs every engine case',
       runs: [{ cpu: 400, sec: 487, card: null, time: at(2), whole: true, result: 'fail', issue: null, repo: 'sample', url: null }],
       lastRun: { sec: 487, cpu: 400, clockPerCpu: 1.218, time: at(2), whole: true } }),
-    file({ file: CARD, cpu: 2, median: 2, change: 0, timedRuns: 1, flaky: 1,
+    file({ file: CARD, cpu: 2, median: 2, change: 0, timedRuns: 1, flaky: 1, cases: ['capwaittests', 'libcheck'],
       runs: [{ cpu: 2, sec: 600, card: 'c-12', time: at(1), whole: false, issue: 12, repo: 'sample', url: `${P}/12` }],
       lastRun: { sec: 600, cpu: 2, clockPerCpu: 300, time: at(1), whole: false } }),
     file({ file: NEVER, flaky: 1, issue: 77 }),
@@ -127,4 +128,30 @@ test('Tests: the search box keeps the rows whose path holds its text, with the f
   assert.equal(tp(w).querySelector('.tests-table tbody').textContent, 'No test file matches');
   search(w, '');
   assert.deepEqual(names(w), [NEVER]);
+});
+
+// Bug it catches (#272): a search for the case capwaittests found nothing, as the search matched file paths alone.
+// A row found by a case name says which case; a row its path matched names none, even when a case matches too.
+// WHOLE's other case names come from the snapshot's other parts that name a file's cases: a failure's cases, a
+// hollow case, a wait and a flaky entry; each is searched for, so a part the search leaves out fails its own line.
+test('Tests: the search finds a file by one of its case names, and names the case that matched', () => {
+  const w = boot({ tab: 'tests' }), d = full(), part = clone(PART);
+  Object.assign(part.files[0], { failures: [{ card: 'c-9', issue: 9, time: at(3), verdict: 'main', cases: ['failedone'], tail: null }],
+    hollow: [{ case: 'hollowone', kind: 'no assert', reason: 'r' }], waits: [{ case: 'waitone', kind: 'sleep', at: 'x.sh:3', reason: 'r' }] });
+  d.panels.tests.data.tests = part;
+  d.panels.tests.data.flaky = [{ case: `${WHOLE}: flakyone`, count: 2, issue: null, files: [WHOLE] }];
+  deliver(w, d);
+  const matched = (f) => { const m = rowOf(w, f).querySelector('.tests-matched'); return m && m.textContent; };
+  for (const c of ['failedone', 'hollowone', 'waitone', 'flakyone']) {
+    search(w, c);
+    assert.deepEqual([names(w), matched(WHOLE)], [[WHOLE], `Case: ${c}`], `a case named by the snapshot's ${c}`);
+  }
+  search(w, 'CapWait');
+  assert.deepEqual(names(w), [CARD], 'a case name, in any case');
+  assert.equal(matched(CARD), 'Case: capwaittests');
+  search(w, 'lib');
+  assert.deepEqual(names(w), [CARD, NEVER], 'a path search as before');
+  assert.deepEqual([matched(CARD), matched(NEVER)], [null, null], 'no case named for a path match');
+  search(w, 'nosuchcase');
+  assert.equal(tp(w).querySelector('.tests-table tbody').textContent, 'No test file matches');
 });

@@ -729,7 +729,8 @@ and the test files of main's checkout, and holds:
   entries a runner names as its own among them), `issue` (the issue last
   filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
   `conveyor.sh testissue`, else null), `slowOnPurpose`
-  (the reason of its mark, else null), `usual` and `slower` (below).
+  (the reason of its mark, else null), `cases` (the names of the cases it defines in main's checkout, its `t_<case>() {`
+  lines that the runner selects, not its helpers or the lines of a heredoc, A to Z; empty with none: the Board's Tests search matches them), `usual` and `slower` (below).
   A `wholeOnly` file starts other test files whole, so its CPU seconds are the sum of theirs, each of them timed on
   its own. Its `slower` is false. Each file also has `optimize`: each issue the Board filed for it (`testactions/filed.jsonl`: the Optimize
   issues, and the older speed-up issues), newest first. Each has `issue`, `time` (when it was filed), `state` (`open`:

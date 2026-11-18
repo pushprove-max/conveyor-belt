@@ -431,8 +431,9 @@ passed". A surviving mutant shows a change that the tests do not see.
 
 Point at a column heading, or move the keyboard focus to it, to see what the column shows. Click a column heading to
 sort the table by that column. Click it again to reverse the order. An arrow shows the column and the direction. Until
-you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path in
-the search box to see only the files that match it. The search and a filter chip work together.
+you pick a column, the files that need a look come first, then the highest CPU seconds. Type part of a file's path, or
+part of a case name, in the search box to see only the files that match it. The search matches file paths and case
+names. A row that a case name found shows that case beside the file name. The search and a filter chip work together.
 
 Click a file's name to open its row. The row has four tabs: Overview, Timeline (with its count of events), Judge and
 Mutation. Overview shows first. Use the left and right arrow keys to move between the tabs.

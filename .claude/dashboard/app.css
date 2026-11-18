@@ -694,6 +694,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tests-selected { margin-right: var(--sp-2); color: var(--text); }
 .tests-quiet { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
 .tests-untimed { color: var(--muted); }
+.tests-matched { margin-left: var(--sp-2); }
 /* A column heading's hint, on hover and on focus. */
 .tests-table th { position: relative; }
 .tests-hint { display: none; position: absolute; z-index: 5; top: 100%; left: 0; width: max-content; max-width: 32ch; padding: var(--sp-1) var(--sp-2);

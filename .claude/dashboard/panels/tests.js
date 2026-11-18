@@ -19,7 +19,8 @@
 // other); one with clock times only (its runner's report gives no CPU time) shows "Wall only". Each column heading has a hint on hover and on focus. A file the pack marks wholeOnly (a runner that starts
 // other test files whole, each of them timed on its own) has "Runs other test files", is never Slower than usual or
 // Waits, and has no Optimize. No test file has a CPU budget (#349). A search box over it keeps
-// the rows whose path holds its text (any case); filter chips, each with its count, show one status alone; the two
+// the rows whose path or one of whose case names (casesOf()) holds its text (any case), a row found by a case naming
+// it beside the file name; filter chips, each with its count, show one status alone; the two
 // apply together. Each column heading sorts the table by that column (file names A to Z, any other highest first; a
 // second click reverses it, and an arrow shows which). With no sort picked, the rows that need a look (slower
 // than usual, waits, flaky or fails often) come first, then the highest CPU s.
@@ -707,6 +708,14 @@
   }
   // Its waits (#189): the WAIT lines its newest judge named (the snapshot's waits), [{case, kind, at, reason}].
   const waitsOf = (f) => list(f.waits).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
+  // The search (#272): the names of the cases the snapshot knows for a file (the cases it defines, its failures', its
+  // hollow cases, its waits and its flaky entries), and whether a row shows for the search text q (lower case): its
+  // path holds q, or one of its case names does. caseHit: the case that matched, for a row its path did not match.
+  const casesOf = (f) => [...new Set([...list(f.cases).filter((c) => typeof c === 'string'),
+    ...failsOf(f).flatMap((x) => list(x.cases).filter((c) => typeof c === 'string')), ...hollowOf(f).map((x) => x.case), ...waitsOf(f).map((x) => x.case),
+    ...list(S.d && S.d.flaky).filter((c) => obj(c) && typeof c.case === 'string' && c.case.includes(': ') && list(c.files).includes(f.file)).map((c) => c.case.slice(c.case.indexOf(': ') + 2))])];
+  const caseHit = (f, q) => (!q || f.file.toLowerCase().includes(q) ? null : casesOf(f).find((c) => c.toLowerCase().includes(q)) || null);
+  const shows = (f, q) => !q || f.file.toLowerCase().includes(q) || caseHit(f, q) !== null;
   const waitSaid = (x) => `${x.case} | ${x.kind} | ${typeof x.at === 'string' ? x.at : ''} | ${typeof x.reason === 'string' ? x.reason : ''}`;
   // Why it never ran, when the engine can tell (the snapshot's neverRun: {kind, reason}), else null.
   const neverWhy = (f) => (obj(f.neverRun) && typeof f.neverRun.reason === 'string' && f.neverRun.reason ? f.neverRun.reason : null);
@@ -1202,7 +1211,7 @@
   // A file named there opens its row: the search and the filter let it show.
   function goto(file) {
     const f = list(tests() && tests().files).find((x) => obj(x) && x.file === file), q = S.query.trim().toLowerCase();
-    if (f && ((S.filter !== 'all' && !marks(f).some((m) => m[0] === S.filter)) || (q && !file.toLowerCase().includes(q)))) { S.filter = 'all'; S.query = ''; }
+    if (f && ((S.filter !== 'all' && !marks(f).some((m) => m[0] === S.filter)) || !shows(f, q))) { S.filter = 'all'; S.query = ''; }
     S.open.add(file); S.keep = { act: 'open', file }; draw();
     const tr = Array.from(S.el.querySelectorAll('.tests-row')).find((r) => r.dataset.file === file);
     if (tr && typeof tr.scrollIntoView === 'function') tr.scrollIntoView({ block: 'nearest' });
@@ -1729,10 +1738,10 @@
       b.dataset.filter = k; b.setAttribute('aria-pressed', String(S.filter === k));
       bar.append(b);
     });
-    // The search box: any part of the path, in any case, with the filter chip picked.
+    // The search box: any part of the path or of a case name, in any case, with the filter chip picked.
     if (!S.search) {
       const s = h('input', 'field tests-search');
-      s.type = 'search'; s.placeholder = 'Search test files'; s.dataset.act = 'search'; s.setAttribute('aria-label', 'Search the test files by name');
+      s.type = 'search'; s.placeholder = 'Search test files'; s.dataset.act = 'search'; s.setAttribute('aria-label', 'Search the test files by path or case name');
       s.addEventListener('input', () => { S.query = s.value; draw(); });
       S.search = s;
     }
@@ -1741,7 +1750,7 @@
     const q = S.query.trim().toLowerCase();
     // With no sort picked, the timed files first, then the rows that need a look; the snapshot's order (the highest CPU s
     // first) inside each. A sort keeps that order among equal values.
-    let shownFiles = files.map((f, i) => [f, i]).filter(([f]) => (S.filter === 'all' || marks(f).some((m) => m[0] === S.filter)) && (!q || f.file.toLowerCase().includes(q)))
+    let shownFiles = files.map((f, i) => [f, i]).filter(([f]) => (S.filter === 'all' || marks(f).some((m) => m[0] === S.filter)) && shows(f, q))
       .sort((a, b) => (timed(b[0]) - timed(a[0])) || (look(b[0]) - look(a[0])) || (a[1] - b[1])).map(([f]) => f);
     const col = S.sort && COLS.find((c) => c[0] === S.sort.key);
     if (col) {
@@ -1827,6 +1836,9 @@
       if ((num(f.runsOnRecord) || 0) >= NEVER && num(f.caught) === 0) chips.append(h('span', 'tests-quiet tests-never', 'Never caught anything'));
       const fileCell = cell(check, 'tests-file');
       fileCell.append(name);
+      // A row the search found by a case name, not by its path, names that case beside the file name.
+      const hit = caseHit(f, q);
+      if (hit) fileCell.append(h('span', 'tests-quiet tests-matched', `Case: ${hit}`));
       if (!timed(f)) {
         // A file never timed: one cell in place of its figures.
         const none = cell('Not timed yet', 'tests-untimed');

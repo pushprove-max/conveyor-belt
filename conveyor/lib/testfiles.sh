@@ -46,6 +46,9 @@
 #   mutation: its newest mutation check (lib/mutate.sh), {file, at, sha, seed, state, reason, of (its mutants), tried,
 #   killed, survived ([{source, line, kind, before, after}]), noresult, notMutated, end}; null when none was made;
 #   mutationPlace: its place in the mutation checks' asked list ($MUTS/asked, mutask()), 1 first; null when not asked;
+#   cases: the names of the cases it defines in main's checkout (its `t_<case>() {` lines the runner selects, not its
+#   helpers or a heredoc's lines), A to Z, []
+#   with none; the Board's search matches them;
 #   waits: the waits its newest judge that ended done named on WAIT lines (lib/testaction.sh tawaits()), [{case, kind,
 #   at, reason}]; null when no judge of it named waits or none (a judge from before WAIT lines were asked for);
 #   neverRun: why a file of main's checkout with no run on record never ran, when the engine can tell (neverwhy(),
@@ -287,7 +290,7 @@ testolder() {
     | {file: $f, olderRuns: ($r[:-$keep] | reverse | map(del(.file))), olderEdits: ([alledits($cr)[] | select(.file == $f)][$keep:])}'
 }
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp
+  local si sh rn mn fs fl sf defs refs cs ru all ln ch hv out nv rp cp
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
@@ -295,6 +298,18 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   testowners
+  # The cases each test file of main's checkout defines, by file: the `t_<case>() {` lines the runner selects
+  # (conveyor/conveyor.test.sh: a case name of a-z and 0-9 only, so a t_left_stays helper is no case), outside a
+  # heredoc (a fixture's cases, written into a scratch file, are not the file's own). Comment lines start no heredoc.
+  cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" '
+    FNR == 1 { end = "" }
+    end != "" { l = $0; if (dash) sub(/^\t+/, "", l); if (l == end) end = ""; next }
+    /^t_[a-z0-9]+\(\) \{/ { c = $0; sub(/^t_/, "", c); sub(/\(.*/, "", c); print FILENAME "\t" c }
+    /^[ \t]*#/ { next }
+    { s = $0; gsub(/<<</, "", s)
+      if (match(s, "<<-?[ \t]*[\"" q "]?[A-Za-z_][A-Za-z0-9_]*")) {
+        h = substr(s, RSTART, RLENGTH); dash = (h ~ /^<<-/); sub(/^<<-?[ \t]*/, "", h); gsub("[\"" q "]", "", h); end = h } }' 2>/dev/null) \
+    | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'
   ln=$(testlines) || return 1
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
   # call (a commit main's checkout does not have is left out). A path is a commit's key only when it is one of the
@@ -306,7 +321,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
-    --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
+    --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
     --slurpfile hv <(printf '%s' "$hv") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
@@ -362,7 +377,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
-           mutationPlace: ($place[$f] // null),
+           mutationPlace: ($place[$f] // null), cases: ($cs[0][$f] // []),
            waits: ([$tj[] | select(.file == $f)] | max_by(.end // "") | if . == null or .waits == [] then null else .waits end)}
         | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
