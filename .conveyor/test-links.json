@@ -1,7 +1,10 @@
 {
   ".conveyor/engine-areas.json": [
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "commands/setup.md": [
@@ -170,7 +173,10 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/testrun.sh": [
+    "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/views.sh": [
@@ -258,6 +264,9 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/tests/redpickbig.test.sh": [
-    "conveyor/tests/models.test.sh"
+    "conveyor/tests/codex.test.sh",
+    "conveyor/tests/models.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh"
   ]
 }

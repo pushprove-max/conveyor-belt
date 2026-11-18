@@ -2461,8 +2461,11 @@ donewhen() { # <worktree> <issue json>
   jq -c --argjson x "$miss" '{items, met: (.met | length), failed} + (if $x == [] then {} else {notes: $x} end)' <<<"$k"
 }
 # The reply's D<n> lines as donewhen() kept them in <worktree>.donewhen, each with its state (met or not met), cut to
-# 300 characters: a JSON array, for the session's line (doneLines; the pull request of Land as pr lists them).
-donelines() { jq -Rsc '[splits("\n") | select(. != "" and (startswith("Note: ") | not)) | .[0:300]]' "$1.donewhen" 2>/dev/null || echo '[]'; }
+# 300 characters: a JSON array, for the session's line (doneLines; the pull request of Land as pr lists them). With no
+# such file (the issue has no Done-when section) jq 1.8 still prints the slurped value, [], and then fails, so the file
+# is read on jq's input and jq's output is kept only when it worked: printed with the fallback, it was two arrays, no
+# JSON text for --argjson, and the line lost all its fields.
+donelines() { local d; d=$(jq -Rsc '[splits("\n") | select(. != "" and (startswith("Note: ") | not)) | .[0:300]]' 2>/dev/null < "$1.donewhen") && printf '%s\n' "$d" || echo '[]'; }
 # A build, fix or rebase session's line, with the Done-when check of its reply on it (doneWhen, and the reply's D<n>
 # lines: doneLines). A failed check is not a block: one fix session is told the failed items, as a NO-GO's findings
 # are, and the check runs again on its reply, its line carrying that result; a second failure blocks the card with the items listed. Fails when the card blocked.
