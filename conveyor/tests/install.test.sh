@@ -149,11 +149,16 @@ t_installrace() {
     || fail "the second install left its own copy, or the folder writable: $(ls -a "$V" "$V/$A")"
 }
 
-# Bug: an engine older than the mirror lock moves its own folder of the same commit in after this install's check
-# that none is there; this install's move then failed into that read-only folder, and its project took the commit
-# only at its next take. A stand-in mv puts the other folder in place just before this install's move.
+# Bug: an older engine lets the mirror's lock go before it moves its own folder of the same commit in, so its move
+# can come after this install's check that none is there; this install's move then failed into that read-only folder,
+# and its project took the commit only at its next take. A stand-in mv puts the other folder in place just before this
+# install's move.
 t_installmv() {
   coderepo; X=$D/conveyor/conveyor.sh; local w=$T/$CASE rc
+  # Text check, as a comment has no behaviour: the one above the move said the older engine predates the mirror's lock,
+  # but that engine takes the lock and lets it go before its move.
+  grep -B2 '^ *chmod -R a-w "$d.part" && mv "$d.part" "$d"' "$SRC/lib/install.sh" | grep -q "lets the mirror's lock go before it moves" \
+    && ! grep -q 'older than this lock' "$SRC/lib/install.sh" || fail "install.sh's comment above the move misstates when an older engine moves its folder in"
   bash "$X" install "$A" >/dev/null && mv "$V/$A" "$V/first" || fail "the first install was not made"
   trap 'chmod -R u+w "$T/$CASE"' EXIT
   mkdir -p "$w/bin" && printf '%s\n' '#!/usr/bin/env bash' \

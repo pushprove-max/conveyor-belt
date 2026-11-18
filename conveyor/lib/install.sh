@@ -57,8 +57,8 @@ install() { # <commit> [<repository>]
       { git clone -q --no-checkout "file://$m" "$d.part" && git -C "$d.part" remote set-url origin "$src" \
         && git --no-replace-objects -C "$d.part" -c advice.detachedHead=false checkout -q --detach "$c" && installed "$c" '' "$d.part"; } \
         || { rm -rf "$d.part"; exit 1; }
-      # An engine older than this lock moves its folder in outside it, after this check: when the move fails with the
-      # folder there, that folder is taken now, as at exit 3, and this one's copy put away.
+      # An older engine lets the mirror's lock go before it moves its folder in, so its move can come after this check:
+      # when the move fails with the folder there, that folder is taken now, as at exit 3, and this one's copy put away.
       chmod -R a-w "$d.part" && mv "$d.part" "$d" \
         || { [ -e "$d" ] || exit 2; [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 2; exit 3; }
     ) 9>>"$m.lock" 2>/dev/null; rc=$?
