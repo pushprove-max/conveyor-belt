@@ -441,7 +441,11 @@ snaprows() { # <records file> <kept> <to>
 }
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
-  d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT
+  # A stop (TERM, INT, HUP) ends the snapshot once the command it runs has ended. A reader's timeout sends TERM to the
+  # whole process group; one that comes as the shell starts a command reaches the shell after the fork and never the
+  # new command. With no trap of its own, the shell then runs the EXIT trap at once, and the scratch folder is removed
+  # under that command (cardruns.py failed with FileNotFoundError on cardruns.jq, #359).
+  d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT; trap 'exit 143' TERM INT HUP
   # The issues first: a new one is held (adopt) before the copy, so the snapshot never shows it in the queue. When
   # its hold cannot be saved, the issues are not known: a new issue is never shown queued when it is not held.
   saw=$(clock) || exit 1; issues=$(openissues "$FIELDS" 2>/dev/null) || issues=''

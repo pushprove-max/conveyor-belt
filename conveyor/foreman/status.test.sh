@@ -187,6 +187,31 @@ nosnap "exit 124"
 grep -qxF 'alpha: no snapshot (it took over 45 s and was stopped)' <<<"$out" || fail "the status does not say the read was stopped at its wait: $out"
 }
 
+# Issue 359: a snapshot that failed while the loop worked gave "no snapshot" and the tail of a Python stack trace, and
+# the Foreman saw nothing of the belt. Bug it catches: a failed read that shows no earlier snapshot, its age or one line
+# of reason, that says "no snapshot" when it shows one, or that shows the stack. The poll keeps the one it read; the
+# status keeps the one it read, and shows it. The kept copy holds the accounts' email addresses: a copy other users
+# can read (made under umask 022) is a bug too.
+t_nosnaplast() {
+CASE=nosnaplast; fixture nosnaplast; mkdir -p "$FD"
+local tb="printf 'Traceback (most recent call last):\n  File \"cardruns.py\", line 53, in main\n    with open(program) as f:\nFileNotFoundError: [Errno 2] No such file or directory: cardruns.jq\n' >&2; exit 1"
+snap ".belt = [$(card 3 'Polled' build)]"; (umask 022 && poll)
+[ "$(ls -l "$FD/conveyor-snapshot-alpha.json" | cut -c1-10)" = '-rw-------' ] || fail "the kept snapshot is readable by others: $(ls -l "$FD/conveyor-snapshot-alpha.json")"
+export CONVEYOR_FOREMAN_ASK="$tb" CONVEYOR_FOREMAN_NOW=$((NOW + 300))
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+for l in 'alpha: the last snapshot, made 5m ago (a new one failed: FileNotFoundError: [Errno 2] No such file or directory: cardruns.jq):' \
+  'alpha: 1 on the belt' '  #3 build 17m Polled'; do
+  grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
+done
+! grep -qE 'no snapshot|Traceback|File "|open\(' <<<"$out" || fail "the status says no snapshot or shows the stack trace: $out"
+snap ".belt = [$(card 4 'Read by status' review)] | .health.time = \"2026-11-15T12:05:00Z\""; export CONVEYOR_FOREMAN_ASK="cat $T/snap"
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+export CONVEYOR_FOREMAN_ASK="$tb" CONVEYOR_FOREMAN_NOW=$((NOW + 330))
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF 'alpha: the last snapshot, made under a minute ago (a new one failed: FileNotFoundError: [Errno 2] No such file or directory: cardruns.jq):' <<<"$out" && grep -qxF '  #4 review 17m Read by status' <<<"$out" \
+  || fail "the status does not show the snapshot it read last: $out"
+}
+
 # Issue 357: a snapshot made anew from the whole card records runs past the ask's wait (its timeout exit, 124) while
 # health lists a blocked card, with the record already 2 minutes without a snapshot. Bug it catches: the watcher read
 # health only from the snapshot, and each poll waited for the read with the longer wait too, so the Foreman heard of
@@ -272,7 +297,7 @@ grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' 
   || fail "the wake does not name the pending #8 alone as not yet reported: $w"
 }
 
-cases=(status wake suite suitedead mainred building slowlive slowdown nosnapanew nosnapquiet healthwake polllog unreported)
+cases=(status wake suite suitedead mainred building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

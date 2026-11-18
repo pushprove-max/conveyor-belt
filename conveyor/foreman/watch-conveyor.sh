@@ -189,7 +189,9 @@ unreported() {
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
 # above), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
-# never empty. <project> names one record of mine; with none, every one of them. Then the watcher's last poll, from
+# never empty and one line (the last the engine said: of a stack trace, its error); when one read before (keepsnap),
+# "<repo>: the last snapshot, made <age> ago (a new one failed: <why>):" in its place, and that snapshot's lines as above. <project> names one
+# record of mine; with none, every one of them. Then the watcher's last poll, from
 # the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
@@ -203,6 +205,14 @@ STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
     | if $run != [] then $run[] | suiteline($now)
       else $s | map(select(.ended != null)) | max_by(.ended) | objects | "last " + suiteline($now) end)'
+# The last snapshot of a record that read, kept by the status and each poll ($FD/conveyor-snapshot-<repo>.json,
+# written whole and renamed into place, readable by this user alone: it holds the accounts' email addresses): the status
+# shows it when a new one does not read.
+keepsnap() { # <repo> <snapshot>
+  { mkdir -p "$FD" && (umask 077 && printf '%s\n' "$2" > "$FD/conveyor-snapshot-$1.json.$$") && mv -f "$FD/conveyor-snapshot-$1.json.$$" "$FD/conveyor-snapshot-$1.json"; } 2>/dev/null \
+    || rm -f "$FD/conveyor-snapshot-$1.json.$$"
+}
+
 if [ "${1:-}" = --status ]; then
   now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} n=0
   errf=$(mktemp) || exit 1; trap 'rm -f "$errf"' EXIT
@@ -211,13 +221,18 @@ if [ "${1:-}" = --status ]; then
     n=$((n + 1))
     rec=$(ask "$repo" "$main" snapshot 2>"$errf"); rc=$?
     if [ "$rc" != 0 ] || ! jq -e objects <<<"$rec" >/dev/null 2>&1; then
-      # Why, never an empty "()": what the engine said (a snapshot made anew says so before its long work), else
-      # the ask's wait it ran past (a killed run says nothing), else its exit.
-      why=$(tr -s '[:space:]' ' ' < "$errf" | tail -c 200 | sed 's/^ *//; s/ *$//')
+      # Why, never an empty "()": the last line the engine said (a snapshot made anew says so before its long work;
+      # of a program's stack trace, its error), else the ask's wait it ran past (a killed run says nothing), else its exit.
+      why=$(grep -v '^[[:space:]]*$' "$errf" | tail -n 1 | tr -s '[:space:]' ' ' | cut -c1-200 | sed 's/^ *//; s/ *$//')
       [ -n "$why" ] || if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then why="it took over ${ASK_LIMIT:-45} s and was stopped"
         elif [ "$rc" = 0 ]; then why="the answer is not a snapshot"; else why="exit $rc, with nothing said"; fi
-      echo "$repo: no snapshot ($why)"; continue
-    fi
+      # The last snapshot that read, with its age (its health record's time) and the why, in its place; else none.
+      rec=$(cat "$FD/conveyor-snapshot-$repo.json" 2>/dev/null) && jq -e objects <<<"$rec" >/dev/null 2>&1 \
+        || { echo "$repo: no snapshot ($why)"; continue; }
+      age=$(jq -r --argjson now "$now" "$SUITE"'[.health.time | strings | fromdate?][0] | if . == null then "at an unknown time"
+        elif $now - . < 60 then "under a minute ago" else "\($now - . | took) ago" end' <<<"$rec" 2>/dev/null) && [ -n "$age" ] || age='at an unknown time'
+      echo "$repo: the last snapshot, made $age (a new one failed: $why):"
+    else keepsnap "$repo" "$rec"; fi
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
     if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null); then
       awk -F'\t' '$1 != "" && $2 != "suite ended" { print "needs you: " $4 }' <<<"$probs"
@@ -245,6 +260,7 @@ record() { # <repo> <main> <now> <await>
   # 128 KB a single argument may hold (#544).
   readsnap() { # <ask limit, seconds>: rec, the history file and cur, the problems; nonzero when the record does not read (the ask's exit when it failed)
     rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") || return
+    ! jq -e objects <<<"$rec" >/dev/null 2>&1 || keepsnap "$repo" "$rec"
     { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
       && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; }
     cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")

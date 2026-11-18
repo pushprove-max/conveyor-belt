@@ -24,6 +24,54 @@ t_snapslots() {
   [ "$(loop snapshot | jq -c .testSlots)" = '{"used":0,"of":2}' ] || fail "once slot 1 was given back: $(loop snapshot | jq -c .testSlots)"
 }
 
+# Bug (#359): `foreman status` failed with "FileNotFoundError: .../T/tmp.XXXXXXXXXX/cardruns.jq" while the loop worked.
+# The cause: the Foreman's ask stops a snapshot past its wait with `timeout`, which sends TERM to the snapshot's whole
+# process group. When it comes as the snapshot's shell starts cardruns.py, the shell takes it only once the fork is
+# made, and the new cardruns.py never gets it. With no TERM trap of its own, the shell then runs its EXIT trap at once
+# and removes the scratch folder under cardruns.py, which fails on its first file, as reported. Here two snapshots run
+# at once, each under `timeout` (its own process group, as the ask's); the first whose cardruns.py starts sends that
+# TERM to its own group, from a sitecustomize on PYTHONPATH (a python3 on PATH would not do: on macOS p_path puts
+# Homebrew's first), as from a cardruns.py that never got it. Bug it catches: a stopped snapshot that removes its
+# folder while cardruns.py still reads it, or a stop that ends the snapshot made beside it.
+t_snapstop() {
+  local py=$T/$CASE/py tmp=$T/$CASE/tmp i n=0 stopped='' made=''
+  setup "[]"
+  mkdir -p "$py" "$tmp"
+  cat > "$py/sitecustomize.py" <<'PY'
+import atexit, os, signal, sys, time
+if sys.argv[0].endswith("cardruns.py"):
+    try:
+        os.close(os.open(os.environ["SNAPSTOP"], os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        pass
+    else:
+        failed = []
+        hook = sys.excepthook
+        sys.excepthook = lambda *e: (failed.append(1), hook(*e))
+        atexit.register(lambda: open(os.environ["SNAPSTOP"] + ".rc", "w").write("1" if failed else "0"))
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # as one started after the TERM was sent: it never gets it
+        os.killpg(0, signal.SIGTERM)
+        time.sleep(1)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+PY
+  for i in 1 2; do
+    ( SNAPSTOP=$T/$CASE/stop PYTHONPATH=$py TMPDIR=$tmp CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards \
+        timeout -k 2 60 bash "$SRC/conveyor.sh" snapshot > "$T/$CASE/out$i" 2>&1; echo $? > "$T/$CASE/rc$i" ) &
+  done 2>/dev/null
+  wait
+  # The stopped snapshot's shell and its cardruns.py outlive the timeout (its top shell ended at the TERM): wait for them.
+  while { [ ! -e "$T/$CASE/stop.rc" ] || [ -n "$(ls -A "$tmp")" ]; } && [ $((n++)) -lt 100 ]; do sleep 0.1; done
+  for i in 1 2; do
+    if [ "$(cat "$T/$CASE/rc$i")" = 143 ]; then stopped+="$i"
+    elif [ "$(cat "$T/$CASE/rc$i")" = 0 ] && jq -e '.belt | arrays' "$T/$CASE/out$i" >/dev/null 2>&1; then made+="$i"; fi
+  done
+  [ ${#stopped} = 1 ] && [ ${#made} = 1 ] \
+    || fail "not one snapshot stopped and one made (exits $(cat "$T/$CASE/rc1") and $(cat "$T/$CASE/rc2")): $(cat "$T/$CASE/out1" "$T/$CASE/out2")"
+  [ "$(cat "$T/$CASE/stop.rc" 2>/dev/null)" = 0 ] && ! grep -q Traceback "$T/$CASE/out$stopped" \
+    || fail "cardruns.py lost its scratch folder as the snapshot was stopped: $(cat "$T/$CASE/out$stopped")"
+  [ -z "$(ls -A "$tmp")" ] || fail "a snapshot left its scratch folder: $(ls -A "$tmp")"
+}
+
 # Bug (#281): while a bug card's new tests ran on main's code without its fix (testrun.sh bugproof(), its live record
 # $CARDS/mainrun/<card>.unfixed.live), the card's records ended with its build line, so the snapshot named the review
 # after it ("review 1 of 3", the reviewer's model) though no review ran. That run is the card's step in progress: proof,
