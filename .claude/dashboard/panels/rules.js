@@ -60,7 +60,7 @@
 // record has onboarded null, or a list without a rule of ONBOARD its engine has, a line above the panels with Set up,
 // and a modal in steps, each rule's row as the Rules panel draws it, its default selected until it is set, with a
 // "default: <value>" button. A rule is set once the host saved a choice of it (the default selected too, which sends
-// the default); Next waits for every rule of its step; Later (or Escape) shuts it for this visit;
+// the default); Next sets each rule of its step not set yet to its default; Later (or Escape) shuts it for this visit;
 // Finish sends `onboarded` with the keys confirmed, those confirmed before too. A record with no onboarded key (an
 // older engine, which cannot save it) is never asked.
 // Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), repoUrl, state, control, cap, guard,
@@ -2101,12 +2101,21 @@
       if (e.shiftKey && at <= 0) { e.preventDefault(); all[all.length - 1].focus(); } else if (!e.shiftKey && at === all.length - 1) { e.preventDefault(); all[0].focus(); }
     });
   }
+  // Next (Finish on the last step): each rule of the step not set yet is first set to its default, as its "default:"
+  // button sets it, in one batch; the step moves on only once the host saved them all.
   function onbNext() {
-    const steps = onbSteps();
-    if (OB.step < steps.length - 1) { OB.step += 1; onbDraw(); onbFocusStep(); return; }
-    // Finish: the rules confirmed now and those confirmed before, sent as one action.
-    const c = ctl(), done = list(c && c.onboarded && c.onboarded.rules).filter((k) => typeof k === 'string' && !OB.keys.includes(k));
-    run([['onboarded', done.concat(OB.keys)]], words('onboarded'));
+    const steps = onbSteps(), [name, ks] = steps[OB.step], repo = S.d.repo;
+    const todo = ks.filter((k) => !OB.set.has(k)), sends = todo.flatMap((k) => onbDefault(k, ctl())[1]);
+    const go = () => {
+      todo.forEach((k) => OB.set.add(k));
+      if (OB.step < steps.length - 1) { OB.step += 1; onbDraw(); onbFocusStep(); return; }
+      // Finish: the rules confirmed now and those confirmed before, sent as one action.
+      const c = ctl(), done = list(c && c.onboarded && c.onboarded.rules).filter((k) => typeof k === 'string' && !OB.keys.includes(k));
+      run([['onboarded', done.concat(OB.keys)]], words('onboarded'));
+    };
+    if (!sends.length) { go(); return; }
+    S.from = ONB; OB.rule = null;
+    run(sends, `${name}: the defaults`).then((ok) => { if (ok && repo === OB.repo && repo === S.d.repo) go(); });
   }
   // The step shown: each rule's row as the Rules tab draws it, with its default; the steps, the count and the buttons.
   function onbDraw() {
@@ -2143,7 +2152,7 @@
     const last = OB.step === steps.length - 1, next = dlg.querySelector('[data-act="onboard-next"]');
     next.textContent = last ? 'Finish' : 'Next';
     next.setAttribute('aria-label', last ? 'Finish the setup' : 'Next step');
-    next.disabled = S.busy || !keys.every(set);
+    next.disabled = S.busy;
     dlg.querySelector('[data-act="onboard-back"]').disabled = OB.step === 0;
     // The focus stays in the box: on the control focused last, drawn again; while that one is off (a change out), on
     // the box itself, so Escape and Tab still work, and back on the control when it is on again.

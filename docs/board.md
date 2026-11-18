@@ -131,8 +131,8 @@ The first time the Board opens for a repository, a box asks you to set each proj
 
 Each rule shows its name, what it does and the controls of the Rules tab. The default is already selected, also when
 the rule has another value now. To keep the default, click the selected choice or the **default: <value>** button.
-A rule is set only when the build machine saves your choice. **Next** is on when each rule of the step is set. On the
-last step it is **Finish**. The footer says how many rules are set.
+A rule is set only when the build machine saves your choice. **Next** sets each rule of the step that is not set yet
+to its default, then shows the next step. On the last step it is **Finish**. The footer says how many rules are set.
 
 Each choice is saved when you click it. A model is saved when you pick it, with no **Save**. If you leave before the
 end, the rules you set stay set.

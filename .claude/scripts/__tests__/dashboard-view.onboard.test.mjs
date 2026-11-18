@@ -67,14 +67,13 @@ test('Setup: a project with no onboarded opens the modal; Later closes it for th
 
 // Bug guarded: a rule counted as set with nothing saved (a check that sent nothing, a refusal), a preselected choice
 // sent nothing, a value in force that is not the default showed as preselected, and a choice made by keyboard left
-// the focus outside the modal. Next waits for each rule of its step to be saved; each choice is the Rules tab's command
-// (P0_OFF, which the Rules tab's own case below checks the tab sends).
+// the focus outside the modal. Each choice is the Rules tab's command (P0_OFF, which the Rules tab's own case below
+// checks the tab sends).
 const stepSnap = () => snap(null, { rules: { ...CONTROL.rules, push: true, visible: false, wholeSuite: false } });
 const P0_OFF = [{ action: 'rules', args: ['P0=off'], repo: 'sample' }];
-test('Setup: Next stays disabled until each rule on the step is saved; a preselected default sends it; each choice sends the Rules tab\'s command', async () => {
+test('Setup: a rule is set only once saved; a preselected default sends it; each choice sends the Rules tab\'s command', async () => {
   const w = boot();
   deliver(w, stepSnap());
-  assert.equal(nextB(w).disabled, true, 'nothing set yet');
   // Bug: clicking the selected P0 turned it off, though a click on the selected choice keeps the default.
   assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'sample' }],
     'the selected P0 keeps the Build default');
@@ -122,11 +121,42 @@ test('Setup: Next stays disabled until each rule on the step is saved; a presele
   key(w, w.document.activeElement, 'Escape');
   assert.ok(!shown(w), 'Escape still reaches the modal');
   act(line(w), 'onboard-open').click();
-  assert.equal(nextB(w).disabled, true, 'the dependency guard is not set yet');
   assert.equal(act(box(w), 'onboard-default-dep-guard').textContent, 'default: On');
   assert.deepEqual(await sent(w, () => act(box(w), 'onboard-default-dep-guard').click()), [{ action: 'dep-guard', args: ['on'], repo: 'sample' }]);
-  assert.equal(nextB(w).disabled, false);
   assert.equal(count(w), '8 of 16 rules set');
+});
+
+// Bug (issue 402): Next stayed disabled until every rule of the step was set, so a user who took the defaults of Build
+// and Never build without clicking them could not go on. Next is on, sends the default of each rule not set yet
+// (both here, so a Next that set only the first would fail), as its "default:" button does, counts them as set and
+// shows the next step.
+test('Setup: Next with Build and Never build unset writes both defaults and shows step 2', async () => {
+  const w = boot();
+  deliver(w, stepSnap());
+  assert.equal(isSet(w, 'build'), 'false');
+  assert.equal(isSet(w, 'never'), 'false');
+  assert.equal(nextB(w).disabled, false, 'Next is on with Build and Never build unset');
+  assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'sample' },
+    { action: 'rules', args: ['area:infra=on'], repo: 'sample' }],
+    'the defaults of both, as their default: buttons send them');
+  assert.equal(step(w), '2. Landing');
+  assert.equal(count(w), '2 of 16 rules set');
+});
+
+// Bug (issue 402): Finish stayed disabled with a rule of the last step unset. It writes that rule's default, then
+// onboarded, and the dialog closes.
+test('Setup: Finish with a rule unset writes its default and closes the dialog', async () => {
+  const w = boot();
+  deliver(w, snap({ at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'visible') }));
+  assert.equal(nextB(w).textContent, 'Finish');
+  assert.equal(nextB(w).disabled, false, 'Finish is on with Visible changes unset');
+  const done = record({ rules: { ...CONTROL.rules, push: false, visible: false, wholeSuite: false }, onboarded: { at: '2026-11-09T17:00:00.000Z', rules: ALL } });
+  // The host's answer to onboarded is the record that says so; the default before it is answered as sent.
+  Object.defineProperty(w, 'reply', { configurable: true, get: () => (w.posts.at(-1).body.action === 'onboarded' ? done : null) });
+  assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'rules', args: ['visible=off'], repo: 'sample' },
+    { action: 'onboarded', args: ALL.filter((k) => k !== 'visible').concat(['visible']), repo: 'sample' }]);
+  await settle();
+  assert.ok(!shown(w), 'the dialog closes');
 });
 
 // Bug guarded: the setup's P0 off differed from the Rules tab's. The case above compares the setup's to P0_OFF;
