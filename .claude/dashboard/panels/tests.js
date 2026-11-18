@@ -2031,9 +2031,11 @@
   // chosen that the version picked has not run yet; while a run goes, a bar of its tasks done with Stop; then the results side by side, one
   // column a version or arm, and Compare, which shows `bench swe diff` of two columns.
   const BENCH = { n: 5, solo: false, engine: 'main', a: '', b: '', diff: null };  // the n, version and Compare pair picked, the last Compare's text
-  // Another arm (bench/arms/, `bench swe <n> --arm`) shows by its label, with its engine version when it runs one.
+  // Another arm (bench/arms/, `bench swe <n> --arm`) shows by its label, with its model when it keeps each model's
+  // results under a key of their own (an arm on the builder's model: its key is not its name; an arm of a fixed model
+  // has the model in its label already), and its engine version when it runs one.
   const otherArm = (x) => typeof x.arm === 'string' && x.arm !== 'conveyor' && x.arm !== 'solo';
-  const keyName = (k) => (otherArm(k) ? `${k.label || k.arm}${k.engine ? ` ${k.version || 'commit'} ${String(k.engine).slice(0, 12)}` : ''}`
+  const keyName = (k) => (otherArm(k) ? `${k.label || k.arm}${k.model && k.key !== k.arm ? ` (${k.model})` : ''}${k.engine ? ` ${k.version || 'commit'} ${String(k.engine).slice(0, 12)}` : ''}`
     : k.arm === 'solo' ? `Claude alone${k.model ? ` (${k.model})` : ''}` : `${k.version || 'commit'} ${String(k.engine || '').slice(0, 12)}`);
   // A run's arms: its label (each arm's name, bench/swe.sh swe_run()) when it runs another arm or more than one.
   const runArms = (l) => (otherArm(l) || list(l.arms).length > 1 ? String(l.label || l.arm) : null);

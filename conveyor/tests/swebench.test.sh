@@ -381,6 +381,23 @@ t_swearms() {
     || fail "the arms are not listed with their preflight state: $out"
 }
 
+# Bug (#338): an arm on the builder's model keeps each model's results under a key of its own, but the results and
+# diff called both keys by the arm's label alone, so two models' runs could not be told apart. An arm of a fixed model
+# (its key is its name) has the model in its label already, and was named with it twice.
+t_swearmmodel() {
+  swe; local m out
+  for m in m1 m2; do
+    mkdir -p "$B/results/stub-a-$m" && jq -nc --arg m "$m" '{task: "proj__a-1", arm: "stub-a", label: "Stub a", key: "stub-a-\($m)", engine: null, version: null,
+      model: $m, resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1}' > "$B/results/stub-a-$m/proj__a-1.json" || fail "the results could not be written"
+  done
+  mkdir -p "$B/results/stub-f" && jq -nc '{task: "proj__a-1", arm: "stub-f", label: "Stub f (m3)", key: "stub-f", engine: null, version: null,
+    model: "m3", resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1}' > "$B/results/stub-f/proj__a-1.json" || fail "the results could not be written"
+  out=$(loop bench swe results 2>&1); grep -q "^Stub a (m1): 1 of 1 resolved" <<<"$out" && grep -q "^Stub a (m2): 1 of 1 resolved" <<<"$out" \
+    && grep -q "^Stub f (m3): 1 of 1 resolved" <<<"$out" || fail "the results do not name each key's model once: $out"
+  out=$(loop bench swe diff stub-a-m1 stub-a-m2 --json 2>&1) && [ "$(jq -c '[.a.version, .b.version]' <<<"$out")" = '["Stub a (m1)","Stub a (m2)"]' ] \
+    || fail "diff does not name each key's model: $out"
+}
+
 # Bugs: an arm whose preflight fails could still be picked, or failed with no word of what is missing; an arm that
 # cannot run here was offered.
 t_swearmpre() {

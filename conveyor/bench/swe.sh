@@ -197,11 +197,13 @@ swe_use() { # <run context>
   SWE_ARM=${x[0]} SWE_KEY=${x[1]} SWE_COMMIT=${x[2]} SWE_VERSION=${x[3]} SWE_MODEL=${x[4]} SWE_ENG=${x[5]} SWE_LABEL=${x[6]} SWE_KIND=${x[7]} SWE_SESSIONS=${x[8]}
   SWE_ARMJ=$(jq -c .spec <<<"$1")
 }
-# What a run's lines (runname) and the results (resname) call an arm, from a run context or a result.
+# What a run's lines (runname) and the results (resname) call an arm, from a run context or a result. A result of
+# an arm on the builder's model names its model, as each model's results are kept under a key of their own
+# (swe_armkey: its key is not its name); an arm of a fixed model has the model in its label already.
 SWE_NAMES='def runname: if .arm == "solo" then "Claude alone" elif .arm == "conveyor" then "engine \(.version // .engine[0:12]) (\(.engine))"
     else "\(.label // .arm)\(if .engine then " on engine \(.version // .engine[0:12]) (\(.engine))" else "" end)" end;
   def resname: if .arm == "solo" then "Claude alone (\(.model // "default"))" elif .arm == "conveyor" then "\(.version // "commit") \(.engine[0:12])"
-    else "\(.label // .arm)\(if .engine then " \(.version // "commit") \(.engine[0:12])" else "" end)" end;'
+    else "\(.label // .arm)\(if .model and .key != .arm then " (\(.model))" else "" end)\(if .engine then " \(.version // "commit") \(.engine[0:12])" else "" end)" end;'
 # One task with the arm in use (swe_use): fetched image, sandbox, trial, grade. Writes results/<key>/<task>.json and
 # .patch and prints "resolved", "unresolved", "unresolved (<why it did not fire>)", or "not run: <why>". A trial that
 # did not fire is the arm's failed task: kept, never graded, never run again.

@@ -128,11 +128,24 @@ test('Benchmarks: another arm shows by its label, and a run of two arms names bo
   const w = boot({ tab: 'tests' });
   const r = { resolved: true, sessions: 1, tokens: 10, minutes: 2 };
   deliver(w, withBench({ ...BASE, live: { state: 'done', arm: 'codex-sol', arms: ['codex-sol', 'conveyor-codex-claude'], label: 'Codex alone, Codex builds on engine main', n: 2, done: 2, resolved: 1, tasks: [] },
-    keys: [{ key: 'codex-sol', arm: 'codex-sol', label: 'Codex alone', engine: null, model: 'gpt-6.2-sol', tasks: { 'p__a-1': r } },
+    keys: [{ key: 'codex-sol', arm: 'codex-sol', label: 'Codex alone (gpt-6.2-sol)', engine: null, model: 'gpt-6.2-sol', tasks: { 'p__a-1': r } },
       { key: `conveyor-codex-claude-${EB}`, arm: 'conveyor-codex-claude', label: 'Codex builds', engine: EB, version: 'main', tasks: { 'p__a-1': r } }] }));
   const head = Array.from(part(w).querySelectorAll('.tests-bench-table tr')[0].children, (c) => c.textContent);
-  assert.deepEqual(head, ['Task', 'Codex alone', `Codex builds main ${'b'.repeat(12)}`]);
+  // An arm of a fixed model has it in its label: the column does not add it again (#338).
+  assert.deepEqual(head, ['Task', 'Codex alone (gpt-6.2-sol)', `Codex builds main ${'b'.repeat(12)}`]);
   assert.match(part(w).querySelector('.tests-bench-last').textContent, /· Codex alone, Codex builds on engine main\.$/);
+});
+
+// Bug it guards (#338): an arm on the builder's model keeps each model's results under a key of its own, but its
+// columns and Compare options showed the label alone, so two models' runs of one arm could not be told apart.
+test('Benchmarks: two models of one arm show by their model in the columns and Compare', async () => {
+  const w = boot({ tab: 'tests' });
+  const r = { resolved: true, sessions: 1, tokens: 10, minutes: 2 };
+  deliver(w, withBench({ ...BASE, keys: ['m1', 'm2'].map((m) => ({ key: `caveman-${m}`, arm: 'caveman', label: 'Claude with Caveman', engine: null, model: m, tasks: { 'p__a-1': r } })) }));
+  const head = Array.from(part(w).querySelectorAll('.tests-bench-table tr')[0].children, (c) => c.textContent);
+  assert.deepEqual(head, ['Task', 'Claude with Caveman (m1)', 'Claude with Caveman (m2)']);
+  assert.deepEqual(Array.from(act(part(w), 'bench-a').options, (o) => [o.value, o.textContent]),
+    [['caveman-m1', 'Claude with Caveman (m1)'], ['caveman-m2', 'Claude with Caveman (m2)']]);
 });
 
 // Bug it guards (#325): Compare sent each column's engine commit, so Conveyor and another Conveyor arm on the same
