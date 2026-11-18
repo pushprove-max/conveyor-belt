@@ -31,9 +31,10 @@ results() {
   done
 }
 
-# That this checkout's own tests pass the lint is not checked here: test-changed.sh lints them on every run, or
-# once a tree in one-file mode (the last case below proves it does, and fails on a sleep-then-check), and the lint of
-# the whole checkout was nine tenths of this file's time.
+# That this checkout's own tests pass the lint is not checked here: test-changed.sh lints them on every run (the last
+# case below proves it does for a whole run, and fails on a sleep-then-check), or once a tree in one-file mode in a
+# test step (test-changed-one.test.sh proves that), and the lint of the whole checkout was nine tenths of this file's
+# time.
 
 # A sleep, then a check: on one line, on the next line, and in a script the test writes.
 fails sleep-then-check 2 'start &' 'sleep 2; [ -e "$T/done" ] || fail "not done"'
@@ -120,8 +121,8 @@ passes no-sleep '# sleep 2 here would hide a slow start' 'rm "$BIN/sleep"; stub 
 bash "$HERE/test-lint.sh" "$T/none.test.sh" > "$T/out" 2>&1 && no "a file that is not there passed the lint" \
   || { grep -q 'could not be read' "$T/out" && ok "a file that cannot be read fails the lint" || no "an unreadable file: $(cat "$T/out")"; }
 
-# test-changed.sh runs the lint on every run (in one-file mode in a test step, once a tree): a sleep-then-check in a
-# test file fails the run, whatever changed.
+# test-changed.sh runs the lint on every run: a sleep-then-check in a test file fails a whole run (no --file, no test
+# step's log), whatever changed. Its one-file mode in a test step lints once a tree: test-changed-one.test.sh checks it.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "core", "file": "conveyor/core.sh"}' '{"area": "core", "tests": "all"}' '{"area": "a", "file": "conveyor/x.sh"}' \
