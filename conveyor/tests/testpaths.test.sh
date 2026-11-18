@@ -112,3 +112,32 @@ t_listguess() {
   [ "$out" = 'args node --test|args jest|args pytest|args rspec|args vitest|args mocha|runner go test|runner cargo test||||||args pytest|args node --test|' ] \
     || fail "setup did not find each runner, and what test.list it takes: $out"
 }
+
+# #350. Bug it catches: the project's test runner, scripts/run-tests.mjs, matched tests.patterns, so it was a test
+# file: a card that changed it ran it alone as a test, and given no list it ran the whole suite. A file that the test
+# commands name, or the package scripts they run name (npm test, its pretest, the npm run script it runs; yarn run),
+# is a runner (no folder such as tests, no file that only a pattern matches), as is the file a command of a shell
+# script among them starts (tests/b.test.sh, which ci/full.sh runs; not tests/a.test.mjs, which it only names), and
+# each of test.wholeCommands: the runners that the patterns match are no test files (testpaths(), with -v and -z
+# too), and the test map names them as not mapped, with the reason.
+t_testpathsrunner() {
+  setup '[]'; tpfiles tools/prep.mjs scripts/run-tests.mjs scripts/lint.mjs ci/full.sh tests/a.test.mjs tests/b.test.sh tests/c.test.mjs
+  printf '%s\n' '[ -f tests/a.test.mjs ] || exit 1 # tests/c.test.mjs' 'exec timeout 60 bash tests/b.test.sh "$@"' > "$R/ci/full.sh"
+  printf '%s\n' '{"scripts": {"pretest": "node ./tools/prep.mjs", "test": "npm run unit -- --x", "unit": "FORCE=1 node scripts/run-tests.mjs --all && node --test tests",' \
+    '"full": "bash \"ci/full.sh\""}}' > "$R/package.json" && git -C "$R" add package.json ci/full.sh && git -C "$R" commit -qm scripts || fail "main's package.json"
+  tune '.tests.patterns = ["*.test.mjs", "*.test.sh", "scripts/*.mjs", "ci/"] | .test.command = "npm test" | .test.full = "yarn run full" | .test.fileCommand = "node"
+    | .test.wholeCommands = ["tests/c.test.mjs"]'
+  local out ps='scripts/run-tests.mjs scripts/lint.mjs tests/a.test.mjs ci/full.sh tools/prep.mjs tests/b.test.sh tests/c.test.mjs'
+  out=$(tpeng 'runnerfiles | paste -sd " " -; printf "%s\n" '"$ps"' | testpaths | paste -sd " " -; printf "%s\n" '"$ps"' | testpaths -v | paste -sd " " -
+    printf "%s\0" '"$ps"' | testpaths -z | tr "\0" "\n" | paste -sd " " -; mapwrite "$R" /dev/null "" node 1 && jq -c .notMapped "$(mappath)"
+    echo "{\"scripts\": {\"test\": \"node scripts/lint.mjs\"}}" > "$R/package.json"; names && printf "%s\n" '"$ps"' | testpaths | paste -sd " " -') || fail "the engine failed: $out"
+  # The last line: package.json's test script now runs scripts/lint.mjs, and no full script names ci/full.sh; from the
+  # next names(), lint.mjs is the runner, and full.sh and the b.test.sh it runs are test files.
+  [ "$out" = 'ci/full.sh scripts/run-tests.mjs tests/b.test.sh tests/c.test.mjs tools/prep.mjs
+scripts/lint.mjs tests/a.test.mjs
+scripts/run-tests.mjs ci/full.sh tools/prep.mjs tests/b.test.sh tests/c.test.mjs
+scripts/lint.mjs tests/a.test.mjs
+[{"file":"ci/full.sh","why":"the test runner, not a test"},{"file":"scripts/run-tests.mjs","why":"the test runner, not a test"},{"file":"tests/b.test.sh","why":"the test runner, not a test"},{"file":"tests/c.test.mjs","why":"the test runner, not a test"}]
+scripts/run-tests.mjs tests/a.test.mjs ci/full.sh tests/b.test.sh' ] \
+    || fail "the test runners were not found, or were taken for test files: $out"
+}

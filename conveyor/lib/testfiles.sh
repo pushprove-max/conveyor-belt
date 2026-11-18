@@ -490,7 +490,10 @@ cpuplan() {
   if [[ $cmd == *[\;\&\|\<\>\$\`\"\'\(\)\{\}\\]* || $cmd == *$'\n'* ]]; then jq -cn --arg w "$no the test command is not one plain command, so Conveyor cannot wrap it safely: $how" '{why: $w}'; return 0; fi
   read -ra ws <<<"$cmd"
   for w in "${ws[@]}"; do [[ $w == -* ]] || [ ! -e "$MAIN/$w" ] || ps+=("$w"); done
-  if [ ${#ps[@]} != 1 ] || [ ! -f "$MAIN/${ps[0]}" ] || [ -z "$(printf '%s\n' "${ps[0]}" | testpaths)" ]; then
+  # The file the command names is the runner too (TESTRUNNERS, no test file to testpaths(): #350), so it is read
+  # against tests.patterns alone (testpaths() with no TESTRUNNERS).
+  names || return 1
+  if [ ${#ps[@]} != 1 ] || [ ! -f "$MAIN/${ps[0]}" ] || [ -z "$(printf '%s\n' "${ps[0]}" | TESTRUNNERS='' testpaths)" ]; then
     jq -cn --arg w "$no the test command runs more than one test file, or a folder or script, and one wrapper around it gives one time for all of them: $how" '{why: $w}'; return 0
   fi
   q=$(printf %q "${ps[0]}")

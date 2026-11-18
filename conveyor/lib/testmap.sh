@@ -231,12 +231,14 @@ mapv8() { # <dir, absolute> <folder> <test file>...
 # <tests>, the map there (mappath()) with those tests mapped again: each taken out of every source and put back where
 # the run found it, the rest of the map (its commit) kept. <not mapped> (mapcollect()'s <tmp>/skipped, or "" for none)
 # is its notMapped: with <tests>, each of them is taken out of the map's notMapped first, and one that is in <not
-# mapped> is not added to its tests (the next run of the file tries again). Written beside it and moved in, so a
-# reader never sees half.
+# mapped> is not added to its tests (the next run of the file tries again). notMapped also names each test runner
+# (TESTRUNNERS, no test file: testpaths()) with the reason RUNNERFIX. Written beside it and moved in, so a reader never
+# sees half.
 mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds> [<test file>...]
   local d=$1 p=$2 nm=${3:-/dev/null} lang=$4 sec=$5 f cmd sha; shift 5
   f=$(mappath); packget test.command cmd && sha=$(git -C "$d" rev-parse HEAD) || return 1
-  jq -n --rawfile p "$p" --rawfile all <(git -C "$d" -c core.quotePath=false ls-files) --rawfile ts <(git -C "$d" -c core.quotePath=false ls-files | testpaths) \
+  names || return 1
+  jq -n --arg rn "$TESTRUNNERS" --arg rf "$RUNNERFIX" --rawfile p "$p" --rawfile all <(git -C "$d" -c core.quotePath=false ls-files) --rawfile ts <(git -C "$d" -c core.quotePath=false ls-files | testpaths) \
     --slurpfile old <(if [ $# -gt 0 ]; then cat "$f" 2>/dev/null; fi) --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" --slurpfile nm "$nm" --rawfile only <(printf '%s\n' "$@") '
     def ls: split("\n") | map(select(. != ""));
     (($all | ls) - ($ts | ls) | INDEX(.)) as $src
@@ -245,7 +247,8 @@ mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds> 
     | (if $only == [] then {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}}
        else ($old[0] // {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}})
          | .sources |= map_values(. - $only) | .tests -= $only end)
-    | .notMapped = ([.notMapped[]? | select(.file as $f | $only | index($f) | not)] + [$nm[] | objects] | unique_by(.file))
+    | .notMapped = ([.notMapped[]? | select(.why != $rf and (.file as $f | $only | index($f) | not))] + [$nm[] | objects]
+        + [$rn | ls[] | {file: ., why: $rf}] | unique_by(.file))
     | .tests = (.tests + (if $only == [] then [$pairs[][0]] else $only - [.notMapped[].file] end) | unique)
     | reduce $pairs[] as $x (.; .sources[$x[1]] = ((.sources[$x[1]] // []) + [$x[0]] | unique))
     | .sources |= with_entries(select(.value != []))' > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
@@ -510,11 +513,12 @@ mapstop() { # <worktree> <why>
 # holds them: {"area": <name>, "file": <source>}, {"area": <name>, "test": <test file>} (a name with no / is the tracked
 # test file of that name), {"area": <name>, "tests": "all"} (every source of the area is shared), {"area": <name>,
 # "why": <text>} and {"outside": <path>} (a file no area needs). A map that cannot be read, a line of none of these
-# kinds, or a test it names that is no tracked test file, fails it (exit 1, the reason on stdout).
-mapread() { # <worktree>
+# kinds, or a test it names that is no tracked test file, fails it (exit 1, the reason on stdout). Given <file>, a map
+# of the project's own is read from it in place of the worktree's (testsel(): the map at the change's base).
+mapread() { # <worktree> [<file>]
   local m f out age=null sha
   packget test.map m || { echo "the pack's test.map could not be read"; return 1; }
-  case $m in off) return 0 ;; '') f=$(mappath); [ -s "$f" ] || return 0 ;; *) f=$1/$m ;; esac
+  case $m in off) return 0 ;; '') f=$(mappath); [ -s "$f" ] || return 0 ;; *) f=${2:-$1/$m} ;; esac
   if [ -z "$m" ]; then
     sha=$(jq -r '.commit // ""' "$f" 2>/dev/null) && [ -n "$sha" ] && age=$(git -C "$1" rev-list --count "$sha..HEAD" 2>/dev/null) || age=null
   fi

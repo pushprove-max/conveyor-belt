@@ -15,12 +15,14 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # script, which fails on main's a.txt). On main's code the test command runs <command> ($STUB/mainrun-cmd). Then
 # doctor's warning (widewarn()) as it stands, and again once the pack sets test.fileCommand. Writes $T/$CASE/unfixed
 # (the check's result), $T/$CASE/rc (its exit), $T/$CASE/warn and $T/$CASE/warnfc (the two warnings). With off, the
-# rule Whole suite in a card is off (the fixture's seed turns it on), and the pack's test.list is <list> (none unset).
-wideproof() { # <command> [off [<list>]]
+# rule Whole suite in a card is off (the fixture's seed turns it on), the pack's test.list is <list> (none unset) and
+# its test.fileCommand is <file command> (none unset).
+wideproof() { # <command> [off [<list> [<file command>]]]
   local wt=$T/$CASE/cards/c7
   setup '[]'
   [ "${2:-}" != off ] || { jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; } || fail "the rule could not be turned off"
   [ -z "${3:-}" ] || tune --arg l "$3" '.test.list = $l'
+  [ -z "${4:-}" ] || tune --arg f "$4" '.test.fileCommand = $f'
   printf '%s\n' "$1" > "$STUB/mainrun-cmd"
   printf '%s\n' '#!/usr/bin/env bash' 'true' > "$R/b.test.sh" && git -C "$R" add b.test.sh && git -C "$R" commit -qm 'a test on main' || fail "main's test file"
   git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" && printf '%s\n' '#!/usr/bin/env bash' 'grep -qx two a.txt' > "$wt/a.test.sh" \
@@ -71,6 +73,19 @@ t_wideoff() {
     || fail "the check's result does not begin with the reason: $(cat "$T/$CASE/unfixed")"
 }
 
+# #350. Bug it catches: the proof run's stop held only for test.command, and only past ten files for each it was
+# given, so a file that test.fileCommand runs alone and that runs every test (the test runner) ran the whole suite.
+# Given a.test.sh alone, the file command reports 3 test files: the run is ended at once, and the check fails with
+# exit 2, its result's first line naming the file that ran the rest.
+t_wideofffile() {
+  local s=$SECONDS
+  # The file command, which the run gives the file as its last word (`: <file>`).
+  wideproof true off '' 'for i in 1 2 3; do echo "-- ok t$i.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; sleep 30; :' # sleep: a long run, which the stop cuts
+  [ $((SECONDS - s)) -lt 25 ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the proof run was not stopped, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s)"
+  head -n 1 "$T/$CASE/unfixed" | grep -qE '^the rule Whole suite in a card is off, and the test command, given 1 test file\(s\), reported [23] test files: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
+    || fail "the check's result does not begin with the reason naming the file: $(cat "$T/$CASE/unfixed")"
+}
+
 # #293. Bug it catches: with the rule off and a pack that sets neither test.list nor test.fileCommand, the proof run
 # started test.command, which cannot be given its files and so runs the whole suite. It does not start; the check fails
 # with exit 2, its result's first line the reason naming both settings.
@@ -100,7 +115,7 @@ t_wideoffalone() {
   wideoffsel '[ -n "${CONVEYOR_TEST_FILES:-}" ] || { echo "TESTRUN files=30" >> "$CONVEYOR_TEST_LOG/r"; sleep 30; exit 1; }' # sleep: a long run, which the stop cuts
   [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/unfixed" "$T/$CASE/run.out")"
   # The run was given no list, and test.list and test.fileCommand do not change it: the reason says neither.
-  head -n 1 "$T/$CASE/unfixed" | grep -qxF 'The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported 30 test files. That is over ten for each of the 1 test file(s) that the test map and .conveyor/test-links.json link to the change, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.' \
+  head -n 1 "$T/$CASE/unfixed" | grep -qxF 'The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported 30 test files. That is more than the 1 test file(s) that the test map and .conveyor/test-links.json link to the change, with one more for each file that the change touches, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.' \
     || fail "the check's result does not begin with the reason the run was stopped: $(cat "$T/$CASE/unfixed")"
 }
 

@@ -78,11 +78,15 @@ GLOBRX=$RX'def globrx: (if startswith("/") then "^" else "(^|/)" end) as $a | en
   | $a + join("") + (if $d then "" else "$" end);
   def globsrx: "(" + (map(globrx) | join("|")) + ")";'
 # What names sets is kept while the pack's and the schema's text are those it read (NAMED, cleared by packok when either
-# changes), so a turn on an unchanged pack starts no program for it.
-NAMED=''
+# changes), so a turn on an unchanged pack starts no program for it. Main's package.json, whose scripts can name the
+# test runner (runnerfiles()), is read too: when its text is not the one kept (NAMED_PJ), names makes all again.
+NAMED='' NAMED_PJ=''
 names() {
-  local p x r y t
-  packok || return 1; [ -z "$NAMED" ] || return 0
+  local p x r y t pj=''
+  packok || return 1
+  [ ! -f "$MAIN/package.json" ] || IFS= read -r -d '' pj < "$MAIN/package.json" || :
+  [ "$pj" = "$NAMED_PJ" ] || NAMED=''
+  [ -z "$NAMED" ] || return 0
   packget remote REMOTE defaultBranch BRANCH owner.name OWNER labels.built BUILT labels.followup FOLLOWUP labels.type TYPE \
       labels.areaPrefix AREA labels.priorities PRIOS labels.nonProductAreas NONPRODUCT productPaths p review.proof r tests.patterns t \
     && mapfile -d '' -t x < <(jq -j --argjson t "$t" "$GLOBRX"'(map(rx) | "^(" + join("|") + ")"), join(", "), ($t | globsrx), ($t | join(", ")) | . + "\u0000"' <<<"$p") \
@@ -90,11 +94,84 @@ names() {
   # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof() read.
   # shellcheck disable=SC2034 # TESTRX and TESTGLOBS are read in lib/issues.sh and lib/testrun.sh
   PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]}
+  # The runner files tests.patterns match (runnerfiles(), through testpaths() while TESTRUNNERS is empty), which
+  # testpaths() leaves out of the test files from then on.
+  # shellcheck disable=SC2034 # TESTRUNNERS is read in lib/issues.sh, lib/testrun.sh and lib/testmap.sh
+  TESTRUNNERS=''
+  # shellcheck disable=SC2034
+  TESTRUNNERS=$(runnerfiles | testpaths); NAMED_PJ=$pj
   YES="visible to customers or staff: needs $OWNER's yes: "
   [ "$r" = real ] && r=$REALPROOF || r=''
   REVIEW=${REVIEWT//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<product paths>'/"$p"}; REVIEW=${REVIEW//'<real proof>'/"$r"}
   REVIEWOFF=${REVIEW//'<yes>'/"$NOYESREVIEW"}; y=${YESREVIEW//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<yes>'/"${y//'<product paths>'/"$p"}"}
   tunables && NAMED=1
+}
+# The files the pack's test commands run as the project's test runner (#350), one a line: each tracked file of main's
+# checkout that a word of test.command, test.full or test.fileCommand names (quotes and a leading ./ taken off; of an
+# --option=<value>, the value), and so of each package script those commands run (npm test or t, npm run <name>,
+# yarn, pnpm or bun <name> or run <name>: its package.json scripts entry, with its pre and post entries), and of each
+# shell script among those files (a .sh file, or one whose first line names sh or bash) the file each of its commands
+# starts by a path written in it (its first word after env settings, exec, env, timeout and the shell, node or python
+# that runs it; a word with a $ in it, as the test file of `bash "$t"`, and a script's other words, such as the test
+# files a selector names, are no runner), up to three files or scripts deep; and each
+# of test.wholeCommands, the pack's runners of the whole suite. Such a file is the runner, not a test: given no list,
+# it runs every test.
+# shellcheck disable=SC2034 # used in lib/testrun.sh and lib/testmap.sh
+RUNNERFIX='the test runner, not a test'
+runnerfiles() {
+  local c a b e ws w s r q=() n=() seen=' ' d=0 i cs=() pj=$MAIN/package.json m
+  packget test.command c test.full a test.fileCommand b test.wholeCommands e 2>/dev/null || return 0
+  # Each to read: W, a command whose every word counts; F, a shell script's text, whose commands' first words count.
+  q=("W$c" "W$a" "W$b")
+  while IFS= read -r w; do [ -z "$w" ] || cs+=("${w#./}"); done < <(jq -r '.[]? | strings' <<<"${e:-[]}" 2>/dev/null)
+  while [ ${#q[@]} != 0 ] && [ $d -lt 4 ]; do
+    n=("${q[@]}"); q=(); d=$((d + 1))
+    for c in "${n[@]}"; do
+      m=${c:0:1}; c=${c:1}
+      # Each command of it (split at && || ; | and parentheses, and lines), word by word.
+      c=${c//'&&'/$'\n'}; c=${c//'||'/$'\n'}; c=${c//[;|()]/$'\n'}
+      while IFS= read -r s; do
+        read -ra ws <<<"$s"; [ ${#ws[@]} != 0 ] || continue
+        if [ "$m" = F ]; then
+          # A script's command: its first word after the env settings, wrappers and the program that runs the file.
+          [[ ${ws[0]} != \#* ]] || continue
+          i=0
+          while [ $i -lt ${#ws[@]} ]; do
+            case ${ws[i]} in
+              [A-Za-z_]*=*|exec|env|command|nohup|time|timeout|then|do|else|'!'|bash|sh|zsh|dash|node|python|python3|-*) ;;
+              # timeout's duration.
+              *) [[ ${ws[i]} =~ ^[0-9.]+[smhd]?$ ]] || break ;;
+            esac
+            i=$((i + 1))
+          done
+          ws=("${ws[@]:i:1}")
+        fi
+        for w in "${ws[@]}"; do
+          w=${w//[\"\']/}; [[ $w != -*=* ]] || w=${w#*=}; w=${w#./}
+          [ -n "$w" ] && [[ $w != -* && $w != *[\$*?]* && $w != /* ]] || continue
+          cs+=("$w")
+          # A shell script it names, read once, whose commands start files too.
+          [[ $seen != *" F:$w "* ]] && [ -f "$MAIN/$w" ] || continue
+          [[ $w == *.sh ]] || head -n 1 "$MAIN/$w" 2>/dev/null | grep -qE '^#!.*[/ ](ba)?sh([[:space:]]|$)' || continue
+          seen+="F:$w "; q+=("F$(sed -E 's/(^|[[:space:]])#.*//' "$MAIN/$w")")
+        done
+        # The package script it runs: its first word after the env settings is the package manager, and of the words
+        # after that which are no options, the first names the script (test or t: test; run or run-script: the next).
+        i=0; while [ $i -lt ${#ws[@]} ] && [[ ${ws[i]} == [A-Za-z_]*=* ]]; do i=$((i + 1)); done
+        case ${ws[i]:-} in npm|pnpm|yarn|bun) ;; *) continue ;; esac
+        r=(); for w in "${ws[@]:i+1}"; do [[ $w == -* ]] || r+=("$w"); done
+        w=${r[0]:-}; case $w in run|run-script) w=${r[1]:-} ;; t) w='test' ;; esac
+        [ -n "$w" ] && [ -f "$pj" ] || continue
+        for s in "pre$w" "$w" "post$w"; do
+          [[ $seen != *" $s "* ]] || continue; seen+="$s "
+          s=$(jq -r --arg s "$s" '.scripts[$s] // empty | strings' "$pj" 2>/dev/null) && [ -n "$s" ] && q+=("W$s")
+        done
+      done <<<"$c"
+    done
+  done
+  [ ${#cs[@]} != 0 ] || return 0
+  mapfile -t cs < <(printf '%s\n' "${cs[@]}" | LC_ALL=C sort -u)
+  git -C "$MAIN" -c core.quotePath=false ls-files -- "${cs[@]/#/:(literal)}" 2>/dev/null | grep -xF -f <(printf '%s\n' "${cs[@]}") | LC_ALL=C sort -u
 }
 # The pack's tunables (plan section 5), each the pack's value, else the schema's default; in seconds. TUNED is the
 # pack's own tunables object, so health can say which home each value came from.
@@ -445,11 +522,10 @@ WIDE='the test command, given <n> test file(s), ran <ran> test files: it runs te
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NARROW='the rule Whole suite in a card is off, and <why>; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file'
 # Why the bug-card check was stopped when, with that rule off, the test command was run with no list of test files to
-# find whether the change selects a test of its own (bugproof(), lib/testrun.sh), and reported <ran> test files, over
-# ten for each of the <n> that the test map and its links give the change. test.list and test.fileCommand do not change
-# this run.
+# find whether the change selects a test of its own (bugproof(), lib/testrun.sh), and reported <ran> test files, more
+# than the <n> that the test map and its links give the change and one for each file it touches (TEST_ADDS, tests()). test.list and test.fileCommand do not change this run.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
-NARROWALONE='The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported <ran> test files. That is over ten for each of the <n> test file(s) that the test map and .conveyor/test-links.json link to the change, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.'
+NARROWALONE='The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported <ran> test files. That is more than the <n> test file(s) that the test map and .conveyor/test-links.json link to the change, with one more for each file that the change touches, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.'
 # What a card's test step says when, with that rule off, no test file is linked to its change (listcmd()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'

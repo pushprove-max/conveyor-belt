@@ -305,10 +305,20 @@ withdrawn() { # <issue>
 # (one a line; with -z, each ended by a NUL), prints those that are test files; with -v, those that are not. Every
 # line is read, so a pipe into it never ends early. TESTRX is the one names() made last, as PRODUCT is (a pack a card
 # changed counts from the loop's next turn); with none made yet, names() makes it here. Fails when the pack cannot be
-# read.
+# read. A file the pack's test commands run as the runner (TESTRUNNERS, runnerfiles() in lib/prompts.sh) is no test file
+# though a pattern matches it (#350): run alone, as a test, it would run every test.
 testpaths() { # [-v] [-z]
   [ -n "${TESTRX:-}" ] || names || { cat > /dev/null; return 1; }
-  grep -E "$@" -e "$TESTRX" || :
+  [ -n "${TESTRUNNERS:-}" ] || { grep -E "$@" -e "$TESTRX" || :; return 0; }
+  local a v='' z=() zf=() l rs=() t
+  local -A rn=()
+  for a; do case $a in -v) v=1 ;; -z) z=(-d ''); zf=(-z) ;; esac; done
+  while IFS= read -r l; do rn[$l]=1; rs+=(-e "$l"); done <<<"$TESTRUNNERS"
+  if [ -z "$v" ]; then grep -E "$@" -e "$TESTRX" | { grep -vxF "${zf[@]}" "${rs[@]}" || :; }; return 0; fi
+  while IFS= read -r "${z[@]}" l || [ -n "$l" ]; do
+    t=''; [ -n "$l" ] && [[ $l =~ $TESTRX ]] && [ -z "${rn[$l]:-}" ] && t=1
+    [ -n "$t" ] || if [ ${#z[@]} = 0 ]; then printf '%s\n' "$l"; else printf '%s\0' "$l"; fi
+  done
 }
 # The JavaScript files <file>... load, each ended by a NUL: each <file>, with the local modules it imports (also by a
 # dynamic import(), as `await import('./x.mjs')`) or requires by a relative path (./ or ../; with no extension, the

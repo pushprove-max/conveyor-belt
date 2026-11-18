@@ -74,6 +74,15 @@ When you set `tests.patterns`, it replaces the default. Without it, Conveyor use
 conventions: `__tests__/`, `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `*_test.go`, `tests/`, `test/`, `spec/`,
 `*_spec.rb`, `*Test.java`, `*Tests.cs`, `test-*.mjs`, `*.t` and `t/*.sh`.
 
+Your test runner is never a test file, also when a glob matches it. The test runner is a file that `test.command`,
+`test.full` or `test.fileCommand` names, or a file that a `package.json` script of those commands names, for example
+`scripts/run-tests.mjs` in `"test": "node scripts/run-tests.mjs"`. When a shell script of those commands starts a file
+by its path, as in `node scripts/run-tests.mjs`, that file is a runner too. A test file that the script starts from a
+list or a variable, as in `bash "$t"`, stays a test file. Each file in `test.wholeCommands` is a runner too. Given no list, the runner runs every test. A card
+that changes the runner runs the test files that name the runner, and the tests that the test map and
+`.conveyor/test-links.json` give it. The card's list and the test map show the runner with the reason "the test
+runner, not a test".
+
 For a bug card, Conveyor gives the card's test files to your test command (`test.command`) on main's code, without
 the fix. If your test command cannot run a test file that it gets alone, set `test.fileCommand` to a command that
 runs one test file, for example `"fileCommand": "node --test"`. Conveyor then runs it once for each test file, with
@@ -200,9 +209,11 @@ or has a list form that the command cannot take, the card runs each test file al
 pack sets neither, the card stops at its test step, and Needs you shows the reason. The reason names the settings that
 fix it. `conveyor.sh doctor` shows a `warning:` line for a pack that sets neither `test.list` nor `test.fileCommand`.
 
-A command can ignore the list that it gets. If a card's run reports more than ten test files for each file that it
-gets, Conveyor stops the run. The card stops at its test step with a reason of the same kind. The check of a bug
-card on main's code follows the same rule.
+A command can ignore the list that it gets. A `test.command` can also add test files of its own for the change: it
+can report one more test file for each file that the change touches. If a card's run reports more test files than
+that, Conveyor stops the run at once, with every process that the run started. The card stops at its test step with
+a reason of the same kind. When `test.fileCommand` runs the files, the reason names the file that ran the others. The
+check of a bug card on main's code follows the same rule. The full suite of a release has no such limit.
 
 ## The test map
 
@@ -256,7 +267,10 @@ To turn the map off, set `test.map` to `off` in the pack. Cards then find their 
 project keeps, set `test.map` to its path from the root of the repository. Conveyor reads it in each card's worktree
 and does not make it again. The file can be a JSON object (`{"<source file>": ["<test file>", ...]}`) or lines of
 areas in the form of this project's `.conveyor/engine-areas.json`. A test file named without a folder is the tracked
-test file of that name. The files of an area whose tests are `"all"` run the whole suite.
+test file of that name. The files of an area whose tests are `"all"` run the whole suite. When the rule Whole suite
+in a card is off, a card that changes this map runs the tests of each source file whose tests the change changes:
+the tests that the map gave the file before
+and the tests that it gives the file now.
 
 ## The host file
 

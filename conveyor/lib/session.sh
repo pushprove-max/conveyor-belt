@@ -45,6 +45,15 @@ testdone() { # <worktree>; prints {done, failed}
   ok=$(find "$1.testlog/cases/ok" -maxdepth 1 -type f 2>/dev/null | wc -l); bad=$(find "$1.testlog/cases/failed" -maxdepth 1 -type f 2>/dev/null | wc -l)
   printf '{"done":%d,"failed":%d}\n' $((ok + bad)) $((bad))
 }
+# Ends <pid> and every process under it at once (SIGKILL): each is stopped first, so none starts another or leaves
+# its parent unseen while they are found, then its process group (a test run's timeout leads one) and each found.
+endall() { # <pid>
+  local ps=("$1") i=0 k
+  while [ $i -lt ${#ps[@]} ]; do
+    kill -STOP "${ps[i]}" 2>/dev/null; for k in $(pgrep -P "${ps[i]}" 2>/dev/null); do ps+=("$k"); done; i=$((i + 1))
+  done
+  kill -KILL -- "-$1" 2>/dev/null; kill -KILL "${ps[@]}" 2>/dev/null; :
+}
 # The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote.
 testprogress() { # <output file> [log...]
   local f=$1; shift
@@ -126,12 +135,13 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
         | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: {run, of},
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
-      # A run given TEST_GIVEN test files (the rule Whole suite in a card off: tests(), bugrun()) that reports far
-      # more, over ten for each (the files it says it selected, or those it ran), is stopped: <worktree>.wide holds
-      # that count.
+      # A run given TEST_GIVEN test files (the rule Whole suite in a card off: a card's run and the bug-card check,
+      # tests(), bugrun(); never the full test suite) that reports more (the files it says it selected, or those it
+      # ran) than those and the TEST_ADDS a test command may pick for the change itself (tests()) is ended at once,
+      # every process under it (#350: a card never runs the whole suite): <worktree>.wide holds that count.
       if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run, .files.of // 0] | max' <<<"$st" 2>/dev/null) \
-        && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt $((TEST_GIVEN * 10)) ]; then
-        echo "$wn" > "$wt.wide"; kill "$pid" 2>/dev/null
+        && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt $((TEST_GIVEN + ${TEST_ADDS:-0})) ]; then
+        echo "$wn" > "$wt.wide"; endall "$pid"
       fi
       continue
     fi
