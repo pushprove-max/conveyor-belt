@@ -1377,8 +1377,9 @@
     ['blocked', 'Blocked'], ['rule', 'Skipped by a rule'], ['approve', 'Waits for your yes']];
   const ISORTS = [['priority', 'Priority'], ['number', 'Number'], ['age', 'Age'], ['area', 'Area'], ['state', 'State']];
   const IFILTERS = ['iq', 'istate', 'iprio', 'iarea', 'ilabel', 'isort', 'idir'];
-  // The open issues' filters as the address holds them, as one text (S.shown keeps the ones each panel shows).
-  const filtersOf = (ctx) => JSON.stringify(IFILTERS.map((k) => ctx.param(k) || ''));
+  // The open issues' filters as the address holds them, with the Time and Date set in Customize (a time written in
+  // the old form is drawn again), as one text (S.shown keeps the ones each panel shows).
+  const filtersOf = (ctx) => JSON.stringify([...IFILTERS.map((k) => ctx.param(k) || ''), window.DASH_APP.form()]);
   function openIssues() {
     const d = S.d, c = ctl();
     if (!d.open || !Array.isArray(d.open.issues)) return null;

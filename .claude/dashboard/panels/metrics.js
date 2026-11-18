@@ -165,11 +165,13 @@
         const W = 280, H = 120, base = 96, top = 22, bw = 22, step = W / days.length;
         const most = Math.max(1, ...days.map((x) => (x.landed || 0) + (x.blocked || 0)));
         const yh = (n) => (n * (base - top)) / most;
+        // A day ("2026-11-18") in the Board's Date (Customize); one that is not a date is shown as it came.
+        const dayDate = (d) => { const t = Date.parse(`${d}T12:00:00Z`); return Number.isNaN(t) ? d : ctx.stamp(t, { date: true, time: false, zone: 'UTC' }); };
         const svg = chart(`Landed and blocked per day: ${days.map((x) => `${DAY(x.day)} ${x.landed || 0} landed, ${x.blocked || 0} blocked`).join('; ')}`, W, H);
         svg.append(s('line', { x1: 0, x2: W, y1: base, y2: base, class: 'axis' }));
         days.forEach((x, i) => {
           const cx = i * step + step / 2, l = x.landed || 0, b = x.blocked || 0, g = s('g', { class: 'bar' });
-          g.append(tip(`${x.day}: ${l} landed, ${b} blocked`));
+          g.append(tip(`${dayDate(x.day)}: ${l} landed, ${b} blocked`));
           g.append(s('rect', { x: cx - step / 2, y: top, width: step, height: base - top, class: 'hit' }));
           if (l) g.append(s('rect', { x: cx - bw / 2, y: base - yh(l), width: bw, height: yh(l), rx: 3, class: 'fill-landed' }));
           if (b) g.append(s('rect', { x: cx - bw / 2, y: base - yh(l) - yh(b) - (l ? 2 : 0), width: bw, height: yh(b), rx: 3, class: 'fill-blocked' }));

@@ -159,8 +159,9 @@
   // A running card that went back: the way it went (from, to), else null; its status's amber second line; its round,
   // past the first, else null.
   const backWay = (c) => (c.kind === 'run' && c.back ? c.back : null);
-  const HM = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', hour: '2-digit', minute: '2-digit' });
-  const backLine = (b) => (b ? `← went back from ${NAMES[b.from]}${Number.isNaN(b.time) ? '' : ` at ${HM.format(b.time)} ET`}` : '');
+  // A time in New York, as the deck's ET clock, in the Board's Time (Customize).
+  const ET = (ms, seconds) => view.ctx.stamp(ms, { seconds, zone: 'America/New_York' });
+  const backLine = (b) => (b ? `← went back from ${NAMES[b.from]}${Number.isNaN(b.time) ? '' : ` at ${ET(b.time)} ET`}` : '');
   const roundShown = (c) => (c.kind === 'run' && num(c.round) && c.round > 1 ? c.round : null);
   // A card's number, or a main-red fix card's name (it has no issue): "Main is red (<commit>)".
   const no = (c) => c.name || `#${c.issue}`;
@@ -356,7 +357,6 @@
     view.ro = ro;
     return [deck, hud];
   }
-  const ET = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   function drawDeck() {
     const d = view.deck || {}, r = view.ro, state = str(d.state);
     txt(r.host, `CONVEYOR · ${(str(d.host) || '—').toUpperCase()}`);
@@ -364,7 +364,7 @@
     // cards holding a slot, of the slots in force, every project's (the page's project filter leaves the deck whole, as
     // the head). The header strip's counts are not repeated here (issue 413).
     txt(r.slots, !num(d.used) ? 'SLOTS — IN USE' : `SLOTS ${d.used}${num(d.cap) ? ` OF ${d.cap}` : ''} IN USE`);
-    txt(r.clock, `ET ${ET.format(Date.now())}`);
+    txt(r.clock, `ET ${ET(Date.now(), true)}`);
     cls(r.dot, state === 'running' ? 'on' : 'off');
     txt(r.word, state === 'running' ? 'LIVE' : (state || '—').toUpperCase());
   }

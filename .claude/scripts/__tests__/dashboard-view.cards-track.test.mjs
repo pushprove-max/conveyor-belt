@@ -295,7 +295,7 @@ test('a card shows its time in the step, its start and its overall time so far',
   const old = full();
   Object.assign(old.panels.belt.data.cards[0], { start: '2026-11-08T20:15:00Z', pickedAt: '2026-11-08T20:15:00Z', priorSec: 0 });
   next(w, old);
-  assert.match(row.querySelector('.card-times').textContent, /^started Nov 8, 3:15 PM · 20 h 45 min overall$/);
+  assert.match(row.querySelector('.card-times').textContent, /^started 11\/08\/2026, 3:15 PM · 20 h 45 min overall$/);
   // A card that has landed stays on the belt until it is pushed and its issue is closed. It holds no builder slot:
   // the count against the cap is the cards still being built.
   const after = full();

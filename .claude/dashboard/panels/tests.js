@@ -1844,7 +1844,7 @@
         // The newest run's clock time, with its date and time on hover.
         const took = cell(clockTook(last.sec), 'tests-num');
         if (num(last.sec) !== null && typeof last.time === 'string' && !Number.isNaN(Date.parse(last.time))) {
-          took.title = `${new Date(last.time).toLocaleString()}, ${last.whole === true ? 'whole suite' : 'card'}`;
+          took.title = `${S.ctx.stamp(Date.parse(last.time), { date: true, seconds: true })}, ${last.whole === true ? 'whole suite' : 'card'}`;
         }
         const count = COLS.find((c) => c[0] === 'count')[2](f);
         const caught = cell(num(f.caught) === null ? '—' : String(f.caught), 'tests-num tests-caught');

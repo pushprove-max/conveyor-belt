@@ -190,7 +190,7 @@ test('reordering, resizing, collapsing and hiding persist in the browser and are
       rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] },
       tests: { order: TESTS_IDS, sizes: { tests: 'full' }, lengths: {}, collapsed: [], hidden: [] },
     },
-    density: 'comfortable', theme: 'system' });
+    density: 'comfortable', theme: 'system', time: '12-hour', date: 'mm/dd/yyyy' });
   await settle();
   assert.equal(w.posts.length, 0, 'the layout is kept in the browser: nothing was sent to the host');
 
@@ -245,7 +245,7 @@ test('restore default layout puts everything back and keeps it that way', () => 
   assert.equal(panel(w, 'belt').dataset.size, 'wide');
   assert.equal(root.dataset.density, 'comfortable');
   assert.equal(root.dataset.theme, undefined);
-  assert.deepEqual(saved(w), { tabs: { overview: { order: OVERVIEW, sizes: SIZES0, lengths: {}, collapsed: [], hidden: [] }, belt3d: { order: BELT3D_IDS, sizes: { belt3d: 'full' }, lengths: {}, collapsed: [], hidden: [] }, control: { order: CONTROL_IDS, sizes: CONTROL_SIZES, lengths: {}, collapsed: [], hidden: [] }, rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] }, tests: { order: TESTS_IDS, sizes: { tests: 'full' }, lengths: {}, collapsed: [], hidden: [] } }, density: 'comfortable', theme: 'system' });
+  assert.deepEqual(saved(w), { tabs: { overview: { order: OVERVIEW, sizes: SIZES0, lengths: {}, collapsed: [], hidden: [] }, belt3d: { order: BELT3D_IDS, sizes: { belt3d: 'full' }, lengths: {}, collapsed: [], hidden: [] }, control: { order: CONTROL_IDS, sizes: CONTROL_SIZES, lengths: {}, collapsed: [], hidden: [] }, rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] }, tests: { order: TESTS_IDS, sizes: { tests: 'full' }, lengths: {}, collapsed: [], hidden: [] } }, density: 'comfortable', theme: 'system', time: '12-hour', date: 'mm/dd/yyyy' });
   assert.deepEqual(order(boot({ store: { [STORE]: w.localStorage.getItem(STORE) } })), OVERVIEW);
 });
 

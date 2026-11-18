@@ -10,7 +10,7 @@
 // fine row grid, each placed at the first place it fits, so no column has an empty block between panels.
 (function () {
   'use strict';
-  const STORE_KEY = 'conveyor-board-layout';  // the layout of each tab, density and theme, in this browser only
+  const STORE_KEY = 'conveyor-board-layout';  // the layout of each tab, density, theme, time and date, in this browser only
   const TAB_KEY = 'conveyor-board-tab';        // the tab in view last
   const SEEN_KEY = 'conveyor-board-seen';     // the "Needs you" items already shown once
   // Overview first, with 3D View, the one to look at rather than act on, beside it (#87); then Control and Rules; then
@@ -19,6 +19,9 @@
   const SIZES = ['small', 'wide', 'full'];
   const DENSITIES = ['comfortable', 'compact'];
   const THEMES = ['system', 'light', 'dark'];
+  const CLOCKS = ['12-hour', '24-hour'];
+  const DATES = ['mm/dd/yyyy', 'dd/mm/yyyy'];
+  const PREFS0 = { density: 'comfortable', theme: 'system', time: '12-hour', date: 'mm/dd/yyyy' };
   const ROWS = 6;            // the default length of a panel that states none
   const ROW_SEL = '.rows > li';
   const ROW_PX = 8;          // the fine row grid the panels are packed on
@@ -94,14 +97,29 @@
   const dur = (sec) => (typeof sec === 'number' && sec >= 0 ? ago(sec * 1000) : null);
   // A step's time as measured: a step is often under a minute, so its seconds are given then.
   const took = (sec) => (sec < 60 ? `${Math.max(0, Math.round(sec))} s` : sec < 3600 ? `${Math.floor(sec / 60)} min` : `${Math.floor(sec / 3600)} h ${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')} min`);
-  const clock = (iso) => { const t = parse(iso); return t === null ? 'not read' : new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+  // The one formatter of every time and date the Board writes, in the Time and Date set in Customize: "3:04 PM" or
+  // "15:04", "11/18/2026" or "18/11/2026". ms: a time in ms. date: the date first ("11/18/2026, 3:04 PM"); time: false
+  // for the date alone; seconds: with the seconds; zone: a time zone (Belt 3D's ET clock), else the browser's own.
+  const stampFormats = new Map();
+  function stamp(ms, { date = false, time = true, seconds = false, zone } = {}) {
+    // A page that has not read the layout yet (account.js before the head starts) reads the kept Time and Date.
+    const p = prefs || prefsOf(stored()), h24 = p.time === '24-hour';
+    const key = `${zone || ''} ${h24}`;
+    if (!stampFormats.has(key)) {
+      stampFormats.set(key, new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: h24 ? 'h23' : 'h12',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: 'numeric', minute: '2-digit', second: '2-digit' }));
+    }
+    const v = Object.fromEntries(stampFormats.get(key).formatToParts(ms).map((x) => [x.type, x.value]));
+    const day = p.date === 'dd/mm/yyyy' ? `${v.day}/${v.month}/${v.year}` : `${v.month}/${v.day}/${v.year}`;
+    const hm = `${h24 ? v.hour.padStart(2, '0') : v.hour}:${v.minute}${seconds ? `:${v.second}` : ''}${h24 ? '' : ` ${v.dayPeriod}`}`;
+    return [date && day, time && hm].filter(Boolean).join(', ');
+  }
+  const clock = (iso) => { const t = parse(iso); return t === null ? 'not read' : stamp(t); };
   // A time of day, with the date when it is not today (when a card was picked up).
   function when(iso) {
     const t = parse(iso);
     if (t === null) return 'not read';
-    const d = new Date(t), today = new Date(now());
-    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    return d.toDateString() === today.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+    return stamp(t, { date: new Date(t).toDateString() !== new Date(now()).toDateString() });
   }
   function money(v) {
     if (typeof v !== 'number' || !Number.isFinite(v)) return 'not priced';
@@ -459,8 +477,18 @@
     el.dateTime = iso; el.dataset.since = iso; el.dataset.suffix = suffix || '';
     if (off) el.dataset.offset = String(off);
     el.textContent = ago(now() - t + off * 1000) + (suffix || '');
-    el.title = new Date(t).toLocaleString();
+    el.title = stamp(t, { date: true, seconds: true }); el.dataset.form = form();
     return el;
+  }
+  // The Time and Date set in Customize, as one text.
+  function form() { const p = prefs || prefsOf(stored()); return `${p.time} ${p.date}`; }
+  // A row kept through a redraw (list()) keeps the tooltip each of its times was given when it was made: one given in
+  // another Time or Date is written again in place, so the row keeps its typed text and its open details.
+  function retitle(root) {
+    const f = form();
+    root.querySelectorAll('time[data-since]').forEach((el) => {
+      if (el.dataset.form !== f) { el.title = stamp(Date.parse(el.dataset.since), { date: true, seconds: true }); el.dataset.form = f; }
+    });
   }
   // An issue a Depends on: line names: #N in this project, or "owner/repo#N" (a string) in another repository.
   function depRef(n) { return typeof n === 'string' ? n : `#${n}`; }
@@ -1033,7 +1061,7 @@
     return seen === null ? [] : keys.filter((k) => !seen.includes(k));
   }
 
-  // ---- the layout: each tab's order, widths, lengths, collapsed and hidden panels; density and theme ----
+  // ---- the layout: each tab's order, widths, lengths, collapsed and hidden panels; density, theme, time and date ----
   const tabOf = (id) => modules.get(id).tab;
   // The part a panel is drawn from: its own, or the part of the panel file that registered it (part, panel()).
   const partOf = (id) => modules.get(id).part || id;
@@ -1065,17 +1093,22 @@
       collapsed: Array.isArray(s.collapsed) ? known(s.collapsed) : d.collapsed, hidden: known(s.hidden).filter(hideable),
     };
   }
-  function readLayout() {
+  function stored() {
     let s;
     try { s = JSON.parse(window.localStorage.getItem(STORE_KEY)); } catch (e) { s = null; }
-    if (!s || typeof s !== 'object') s = {};
+    return s && typeof s === 'object' ? s : {};
+  }
+  const prefsOf = (s) => ({ density: DENSITIES.includes(s.density) ? s.density : PREFS0.density, theme: THEMES.includes(s.theme) ? s.theme : PREFS0.theme,
+    time: CLOCKS.includes(s.time) ? s.time : PREFS0.time, date: DATES.includes(s.date) ? s.date : PREFS0.date });
+  function readLayout() {
+    const s = stored();
     // A layout kept before the tabs was the Overview's.
     const kept = s.tabs && typeof s.tabs === 'object' ? s.tabs : { overview: s };
     layouts = Object.fromEntries(TABS.map(([t]) => [t, tidy(t, kept[t])]));
-    prefs = { density: DENSITIES.includes(s.density) ? s.density : 'comfortable', theme: THEMES.includes(s.theme) ? s.theme : 'system' };
+    prefs = prefsOf(s);
   }
   function save() {
-    try { window.localStorage.setItem(STORE_KEY, JSON.stringify({ tabs: layouts, density: prefs.density, theme: prefs.theme })); } catch (e) { /* the layout then lasts for this visit */ }
+    try { window.localStorage.setItem(STORE_KEY, JSON.stringify({ tabs: layouts, ...prefs })); } catch (e) { /* the layout then lasts for this visit */ }
   }
   const lay = () => layouts[tab];
   const shown = () => lay().order.filter((id) => !lay().hidden.includes(id));
@@ -1149,8 +1182,12 @@
     }, FOLD_MS);
   }
   function change(fn, message) {
+    const was = `${prefs.time} ${prefs.date}`;
     flip(() => { fn(); applyLayout(); });
     save();
+    // A new Time or Date shows at once: each panel's times are written when it is drawn, so every panel is drawn again
+    // (the other tabs' when they are opened), with the head and its clock.
+    if (`${prefs.time} ${prefs.date}` !== was) { redrawAll(); tick(); }
     if (message) say(message);
   }
   function move(id, by) {
@@ -1162,9 +1199,9 @@
   function toggle(key, id, on) {
     change(() => { const l = lay(); l[key] = l[key].filter((x) => x !== id).concat(on ? [id] : []); });
   }
-  // Restore puts the tab in view back as it was by default, with the density and theme.
+  // Restore puts the tab in view back as it was by default, with the density, theme, time and date.
   function reset() {
-    change(() => { layouts[tab] = defaults(tab); prefs = { density: 'comfortable', theme: 'system' }; }, `Default layout of ${TABS.find((x) => x[0] === tab)[1]} restored`);
+    change(() => { layouts[tab] = defaults(tab); prefs = { ...PREFS0 }; }, `Default layout of ${TABS.find((x) => x[0] === tab)[1]} restored`);
   }
 
   // ---- a panel's length ----
@@ -1737,7 +1774,7 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
@@ -1823,13 +1860,14 @@
       p.body.replaceChildren(stateBlock('error', `The Board could not draw ${mod.title}`,'Reload the page to draw it again.'));
       tip(p.body.querySelector('.state-detail'), details(String((e && e.message) || e)));
     }
+    retitle(p.body);
     p.state = state;
     p.el.dataset.state = state;
     clip(p);
     if (mod.id !== 'health') faultsChanged();
   }
 
-  // ---- Customize: show or hide the panels of the tab in view, density, theme, restore ----
+  // ---- Customize: show or hide the panels of the tab in view, density, theme, time, date, restore ----
   function choice(name, values, current, pick) {
     const set = h('fieldset', 'choice');
     set.append(h('legend', null, name));
@@ -1837,7 +1875,8 @@
       const label = h('label', 'choice-item'), input = h('input');
       input.type = 'radio'; input.name = `choice-${name.toLowerCase()}`; input.value = v; input.checked = v === current;
       input.addEventListener('change', () => pick(v));
-      label.append(input, h('span', null, v[0].toUpperCase() + v.slice(1)));
+      // A word is shown capitalized ("Compact"); a form ("mm/dd/yyyy", "12-hour") as it is.
+      label.append(input, h('span', null, /^[a-z]+$/.test(v) ? v[0].toUpperCase() + v.slice(1) : v));
       set.append(label);
     });
     return set;
@@ -1866,7 +1905,9 @@
     row.append(restore, h('span', 'sheet-note', 'this browser only'));
     box.replaceChildren(set,
       choice('Density', DENSITIES, prefs.density, (v) => change(() => { prefs.density = v; })),
-      choice('Theme', THEMES, prefs.theme, (v) => change(() => { prefs.theme = v; })), row);
+      choice('Theme', THEMES, prefs.theme, (v) => change(() => { prefs.theme = v; })),
+      choice('Time', CLOCKS, prefs.time, (v) => change(() => { prefs.time = v; })),
+      choice('Date', DATES, prefs.date, (v) => change(() => { prefs.date = v; })), row);
     if (held) { const again = byId(held) || box.querySelector(`input[value="${held}"]`); if (again) again.focus({ preventScroll: true }); }
     const n = l.hidden.length;
     open.querySelector('.label').textContent = n ? `Customize (${n} hidden)` : 'Customize';
@@ -2063,7 +2104,7 @@
   function tick() {
     if (doc.hidden) return;
     if (tipAt && !tipAt.isConnected) closeTip();
-    byId('clock').textContent = new Date(now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    byId('clock').textContent = stamp(now(), { seconds: true });
     doc.querySelectorAll('time[data-since]').forEach((el) => {
       const off = Number(el.dataset.offset) || 0;
       const text = ago(now() - Date.parse(el.dataset.since) + off * 1000) + el.dataset.suffix;
@@ -2297,5 +2338,5 @@
     window.setInterval(() => refresh(), REFRESH_MS);
   }
 
-  window.DASH_APP = { panel, head, overlay, start, pack, joined, text: findingText };
+  window.DASH_APP = { panel, head, overlay, start, pack, joined, text: findingText, stamp, form };
 }());

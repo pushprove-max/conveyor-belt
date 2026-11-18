@@ -91,7 +91,8 @@ test('Tests: Last run took shows each file\'s newest run\'s clock time, with its
   const w = show();
   assert.deepEqual(rows(w).slice(0, 2).map((r) => cells(r)[7]), ['10 min 0 s', '8 min 7 s']);
   const took = rowOf(w, WHOLE).children[7];
-  assert.equal(took.title, `${new Date(at(2)).toLocaleString()}, whole suite`);
+  // T0 less 2 h is 10:00 in New York, in the Board's default Time and Date (issue 458).
+  assert.equal(took.title, '11/09/2026, 10:00:00 AM, whole suite');
 });
 
 test('Tests: a column heading sorts the rows, a second click reverses them, and an arrow shows the sort', () => {

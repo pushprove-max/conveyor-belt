@@ -87,7 +87,7 @@ test('metrics: each chart draws from the totals, inline SVG and no library', () 
   assert.equal(days.querySelectorAll('rect.fill-blocked').length, 3);
   assert.deepEqual(Array.from(days.querySelectorAll('.tick:not(.count)'), (t) => t.textContent), ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon']);
   assert.deepEqual(Array.from(days.querySelectorAll('.legend li'), (li) => li.textContent), ['Landed', 'Blocked']);
-  assert.equal(days.querySelectorAll('g.bar')[6].querySelector('title').textContent, '2026-11-09: 2 landed, 2 blocked');
+  assert.equal(days.querySelectorAll('g.bar')[6].querySelector('title').textContent, '11/09/2026: 2 landed, 2 blocked');
   // Block reasons: one bar, a segment a reason, each named with its count in the legend.
   const blocks = chartOf(w, 'blocks');
   assert.equal(blocks.querySelectorAll('svg rect').length, 2);

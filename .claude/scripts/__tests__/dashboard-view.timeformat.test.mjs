@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: Apache-2.0
+// The Board's Time (12-hour or 24-hour) and Date (mm/dd/yyyy or dd/mm/yyyy), set in Customize (issue 458): the times
+// and dates the panels write follow them, and a change shows at once. Shared setup: dashboard-view.helpers.mjs.
+import assert from 'node:assert/strict';
+import { STORE, T0, $, boot, panel, deliver, next, full, saved, clone, issuesP, cases } from './dashboard-view.helpers.mjs';
+
+const test = cases(import.meta.url);
+
+const pick = (w, name, value) => {
+  const r = $(w, `#customize input[name="choice-${name}"][value="${value}"]`);
+  r.checked = true; r.dispatchEvent(new w.Event('change', { bubbles: true }));
+};
+
+// A card picked up on an earlier day shows its date and time; the head's clock its time. Bug it catches: a time or
+// date in the browser's own style whatever the owner chose, or one that keeps the old style until the page is reloaded.
+test('a card\'s start and the head\'s clock follow Customize\'s Time and Date, and a change redraws them at once', () => {
+  const w = boot();
+  const data = full();
+  Object.assign(data.panels.belt.data.cards[0], { start: '2026-11-08T20:15:00Z', pickedAt: '2026-11-08T20:15:00Z', priorSec: 0 });
+  deliver(w, data);
+  const times = () => panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] .card-times').textContent;
+  const clock = () => w.document.getElementById('clock').textContent;
+  assert.match(times(), /^started 11\/08\/2026, 3:15 PM · /, 'by default: mm/dd/yyyy and 12-hour');
+  assert.equal(clock(), '12:00:00 PM');
+  w.document.getElementById('customize-open').click();
+  assert.deepEqual(Array.from(w.document.querySelectorAll('#customize input[name="choice-time"]'), (r) => [r.value, r.checked]), [['12-hour', true], ['24-hour', false]]);
+  assert.deepEqual(Array.from(w.document.querySelectorAll('#customize input[name="choice-date"]'), (r) => r.parentNode.textContent), ['mm/dd/yyyy', 'dd/mm/yyyy']);
+  pick(w, 'time', '24-hour');
+  assert.match(times(), /^started 11\/08\/2026, 15:15 · /, 'redrawn with no new data: 24-hour');
+  assert.equal(clock(), '12:00:00');
+  pick(w, 'date', 'dd/mm/yyyy');
+  assert.match(times(), /^started 08\/11\/2026, 15:15 · /, 'redrawn with no new data: dd/mm/yyyy');
+  assert.equal(w.navigations, 0, 'no reload');
+  assert.deepEqual([saved(w).time, saved(w).date], ['24-hour', 'dd/mm/yyyy'], 'kept with the layout');
+  pick(w, 'time', '12-hour');
+  assert.match(times(), /^started 08\/11\/2026, 3:15 PM · /, 'back to 12-hour with dd/mm/yyyy kept');
+});
+
+// The metrics panel's days are dates in the kept Date: 9 November with dd/mm/yyyy is 09/11/2026. Bug it catches: a
+// day written as the collector gives it ("2026-11-09") whatever the owner chose.
+test('metrics: with 24-hour Time and dd/mm/yyyy Date kept, its days are written dd/mm/yyyy', () => {
+  const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour', date: 'dd/mm/yyyy' }) } });
+  deliver(w, full());
+  const days = panel(w, 'metrics').querySelector('[data-chart="days"]');
+  assert.equal(days.querySelectorAll('g.bar')[6].querySelector('title').textContent, '09/11/2026: 2 landed, 2 blocked');
+  assert.equal(w.document.getElementById('clock').textContent, '12:00:00', 'the head\'s clock in 24-hour from the first draw');
+});
+
+// A row kept through a redraw (Needs you reuses its rows by key) holds the tooltip written when it was made. Bugs it
+// catches (review of issue 458): after Time is set to 24-hour, a waiting card's time still reads "11:50:00 AM"; or
+// every row is made again for it, so an answer typed in a decision and not sent yet is lost.
+test('Needs you: a waiting card\'s time tooltip follows a change of Time at once, and a typed answer stays', () => {
+  const w = boot();
+  deliver(w, full());
+  const tipOf = () => panel(w, 'needs').querySelector('[data-group="waiting"] .rows time.since').title;
+  const field = () => panel(w, 'needs').querySelector('li[data-key="decision:bookshop:q-ship@2026-11-09T10:00:00Z"] input');
+  assert.equal(tipOf(), '11/09/2026, 11:50:00 AM');
+  const typed = field();
+  typed.value = 'Ship on Monday';
+  w.document.getElementById('customize-open').click();
+  pick(w, 'time', '24-hour');
+  assert.equal(tipOf(), '11/09/2026, 11:50:00');
+  assert.equal(field(), typed, 'the decision\'s row is the same');
+  assert.equal(field().value, 'Ship on Monday');
+});
+
+// Rules draws nothing for a refresh that changes only readAt (issue 294). Bug it catches (review of issue 458): a
+// change of Date after such a refresh drew nothing either, so an open issue's age tooltip kept mm/dd/yyyy.
+test('Rules: after a refresh that changes only readAt, a change of Date redraws an open issue\'s age tooltip', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full(T0 - 40000);
+  d.panels.rules.data.open.issues = [{ repo: 'sample', issue: 76, title: 'Split the PROD stack', priority: 'P1', labels: ['P1', 'area:infra'], created: '2026-11-01T00:00:00Z' }];
+  d.panels.rules.data.readAt = new Date(T0 - 70000).toISOString();
+  deliver(w, d);
+  const again = clone(d);
+  again.updatedAt = new Date(T0 - 20000).toISOString();
+  again.panels.rules.data.readAt = new Date(T0 - 30000).toISOString();
+  next(w, again);
+  const tipOf = () => issuesP(w).querySelector('[data-issue="76"] .rules-age time').title;
+  assert.equal(tipOf(), '10/31/2026, 8:00:00 PM');
+  w.document.getElementById('customize-open').click();
+  pick(w, 'date', 'dd/mm/yyyy');
+  assert.equal(tipOf(), '31/10/2026, 8:00:00 PM');
+});

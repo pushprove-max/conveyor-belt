@@ -12,13 +12,15 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 const json = (d, status = 200) => Promise.resolve({ ok: status < 400, status, headers: { get: () => 'application/json' }, json: () => Promise.resolve(d) });
 const LINE = 'Opening the Board on the machine it runs on needs no login. Other devices on the network always log in.';
 
-// page(me, users) -- account.html with account.js run on it; GET me and users answer these, every POST is kept in
-// w.posts and answered by w.answer (200 by default). w.navigations counts the page leaving (jsdom does not navigate).
+// page(me, users, layout) -- account.html with app.js (its shared time formatter) and account.js run on it; GET me and
+// users answer these, every POST is kept in w.posts and answered by w.answer (200 by default). layout: the Board's kept
+// layout and settings (Customize) in this browser. w.navigations counts the page leaving (jsdom does not navigate).
 // A browser dialog (confirm()) throws: the page has none (issue 407).
-async function page(me, users) {
+async function page(me, users, layout) {
   const virtualConsole = new VirtualConsole();
   const dom = new JSDOM(read('account.html'), { url: 'https://localhost:8443/account.html', runScripts: 'outside-only', virtualConsole });
   const w = dom.window;
+  if (layout) w.localStorage.setItem('conveyor-board-layout', JSON.stringify(layout));
   w.navigations = 0;
   virtualConsole.on('jsdomError', (e) => { if (/navigation/.test(e.message)) w.navigations += 1; else throw e; });
   w.posts = [];
@@ -28,6 +30,7 @@ async function page(me, users) {
     return url === 'me' ? me() : json(users());
   };
   w.confirm = () => { throw new Error('no browser dialog'); };
+  w.eval(read('app.js'));
   w.eval(read('account.js'));
   await settle(); await settle();
   return w;
@@ -183,19 +186,29 @@ test('Account page: each field has a visible name, and the words are "authentica
   assert.ok(buttons(rowOf(w, 'ana')).includes('Turn off authenticator codes'));
 });
 
-// Times are local, as on the Board's main page: no "UTC", the time of day as the browser writes it, the date when it is
-// not today. Bug: every time on the page was a UTC stamp that disagreed with the rest of the Board.
+// Times are local, as on the Board's main page: no "UTC", the time of day in the Board's default Time (12-hour), the
+// date when it is not today in its default Date (mm/dd/yyyy). Bug: every time on the page was a UTC stamp that
+// disagreed with the rest of the Board.
+const today = new Date(); today.setHours(9, 5, 0, 0);
+const older = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 40, 14, 49);
+const timed = { ...admin, created: older.toISOString(), lastLogin: today.toISOString() };
+const p2 = (n) => String(n).padStart(2, '0');
+const [mm, dd, yyyy] = [p2(older.getMonth() + 1), p2(older.getDate()), older.getFullYear()];
 test('Account page: times in local time, with the date when not today', async () => {
-  const today = new Date(); today.setHours(9, 5, 0, 0);
-  const older = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 40, 14, 49);
-  const u = { ...admin, created: older.toISOString(), lastLogin: today.toISOString() };
-  const w = await page(() => json(u), () => ({ me: 'max', users: [u] }));
+  const w = await page(() => json(timed), () => ({ me: 'max', users: [timed] }));
   const text = w.document.querySelector('main').textContent;
   assert.doesNotMatch(text, /UTC|T\d\d:\d\d/);
-  const time = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  assert.ok(text.includes(`Last login ${time(today)}`), `today: the time alone (${text})`);
-  const day = older.toLocaleDateString([], { month: 'short', day: 'numeric', ...(older.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
-  assert.ok(text.includes(`Created ${day}, ${time(older)}`), 'another day: the date and time');
+  assert.ok(text.includes('Last login 9:05 AM'), `today: the time alone (${text})`);
+  assert.ok(text.includes(`Created ${mm}/${dd}/${yyyy}, 2:49 PM`), 'another day: the date and time');
+});
+
+// Issue 458: the Time and Date set in Customize (kept with the Board's layout in this browser) are the account page's
+// too. Bug it catches: a page that writes its own times in the browser's style, whatever the owner chose.
+test('Account page: times and dates follow Customize\'s 24-hour Time and dd/mm/yyyy Date', async () => {
+  const w = await page(() => json(timed), () => ({ me: 'max', users: [timed] }), { time: '24-hour', date: 'dd/mm/yyyy' });
+  const text = w.document.querySelector('main').textContent;
+  assert.ok(text.includes('Last login 09:05'), `today: the time alone, 24-hour (${text})`);
+  assert.ok(text.includes(`Created ${dd}/${mm}/${yyyy}, 14:49`), `another day: dd/mm/yyyy and 24-hour (${text})`);
 });
 
 // Make member and Remove can shut you, or every admin, out: neither is on your own row or on the last admin's. Bug:

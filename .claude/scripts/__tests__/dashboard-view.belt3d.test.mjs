@@ -167,7 +167,7 @@ const recs = (...r) => r.map(([name, min]) => ({ name, at: min === null ? null :
 test('belt3d: a card gone Review 1, Fix 1, Review 2 is amber from Review to Fix, "← back to Review", its badge 2 and when it went back', async () => {
   const w = await open3d(full());
   assert.deepEqual(backOn(w, 63, 'sample:c3-63'), { way: { from: 2, to: 1 }, label: ['← back to Review', 'b3-lb b3-bk'], badge: ['2', 'b3-lb b3-rd'],
-    status: ['Review 2 · 5 min', '← went back from Fix at 11:55 ET'] });
+    status: ['Review 2 · 5 min', '← went back from Fix at 11:55 AM ET'] });
   // A card that has not gone back has none of it.
   assert.deepEqual(backOn(w, 9, 'sample:c7-9'), { way: null, label: ['', 'b3-lb b3-bk off'], badge: ['', 'b3-lb b3-rd off'], status: ['Test 142/205', ''] });
 });
@@ -179,7 +179,7 @@ test('belt3d: a card whose tests failed and is in Fix 2 is amber from Fix to Tes
     records: recs(['building', 50], ['review 1 (NO-GO)', 40], ['fix 1', 30], ['review 2 (GO)', 20], ['tests failed', 2], ['fix after failed tests', null]) };
   const w = await open3d(floor({ belt: [runCard('c8-8', 8, 'fix', { track })] }));
   assert.deepEqual(backOn(w, 8, 'sample:c8-8'), { way: { from: 3, to: 2 }, label: ['← back to Fix', 'b3-lb b3-bk'], badge: ['2', 'b3-lb b3-rd'],
-    status: ['Fix 2 · 2 min', '← went back from Test at 11:58 ET'] });
+    status: ['Fix 2 · 2 min', '← went back from Test at 11:58 AM ET'] });
 });
 // Issue 650: a fix the Done-when check on the build's reply started (replyCheck) is Build's. Bug it catches: the review
 // after it read as a step back from Fix ("← went back from Fix"), and its lane said Fix while it ran.
@@ -209,7 +209,7 @@ test('belt3d: once the card moves on past the step it went back from, its amber 
   next(w, fix);
   frames(w);
   assert.deepEqual(backOn(w, 63, 'sample:c3-63'), { way: { from: 2, to: 1 }, label: ['← back to Review', 'b3-lb b3-bk'], badge: ['2', 'b3-lb b3-rd'],
-    status: ['Fix 2 · 5 min', '← went back from Fix at 11:55 ET'] }, 'back in Fix, not past it: the marks hold');
+    status: ['Fix 2 · 5 min', '← went back from Fix at 11:55 AM ET'] }, 'back in Fix, not past it: the marks hold');
   const on = full(), c = on.panels.belt3d.data.belt[0];
   c.step = 'tests';
   c.track = { ...c.track, steps: trackOf('+++>..', 'tests').steps, at: 3, records: recs(['building', 30], ['review 1 (NO-GO)', 15], ['fix 1', 5], ['review 2 (GO)', 1], ['tests', null]) };
@@ -732,12 +732,12 @@ test('belt3d: the deck\'s readouts are the snapshot\'s values, its slots the hea
   const data = full();
   const w = await open3d(data);
   // T0 is 17:00 UTC on 9 November: 12:00 in New York (EST).
-  assert.deepEqual(readouts(w), [['CONVEYOR · BUILDHOST'], ['SLOTS 2 OF 3 IN USE'], ['ET 12:00:00'], ['LOOP ● LIVE']]);
+  assert.deepEqual(readouts(w), [['CONVEYOR · BUILDHOST'], ['SLOTS 2 OF 3 IN USE'], ['ET 12:00:00 PM'], ['LOOP ● LIVE']]);
   assert.equal(fig(w, 'belt'), '2 of 3', 'the head\'s tile gives the same figure');
   assert.doesNotMatch(readouts(w).flat().join(' '), /RUNNING|WAITING|HELD|LANDED|FREE/, 'no corner repeats the header strip\'s counts or a free-slot pool');
   assert.equal(b3(w).querySelector('.b3-ro .bar i') !== null, true, 'the bar under the top-left readout');
   tick(w, 1000);
-  assert.deepEqual(readouts(w)[2], ['ET 12:00:01'], 'the clock ticks with the panel\'s second');
+  assert.deepEqual(readouts(w)[2], ['ET 12:00:01 PM'], 'the clock ticks with the panel\'s second');
   const after = clone(data);
   after.panels.belt3d.data.deck = { host: 'buildhost', state: 'paused', used: 3, cap: 4 };
   next(w, after);
@@ -753,9 +753,23 @@ test('belt3d: the deck\'s readouts are the snapshot\'s values, its slots the hea
   // No slots in force read: the cards alone, as the tile; a count or a machine not read is a dash, never a number.
   assert.deepEqual(readouts(await open3d(floor({ deck: { host: 'buildhost', state: 'running', used: 2, cap: null } })))[1], ['SLOTS 2 IN USE']);
   const unread = await open3d(floor({ deck: { host: 'buildhost', state: 'not read', used: null, cap: 3 } }));
-  assert.deepEqual(readouts(unread).slice(1), [['SLOTS — IN USE'], ['ET 12:00:00'], ['LOOP ● NOT READ']]);
+  assert.deepEqual(readouts(unread).slice(1), [['SLOTS — IN USE'], ['ET 12:00:00 PM'], ['LOOP ● NOT READ']]);
   const none = await open3d(floor({ deck: undefined }));
-  assert.deepEqual(readouts(none), [['CONVEYOR · —'], ['SLOTS — IN USE'], ['ET 12:00:00'], ['LOOP ● —']]);
+  assert.deepEqual(readouts(none), [['CONVEYOR · —'], ['SLOTS — IN USE'], ['ET 12:00:00 PM'], ['LOOP ● —']]);
+});
+
+// Issue 458: the deck's ET clock is in the Board's Time, 12-hour by default, and 24-hour once Customize says so, at
+// once. Bug it catches: a clock fixed at 24-hour ("ET 15:04:47") whatever the owner chose, or one that keeps the old
+// style until the page is reloaded.
+test('belt3d: the ET clock reads 3:04:47 PM by default and 15:04:47 with Time set to 24-hour', async () => {
+  const w = await open3d(full());
+  // T0 is 12:00:00 in New York: 3 h 4 min 47 s on is 15:04:47 ET.
+  tick(w, (3 * 3600 + 4 * 60 + 47) * 1000);
+  assert.deepEqual(readouts(w)[2], ['ET 3:04:47 PM']);
+  w.document.getElementById('customize-open').click();
+  const r = w.document.querySelector('#customize input[name="choice-time"][value="24-hour"]');
+  r.checked = true; r.dispatchEvent(new w.Event('change', { bubbles: true }));
+  assert.deepEqual(readouts(w)[2], ['ET 15:04:47'], 'the clock follows the new Time with no reload');
 });
 
 // Done when: the deck is SVG, CSS and HTML of the page's own, under the floor, taking no click, and with reduced motion

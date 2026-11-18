@@ -20,15 +20,12 @@
     return el;
   }
   const chip = (text, tone) => h('span', `chip chip-${tone}`, text);
-  // A stored time, in local time as the Board's main page shows it: the time of day, with the date when it is not
-  // today (and the year when it is not this year).
+  // A stored time, in local time as the Board's main page shows it (its Time and Date, set in Customize): the time of
+  // day, with the date when it is not today.
   function when(t) {
     const ms = typeof t === 'string' ? Date.parse(t) : NaN;
     if (Number.isNaN(ms)) return 'never';
-    const d = new Date(ms), today = new Date();
-    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    if (d.toDateString() === today.toDateString()) return time;
-    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) })}, ${time}`;
+    return window.DASH_APP.stamp(ms, { date: new Date(ms).toDateString() !== new Date().toDateString() });
   }
   const note = (text) => { byId('note').textContent = text; };
   function button(text, label, onClick, cls) {

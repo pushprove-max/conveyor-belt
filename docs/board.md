@@ -77,6 +77,13 @@ the button shows the new count and you must click two times again. A new line ch
 It changes the count of **Dismiss all shown** only if the panel shows the new line. The lines leave the panel and its count. **Show every line** still shows
 them, marked Dismissed.
 
+Customize also sets how the Board writes times and dates, in this browser:
+
+- **Time**: 12-hour ("3:04 PM", the default) or 24-hour ("15:04").
+- **Date**: mm/dd/yyyy (the default) or dd/mm/yyyy.
+
+All the Board's times and dates use these settings, the Account page and the Belt 3D clock too. A change shows at once.
+
 **Restart the Board's feed** is in each place that tells you to press it:
 
 - A panel that could not read its data shows the button next to its error text.
