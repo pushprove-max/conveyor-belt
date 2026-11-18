@@ -16,6 +16,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The stub test command notes each run in $STUB/tests and what the step's log folder holds of the kept checks in
 # $STUB/kept. The push after a landing is off: no case here checks it.
 ccsetup() { # <issue number>
+  local -x FILEMODE=1 # every case of this file: the per-file fixture (tests/lib.sh filemode())
   setup "[$(issue "$1" 2026-01-01)]"
   jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"
   tune --arg c "bash $STUB/check" '.test.checkCommand = $c'
@@ -70,7 +71,8 @@ t_checkstep() {
   echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo x > "$R/bad.txt"; git -C "$R" add bad.txt; git -C "$R" commit -qm bad; }' > "$STUB/review-cmd"
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(ccsteps 8)" = "build review test fix review test landed" ] && [ "$(cc tests)" = 1 ] \
+  # One run of the three files, each alone through test.fileCommand: three test commands, none in the failed step.
+  [ "$(ccsteps 8)" = "build review test fix review test landed" ] && [ "$(cc tests)" = 3 ] \
     || fail "the check's failure in the Test step did not end it before any test ran and go to a fix session: $(ccsteps 8), $(cc tests) test run(s)"
   [ "$(st 'select(.issue == 8 and .step == "test") | select(.checks) | [.result, .reason, (.failures.files | map(.file))] | tojson')" \
     = "[\"fail\",\"the project's checks failed (test.checkCommand: bash $STUB/check); no test file ran\",[\"bash $STUB/check\"]]" ] \

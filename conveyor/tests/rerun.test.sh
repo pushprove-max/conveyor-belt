@@ -97,6 +97,7 @@ tline() { st 'select(.step == "test") | tojson' | sed -n "$1p" | jq -r "$2"; } #
 # made no edit. A failing case runs once more, alone, before any fix session; when it passes there is none, and the
 # card's test line says it passed on re-run and which case had failed, never a plain pass.
 t_rerunpass() {
+  # The old fixture: the run again is test.command's, given the failed case alone (test.fileCommand runs a file whole).
   rerunsetup '1 fail flaky'
   # The run again's live record, once watch() has written it (#433).
   # shellcheck disable=SC2016 # expanded where the test command sources it
@@ -135,6 +136,7 @@ t_rerunpass() {
 # which passed and which no changed file selects, is kept as passed (the owner, 2026-11-13: #325 had one failing case
 # of its selection, and after its fix the whole selection would have run again).
 t_rerunfail() {
+  # The old fixture: the run again and main's run are test.command's, given the failed case alone (verdicts()).
   rerunsetup '1 fail flaky' '2 fail flaky'
   local m1; m1=$(git -C "$R" rev-parse HEAD)
   loop run 1 > /dev/null || fail "run exited non-zero"
@@ -169,6 +171,7 @@ t_rerunfail() {
 # (testclock) must cut the run at testTimeout (2 s): a clock that never fired let the case end after 30 s and pass, and
 # the first run ran c.test too.
 t_rerunkilled() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 stall flaky'
   tuned '.tunables.testTimeout = 2' rerunstep || fail "the test step did not pass on its run again: $(ran 2)"
   [ "$(ran 1)" = "one two flaky" ] || fail "the first run was not cut off in b.test: $(ran 1)"
@@ -179,6 +182,7 @@ t_rerunkilled() {
 
 # A fix session that left the staged change as it was: the run after it covers only the cases that had not passed.
 t_rerunsame() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
   ! rerunstep || fail "the first test step passed"
   rerunstep || fail "the step after a fix that made no edit did not pass: $(ran 3)"
@@ -190,6 +194,7 @@ t_rerunsame() {
 # spaces (`"a b"` to `"ab"`) kept what the run before passed, and the run after it skipped tests of the new change.
 # The trees are compared, so a.txt is a file the fix changed and a.test's cases run again.
 t_rerunspace() {
+  local -x FILEMODE=1
   rerunwt 'echo "a b" > a.txt' '1 fail flaky' '2 fail flaky'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo ab > a.txt'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
@@ -201,6 +206,7 @@ t_rerunspace() {
 # without its failed case: the run again after it runs that case. Were the old pass kept alone, the run again would
 # skip a.test and pass with `one` failing.
 t_rerunfixkept() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky' '3 fail one'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo three >> a.txt'; rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
@@ -215,6 +221,7 @@ t_rerunfixkept() {
 # cases of the card's other files ran again). The fix edits x.txt, which selects a.test's case one alone; one fails
 # again, and two, which passed and did not run, stays kept.
 t_rerunfixcase() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail one' '2 fail one' '3 fail one'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo x >> x.txt'; rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
@@ -227,6 +234,7 @@ t_rerunfixcase() {
 
 # A fix that also edits a file of the "all" area (core.txt, in the map as `all`) runs the whole selection again.
 t_rerunfixall() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo two >> a.txt; echo x >> core.txt'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
@@ -236,6 +244,7 @@ t_rerunfixall() {
 # A fix that edits only a test file (c.test, which had passed) runs the case that had failed and that file's cases;
 # a.test, whose file the fix did not touch, is kept as passed.
 t_rerunfixtest() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo x >> c.test'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
@@ -247,6 +256,7 @@ t_rerunfixtest() {
 # nothing (here a.txt, the card's own file, on a HEAD whose new commit changes no file) has edited it outside any
 # conflict: its passes are not kept, and the run after it is of the whole selection.
 t_rerunmoved() {
+  local -x FILEMODE=1
   rerunsetup '1 fail flaky' '2 fail flaky'
   echo 'echo two >> a.txt; [ "$(wc -l < "$STUB/sessions")" = 1 ] || git update-ref HEAD "$(git commit-tree "HEAD^{tree}" -p HEAD -m moved)"' > "$STUB/build"
   loop run 1 > /dev/null || fail "run exited non-zero"
@@ -261,6 +271,7 @@ t_rerunmoved() {
 # lists it, so the Foreman's watcher wakes on it (conveyor/foreman/foreman.test.sh, t_wake). The first run, before any
 # list, ran the whole selection and refused nothing.
 t_rerunrefused() {
+  local -x FILEMODE=1
   rerunsetup '1 fail flaky' '2 fail flaky'
   cat > "$STUB/build" <<'EOF'
 if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt
@@ -280,6 +291,7 @@ EOF
 # A merge in doubt (the session that brought the change onto main edited it outside the conflicts: here b.txt beside
 # the conflict in a.txt) runs the whole selection, and refuses nothing: the merge may have broken what passed before.
 t_rerunmergedoubt() {
+  # The old fixture: #7 lands on a main that changed a.txt too.
   rerunsetup
   echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i.bak 's/^main1\$/seven/' a.txt; rm -f a.txt.bak; echo b > b.txt; else sed -i.bak 's/^l1\$/seven/' a.txt; rm -f a.txt.bak; fi" > "$STUB/build"
@@ -295,6 +307,7 @@ t_rerunmergedoubt() {
 # which selects c.test. The rebuild session brings #7 onto main, and the run after it keeps the passes of the first:
 # a.test (main changed its a.txt) and c.test run, b.test, which nothing main changed selects, does not.
 t_rerunrebuilt() {
+  # The old fixture: #7 lands on a main that changed a.txt too.
   rerunsetup
   echo 'y.txt c.test' >> "$STUB/map"
   echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
@@ -329,10 +342,12 @@ retried() { # [move main]
     || fail "the retried card did not keep the passes of its last run: $(ran 5): $(cat "$STUB/rerun.5" 2>&1)"
 }
 t_rerunretry() {
+  local -x FILEMODE=1
   retried
   [ -z "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5")" ] || fail "the retried card on the same main was told of changes: $(cat "$STUB/rerun.5")"
 }
 t_rerunretrymoved() {
+  local -x FILEMODE=1
   retried move
   [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed: $(cat "$STUB/rerun.5")"
 }
@@ -341,6 +356,7 @@ t_rerunretrymoved() {
 # catches: the run again's list (rerunlist()) lost the `off` line, so a selection that runs what did not finish (the
 # engine's runner, .conveyor/test-changed.sh) ran the slow file again on the run again. The run again is told it too.
 t_rerunslowoff() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail flaky'
   echo '{"filed": [{"file": "c.test", "issue": 9}]}' > "$ST/slow.json"
   rerunstep || fail "the test step did not pass on its run again: $(ran 2)"
@@ -352,6 +368,7 @@ t_rerunslowoff() {
 # Bug: a run killed part-way through a file kept none of that file's cases that had passed, so the run again ran them
 # too. Here a.test passes `one` and hangs in `two`: the run again runs `two` and what never began, not `one`.
 t_rerunkilledcase() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 hang two'
   tuned '.tunables.testTimeout = 2' rerunstep || fail "the test step did not pass on its run again: $(ran 2)"
   [ "$(ran 1)" = "one two" ] || fail "the first run was not cut off in a.test's second case: $(ran 1)"
@@ -364,6 +381,7 @@ t_rerunkilledcase() {
 # and the passed cases of the card's other files ran again). a.test failed `one` and passed `two`; the fix edits x.txt,
 # which selects `one` alone, and `one` hangs: the run again runs `one`, and `two` stays kept.
 t_rerunfixtimeoutok() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail one' '2 fail one' '3 hang one'; tune '.tunables.testTimeout = 2'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo x >> x.txt'; rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
@@ -377,6 +395,7 @@ t_rerunfixtimeoutok() {
 # The same for a file that had passed: a.test passed, the fix edits x.txt, which selects its case `one`, and `one`
 # hangs. The run again runs `one` alone, not a.test whole.
 t_rerunfixtimeoutpass() {
+  local -x FILEMODE=1
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky' '3 hang one'; tune '.tunables.testTimeout = 2'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo x >> x.txt'; rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
