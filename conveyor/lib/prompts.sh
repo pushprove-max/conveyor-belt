@@ -94,12 +94,14 @@ names() {
   # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof() read.
   # shellcheck disable=SC2034 # TESTRX and TESTGLOBS are read in lib/issues.sh and lib/testrun.sh
   PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]}
-  # The runner files tests.patterns match (runnerfiles(), through testpaths() while TESTRUNNERS is empty), which
-  # testpaths() leaves out of the test files from then on.
+  # The runner files (SUITERUNNERS, runnerfiles(), which no per-file run runs: filecmd(), lib/testrun.sh), and of
+  # them those tests.patterns match (through testpaths() while TESTRUNNERS is empty), which testpaths() leaves out of
+  # the test files from then on.
   # shellcheck disable=SC2034 # TESTRUNNERS is read in lib/issues.sh, lib/testrun.sh and lib/testmap.sh
   TESTRUNNERS=''
+  SUITERUNNERS=$(runnerfiles)
   # shellcheck disable=SC2034
-  TESTRUNNERS=$(runnerfiles | testpaths); NAMED_PJ=$pj
+  TESTRUNNERS=$(testpaths <<<"$SUITERUNNERS"); NAMED_PJ=$pj
   YES="visible to customers or staff: needs $OWNER's yes: "
   [ "$r" = real ] && r=$REALPROOF || r=''
   REVIEW=${REVIEWT//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<product paths>'/"$p"}; REVIEW=${REVIEW//'<real proof>'/"$r"}
@@ -107,7 +109,7 @@ names() {
   tunables && NAMED=1
 }
 # The files the pack's test commands run as the project's test runner (#350), one a line: each tracked file of main's
-# checkout that a word of test.command, test.full or test.fileCommand names (quotes and a leading ./ taken off; of an
+# checkout that a word of test.command, test.full, test.main or test.fileCommand names (quotes and a leading ./ taken off; of an
 # --option=<value>, the value), and so of each package script those commands run (npm test or t, npm run <name>,
 # yarn, pnpm or bun <name> or run <name>: its package.json scripts entry, with its pre and post entries), and of each
 # shell script among those files (a .sh file, or one whose first line names sh or bash) the file each of its commands
@@ -119,10 +121,10 @@ names() {
 # shellcheck disable=SC2034 # used in lib/testrun.sh and lib/testmap.sh
 RUNNERFIX='the test runner, not a test'
 runnerfiles() {
-  local c a b e ws w s r q=() n=() seen=' ' d=0 i cs=() pj=$MAIN/package.json m
-  packget test.command c test.full a test.fileCommand b test.wholeCommands e 2>/dev/null || return 0
+  local c a b e mc ws w s r q=() n=() seen=' ' d=0 i cs=() pj=$MAIN/package.json m
+  packget test.command c test.full a test.main mc test.fileCommand b test.wholeCommands e 2>/dev/null || return 0
   # Each to read: W, a command whose every word counts; F, a shell script's text, whose commands' first words count.
-  q=("W$c" "W$a" "W$b")
+  q=("W$c" "W$a" "W$mc" "W$b")
   # The schema's default, [], names none: no jq for it.
   [ "${e:-[]}" = '[]' ] || while IFS= read -r w; do [ -z "$w" ] || cs+=("${w#./}"); done < <(jq -r '.[]? | strings' <<<"$e" 2>/dev/null)
   while [ ${#q[@]} != 0 ] && [ $d -lt 4 ]; do

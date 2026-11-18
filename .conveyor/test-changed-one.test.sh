@@ -64,6 +64,13 @@ got=$(one none conveyor/tests/gone.test.sh)
   && [ "$(cat "$T/out")" = "test-changed: --file: no such test file: 'conveyor/tests/gone.test.sh'" ] \
   || no "the one-file mode given a missing path did not fail at once: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 
+# Issue 382: the engine's runner given as the file is no test file. It is refused at once, as the last guard after
+# the engine's list leaves runners off: nothing runs, not even the checks every run makes, and no log is written.
+got=$(one runner ./conveyor/conveyor.test.sh)
+[ -z "$got" ] && [ "$(cat "$T/rc")" = 2 ] && [ ! -e "$T/runner/test-changed.log" ] \
+  && [ "$(cat "$T/out")" = "test-changed: --file: conveyor/conveyor.test.sh is a runner of the whole suite, not a test file: not run" ] \
+  || no "the one-file mode given the engine's runner did not refuse it: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
+
 # Through the engine's own loop for test.fileCommand (filecmd() of conveyor/lib/testrun.sh, on the pack's own
 # test.fileCommand in .conveyor/project.json): each listed file (two area files and a Board test) runs alone, each run reports `TESTRUN files=1` (in its output), and
 # the run's count (testprogress(), which watch() holds against the files given) is the three files it was given, not

@@ -4,7 +4,7 @@
 # Engine cases (#350): a card never runs the whole suite. A card that changes the project's test runner
 # (scripts/run-tests.mjs, which tests.patterns match) runs the runner's own tests, never the runner as a test; a card's
 # run that reports more test files than it was given is ended at once, every process under it; the release's run is
-# not limited so.
+# not limited so; a runner on a card's list (#382) is left off it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -98,4 +98,63 @@ t_runnerrelease() {
   rnrun 'echo "// faster" >> scripts/run-tests.mjs' test.full
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ -e "$STUB/full" ] && [ ! -e "$T/$CASE/cards/c7.stop" ] \
     || fail "the release's run was stopped (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/cards/c7.stop" "$T/$CASE/run.out" 2>&1)"
+}
+
+# Issue 382. Main holds the runner conveyor/conveyor.test.sh and two area files, conveyor/tests/a.test.sh and
+# b.test.sh; <jq> tunes the pack so that a test command names the runner. Card c7's worktree is made on main.
+rdsetup() { # <jq>
+  setup '[]'
+  mkdir -p "$R/conveyor/tests" && echo 'echo whole suite' > "$R/conveyor/conveyor.test.sh" && echo x > "$R/conveyor/tests/a.test.sh" \
+    && echo x > "$R/conveyor/tests/b.test.sh" && git -C "$R" add -f conveyor && git -C "$R" commit -qm files || fail "main's files could not be committed" # -f: the fixture ignores conveyor/
+  tune "$1"
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" || fail "the card's worktree could not be made"
+}
+# Runs <code> in the engine's shell (the loop's libraries sourced, names() run), its output in $T/$CASE/run.out.
+rdrun() { # <code>
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; wt=$T/$CASE/cards/c7
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
+    names || exit 1; eval "$1" ) > "$T/$CASE/run.out" 2>&1 || fail "the engine's code could not be run: $(cat "$T/$CASE/run.out")"
+}
+RDNOTE="conveyor: conveyor/conveyor.test.sh is left off the card's list: the test runner, not a test"
+
+# Bug it catches: a card's rerun list that named the whole-suite runner (here named only by test.main) beside two area
+# files had test.fileCommand run the runner as one file, so the card ran the whole suite. The two area files run, the
+# runner does not, and the run's output (the card's test log) names it as left off.
+t_runnerdrop() {
+  rdsetup '.test.main = "bash conveyor/conveyor.test.sh" | .test.fileCommand = "bash \"$STUB/one\""'
+  printf '%s\n' 'echo "$1" >> "$STUB/got"' > "$STUB/one"
+  local wt=$T/$CASE/cards/c7
+  printf 'fail\t%s\n' conveyor/tests/a.test.sh conveyor/conveyor.test.sh conveyor/tests/b.test.sh > "$wt.rerun"
+  rdrun 'tests "$wt" test.fileCommand alone; echo $? > "$T/$CASE/rc"'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'conveyor/tests/a.test.sh\nconveyor/tests/b.test.sh' ] \
+    || fail "the list did not run the two area files alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$wt.test" "$T/$CASE/run.out" 2>&1)"
+  grep -qxF "$RDNOTE" "$wt.test" || fail "the card's test log does not name the dropped runner: $(cat "$wt.test" 2>&1)"
+}
+
+# Bug it catches: a main-red entry made before issue 214 names its case under the runner (conveyor/conveyor.test.sh,
+# which test.command names), and the main-red check (redrun()) gave the runner to test.command as the file to run. The
+# case runs under its own file; a case with no file of its own is left off, the log naming the runner; a list left
+# with nothing to run does not run test.command at all, which given no list would run its whole selection.
+t_runnerred() {
+  rdsetup '.test.command = "bash \"$STUB/cmd\" conveyor/conveyor.test.sh"'
+  printf '%s\n' 'cat "$CONVEYOR_TEST_RERUN" >> "$STUB/got"; echo end >> "$STUB/got"' > "$STUB/cmd"
+  local wt=$T/$CASE/cards/c7 r='{"file": "conveyor/conveyor.test.sh", "files": ["conveyor/tests/a.test.sh"], "name": "x", "case": "x"}'
+  local n='{"file": "conveyor/conveyor.test.sh", "files": [], "name": "y", "case": "y"}'
+  rdrun "redrun \"\$wt\" '[$r, $n]' > /dev/null; cp \"\$wt.test\" \"\$T/\$CASE/both\"; redrun \"\$wt\" '[$n]' > /dev/null"
+  [ "$(cat "$STUB/got" 2>&1)" = $'fail\tconveyor/tests/a.test.sh\tx\nend' ] \
+    || fail "the main-red cases were not run under their own file alone: $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  grep -qxF "$RDNOTE" "$T/$CASE/both" && [ "$(cat "$wt.test")" = "$RDNOTE" ] \
+    || fail "the test log does not name the dropped runner: $(cat "$T/$CASE/both" "$wt.test" 2>&1)"
+}
+
+# Bug it catches: the list the map and the links give a card's run (testsel()) named the runner (here named only by
+# test.full) beside an area file, and the command was given it. The command is given the area file alone, and the
+# run's output is to name the runner (RUNOFF, which tests() prints).
+t_runnerlist() {
+  rdsetup '.test.full = "bash conveyor/conveyor.test.sh" | .test.list = "env"'
+  jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule could not be turned off"
+  rdrun 'testsel() { printf "%s\n" "{\"by\": \"map\"}" conveyor/conveyor.test.sh conveyor/tests/a.test.sh; }
+    RUNOFF=; listcmd "$wt" "bash run" && printf "%s|%s|%s\n" "$TEST_GIVEN" "$TEST_FILES" "$RUNOFF" > "$T/$CASE/got"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = "1|conveyor/tests/a.test.sh|conveyor/conveyor.test.sh" ] \
+    || fail "the map's list kept the runner: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
 }

@@ -96,11 +96,16 @@ unset CONVEYOR_SHELL_TEST_CASE
 # `test-changed.sh --file <path>` runs that test file alone and nothing else: an engine case file
 # (conveyor/tests/<area>.test.sh) with the cases the selection chose in it (all its cases when it chose none there),
 # any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
-# run makes (the map check, the test lint, shellcheck) still run. A path that is no file fails at once, before any of it.
+# run makes (the map check, the test lint, shellcheck) still run. A path that is no file fails at once, before any of it,
+# as does a runner of the whole suite (issue 382: the engine's runner, this script and the full test's), which is no
+# test file.
 ONE=
 if [ "${1:-}" = --file ]; then
   ONE=${2:-}; ONE=${ONE#./}
   [ -n "$ONE" ] && [ -f "$ONE" ] || { echo "test-changed: --file: no such test file: '${ONE}'" >&2; exit 2; }
+  for r in conveyor/conveyor.test.sh .conveyor/test-changed.sh .conveyor/test-full.sh; do
+    [ ! "$ONE" -ef "$r" ] || { echo "test-changed: --file: $ONE is a runner of the whole suite, not a test file: not run" >&2; exit 2; }
+  done
 fi
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
 # Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list

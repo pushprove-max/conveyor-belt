@@ -77,10 +77,12 @@ conventions: `__tests__/`, `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `*_
 `*_spec.rb`, `*Test.java`, `*Tests.cs`, `test-*.mjs`, `*.t` and `t/*.sh`.
 
 Your test runner is never a test file, also when a glob matches it. The test runner is a file that `test.command`,
-`test.full` or `test.fileCommand` names, or a file that a `package.json` script of those commands names, for example
+`test.full`, `test.main` or `test.fileCommand` names, or a file that a `package.json` script of those commands names, for example
 `scripts/run-tests.mjs` in `"test": "node scripts/run-tests.mjs"`. When a shell script of those commands starts a file
 by its path, as in `node scripts/run-tests.mjs`, that file is a runner too. A test file that the script starts from a
-list or a variable, as in `bash "$t"`, stays a test file. Each file in `test.wholeCommands` is a runner too. Given no list, the runner runs every test. A card
+list or a variable, as in `bash "$t"`, stays a test file. Each file in `test.wholeCommands` is a runner too. Given no list, the runner runs every test. So a card's
+list of tests never holds a runner: when the test map, the links or a list of failed tests names one, the card leaves
+it off, and the card's test log names it. A card
 that changes the runner runs the test files that name the runner, and the tests that the test map and
 `.conveyor/test-links.json` give it. The card's list and the test map show the runner with the reason "the test
 runner, not a test".

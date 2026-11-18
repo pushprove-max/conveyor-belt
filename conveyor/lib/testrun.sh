@@ -371,7 +371,7 @@ cacheoff() { # <worktree>
 # with no test.fileCommand, does not run and fails with <worktree>.stop saying why; and a run that reports more test
 # files than it was given (TEST_GIVEN, with TEST_ADDS for a test command's own picks: watch() ends it, <worktree>.wide) does not run again and fails the same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -384,7 +384,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     listcmd "$1" "$cmd" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
     cmd=$LISTCMD
     # The rule Whole suite in a card off, and no test file linked to the change: nothing runs, and its output says so.
-    [ -z "$LISTNONE" ] || { printf 'conveyor: %s\n' "$NONELINKED" > "$1.test"; TEST_WAIT=0; TEST_RUN=0; return 0; }
+    [ -z "$LISTNONE" ] || { printf 'conveyor: %s\n' "$NONELINKED" > "$1.test"; runnernote "$RUNOFF" >> "$1.test"; TEST_WAIT=0; TEST_RUN=0; return 0; }
   fi
   # A test command given TEST_GIVEN files picks its own tests too, as a project's selector of the changed tests can (a
   # test of a changed file that the test map does not name): watch() lets it report one more for each file the change
@@ -420,6 +420,15 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     # test suite, which runs whole.
     [ "${2:-}" = test.full ] || { cw=$(cacheoff "$1"); [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; }
   fi
+  # A card's list holds no suite runner, wherever it got it (#382): runnersoff() takes each off its list, and the
+  # run's output names it (RUNOFF, with those listcmd() took off). The release's runs (test.full, test.main) keep theirs.
+  # A run alone of test.command left with no `fail` line would run its whole selection: it runs nothing, and fails.
+  if [ "${2:-}" != test.full ] && [ "${2:-}" != test.main ]; then
+    x=$(runnersoff "$1.rerun"); RUNOFF=$(printf '%s\n' "$RUNOFF" "$x" | grep . | sort -u)
+    if [ -n "$x" ] && [ "${3:-}" = alone ] && [ "${2:-test.command}" = test.command ] && ! grep -q $'^fail\t' "$1.rerun"; then
+      runnernote "$RUNOFF" > "$1.test"; return 1
+    fi
+  fi
   # Its ask (slot_ask), held until it ends, so no mutation check of any project runs beside it; a mutation check's own
   # run (MUT_RUN, lib/mutate.sh mutone()) makes none.
   [ -n "${MUT_RUN:-}" ] || slot_ask || :
@@ -436,7 +445,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
   # The files its list keeps whole as passed (`pass` lines): not run. A file it runs only some cases of is run.
   kp=$(awk -F'\t' '$1 == "pass" {print $2}' "$1.rerun" 2>/dev/null)
-  testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
+  testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
   if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t" \
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
     # Its output's end (the last 60 lines, as a failed test line's tail, card()) goes with them: the run again
@@ -448,7 +457,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     # The first run's coverage report, which the run again may write over: kept for uncovered() (covkeep()).
     covkeep "$1"
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
-      [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
+      [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
     else rc=1; fi
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
@@ -514,6 +523,9 @@ listcmd() { # <worktree> <command>
   if ! wholerule; then
     # The list that could not be made says why (the error of the command that failed); the settings are named only
     # while test.fileCommand is not set.
+    # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
+    # runnersout() off those the map and the links give; RUNOFF names those, which tests() names in its output.
+    names > /dev/null 2>&1 || :
     # The test files the card's own change adds or changes (the pack's test patterns: testpaths(), so no runner and no
     # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
     # none, the CARDLINKED test files the test map and the links give the change (testsel() narrow), those that failed
@@ -527,11 +539,11 @@ listcmd() { # <worktree> <command>
       s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
         narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
       by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
+      runnersout
       CAPMAX=$CARDLINKED testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
       [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/${#fs[@]}}; CAPNOTE=${CAPNOTE//'<all>'/$((${#fs[@]} + CAPLEFT))}; }
     fi
     # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
-    names > /dev/null 2>&1 || :
     [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
     jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
       + if $n == 0 then {why: $w} elif $l > 0 then {left: $l, why: $c} else {} end
@@ -919,7 +931,7 @@ repairholder() {
 # (cleanrun()). Sets REPAIRED: what the runs showed.
 # shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
 repairproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN=''
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN='' RUNOFF=''
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.command cmd 2>/dev/null; then REPAIRED="the pack's test.command could not be read"
@@ -959,14 +971,44 @@ repairproof() { # <card> <worktree>
 # repair), else the running engine's. It holds no test slot of the loop's: the runners take their own. Output in
 # <worktree>.test, progress logs in <worktree>.testlog; exit as the command's, under the test timeout.
 cleanrun() { # <worktree> <command> [<list>]
-  local lib=$HERE/lib e=() v pid
+  local lib=$HERE/lib e=() v pid rs=''
   [ ! -f "$1/conveyor/lib/slots.sh" ] || lib=$1/conveyor/lib
   for v in PATH HOME USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME; do [ -z "${!v+x}" ] || e+=("$v=${!v}"); done
   rm -rf "$1.testlog" "$1.report"; mkdir "$1.testlog" 2>"$1.test" || return 1
+  # A suite runner on <list> is taken off it (runnersoff(), #382); a list so left with no `fail` line runs nothing.
+  # The output names each, with those listcmd() took off its command's list (RUNOFF).
+  [ -z "${3:-}" ] || { rs=$(runnersoff "$3"); [ -z "$rs" ] || grep -q $'^fail\t' "$3" || { runnernote "$rs" > "$1.test"; return 1; }; }
+  rs=$(printf '%s\n' "${RUNOFF:-}" "$rs" | grep . | sort -u)
   (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
     CONVEYOR_TEST_FILES="${TEST_FILES:-}" timeout --kill-after=30 "$TEST_TIMEOUT" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
   pid=$!
-  watch $pid "$1.test" "$1.live" test
+  watch $pid "$1.test" "$1.live" test; v=$?; runnernote "$rs" >> "$1.test"; return $v
+}
+# The pack's suite runners (SUITERUNNERS, runnerfiles() in lib/prompts.sh) that the list <file> (CONVEYOR_TEST_RERUN)
+# names on a `fail` or `shared` line, a leading ./ taken off, one a line; each such line is taken off the list (#382:
+# a runner run as a card's test runs the whole suite). Prints nothing, and leaves the list as it is, when it names none.
+runnersoff() { # <list file>
+  local rs
+  [ -s "$1" ] || return 0
+  names > /dev/null 2>&1 || :
+  [ -n "${SUITERUNNERS:-}" ] || return 0
+  rs=$(awk -F'\t' '$1 == "fail" || $1 == "shared" { sub(/^\.\//, "", $2); print $2 }' "$1" | grep -xF -f <(printf '%s\n' "$SUITERUNNERS") | sort -u) || return 0
+  R=$rs awk -F'\t' 'BEGIN { n = split(ENVIRON["R"], a, "\n"); for (i = 1; i <= n; i++) r[a[i]] = 1 }
+    { f = $2; sub(/^\.\//, "", f) } ($1 == "fail" || $1 == "shared") && (f in r) { next } { print }' "$1" > "$1.new" && mv -f "$1.new" "$1"
+  printf '%s\n' "$rs"
+}
+# listcmd()'s list fs with each suite runner (SUITERUNNERS) on it taken off, a leading ./ taken off each path; adds
+# each one taken off to RUNOFF (#382).
+runnersout() {
+  local x
+  [ ${#fs[@]} != 0 ] && [ -n "${SUITERUNNERS:-}" ] || return 0
+  x=$(printf '%s\n' "${fs[@]#./}" | grep -xF -f <(printf '%s\n' "$SUITERUNNERS") | sort -u) || return 0
+  mapfile -t fs < <(printf '%s\n' "${fs[@]#./}" | grep -vxF -f <(printf '%s\n' "$x"))
+  RUNOFF=$(printf '%s\n' "${RUNOFF:-}" "$x" | grep . | sort -u)
+}
+# The output line of each runner <paths> (one a line) names, taken off a card's list (runnersoff(), listcmd()).
+runnernote() { # <paths>
+  local x; while IFS= read -r x; do [ -z "$x" ] || echo "conveyor: $x is left off the card's list: $RUNNERFIX"; done <<<"$1"
 }
 # The bug-card check (card(): a card whose issue has the pack's type label, labels.type, after its build and before its
 # review). The test files its staged change adds or changes (paths testpaths() takes for test files: the pack's
@@ -1391,7 +1433,12 @@ rednames() { # <verdict> <redrun() output>
 # that case); none when they name neither. A command that writes no logs says only its exit, of every case.
 redrun() { # <worktree> <cases json>
   local rc t=null
-  jq -r '.[] | if .case == "" then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
+  # A case its entry names under a suite runner (SUITERUNNERS, which a card's list holds no line of: #382) runs under
+  # its own files.
+  names > /dev/null 2>&1 || :
+  jq -r --arg rn "${SUITERUNNERS:-}" '($rn | split("\n")) as $rn | .[] | [.files[]? | select(IN($rn[]; .) | not)] as $own
+    | if .case == "" then "fail\t\(.file)" elif IN($rn[]; .file) and $own != [] then (.case as $c | $own[] | "fail\t\(.)\t\($c)")
+      else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
   tests "$1" test.command alone; rc=$?
   [ -z "$(testlogs "$1")" ] || t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'
   jq -c --slurpfile t <(printf '%s' "$t") --argjson rc "$rc" '$t[0] as $t | def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
