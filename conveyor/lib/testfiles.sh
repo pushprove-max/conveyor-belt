@@ -289,6 +289,61 @@ testolder() {
     | [testruns($ls; $su) | select(.file == $f)] | sort_by(.time) as $r
     | {file: $f, olderRuns: ($r[:-$keep] | reverse | map(del(.file))), olderEdits: ([alledits($cr)[] | select(.file == $f)][$keep:])}'
 }
+# The case scan of test files (testspart(): the cases each file defines; owncases(), lib/testrun.sh: the cases a card's
+# change adds or changes), an awk program run with -v q="'": a line for each case, <file><TAB><case><TAB><first
+# line><TAB><last line>. A case is a `t_<case>() {` line the runner selects (conveyor/conveyor.test.sh: a case name of
+# a-z and 0-9 only, so a t_left_stays helper is no case), outside a heredoc (a fixture's cases, written into a scratch
+# file, are not the file's own). Only a << outside quotes and comments starts a heredoc. A case's lines are the comment
+# lines right above its first line and every line to its end: the next line outside a heredoc and quotes that starts
+# with `}`, or its first line when it ends there (`t_<case>() { ...; }`); for one that closes inline on a later line
+# (`  ...; }`), the line that ends with `}` right before (but for blank and comment lines) the first line at the first
+# column after it, or before the next case or the file's end (shut(), below); a line inside a quoted string of many
+# lines is neither. A case with no end has last line 0.
+CASESCAN='
+  # The end word of the first heredoc opener on line s, or "" (sets dash for a <<- opener): a scan that keeps the
+  # quote it is in (S single, A dollar-single, D double, P a $( or a parenthesis, N none) and stops at a comment, so a
+  # << inside quotes is text, not an opener (#370). The quotes still open at the line end (QS, QT: the stack and its
+  # top) are where the next line starts, so a line inside a quoted string of many lines is text (inq()); a stack with
+  # no quote in it starts the next line empty, as does a heredoc opener.
+  function inq(   j) { for (j = 1; j <= QT; j++) if (QS[j] != "P") return 1; return 0 }
+  function opener(s,   i, n, c, t, h) {
+    n = length(s); if (!inq()) QT = 0; QS[0] = "N"
+    for (i = 1; i <= n; i++) {
+      c = substr(s, i, 1); t = QS[QT]
+      if (t == "S") { if (c == q) QT--; continue }
+      if (t == "A") { if (c == "\\") i++; else if (c == q) QT--; continue }
+      if (c == "\\") { i++; continue }
+      if (t == "D") { if (c == "\"") QT--; else if (substr(s, i, 2) == "$(") { QS[++QT] = "P"; i++ }; continue }
+      if (substr(s, i, 2) == "$" q) { QS[++QT] = "A"; i++ }
+      else if (c == q) QS[++QT] = "S"
+      else if (c == "\"") QS[++QT] = "D"
+      else if (c == "(") QS[++QT] = "P"
+      else if (c == ")") { if (QT > 0) QT-- }
+      else if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;|&(]/)) return ""
+      else if (substr(s, i, 3) == "<<<") i += 2
+      else if (substr(s, i, 2) == "<<" && match(substr(s, i), "^<<-?[ \t]*[\"" q "\\\\]?[A-Za-z_][A-Za-z0-9_]*")) {
+        h = substr(s, i, RLENGTH); dash = (h ~ /^<<-/); sub(/^<<-?[ \t]*/, "", h); gsub("[\"" q "\\\\]", "", h); QT = 0; return h }
+    }
+    return ""
+  }
+  # The open case (open: its name c, its first line at), printed with its inline end (pe), else its last line that is
+  # not blank and no comment (lb) when that line ends with `}` outside quotes (lz), else with no end. pe is lb as it
+  # was at the first line at the first column (not blank, `#` or `}`) and outside quotes (q0: the line starts outside
+  # them) after a line that ends with `}`: a top-level line after an inline close, or a line of the case itself, which
+  # ends it early, so a changed line after it counts as one outside all cases. A case line resets the quotes (QT): a
+  # quote the scan read wrong leaves at most one case unended.
+  function shut() { if (open) print pf "\t" c "\t" at "\t" (pe ? pe : lz ? lb : 0); open = 0 }
+  FNR == 1 { shut(); end = ""; cm = 0; QT = 0; pf = FILENAME }
+  end != "" { l = $0; if (dash) sub(/^\t+/, "", l); if (l == end) end = ""; cm = 0; next }
+  { q0 = inq() }
+  open && !q0 && /^\}/ { print pf "\t" c "\t" at "\t" (pe ? pe : FNR); open = 0 }
+  open && !q0 && /^[^ \t#}]/ && !pe && lz { pe = lb }
+  /^t_[a-z0-9]+\(\) \{/ { shut(); c = $0; sub(/^t_/, "", c); sub(/\(.*/, "", c); at = cm ? cm : FNR; open = 1; pe = 0; lz = 0; QT = 0
+    if (substr($0, index($0, "{") + 1) ~ /\}[ \t]*(#.*)?$/) { print pf "\t" c "\t" at "\t" FNR; open = 0 } }
+  # cm: the first of the comment lines right above this line, 0 when the line above is no comment.
+  { if ($0 ~ /^#/) { if (!cm) cm = FNR } else cm = 0; end = opener($0) }
+  open && !/^[ \t]*(#.*)?$/ { lb = FNR; lz = !inq() && /\}[ \t]*(#.*)?$/ }
+  END { shut() }'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   local si sh rn mn fs fl sf defs refs cs ru all ln ch hv out nv rp cp
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
@@ -298,38 +353,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   testowners
-  # The cases each test file of main's checkout defines, by file: the `t_<case>() {` lines the runner selects
-  # (conveyor/conveyor.test.sh: a case name of a-z and 0-9 only, so a t_left_stays helper is no case), outside a
-  # heredoc (a fixture's cases, written into a scratch file, are not the file's own). Only a << outside quotes and
-  # comments starts a heredoc.
-  cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" '
-    # The end word of the first heredoc opener on line s, or "" (sets dash for a <<- opener): a scan that keeps the
-    # quote it is in (S single, A dollar-single, D double, P a $( or a parenthesis, N none) and stops at a comment, so a
-    # << inside quotes is text, not an opener (#370).
-    function opener(s,   i, n, c, t, st, top, h) {
-      n = length(s); top = 0; st[0] = "N"
-      for (i = 1; i <= n; i++) {
-        c = substr(s, i, 1); t = st[top]
-        if (t == "S") { if (c == q) top--; continue }
-        if (t == "A") { if (c == "\\") i++; else if (c == q) top--; continue }
-        if (c == "\\") { i++; continue }
-        if (t == "D") { if (c == "\"") top--; else if (substr(s, i, 2) == "$(") { st[++top] = "P"; i++ }; continue }
-        if (substr(s, i, 2) == "$" q) { st[++top] = "A"; i++ }
-        else if (c == q) st[++top] = "S"
-        else if (c == "\"") st[++top] = "D"
-        else if (c == "(") st[++top] = "P"
-        else if (c == ")") { if (top > 0) top-- }
-        else if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;|&(]/)) return ""
-        else if (substr(s, i, 3) == "<<<") i += 2
-        else if (substr(s, i, 2) == "<<" && match(substr(s, i), "^<<-?[ \t]*[\"" q "\\\\]?[A-Za-z_][A-Za-z0-9_]*")) {
-          h = substr(s, i, RLENGTH); dash = (h ~ /^<<-/); sub(/^<<-?[ \t]*/, "", h); gsub("[\"" q "\\\\]", "", h); return h }
-      }
-      return ""
-    }
-    FNR == 1 { end = "" }
-    end != "" { l = $0; if (dash) sub(/^\t+/, "", l); if (l == end) end = ""; next }
-    /^t_[a-z0-9]+\(\) \{/ { c = $0; sub(/^t_/, "", c); sub(/\(.*/, "", c); print FILENAME "\t" c }
-    { end = opener($0) }' 2>/dev/null) \
+  # The cases each test file of main's checkout defines, by file (the case scan, CASESCAN).
+  cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
     | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'
   ln=$(testlines) || return 1
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git

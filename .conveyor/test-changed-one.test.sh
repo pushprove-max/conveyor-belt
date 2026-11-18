@@ -15,9 +15,9 @@ fails=0
 no() { echo "not ok - $1"; fails=1; }
 
 # A scratch repo: the real script, a map of three areas (a: x.sh and a.test.sh's two cases; b: y.sh and b.test.sh's
-# one; c: z.sh and c.test.sh's one, which no change here selects, so a and b are not every case file), a hooks test
-# and a Board test that no change selects, and a runner stub; each notes its run in $R/ran as `<the file it runs
-# as>:<its cases>`. The change touches x.sh and y.sh: both areas.
+# one; c: z.sh and c.test.sh's one, which no change here selects, so a and b are not every case file), a hooks test,
+# a Board test and a shell test of conveyor/lib/ that no change selects, and a runner stub; each notes its run in
+# $R/ran as `<the file it runs as>:<its cases>`. The change touches x.sh and y.sh: both areas.
 B=.claude/scripts/__tests__/w.test.py
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/hooks" "$R/${B%/*}"
 cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
@@ -32,17 +32,22 @@ echo "$CONVEYOR_TEST_FILE:${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/
 for c in $CONVEYOR_SHELL_TEST_CASE; do echo "ok $c"; done
 EOF
 printf '%s\n' 'echo "hooks/h.test.sh:ALL" >> "$(dirname "$0")/../ran"' > "$R/hooks/h.test.sh"
+# A shell test file outside conveyor/tests/ that selects its cases as the runner does; it notes the cases it runs.
+mkdir -p "$R/conveyor/lib"
+printf '%s\n' 'ALL="sone stwo"' 'SEL=${CONVEYOR_SHELL_TEST_CASE:-$ALL}; SEL=${SEL//,/ }' \
+  'echo "conveyor/lib/s.test.sh:${SEL// /,}" >> "$(dirname "$0")/../../ran"' > "$R/conveyor/lib/s.test.sh"
 printf '%s\n' 'with open("ran", "a") as f: f.write("'"$B"':ALL\n")' > "$R/$B"
 echo one > "$R/conveyor/x.sh"; echo one > "$R/conveyor/y.sh"; echo one > "$R/conveyor/z.sh"
 echo '{"test": {"files": {"conveyor/conveyor.test.sh": {"wholeOnly": true}}}}' > "$R/.conveyor/project.json"
 echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 echo two >> "$R/conveyor/x.sh"; echo two >> "$R/conveyor/y.sh"
-# one <log folder> <path>: the one-file mode on that path, given both areas' case files as the engine's list (as
-# filecmd() passes it on); prints the runs' notes, sorted.
+# one <log folder> <path> [<cases>]: the one-file mode on that path, given both areas' case files and <path> as the
+# engine's list (as filecmd() passes a card's own test files on), and <cases> as the cases the engine names of them
+# (CONVEYOR_TEST_CASES); prints the runs' notes, sorted.
 one() {
   rm -f "$R/ran"; mkdir -p "$T/$1"
-  (cd "$R" && env CONVEYOR_TEST_LOG="$T/$1" CONVEYOR_TEST_FILES=$'conveyor/tests/a.test.sh\nconveyor/tests/b.test.sh' \
+  (cd "$R" && env CONVEYOR_TEST_LOG="$T/$1" CONVEYOR_TEST_FILES=$'conveyor/tests/a.test.sh\nconveyor/tests/b.test.sh\n'"$2" CONVEYOR_TEST_CASES="${3:-}" \
     bash .conveyor/test-changed.sh --file "$2") > "$T/out" 2>&1; echo $? > "$T/rc"
   LC_ALL=C sort "$R/ran" 2>/dev/null | paste -sd'|' -
 }
@@ -50,8 +55,22 @@ one() {
 # An engine case file: only it runs, with its chosen cases, and its log says one file.
 got=$(one area conveyor/tests/a.test.sh)
 [ "$got" = "conveyor/tests/a.test.sh:aone atwo" ] && [ "$(cat "$T/rc")" = 0 ] \
-  && [ "$(grep '^TESTRUN files=' "$T/area/test-changed.log")" = "TESTRUN files=1 of=5" ] \
+  && [ "$(grep '^TESTRUN files=' "$T/area/test-changed.log")" = "TESTRUN files=1 of=6" ] \
   || no "the one-file mode given an area file ran more than it: '$got', exit $(cat "$T/rc"): $(cat "$T/out"): $(cat "$T/area/test-changed.log" 2>/dev/null)"
+
+# Issue 414. Bug it catches: a card that changed one case of an area file ran all its cases. The cases the engine
+# names of the file (CONVEYOR_TEST_CASES: those the card's change adds or changes) run alone: atwo, not aone; a case
+# of another file, or one the file does not have, does not run.
+got=$(one cases conveyor/tests/a.test.sh $'conveyor/tests/a.test.sh\tatwo\nconveyor/tests/a.test.sh\tgone\nconveyor/tests/b.test.sh\tbone')
+[ "$got" = "conveyor/tests/a.test.sh:atwo" ] && [ "$(cat "$T/rc")" = 0 ] \
+  || no "the one-file mode did not run only the cases the engine named: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
+
+# Issue 414 (E2). Bug it catches: a shell test file outside conveyor/tests/ ran all its cases while the test line
+# named only the changed one, also when the engine's list names the file (which marks it whole). The case the engine
+# names of it runs alone (stwo, not sone).
+got=$(one shell conveyor/lib/s.test.sh $'conveyor/lib/s.test.sh\tstwo')
+[ "$got" = "conveyor/lib/s.test.sh:stwo" ] && [ "$(cat "$T/rc")" = 0 ] \
+  || no "the one-file mode did not run only the case the engine named of a shell test file: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 
 # A test file outside the engine (the hooks'), which the change does not select: it runs whole, and no case file runs.
 got=$(one hooks hooks/h.test.sh)

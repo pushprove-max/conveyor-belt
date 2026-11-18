@@ -537,7 +537,12 @@ record and the test line hold `list`: `{"mode": "changed", "files": <count>, "by
 it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed: 7 files (by name)`,
 `whole suite: <why>`); `/units` shows `changed: 7 files` or `whole suite`.
 All of this holds while the rule `wholeSuite` is on. Off (the default), a card's run never gets `mode: "whole"`: it
-runs the test files its change adds or changes (`"by": "own"`; a shared helper is none). A change with none runs at
+runs the test files its change adds or changes (`"by": "own"`; a shared helper is none). Of a test file main has, it
+runs only the cases (`t_<case>() {` to its `}` line, with the comment lines above it) that hold a line the change adds
+or changes; a file whose change touches a line outside every case (a helper or setup), a new file, and a file with no
+such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>` line each; a
+command that does not read it runs each file whole. The list then has `cases`, `[{"file", "case"}]`, and a `why`,
+`the card ran <n> changed cases of <m> test files`, which the output and the Board's step show. A change with none runs at
 most 5 of the test files the test map and the links give its files, those that failed most recently first, and its
 output says so; one with none of those runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why":
 "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that says the run

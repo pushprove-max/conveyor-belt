@@ -179,6 +179,60 @@ t_narrowownsetup() {
     || fail "the card did not run only its own setup test files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.rec" 2>&1)"
 }
 
+# #414. Main holds tests/a.test.sh, tests/b.test.sh and tests/c.test.sh, each a helper (h<x>) and two cases
+# (t_<x>one, which closes inline on its last line, `  echo one; }`, and t_<x>two), a comment line above each: a case
+# that closes so must not leave its file's other cases unnamed (E1: t_slotnoroom ran slots.test.sh whole, its end not
+# found). t_<x>two holds a quoted string of two lines, the first ending in `}` and the second at the first column
+# (`{"y":2}'`), above its `echo 2`: a line inside quotes must not end the case early, so a change below it counts as
+# one outside all cases (a JSON line ended t_testmapstate so, and the whole file ran). The pack runs each test file
+# alone (test.fileCommand, which adds
+# `one:<file>|<the cases CONVEYOR_TEST_CASES names of it, by commas>` to $STUB/got). The card's change, <change>, is
+# staged and tested as narrowrun() does; ownedit <file> <ERE> <text> puts <text> for <ERE> in each line of <file>.
+ownrun() { # <change>
+  local x
+  narrowsetup none
+  cat > "$STUB/one" <<'EOF'
+c=$(printf '%s\n' "${CONVEYOR_TEST_CASES:-}" | awk -F'\t' -v f="$1" '$1 == f {print $2}' | paste -sd, -)
+echo "one:$1|$c" >> "$STUB/got"
+EOF
+  tune '.test.fileCommand = "bash \"$STUB/one\""'
+  mkdir -p "$R/tests"
+  for x in a b c; do
+    printf '%s\n' "h$x() { echo $x; }" '' "# $x one." "t_${x}one() {" '  echo 1' '  echo one; }' '' "# $x two." "t_${x}two() {" "  : '{\"x\":1}" "{\"y\":2}'" '  echo 2' '}' > "$R/tests/$x.test.sh"
+  done
+  git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
+  narrowrun "$1"
+}
+ownedit() { awk -v e="$2" -v t="$3" '{ sub(e, t) } 1' "$1" > "$1.new" && mv "$1.new" "$1"; } # <file> <ERE> <text>
+
+# D1 (#414). Bug it catches: a card ran each test file it changed whole (#398 changed a line or two in each of 50 test
+# files, and ran all 50). A change to one case of each of three files (a line of a case, a new case with the blank
+# line and comment above it, and a case's comment) runs those three cases alone, and the test line, its output and
+# the Board's step name them: "3 changed cases of 3 test files".
+t_narrowowncases() {
+  ownrun "ownedit tests/a.test.sh '^  echo 1\$' '  echo 11' && printf '%s\n' '' '# b three.' 't_bthree() {' '  echo 3' '}' >> tests/b.test.sh \
+    && ownedit tests/c.test.sh '^# c two[.]\$' '# c two, said again.'"
+  local note='the card ran 3 changed cases of 3 test files'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|aone\none:tests/b.test.sh|bthree\none:tests/c.test.sh|ctwo' ] \
+    || fail "the card did not run only its three changed cases (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .cases, .why]' "$T/$CASE/cards/c7.rec")" = '[3,[{"file":"tests/a.test.sh","case":"aone"},{"file":"tests/b.test.sh","case":"bthree"},{"file":"tests/c.test.sh","case":"ctwo"}],"'"$note"'"]' ] \
+    && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" || fail "the test line does not name the cases it ran: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+  [ "$(trackwhy)" = "$note" ] || fail "the Board's test step does not say how many cases ran: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
+# D2, D3 (#414). Bug it catches: a change to a file's shared part, or a new test file, ran only some cases of it, so a
+# case the helper breaks, or a case of the new file, never ran. A change to a.test.sh's helper, outside any case, and
+# to its case t_aone runs that file whole, not t_aone alone; the new file d.test.sh runs whole; b.test.sh, one case
+# changed, runs that case alone.
+t_narrowownwhole() {
+  ownrun "ownedit tests/a.test.sh 'echo a;' 'echo A;' && ownedit tests/a.test.sh '^  echo 1\$' '  echo 11' && ownedit tests/b.test.sh '^  echo 2\$' '  echo 22' \
+    && printf '%s\n' 't_done() {' '  echo d' '}' > tests/d.test.sh"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|\none:tests/b.test.sh|btwo\none:tests/d.test.sh|' ] \
+    || fail "the changed helper's file or the new file did not run whole (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .cases, .why]' "$T/$CASE/cards/c7.rec")" = '[3,[{"file":"tests/b.test.sh","case":"btwo"}],"the card ran 1 changed case of 1 test file, and 2 test files whole"]' ] \
+    || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
 # D2 (#384). Bug it catches: a change with no test file of its own, linked to nearly every test file (a shared
 # helper), ran all of them, about 45 minutes a card. Of 120 linked files it runs 5, each alone: the two that failed
 # most recently in a test step on record, newest first, then the rest in order; the test line and output say so and
@@ -191,12 +245,14 @@ t_narrowcap() {
     || fail "the card did not run 5 files alone, the recently failed first (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -r '.list | "\(.files) \(.left) \(.why)"' "$T/$CASE/cards/c7.rec")" = "5 115 $note" ] && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" \
     || fail "the test step does not say what it ran: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
-  # The Board's card track gives the passed step that note, which it shows: the test line goes through the card's row
-  # (jq/rows.jq, its log) and then its track (jq/track.jq), as the snapshot draws it.
-  [ "$(jq -c '{card: "c7", issue: 7, step: "picked", time: "2026-11-17T11:00:00Z"}, ({card: "c7", issue: 7, step: "test", result: "pass", time: "2026-11-17T12:00:00Z"} + .)' "$T/$CASE/cards/c7.rec" \
-      | jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg shut x -f "$SRC/jq/rows.jq" \
-      | jq -r "$(<"$SRC/jq/track.jq")"' .[0] | track(null; null) | .records[] | select(.name == "tests passed") | .why')" = "$note" ] \
-    || fail "the Board's test step does not show the note: $(cat "$T/$CASE/cards/c7.rec")"
+  [ "$(trackwhy)" = "$note" ] || fail "the Board's test step does not show the note: $(cat "$T/$CASE/cards/c7.rec")"
+}
+# The note the Board's card track gives card c7's passed test step, which it shows: the test line goes through the
+# card's row (jq/rows.jq, its log) and then its track (jq/track.jq), as the snapshot draws it.
+trackwhy() {
+  jq -c '{card: "c7", issue: 7, step: "picked", time: "2026-11-17T11:00:00Z"}, ({card: "c7", issue: 7, step: "test", result: "pass", time: "2026-11-17T12:00:00Z"} + .)' "$T/$CASE/cards/c7.rec" \
+    | jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg shut x -f "$SRC/jq/rows.jq" \
+    | jq -r "$(<"$SRC/jq/track.jq")"' .[0] | track(null; null) | .records[] | select(.name == "tests passed") | .why'
 }
 
 # Bug it catches: the cap left files out under the limit. 3 linked files all run, and the list names none left out.

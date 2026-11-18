@@ -159,8 +159,9 @@
                 # fix's reason: what started it when its line names it (a failed Done-when check, main moved), as the Board labels it.
                 + ({why: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "issue" and $l.result != "ok")
                       or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) then $l.reason
-                      # A test run that left linked test files out (testcap(), testrun.sh): its list's note says so.
-                      elif $l.step == "test" and ($l.list.left? // 0) > 0 then $l.list.why else null end),
+                      # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
+                      # cases of its own test files (owncases(), testrun.sh): its list's note (rows.jq) says so.
+                      elif $l.step == "test" and $l.list != null then $l.list.why else null end),
                     output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail else null end),
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
                     # A test run's changed lines no test reached, from its coverage report (uncovered(), testrun.sh).

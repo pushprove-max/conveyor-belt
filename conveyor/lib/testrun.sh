@@ -371,7 +371,7 @@ cacheoff() { # <worktree>
 # with no test.fileCommand, does not run and fails with <worktree>.stop saying why; and a run that reports more test
 # files than it was given (TEST_GIVEN, with TEST_ADDS for a test command's own picks: watch() ends it, <worktree>.wide) does not run again and fails the same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -490,7 +490,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # the cases of a run again that failed which passed in it (f: its failures).
   if [ -e "$1.first" ]; then if [ $rc = 0 ]; then flakyrun "$1"; else flakyrun "$1" "${f:-}"; fi; fi
   # A change with no test file of its own ran linked test files (listcmd(), testcap()): its output says how many, and
-  # that the run before the push runs them all.
+  # that the run before the push runs them all. One that ran only the changed cases of its own says how many (OWNCASES).
   [ -z "$CAPNOTE" ] || printf 'conveyor: %s\n' "$CAPNOTE" >> "$1.test"
   # A card's run that passed maps the test files its change adds or changes that the test map does not hold yet.
   [ $rc != 0 ] || [ -n "${2:-}" ] || [ "${3:-}" = alone ] || mapnew "$1" >> "$1.test"
@@ -508,7 +508,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # (only with one)} or {mode: "whole", why}. With no test.list, the command is as it is and no file is written.
 # All of that holds while the control record's rule "Whole suite in a card" (rules.wholeSuite, wholerule()) is on.
 # Off (the default), a card never runs the whole suite: the list, test.list set or not, is the test files its own
-# change adds or changes (by: "own"); with none, testsel()'s narrow one, the test files the test map and the links
+# change adds or changes (by: "own"), of each only the cases its change adds or changes where owncases() can name them
+# (TEST_CASES; the list's cases, [{file, case}], and its why, OWNCASES, say so); with none, testsel()'s narrow one, the test files the test map and the links
 # give the changed files, up to CARDLINKED of them (testcap(); the output says so, LINKED, and the list, {mode:
 # "changed", files, by, left, why}, says how many were left out); notTests, [{file, why}], names each
 # test runner the change touches, RUNNERFIX, which is on no list: #350). A list of none runs nothing (LISTNONE
@@ -517,8 +518,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # else nothing runs, <worktree>.stop says why (NARROW) and it fails. Either way TEST_GIVEN is how many files it got
 # (watch() stops a run that reports more: tests()); TEST_ONE is set when test.fileCommand runs them.
 listcmd() { # <worktree> <command>
-  local lm s why='' fs=() by fc rn=''
-  LISTCMD=$2; TEST_FILES=''; LISTNONE=''
+  local lm s why='' fs=() by fc rn='' f c nf=0 nw=0
+  LISTCMD=$2; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   packget test.list lm || return 1
   if ! wholerule; then
     # The list that could not be made says why (the error of the command that failed); the settings are named only
@@ -535,6 +536,18 @@ listcmd() { # <worktree> <command>
       | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
     CAPLEFT=0; CAPNOTE=''
     if [ ${#fs[@]} != 0 ]; then by='{"by":"own","age":null}'
+      # Of each, only the cases the change adds or changes run (owncases(), #414): TEST_CASES, `<file><TAB><case>`
+      # lines, which testonce() gives the command (CONVEYOR_TEST_CASES), and its output says how many (OWNCASES); a
+      # file whose cases cannot be named so runs whole.
+      for f in "${fs[@]}"; do
+        if c=$(owncases "$1" "$f"); then nf=$((nf + 1)); TEST_CASES+=$(awk -v f="$f" '{print f "\t" $0}' <<<"$c")$'\n'
+        else nw=$((nw + 1)); fi
+      done
+      if [ $nf != 0 ]; then
+        c=$(grep -c . <<<"$TEST_CASES"); CAPNOTE=${OWNCASES/'<n>'/$c}; CAPNOTE=${CAPNOTE/'<s>'/$([ "$c" = 1 ] || echo s)}
+        CAPNOTE=${CAPNOTE/'<m>'/$nf}; CAPNOTE=${CAPNOTE/'<s>'/$([ $nf = 1 ] || echo s)}
+        [ $nw = 0 ] || { c=${OWNWHOLE/'<w>'/$nw}; CAPNOTE+=${c/'<s>'/$([ $nw = 1 ] || echo s)}; }
+      fi
     else
       s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
         narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
@@ -545,8 +558,9 @@ listcmd() { # <worktree> <command>
     fi
     # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
     [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
-    jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
+    jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
       + if $n == 0 then {why: $w} elif $l > 0 then {left: $l, why: $c} else {} end
+      + ([$cs | split("\n")[] | select(. != "") | split("\t") | {file: .[0], case: .[1]}] | if . == [] then {} else {cases: ., why: $c} end)
       + ([$rn | split("\n")[] | select(. != "") | {file: ., why: $rf}] | if . == [] then {} else {notTests: .} end)' > "$1.testlist" || return 1
     [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
     why=$(listwhy "$1" "$2" "$lm")
@@ -589,6 +603,34 @@ testcap() { # <file>...
     && mapfile -t ks < <(jq -r '.[]' <<<"$fl") && [ ${#ks[@]} = "$n" ] && CAPFILES=("${ks[@]}")
   CAPLEFT=$(($# - ${#CAPFILES[@]}))
   CAPNOTE=${CAPPED//'<left>'/$CAPLEFT}; CAPNOTE=${CAPNOTE//'<all>'/$#}; CAPNOTE=${CAPNOTE//'<max>'/$n}
+}
+# The cases of the test file <file> that the staged change in <worktree> adds or changes (listcmd(), #414), A to Z, one
+# a line: by the case scan (CASESCAN, lib/testfiles.sh) of main's file (HEAD) and of the staged one, each case of the
+# staged file that holds a line the change adds, or whose case in main's file holds a line the change takes out. A
+# blank line is in no case and changes none. It fails, and the file runs whole, for a file main does not have (a new
+# test file), a line the change adds or takes out that is not blank and is in no case (a helper or setup outside any
+# case: the file's shared part), a case whose end the scan cannot find, or a change that leaves no case to run (it
+# only takes cases out).
+owncases() { # <worktree> <file>
+  local c
+  git -C "$1" cat-file -e "HEAD:$2" 2>/dev/null || return 1
+  c=$({ git -C "$1" show "HEAD:$2" | awk -v q="'" "$CASESCAN" | sed 's/^/a\t/'
+    git -C "$1" show ":$2" | awk -v q="'" "$CASESCAN" | sed 's/^/b\t/'
+    git -C "$1" diff --cached -U0 --no-renames --no-color --no-ext-diff --no-textconv HEAD -- "$2" | sed 's/^/d\t/'; } 2>/dev/null | awk -F'\t' '
+    # The line x of side s (a: the file at HEAD, b: the staged one) that the change takes out or adds, l.
+    function at(s, x, l,   i, k) {
+      if (substr(l, 2) ~ /^[ \t]*$/) return
+      for (i = 1; i <= n[s]; i++) { k = s SUBSEP i; if (lo[k] <= x && x <= hi[k]) { if (nm[k] in has) hit[nm[k]] = 1; return } }
+      whole = 1
+    }
+    $1 != "d" { if ($5 == 0) whole = 1; k = $1 SUBSEP (++n[$1]); nm[k] = $3; lo[k] = $4 + 0; hi[k] = $5 + 0; if ($1 == "b") has[$3] = 1; next }
+    { l = substr($0, 3) }
+    l ~ /^@@ / { split(l, h, " "); split(substr(h[2], 2), o, ","); split(substr(h[3], 2), w, ","); ol = o[1] + 0; nl = w[1] + 0; ih = 1; next }
+    !ih { next }
+    l ~ /^-/ { at("a", ol++, l); next }
+    l ~ /^\+/ { at("b", nl++, l); next }
+    END { if (whole || !ih) exit 1; for (c in hit) { print c; m++ }; exit m ? 0 : 1 }') || return 1
+  LC_ALL=C sort <<<"$c"
 }
 # Why <command> cannot be given a list of test files in the form test.list <form> names (listcmd()): no test.list,
 # none, placeholder with no `{files}` in the command, or args with a command that already names the test files its
@@ -942,7 +984,7 @@ repairholder() {
 # (cleanrun()). Sets REPAIRED: what the runs showed.
 # shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
 repairproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN='' RUNOFF=''
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN='' RUNOFF='' TEST_CASES=''
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.command cmd 2>/dev/null; then REPAIRED="the pack's test.command could not be read"
@@ -991,7 +1033,7 @@ cleanrun() { # <worktree> <command> [<list>]
   [ -z "${3:-}" ] || { rs=$(runnersoff "$3"); [ -z "$rs" ] || grep -q $'^fail\t' "$3" || { runnernote "$rs" > "$1.test"; return 1; }; }
   rs=$(printf '%s\n' "${RUNOFF:-}" "$rs" | grep . | sort -u)
   (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
-    CONVEYOR_TEST_FILES="${TEST_FILES:-}" timeout --kill-after=30 "$TEST_TIMEOUT" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
+    CONVEYOR_TEST_FILES="${TEST_FILES:-}" CONVEYOR_TEST_CASES="${TEST_CASES:-}" timeout --kill-after=30 "$TEST_TIMEOUT" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
   pid=$!
   watch $pid "$1.test" "$1.live" test; v=$?; runnernote "$rs" >> "$1.test"; return $v
 }
@@ -2133,7 +2175,7 @@ testonce() { # <worktree> <cmd>
   t0=$(date +%s); steer_prio test "$k"
   [ -n "$SLOT_CPUS" ] || [ -z "$k" ] || STEER=(taskset -c "$k" "${STEER[@]}")
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec "${STEER[@]}" timeout --kill-after=30 "${TEST_HARD:-0}" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} CONVEYOR_TEST_CASES=${TEST_CASES:-} exec "${STEER[@]}" timeout --kill-after=30 "${TEST_HARD:-0}" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" & clock=$!; steer_watch $pid 8>&- & sw=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock $sw 2>/dev/null; wait $clock $sw 2>/dev/null; rm -f "$1.turnwait"; steer_end

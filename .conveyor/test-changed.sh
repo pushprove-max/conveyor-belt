@@ -94,7 +94,9 @@ set -u
 unset CONVEYOR_SHELL_TEST_CASE
 # One-file mode (issue 379; the pack's test.fileCommand, which Conveyor runs once for each listed test file):
 # `test-changed.sh --file <path>` runs that test file alone and nothing else: an engine case file
-# (conveyor/tests/<area>.test.sh) with the cases the selection chose in it (all its cases when it chose none there),
+# (conveyor/tests/<area>.test.sh) with the cases the selection chose in it (all its cases when it chose none there;
+# the cases CONVEYOR_TEST_CASES names of it, `<file><TAB><case>` lines, when it names any),
+# a shell test file that selects its cases as the runner does with the cases CONVEYOR_TEST_CASES names of it, and
 # any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
 # run makes (the map check, the test lint, shellcheck) still run. A path that is no file fails at once, before any of it,
 # as does a runner of the whole suite (issue 382: the engine's runner, this script and the full test's), which is no
@@ -108,6 +110,9 @@ if [ "${1:-}" = --file ]; then
   done
 fi
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
+# The cases the loop names of the test files it gives (conveyor/lib/testrun.sh owncases(): `<file><TAB><case>` lines),
+# read in one-file mode (below); unset, as the list is, so no test this runs reads the loop's.
+TCASES=${CONVEYOR_TEST_CASES:-}; unset CONVEYOR_TEST_CASES
 # Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list
 # written before that names them under the runner, conveyor/conveyor.test.sh. Both are read as one: the selection
 # below picks the engine's cases as the runner's, and runs each case file of them on its own. An `ok`, `off` or
@@ -1009,15 +1014,25 @@ while IFS= read -r t; do
   esac
 done <<<"${CONVEYOR_TEST_FILES:-}"
 # One-file mode (ONE, above): the selection is that file alone. An engine case file keeps the chosen cases it holds,
-# or all its cases when none of them is chosen or the runner was chosen whole; any other file runs whole.
+# or all its cases when none of them is chosen or the runner was chosen whole; any other file runs whole. The cases
+# the loop names of the file (TCASES: a card's change adds or changes them, issue 414) are the chosen cases then, of
+# an engine case file and of a shell test file that selects its cases (below).
 if [ -n "$ONE" ]; then
   if [[ $ONE == conveyor/tests/*.test.sh && $ONE != conveyor/tests/*/* ]]; then
     own=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$ONE" | sort -u)
     [ -n "$own" ] || { echo "test-changed: --file: $ONE holds no t_ case" >&2; exit 1; }
     c=; [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -z "$cases" ] || c=$(tr ' ' '\n' <<<"$cases" | grep -xF -f <(echo "$own"))
+    k=$(awk -F'\t' -v f="$ONE" '$1 == f {print $2}' <<<"$TCASES" | grep -xF -f <(echo "$own")) && c=$k
     cases=$(tr '\n' ' ' <<<"${c:-$own}"); run=([conveyor/conveyor.test.sh]=1)
   else
-    run=(["$ONE"]=1); twhole[$ONE]=1; cases=
+    # Any other shell test file that selects its cases as the runner does (`SEL=${CONVEYOR_SHELL_TEST_CASE...`) runs
+    # the cases TCASES names of it, as its parts, and only them: the loop lists the file (CONVEYOR_TEST_FILES, above)
+    # and a pick may select it, each of which marks it whole. Else, or with none named, it runs whole.
+    run=(["$ONE"]=1); cases=
+    k=$(awk -F'\t' -v f="$ONE" '$1 == f {print $2}' <<<"$TCASES")
+    if [ -n "$k" ] && [[ $ONE == *.sh ]] && grep -q '^SEL=\${CONVEYOR_SHELL_TEST_CASE' "$ONE"; then
+      twhole=(); tparts=(["$ONE"]=$k)
+    else twhole[$ONE]=1; fi
   fi
 fi
 # The whole selection, before what passed is taken out of it (the cases kept as passed: kept, below).

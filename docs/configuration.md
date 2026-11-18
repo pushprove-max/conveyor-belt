@@ -198,6 +198,13 @@ With the rule Off, a card never runs the whole suite. The whole suite runs only 
 change the runs of a release or of the full test suite. A card runs only the test files that its change adds or
 changes, as `tests.patterns` finds them. A shared helper or a test runner is not a test file here.
 
+Of a test file that is on main, the card runs only the test cases that the change adds or changes. A case is a
+`t_<case>() {` line, the comment lines above it, and the lines to its closing `}`. Conveyor gives these cases to
+your command ([conveyor/README.md](../conveyor/README.md)). A command that does not read them runs each file whole. A
+file runs whole when the change touches a line outside all cases, such as a helper or setup, when the file is new, or
+when no changed case is found in it. The card's test step says "the card ran 3 changed cases of 3 test files", and
+the Board shows this note with the step.
+
 If the change adds or changes no test file, the card runs 5 of the test files that the test map and
 `.conveyor/test-links.json` link to the changed files. The files that failed most recently in a test step run first,
 then the others in the order of the test map. The card's test step says this, and the Board shows the note with the
