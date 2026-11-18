@@ -14,7 +14,7 @@ const pane = (w, k) => opened(w, MERGE).querySelector(`.tests-pane[data-pane="${
 const words = (els) => Array.from(els, (x) => x.textContent);
 const REPORT = '**What it tests**\nIt proves the merge of two cards, which no other test file checks. It is slow.\n\n- one\n\nVERDICT: keep\n';
 const judged = (verdict, text) => rec({ state: 'done', end: iso(Date.now()), verdict, text });
-// MERGE (12 CPU s, budget 8, three card runs 1 to 3 hours ago) with #600 landed between them (11 → 6 CPU s).
+// MERGE (12 CPU s, median 6, three card runs 1 to 3 hours ago) with #600 landed between them (11 → 6 CPU s).
 function landed(acts = []) {
   const d = snap({ acts });
   d.panels.tests.data.tests.files.find((f) => f.file === MERGE).optimize = [
@@ -24,8 +24,8 @@ function landed(acts = []) {
 }
 
 // Bug it catches: an opened row was one long column of plain text that said neither what state the file was in nor
-// what to do next; its runs were sentences with no trend; its budget a loose line; and its Optimize numbers a run of
-// text that did not say whether the Optimize helped.
+// what to do next; its runs were sentences with no trend; and its Optimize numbers a run of text that did not say
+// whether the Optimize helped. Bug caught too (#349): the state and the CPU tile still held the file to a budget.
 test('Tests row: Overview opens first with the diagnosis, the next step as the primary button, six tiles and the 3 latest events', () => {
   const w = show(landed());
   const more = open(w, MERGE);
@@ -34,15 +34,15 @@ test('Tests row: Overview opens first with the diagnosis, the next step as the p
     [['overview', false], ['timeline', true], ['judge', true], ['mutation', true]], 'Overview open, the others folded');
   const diag = pane(w, 'overview').querySelector('.tests-diag');
   assert.equal(diag.querySelector('.tests-diag-state').textContent,
-    'Still 50% over budget after one Optimize card (-45%): 12.0 CPU s against a budget of 8.0. It is slower than usual: +100% against its median.');
+    '12.0 CPU s after one Optimize card (-45%). It is slower than usual: +100% against its median.');
   assert.equal(diag.querySelector('.tests-diag-verdict').textContent, 'Judge: Not judged yet.');
-  // Over budget, an Optimize landed and none open, no keep verdict: Optimize again is the step suggested.
+  // Slower than usual and not judged yet: Judge is the step suggested.
   const primary = diag.querySelectorAll('.btn-primary');
-  assert.deepEqual(words(primary), ['Optimize again']);
+  assert.deepEqual(words(primary), ['Judge']);
   assert.deepEqual(Array.from(pane(w, 'overview').querySelectorAll('.tests-tile'), (t) => [t.dataset.tile, t.querySelector('.tests-tile-label').textContent]),
     [['cpu', 'CPU now'], ['runs', 'Last 4 runs'], ['optimize', 'Last Optimize'], ['clock', 'Clock'], ['caught', 'Bugs caught'], ['mutants', 'Mutants']]);
   const tile = (k) => pane(w, 'overview').querySelector(`[data-tile="${k}"]`);
-  assert.deepEqual(words(tile('cpu').children).slice(1), ['12.0 CPU s', 'Budget: 8.0 CPU s, the project budget.']);
+  assert.deepEqual(words(tile('cpu').children).slice(1), ['12.0 CPU s', 'Median: 6.0 CPU s.']);
   assert.deepEqual(words(tile('optimize').children).slice(1), ['-45%', '#600 · 11.0 → 6.0 CPU s Helped']);
   assert.deepEqual(words(tile('clock').children).slice(1), ['30 s', '2.5× clock / CPU']);
   assert.equal(tile('mutants').querySelector('.tests-tile-big').textContent, 'not checked');
@@ -59,13 +59,14 @@ test('Tests row: Overview opens first with the diagnosis, the next step as the p
   assert.equal(w.document.activeElement, act(opened(w, MERGE), 'tab-timeline'));
 });
 
-// Bug it catches: the next step did not follow from the file's state and its judge's verdict.
-test('Tests row: a keep verdict on a file over budget suggests Raise this file\'s budget…, which opens its budget editor', () => {
+// Bug it catches: the next step did not follow from the file's state and its judge's verdict. Judged, the slow file's
+// next step is Run; no step raises a budget, which no test file has (#349).
+test('Tests row: a keep verdict on a slow file suggests Run, and no step raises a budget', () => {
   const w = show(landed([judged('keep', REPORT)]));
   const diag = open(w, MERGE).querySelector('.tests-diag');
-  assert.deepEqual(words(diag.querySelectorAll('.btn-primary')), ['Raise this file\'s budget…']);
-  act(diag, 'raise-budget').click();
-  assert.equal(w.document.activeElement, act(opened(w, MERGE), 'file-budget-field'));
+  assert.deepEqual(words(diag.querySelectorAll('.btn-primary')), ['Run']);
+  assert.equal(act(diag, 'raise-budget'), null);
+  assert.doesNotMatch(diag.textContent, /budget/i);
 });
 
 // Bug it catches: the judge's text, about 60 lines, was shown whole and open and pushed the rest off the screen; it

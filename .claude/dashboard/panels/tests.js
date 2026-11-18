@@ -5,7 +5,7 @@
 // The page, top to bottom (#73, #74, #178): the Test map part, the figures, the table with its search and filters, Test edits by cards (#76),
 // Removed by Optimize, the bar of the files selected, Recent actions, and one section "Settings", collapsed until
 // opened, with the Tests model, Test limits and Auto-file.
-// The figures: Timed files, files over budget, files slower than usual, files that wait more than they work (their
+// The figures: Timed files, files slower than usual, files that wait more than they work (their
 // last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the 7 days: their slot
 // wait and their run time. A figure that counts the files of a status is a button that shows that status alone, as
 // its filter chip does.
@@ -17,12 +17,12 @@
 // record or more and no catch, Never caught anything as grey text). A file with no CPU or clock time on
 // record shows "Not timed yet" in place of its figures and comes after the timed files (by name, it sorts as any
 // other); one with clock times only (its runner's report gives no CPU time) shows "Wall only". Each column heading has a hint on hover and on focus. A file the pack marks wholeOnly (a runner that starts
-// other test files whole, each of them with its own budget) is held to no budget: it has "Runs other test files" in
-// place of a budget, is never Over budget, Slower than usual or Waits, and has no Optimize. A search box over it keeps
+// other test files whole, each of them timed on its own) has "Runs other test files", is never Slower than usual or
+// Waits, and has no Optimize. No test file has a CPU budget (#349). A search box over it keeps
 // the rows whose path holds its text (any case); filter chips, each with its count, show one status alone; the two
 // apply together. Each column heading sorts the table by that column (file names A to Z, any other highest first; a
-// second click reverses it, and an arrow shows which). With no sort picked, the rows that need a look (over budget
-// and not slow on purpose, slower than usual, waits, flaky or fails often) come first, then the highest CPU s.
+// second click reverses it, and an arrow shows which). With no sort picked, the rows that need a look (slower
+// than usual, waits, flaky or fails often) come first, then the highest CPU s.
 // Selected files: the header checkbox selects every row the search and filters show. With one file or more selected,
 // a bar fixed at the foot of the screen (aria-live) says how many, with Judge, Optimize, Run and Clear. Judge and Run
 // send one POST for all of them (control {action: testaction, args: [judge | run, file...]}); Optimize opens one
@@ -31,12 +31,12 @@
 // Judge with no Tests model. From the click it shows a bar while the POST waits; then each action started shows its
 // state there (queued, running with its time, then its result and its text to open), and each Mutation check its file's.
 // A row opens (#130, the owner's mockup D) to the tabs Overview (open first), Timeline (N), Judge and Mutation, each
-// tied to its pane. Overview: the diagnosis box (its state: over budget by how much, after which Optimize cards and by
+// tied to its pane. Overview: the diagnosis box (its state: its CPU s now, after which Optimize cards and by
 // how much each changed it, its trend; the judge's verdict chip with its reason in one line and Full report, which
 // opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Fix failures, Fix hollow cases,
-// Fix the waiting, Make it run, Delete it (#189), Make it run alone and Record CPU time (#190), Raise this file's budget…, Run and More, the next step suggested,
+// Fix the waiting, Make it run, Delete it (#189), Make it run alone and Record CPU time (#190), Run and More, the next step suggested,
 // nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
-// now with its budget, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
+// now with its median, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
 // bugs caught, mutants), its failures (#188: the card changes it caught, apart, then each failed test step with its
 // kind, card and cases) and its 3 latest events with a link to the Timeline. Timeline: every event newest first (its
 // runs, each with its card's issue or "whole suite" with its result; its Optimize issues; its test edits by their
@@ -72,11 +72,10 @@
 // "tests still passed"). Mutation check, in More and in the bar, is one POST control {action: mutate, args: [file...]}
 // (`conveyor.sh mutate ask`: the front of the idle queue; no check starts while a card needs a test slot, and the bar
 // says so). Optimize's preview lists the survivors; a landed Optimize shows the mutants caught before and after.
-// Its More menu holds Explain the slowdown, Mutation check, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose (it asks for the reason).
+// Its More menu holds Explain the slowdown, Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose (it asks for the reason).
 // Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
 // projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
-// project): CPU budget for a test file (test.fileBudget), the budgets of single files and the files slow on purpose
-// (lists), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
+// project): the files slow on purpose (a list), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
 // file off card runs" (settings.slowIssues, #457).
 // Every value is typed or picked first: the row says Unsaved, with Save and Cancel, as on the Rules tab, and only Save
 // sends it: POST machine {action: load, value} for the Load limit, POST control {action: test-settings, args, repo}
@@ -131,7 +130,6 @@
 (function () {
   'use strict';
   const LOAD = /^[0-9]{1,6}(\.[0-9]{1,3})?$/;  // a load limit, as dashboard_server.py's LOAD and `conveyor.sh machine load` take it (1 or more)
-  const BUDGET = /^[1-9][0-9]{0,5}(\.[0-9]{1,3})?$/;  // CPU seconds, as dashboard_server.py's BUDGET and `conveyor.sh test-settings` take them
   const REASON_MAX = 300;  // a reason, as dashboard_server.py's said_ok takes it
   const WAITS = 2;         // a file waits more than it works when its last run took more than this times its CPU time
   const FAILS = 2;         // a file fails often when this many test steps or more failed in it, not counting those a card's own change made fail (failsOf())
@@ -140,7 +138,7 @@
   const PACK = 'Pack file: this project';
   // The status chips, in the order of the filters: key, words, tone, whether a row with it needs a look.
   const MARKS = [
-    ['over', 'Over budget', 'bad', true], ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
+    ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
     ['waits', 'Waits', 'info', true], ['flaky', 'Flaky', 'warn', true], ['fails', 'Fails often', 'bad', true],
     ['hollow', 'Hollow', 'warn', false],
     ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false],
@@ -171,7 +169,7 @@
     menu: null,          // the file whose More menu is open
     mapSent: null,       // Build the test map, answered yes, until a snapshot names a build begun since: {was: the last build's start then}
     mapRefused: null,    // why the last Build the test map was refused
-    edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|budget` or `${dk(file)}|mark`
+    edit: new Set(),     // the editors opened from a More menu: `${dk(file)}|mark`
     mutAsked: new Map(), // the files a Mutation check was asked for here, by dk(file): the time asked, until the snapshot names them
     tabs: new Map(),     // the tab open on an opened row, by dk(file): overview (with none), timeline, judge or mutation
     tl: new Map(),       // the filter of an opened row's Timeline, by dk(file): all (with none), runs, optimize, edits or judge
@@ -188,15 +186,13 @@
   const settings = () => obj(tests() && tests().settings) || {};
   const own = (file) => obj(obj(settings().files) && settings().files[file]) || {};
   const rules = () => obj(tests() && tests().rules) || {};
-  // A setting's key: load (the machine's), fileBudget, slowIssues, budget:<file>, mark:<file> (the project's); dk is
+  // A setting's key: load (the machine's), slowIssues, mark:<file> (the project's); dk is
   // the key with the project, so a value typed for one project is never sent for another.
   const dk = (key) => (key === 'load' ? key : `${S.d.repo}|${key}`);
   function inForce(key) {
     const m = obj(S.d.machine) || {}, s = settings();
     if (key === 'load') return num(m.maxLoad) === null ? '' : String(m.maxLoad);
-    if (key === 'fileBudget') return num(s.fileBudget) === null ? '' : String(s.fileBudget);
     if (key === 'slowIssues') return s.slowIssues === true ? 'true' : 'false';
-    if (key.startsWith('budget:')) return num(own(key.slice(7)).budget) === null ? '' : String(own(key.slice(7)).budget);
     // Auto-file: rules-on (the switch), guard:<guard>, rule:<setting>:<rule name>.
     const said = (v) => (v === undefined || v === null ? '' : String(v));
     if (key === 'rules-on') return rules().on === true ? 'true' : 'false';
@@ -214,7 +210,7 @@
     const share = num(obj(settings().slower) && settings().slower.share) === null ? 0.25 : settings().slower.share;
     const last = obj(f.lastRun) || {}, runner = f.wholeOnly === true;
     return MARKS.filter(([k]) => ({
-      over: f.over === true && !f.slowOnPurpose, slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
+      slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
       fails: notCard(f).length >= FAILS, hollow: hollowOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
       runner, whole: runner, never: !list(f.runs).length, wall: wallOnly(f),
@@ -317,12 +313,11 @@
     return out.filter(Boolean);
   }
   const control = (args) => ['control', { action: 'test-settings', args, repo: S.d.repo }];
-  const budgetCheck = (v, set) => (v === '' ? (set === '' ? 'Type a budget first.' : null) : BUDGET.test(v) ? null : 'A budget is CPU seconds: a number of 1 or more, as 8 or 12.5.');
 
   // ---- the actions ----
   const ACTS = { judge: 'Judge this test', explain: 'Explain the slowdown', run: 'Run this file now' };
   const FILES_MAX = 20;  // the most files of one action on a list of them, as dashboard_server.py's TEST_FILES_MAX
-  const RUNNER_WHY = 'It runs other test files, and each of them has its own budget.';
+  const RUNNER_WHY = 'It runs other test files, and each of them is timed on its own.';
   const ENDED = { done: 'Done', stopped: 'Stopped', failed: 'Failed', 'timed out': 'Timed out' };
   const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,191}$/;  // a model, as dashboard_server.py's MODEL
   const OTHER = '*other';  // the model list's Other…: a name typed in (no model starts with *)
@@ -614,7 +609,7 @@
         const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `${fix ? 'Fix failures' : 'Optimize'} ${a.file}: preview an issue with this verdict`, () => {
           S.ask = fix ? draftFix(f, a) : draftIssue(f, a); S.tabs.set(dk(f.file), 'overview'); S.keep = { act: 'issue-body', file: f.file, scroll: true }; draw();
         });
-        // A runner is held to no budget, so no Optimize; its failures are its own, so Fix failures holds.
+        // A runner's time is its files' time, so no Optimize; its failures are its own, so Fix failures holds.
         if (f.wholeOnly === true && !fix) { b.disabled = true; b.title = RUNNER_WHY; }
         line.append(' ', b);
       }
@@ -640,7 +635,6 @@
     const lines = ['Optimize this test file: speed it up, split it, merge it into another test file, or delete it. Keep what it tests.', '', 'What the Board measured:',
       `- CPU s in its last run: ${one(f.cpu)}`,
       `- Median of its runs: ${one(f.median)} CPU s (${pct(f.change)} against its median)`,
-      `- Budget: ${one(f.budget)} CPU s`,
       `- Clock / CPU in its last run: ${num(last.clockPerCpu) === null ? '—' : `${one(last.clockPerCpu)}×`}`,
       `- Runs on record: ${num(f.timedRuns) || 0}. Test steps that failed in it: ${num(f.failedSteps) || 0}. Flaky entries: ${num(f.flaky) || 0}.`,
       `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (${runBy(r)})`).join(', ') || 'none'}`];
@@ -858,8 +852,7 @@
         S.ask = { kind: 'close', repo: S.d.repo, file, body: `Done: ${file} used ${one(before)} CPU s before (its usual) and ${one(f.cpu)} CPU s in its last run. Closed from the Board's Tests page.` };
         S.keep = { act: 'close-comment', file }; draw();
       }],
-      // A runner (wholeOnly) is held to no budget, so a budget or a slow-on-purpose mark set here would never apply.
-      ['menu-budget', 'Set a budget for this file', runner ? RUNNER_WHY : null, edit('budget', 'file-budget-field')],
+      // A runner (wholeOnly) is never slower than usual, so a slow-on-purpose mark set here would never apply.
       ['menu-mark', 'Mark as slow on purpose', runner ? RUNNER_WHY : null, edit('mark', 'slow-mark-field')]];
   }
   // The More menu of an opened row: a button that opens it, and its items. Arrow keys move between the items, Escape
@@ -904,36 +897,27 @@
     return el;
   }
   // The next step a row suggests (#130), from its state, its judge's verdict and its Optimize issues: run a file that
-  // has no CPU time to judge, or that runs other test files; for one over budget, raise its budget when the judge said
-  // keep, wait for an Optimize issue still open (run it), else optimize it; judge a file that needs a look and has no
-  // verdict; else run it.
+  // has no CPU time to judge, or that runs other test files; judge a file that needs a look and has no verdict; else
+  // run it. No test file has a CPU budget (#349), so no step follows from one.
   function nextStep(f) {
     if (f.wholeOnly === true || !cpuTimed(f)) return 'run';
-    const v = verdictOf(f.file);
-    if (marks(f).some((m) => m[0] === 'over')) {
-      if (v && v.verdict === 'keep') return 'budget';
-      return optsOf(f).some((o) => ['open', 'building', 'blocked'].includes(o.state)) ? 'run' : 'optimize';
-    }
-    return look(f) && !v ? 'judge' : 'run';
+    return look(f) && !verdictOf(f.file) ? 'judge' : 'run';
   }
   // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Fix failures (with failures no
   // card's change caused), Fix hollow cases (Hollow), Fix the waiting (Waits), Make it run and Delete it (Never run),
-  // Raise this file's budget…, Run and More; the next step suggested is the primary one.
+  // Run and More; the next step suggested is the primary one.
   function stepButtons(f) {
     const h = S.ctx.h, file = f.file, now = h('div', 'tests-act-row tests-steps'), noSeat = !tmodel(), next = nextStep(f);
     const btn = (key, text, act, label, fn) => button(text, `${key === next ? 'btn-primary' : 'btn-quiet'} tests-act`, act, label, fn);
     const judge = btn('judge', 'Judge', 'judge', `${ACTS.judge}: ${file}`, () => start('judge', file));
     if (noSeat) judge.title = NO_SEAT;
-    // A runner (wholeOnly) is held to no budget: its time is its files' time, so no issue asks to optimize it.
+    // A runner (wholeOnly): its time is its files' time, so no issue asks to optimize it.
     const again = optsOf(f).some((o) => o.state === 'landed');
     const opt = btn('optimize', again ? 'Optimize again' : 'Optimize', 'optimize', `Optimize: preview an issue about ${file}`, () => {
       if (f.wholeOnly === true) { S.notes.set(dk(file), { what: 'Optimize', state: 'refused', text: RUNNER_WHY }); draw(); return; }
       S.notes.delete(dk(file)); S.ask = draftIssue(f); S.keep = { act: 'issue-title', file }; draw();
     });
     if (f.wholeOnly === true) opt.title = RUNNER_WHY;
-    // Its budget's editor, as Set a budget for this file in More opens it.
-    const raise = btn('budget', 'Raise this file\'s budget…', 'raise-budget', `Set a budget for ${file}`, () => { S.edit.add(`${dk(file)}|budget`); S.keep = { act: 'file-budget-field', file }; draw(); });
-    if (f.wholeOnly === true) { raise.disabled = true; raise.title = RUNNER_WHY; }
     // Fix failures (#188), on a file with failures no card's change caused: the same preview as Optimize, of a Fix
     // failures issue (draftFix()).
     const fix = fixable(f).length ? btn('fix', 'Fix failures', 'fix-failures', `Fix failures: preview an issue about ${file}`, () => {
@@ -951,7 +935,7 @@
     if (plan) fixes.push(btn('record-cpu', 'Record CPU time', 'record-cpu', `Record CPU time: preview the change to the test command for ${file}`, () => {
       S.notes.delete(dk(file)); S.ask = { kind: 'cpu', repo: S.d.repo, file, was: plan.was, command: plan.command }; S.keep = { act: 'cpu-save', file }; draw();
     }));
-    now.append(judge, opt, ...(fix ? [fix] : []), ...fixes, raise, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
+    now.append(judge, opt, ...(fix ? [fix] : []), ...fixes, btn('run', 'Run', 'run', `${ACTS.run}: ${file}`, () => start('run', file)), moreMenu(f));
     if (noSeat) now.append(h('span', 'tests-why', `Judge and Explain: ${NO_SEAT}`));
     return now;
   }
@@ -1321,7 +1305,7 @@
   const rulesCmd = (args) => ['control', { action: 'testrules', args, repo: S.d.repo }];
   const WHOLE1 = /^[1-9][0-9]{0,5}$/, WHOLE0 = /^[0-9]{1,6}$/, LIMIT = /^[0-9]{1,6}(\.[0-9]{1,3})?$/;
   const ONOFF = [['true', 'On'], ['false', 'Off']];
-  const MEASURES = [['budget', 'CPU s over its budget'], ['usual', 'CPU s over its usual'], ['clock', 'Clock s over its CPU s'], ['flaky', 'Kept off as flaky'], ['failed', 'Failed test steps']];
+  const MEASURES = [['usual', 'CPU s over its usual'], ['clock', 'Clock s over its CPU s'], ['flaky', 'Kept off as flaky'], ['failed', 'Failed test steps']];
   // A setting's check: why the value is not sent, or null.
   const checkBy = (re, words) => (v) => (re.test(v) ? null : words);
   function matchSaid(m) {
@@ -1430,7 +1414,6 @@
     const steps = num(st.count) || 0, took = (s) => (num(s) === null ? '—' : S.ctx.took(s));
     if (files.length) {
       el.append(fig('files', String(num(t.files) === null ? files.length : t.files), 'Timed files'),
-        fig('over', String(num(t.overBudget) || 0), 'Files over budget'),
         fig('slower', String(num(t.slower) || 0), 'Files slower than usual'),
         fig('waits', String(files.filter((f) => marks(f).some((m) => m[0] === 'waits')).length), 'Files that wait more than they work'));
     }
@@ -1462,28 +1445,16 @@
     S.tabs.set(dk(file), k); S.keep = { act: `tab-${k}`, file }; draw();
   };
   const COUNT = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
-  // Its budget, as in force or as saved here and not yet in a snapshot: its CPU s (null: none) and in words.
-  function budgetOf(f) {
-    const mine = shown(`budget:${f.file}`), all = shown('fileBudget');
-    if (f.wholeOnly === true) return { cpu: null, said: 'none, it runs other test files and each of them has its own' };
-    if (mine !== '') return { cpu: Number(mine), said: `${one(Number(mine))} CPU s, its own` };
-    return all !== '' ? { cpu: Number(all), said: `${one(Number(all))} CPU s, the project budget` } : { cpu: null, said: 'not known' };
-  }
   // Its landed Optimize issues whose numbers are on record, oldest first, each with what it did.
   const gains = (f) => optsOf(f).filter((o) => o.state === 'landed').reverse().map((o) => ({ o, g: gainOf(o) })).filter((x) => x.g);
-  // Its state in one paragraph: over its budget by how much, after which Optimize cards, and its trend.
+  // Its state in one paragraph: its CPU s now, after which Optimize cards, and its trend.
   function stateOf(f) {
-    if (f.wholeOnly === true) return 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it. It runs other test files, and each of them has its own budget.';
+    if (f.wholeOnly === true) return 'This file runs only in whole-suite runs (wholeOnly in the pack): a card\'s Test step never runs it. It runs other test files, and each of them is timed on its own.';
     if (!timed(f)) return 'Not timed yet: no run of it is on record.';
-    if (wallOnly(f)) return `Wall only: no budget holds it. Its last run took ${clockTook((obj(f.lastRun) || {}).sec)}. ${wallWhy(f)}`;
-    const b = budgetOf(f).cpu, done = gains(f), mark = shown(`mark:${f.file}`);
+    if (wallOnly(f)) return `Wall only: no CPU time is on record. Its last run took ${clockTook((obj(f.lastRun) || {}).sec)}. ${wallWhy(f)}`;
+    const done = gains(f), mark = shown(`mark:${f.file}`);
     const after = done.length ? ` after ${COUNT[done.length] || done.length} Optimize ${done.length === 1 ? 'card' : 'cards'} (${done.map((x) => pct(x.g.change)).join(', then ')})` : '';
-    let s;
-    if (mark) s = `Slow on purpose: ${mark}.`;
-    else if (b && num(f.cpu) !== null && f.cpu > b) {
-      const x = f.cpu / b;
-      s = `${done.length ? 'Still ' : ''}${x >= 2 ? `${Math.round(x)} times` : `${Math.round((x - 1) * 100)}%`} over budget${after}: ${one(f.cpu)} CPU s against a budget of ${one(b)}.`;
-    } else s = b ? `Within budget${after}: ${one(f.cpu)} of ${one(b)} CPU s.` : `${one(f.cpu)} CPU s${after}.`;
+    const s = mark ? `Slow on purpose: ${mark}.` : `${one(f.cpu)} CPU s${after}.`;
     const k = marks(f).map((m) => m[0]);
     const trend = k.includes('slower') ? `It is slower than usual: ${pct(f.change)} against its median.` : k.includes('faster') ? `It is faster than usual: ${pct(f.change)} against its median.`
       : num(f.change) !== null ? `Its runs are steady: ${pct(f.change)} against its median.` : '';
@@ -1526,7 +1497,7 @@
     });
     return el;
   }
-  // The six tiles: CPU now with its budget, the last 4 runs, the last Optimize, the clock, the bugs caught and the mutants.
+  // The six tiles: CPU now with its median, the last 4 runs, the last Optimize, the clock, the bugs caught and the mutants.
   function tiles(f) {
     const h = S.ctx.h, el = h('div', 'tests-tiles'), last = obj(f.lastRun) || {}, lo = gains(f).pop(), m = mutDone(f), n = num(f.runsOnRecord) || 0;
     let opt = tile('optimize', 'Last Optimize', '—', 'No Optimize landed.');
@@ -1535,7 +1506,7 @@
       sub.append(S.ctx.issueLink(lo.o), ` · ${one(lo.g.before)} → ${one(lo.g.after)} CPU s `, helpedChip(lo.g));
       opt = tile('optimize', 'Last Optimize', pct(lo.g.change), sub);
     }
-    el.append(tile('cpu', 'CPU now', num(f.cpu) === null ? '—' : `${one(f.cpu)} CPU s`, `Budget: ${budgetOf(f).said}.`),
+    el.append(tile('cpu', 'CPU now', num(f.cpu) === null ? '—' : `${one(f.cpu)} CPU s`, num(f.median) === null ? null : `Median: ${one(f.median)} CPU s.`),
       tile('runs', 'Last 4 runs', lastBars(f)), opt,
       tile('clock', 'Clock', clockTook(last.sec), num(last.clockPerCpu) === null ? null : `${one(last.clockPerCpu)}× clock / CPU`),
       tile('caught', 'Bugs caught', String(num(f.caught) || 0), `in ${n} ${n === 1 ? 'run' : 'runs'}`),
@@ -1723,21 +1694,14 @@
     });
     return el;
   }
-  // The editors of its budget and of its mark, each shown once picked (from More, or Raise this file's budget…), and
-  // while a value typed, refused or saved here is in it. A runner (wholeOnly) is held to no budget, so a budget or a
-  // slow-on-purpose mark set here would never apply: it has none.
+  // The editor of its mark, shown once picked (from More), and while a value typed, refused or saved here is in it. A
+  // runner (wholeOnly) is never slower than usual, so a slow-on-purpose mark set here would never apply: it has none.
   function editors(f) {
     const file = f.file, out = [];
     if (f.wholeOnly === true) return out;
     const editing = (what, key) => S.edit.has(`${dk(file)}|${what}`) || S.drafts.has(dk(key)) || S.pending.has(dk(key)) || (S.refused && S.refused.dk === dk(key));
-    if (editing('budget', `budget:${file}`)) {
-      out.push(row('budget', 'Set a budget for this file', 'CPU s in place of the project budget', PACK, ...setting(`budget:${file}`, {
-        act: 'file-budget', file, label: `Budget of ${file}`, type: 'number', placeholder: 'None', clear: 'Clear',
-        check: budgetCheck, send: (v) => control(v === '' ? ['file-budget-clear', file] : ['file-budget', file, v]),
-        said: (v) => (v === '' ? `${file} has no budget of its own` : `budget of ${file} now ${v} CPU s`) })));
-    }
     if (editing('mark', `mark:${file}`)) {
-      out.push(row('mark', 'Mark as slow on purpose', 'No budget holds this file', PACK, ...setting(`mark:${file}`, {
+      out.push(row('mark', 'Mark as slow on purpose', 'No CPU test rule files an issue about this file', PACK, ...setting(`mark:${file}`, {
         act: 'slow-mark', file, label: `Why ${file} is slow on purpose`, placeholder: 'Why it is slow on purpose', clear: 'Clear', ask: true,
         check: (v, set) => (v === '' ? (set === '' ? 'Type why the file is slow on purpose first.' : null) : null),
         send: (v) => control(v === '' ? ['slow-mark-clear', file] : ['slow-mark', file, v]),
@@ -1908,10 +1872,6 @@
           send: (v) => ['machine', { action: 'load', value: v === '' ? 'off' : v }], said: (v) => `load limit now ${v === '' ? 'Off' : v}` }), now));
     }
     if (!t) return el;
-    el.append(row('budget', 'CPU budget for a test file', 'A file over this shows as "Over budget".', PACK,
-      ...setting('fileBudget', { act: 'budget', label: 'CPU budget for a test file', type: 'number', placeholder: '8',
-        check: (v) => (BUDGET.test(v) ? null : 'A budget is CPU seconds: a number of 1 or more, as 8 or 12.5.'),
-        send: (v) => control(['budget', v]), said: (v) => `CPU budget for a test file now ${v} CPU s` })));
     const files = Object.entries(obj(s.files) || {}).filter(([, v]) => obj(v));
     const items = (pick, words) => {
       const ul = h('ul', 'tests-list'), got = files.filter(([, v]) => pick(v) !== null && pick(v) !== undefined);
@@ -1919,13 +1879,12 @@
       if (!got.length) ul.append(h('li', 'board-from', 'None'));
       return ul;
     };
-    el.append(row('budgets', 'Budgets of single files', 'Set them on a row of the table.', PACK, items((v) => num(v.budget), (b) => `${one(b)} CPU s`)));
-    el.append(row('purpose', 'Files slow on purpose', 'No budget holds them. Each has a reason.', PACK, items((v) => (typeof v.slowOnPurpose === 'string' ? v.slowOnPurpose : null), (r) => r)));
+    el.append(row('purpose', 'Files slow on purpose', 'No CPU test rule files an issue about them. Each has a reason.', PACK, items((v) => (typeof v.slowOnPurpose === 'string' ? v.slowOnPurpose : null), (r) => r)));
     // #457's rows, only when the snapshot names them.
     const box = obj(s.box);
     if (box) el.append(row('box', 'Hard box for each test file', 'A test file cannot use more CPU or memory than its test slot gives.', 'the engine (no setting)', h('span', 'board-value', box.on === false ? 'Off' : 'On')));
     if (typeof s.slowIssues === 'boolean') {
-      el.append(row('off-card-runs', 'Take a file off card runs', 'A file over its budget in 2 card runs in a row runs only in the full test suite, and Conveyor files an issue for it.', PACK,
+      el.append(row('off-card-runs', 'Take a file off card runs', 'It files nothing and takes no file off card runs: the Auto-file rules file issues about test files.', PACK,
         ...setting('slowIssues', { act: 'slow-issues', label: 'Take a file off card runs', choices: [['true', 'On'], ['false', 'Off']],
           check: () => null, send: (v) => control(['slow-issues', v]), said: (v) => `Take a file off card runs is now ${v === 'true' ? 'On' : 'Off'}` })));
     }

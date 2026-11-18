@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The dashboard page's Tests page (#520): the figures and the table of test files, its filters, a row opened, and a
-// file's budget and "slow on purpose" mark saved from its row. Shared setup: dashboard-view.helpers.mjs (TESTS: three
+// file's "slow on purpose" mark saved from its row. No test file has a CPU budget (#349). Shared setup: dashboard-view.helpers.mjs (TESTS: three
 // files, merge.test.sh slower than usual).
 import assert from 'node:assert/strict';
 import { P, TESTS, clone, boot, deliver, next, settle, full, act, panel, cases, pickProject } from './dashboard-view.helpers.mjs';
@@ -20,7 +20,8 @@ const open = (w, f) => { act(rowOf(w, f), 'open').click(); return opened(w, f); 
 const menu = (w, f, item) => { act(opened(w, f), 'more').click(); act(opened(w, f), item).click(); return opened(w, f); };
 
 // Bug: a file that got three times slower showed no change when it was over the one budget from the start. Each row
-// compares the file with its own median, and the files that need a look come first.
+// compares the file with its own median, and the files that need a look come first. Bug caught too (#349): a row or
+// figure still flags a file over a CPU budget, which no test file has.
 test('Tests: a snapshot with 3 files gives 3 rows with now, median and change; the file slower than usual has that chip and comes first', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, full());
@@ -29,19 +30,20 @@ test('Tests: a snapshot with 3 files gives 3 rows with now, median and change; t
     ['conveyor/tests/e2e.test.sh', '40.0', '39.0', '+3%'],
     ['.claude/scripts/__tests__/x.test.mjs', '2.0', '4.0', '-50%']], 'merge needs a look: first; then the highest CPU s');
   assert.deepEqual(cells(rowOf(w, MERGE)).slice(5, 7), ['2.5×', '7']);
-  assert.match(cells(rowOf(w, MERGE)).at(-1), /Over budget.*Slower than usual.*Waits.*Flaky.*Fails often.*#480$/);
-  assert.doesNotMatch(cells(rowOf(w, 'conveyor/tests/e2e.test.sh')).at(-1), /Slower than usual|Over budget/, 'over its budget but slow on purpose: not "Over budget"');
+  assert.match(cells(rowOf(w, MERGE)).at(-1), /^Slower than usual.*Waits.*Flaky.*Fails often.*#480$/);
+  assert.doesNotMatch(cells(rowOf(w, 'conveyor/tests/e2e.test.sh')).at(-1), /Slower than usual/, 'slow on purpose: not "Slower than usual"');
+  assert.doesNotMatch(tp(w).textContent, /budget/i, 'no row, figure or chip names a budget');
   assert.match(cells(rowOf(w, 'conveyor/tests/e2e.test.sh')).at(-1), /Slow on purpose/);
   assert.match(cells(rows(w)[2]).at(-1), /Faster/);
   assert.equal(rowOf(w, MERGE).querySelector('.tests-bars').getAttribute('aria-label'), 'Last runs, oldest first: 11.0, 11.5, 12.0 CPU s');
-  assert.deepEqual(['files', 'over', 'slower', 'waits', 'wait', 'run'].map((k) => figure(w, k)), ['3', '1', '1', '1', '2 min', '1 h 00 min']);
+  assert.deepEqual(['files', 'over', 'slower', 'waits', 'wait', 'run'].map((k) => figure(w, k)), ['3', null, '1', '1', '2 min', '1 h 00 min']);
 });
 
 test('Tests: a filter chip shows only its rows, and its count matches', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, full());
   const chips = () => Array.from(tp(w).querySelectorAll('[data-act="filter"]'), (b) => b.textContent);
-  assert.deepEqual(chips(), ['All 3', 'Over budget 1', 'Slower than usual 1', 'Faster 1', 'Waits 1', 'Flaky 1', 'Fails often 1', 'Has an issue 1', 'Slow on purpose 1'],
+  assert.deepEqual(chips(), ['All 3', 'Slower than usual 1', 'Faster 1', 'Waits 1', 'Flaky 1', 'Fails often 1', 'Has an issue 1', 'Slow on purpose 1'],
     'a status no file has gets no chip');
   const pick = (k) => Array.from(tp(w).querySelectorAll('[data-act="filter"]')).find((b) => b.dataset.filter === k).click();
   pick('purpose');
@@ -53,7 +55,7 @@ test('Tests: a filter chip shows only its rows, and its count matches', () => {
   assert.equal(rows(w).length, 3);
 });
 
-test('Tests: a row opens to list its runs, each with a link to its card, its budget and its mark', () => {
+test('Tests: a row opens to list its runs, each with a link to its card, its median and its mark', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, full());
   const more = open(w, MERGE);
@@ -63,50 +65,19 @@ test('Tests: a row opens to list its runs, each with a link to its card, its bud
     [['#509', `${P}/509`], ['#451', `${P}/451`], ['#435', `${P}/435`]], 'the cards that ran it, newest first');
   assert.equal(more.querySelector('.tests-run .tests-tl-what').textContent, '12.0 CPU s · 30.0 s on the clock · card #509');
   assert.match(more.querySelectorAll('.tests-run')[2].textContent, /clock not recorded/);
-  // Its budget is under CPU now, on its Overview.
-  assert.equal(more.querySelector('[data-tile="cpu"] .tests-tile-sub').textContent, 'Budget: 8.0 CPU s, the project budget.');
-  // Issue 73: the budget and the mark are set from the More menu; each editor shows once picked there, with where it saves.
+  // Its median is under CPU now, on its Overview, and no budget (#349).
+  assert.equal(more.querySelector('[data-tile="cpu"] .tests-tile-sub').textContent, 'Median: 6.0 CPU s.');
+  assert.doesNotMatch(more.textContent, /budget/i);
+  // Issue 73: the mark is set from the More menu; its editor shows once picked there, with where it saves. No item
+  // sets a budget (#349).
   assert.equal(more.querySelector('.rules-row'), null, 'no editor until picked from More');
-  menu(w, MERGE, 'menu-budget');
-  menu(w, MERGE, 'menu-mark');
+  act(opened(w, MERGE), 'more').click();
+  assert.equal(act(opened(w, MERGE), 'menu-budget'), null, 'no Set a budget for this file');
+  act(opened(w, MERGE), 'menu-mark').click();
   assert.deepEqual(Array.from(opened(w, MERGE).querySelectorAll('.rules-row'), (r) => [r.querySelector('.board-label').textContent, r.querySelector('.tests-where').textContent]),
-    [['Set a budget for this file', 'Saves to: Pack file: this project'], ['Mark as slow on purpose', 'Saves to: Pack file: this project']]);
+    [['Mark as slow on purpose', 'Saves to: Pack file: this project']]);
   act(rowOf(w, MERGE), 'open').click();
   assert.equal(opened(w, MERGE), undefined, 'and closes again');
-});
-
-// The budget saves through `conveyor.sh test-settings` (POST control), as a Rules value does: typing sends nothing,
-// and a refusal keeps the value in force. Bug it guards: a value sent as typed, or a refusal shown as saved.
-test('Tests: Set a budget shows Unsaved; a refusal shows the reason and keeps the old value; Save posts the file and value', async () => {
-  const w = boot({ tab: 'tests' });
-  deliver(w, full());
-  open(w, MERGE);
-  let more = menu(w, MERGE, 'menu-budget');
-  assert.ok(act(more, 'file-budget-save').hidden, 'nothing to save yet');
-  type(act(more, 'file-budget-field'), '40');
-  assert.ok(!act(more, 'file-budget-save').hidden && more.textContent.includes('Unsaved'), 'typed: Unsaved, with Save and Cancel');
-  assert.deepEqual(w.posts, [], 'typing sent nothing');
-  w.reply = { ok: false, status: 409, text: () => Promise.resolve(`conveyor: test-settings file-budget: "${MERGE}" is not a file of main's checkout; nothing changed`) };
-  act(more, 'file-budget-save').click();
-  await settle();
-  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'test-settings', args: ['file-budget', MERGE, '40'], repo: 'sample' } }]);
-  more = opened(w, MERGE);
-  assert.match(more.querySelector('.rules-refused').textContent, /^Not saved: conveyor: test-settings file-budget: .* is not a file of main's checkout/);
-  assert.match(more.textContent, /Budget: 8\.0 CPU s, the project budget\./, 'refused: the old value stays');
-  assert.equal(act(more, 'file-budget-field').value, '40', 'and the value typed stays, unsaved');
-  w.reply = null;
-  type(act(more, 'file-budget-field'), '30');
-  act(more, 'file-budget-save').click();
-  await settle();
-  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'test-settings', args: ['file-budget', MERGE, '30'], repo: 'sample' } }]);
-  more = opened(w, MERGE);
-  assert.match(more.textContent, /Budget: 30\.0 CPU s, its own\./);
-  assert.match(said(w), /Saved: budget of conveyor\/tests\/merge\.test\.sh now 30 CPU s/);
-  // Clear empties it; Save sends the clear.
-  act(more, 'file-budget-clear').click();
-  act(opened(w, MERGE), 'file-budget-save').click();
-  await settle();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['file-budget-clear', MERGE]]);
 });
 
 // The mark asks for the reason: the engine refuses a mark with none, so the page sends none.
@@ -129,7 +100,7 @@ test('Tests: Mark as slow on purpose with no reason does not post; with one it p
 test('Tests: a project with no file times shows its step figures and the state, and no table', () => {
   const w = boot({ tab: 'tests' });
   const d = full();
-  d.panels.tests.data.tests = { ...clone(TESTS), files: [], slower: [], totals: { files: 0, overBudget: 0, slower: 0, steps: { count: 4, waitSec: 30, runSec: 600 } } };
+  d.panels.tests.data.tests = { ...clone(TESTS), files: [], slower: [], totals: { files: 0, slower: 0, steps: { count: 4, waitSec: 30, runSec: 600 } } };
   deliver(w, d);
   assert.match(tp(w).textContent, /No file times for this project/);
   assert.match(tp(w).textContent, /conveyor\/tools\/testtime\.sh prints this line/, 'with what starts the record');
@@ -175,7 +146,7 @@ test('Tests: a file with clock times only shows its last run\'s clock time and W
   const d = full();
   d.panels.tests.data.tests.files.push({ runs: [{ cpu: null, sec: 4.2, card: 'c1-509', time: d.updatedAt, issue: 509, repo: 'sample', url: `${P}/509` }],
     file: 'src/a.test.ts', cpu: null, median: null, change: null, lastRun: { sec: 4.2, cpu: null, clockPerCpu: null }, timedRuns: 0, failedSteps: 0, flaky: 0,
-    issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, over: false, usual: null, slower: false });
+    issue: null, slowOnPurpose: null, usual: null, slower: false });
   deliver(w, d);
   const row = rowOf(w, 'src/a.test.ts');
   assert.ok(row, 'the file has a row');

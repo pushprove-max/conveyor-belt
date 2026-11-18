@@ -158,8 +158,8 @@
         // its element into view moved the page and the panel under the reader at each redraw.
         // A retried card has a new card id, so its row is new: until it has drawn once, what was open is taken from
         // the row of its latest earlier card id still shown ("Every step" and its earlier attempts stay open).
-        // The places the keyboard can be: a fold, a step's bar, a step's "N slow files" button.
-        const keys = 'summary, .tl-item, .tl-slow-open';
+        // The places the keyboard can be: a fold, a step's bar.
+        const keys = 'summary, .tl-item';
         let was = more.firstChild;
         const at = was ? Array.from(was.querySelectorAll(keys)).indexOf(li.ownerDocument.activeElement) : -1;
         if (!was && Array.isArray(c.earlier)) {

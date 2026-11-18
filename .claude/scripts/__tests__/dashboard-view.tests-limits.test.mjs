@@ -112,18 +112,16 @@ test('Rules: no Load limit field, and one line that says test limits are on the 
   assert.ok(panel(w, 'tests'));
 });
 
-test('Tests: each pack row names the pack file; the CPU budget saves through test-settings budget; the lists name the files', async () => {
+// #349: no test file has a CPU budget. Bug caught: Test limits still has a CPU budget for a test file, or a list of the
+// budgets of single files, though the engine holds no file to one.
+test('Tests: the pack row of the files slow on purpose names the pack file and the files; no row sets a CPU budget', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, full());
-  for (const k of ['budget', 'budgets', 'purpose']) assert.match(lim(w, k).textContent, /Saves to: Pack file: this project/, k);
-  assert.equal(act(sec(w), 'budget-field').value, '8');
+  assert.match(lim(w, 'purpose').textContent, /Saves to: Pack file: this project/);
   assert.match(lim(w, 'purpose').textContent, /conveyor\/tests\/e2e\.test\.sh: runs the whole loop/);
-  assert.match(lim(w, 'budgets').textContent, /None/);
-  type(w, 'budget-field', '12.5');
-  act(sec(w), 'budget-save').click();
-  await settle();
-  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'test-settings', args: ['budget', '12.5'], repo: 'sample' } }]);
-  assert.equal(act(sec(w), 'budget-field').value, '12.5', 'saved: shown until a snapshot names it');
+  assert.equal(lim(w, 'budget'), null, 'no CPU budget for a test file');
+  assert.equal(lim(w, 'budgets'), null, 'no budgets of single files');
+  assert.equal(act(sec(w), 'budget-field'), null);
 });
 
 // #457's hard box and "take a file off card runs" are shown only when the snapshot names them: a row for a setting the

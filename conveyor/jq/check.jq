@@ -57,8 +57,9 @@ def ok: . as $r | (keys - known) == need
         # changed tests, how many and by what (the test map or names), with the map's age when known.
         and (.list // {mode: "whole", why: ""} | type == "object" and ((.mode == "whole" and (.why | type == "string"))
           or (.mode == "changed" and (.files | type == "number") and (.by | type == "string") and (.age // 0 | type == "number"))))
-        # The test files over the CPU budget (slowtests()): before and finding only of a file the card changed; no cpu
-        # on a line written while the budget was clock seconds, which the records still hold.
+        # The test files over the CPU budget, on a line written while test files had one (none is written now, #349):
+        # before and finding only of a file the card changed; no cpu on a line written while the budget was clock
+        # seconds. The records still hold such lines.
         and (.slow // [] | type == "array" and all(type == "object" and (.file | type == "string") and ([.sec, .budget, .cpu // 0] | all(type == "number"))
           and (.changed | type == "boolean") and (.before // 0 | type == "number") and (.finding // false | type == "boolean")
           and (.from // "" | type == "string") and (keys - ["before", "finding", "cpu", "from"] == ["budget", "changed", "file", "sec"])))

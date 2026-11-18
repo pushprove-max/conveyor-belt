@@ -15,7 +15,7 @@ function show({ suite = { time: '2026-11-16T03:00:00Z', cpu: 812.4 }, report = {
   t.suite = suite;
   t.settings.report = report;
   t.settings.cpuTime = cpuTime;
-  t.files.push({ ...base, file: WHOLE, wholeOnly: true, budget: null, budgetFrom: null, over: false, slower: false, hollow: null, waits: null },
+  t.files.push({ ...base, file: WHOLE, wholeOnly: true, slower: false, hollow: null, waits: null },
     { ...base, file: WALL, cpu: null, median: null, change: null, runs: [{ cpu: null, sec: 4.2, card: 'c1-509', time: d.updatedAt, issue: 509 }],
       lastRun: { sec: 4.2, cpu: null, clockPerCpu: null }, timedRuns: 0, hollow: null, waits: null });
   const w = boot({ tab: 'tests' });
@@ -62,7 +62,7 @@ test('Tests alone: Record CPU time previews the wrapped test command and saves i
     /^No CPU time: its runner, vitest, gives clock time only in its report \(the pack's test\.report\)\. Record CPU time wraps the test command in conveyor\/tools\/testtime\.sh\.$/);
   assert.equal(status(w, X).querySelector('.tests-wall-why'), null, 'a file with CPU time has no such reason');
   assert.equal(act(open(w, X), 'record-cpu'), null, 'a file with CPU time has no Record CPU time');
-  assert.match(open(w, WALL).textContent, /Wall only: no budget holds it\. Its last run took 4 s\. No CPU time: its runner, vitest/);
+  assert.match(open(w, WALL).textContent, /Wall only: no CPU time is on record\. Its last run took 4 s\. No CPU time: its runner, vitest/);
   act(open(w, WALL), 'record-cpu').click();
   const more = opened(w, WALL);
   assert.equal(act(more, 'cpu-was').textContent, `vitest run ${WALL}`);

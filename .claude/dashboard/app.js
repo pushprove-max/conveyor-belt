@@ -613,37 +613,6 @@
       if (b.state === 'now') li.setAttribute('aria-current', 'step');
       if (b.verdict) label.append(chip(verdictSaid(b.verdict), b.verdict === 'GO' ? 'ok' : 'warn'));
       if (b.parts.some((s) => s.rerun === true)) label.append(chip('passed on re-run', 'warn'));
-      // A test file over the CPU budget in a passing run is a note, never a finding: one quiet "N slow files" chip in
-      // the label, opening a list under the step (outside the label, so many files never grow it under the next bar).
-      const slow = b.parts.flatMap((s) => (Array.isArray(s.slow) ? s.slow : [])).filter((x) => x && typeof x.file === 'string' && num(x.cpu))
-        .sort((x, y) => y.cpu - x.cpu);
-      let slowList = null;
-      if (slow.length) {
-        const key = String(all.indexOf(b.parts[0]));
-        const btn = h('button', 'tl-slow-open');
-        btn.type = 'button';
-        btn.append(chip(`${slow.length} slow ${slow.length === 1 ? 'file' : 'files'}`, 'quiet'));
-        slowList = h('div', 'tl-slow');
-        slowList.dataset.step = key;
-        const budgets = [...new Set(slow.map((x) => x.budget).filter(num))];
-        // The budget they went over, when the snapshot gives one for them all.
-        if (budgets.length === 1 && slow.every((x) => num(x.budget))) slowList.append(h('p', 'tl-slow-budget', `Over the ${budgets[0]} CPU s budget per file`));
-        const rows = h('ol', 'tl-slow-files');
-        rows.append(...slow.map((x) => {
-          const cut = x.file.lastIndexOf('/'), li2 = h('li', 'tl-slow-file'), name = h('span', 'tl-slow-name');
-          name.append(h('span', 'tl-slow-base', x.file.slice(cut + 1)));
-          if (cut > 0) name.append(h('span', 'tl-slow-dir', x.file.slice(0, cut)));
-          li2.append(name, h('span', 'tl-slow-cpu', `${Math.round(x.cpu * 10) / 10} CPU s`));
-          return li2;
-        }));
-        slowList.append(rows);
-        // Closed at first; open through a redraw when it was open before.
-        const was2 = mine ? Array.from(mine.querySelectorAll('.tl-slow')).find((x) => x.dataset.step === key) : null;
-        const show = (on) => { slowList.hidden = !on; btn.setAttribute('aria-expanded', String(on)); };
-        show(Boolean(was2 && !was2.hidden));
-        btn.addEventListener('click', (e) => { e.stopPropagation(); show(slowList.hidden); });
-        label.append(btn);
-      }
       const f = findings({ counts: b.counts });
       if (f) label.append(h('span', 'tl-findings', f));
       // What the judge made of the review, its declined count opening the card's lines in the Declined panel.
@@ -653,7 +622,6 @@
       lane.append(bar);
       Object.assign(b, { lane, bar, dur: h('span', 'tl-dur'), tip: h('span', 'tl-tip') });
       li.append(label, lane, b.tip);
-      if (slowList) li.append(slowList);
       // The test run in progress says how far it has got.
       const prog = b.state === 'now' ? testProgress(t) : null;
       if (prog) li.append(h('p', 'tl-tests', prog));

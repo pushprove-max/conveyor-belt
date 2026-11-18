@@ -66,7 +66,7 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   in its own process and test slot, with only its chosen cases, side by side with the other area files on the
   machine's test slots. The runner, `conveyor/conveyor.test.sh`, runs them, given that file's cases alone. The result
   names the area file: a failure, a main-red record, a flaky entry, a Tests page row and a CPU time read as
-  `conveyor/tests/release.test.sh: relpass`, and each area file has its own CPU budget. A failed case runs again by
+  `conveyor/tests/release.test.sh: relpass`. A failed case runs again by
   name in its own area file. A record made before this that names `conveyor/conveyor.test.sh: <case>` still reads:
   the case counts for the area file that defines it. `bash conveyor/tests/<area>.test.sh` runs one area file by hand.
   A change that selects every case runs no area file on the card: the runner is whole-only (`wholeOnly` in

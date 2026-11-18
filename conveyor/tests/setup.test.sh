@@ -195,7 +195,7 @@ t_setuptiming() {
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test 'bash scripts/test.sh; true' --survey no 2>&1) || fail "setup exited non-zero: $out"
   grep -qF 'conveyor: the test command runs scripts/test.sh, which prints no `TESTRUN sec` lines, so cards record no test times.' <<<"$out" \
     && grep -qF "copy $D/conveyor/tools/testtime.sh into the project" <<<"$out" && grep -qF './testtime.sh "$f" -- <the file'"'"'s command>' <<<"$out" \
-    && grep -qF 'conveyor/README.md, The CPU budget of a test file' <<<"$out" || fail "setup did not say how to wrap each test file's run: $out"
+    && grep -qF 'conveyor/README.md, Test file times' <<<"$out" || fail "setup did not say how to wrap each test file's run: $out"
   cmp -s "$S/scripts/test.sh" "$T/$CASE/script.was" || fail "setup changed the project's test script"
   jq -e '.test.slowIssues == false' "$S/.conveyor/project.json" > /dev/null || fail "setup's new pack does not turn Slow test issues off: $(jq -c .test "$S/.conveyor/project.json")"
   # Issue 519: a new install starts with the test rules' switch off and no rule on (a pack that names no switch is off: testrules.test.sh).
@@ -207,7 +207,7 @@ t_setuptiming() {
 }
 # The first test-speed survey (lib/survey.sh, firstsurvey()). Bugs: yes files no survey issue, or two, or one of
 # another kind than the monthly one (pick takes that kind only in the quiet hour), or one whose card is not asked for
-# the groups of slow files and the shared helpers; the answer is not saved, so every setup run asks again and a yes
+# the shared helpers; the answer is not saved, so every setup run asks again and a yes
 # files again; --survey cannot ask for another later.
 t_setupsurvey() {
   local X out; sample; X=$D/conveyor/conveyor.sh
@@ -216,9 +216,9 @@ t_setupsurvey() {
     && jq -e '.test.firstSurvey == true' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --survey yes did not file exactly one first survey issue of the monthly kind, or did not save the answer: $(cat "$G/filed" 2>&1) $out"
   jq -e '.[7] | contains("each of the project'"'"'s test files alone") and contains("clock seconds") and contains("CPU seconds")
-      and contains("over the CPU budget of 8 CPU s") and contains("each group of files over the budget")
+      and (contains("budget") | not)
       and contains("each shared helper the measurements point to") and contains("for the Foreman to file as cards")' "$G/filed" >/dev/null \
-    || fail "the first survey's issue does not ask for each file alone, the groups over budget and the shared helpers: $(jq -r '.[7]' "$G/filed")"
+    || fail "the first survey's issue does not ask for each file alone and the shared helpers, or names a CPU budget no file has (#349): $(jq -r '.[7]' "$G/filed")"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) && [ "$(wc -l < "$G/filed")" = 1 ] || fail "setup run again asked again, or filed again: $out"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey yes 2>&1) && [ "$(wc -l < "$G/filed")" = 2 ] && grep -q 'filed #102' <<<"$out" \
     || fail "setup --survey yes run again did not file another survey: $out"
@@ -468,15 +468,15 @@ doctortests() { # <jq object>...
   # Whole records, as line() writes them: the snapshot doctor's Board check reads stops at any other line.
   for o in "$@"; do jq -cn "{card: \"c0-1\", issue: 1, step: \"test\", time: \"2026-11-01T00:00:00Z\", result: \"pass\", sha: \"\", reason: \"\", tokens: {claude: 0, codex: 0}} + $o"; done >> "$s/cards.jsonl"
 }
-# Bug caught (#515): a project's test command printed no `TESTRUN sec` lines, so none of its cards recorded test times
-# and no file was held to the CPU budget, and doctor said nothing. Its last card test runs, a pass and a fail, recorded
+# Bug caught (#515): a project's test command printed no `TESTRUN sec` lines, so none of its cards recorded test times,
+# and doctor said nothing. Its last card test runs, a pass and a fail, recorded
 # none (a later line of a batch that reused a run, and one that selected no file, are no run): doctor warns, naming
 # the README section that says how to add them, and still passes.
 t_doctoruntimed() {
   local X out; doctordone
   doctortests '{}' '{result: "fail"}' '{reused: true, times: null}' '{ended: "nothing selected"}'
   out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times: $out"
-  grep -qxF 'warning: the last 2 card test runs recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, The CPU budget of a test file, says how to add them' <<<"$out" \
+  grep -qxF 'warning: the last 2 card test runs recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, Test file times, says how to add them' <<<"$out" \
     || fail "doctor did not warn that the last card test runs recorded no test times: $out"
 }
 # #152. Bug: doctor's warning did not say which runner setup found or which report option gives the times.
@@ -485,7 +485,7 @@ t_doctorreport() {
   doctortests '{}'
   jq '.test.report = {runner: "go test", option: "-json"}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
   out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times: $out"
-  grep -qF 'recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, The CPU budget of a test file, says how to add them; the test command runs go test, whose report option -json would give them' <<<"$out" \
+  grep -qF 'recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, Test file times, says how to add them; the test command runs go test, whose report option -json would give them' <<<"$out" \
     || fail "doctor did not name the runner and its report option: $out"
 }
 t_doctormissing() {

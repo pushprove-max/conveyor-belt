@@ -240,7 +240,7 @@ aways() { # each card that gave way (giveway()): {to: the issue it gave way to, 
 # length of it passes the kernel's limit on one argument), since (when the issue was opened), lowest number first.
 # null when gh did not list the open issues.
 # untimed (on records slurped): the project's last card test runs that recorded no test times, so its test command
-# prints no `TESTRUN sec` lines and no report of its runner was read (README.md, The CPU budget of a test file): of the
+# prints no `TESTRUN sec` lines and no report of its runner was read (README.md, Test file times): of the
 # last 5 card test runs that ran tests (pass or fail; no batch's reused line, no refused full run, none that selected
 # no file), how many, when none of them recorded a file's times (times, an object even when each file was timed by
 # the clock only); 0 when one did, or there is none. health and doctor say so.

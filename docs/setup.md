@@ -124,7 +124,7 @@ Conveyor cannot ask for a report, for example for jest followed by another comma
 report option that would give one (`option`). The Board's Health shows "Test times: Not recorded" with that option. Add the option to your test command and run setup
 again. For a runner that setup does not know, set `test.report` yourself, for example
 `{"runner": "make test", "format": "junit", "path": "reports"}` for JUnit XML files in the folder `reports`. The
-section "The CPU budget of a test file" in `conveyor/README.md` lists each runner, its report option and its format.
+section "Test file times" in `conveyor/README.md` lists each runner, its report option and its format.
 
 Each time it runs, setup also asks if you want a fast lane and a research lane ([Lanes](lanes.md)). On yes, it makes
 the lane, or keeps the lane that is already there.

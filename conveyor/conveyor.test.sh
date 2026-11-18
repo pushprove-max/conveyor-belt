@@ -22,7 +22,7 @@ SEL=${CONVEYOR_SHELL_TEST_CASE:-${*:-$ALL}}; SEL=${SEL//,/ }
 # The selection is this run's, not its cases': a case that starts a runner of its own (t_slotwhole) names its cases, or
 # runs them all. The Test step's run again of the failed cases names them here (.conveyor/test-changed.sh).
 # CONVEYOR_TEST_TIMES names a file it writes, once its cases end, the time of each case file whose every case it ran
-# (case_times()), for the Test step's time budget of a test file. The run's own, not its cases'.
+# (case_times()), for the times the Test step records of a test file. The run's own, not its cases'.
 TIMES=${CONVEYOR_TEST_TIMES:-}
 unset CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_TIMES
 for CASE in $SEL; do case " $ALL " in *" $CASE "*) ;; *) echo "unknown case $CASE" >&2; exit 2 ;; esac; done

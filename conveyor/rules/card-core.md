@@ -10,7 +10,6 @@ Always:
 - When the issue has a `## Done when` section, your final reply (of the build and of every fix or rebase session) ends with a `## Done when` section: one line per bullet of the issue's, in order, `D<n> met: <evidence>` or `D<n> not met: <why>`. Evidence names something checkable: a test (file and case name), a file and line, or a command and its result. Name every TODO or [VERIFY] marker your change adds, on a line with its file. Conveyor checks these lines in code before the review.
 
 Keep tests fast:
-- A test file runs on its own in under the project's CPU budget (the pack's `test.fileBudget`, default 8 CPU s): every card's test step waits for its slowest file.
 - No wrapper that only runs other tests again, and no second case of one behaviour: the run already runs them, so the copy doubles their time and proves nothing.
 - One fixture, render or build per file where the cases allow it, as each one is paid for on every run; a case that runs several fixtures one after another is split into one case per fixture, as cases run side by side and a file takes about as long as its slowest case.
 - Use the project's shared fast test helpers rather than the slow real thing, unless the test is about that thing; call the function rather than run the whole program when only the function is under test: the slow path adds its time to every run and proves nothing more about the code under test.

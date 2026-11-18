@@ -319,7 +319,7 @@ async function main() {
       await click(page, '[data-act="rule-followups"]');
       await sleep(1000);
     });
-    // 9. Tests: each file's CPU s, median, last runs and status. The file over its budget opens to its runs and budget,
+    // 9. Tests: each file's CPU s, median, last runs and status. A file slower than usual opens to its runs,
     // and Explain the slowdown runs and shows its answer; then Judge this test runs on a second file and shows its
     // verdict (timeline.js TEST_ANSWERS).
     const row = (f) => `tr.tests-row[data-file="${f}"] [data-act="open"]`;

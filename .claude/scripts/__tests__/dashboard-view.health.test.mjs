@@ -76,9 +76,9 @@ test('Health: a failing push is one plain line with its output under "Show outpu
   assert.equal(host.querySelector(':scope > details.output .output-text').textContent, data.panels.health.data.host.error.trim(), 'the whole reason under Show output');
 });
 
-// Issue 457: a test file over its CPU budget in two card test runs in a row comes off card test steps. Bug it catches:
-// Health did not say so, and the owner could not see which file no card runs, or why. The row lists the file, both
-// runs' CPU seconds against the budget, and the issue whose card brings it back.
+// Issue 457: a test file a "Slow test" issue keeps off card test steps. Bug it catches: Health did not say so, and the
+// owner could not see which file no card runs, or why. The row lists the file, both runs' CPU seconds, and the issue
+// whose card brings it back; it names no CPU budget, which no test file has (#349).
 test('Health: a test file kept off card test steps is listed with why and its issue', () => {
   const w = boot();
   const data = full();
@@ -86,9 +86,10 @@ test('Health: a test file kept off card test steps is listed with why and its is
     cpu: 10.24, budget: 8, card: 'c2-9', last: { cpu: 9, card: 'c2-8' } }];
   deliver(w, data);
   const row = dd(w, 'Kept off card tests');
-  assert.match(row.textContent, /^1 file1 test file over the CPU budget in two card test runs in a row/);
+  assert.match(row.textContent, /^1 file1 test file kept off card test steps by a Slow test issue/);
   assert.equal(row.querySelector(':scope > details.output .slow-off-list').textContent,
-    "conveyor/tests/s.test.sh2 runs over budget#1710.2 CPU s in c2-9's test run and 9 in c2-8's, over the 8 CPU s budget; runs only in the full test suite until its issue lands");
+    "conveyor/tests/s.test.shKept off#1710.2 CPU s in c2-9's test run and 9 in c2-8's; runs only in the full test suite until its issue lands");
+  assert.doesNotMatch(row.textContent, /budget/i);
   assert.equal(row.querySelector(':scope > details.output a.issue').href, 'https://github.com/example/sample/issues/17');
 });
 
@@ -298,7 +299,7 @@ test('Health: card test runs that recorded no test times are a warning that name
   assert.deepEqual(failingRows(none), ['Test times']);
   const row = dd(none, 'Test times');
   assert.equal(row.querySelector(':scope > .chip.chip-warn').textContent, 'Not recorded');
-  assert.match(row.textContent, /the last 3 card test runs recorded no test times.*Next: .*"The CPU budget of a test file" in conveyor\/README\.md/);
+  assert.match(row.textContent, /the last 3 card test runs recorded no test times.*Next: .*"Test file times" in conveyor\/README\.md/);
   assert.equal(panel(at(0), 'health').querySelector('dt[data-check="Test times"]'), null, 'runs that recorded times show no row');
 });
 

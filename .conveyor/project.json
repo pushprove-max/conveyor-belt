@@ -48,83 +48,9 @@
         "cardMode": "CONVEYOR_CLOSURE_QUICK=1"
       },
       "conveyor/conveyor.test.sh": {
-        "wholeOnly": true,
-        "budget": 6873
-      },
-      ".claude/scripts/__tests__/dashboard.test.sh": {
-        "budget": 155
-      },
-      "conveyor/tests/adopt.test.sh": {
-        "budget": 74
-      },
-      "conveyor/tests/batch.test.sh": {
-        "budget": 374
-      },
-      "conveyor/tests/bugproof.test.sh": {
-        "budget": 200
-      },
-      "conveyor/tests/deps.test.sh": {
-        "budget": 132
-      },
-      "conveyor/tests/fail.test.sh": {
-        "budget": 223
-      },
-      "conveyor/tests/giveway.test.sh": {
-        "budget": 111
-      },
-      "conveyor/tests/judge.test.sh": {
-        "budget": 155
-      },
-      "conveyor/tests/machine.test.sh": {
-        "budget": 179
-      },
-      "conveyor/tests/merge.test.sh": {
-        "budget": 93
-      },
-      "conveyor/tests/metrics.test.sh": {
-        "budget": 100
-      },
-      "conveyor/tests/models.test.sh": {
-        "budget": 111
-      },
-      "conveyor/tests/pick.test.sh": {
-        "budget": 89
-      },
-      "conveyor/tests/port.test.sh": {
-        "budget": 314
-      },
-      "conveyor/tests/proxyroute.test.sh": {
-        "budget": 75
-      },
-      "conveyor/tests/records.test.sh": {
-        "budget": 79
-      },
-      "conveyor/tests/rerun.test.sh": {
-        "budget": 92
-      },
-      "conveyor/tests/review.test.sh": {
-        "budget": 300
-      },
-      "conveyor/tests/rules.test.sh": {
-        "budget": 176
-      },
-      "conveyor/tests/samefile.test.sh": {
-        "budget": 265
-      },
-      "conveyor/tests/serve.test.sh": {
-        "budget": 185
-      },
-      "conveyor/tests/setup.test.sh": {
-        "budget": 177
-      },
-      "conveyor/tests/views.test.sh": {
-        "budget": 90
-      },
-      "conveyor/tests/visible.test.sh": {
-        "budget": 210
+        "wholeOnly": true
       }
-    },
-    "fileBudget": 60
+    }
   },
   "linkFromMain": [
     "node_modules"

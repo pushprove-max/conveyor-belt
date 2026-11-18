@@ -153,8 +153,6 @@
                  sec: (if $l.step == "picked" then null else $l.took // null end), at: $l.time}
                 + (if $l.step == "filed" then {n: ($l.n // 0)} elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
                    elif $l.step == "test" and $l.result == "pass" and $l.rerun != null then {rerun: true} else {} end)
-                # A passing test run's files over the CPU budget (rows.jq slow): a note on its bar.
-                + (if $l.slow != null then {slow: $l.slow} else {} end)
                 # A blocked line's sentence (why) and the end of its output, a failed test run's, review's or issue closing's reason (why),
                 # a NO-GO review's findings (output), a failed test run's failing files (failures) and the end of its output, and a
                 # fix's reason: what started it when its line names it (a failed Done-when check, main moved), as the Board labels it.

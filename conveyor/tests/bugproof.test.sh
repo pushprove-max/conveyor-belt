@@ -356,10 +356,10 @@ t_speedfaster() {
 }
 
 # D2. Bug it catches: a speed-up card whose file is as slow as its median lands as a speed-up. It is blocked with the
-# "not faster" reason naming both numbers and the file's budget, never reviewed.
+# "not faster" reason naming both numbers, and no budget (#349), never reviewed.
 t_speedslow() {
   speedcard 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now; its budget is 8 CPU s' ] && [ ! -e "$STUB/asked" ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
     || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
   [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   # #180: with no version on its line, a later change to the check could not tell this block from others.
@@ -416,7 +416,7 @@ t_optkeep() {
 # D1. Bug it catches: an Optimize card that keeps its file as slow as its median lands. It is blocked before review.
 t_optslow() {
   optcard 'echo fast > f.test.sh' 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now; its budget is 8 CPU s' ] && [ ! -e "$STUB/asked" ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
     || fail "an Optimize card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
   [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] || fail "the blocked line does not carry the speed check's version $SPEEDV: $(st 'select(.step == "blocked")')"
 }
@@ -427,7 +427,7 @@ t_optsplit() {
   optcard 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 2 3
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":5,"fix":"split","into":["f1.test.sh","f2.test.sh"]}' ] || fail "the split's record does not hold its summed CPU seconds: $(st 'select(.step == "bugproof")')"
   [ "$(sort "$STUB/mainran" | tr '\n' '|')" = 'f1.test.sh: one|f2.test.sh: two|' ] || fail "the split's new files did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
-  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed (the median on record of f.test.sh is 10 CPU s), each file at or under its budget: f1.test.sh 2 of 8 CPU s, f2.test.sh 3 of 8 CPU s' "$STUB/asked" \
+  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed (the median on record of f.test.sh is 10 CPU s): f1.test.sh 2 CPU s, f2.test.sh 3 CPU s' "$STUB/asked" \
     || fail "the review was not shown the split's numbers"
   [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster split did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }

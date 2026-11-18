@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # testtime.sh <file> -- <command>...: runs the command once, then prints the test file's timing line, as a project's
-# test runner says it in its log for the CPU budget of a test file (conveyor/README.md, The CPU budget of a test file):
+# test runner says it in its log for the times of a test file (conveyor/README.md, Test file times):
 # `TESTRUN sec<TAB><file><TAB><clock seconds><TAB><CPU seconds>`, the CPU seconds the user plus system time of all the
 # command started. It changes nothing else: the command's output and exit code are its own. A project copies it beside
 # its test script and wraps each test file's run with it.

@@ -75,23 +75,23 @@ test('Tests actions: the preview table shows each match with its guard result, a
   const w = boot({ tab: 'tests' });
   deliver(w, snap());
   const rows = Array.from(auto(w).querySelectorAll('.tests-auto-match'), (r) => Array.from(r.children, (td) => td.textContent));
-  assert.deepEqual(rows, [['over budget', MERGE, 'cpu 11.0, 11.5, 12.0; budget 8', 'Stopped by off: the switch is off'], ['over budget', X, 'cpu 9.0, 9.0, 9.0; budget 8', 'Would file']]);
+  assert.deepEqual(rows, [['over usual', MERGE, 'cpu 11.0, 11.5, 12.0; usual 6', 'Stopped by off: the switch is off'], ['over usual', X, 'cpu 9.0, 9.0, 9.0; usual 4', 'Would file']]);
   const log = Array.from(auto(w).querySelectorAll('.tests-auto-line'), (l) => l.textContent);
   assert.equal(log.length, 2);
-  assert.match(log[0], /Filed #480 · rule over budget · conveyor\/tests\/merge\.test\.sh$/);
-  assert.match(log[1], /Stopped by perDay · rule over budget · .*x\.test\.mjs · 3 issues filed today$/);
+  assert.match(log[0], /Filed #480 · rule over usual · conveyor\/tests\/merge\.test\.sh$/);
+  assert.match(log[1], /Stopped by perDay · rule over usual · .*x\.test\.mjs · 3 issues filed today$/);
 });
 
 // Bug it guards: a rule changed by a typed value alone, or saved by a command the engine does not take.
 test('Tests actions: a rule field shows Unsaved when changed, and Save posts the engine rule command', async () => {
   const w = boot({ tab: 'tests' });
   deliver(w, snap());
-  const rule = () => auto(w).querySelector('[data-rule="over budget"]');
+  const rule = () => auto(w).querySelector('[data-rule="over usual"]');
   assert.ok(act(rule(), 'rule-limit-save').hidden);
   type(act(rule(), 'rule-limit-field'), '1.5');
   assert.ok(!act(rule(), 'rule-limit-save').hidden && rule().textContent.includes('Unsaved'));
   assert.deepEqual(w.posts, []);
   act(rule(), 'rule-limit-save').click();
   await settle();
-  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testrules', args: ['set', 'over budget', 'limit', '1.5'], repo: 'sample' } }]);
+  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testrules', args: ['set', 'over usual', 'limit', '1.5'], repo: 'sample' } }]);
 });

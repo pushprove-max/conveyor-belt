@@ -50,11 +50,11 @@ const LANDED_BEFORE = [{ issue: 39, ago: 3 * 3600, sha: '1d7e6b0' }, { issue: 38
 const STEP_INDEX = { build: 0, review: 1, fix: 2, tests: 3, landing: 4, push: 5 };
 const LABEL = { build: 'building', tests: 'tests', landing: 'landing', push: 'pushing' };
 
-// The Tests page: the project's test files, as testspart() gives them. One is over its budget (orders: #42's
-// pagination made it slower), one is slower than usual, one is flaky, the rest are fine. runs: [CPU s, clock s, issue,
+// The Tests page: the project's test files, as testspart() gives them. Two are slower than usual (orders: #42's
+// pagination made it slower), one is flaky, the rest are fine. runs: [CPU s, clock s, issue,
 // hours ago], newest first.
 export const TEST_FILES = [
-  { file: 'test/orders.test.ts', cpu: 9.4, median: 8, change: 0.18, over: true, runs: [[9.4, 10.6, 42, 1], [7.9, 8.8, 39, 3], [7.8, 8.9, 38, 5]] },
+  { file: 'test/orders.test.ts', cpu: 9.4, median: 8, change: 0.18, slower: true, runs: [[9.4, 10.6, 42, 1], [7.9, 8.8, 39, 3], [7.8, 8.9, 38, 5]] },
   { file: 'test/payments.test.ts', cpu: 5.2, median: 5.1, change: 0.02, runs: [[5.2, 6.1, 42, 1], [5.1, 5.9, 39, 3]] },
   { file: 'test/search.test.ts', cpu: 4.1, median: 2.6, change: 0.58, slower: true, runs: [[4.1, 4.7, 42, 1], [3.9, 4.4, 39, 3], [2.6, 3.1, 38, 5]] },
   { file: 'test/auth.test.ts', cpu: 3.6, median: 3.5, change: 0.03, runs: [[3.6, 4.2, 42, 1], [3.5, 4, 39, 3]] },
@@ -63,8 +63,8 @@ export const TEST_FILES = [
   { file: 'test/invoices.test.ts', cpu: 2, median: 2.1, change: -0.05, runs: [[2, 2.4, 42, 1], [2.1, 2.5, 39, 3]] },
   { file: 'test/customers-lookup.test.ts', cpu: 1.6, median: 1.6, change: 0, runs: [[1.6, 2, 42, 1], [1.6, 1.9, 39, 3]] },
 ];
-// The answers of the two test actions the Tests beat runs: Explain the slowdown on the file over its budget, Judge this
-// test on a second file. Each runs for ACTION_SEC story seconds, then shows its answer.
+// The answers of the two test actions the Tests beat runs: Explain the slowdown on orders, slower than usual, Judge
+// this test on a second file. Each runs for ACTION_SEC story seconds, then shows its answer.
 export const TEST_ANSWERS = {
   explain: { file: 'test/orders.test.ts', verdict: null, text: 'test/orders.test.ts went from 7.9 to 9.4 CPU s with #42 (Add cursor pagination to /orders), commit 4f2c9e1.\n'
     + 'Its new cases seed 5,000 orders in beforeEach, once for each of its 12 cases.\n'
@@ -163,7 +163,7 @@ export function createTimeline(wallStart = Date.now()) {
   function testsPart(t) {
     const files = TEST_FILES.map((f) => {
       const last = f.runs[0];
-      return { file: f.file, cpu: f.cpu, median: f.median, usual: f.median, change: f.change, budget: 8, budgetFrom: 'project', over: f.over === true,
+      return { file: f.file, cpu: f.cpu, median: f.median, usual: f.median, change: f.change,
         slower: f.slower === true, slowOnPurpose: null, flaky: f.flaky || 0, failedSteps: 0, issue: null, timedRuns: 6 + f.runs.length,
         lastRun: { cpu: last[0], sec: last[1], clockPerCpu: Math.round((last[1] / last[0]) * 100) / 100 },
         runs: f.runs.map(([cpu, sec, n, h]) => ({ cpu, sec, card: cardId(n), time: iso(t - (h * 3600) / SCALE), issue: n, repo: REPO, url: issueUrl(n) })) };
@@ -174,10 +174,10 @@ export function createTimeline(wallStart = Date.now()) {
         ...TESTS_MODEL, limit: 900, verdict: done ? ans.verdict : null, text: done ? ans.text : `${ans.text.split('\n')[0]}\n`, textCut: false };
     });
     return { repo: REPO, repos: [REPO], others: {},
-      tests: { settings: { fileBudget: 8, slowIssues: false, slower: { share: 0.25, runs: 3, minRuns: 5 }, files: {} },
-        rules: { on: true, perDay: 3, maxOpen: 5, quietDays: 14, burst: true, list: [{ name: 'over budget', on: true, measure: 'budget', limit: 1, runs: 3, minRuns: 3 }], last: null, log: [] },
+      tests: { settings: { slowIssues: false, slower: { share: 0.25, runs: 3, minRuns: 5 }, files: {} },
+        rules: { on: true, perDay: 3, maxOpen: 5, quietDays: 14, burst: true, list: [{ name: 'slower than usual', on: true, measure: 'usual', limit: 1.5, runs: 3, minRuns: 5 }], last: null, log: [] },
         files, slower: TEST_FILES.filter((f) => f.slower).map((f) => f.file),
-        totals: { files: files.length, overBudget: files.filter((f) => f.over).length, slower: files.filter((f) => f.slower).length, steps: { count: 41, waitSec: 95, runSec: 2460 } } },
+        totals: { files: files.length, slower: files.filter((f) => f.slower).length, steps: { count: 41, waitSec: 95, runSec: 2460 } } },
       machine: { maxLoad: 24, unread: false, cores: 16, load: 6.2 },
       testActions: { limit: 900, allowed: { claude: ['claude-opus-5-5', 'claude-sonnet-5-5'] }, actions },
       control: JSON.parse(JSON.stringify(control)), clis: { claude: { models: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] } }, flaky: [] };

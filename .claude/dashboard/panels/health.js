@@ -136,32 +136,31 @@ window.DASH_APP.panel({
             'Fix each case, or the fixture under it. If a case has an issue, fix the case through that issue.';
         } else check(`Flaky tests${of}`, ctx.chip('None', 'ok'), 'no case passed only on re-run in the last 7 days');
       }
-      // The test files kept off card test steps for their CPU seconds (conveyor/lib/testrun.sh slowoffs()), each with
-      // why: over the budget in two card test runs in a row, by how much, and the issue whose card brings it back. One
-      // row each (item), the figures under its name.
+      // The test files a "Slow test" issue still keeps off card test steps (conveyor/lib/testrun.sh slowoffs()), each
+      // with its CPU seconds in the two card test runs that filed it, and the issue whose card brings it back. One row
+      // each (item), the figures under its name.
       if (Array.isArray(r.slowOff)) {
         const files = r.slowOff.filter((f) => f && typeof f.file === 'string');
         if (files.length) {
           const n = (x) => (typeof x === 'number' ? `${Math.round(x * 10) / 10}` : '?');
           const det = h('details', 'output'), list = h('ul', 'output-findings slow-off-list');
-          list.append(...files.map((f) => item(f.file, '2 runs over budget', f,
-            `${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s, over the ${n(f.budget)} CPU s budget; runs only in the full test suite until its issue lands`)));
+          list.append(...files.map((f) => item(f.file, 'Kept off', f,
+            `${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s; runs only in the full test suite until its issue lands`)));
           det.append(h('summary', null, 'Show output'), list);
           check(`Kept off card tests${of}`, ctx.chip(`${files.length} file${files.length === 1 ? '' : 's'}`, 'warn'),
-            `${files.length === 1 ? '1 test file' : `${files.length} test files`} over the CPU budget in two card test runs in a row`, det).next =
+            `${files.length === 1 ? '1 test file' : `${files.length} test files`} kept off card test steps by a Slow test issue`, det).next =
             'Each comes back to card test steps when the card of its Slow test issue lands: make the file cheaper there.';
         } else check(`Kept off card tests${of}`, ctx.chip('None', 'ok'), 'every test file runs in card test steps');
       }
       // The project's last card test runs recorded no test times (untimed: how many; conveyor/lib/views.sh): its test
-      // command prints no `TESTRUN sec` lines and no report of its runner was read, so no test file is held to the CPU
-      // budget. When setup found a runner whose report Conveyor cannot read now (report: the pack's test.report with
+      // command prints no `TESTRUN sec` lines and no report of its runner was read. When setup found a runner whose report Conveyor cannot read now (report: the pack's test.report with
       // no format), the row names the runner and the report option that would give the times.
       if (typeof r.untimed === 'number' && r.untimed > 0) {
         const rp = r.report && typeof r.report === 'object' && typeof r.report.runner === 'string' && !r.report.format && typeof r.report.option === 'string' ? r.report : null;
         check(`Test times${of}`, ctx.chip('Not recorded', 'warn'),
           `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times${rp ? `; the test command runs ${rp.runner}, and Conveyor cannot read its output` : ''}`).next = rp
-          ? `Add the report option ${rp.option} to the test command, then run setup again: Conveyor reads each test file's times from that report. The section "The CPU budget of a test file" in conveyor/README.md tells more.`
-          : 'Add them to the test command: the section "The CPU budget of a test file" in conveyor/README.md tells how.';
+          ? `Add the report option ${rp.option} to the test command, then run setup again: Conveyor reads each test file's times from that report. The section "Test file times" in conveyor/README.md tells more.`
+          : 'Add them to the test command: the section "Test file times" in conveyor/README.md tells how.';
       }
       // The card records' lines the record check set aside (quarantined: [{line, field, time}]; conveyor/lib/views.sh
       // check()): the loop reads on without them, and the owner decides what each was.

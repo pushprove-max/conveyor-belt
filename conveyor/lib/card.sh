@@ -16,33 +16,6 @@ redbrief() { # <card> <issue> <branch>
   red=$(redissue "$1") && [ "$red" != "$issue" ] || return 0
   sprompt=${sprompt/"$(issuepart "$issue")"/"$(issuepart "$red")"}; issue=$red
 }
-# A card of a speed-up or Optimize issue whose newest blocked card's build changed nothing and stopped for the owner's
-# yes to a budget of its own for its test file (OWNSTOP, kept with no patch) has nothing to build, review or land. By
-# the issue as it is now against the body that card kept (keptway()): an approval line since (land) sets the budget in
-# the pack's test.files (testsettings()) and closes the issue, its closed line naming the budget, unless the yes gives
-# a condition (conditional()): then nothing is set and the card is blocked naming it; none since (wait)
-# stops again for the yes. Exit 1 when the card goes on to its build: no such stop, or the issue changed since.
-ownyes() { # <card> <issue> <worktree> <issue json> <test file>
-  local c=$1 n=$2 wt=$3 sf=$5 l k b why err msg
-  l=$(stdb ask issue retried "$n" 2>/dev/null | jq -rs --arg s "$YES$OWNSTOP$sf: " 'map(select(.step == "blocked")) | last // empty
-    | select((.reason | startswith($s)) and (.kept // "") != "") | "\(.kept)/\(.card)\t\(.reason)"' 2>/dev/null) && [ -n "$l" ] || return 1
-  k=$ST/${l%%$'\t'*}; [ ! -s "$k.patch" ] || return 1
-  b=${l#*$'\t'}; b=${b#"$YES$OWNSTOP$sf: "}; why=${b#*' CPU s: '}; b=${b%%' CPU s: '*}
-  case $(keptway "$4" "$k.body") in
-    land) ;;
-    wait) jq -c '{body}' <<<"$4" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: $b CPU s: $why" post; return 0 ;;
-    *) return 1 ;;
-  esac
-  # A yes with a condition (the Board's "Approve with a condition") may ask for another budget than the one proposed,
-  # and with no change there is nothing a review could hold to it: nothing is set, and the card stops naming it.
-  ! conditional "$4" || { block "$c" "$n" "$wt" "$OWNER's yes to a budget of its own for $sf, $b CPU s, gives a condition, and a build that changed nothing has nothing to hold to it, so no budget was set: set the budget the condition asks for on the Board's Tests page (conveyor.sh test-settings file-budget $sf <CPU s>) and shut the issue"; return 0; }
-  err=$(testsettings file-budget "$sf" "$b" 2>&1) || { block "$c" "$n" "$wt" "the owner's yes to a budget of its own for $sf could not be saved in the pack: ${err:0:400}"; return 0; }
-  msg="$sf has a budget of its own, $b CPU s, with $OWNER's yes; its build changed nothing, so nothing lands"
-  err=$(gh_write issue close "$n" --comment "Conveyor card $c closes this issue: $msg."$'\n\n'"Why the file needs it: $why" 2>&1 >/dev/null) \
-    || { block "$c" "$n" "$wt" "$msg. The engine could not close the issue: ${err:0:400}"; return 0; }
-  record "$c" "$n" closed ok "$(jq -cn --arg r "$msg" --argjson e "$(ending)" '{reason:$r} + $e')"
-  clean "$wt"
-}
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
@@ -55,7 +28,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local mainsec=0 mw # mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
-  local kw='' ob='' # kw: keptway()'s answer for a kept patch; ob: the budget of its own its build proposes (ownbudget())
+  local kw='' # kw: keptway()'s answer for a kept patch
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
@@ -119,21 +92,8 @@ card() { # <card> <issue> [<branch> <tip>]
     esac
   fi
   # The test file of a speed-up or Optimize card (a bug card whose issue speedfile() names): its build is told the
-  # target (speedbrief()), and may propose a budget of its own for the file (ownbudget(): ob, <CPU s><TAB><why>).
+  # target (speedbrief()).
   [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=''
-  # A card that stopped for the owner's yes to such a budget (OWNSTOP) lands from its kept patch with the yes: an
-  # approval line since its stop (keptway() land) sets the budget in the pack's test.files (testsettings()) first.
-  # With no yes since, it stops again (ob kept, below); the owner's no holds the issue (the Board's Decline).
-  if [ "$mode" = land ] && [ -n "$sf" ] && [[ $was == "$YES$OWNSTOP$sf: "* ]]; then
-    ob=${was#"$YES$OWNSTOP$sf: "}; ob=${ob%%' CPU s: '*}$'\t'${ob#*' CPU s: '}
-    if [ "$kw" = land ]; then
-      err=$(testsettings file-budget "$sf" "${ob%%$'\t'*}" 2>&1) || { block "$c" "$n" "$wt" "the owner's yes to a budget of its own for $sf could not be saved in the pack: ${err:0:400}"; return; }
-      echo "conveyor: card $c: $sf has a budget of its own, ${ob%%$'\t'*} CPU s, with $OWNER's yes"; ob=''
-    fi
-  fi
-  # Such a stop whose build changed nothing has no kept patch (mode is empty): ownyes() sets the budget and closes the
-  # issue on the yes, or stops again with none.
-  [ -z "$mode" ] && [ -z "$br" ] && [ "$n" != 0 ] && [ -n "$sf" ] && ownyes "$c" "$n" "$wt" "$issue" "$sf" && return
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
   # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
   [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
@@ -246,21 +206,17 @@ card() { # <card> <issue> [<branch> <tip>]
       || rep=$(repeats "$wt")
     [ -z "$rep" ] || more+=$'\n\n'"$(again "$rep")"
     [ -z "$sf" ] || { t=$(speedbrief "$c" "$wt" "$sf") && more+=$'\n\n'"$t"; } \
-      || { block "$c" "$n" "$wt" "brief: the engine could not read the project pack for the budget of $sf"; return; }
+      || { block "$c" "$n" "$wt" "brief: the engine could not read the project pack for the split allowance of $sf"; return; }
     began "$c" "$n" build
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return
-    # Its build may end proposing a budget of its own for the file it keeps: the check holds the file to that budget,
-    # and the card stops for the owner's yes to it once its review would let it land (below).
-    [ -z "$sf" ] || ob=$(ownbudget "$wt") || ob=''
-    [ -z "$ob" ] || [ -e "$wt/$sf" ] || { block "$c" "$n" "$wt" "build: the build proposes a budget of its own for $sf, but its change removes $sf"; return; }
     # A bug card (the pack's type label): the tests it adds or changes must fail on main's code without the fix
     # (bugproof(); a change that selects no test of its own is proved by the test files its issue's Done-when names,
     # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
     # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
-    # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when its file is not faster, a split does not fit
-    # its budgets, or a file does not pass, the card is blocked with that reason and no review, its blocked line
+    # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when its file is not faster, a split takes more
+    # CPU seconds than it may, or a file does not pass, the card is blocked with that reason and no review, its blocked line
     # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
     # FIXFAILS) is checked by steadyproof(): when its file fails in one of its runs in a row, the card is blocked
     # naming that run, with no review. So are the Board's other fix issues (#189): Fix the waiting (WAITFIX), Fix hollow
@@ -270,9 +226,9 @@ card() { # <card> <issue> [<branch> <tip>]
     # ranproof() once its test step passed (mk).
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
-      OWNBUDGET=${ob%%$'\t'*} speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$OPTIMIZE"); then
-      sk=$OPTREVIEW; OWNBUDGET=${ob%%$'\t'*} optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      sk=$OPTREVIEW; optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$FIXFAILS"); then
       sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
@@ -325,13 +281,10 @@ card() { # <card> <issue> [<branch> <tip>]
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
     redbrief "$c" "$n" "$br"
-    # A build that changed nothing but proposes a budget of its own (ob) stops for the owner's yes to it (OWNSTOP), as
-    # a card with a change does below, not as a session that made no change: with the yes, its retry sets the budget
-    # and closes the issue (ownyes(), above); with the owner's no, the issue is held.
     # A main-red fix card whose staged change is only the links the engine staged (linksonly()) made no change: the
     # links come with a fix, so with none they are dropped (issue 323).
     git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet \
-      && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || { [ -z "$ob" ] || { jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'}" post; return; }
+      && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || {
       nochange "$c" "$n" "$wt" "$sprompt"; return; }
     if [ "$mode" = land ]; then
       # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
@@ -429,10 +382,6 @@ card() { # <card> <issue> [<branch> <tip>]
     # saying nothing visible changes is no yes: a visible change stops as it would with no section. With the rule
     # "visible changes need the owner's yes" off, none of this holds a card.
     # A card that stops here keeps the issue body this review read (.body; keptway(): its retry lands only on it).
-    # A card whose build proposes a budget of its own for its test file (ob) stops here for the owner's yes to that
-    # budget, whatever that rule: with the yes, its retry sets the budget and lands (above); with the owner's no, the
-    # issue is held. It is not built again for it.
-    [ -z "$ob" ] || { jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES$OWNSTOP$sf: ${ob%%$'\t'*} CPU s: ${ob#*$'\t'}" post; return; }
     yesfrom=''
     if [ -n "$heldto" ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths; then
       case $vis in
@@ -548,13 +497,12 @@ card() { # <card> <issue> [<branch> <tip>]
         began "$c" "$n" test
         [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
         sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
-        # A test file its own run found over the time budget (slowtests()) is a note on its test line (slow), never a
-        # finding: the card goes on with the pass. Only a test rule files an issue about it (testrulespass(), after the
-        # test line is recorded).
+        # The times its own run took go on its test line (slowtests()); only a test rule files an issue about a test
+        # file (testrulespass(), after the test line is recorded).
         testedhere "$wt" || own=1
         [ -n "$own" ] || ! t=$(sharedtests "$wt" "$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)") \
           || { own=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; }
-        [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || { slowtests "$wt" || rm -f "$wt.slow"; }; }
+        [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
         [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
         if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
           out=$(locked gather "$c" "$wt" "$me") || out=''

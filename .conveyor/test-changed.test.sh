@@ -111,7 +111,7 @@ p_shellcount() {
   mkdir "$T/slog"; CONVEYOR_TEST_LOG=$T/slog ran > /dev/null
   [ "$(head -n 2 "$T/slog/test-changed.log" | tr '\n' '|')" = "TESTRUN files=2 of=3|TESTRUN cases=4 of=5|" ] \
     && ok "the test step's log counts a shell test file's cases among those selected" || no "shell cases: $(cat "$T/slog/test-changed.log" 2>&1)"
-  # Bug: with no time line, the loop could not tell a test file the card adds that runs over the time budget.
+  # Bug: with no time line, the loop recorded no time of a test file the card adds.
   # The engine's runner is no test file of its own: it times its case files (p_enginetime), never itself.
   [ "$(grep '^TESTRUN sec' "$T/slog/test-changed.log" | grep -cE '^TESTRUN sec	tool/s\.test\.sh	[0-9]+\.[0-9]	[0-9]+\.[0-9]$')" = 1 ] \
     && ! grep -q '^TESTRUN sec	conveyor/conveyor.test.sh' "$T/slog/test-changed.log" \
@@ -324,7 +324,7 @@ p_scold() {
   [ "$(cat "$T/rc")" = 0 ] && [ "$(grep -c 'shellcheck is not installed' "$T/out")" = 1 ] && ok "a missing shellcheck says so and passes" || no "no shellcheck: exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
-# Bug: an engine case file had no time line, so one a card added or slowed past the budget was never a finding.
+# Bug: an engine case file had no time line, so the time of one a card added or slowed was never recorded.
 # The runner writes each case file's time and CPU seconds to the file CONVEYOR_TEST_TIMES names; the log has them
 # under its path.
 p_enginetime() {
@@ -335,7 +335,7 @@ p_enginetime() {
     && ok "the test step's log times an engine case file by the runner's time and CPU seconds of it" || no "engine time line: exit $(cat "$T/rc"): $(cat "$T/elog/test-changed.log" 2>&1)"
 }
 
-# Bug: the budget judged a file's clock time, which on a busy machine is the load's. The log gives each file's CPU
+# Bug: a file's recorded time was its clock time, which on a busy machine is the load's. The log gives each file's CPU
 # seconds too, of its own process tree: a file that sleeps 0.6 s uses next to none, one that burns CPU uses it,
 # however long either took.
 p_cputime() {
@@ -436,7 +436,7 @@ p_flakyoff() {
   got=$(CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
   [ "$got" = "atwo bone " ] && ok "a fix that changed an \"all\" area's file runs every case but the one kept off" || no "off case, fix of core.sh: ran '$got': $(cat "$T/out")"
 }
-# Issue 457: a test file over its CPU budget in two card runs in a row is kept off card runs (conveyor.sh slowoff():
+# Issue 457: a test file the slow-test record names is kept off card runs (conveyor.sh slowoff():
 # a `pass` and an `off` line naming the file, no case). Bug it catches: the file ran on a card's run all the same, as
 # a changed file (or, of an engine case file, a change to its area or an "all" area) selected it again.
 p_slowoff() {

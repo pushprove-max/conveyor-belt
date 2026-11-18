@@ -13,7 +13,7 @@ const HOLLOW = [{ case: 'loads', kind: 'no-assert', reason: 'no expect or assert
 const WAITS = [{ case: 'mergewait', kind: 'polling', at: 'conveyor/tests/merge.test.sh:40', reason: 'it polls the lock file every second' }];
 // A file with no run on record, as the snapshot's tests part has it, with why it never ran (null: the engine cannot tell).
 const never = (file, neverRun) => ({ file, cpu: null, median: null, change: null, runs: [], lastRun: null, timedRuns: 0, runsOnRecord: 0, failedSteps: 0,
-  failures: [], flaky: 0, issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, over: false, usual: null, slower: false, hollow: null, waits: null, neverRun });
+  failures: [], flaky: 0, issue: null, slowOnPurpose: null, usual: null, slower: false, hollow: null, waits: null, neverRun });
 function show({ acts = [], waits = WAITS } = {}) {
   const d = snap({ acts }), files = d.panels.tests.data.tests.files, of = (f) => files.find((x) => x.file === f);
   of(X).hollow = HOLLOW;

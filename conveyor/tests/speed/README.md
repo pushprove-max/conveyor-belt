@@ -12,8 +12,8 @@ two cards edit one report.
   test slots allow, so the file's time is close to its slowest case's.
 - A card's Test step runs each case file the same way, as a test file of its own: its own process and test slot,
   with only the cases the change selects of it, side by side with the other case files it selects. Each one pays
-  the runner's start-up once (about 0.4 CPU s on the build machine). Its result and its time name the case file, and
-  the time counts toward that file's own CPU budget only when the step ran all of the file's cases.
+  the runner's start-up once (about 0.4 CPU s on the build machine). Its result names the case file, and its time
+  does too only when the step ran all of the file's cases.
 - On the machine that runs the loop, with whatever else it runs at the time: the same machine and about the same load
   for the before and the after. Note the load average next to the times when it is far from usual.
 - Two numbers, before and after: the file's time (wall clock, from the first case started to the last ended) and its
@@ -49,20 +49,14 @@ The same three rules are in the card rules (`.conveyor/card-rules.md`), so every
   proves. Why: a card run pays for the loop, its sessions and its waits around the one function: `testfails` 13.62 s to
   3.14 s (76% cut, #362) and `testrec` 19.26 s to 1.99 s (89% cut, #371) (`cases-4.md`).
 
-## How a split is checked, and a budget of its own
+## How a split is checked
 
-An Optimize card that splits a test file passes its check when every case passes, each new file is at or under its
-budget (the pack's `test.fileBudget`, or the file's own in `test.files`), and the new files' CPU seconds summed are at
-most the old file's on record plus a start-up allowance for each new file. The allowance is the CPU seconds of a run of
+An Optimize card that splits a test file passes its check when every case passes and the new files' CPU seconds
+summed are at most the old file's on record plus a start-up allowance for each new file. The allowance is the CPU seconds of a run of
 a new file with no case selected, when that run names no case. An engine case file run so runs the runner with no
 case. A runner with no case filter runs the whole file, so
 then the allowance is the pack's `test.splitAllowance`, as it is when that run gives no CPU seconds. A split never makes the
-sum lower, so a split into too few files fails: the card's brief says how many files a split alone needs. Make the
-heavy cases faster, or make the split finer.
-
-A file whose cases cannot fit the budget without losing what they test gets a budget of its own: the build ends its
-reply with `OWN-BUDGET: <CPU s> CPU s: <why>`, the card stops for the owner's yes, and the yes puts that budget in
-`test.files` for the file. `conveyor/README.md` (The CPU budget of a test file) has the details.
+sum lower: each new file adds its start-up. `conveyor/README.md` (Test file times) has the details.
 
 ## Ways that worked
 

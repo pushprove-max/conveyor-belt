@@ -5,8 +5,8 @@
 # The snapshot's tests part, read from the card records (recs, olds: a retried card's runs count too), the pack, the
 # flaky-test record ($FLAKY), the slow-test record ($SLOWFILED), the test rules' log ($TESTRULESLOG) and the Board's
 # test issues ($TAFILED):
-# settings: the pack's fileBudget, slowIssues (true or false), slower ({share, runs, minRuns}) and files (each file's own
-#   budget and slowOnPurpose, as the pack holds them), and report (the pack's test.report, {runner, format, path, env,
+# settings: the pack's slowIssues (true or false), slower ({share, runs, minRuns}) and files (each file's own
+#   settings, as the pack holds them), and report (the pack's test.report, {runner, format, path, env,
 #   args, option}, null with none: the runner whose report gives a Wall only file's clock seconds, #190), and cpuTime
 #   (cpuplan(): {file, was, command}, the test command Record CPU time saves, or {why}; null when it cannot be told);
 # suite: the newest whole-suite run on record ($SUITERUNS), {time, cpu: the CPU seconds of its files summed, null with
@@ -28,11 +28,9 @@
 #   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
 #   (FAILURE); tail is null past the newest TESTKEEP), caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
 #   so the fix went into the code; changedToPass when that commit changed the file),
-#   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), budget and budgetFrom (file: its own;
-#   project: test.fileBudget), slowOnPurpose (its reason, else null), over (cpu over its budget; false with no cpu), usual (the median of
+#   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), slowOnPurpose (its reason, else null), usual (the median of
 #   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower; a wholeOnly
-#   file (a runner that starts other test files whole, each timed with its own budget) is held to no budget: budget and
-#   budgetFrom null, over and slower false; optimize: each issue the Board filed for it ($TAFILED: Optimize, and older
+#   file (a runner that starts other test files whole, each timed on its own) has slower false; optimize: each issue the Board filed for it ($TAFILED: Optimize, and older
 #   speed-up, issues), newest first: {issue, time (filed), state (open: no card took it; building; blocked, with reason;
 #   landed, with sha and landed, the time; closed: its card closed it without landing), fix, into, before and after
 #   (from the bugproof line's speed of its landed card, else of its newest: fix is sped up, split, merged or deleted,
@@ -57,7 +55,7 @@
 #   slower.share;
 # edits: each entry of the landed lines' testedits (testedits(), below), newest first, with its card, issue and time;
 #   a file's newest TESTKEEP alone, so the list grows with the test files, not with the cards that land;
-# totals: files (those with CPU seconds on record), overBudget (over and not slow on purpose), slower, and steps: the card test steps that ran in
+# totals: files (those with CPU seconds on record), slower, and steps: the card test steps that ran in
 #   the 7 days to today ({count, waitSec: their seconds waiting for a test slot, runSec: their test commands' seconds}).
 TESTKEEP=5
 # A runner (the engine's conveyor/conveyor.test.sh) names its cases' failures and flaky entries as its own, while the
@@ -286,8 +284,8 @@ testolder() {
     | {file: $f, olderRuns: ($r[:-$keep] | reverse | map(del(.file))), olderEdits: ([alledits($cr)[] | select(.file == $f)][$keep:])}'
 }
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local b si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp
-  packget test.fileBudget b test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
+  local si sh rn mn fs fl sf defs refs ru all ln ch hv out nv rp cp
+  packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
@@ -303,7 +301,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ch=$(printf '%s\n' "$ch" | git -C "$MAIN" diff-tree --stdin -r --root --name-only --no-renames -z 2>/dev/null \
     | jq -Rsc --arg want "$ch" '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
-  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --argjson b "$b" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
+  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
     --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
@@ -346,7 +344,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | [testruns($ls; $su), ($all[], $ta[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
-        | ($fs[$f] // {}) as $own | ($own.budget // $b) as $bud | ($own.wholeOnly == true) as $wo
+        | ($fs[$f] // {}) as $own | ($own.wholeOnly == true) as $wo
         | (if ($c | length) >= $mn and ($c | length) > $rn then $c[:-$rn] | median else null end) as $usual
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
            runs: ($r[-$keep:] | reverse | map(del(.file))),
@@ -356,8 +354,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            caught: ($catch[$f].caught // 0), changedToPass: ($catch[$f].changed // 0),
            flaky: ($flaky[$f] // 0),
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
-           budget: (if $wo then null else $bud end), budgetFrom: (if $wo then null elif $own.budget != null then "file" else "project" end),
-           slowOnPurpose: ($own.slowOnPurpose // null), over: ($wo | not) and $now != null and $now > $bud, usual: ($usual | r3),
+           slowOnPurpose: ($own.slowOnPurpose // null), usual: ($usual | r3),
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
@@ -367,12 +364,12 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
     | sort_by(-(.cpu // -1), .file)
     | [$ls[] | select(.reused != true and ((.time | fromdate? | strflocaltime("%Y-%m-%d")) // "") >= $since)] as $wk
-    | {settings: {fileBudget: $b, slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
+    | {settings: {slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
        rules: (if $ru == null then null else $ru + {last: $last[0], log: ($lg[0] // [])} end),
        files: ., slower: map(select(.slower) | .file),
        edits: (reduce $alledits[] as $e ({n: {}, out: []};
            if (.n[$e.file] // 0) < $keep then .out += [$e] | .n[$e.file] += 1 else . end) | .out),
-       totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), overBudget: (map(select(.over and .slowOnPurpose == null)) | length), slower: (map(select(.slower)) | length)}) + {
+       totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}') || return 1
   nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
   rp=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || rp=null
@@ -437,28 +434,25 @@ except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.
 
 # conveyor.sh test-settings: one test setting of the pack saved, as the Board saves it. Each refuses a bad value, says
 # why and changes nothing:
-#   budget <CPU s>               test.fileBudget, a number of at least 1
 #   slow-issues <true | false>   test.slowIssues
-#   file-budget <file> <CPU s>   test.files.<file>.budget, for a file main's checkout tracks
-#   file-budget-clear <file>     that budget taken off: the file is held to test.fileBudget again
-#   slow-mark <file> <reason>    test.files.<file>.slowOnPurpose: the reason, one line that is not blank
+#   slow-mark <file> <reason>    test.files.<file>.slowOnPurpose: the reason, one line that is not blank, for a file
+#                                main's checkout tracks
 #   slow-mark-clear <file>       that mark taken off
 #   cpu-time <file>              test.command made the one cpuplan() gives for that file (Record CPU time, #190)
-# A file with neither setting left is taken out of test.files.
-TESTSET_USAGE='usage: conveyor.sh test-settings budget <CPU s> | slow-issues <true | false> | file-budget <file> <CPU s> | file-budget-clear <file> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file>'
+# A file with no setting left is taken out of test.files (packset()).
+TESTSET_USAGE='usage: conveyor.sh test-settings slow-issues <true | false> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file>'
 testsettings() { # <what> [<file>] [<value>]
   local why='' r=${3:-} p
   case ${1:-}:$# in
-    budget:2 | slow-issues:2 | file-budget:3 | file-budget-clear:2 | slow-mark:3 | slow-mark-clear:2 | cpu-time:2) ;;
+    slow-issues:2 | slow-mark:3 | slow-mark-clear:2 | cpu-time:2) ;;
     *) echo "$TESTSET_USAGE" >&2; return 2 ;;
   esac
   case $1 in
-    budget | file-budget) [[ ${!#} =~ ^[1-9][0-9]{0,5}(\.[0-9]{1,3})?$ ]] || why="the budget is CPU seconds, a number of at least 1 (such as 8 or 12.5), not \"${!#}\"" ;;
     slow-issues) [[ $2 =~ ^(true|false)$ ]] || why="test.slowIssues is true or false, not \"$2\"" ;;
     slow-mark) r=${r#"${r%%[![:space:]]*}"}; r=${r%"${r##*[![:space:]]}"}  # the reason with no space at its ends
       [[ $3 != *[$'\n\r']* ]] || why="the reason is one line"; [ -n "$r" ] || why="a file is marked slow on purpose only with a reason" ;;
   esac
-  case $1 in file-budget | slow-mark)
+  case $1 in slow-mark)
     { [ -n "$2" ] && [ "$(git -C "$MAIN" ls-files -- ":(literal)$2" 2>/dev/null)" = "$2" ]; } || why=${why:-"\"$2\" is not a file of main's checkout"} ;;
   esac
   if [ "$1" = cpu-time ]; then
@@ -467,17 +461,14 @@ testsettings() { # <what> [<file>] [<value>]
   fi
   [ -z "$why" ] || { echo "conveyor: test-settings $1: $why; nothing changed" >&2; return 1; }
   case $1 in
-    budget) packset --argjson v "$2" '.test.fileBudget = $v' ;;
     slow-issues) packset --argjson v "$2" '.test.slowIssues = $v' ;;
-    file-budget) packset --arg f "$2" --argjson v "$3" '.test.files[$f].budget = $v' ;;
     slow-mark) packset --arg f "$2" --arg v "$r" '.test.files[$f].slowOnPurpose = $v' ;;
-    file-budget-clear) packset --arg f "$2" 'if .test.files[$f] == null then . else del(.test.files[$f].budget) end' ;;
     slow-mark-clear) packset --arg f "$2" 'if .test.files[$f] == null then . else del(.test.files[$f].slowOnPurpose) end' ;;
     cpu-time) packset --arg c "$(jq -r '.command' <<<"$p")" '.test.command = $c' ;;
   esac
 }
 # Record CPU time (#190): how the pack's test command can give a Wall only file's CPU seconds, as JSON. No runner's
-# report gives CPU seconds (README.md, The CPU budget of a test file), so a report option never can. The wrapper
+# report gives CPU seconds (README.md, Test file times), so a report option never can. The wrapper
 # conveyor/tools/testtime.sh times one command as one file's run, so it applies when the test command runs one test
 # file and nothing else: the command is given no list (test.list not set, or none), is one plain command (no ; & | < >
 # $ ` quote or bracket), and of its words exactly one names a path of main's checkout, a test file. Then it prints
@@ -489,7 +480,7 @@ cpuplan() {
   local cmd lm w ws=() ps=() q
   packget test.command cmd test.list lm || return 1
   local no='No report option gives CPU time: a runner'"'"'s report gives clock seconds only. The wrapper conveyor/tools/testtime.sh does not apply either:'
-  local how='wrap each test file'"'"'s run with it in your test script (conveyor/README.md, The CPU budget of a test file).'
+  local how='wrap each test file'"'"'s run with it in your test script (conveyor/README.md, Test file times).'
   if [[ $cmd == *testtime.sh* || $cmd == *CONVEYOR_TEST_TIME* ]]; then jq -cn --arg w "The test command already runs conveyor/tools/testtime.sh, and its runs give no CPU seconds for this file: check that the wrapper names this file." '{why: $w}'; return 0; fi
   if [ -n "$lm" ] && [ "$lm" != none ]; then jq -cn --arg w "$no the test command is given the test files of each card's change (test.list $lm), and one wrapper around it gives one time for all of them: $how" '{why: $w}'; return 0; fi
   if [[ $cmd == *[\;\&\|\<\>\$\`\"\'\(\)\{\}\\]* || $cmd == *$'\n'* ]]; then jq -cn --arg w "$no the test command is not one plain command, so Conveyor cannot wrap it safely: $how" '{why: $w}'; return 0; fi

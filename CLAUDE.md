@@ -58,6 +58,4 @@ These points cost the most when missed:
   reported under `conveyor/tests/release.test.sh`.
   `bash` on one area file (as `bash conveyor/tests/release.test.sh`) runs it by hand. `conveyor/conveyor.test.sh` runs every case: the
   whole engine test.
-- A test file stays under the CPU budget (`conveyor/README.md`, The CPU budget of a test file). Why and how:
-  `conveyor/tests/speed/README.md`.
 - No test starts a browser; Board tests use jsdom (`.conveyor/no-browser-tests.sh` fails a run that adds one).

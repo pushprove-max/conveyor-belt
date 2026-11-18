@@ -4,7 +4,7 @@
 # 463 tests, most of them on logic that did not change, as a change to an engine file ran its whole area. A change to
 # the messages, comments and blanks of an engine or Board file now runs only the tests that hold its texts; a change to
 # quoted code, or to a #! or shellcheck line, still runs the area. (These cases are apart from test-changed.test.sh,
-# which is at the CPU budget of a test file.)
+# so the two files run side by side.)
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

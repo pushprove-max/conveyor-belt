@@ -84,7 +84,7 @@
 # each (`TESTRUN case<TAB><file><TAB><case>`). Each Board or shell test file it runs, its log times as it ends
 # (`TESTRUN sec<TAB><file><TAB><seconds><TAB><CPU seconds>`: clock, and user plus system of all it started), and each
 # engine case file whose every case the runner ran, as the runner ends (the sums of its cases' times:
-# CONVEYOR_TEST_TIMES), for the loop's CPU budget of a test file (conveyor/README.md).
+# CONVEYOR_TEST_TIMES), for the times the loop records of a test file (conveyor/README.md).
 # The engine's runner above is the set of engine cases the selection picks; they run as their case files (issue 214):
 # each engine case file that holds some of them is a test file of its own, run with those cases alone (the runner,
 # given them, under that file's mark), side by side on the machine's test slots. Its log lines (`==`, `-- ok|FAIL`,
@@ -1383,14 +1383,14 @@ for t in "${order[@]}"; do
       echo "== $t"; env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" bash "$t" || r=FAIL
     fi
     # Each case file whose every case it ran, timed by the runner (the sums of its cases' clock and CPU seconds, as
-    # they run at once), for the loop's CPU budget of a test file (conveyor/README.md, The test step).
+    # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
     [ ! -s "$o.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "$o.times" >> "$log"
     rm -f "$o.times"; marked "$t" || r=FAIL; metaran "$t" || r=FAIL
   elif [ -n "${ecases[$t]:-}" ]; then
     # An engine case file run on its own (above), with its chosen cases.
     shown[$t]=1; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"; [ "${erc[$t]}" = 0 ] || r=FAIL
     # Its time when it ran every case it has, timed by the runner (the sums of its cases' clock and CPU seconds, as
-    # they run at once), for the loop's CPU budget of a test file (conveyor/README.md, The test step).
+    # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
     [ ! -s "${eout[$t]}.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "${eout[$t]}.times" >> "$log"
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
   else
@@ -1413,7 +1413,7 @@ for t in "${order[@]}"; do
     esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     times >> "$o.cpu"
-    # Its own time and CPU seconds, for the loop's CPU budget of a test file (conveyor/README.md, The test step); not
+    # Its own time and CPU seconds, for the times the loop records of a test file (conveyor/README.md, The test step); not
     # of a run of some of its parts, which is not the file's time.
     [ -n "$p" ] || printf 'TESTRUN sec\t%s\t%s\t%s\n' "$t" "$(awk -v a="$s" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }')" \
       "$(awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }

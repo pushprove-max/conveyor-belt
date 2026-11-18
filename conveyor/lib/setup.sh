@@ -355,7 +355,7 @@ setuplane() {
 }
 # A test command that runs a shell script of the project (a word of it ending in .sh that is a file, from the
 # checkout's root) with no `TESTRUN sec` and no testtime.sh in it: its cards record no test times. Setup says how to
-# wrap each test file's run with tools/testtime.sh (conveyor/README.md, The CPU budget of a test file), each run; it
+# wrap each test file's run with tools/testtime.sh (conveyor/README.md, Test file times), each run; it
 # never changes the project's script.
 timinghint() {
   local cmd w p ws=()
@@ -369,7 +369,7 @@ timinghint() {
     echo "  If it runs the test files one by one, copy $HERE/tools/testtime.sh into the project and wrap each file's run"
     echo "  with it, writing its line to the script's log in \$CONVEYOR_TEST_LOG before the file's \`-- ok|FAIL <file>\` line:"
     echo "    ./testtime.sh \"\$f\" -- <the file's command> > \"\$out\" 2>&1; rc=\$?; cat \"\$out\"; grep '^TESTRUN sec' \"\$out\" >> \"\$CONVEYOR_TEST_LOG/<its log>\""
-    echo "  conveyor/README.md, The CPU budget of a test file, says more."
+    echo "  conveyor/README.md, Test file times, says more."
   done
 }
 # The pack's test.report for a test command (setup()), as JSON: {runner, format, path} when the command already has
@@ -948,12 +948,17 @@ doctor() {
     elif [ -n "$p" ] && [ "$p" != "$c" ]; then echo "warning: the running loop started on Conveyor commit $c, and the pack pins $p: it runs old code until it restarts"; fi
   fi
   # The project's last card test runs recorded no test times (UNTIMED, lib/views.sh): its test command prints no
-  # `TESTRUN sec` lines and Conveyor read no report of its runner. A warning: the cards still run, held to no CPU
-  # budget. When setup found a runner whose report Conveyor cannot read now (test.report with no format), it names the
-  # runner and its option that would give them.
+  # `TESTRUN sec` lines and Conveyor read no report of its runner. A warning: the cards still run. When setup found a
+  # runner whose report Conveyor cannot read now (test.report with no format), it names the runner and its option that
+  # would give them.
   e=$(stdb ask lines cards 2>/dev/null | jq -s "$UNTIMED"' untimed' 2>/dev/null) || e=0
   t=$(jq -r '.test.report | objects | select(.format == null and .option) | "; the test command runs \(.runner), whose report option \(.option) would give them"' "$PACK" 2>/dev/null) || t=''
-  [[ ! $e =~ ^[1-9][0-9]*$ ]] || echo "warning: the last $e card test run$([ "$e" = 1 ] || echo s) recorded no test times: the test command prints no \`TESTRUN sec\` lines; conveyor/README.md, The CPU budget of a test file, says how to add them$t"
+  [[ ! $e =~ ^[1-9][0-9]*$ ]] || echo "warning: the last $e card test run$([ "$e" = 1 ] || echo s) recorded no test times: the test command prints no \`TESTRUN sec\` lines; conveyor/README.md, Test file times, says how to add them$t"
+  # No test file has a CPU budget: the pack's budget settings left in it are ignored, all named on one line.
+  t=$(jq -r '[(.test | objects | select(has("fileBudget")) | "test.fileBudget"),
+      (.test.files | objects | to_entries[] | select(.value | objects | has("budget")) | "test.files.\(.key).budget"),
+      (.test.rules.list | arrays | .[] | objects | select(.measure == "budget") | "the test rule \(.name // "")")] | join(", ")' "$PACK" 2>/dev/null) || t=''
+  [ -z "$t" ] || echo "note: no test file has a CPU budget, so the pack's budget settings are ignored: $t; take them out of $PACK"
   widewarn
   narrowwarn
   if packget privacy.mode e && [ "$e" = public ]; then

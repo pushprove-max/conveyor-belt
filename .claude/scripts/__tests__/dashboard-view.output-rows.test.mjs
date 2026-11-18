@@ -22,9 +22,9 @@ test('Health: each flaky case and each kept-off file is one row with its name, c
   const flaky = Array.from(dd(w, 'Flaky tests').querySelectorAll(':scope > details.output li.output-finding'));
   assert.deepEqual(flaky.map(row), [['b.test: flaky', '3 re-runs', `${P}/16`], ['c.test: other', '1 re-run', null]]);
   const off = Array.from(dd(w, 'Kept off card tests').querySelectorAll(':scope > details.output li.output-finding'));
-  assert.deepEqual(off.map(row), [['conveyor/tests/s.test.sh', '2 runs over budget', `${P}/17`]]);
+  assert.deepEqual(off.map(row), [['conveyor/tests/s.test.sh', 'Kept off', `${P}/17`]]);
   assert.equal(off[0].querySelector('.detail').textContent,
-    "10.2 CPU s in c2-9's test run and 9 in c2-8's, over the 8 CPU s budget; runs only in the full test suite until its issue lands", 'why it is kept off, under its name');
+    "10.2 CPU s in c2-9's test run and 9 in c2-8's; runs only in the full test suite until its issue lands", 'why it is kept off, under its name');
   for (const li of [...flaky, ...off]) assert.equal(li.querySelector('pre.output-text'), null, 'no mono block in a row');
 });
 

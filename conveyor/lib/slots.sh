@@ -539,7 +539,6 @@ steer_use() { # <process group>
 # No starvation, beside a steered run <process group>: a run with a process waiting to run (runnable) whose CPU time
 # grows by less than a tenth of a second in 3 looks (a look each STEER_TICK seconds, 1 by default) gets its normal
 # priority back for 2 looks, then is lowered again. A test file then never times out only because it was lowered.
-# Its CPU-second budget is not changed: the budget counts the CPU time it used, whatever its priority.
 # It looks while the run's leader <process group> lives, not its group: the watch starts before timeout makes the
 # group (testonce), and a survey session (session.sh) is never a group of its own; steer_pids finds its processes.
 # Started in the background, it first closes every descriptor it was given, whatever its number (closefds), as

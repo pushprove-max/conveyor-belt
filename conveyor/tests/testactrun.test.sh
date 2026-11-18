@@ -32,9 +32,9 @@ trfree() { flock -n "$T/$CASE/slots/1" true; } # the pool's one slot is free
 
 # Bugs this guards (issue 517): the owner could not time one test file without a card. A run by hand ran more than the
 # file, or ran it with no test slot, beside the cards' runs; its record did not say how it went or how long it took;
-# its slot stayed taken; its time was lost to the next card that changed the file, which had no before.
+# its slot stayed taken.
 t_tarun() {
-  trsetup; local id got w=$T/$CASE/wt
+  trsetup; local id
   id=$(loop testaction run tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the run did not start: $id"
   wait_until '[ -s "$STUB/tr-held" ]' "cat '$ST/testactions/$id.err'" || fail "the test command did not start"
   [ "$(cat "$STUB/tr-list")" = $'fail\ttests/x.test.sh' ] || fail "the command was not told to run that file alone: $(cat "$STUB/tr-list")"
@@ -50,12 +50,6 @@ t_tarun() {
   trfree || fail "the slot is still held once the run ended"
   grep -q 'running tests/x.test.sh' "$ST/testactions/$id.txt" && [ ! -L "$ST/testactions/$id.txt" ] || fail "the output was not kept: $(ls -l "$ST/testactions")"
   [ ! -e "$T/$CASE/cards/testactions/$id" ] && [ "$(git -C "$R" worktree list | wc -l)" = 1 ] || fail "the copy of main it ran in was left: $(git -C "$R" worktree list)"
-  # A later card whose change modifies the file, over a 1 CPU s budget, gets the run's time as its before.
-  tune '.test.fileBudget = 1'
-  git -C "$R" worktree add -q --detach "$w" && echo more >> "$w/tests/x.test.sh" && git -C "$w" add tests && mkdir -p "$w.testlog" \
-    && printf 'TESTRUN sec\ttests/x.test.sh\t9\t9\n' > "$w.testlog/r.log" || fail "the later card's worktree"
-  got=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && slowtests "$w" && jq -c 'map({file, before, from})' "$w.slow" ) )
-  [ "$got" = "[{\"file\":\"tests/x.test.sh\",\"before\":2.25,\"from\":\"run by hand, $(tarec "$id" '.end[:10]')\"}]" ] || fail "the later card's before is not the run by hand's: $got"
 }
 
 # Bug this guards (issue 517): a file that fails run by hand lost its output, or its record said it passed.

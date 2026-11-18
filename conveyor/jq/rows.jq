@@ -61,8 +61,6 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                verdicts: (if .step == "test" then .verdicts else null end), mainSec: (if .step == "test" then .mainRun.sec else null end),
                # A test line that passed only when what had not passed ran again (tests()).
                rerun: (if .step == "test" and .result == "pass" and .rerun != null then true else null end),
-               # A passing test line's files over the CPU budget (testrun.sh slowtests()), {file, cpu}: a note, never a finding.
-               slow: (if .step == "test" and .result == "pass" and (.slow | type) == "array" and (.slow | length) > 0 then [.slow[] | {file, cpu}] else null end),
                # A test line whose list left linked test files out (testcap(), testrun.sh): how many and its note, which the track shows.
                list: (if .step == "test" and (.list.left? // 0) > 0 then {left: .list.left, why: .list.why} else null end),
                # A test line that reused the pass before it (card()): it keeps that pass's rerun on the track.

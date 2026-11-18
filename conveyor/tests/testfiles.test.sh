@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the snapshot's tests part (lib/testfiles.sh testspart()), a test file's own budget and its "slow on
-# purpose" mark (testrun.sh slowtests()), and `conveyor.sh test-settings`, which saves them and the project's test
-# settings in the pack.
+# Engine cases: the snapshot's tests part (lib/testfiles.sh testspart()), a test file's "slow on purpose" mark, the
+# times a card's run records (testrun.sh slowtests()), and `conveyor.sh test-settings`, which saves the mark and the
+# project's test settings in the pack. No test file has a CPU budget (#349).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -45,8 +45,8 @@ t_tfpart() {
   printf '%s\n' '{"event": "filed", "file": "b.test", "issue": 44}' '{"event": "stopped", "file": "b.test", "guard": "perDay"}' '{"event": "filed", "file": "c.test", "issue": 46}' > "$ST/testrules.jsonl"
   mkdir -p "$ST/testactions" && printf '%s\n' '{"event": "filed", "file": "c.test", "issue": 47}' '{"event": "filed", "file": "d.test", "issue": 49}' > "$ST/testactions/filed.jsonl"
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
-  [ "$(jq -c '.files[] | select(.file == "a.test") | {cpu, median, change, runs: [.runs[].cpu], newest: (.runs[0] | {card, time}), lastRun, timedRuns, failedSteps, flaky, issue, budget, budgetFrom, over}' <<<"$got")" \
-    = '{"cpu":10,"median":3.5,"change":1.857,"runs":[10,3,4,2],"newest":{"card":"c-a.test-3","time":"2026-11-10T12:03:00Z"},"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:03:00Z","whole":false},"timedRuns":4,"failedSteps":2,"flaky":2,"issue":42,"budget":8,"budgetFrom":"project","over":true}' ] \
+  [ "$(jq -c '.files[] | select(.file == "a.test") | {cpu, median, change, runs: [.runs[].cpu], newest: (.runs[0] | {card, time}), lastRun, timedRuns, failedSteps, flaky, issue}' <<<"$got")" \
+    = '{"cpu":10,"median":3.5,"change":1.857,"runs":[10,3,4,2],"newest":{"card":"c-a.test-3","time":"2026-11-10T12:03:00Z"},"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:03:00Z","whole":false},"timedRuns":4,"failedSteps":2,"flaky":2,"issue":42}' ] \
     || fail "a.test's figures: $(jq -c '.files[] | select(.file == "a.test")' <<<"$got")"
   [ "$(jq -cS '.files | map({key: .file, value: .issue}) | from_entries' <<<"$got")" = '{"a.test":42,"b.test":44,"c.test":47,"d.test":49}' ] \
     || fail "each file's issue, the newest filed for it in any record: $(jq -c '[.files[] | {file, issue}]' <<<"$got")"
@@ -119,22 +119,21 @@ t_tfrunner() {
 # twice: named. o.test: one run short (10 then 16 at the end). f.test: 3 runs on record, too few. h.test: 14 twice,
 # over 10 by 40%, under the share. Bug caught: a usual that is the median of every run, the slow runs among them,
 # hides a file whose slow runs are half its record (merge.test.sh's 72 CPU s runs).
-# A runner that starts other test files whole (wholeOnly in the pack) is held to no budget: its CPU is the sum of its
-# case files', each timed with its own budget. r.test (wholeOnly) and c.test ran at 10, 10, 900 and 900 CPU s, far
-# over the 8 CPU s budget and over their usual: c.test is over budget and slower, r.test neither, with no budget.
-# Bug caught: conveyor/conveyor.test.sh showed as over budget and slower than usual forever, as no change can pass.
+# A runner that starts other test files whole (wholeOnly in the pack) is never slower than usual: its CPU is the sum
+# of its case files', each timed on its own. r.test (wholeOnly) and c.test ran at 10, 10, 900 and 900 CPU s, far over
+# their usual: c.test is slower, r.test not. Bug caught: conveyor/conveyor.test.sh showed as slower than usual
+# forever, as no change can pass. Bug caught too (#349): a file over the pack's old test.fileBudget, still in it, is
+# flagged over budget: no file or total of the part names a budget.
 t_tfslower() {
-  setup '[]'; tune '.test.slower = {share: 0.5, runs: 2, minRuns: 4} | .test.files = {"r.test": {wholeOnly: true}}'
+  setup '[]'; tune '.test.fileBudget = 8 | .test.slower = {share: 0.5, runs: 2, minRuns: 4} | .test.files = {"r.test": {wholeOnly: true}}'
   tf_runs s.test 10 10 16 16; tf_runs o.test 10 10 10 16; tf_runs f.test 10 16 16; tf_runs h.test 10 10 14 14
   tf_runs r.test 10 10 900 900; tf_runs c.test 10 10 900 900
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
   [ "$(jq -cS '[.slower, .totals.slower, (.files | map({key: .file, value: .slower}) | from_entries)]' <<<"$got")" \
     = '[["c.test","s.test"],2,{"c.test":true,"f.test":false,"h.test":false,"o.test":false,"r.test":false,"s.test":true}]' ] || fail "the files slower than usual: $(jq -c '[.slower, .files]' <<<"$got")"
   [ "$(jq -c '[(.files[] | select(.file == "s.test") | .usual), (.files[] | select(.file == "f.test") | .usual)]' <<<"$got")" = '[10,null]' ] || fail "the usual times: $got"
-  # Over budget: c.test and the four files at 14 or 16 CPU s, never the wholeOnly runner.
-  [ "$(jq -cS '[.totals.overBudget, (.files | map(select(.file | IN("c.test", "r.test")) | {key: .file, value: {budget, budgetFrom, over}}) | from_entries)]' <<<"$got")" \
-    = '[5,{"c.test":{"budget":8,"budgetFrom":"project","over":true},"r.test":{"budget":null,"budgetFrom":null,"over":false}}]' ] \
-    || fail "the wholeOnly runner: $(jq -c '[.totals, .files]' <<<"$got")"
+  [ "$(jq -c '[(.totals | keys), any(.files[]; has("budget") or has("budgetFrom") or has("over")), (.settings | has("fileBudget"))]' <<<"$got")" \
+    = '[["files","slower","steps"],false,false]' ] || fail "the part names a CPU budget: $(jq -c '[.totals, .settings, .files]' <<<"$got")"
 }
 
 # A project with no recorded file time still has the part (the page shows its step totals, never an error): an empty
@@ -152,7 +151,7 @@ t_tfempty() {
     jq -cn '{card: "c-3", issue: 3, step: "test", time: "2026-11-12T14:00:00Z", result: "pass", reused: true}'
     jq -cn '{card: "c-0", issue: 4, step: "test", time: "2026-11-01T12:00:00Z", result: "pass", wait: 100, run: 100}'; } >> "$ST/cards.jsonl"
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
-  [ "$(jq -c '[.files, .slower, .totals]' <<<"$got")" = '[[],[],{"files":0,"overBudget":0,"slower":0,"steps":{"count":2,"waitSec":4.5,"runSec":9}}]' ] \
+  [ "$(jq -c '[.files, .slower, .totals]' <<<"$got")" = '[[],[],{"files":0,"slower":0,"steps":{"count":2,"waitSec":4.5,"runSec":9}}]' ] \
     || fail "the part with no file time: $got"
 }
 
@@ -200,41 +199,45 @@ t_tfnever() {
     || fail "a file whose content was parsed before is parsed again: $got"
 }
 
-# A file with its own budget is held to it, not to the project's 5 CPU s, in the slow note (slowtests()) and in the
-# part: a.test (own 20) at 10 CPU s is no note; b.test (own 2) at 3 is one, against 2; c.test (none) at 6, against 5.
-# The test line the run makes (slowrec()) records each file's clock seconds, which the part reads. Bug caught: a slow
-# note on a file allowed more than the project budget, and none on one allowed less.
-# A file marked slow on purpose is in no slow note: m.test at 50 CPU s, over the budget, with the mark; and a CPU test
-# rule never files it (testrules.test.sh). n.test, at 9 with no mark, is one. The part counts m.test over budget but
-# not among the files over it that need work (overBudget: b.test, c.test and n.test). Bug caught: a file slow on
-# purpose named slow on every card's test line.
-t_tfownbudget() {
+# #349: no test file has a CPU budget. The pack still holds the old test.fileBudget of 5 and budgets of single files:
+# a.test's 20, b.test's 2. A card's run times each file (slowtests()) and its test line (slowrec()) records each
+# file's CPU and clock seconds, which the part reads, and holds no slow note. Bugs caught: a file over the old budget
+# flagged on the test line, or in the part; a file's times not recorded. m.test, marked slow on purpose, keeps its
+# mark in the part (a CPU test rule never files it: testrules.test.sh).
+t_tfnobudget() {
   setup '[]'; tune '.test.fileBudget = 5 | .test.files = {"a.test": {budget: 20}, "b.test": {budget: 2}, "m.test": {slowOnPurpose: "it starts the whole loop"}}'
-  mkdir -p "$R.testlog" && printf 'TESTRUN sec\t%s\t%s\t%s\n' a.test 11 10 b.test 4 3 c.test 7 6 m.test 60 50 n.test 10 9 > "$R.testlog/r.log"
+  mkdir -p "$R.testlog" && printf 'TESTRUN sec\t%s\t%s\t%s\n' a.test 11 10 b.test 4 3 c.test 7 6 m.test 60 50 > "$R.testlog/r.log"
   tf_card slowtests "$R" || fail "slowtests failed"
-  [ "$(jq -c 'map({file, budget})' "$R.slow")" = '[{"file":"b.test","budget":2},{"file":"c.test","budget":5},{"file":"n.test","budget":5}]' ] || fail "the slow note: $(cat "$R.slow")"
-  tf_card slowrec "$R" | jq -c '{card: "c-1", issue: 1, step: "test", time: "2026-11-10T12:00:00Z", result: "pass"} + .' >> "$ST/cards.jsonl"
+  [ ! -e "$R.slow" ] || fail "the run wrote a slow note: $(cat "$R.slow")"
+  got=$(tf_card slowrec "$R")
+  [ "$got" = '{"times":{"a.test":10,"b.test":3,"c.test":6,"m.test":50},"clocks":{"a.test":11,"b.test":4,"c.test":7,"m.test":60}}' ] || fail "the test line's times: $got"
+  jq -c '{card: "c-1", issue: 1, step: "test", time: "2026-11-10T12:00:00Z", result: "pass"} + .' <<<"$got" >> "$ST/cards.jsonl"
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
-  [ "$(jq -c '.files[] | select(.file == "a.test") | {budget, budgetFrom, over, lastRun}' <<<"$got")" = '{"budget":20,"budgetFrom":"file","over":false,"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:00:00Z","whole":false}}' ] \
+  [ "$(jq -c '.files[] | select(.file == "a.test") | .lastRun' <<<"$got")" = '{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:00:00Z","whole":false}' ] \
     || fail "a.test in the part: $(jq -c '.files[] | select(.file == "a.test")' <<<"$got")"
-  [ "$(jq -c '.files[] | select(.file == "c.test") | {budget, budgetFrom, over}' <<<"$got")" = '{"budget":5,"budgetFrom":"project","over":true}' ] || fail "c.test in the part: $(jq -c '.files[] | select(.file == "c.test")' <<<"$got")"
-  [ "$(jq -c '[(.files[] | select(.file == "m.test") | {over, slowOnPurpose}), .totals.overBudget]' <<<"$got")" = '[{"over":true,"slowOnPurpose":"it starts the whole loop"},3]' ] \
-    || fail "m.test in the part: $got"
+  [ "$(jq -c '[any(.files[]; has("budget") or has("over")), (.totals | has("overBudget")), (.files[] | select(.file == "m.test") | .slowOnPurpose)]' <<<"$got")" = '[false,false,"it starts the whole loop"]' ] \
+    || fail "the part names a CPU budget, or lost m.test's mark: $got"
 }
 
 # The Board saves the test settings through these commands: each saves its value in main's pack, and the next snapshot
-# shows it (its tests part's settings). c.test gets both of its own settings and then has both cleared: it leaves the
-# pack. Bug caught: a value written somewhere the snapshot does not read, or a clear that left the file's entry.
+# shows it (its tests part's settings). c.test gets its mark and then has it cleared: it leaves the pack. Bug caught:
+# a value written somewhere the snapshot does not read, or a clear that left the file's entry. No test file has a CPU
+# budget (#349): the old budget commands (budget, file-budget, file-budget-clear) are usage errors and change nothing.
 # The snapshot holds this part whole (testrules.test.sh reads it there), so the part is read here. Each setting is
 # saved by testsettings(), the function `conveyor.sh test-settings` calls; one is saved through the command itself.
 # A bad value is refused with why, and the pack is left byte for byte as it was. Bug caught: a mark with no reason
-# (blank, or more than one line) saved, which slowtests() then honours, hiding a slow file for no stated reason.
+# (blank, or more than one line) saved, which the test rules (testrulespass()) then honour, hiding a slow file for
+# no stated reason.
 tf_refused() { # the refusals, each checked: in a shell with testsettings() loaded (tf_as test-settings)
   local a out
-  for a in 'budget 0' 'budget 0.5' 'budget eight' 'slow-issues yes' 'file-budget a.test -3' 'file-budget gone.test 5' 'file-budget ../a.test 5'; do
+  for a in 'slow-issues yes' 'slow-mark gone.test x' 'slow-mark ../a.test x'; do
     # shellcheck disable=SC2086 # each is the command's words
     out=$(testsettings $a 2>&1) && fail "test-settings $a was taken"
     [[ $out == *"nothing changed"* ]] || fail "test-settings $a did not say why: $out"
+  done
+  for a in 'budget 12' 'file-budget a.test 20' 'file-budget-clear a.test'; do
+    # shellcheck disable=SC2086 # each is the command's words
+    testsettings $a > /dev/null 2>&1; [ $? = 2 ] || fail "the budget command test-settings $a was not a usage error"
   done
   for a in '' '   ' $'one\ntwo'; do
     out=$(testsettings slow-mark a.test "$a" 2>&1) && fail "the mark with the reason '$a' was taken"
@@ -243,7 +246,7 @@ tf_refused() { # the refusals, each checked: in a shell with testsettings() load
 }
 tf_saved() { # the settings saved: in a shell with testsettings() loaded (tf_as test-settings)
   local a
-  for a in 'budget 12' 'slow-issues true' 'file-budget a.test 20.5' 'file-budget c.test 30' 'slow-mark c.test x' 'file-budget-clear c.test' 'slow-mark-clear c.test'; do
+  for a in 'slow-issues true' 'slow-mark c.test x' 'slow-mark-clear c.test'; do
     # shellcheck disable=SC2086 # each is the command's words
     testsettings $a > /dev/null || fail "test-settings $a failed"
   done
@@ -258,8 +261,8 @@ t_tfsettings() {
   [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "a refused value changed the pack"
   tf_as test-settings tf_saved || fail "a setting was not saved"
   loop test-settings slow-mark b.test '  starts a loop of its own  ' || fail "the mark of b.test failed"
-  got=$(tf_in testspart 2026-11-09 | jq -c '.settings | {fileBudget, slowIssues, files}')
-  [ "$got" = '{"fileBudget":12,"slowIssues":true,"files":{"a.test":{"budget":20.5},"b.test":{"slowOnPurpose":"starts a loop of its own"}}}' ] \
+  got=$(tf_in testspart 2026-11-09 | jq -c '.settings | {slowIssues, files}')
+  [ "$got" = '{"slowIssues":true,"files":{"b.test":{"slowOnPurpose":"starts a loop of its own"}}}' ] \
     || fail "the part's settings: $got"
 }
 

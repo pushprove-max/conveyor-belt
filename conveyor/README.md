@@ -338,11 +338,8 @@ Each run of a card's changed tests writes one `test` line to the card records, `
 - `tests`: the counts a host's runner prints; a failed run also has `failures`, `reason` and `tail`.
 - `timed`: each test file the card's change adds or modifies that its own run timed, `{file, sec, cpu}`: its clock
   seconds and its CPU seconds (null when its runner gave none).
-- `times`: the CPU seconds of every test file the card's own run timed, `{"<file>": <CPU seconds>}`: the next card
-  run's check of two slow runs in a row, and once the card has landed, a later card's "before" of those files (below).
-- `slow`: each test file the card's own run found over the CPU budget (below), `{file, sec, cpu, budget, changed}`,
-  and of a file the card's change only modifies, `before` (main's recorded CPU seconds of it, null when none is
-  recorded) and `from` (where that time came from, when there is one). A note, never a finding.
+- `times`: the CPU seconds of every test file the card's own run timed, `{"<file>": <CPU seconds>}`: what the test
+  rules and the Tests page read (below).
 
 A card whose tests already passed on what it holds, while it waited to land, is not run again: its `test` line is a
 `pass` with `reused: true` and no run. No passing output is kept. The Board's card shows the Test step's time as
@@ -584,28 +581,24 @@ command; other commands still run. The refusal tells the session to narrow to on
 output it has, or to stop and report what it knows. The card's test step still runs the tests before the card lands. Not counted: a command that sets its own EXIT trap, and a test run from a
 script or `bash -c` text.
 
-### The CPU budget of a test file
+### Test file times
 
-The budget is CPU seconds, not clock seconds: on a busy machine (a load of 8 to 90) a file's clock time measures
-the load, not the file. Its CPU seconds (user plus system, of the file's
-process tree) stay the same however busy the machine is.
+Conveyor records the clock seconds and the CPU seconds of each test file it runs, and the Board's Tests page shows
+them. No test file has a CPU budget. On a busy machine (a load of 8 to 90) a file's clock time measures the load, not
+the file. Its CPU seconds (user plus system, of the file's process tree) stay the same however busy the machine is.
 
 A runner times each test file it runs, from its start to its end, and measures its CPU seconds, and says so in its
 log as the file ends: `TESTRUN sec<TAB><file><TAB><seconds><TAB><CPU seconds>` (the last line of a file counts; a
 run again, and a run after a fix session that keeps what passed, keep the times the runs before them took of the
-files they do not run). A line with no CPU seconds is recorded, and its file held to no budget. The card's test line
-holds each test file its change adds or modifies with both times (`timed`). A file over the pack's
-`test.fileBudget` CPU seconds (default 8: a file whose CPU stays under 8 s fits in about 4 s of clock time on a
-quiet machine, with its worker threads) is on the card's test line (`slow`). A file with a budget of its own
-(`test.files`, below, The test files in the snapshot) is held to that budget in place of `test.fileBudget`, and a file
-marked slow on purpose is held to no budget: it is never on the `slow` line and no CPU test rule files it. The test
+files they do not run). A line with no CPU seconds is recorded with its clock seconds only. The card's test line
+holds each test file its change adds or modifies with both times (`timed`). The test
 line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`). A run after a fix session lists
 the files it kept as passed and did not run (`carried`): their times are from an earlier run, and the test judge
 does not count them as a run of that file.
 
 **How a split is checked.** A split does not lower the CPU seconds summed: each new file has its own start-up. It
-gives files that each fit the budget and run side by side. So the check of an Optimize card (Bug cards: the new tests
-fail without the fix, below) passes a split when every case passes, each new file is at or under its budget, and the
+gives files that run side by side. So the check of an Optimize card (Bug cards: the new tests
+fail without the fix, below) passes a split when every case passes and the
 CPU seconds summed are at most the old file's median on record plus a start-up allowance for each new file. The check
 measures the allowance: it runs the first new file with no case selected. When the test command starts node --test,
 pytest, go test, cargo test or rspec, Conveyor runs that runner on the file itself, with the runner's own filter set
@@ -616,14 +609,7 @@ file, so its CPU seconds are not start-up. When the run is not used, fails or gi
 the pack's `test.splitAllowance` (default 1). The reason of a refused split says which: the file the allowance was
 measured on, or the pack's value and why. It measures only when the sum is over the old file's median.
 
-**A budget of its own.** A file whose cases cannot fit the budget without losing what they test gets a budget of its
-own in `test.files`. The Board's Tests page sets it (`conveyor.sh test-settings file-budget`, below). The build of an
-Optimize or speed-up card can also propose one with an `OWN-BUDGET:` line, with a change or with no change. Its card
-then stops for the owner's yes, and the yes sets that budget (Bug cards, below). When the build changed no file, the
-yes sets the budget and closes the issue. Nothing is built, reviewed or landed.
-
-A project whose test command prints no `TESTRUN sec` lines records no test times, and no file of it is held to the
-budget. The plugin ships a helper for it, `conveyor/tools/testtime.sh <file> -- <command>...`: it runs the command
+A project whose test command prints no `TESTRUN sec` lines records no test times. The plugin ships a helper for it, `conveyor/tools/testtime.sh <file> -- <command>...`: it runs the command
 once, then prints the file's `TESTRUN sec` line, with its clock seconds and its CPU seconds (the user plus system time
 of all the command started); the command's output and exit code stay its own. A test script that runs the test files
 one by one, writing `== <file>` and `-- ok|FAIL <file>` lines to its log in `CONVEYOR_TEST_LOG`, copies the helper
@@ -638,7 +624,7 @@ cat "$out"; grep '^TESTRUN sec' "$out" >> "$CONVEYOR_TEST_LOG/<its log>"
 report Conveyor can read. The pack's `test.report` says how: `format`, and `path`, the report file or a folder of
 report files, from the repository root (no `path`: the command's own output). After each test run, Conveyor reads
 the report files written during that run and records each test file's clock seconds. A report gives no CPU seconds,
-so these files are "Wall only" on the Board's Tests page, and no CPU budget holds them. When the runner's log also
+so these files are "Wall only" on the Board's Tests page. When the runner's log also
 has a `TESTRUN sec` line for a file, that line wins.
 
 | Runner | Report option in the test command | `format` | `path` |
@@ -691,9 +677,8 @@ failed cases of it). The run's log says so with `TESTRUN why<TAB><file><TAB>pass
 the test line's `why` holds it too. A file with no `TESTRUN inputs` line is never kept off in this way.
 The full test suite does not use the cache. A path that is absolute or contains `..` is not kept.
 
-Slow-test findings are notes. A file over the budget never sends a card to its review, a fix or another test step:
-the card lands on its passing run, its test line names the file, the Board's Tests bar of the card shows it ("slow:
-<file> <CPU s>"), and nothing is filed as a follow-up. Conveyor files an issue about a test file only by a test
+A slow test file never sends a card to its review, a fix or another test step, and nothing is filed for it as a
+follow-up. Conveyor files an issue about a test file only by a test
 rule (Test rules, below), behind its switch and guards. The pack's `test.slowIssues` files nothing.
 
 The issue that filing kept for each file is still in `slow.json` in the state folder. A file it names comes off card
@@ -704,28 +689,12 @@ cheaper. The full test suite and the whole test on main are given no such list a
 lists the files kept off, with why and their issue; the Board's Health panel draws them as its "Kept off card tests"
 line. An issue a test rule files keeps no file off.
 
-Main's CPU seconds of a file (its "before") come from records, never from running the tests again: no test runs a
-second time only to be timed, and the card's test step runs each selected file once, in the card's own worktree. The
-before is the newest of these records of the file:
-
-- the newest card that ran the file and landed: its test lines' `times` (above), the last of them holding the file,
-  dated by its `landed` line (`card #<issue>, <day>`);
-- the latest test-speed survey (below): `.conveyor/test-times.json` on the commit the change is on,
-  `{"files": {"<file>": {"sec": <s>, "cpu": <CPU s>}}}`, dated by the commit that last wrote it (`test-speed survey,
-  <day>`);
-- a run of the file by hand that passed (`conveyor.sh testaction run`, below, Test actions): its record's `cpu`, dated
-  by its end (`run by hand, <day>`).
-
-A file none of them records has no before.
-
 ### The test files in the snapshot
 
-One budget for all test files cannot tell a file that is slow on purpose from one that got slower: a file over the
-budget from the start shows no change when it gets three times slower. So the snapshot's `tests` part compares each
-file with its own usual time. It is made from the card test lines (those of retried cards too), the whole-suite runs
+The snapshot's `tests` part compares each test file with its own usual time. It is made from the card test lines (those of retried cards too), the whole-suite runs
 and the test files of main's checkout, and holds:
 
-- `settings`: the pack's `fileBudget`, `slowIssues`, `slower` (`{share, runs, minRuns}`), `files` (each file's own
+- `settings`: the pack's `slowIssues`, `slower` (`{share, runs, minRuns}`), `files` (each file's own
   settings, as the pack holds them), `report` (the pack's `test.report`, null with none: the runner a Wall only
   file's status names) and `cpuTime` (Record CPU time: `{file, was, command}`, the one test file the test command
   runs and the command wrapped in `conveyor/tools/testtime.sh`, which `conveyor.sh test-settings cpu-time <file>` saves;
@@ -759,11 +728,10 @@ and the test files of main's checkout, and holds:
   neither way), `flaky` (its entries in the flaky-test record, its cases' entries too, the
   entries a runner names as its own among them), `issue` (the issue last
   filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
-  `conveyor.sh testissue`, else null), `budget` and `budgetFrom` (`file`: its own; `project`: `test.fileBudget`), `slowOnPurpose`
-  (the reason of its mark, else null), `over` (`cpu` is over its budget; false with no `cpu`), `usual` and `slower` (below).
-  A `wholeOnly` file starts other test files whole, so its CPU seconds are the sum of theirs, and each of them has its
-  own budget. It has no budget of its own: its `budget` and `budgetFrom` are null, and its `over` and `slower` are
-  false. Each file also has `optimize`: each issue the Board filed for it (`testactions/filed.jsonl`: the Optimize
+  `conveyor.sh testissue`, else null), `slowOnPurpose`
+  (the reason of its mark, else null), `usual` and `slower` (below).
+  A `wholeOnly` file starts other test files whole, so its CPU seconds are the sum of theirs, each of them timed on
+  its own. Its `slower` is false. Each file also has `optimize`: each issue the Board filed for it (`testactions/filed.jsonl`: the Optimize
   issues, and the older speed-up issues), newest first. Each has `issue`, `time` (when it was filed), `state` (`open`:
   no card took it; `building`; `blocked`, with `reason`; `landed`, with `sha` and `landed`, the time; `closed`: its card
   closed it with no landing), `fix`, `into`, `before` and `after` (from the `speed` of the `bugproof` line of its
@@ -787,7 +755,7 @@ and the test files of main's checkout, and holds:
 - `slower`: the names of the files slower than their usual;
 - `edits`: each entry of the `testedits` of the landed cards (below), newest first, with the card's `card`, `issue`
   and `time` (when it landed); the newest 5 of each file;
-- `totals`: `files` (those with CPU seconds on record), `overBudget` (over their budget and not slow on purpose), `slower`, and `steps`: the card
+- `totals`: `files` (those with CPU seconds on record), `slower`, and `steps`: the card
   test steps that ran in the 7 days to today, `{count, waitSec, runSec}`, with the seconds they waited for a test slot
   and the seconds their test commands ran.
 
@@ -817,8 +785,7 @@ raise the time they are compared with; it is null with fewer runs on record. Con
 
 A file's own settings are in the pack's `test.files`, by its path from the repository root:
 
-- `budget`: the CPU seconds the file may use, in place of `test.fileBudget` (at least 1);
-- `slowOnPurpose`: why the file is slow on purpose, one line that is not blank. Such a file is held to no budget.
+- `slowOnPurpose`: why the file is slow on purpose, one line that is not blank. The CPU test rule never files it.
 - `cardMode` and `wholeOnly`, of a meta-runner, a test file that starts other test files whole (read by the
   project's changed-tests script, which marks each file it starts and logs `TESTRUN nested <file> <inner file>`
   for each such start): `cardMode` is the `NAME=VALUE` that makes the file run its own checks with a stub in place of
@@ -827,18 +794,17 @@ A file's own settings are in the pack's `test.files`, by its path from the repos
   the suite of `release-prep` and `release`. A meta-runner with neither fails a card's Test step, which names the file and the two marks.
 
 ```json
-"test": {"command": "...", "files": {"conveyor/tests/merge.test.sh": {"budget": 30},
-  "conveyor/tests/e2e.test.sh": {"slowOnPurpose": "runs the whole loop end to end"}}}
+"test": {"command": "...", "files": {"conveyor/tests/e2e.test.sh": {"slowOnPurpose": "runs the whole loop end to end"}}}
 ```
+
+The pack's `test.fileBudget`, a `budget` in `test.files` and a test rule with the measure `budget` are ignored.
+`doctor` names them on one line while the pack holds them.
 
 The Board saves these settings with `conveyor.sh test-settings`, which changes main's pack (`.conveyor/project.json`)
 and nothing else. Each command checks its value and the changed pack (lib/pack.sh) before it saves; a bad value is
 refused with the reason, and the pack does not change:
 
-- `test-settings budget <CPU s>`: `test.fileBudget`, a number of at least 1;
 - `test-settings slow-issues <true | false>`: `test.slowIssues`, which files nothing now (Test rules, below);
-- `test-settings file-budget <file> <CPU s>`: the budget of one file that main's checkout tracks;
-- `test-settings file-budget-clear <file>`: that budget removed; the file is held to `test.fileBudget` again;
 - `test-settings slow-mark <file> <reason>`: the "slow on purpose" mark of one file that main's checkout tracks, with
   its reason (the spaces at its ends removed);
 - `test-settings slow-mark-clear <file>`: that mark removed;
@@ -860,7 +826,6 @@ A rule has a `name`, `on`, one `measure`, one `limit`, `runs` (the card test run
 and `minRuns` (the least count of the file's card test runs on record). The measures, from the card test lines and
 the flaky-test record:
 
-- `budget`: CPU seconds over `limit` times the file's budget (its own in `test.files`, else `test.fileBudget`);
 - `usual`: CPU seconds over `limit` times its usual, the median of its runs before its last `runs` runs ("slower than
   its usual");
 - `clock`: clock seconds over `limit` times its CPU seconds, in runs of at least `minClock` clock seconds (default 0);
@@ -868,17 +833,17 @@ the flaky-test record:
   `days` days (default 7);
 - `failed`: at least `limit` card test steps that failed in it in the last `days` days (default 7).
 
-`budget` and `usual` are the CPU rules. A file two rules match is filed by the first rule in the list.
+`usual` is the CPU rule. A file two rules match is filed by the first rule in the list.
 
 ```json
 "test": {"rules": {"on": true, "perDay": 3, "list": [
-  {"name": "over budget", "on": true, "measure": "budget", "limit": 1, "runs": 3, "minRuns": 3}]}}
+  {"name": "slower than usual", "on": true, "measure": "usual", "limit": 1.5, "runs": 3, "minRuns": 5}]}}
 ```
 
 The guards, each a pack setting with a default, stop a match in this order:
 
 - `off`: the switch is off;
-- `slowOnPurpose`: a file marked slow on purpose is never filed by a CPU rule;
+- `slowOnPurpose`: a file marked slow on purpose is never filed by the CPU rule;
 - `oneAFile`: an earlier rule matched the file in the same pass;
 - `open`: the issue last filed for the file is open, whichever rule matched it; an issue whose state cannot be read
   (or that is closed with no closing time) counts as open, so nothing is filed;
@@ -998,8 +963,7 @@ the title's next word. Such a change keeps what the file tests, so its tests pas
 there. The file runs alone, with the change, on a test slot, with the pack's `test.command`. It must pass, and its CPU
 seconds must be lower than its median on record (the median the Tests page shows). The card's `bugproof` line (result
 `ok` or `fail`) names the file and both numbers: `speed: {file, before, after}`. When the file is not faster, the card
-is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s now; its budget is <budget> CPU s",
-with no review. When the file
+is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s now", with no review. When the file
 fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
 shown the result.
 
@@ -1009,10 +973,10 @@ another test file, or deletes it. No test must fail on main's code. The check de
 
 - The change keeps the file and adds no test file: the check is the speed-up check above.
 - The change adds test files (a split): the new files run alone, with the change, on a test slot, and so does the rest
-  of the old file when the change keeps it. They must pass, and each file must be at or under its budget. Their CPU
-  seconds summed must be at most the old file's median plus a start-up allowance for each file the split adds (The
-  CPU budget of a test file, above). Else the card is blocked with no review. The reason names each file over its
-  budget and by how much, and a sum over its limit with the allowance.
+  of the old file when the change keeps it. They must pass. Their CPU
+  seconds summed must be at most the old file's median plus a start-up allowance for each file the split adds (Test
+  file times, above). Else the card is blocked with no review. The reason names the sum, how far it is over its limit,
+  and the allowance.
 - The change removes the file and adds no test file (a delete, or a merge into another file): it is not run with the
   change. The file runs alone on main's code, and the review gets the cases that its runner named. The review must
   name, for each case, the test that still covers it, one line each: `COVERED-BY: <test file>: <case>`. Such a line is
@@ -1025,20 +989,8 @@ removes the file and changes another test file is a merge into that file; one th
 delete.
 
 The build of a speed-up or Optimize card is told the target. Before the build, the file runs alone on main's code to
-count its cases. The brief gives the file's CPU seconds on record and its budget, its count of cases and their average
-CPU seconds, and how many files a split alone needs to fit the budget. It also says how the check above takes a split.
-When the build finds that the file's cases cannot fit the budget without losing what they test, it keeps the file and
-ends its reply with one line: `OWN-BUDGET: <CPU s> CPU s: <why>`. The check then holds the file to that budget in place
-of its own. After a review that lets the card land, the card stops for the owner's yes, as a visible change does, and
-waits under Needs you with the reason "a budget of its own for the test file <file>: <CPU s> CPU s: <why>". This stop
-does not depend on the rule "visible changes need the owner's yes". With the yes (an approval line, as for a visible
-change), the next card sets the budget (`test.files`, as `conveyor.sh test-settings file-budget` does) and lands
-from the kept patch, with no build and no review. With no yes, the card stops again. With the owner's no (the Board's
-Decline), the issue is held. The card is not built again for it. A build can also change no file and end with the
-`OWN-BUDGET:` line. Then the card stops for the yes at once, with no review. With the yes, the next card sets the
-budget and closes the issue, and the closed line names the budget. No build, review or landing runs. A yes with a
-condition sets no budget. The card stops and names the condition. Set the budget it asks for on the Board's Tests page,
-then shut the issue.
+count its cases. The brief gives the file's CPU seconds on record, its count of cases and their average
+CPU seconds. It also says how the check above takes a split.
 
 The loop retries a blocked card by itself when the check above has changed since the card was blocked. When the loop
 starts, it looks at each issue whose last card is blocked by an older version of this check. It retries the card one
@@ -1076,14 +1028,11 @@ first, so its measurements start while the machine is quiet. Its card:
 
 - runs each of the project's test files alone, one after another, each in one of the machine's test slots, and
   records each file's clock seconds and CPU seconds (user plus system, of the run and all it started), in its report
-  and in `.conveyor/test-times.json`, where a card's slow-test check takes the file's time before its change (The CPU
-  budget of a test file, above);
+  and in `.conveyor/test-times.json`;
 - rewrites the project's slowest lists and its survey report: every test
-  file with its clock and CPU seconds, and the files over the CPU budget (`test.fileBudget`, above);
-- names in the report each file newly over the budget (over it now, and not in the last report's list), for the
-  Foreman to file speed cards from.
+  file with its clock and CPU seconds.
 
-It changes no test and no budget. It is a card, not a whole-suite run on main: the whole test on main (above) runs
+It changes no test. It is a card, not a whole-suite run on main: the whole test on main (above) runs
 only on its own schedule.
 
 The settings, in the pack's `test`:
@@ -1101,7 +1050,7 @@ whatever the loop's restarts; one GitHub did not take is filed at the next look 
 Setup asks "Run a first test-speed survey now?" (yes or no) while the pack has no saved answer, and saves the answer
 as the pack's `test.firstSurvey`. Yes files one issue, "Test-speed survey, first", of the same kind and picked only in
 the same hour: its card measures every test file alone (clock and CPU seconds) and writes the report as above, and
-names in it, for the Foreman to file as cards, each group of files over the budget and each shared helper the
+names in it, for the Foreman to file as cards, each shared helper the
 measurements point to (a slow library call many files repeat, a costly fixture, a runner setting). No files none.
 Either way the monthly survey still runs unless `test.survey` is `false`. Setup run again does not ask again; to run a
 survey later, run `/conveyor-belt:setup --survey`, or `conveyor.sh setup --survey yes` from a shell, which files
@@ -1110,8 +1059,7 @@ another first-survey issue.
 ### The test-speed rules
 
 Every project's cards and reviews get the plugin's general test-speed rules, with no setup: the "Keep tests fast"
-section of the core card rules (`conveyor/rules/card-core.md`). A test file runs alone in under the project's CPU budget
-(`test.fileBudget`, default 8 CPU s); no wrapper that only runs other tests again and no second case of one behaviour;
+section of the core card rules (`conveyor/rules/card-core.md`): no wrapper that only runs other tests again and no second case of one behaviour;
 one fixture, render or build per file where the cases allow it, and a case that runs several fixtures one after another
 split into one case per fixture; the project's shared fast test helpers rather than the slow real thing, unless the
 test is about that thing, and the function called rather than the whole program run when only the function is under
@@ -1239,9 +1187,7 @@ command writes it and kept when the run ends. Its `<id>.json` holds `id`, `actio
 `result` (pass or fail; null until it ends, or when it did not run), `sec` (the file's clock seconds, as its runner
 timed it, else the command's), `cpu` (the file's CPU seconds; null when its runner gave none), `wait` (the seconds it
 waited for its slot), `pid` while it runs, and `reason` for a failed one. `conveyor.sh testaction stop <id>` ends it,
-and every process it started, and frees its slot; its record says stopped. A run that passed counts as a recorded
-time of the file, as one from a landed card does: a later card that modifies the file gets it as its before, from
-`run by hand, <day>` (above, The CPU budget of a test file).
+and every process it started, and frees its slot; its record says stopped.
 
 `conveyor.sh testissue <test file> <title> <body>` is the Board's File an issue about one test file: it files the
 issue through the GitHub write path, with the pack's type and its last priority, prints its address, and keeps

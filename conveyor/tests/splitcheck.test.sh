@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the check of an Optimize card's split, or of a sped-up test file (speedproof()), against the budget of
-# each file and a start-up allowance for each file a split adds.
+# Engine cases: the check of an Optimize card's split (speedproof()): its files' CPU seconds summed against the old
+# file's on record and a start-up allowance for each file a split adds. No file is held to a CPU budget (#349).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # speedproof() called as card() calls it, on card c7 of #7, whose change runs <change> in its worktree on main, where
-# f.test.sh (`echo slow`) has a median of 10 CPU s on record (whole-suite runs of 9, 10 and 11) and the pack's
-# test.fileBudget is 8. Each run under cards/mainrun/ times each file its list names `fail` at the CPU seconds
+# f.test.sh (`echo slow`) has a median of 10 CPU s on record (whole-suite runs of 9, 10 and 11) and the pack still
+# holds the old test.fileBudget of 8, which no file is held to. Each run under cards/mainrun/ times each file its list names `fail` at the CPU seconds
 # $STUB/cpu-<file> holds, and names the case one of it as passed; a line that names a case as well (a run with no case
 # selected) is timed at $STUB/cpu-probe, with no line when that is empty, and names no case unless $STUB/probe-whole
 # exists (PROBEWHOLE set: a runner with no case filter, which runs the file whole). The check's exit is in $RC and the first line of what the review is shown in $WHY.
-# The files given after <change> are those the split adds; OWNBUDGET, when set, is the budget the build proposes.
+# The files given after <change> are those the split adds.
 splitrun() { # <change> <cpu f.test.sh> <cpu f1.test.sh> <cpu f2.test.sh> <cpu probe> [<added file>...]
   local wt=$T/$CASE/cards/c7 c
-  setup '[]'
+  setup '[]'; tune '.test.fileBudget = 8'
   echo slow > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' || fail "main's file"
   for c in 9 10 11; do
     jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
@@ -45,22 +45,22 @@ EOF
 SPLIT='rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh'
 
 # Bug it catches (#158): an honest split is refused because its files, each with its own start-up, take more CPU
-# seconds summed than the old file (11 against 10). Each file fits the budget of 8, and the sum is within 10 plus the
-# allowance for its two files: the run with no case gives no CPU seconds, so the pack's test.splitAllowance (1) counts.
+# seconds summed than the old file (11 against 10). The sum is within 10 plus the allowance for its two files: the run
+# with no case gives no CPU seconds, so the pack's test.splitAllowance (1) counts. The review is shown each file's CPU
+# seconds, against no budget.
 t_splitfits() {
   splitrun "$SPLIT" '' 4 7 '' f1.test.sh f2.test.sh
-  [ "$RC" = 0 ] || fail "a split whose files each fit the budget, within the allowance, was refused: $WHY"
-  grep -q 'f1.test.sh, f2.test.sh passed in 11 CPU s summed (the median on record of f.test.sh is 10 CPU s), each file at or under its budget: f1.test.sh 4 of 8 CPU s, f2.test.sh 7 of 8 CPU s' "$T/$CASE/cards/c7.unfixed" \
-    || fail "the review is not shown each file against its budget: $(cat "$T/$CASE/cards/c7.unfixed")"
+  [ "$RC" = 0 ] || fail "a split within the allowance was refused: $WHY"
+  grep -qxF 'This change splits the test file f.test.sh, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, f1.test.sh, f2.test.sh passed in 11 CPU s summed (the median on record of f.test.sh is 10 CPU s): f1.test.sh 4 CPU s, f2.test.sh 7 CPU s.' "$T/$CASE/cards/c7.unfixed" \
+    || fail "the review is not shown each file's CPU seconds: $(cat "$T/$CASE/cards/c7.unfixed")"
   [ "$(st 'select(.step == "bugproof") | "\(.result) \(.speed.after)"')" = 'ok 11' ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
 }
 
-# Bug it catches: a split whose sum is fine (10, no more than the old file) passes with one file over the budget, so
-# the card lands with a file the next survey files again. The reason names the file and by how much.
+# #349: no test file has a CPU budget. Bug it catches: a split whose sum is fine (10, no more than the old file) is
+# refused for one file over the pack's old test.fileBudget of 8 (f1.test.sh at 9 CPU s).
 t_splitover() {
   splitrun "$SPLIT" '' 9 1 '' f1.test.sh f2.test.sh
-  [ "$RC" != 0 ] && [ "$WHY" = 'the split does not fit: f1.test.sh takes 9 CPU s, 1 over its budget of 8 CPU s' ] \
-    || fail "a split with a file over the budget was not refused, naming that file: exit $RC, $WHY"
+  [ "$RC" = 0 ] || fail "a split was refused for a file over the old budget: exit $RC, $WHY"
 }
 
 # Bug it catches: the allowance is guessed, not measured: with the pack's 1 CPU s the sum of 12 would pass (10 + 2 x 1),
@@ -79,12 +79,4 @@ t_splitprobewhole() {
   PROBEWHOLE=1 splitrun "$SPLIT" '' 6 7 6 f1.test.sh f2.test.sh
   [ "$RC" != 0 ] && [ "$WHY" = "the split does not fit: the files take 13 CPU s summed, 1 over the 12 CPU s a split of f.test.sh may take: 10 CPU s on record plus a start-up allowance of 1 CPU s (the pack's test.splitAllowance: the run of f1.test.sh with no case ran its case one: the test command runs the file whole) for each of the 2 files it adds" ] \
     || fail "a run with no case selected that ran the file's cases was taken as its start-up: exit $RC, $WHY"
-}
-
-# Bug it catches: a build that proposes a budget of its own for the file it sped up is taken at its word: the file,
-# faster than on record (9 against 10), still takes more than the 7 CPU s it proposes.
-t_speedownover() {
-  OWNBUDGET=7 splitrun 'echo fast > f.test.sh' 9 '' '' ''
-  [ "$RC" != 0 ] && [ "$WHY" = 'the file is over the budget of its own that the build proposes: f.test.sh takes 9 CPU s, 2 over its budget of 7 CPU s' ] \
-    || fail "a file over the budget its build proposes passed: exit $RC, $WHY"
 }

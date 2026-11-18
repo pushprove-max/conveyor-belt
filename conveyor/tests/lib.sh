@@ -323,8 +323,8 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
 }
 # The time of each case file <file>... whose every case the run selected (SEL) and timed (run_case: $T/<case>.sec and
 # $T/<case>.cpu), one a line, `<file's name><TAB><seconds><TAB><CPU seconds>`: the sums of its cases' own times, as
-# they run at once and the run's time is no one file's. For the loop's CPU budget of a test file (README.md, The test
-# step; the runner, CONVEYOR_TEST_TIMES).
+# they run at once and the run's time is no one file's. For the times the loop records of a test file (README.md, The
+# test step; the runner, CONVEYOR_TEST_TIMES).
 case_times() { # <case file>...
   local f c x u m n
   for f; do

@@ -29,14 +29,14 @@ t_hookrefusals() {
 
 # Bug: the test-speed rules lived in one project's own rules, so another project's cards wrote slow tests and their
 # reviews let them through. The core rules, which every project's cards and reviews are given with no setup, hold a
-# "Keep tests fast" section of four rules, each with its reason; a card's rules hold it whether or not the project
-# adds rules of its own (cardrules(), as the build, fix and review prompts are given them).
+# "Keep tests fast" section of three rules, each with its reason, and none holds a test file to a CPU budget, which no
+# file has (#349); a card's rules hold it whether or not the project adds rules of its own (cardrules(), as the build,
+# fix and review prompts are given them).
 t_speedrules() {
   local f=$SRC/rules/card-core.md s r p
   s=$(sed -n '/^Keep tests fast:$/,/^$/p' "$f")
-  [ "$(grep -c '^- ' <<<"$s")" = 4 ] || fail "the core card rules have no Keep tests fast section of four rules: $s"
-  for r in 'A test file runs on its own in under the project'"'"'s CPU budget (the pack'"'"'s `test.fileBudget`, default 8 CPU s)' \
-    'No wrapper that only runs other tests again, and no second case of one behaviour' \
+  [ "$(grep -c '^- ' <<<"$s")" = 3 ] && ! grep -qi 'budget' "$f" || fail "the core card rules have no Keep tests fast section of three rules, or name a CPU budget: $s"
+  for r in 'No wrapper that only runs other tests again, and no second case of one behaviour' \
     'One fixture, render or build per file where the cases allow it' 'is split into one case per fixture' \
     'Use the project'"'"'s shared fast test helpers rather than the slow real thing, unless the test is about that thing' \
     'call the function rather than run the whole program when only the function is under test'; do

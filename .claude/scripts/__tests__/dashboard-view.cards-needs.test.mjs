@@ -412,44 +412,18 @@ test('a card whose tests passed on re-run is drawn with "passed on re-run", neve
   assert.doesNotMatch(row.textContent, /re-run/);
 });
 
-// The owner, 2026-11-14: a test file over the CPU budget in a passing run is a note, never a finding: the card lands,
-// and its Tests bar in "Every step" notes it. Bugs caught: the note was on the test line alone, so the Board never showed
-// it; then one warning chip per file stacked 13 high in the label and ran under the next step's bar: now one quiet
-// "N slow files" chip opens a list outside the label, highest CPU seconds first.
-test('a passing test run with files over the CPU budget shows one "N slow files" chip opening a sorted list under the step', () => {
+// #349: no test file has a CPU budget, so a passing test run flags no file. Bug caught: a Tests bar in "Every step"
+// still shows an "N slow files" chip, and its list of files over the budget, from a step that holds an old slow list.
+test('a passing test run flags no slow file, though its step holds an old slow list', () => {
   const w = boot();
   const data = full();
-  const many = Array.from({ length: 13 }, (_, i) => ({ file: `conveyor/tests/f${i}.test.sh`, cpu: 50 + ((i * 7) % 13) + 0.34, budget: 8 }));
   const rec = (sec, slow) => ({ name: 'tests passed', state: 'done', sec, at: iso(T0 - sec * 1000), ...(slow === undefined ? {} : { slow }) });
-  data.panels.belt.data.cards[0].track = trackOf('++++>.', 'landing', { records: [rec(240, many), rec(180, [{ file: 's.test', cpu: 10.24 }]), rec(120, []), rec(60)] });
+  data.panels.belt.data.cards[0].track = trackOf('++++>.', 'landing', { records: [rec(240, [{ file: 's.test', cpu: 10.24, budget: 8 }]), rec(60)] });
   deliver(w, data);
-  const items = () => panel(w, 'belt').querySelectorAll('li[data-key="sample:c3-63"] details.track-detail .timeline > li.tl-item');
-  const [big, one, empty, missing] = Array.from(items());
-  const label = (li) => li.querySelector(':scope > .tl-label');
-  assert.deepEqual(Array.from(label(big).querySelectorAll('.chip'), (c) => [c.textContent, c.className]), [['13 slow files', 'chip chip-quiet']], 'one quiet chip, not 13 warning chips');
-  assert.doesNotMatch(label(big).textContent, /slow:/);
-  assert.equal(label(one).querySelector('.chip').textContent, '1 slow file');
-  assert.equal(label(empty).querySelector('.chip'), null, 'an empty slow list has no chip');
-  assert.equal(label(missing).querySelector('.chip'), null, 'a missing slow list has no chip');
-  // The list sits outside the label, so 13 files add nothing to the label's row.
-  assert.equal(label(big).querySelectorAll('*').length, label(one).querySelectorAll('*').length);
-  const list = big.querySelector(':scope > .tl-slow');
-  assert.equal(list.hidden, true, 'closed at first');
-  label(big).querySelector('button.tl-slow-open').click();
-  assert.equal(list.hidden, false);
-  assert.equal(list.querySelector('.tl-slow-budget').textContent, 'Over the 8 CPU s budget per file');
-  const rows = Array.from(list.querySelectorAll('.tl-slow-file'), (r) => [r.querySelector('.tl-slow-base').textContent, r.querySelector('.tl-slow-dir').textContent, r.querySelector('.tl-slow-cpu').textContent]);
-  const want = many.slice().sort((a, b) => b.cpu - a.cpu).map((x) => [x.file.slice(15), 'conveyor/tests', `${Math.round(x.cpu * 10) / 10} CPU s`]);
-  assert.equal(rows.length, 13);
-  assert.deepEqual(rows, want, 'file name, folder and CPU seconds, highest first');
-  assert.equal(rows[0][2], '62.3 CPU s');
-  // An open list stays open through a redraw, and the keyboard stays on its button (bug caught: the redraw put the
-  // focus back only on a fold or a bar, so a reader on the button lost their place at each snapshot).
-  const btn = label(big).querySelector('button.tl-slow-open');
-  btn.focus();
-  data.panels.belt.data.cards[0].tokens = { claude: 2000000, codex: 1000000 };  // a change, so the steps are drawn anew
-  next(w, data);
-  assert.notEqual(label(items()[0]).querySelector('button.tl-slow-open'), btn, 'the steps were drawn anew');
-  assert.equal(items()[0].querySelector(':scope > .tl-slow').hidden, false);
-  assert.equal(w.document.activeElement, label(items()[0]).querySelector('button.tl-slow-open'), 'the focus stays on the slow-files button');
+  const items = Array.from(panel(w, 'belt').querySelectorAll('li[data-key="sample:c3-63"] details.track-detail .timeline > li.tl-item'));
+  assert.ok(items.length >= 2);
+  for (const li of items) {
+    assert.doesNotMatch(li.textContent, /slow file|budget/i);
+    assert.equal(li.querySelector('.tl-slow, .tl-slow-open'), null, 'no slow list and no button for it');
+  }
 });

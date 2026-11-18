@@ -38,7 +38,8 @@ tarec() { jq -r "$2" "$ST/testactions/$1.json" 2>/dev/null; } # <id> <jq filter>
 # or changed the repo it reads; a snapshot that did not list the seat or the action.
 t_tajudge() {
   tasetup; local id out
-  # A test line that timed the file, over its budget, and a flaky entry of a case of it.
+  # A test line that timed the file, written while files had a CPU budget (its slow note, which the judge is not
+  # given: no file has a budget now, #349), and a flaky entry of a case of it.
   jq -cn '{card: "c1-5", issue: 5, step: "test", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "",
     times: {"tests/x.test.sh": 41.5, "tests/other.test.sh": 2}, clocks: {"tests/x.test.sh": 44}, slow: [{file: "tests/x.test.sh", sec: 44, cpu: 41.5, budget: 8, changed: false}]}' >> "$ST/cards.jsonl"
   # Bug it catches (#130): a file timed in whole-suite runs alone was "not timed" to the judge, while the Tests page
@@ -72,7 +73,7 @@ t_tajudge() {
   grep -q -- '--model m-tests --effort high' "$STUB/ta-args" || fail "the session did not start on the Tests seat's CLI, model and effort: $(cat "$STUB/ta-args")"
   out=$(cat "$STUB"/ta-prompt.*)
   grep -qF 'Test file: tests/x.test.sh' <<<"$out" && grep -qF '"times":41.5' <<<"$out" && grep -qF '"clocks":44' <<<"$out" \
-    && grep -qF '{"time":"2026-11-03T00:00:00Z","whole":true,"how":"full","cpu":45.5,"sec":50,"result":"ok"}' <<<"$out" && grep -qF '"budget":8' <<<"$out" && grep -qF 'c1-5 (#5)' <<<"$out" \
+    && grep -qF '{"time":"2026-11-03T00:00:00Z","whole":true,"how":"full","cpu":45.5,"sec":50,"result":"ok"}' <<<"$out" && ! grep -qi 'budget' <<<"$out" && grep -qF 'c1-5 (#5)' <<<"$out" \
     && grep -qF 'tests/x.test.sh: one' <<<"$out" && ! grep -qF 'other.test.sh' <<<"$out" || fail "the prompt does not name the file, its recorded times (its card runs and whole-suite runs), the cards that ran it and its flaky entries alone: $out"
   # Bug it catches (#188): the judge was given no failure, so it could not say why the file fails. It is given each
   # recent failure of the file alone, newest first: its verdict, card, failing cases and the end of its output; a step

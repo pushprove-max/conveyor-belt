@@ -14,11 +14,11 @@ const at = (h) => new Date(T0 - h * 3600000).toISOString();
 // wholeOnly and slow on purpose, one whole-suite run that failed, 400 CPU s in 487 s. NEVER: no run, flaky (it needs a
 // look, yet comes last: it has no time) and with issue #77. The snapshot's order: highest CPU s first.
 const file = (o) => ({ cpu: null, median: null, change: null, runs: [], lastRun: null, timedRuns: 0, wholeOnly: false, failedSteps: 0, flaky: 0,
-  issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, over: false, usual: null, slower: false, ...o });
+  issue: null, slowOnPurpose: null, usual: null, slower: false, ...o });
 const PART = { ...clone(TESTS), settings: { ...clone(TESTS.settings), files: { [WHOLE]: { wholeOnly: true, slowOnPurpose: 'runs every engine case' } } }, slower: [],
-  totals: { files: 2, overBudget: 0, slower: 0, steps: { count: 1, waitSec: 0, runSec: 600 } },
+  totals: { files: 2, slower: 0, steps: { count: 1, waitSec: 0, runSec: 600 } },
   files: [
-    file({ file: WHOLE, cpu: 400, median: 400, change: 0, wholeOnly: true, timedRuns: 1, over: true, slowOnPurpose: 'runs every engine case',
+    file({ file: WHOLE, cpu: 400, median: 400, change: 0, wholeOnly: true, timedRuns: 1, slowOnPurpose: 'runs every engine case',
       runs: [{ cpu: 400, sec: 487, card: null, time: at(2), whole: true, result: 'fail', issue: null, repo: 'sample', url: null }],
       lastRun: { sec: 487, cpu: 400, clockPerCpu: 1.218, time: at(2), whole: true } }),
     file({ file: CARD, cpu: 2, median: 2, change: 0, timedRuns: 1, flaky: 1,
@@ -53,38 +53,36 @@ test('Tests: every test file has a row: the card run, the whole-only file with i
   assert.equal(more.querySelector('.tests-run a.issue'), null, 'a whole-suite run links no card');
 });
 
-// Bug: conveyor/conveyor.test.sh, a runner (wholeOnly) whose CPU is the sum of its case files', showed Over budget for
-// ever and offered "File an issue: speed up", an issue no change can meet. WHOLE here is as the engine now gives such
-// a file (testfiles.test.sh, tfslower): not slow on purpose, 900 CPU s, no budget; its last run took 3 times its
-// CPU time on the clock, which the Board would show as Waits.
-test('Tests: a wholeOnly runner has "Runs other test files" in place of a budget, no Over budget or Waits, and no speed-up action', () => {
+// Bug: conveyor/conveyor.test.sh, a runner (wholeOnly) whose CPU is the sum of its case files', was flagged for ever
+// and offered "File an issue: speed up", an issue no change can meet. WHOLE here is as the engine now gives such a
+// file (testfiles.test.sh, tfslower): not slow on purpose, 900 CPU s, not slower; its last run took 3 times its CPU
+// time on the clock, which the Board would show as Waits.
+test('Tests: a wholeOnly runner has "Runs other test files", no Slower than usual or Waits, and no speed-up action', () => {
   const part = clone(PART);
   part.settings.files[WHOLE] = { wholeOnly: true };
-  Object.assign(part.files[0], { cpu: 900, median: 900, slowOnPurpose: null, budget: null, budgetFrom: null, over: false, slower: false,
+  Object.assign(part.files[0], { cpu: 900, median: 900, slowOnPurpose: null, slower: false,
     lastRun: { ...part.files[0].lastRun, cpu: 900, sec: 2700, clockPerCpu: 3 } });
   const w = boot({ tab: 'tests' }), d = full(); d.panels.tests.data.tests = part; deliver(w, d);
   const chips = cells(rowOf(w, WHOLE)).at(-1);
   assert.match(chips, /Runs other test files/);
-  assert.doesNotMatch(chips, /Over budget|Slower than usual|Waits|Slow on purpose/);
+  assert.doesNotMatch(chips, /budget|Slower than usual|Waits|Slow on purpose/i);
   assert.doesNotMatch(cells(rowOf(w, CARD)).at(-1), /Runs other test files/);
   act(rowOf(w, WHOLE), 'open').click();
   const more = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
-  assert.match(more.textContent, /Budget: none, it runs other test files/);
+  assert.match(more.textContent, /It runs other test files, and each of them is timed on its own\./);
   // No Optimize issue for a runner (#100: a click says why on its row, rather than a disabled button that does nothing).
   act(more, 'optimize').click();
   const shut = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
   assert.equal(act(shut, 'issue-title'), null, 'no Optimize issue for a runner');
-  assert.match(shut.querySelector('.tests-note-line').textContent, /^Optimize: Not done: It runs other test files, and each of them has its own budget\.$/);
-  // Bug: the budget editor saved a budget for the runner and said "budget of ... now 8 CPU s", which never applies.
-  assert.equal(act(shut, 'file-budget-field'), null, 'no budget editor for a runner');
+  assert.match(shut.querySelector('.tests-note-line').textContent, /^Optimize: Not done: It runs other test files, and each of them is timed on its own\.$/);
   assert.equal(act(shut, 'slow-mark-field'), null, 'no slow-on-purpose mark for a runner');
   act(shut, 'more').click();
   const menu = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
-  assert.deepEqual(['menu-budget', 'menu-mark'].map((a) => act(menu, a).disabled), [true, true], 'nor from its More menu');
+  assert.equal(act(menu, 'menu-mark').disabled, true, 'nor from its More menu');
   act(rowOf(w, CARD), 'open').click();
   const card = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === CARD);
   act(card, 'optimize').click();
-  assert.ok(act(tp(w), 'issue-title'), 'a file with a budget keeps its Optimize');
+  assert.ok(act(tp(w), 'issue-title'), 'a file a card runs keeps its Optimize');
 });
 
 // The clock time of the newest run, card or whole suite, and when it ran on hover.

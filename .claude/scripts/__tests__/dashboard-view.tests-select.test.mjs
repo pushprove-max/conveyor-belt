@@ -9,12 +9,12 @@ import { boot, deliver, next, settle, act, cases, clone, css, iso, T0, TA } from
 const test = cases(import.meta.url);
 const { MERGE, X, ID1, rec, snap, tp, rowOf, type, reply } = TA;
 const E2E = 'conveyor/tests/e2e.test.sh', BIG = 'conveyor/tests/big.test.sh';
-// Four files: MERGE and BIG over budget, E2E over its budget but slow on purpose (so not "Over budget"), X under it.
+// Four files: MERGE and BIG wait more than they work (2.5 times their CPU on the clock), E2E slow on purpose, X fast.
 // X is the runner (wholeOnly) when `runner` is set.
 function four({ model, runner = false } = {}) {
   const d = snap(model === undefined ? {} : { model }), files = d.panels.tests.data.tests.files;
   files.push({ ...clone(files[1]), file: BIG, cpu: 20, issue: null, flaky: 0, slower: false, failedSteps: 0 });
-  if (runner) Object.assign(files.find((f) => f.file === X), { wholeOnly: true, budget: null });
+  if (runner) Object.assign(files.find((f) => f.file === X), { wholeOnly: true });
   return d;
 }
 const show = (o) => { const w = boot({ tab: 'tests' }); deliver(w, four(o)); return w; };
@@ -27,15 +27,15 @@ const answers = (w) => Array.from(bar(w).querySelectorAll('.tests-selbar-answers
 const results = (list) => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ results: list })) });
 
 // Bug it guards (D1): the header checkbox that selected every file, the hidden ones too, or a bar that miscounted.
-test('Tests select: with the Over budget filter, the header checkbox selects only the over-budget rows, and the bar says their count', () => {
+test('Tests select: with the Waits filter, the header checkbox selects only the rows that wait, and the bar says their count', () => {
   const w = show();
   assert.equal(bar(w), null, 'no bar with no file selected');
-  filter(w, 'over');
+  filter(w, 'waits');
   assert.deepEqual(names(w), [MERGE, BIG]);
   act(tp(w), 'select-all').click();
   filter(w, 'all');
   assert.deepEqual(names(w).length, 4);
-  assert.deepEqual(checked(w), [MERGE, BIG], 'the over-budget rows alone');
+  assert.deepEqual(checked(w), [MERGE, BIG], 'the rows that wait alone');
   assert.equal(tp(w).querySelector('.tests-selected').textContent, '2 selected', 'the header says it');
   assert.equal(bar(w).querySelector('.tests-selbar-count').textContent, '2 selected');
   assert.equal(bar(w).querySelector('.tests-selbar-count').closest('[aria-live]').getAttribute('aria-live'), 'polite', 'the bar is announced');
@@ -123,7 +123,7 @@ test('Tests select: Optimize previews one issue a file and leaves the runner out
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'test-issue', repo: 'sample',
     args: [MERGE, `Optimize the test file ${MERGE}`, first.trim(), BIG, `Optimize the test file ${BIG}`, 'Split it in two.'] } }]);
   assert.deepEqual(answers(w), [`${MERGE}: Optimize, taken: https://github.com/example/sample/issues/601`, `${BIG}: Optimize, taken: https://github.com/example/sample/issues/602`,
-    `${X}: left out of Optimize: It runs other test files, and each of them has its own budget.`]);
+    `${X}: left out of Optimize: It runs other test files, and each of them is timed on its own.`]);
 });
 
 // Bug it guards (#104): "File N issues" with a title cleared said why only in the note at the page foot; the bar of the
@@ -140,15 +140,17 @@ test('Tests select: "File N issues" with a title cleared posts nothing and the b
   assert.ok(bar(w).querySelector('.tests-selbar-preview'), 'the preview stays open to fix it');
 });
 
-// Bug it guards: a figure that counted the files over budget, with no way to see which ones.
+// Bug it guards: a figure that counted the files of a status, with no way to see which ones. No figure counts files
+// over a CPU budget, which no test file has (#349).
 test('Tests select: a figure that counts files is a button that shows them alone, as its chip does', () => {
   const w = show();
   const fig = (k) => tp(w).querySelector(`[data-figure="${k}"]`);
   assert.equal(fig('files').querySelector('.rules-what').textContent, 'Timed files');
   assert.equal(fig('files').tagName, 'DIV', 'all the files: no filter to set');
-  fig('over').click();
-  assert.deepEqual(names(w), [MERGE, BIG]);
-  assert.deepEqual([fig('over').getAttribute('aria-pressed'), tp(w).querySelector('[data-filter="over"]').getAttribute('aria-pressed')], ['true', 'true']);
+  assert.equal(fig('over'), null, 'no figure of files over budget');
+  fig('slower').click();
+  assert.deepEqual(names(w), [MERGE]);
+  assert.deepEqual([fig('slower').getAttribute('aria-pressed'), tp(w).querySelector('[data-filter="slower"]').getAttribute('aria-pressed')], ['true', 'true']);
   fig('waits').click();
   assert.deepEqual(names(w), [MERGE, BIG], 'both last ran 2.5 times their CPU time');
   assert.equal(tp(w).querySelector('[data-filter="waits"]').getAttribute('aria-pressed'), 'true');

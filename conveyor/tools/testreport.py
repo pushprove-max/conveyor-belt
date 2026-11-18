@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """testreport.py <format> <worktree> <since> <path>...: the clock seconds of each test file, read from a test runner's
-own report (the pack's test.report, conveyor/README.md, The CPU budget of a test file), printed as the runner's log
+own report (the pack's test.report, conveyor/README.md, Test file times), printed as the runner's log
 line `TESTRUN sec<TAB><file><TAB><clock seconds>`, with no CPU seconds: a report gives clock time only.
 
 A path is a report file or a folder of them (every file under it). Only a file written at or after <since> (epoch

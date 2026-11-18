@@ -281,8 +281,7 @@ session with `taskpolicy -c utility`.
 Conveyor never lowers the Board's server, the Foreman's session or a process that you start.
 
 When a test run waits for the CPU and gets almost none for a few seconds, Conveyor gives it its normal priority back
-for a short time. Thus a test file does not time out because Conveyor lowered it. The CPU-second budget of a test file
-stays the same.
+for a short time. Thus a test file does not time out because Conveyor lowered it.
 
 `steer` is on when the host file does not set it. To turn it off, set **Card work yields to you** to Off on the Board's
 Rules tab, or run `conveyor.sh machine steer off`. Card work then runs at normal priority, as your own work does.

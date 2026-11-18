@@ -367,8 +367,8 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
           trc=''; began "$1" "$2" "$5"; continue
         fi
         [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); return 4; }
-        # Its test files over the time budget are a note on its test line (slowtests()), never a finding (card()).
-        trc=''; slowtests "$3" || rm -f "$3.slow"
+        # Its test files' times go on its test line (slowtests()).
+        trc=''; slowtests "$3" || :
         record "$1" "$2" test pass "$(jq -cn --argjson x "$(testrec "$3" 0 "$sec")" --argjson r "$(firstrun "$3" pass)" --argjson s "$(slowrec "$3")" '$x + $r + $s')"
         testrulespass > /dev/null
         tested "$3"; began "$1" "$2" "$5"; continue

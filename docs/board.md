@@ -105,7 +105,7 @@ Click the button, then click it again. The text next to the button shows that th
 ## Health and Lanes
 
 - **Flaky tests** and **Kept off card tests** in Health list each test case or file on its own row under **Show
-  output**. A row shows the name, a count ("3 re-runs", "2 runs over budget") and the issue filed for it, as a link,
+  output**. A row shows the name, a count ("3 re-runs", "Kept off") and the issue filed for it, as a link,
   when there is one.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
@@ -305,10 +305,6 @@ issue number, as a link, and the issue title.
 - A bug card shows "Proof run" on the Build step while its new tests run on main without its fix, with its test files
   run, "297 of 1161 test files". While all the test slots are in use, it shows "waiting for a test slot". No review
   runs then.
-- A passing Test step with test files over their CPU budget shows one chip, "3 slow files" or "1 slow file". It is a
-  note, not a warning: the card still lands. Click the chip to open the list under the step. Each row shows the file
-  name, its folder under it and its CPU seconds, "63.3 CPU s". The slowest file is first. When all the files went over one
-  budget, a line above the rows gives it (`test.fileBudget` in the pack, or the file's own budget).
 
 ## Tests page
 
@@ -334,20 +330,19 @@ build runs your whole suite once on the build machine, on a test slot. While it 
 have run, and **Stop** ends the build. When the build ends, the part shows its result. The Board refuses the button to
 a member. When the map is off, when `test.map` names a map that your project keeps itself, or when your language has no coverage tool, the part tells you and shows no button.
 
-The figures count the timed files, the files over budget, the files slower than usual and the files that wait more
-than they work, and give the slot wait and run time of the card Test steps of 7 days. Click the figure of files over
-budget, slower than usual or that wait, and the table shows those files only, as their filter chip does.
+The figures count the timed files, the files slower than usual and the files that wait more than they work, and give
+the slot wait and run time of the card Test steps of 7 days. No test file has a CPU budget. Click the figure of files
+slower than usual or that wait, and the table shows those files only, as their filter chip does.
 
 The table shows every test file of the project: each file's CPU seconds, its median, its last runs, the clock time of
-its newest run (Last run took; point at it to see when that run was) and its status (Over budget, Slower than usual,
-Waits, Flaky and others). A file with an issue shows a link to it, "#NN". The runs are those of card Test steps and of
+its newest run (Last run took; point at it to see when that run was) and its status (Slower than usual, Waits,
+Flaky and others). A file with an issue shows a link to it, "#NN". The runs are those of card Test steps and of
 whole-suite runs (Run full test suite, Push landed, and the suite of a release). A file with no time yet shows
 "Not timed yet" in place of its figures and comes after the timed files. A file with clock times only shows "Wall
-only": its test runner's report gives no CPU seconds, so its CPU columns are empty and no budget holds it. A file that only whole-suite runs run
+only": its test runner's report gives no CPU seconds, so its CPU columns are empty. A file that only whole-suite runs run
 (`wholeOnly` in the pack's `test.files`) shows "Whole suite only". Such a file starts other test files, and each of
-them has its own budget, so the file itself has no budget. It shows "Runs other test files" in place of a budget. It
-never shows Over budget, Slower than usual or Waits, and you cannot optimize it, set its budget or mark it slow on
-purpose.
+them is timed on its own. It shows "Runs other test files". It never shows Slower than usual or Waits, and you cannot
+optimize it or mark it slow on purpose.
 
 A Wall only file has no CPU seconds because no test runner's report gives CPU time. The status says why and names the
 runner from the pack's `test.report`. With no `test.report`, the clock time came from a `TESTRUN sec` line of your test
@@ -356,8 +351,8 @@ When your test command runs only this one test file, is one plain command and ge
 or `none`), the row has **Record CPU time**. It shows your test command now and the same command wrapped in the
 helper. Click **Save the test command** to save it in the pack's `test.command`. Only an admin can save it. The next
 run of the file records its CPU seconds, and Wall only goes away. In all other cases the row says why no action can
-apply, and shows none. Then wrap each test file's run with the helper in your test script (`conveyor/README.md`, The
-CPU budget of a test file).
+apply, and shows none. Then wrap each test file's run with the helper in your test script (`conveyor/README.md`, Test
+file times).
 
 A Whole suite only file costs more than its own time. A card's Test step never runs it, so a change to it is tested
 only by a whole-suite run. The status gives the CPU seconds of the newest whole-suite run on record. To fix it, open
@@ -442,14 +437,13 @@ the search box to see only the files that match it. The search and a filter chip
 Click a file's name to open its row. The row has four tabs: Overview, Timeline (with its count of events), Judge and
 Mutation. Overview shows first. Use the left and right arrow keys to move between the tabs.
 
-Overview starts with a box that says what state the file is in: how far over its budget it is, after which Optimize
+Overview starts with a box that says what state the file is in: its CPU seconds now, after which Optimize
 cards and by how much each one changed it, and whether its runs are slower or faster than usual. Under it is the
 verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
 buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Fix failures** (on a file
 with a flaky or main failure), **Fix hollow cases** (on a Hollow file), **Fix the waiting** (on a file that Waits),
-**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), **Raise this file's budget…**, Run and More. The step that the Board suggests is the primary button. For a file over its budget, it is
-Raise this file's budget… when Judge said keep, Run while an Optimize issue of the file is open, and Optimize in other
-cases. Six tiles follow: the CPU seconds now with the budget, the last 4 runs as bars, the last Optimize as a
+**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), Run and More. The step that the Board suggests is the primary
+button. Six tiles follow: the CPU seconds now with the median, the last 4 runs as bars, the last Optimize as a
 percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs
 caught and the mutants caught (or "not checked"). Point at a bar, or move the keyboard focus to it, to see its CPU
 seconds. The failures of the file come next, when it has any. Last, the 3 latest events, with a button that opens
@@ -471,7 +465,7 @@ Judge (Judge this test) and Run (Run this file now) start at once.
 Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers, its hollow cases,
 its surviving mutants (so that the card adds the assertions that catch them) and the newest verdict of Judge, with
 the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds Explain the slowdown,
-Mutation check, Keep a case off, Close its issue as done, Set a budget for this file and Mark as slow on purpose
+Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
 
 Mutation check puts the file at the front of the idle queue (`conveyor.sh mutate ask`). It does not start a check.
@@ -533,16 +527,15 @@ For each Mutation check, the bar shows the state of the check of that file. One 
 
 An Optimize card picks the fix: speed the file up, split it, merge it into another test file, or delete it. It does
 not need a test that fails on main. A file it keeps must pass in fewer CPU seconds than its median, else the card is
-blocked with "the file is not faster", both numbers and its budget (`conveyor/README.md`, Bug cards: the new tests
-fail without the fix). Each file of a split must pass at or under its budget, and the files' CPU seconds summed must be
-at most the old file's plus a start-up allowance for each new file. A file whose cases cannot fit its budget can get
-a budget of its own: the card stops under Needs you for your yes to it. For a delete or a merge, the review names the
+blocked with "the file is not faster" and both numbers (`conveyor/README.md`, Bug cards: the new tests fail without
+the fix). Each file of a split must pass, and the files' CPU seconds summed must be at most the old file's plus a
+start-up allowance for each new file. For a delete or a merge, the review names the
 test that still covers each case of the file. Each file of an action on many files gets its own action or issue, and
 its own answer. At most 3 test actions run at once. The others wait as queued and start in the order asked. Stop
 takes a queued one off before it starts.
 
 Settings is closed until you open it. It holds "Model for Tests actions" (Judge and Explain the slowdown need it),
-Test limits (the Load limit, `maxLoad` in the host file, and the project's test budget in the pack), and Auto-file,
+Test limits (the Load limit, `maxLoad` in the host file, and the files slow on purpose in the pack), and Auto-file,
 which shows the test rules (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test
 actions).
 

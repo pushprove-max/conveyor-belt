@@ -3,7 +3,7 @@
 # timeout: 300
 # Engine cases: a test file the slow-test record names comes off card test steps until the card of its "Slow test"
 # issue lands, and runs only in the full test suite (testrun.sh slowoffs(), slowoff()), in whole card runs. Its own
-# file: with budgetkept.test.sh's case the file would be over the CPU budget for one file.
+# file, so its whole card run runs beside budgetkept.test.sh's.
 # The helpers (reviews, landedone) are budget.test.sh's, ftended fulltest.test.sh's.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -20,7 +20,7 @@ t_budgetoff() {
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
   echo '9 6.5' > "$R/s.test"; git -C "$R" add s.test; git -C "$R" commit -qm s; git -C "$R" push -q origin main
-  tune '.test.fileBudget = 5 | .test.full = ". \"$STUB/test-cmd\""'
+  tune '.test.full = ". \"$STUB/test-cmd\""'
   cat >> "$STUB/test-cmd" <<'EOF'
 for f in *.test; do
   [ -f "$f" ] && ! awk -F'\t' -v f="$f" '$1 == "pass" && $2 == f { x = 1 } END { exit !x }' "${CONVEYOR_TEST_RERUN:-/dev/null}" || continue

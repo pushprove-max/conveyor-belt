@@ -176,7 +176,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
 # or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`,
 # and Release anyway: `release-run anyway <version> --by <Board user>`),
-# or test-settings (the Tests page's limits, and one file's budget or "slow on purpose" mark: `conveyor.sh test-settings`),
+# or test-settings (the Tests page's limits, and one file's "slow on purpose" mark: `conveyor.sh test-settings`),
 # or standing (the Rules tab's Done without asking: one standing kind of routine yes on or off, `conveyor.sh auto standing`),
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
@@ -395,7 +395,7 @@ def control_ok(body):
     if a == 'release-run':  # the Release panel's Release (the version typed), Draft notes and Run suite (prep, the version),
         # Release anyway over release-prep's red suite (anyway, the version) and Stop (stop)
         return (n == 1 and (v[0] == 'stop' or VERSION.fullmatch(v[0]) is not None)) or (n == 2 and v[0] in ('prep', 'anyway') and VERSION.fullmatch(v[1]) is not None)
-    if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's budget or mark
+    if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's mark
         return test_settings_ok(v)
     if a == 'standing':  # the Rules tab: one standing kind of routine yes, on or off
         return n == 2 and v[0] in STANDING and v[1] in ('on', 'off')
@@ -447,7 +447,7 @@ def test_files(action, args):
 # The Auto-file guards and settings of a rule, and a value of one, as `conveyor.sh testrules` takes them (it checks each).
 RULE_GUARDS = frozenset({'perDay', 'maxOpen', 'quietDays', 'burst'})
 RULE_KEYS = frozenset({'on', 'measure', 'limit', 'runs', 'minRuns', 'days', 'minClock'})
-RULE_VALUE = re.compile(r'true|false|budget|usual|clock|flaky|failed|[0-9]{1,6}(\.[0-9]{1,3})?')
+RULE_VALUE = re.compile(r'true|false|usual|clock|flaky|failed|[0-9]{1,6}(\.[0-9]{1,3})?')
 TEST_ISSUE_BODY = 2500  # the most characters of an issue body the Tests page files: 3 bytes each still fit MAX_CONTROL_BODY
 # The most files of one Tests page action on a list of files; such a body may be TEST_FILES_MAX times MAX_CONTROL_BODY.
 TEST_FILES_MAX = 20
@@ -455,9 +455,8 @@ MAX_TEST_LIST_BODY = TEST_FILES_MAX * MAX_CONTROL_BODY
 
 
 # A test file's path from the repository root, as the Tests page sends it (the host checks that main's checkout tracks
-# it); never one that starts with - or /. A budget in CPU seconds, as `conveyor.sh test-settings` takes it (1 or more).
+# it); never one that starts with - or /.
 TEST_FILE = re.compile(r'[A-Za-z0-9._@+][A-Za-z0-9._@+/-]{0,299}')
-BUDGET = re.compile(r'[1-9][0-9]{0,5}(\.[0-9]{1,3})?')
 # A price as typed, one word: `conveyor.sh prices set` checks it is $ per million tokens and says why it is not, so the
 # Rules tab shows the refusal (a negative or a word) in the engine's own words.
 PRICE = re.compile(r'\S{1,40}')
@@ -468,19 +467,15 @@ PROVIDERS = frozenset({'claude', 'openai', 'opencode', 'other'})
 
 
 def test_settings_ok(v):
-    """Whether args are one `conveyor.sh test-settings` command: budget <CPU s>, slow-issues true|false,
-    file-budget <file> <CPU s>, file-budget-clear <file>, slow-mark <file> <reason: one line>, slow-mark-clear <file>
-    or cpu-time <file> (Record CPU time: the pack's test command changed, an admin's alone)."""
+    """Whether args are one `conveyor.sh test-settings` command: slow-issues true|false, slow-mark <file> <reason: one
+    line>, slow-mark-clear <file> or cpu-time <file> (Record CPU time: the pack's test command changed, an admin's
+    alone)."""
     n, w = len(v), v[0] if v else None
-    if n == 2 and w == 'budget':
-        return BUDGET.fullmatch(v[1]) is not None
     if n == 2 and w == 'slow-issues':
         return v[1] in ('true', 'false')
-    if n == 3 and w == 'file-budget':
-        return TEST_FILE.fullmatch(v[1]) is not None and BUDGET.fullmatch(v[2]) is not None
     if n == 3 and w == 'slow-mark':
         return TEST_FILE.fullmatch(v[1]) is not None and said_ok(v[2])
-    if n == 2 and w in ('file-budget-clear', 'slow-mark-clear', 'cpu-time'):
+    if n == 2 and w in ('slow-mark-clear', 'cpu-time'):
         return TEST_FILE.fullmatch(v[1]) is not None
     return False
 

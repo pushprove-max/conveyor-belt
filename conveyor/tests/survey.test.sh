@@ -33,8 +33,7 @@ sv_looks() { local t n; for t; do n=$(sv_now "$t") && CONVEYOR_NOW=$n survey || 
 t_survey() {
   survey_start
   # Another day of the month, or the 1st outside the quiet hour (default 03:00 to 03:59): none. Then the 1st, in the
-  # hour: one issue, of the pack's second priority, whose card reports each file's clock and CPU seconds and the files
-  # over the CPU budget (test.fileBudget, default 8 CPU s). One filed outside the hour on the 1st would be kept with its
+  # hour: one issue, of the pack's second priority, whose card reports each file's clock and CPU seconds. One filed outside the hour on the 1st would be kept with its
   # time (kept, noted in $T/$CASE/dec before the later looks), and the one in the hour would not be filed.
   # Then not again that month: later in the hour, or on a later day. The next month's 1st: its own.
   months() {
@@ -48,9 +47,9 @@ t_survey() {
     && [ "$(kept)" = '["2027-01",100102,"2027-01-01T03:00:00Z"]' ] \
     || fail "a second survey issue was filed in one month, or the next month filed none, or not of the pack's second priority: $(filed '[.title, .labels]') $(kept)"
   jq -se '.[0].body | contains("each of the project'"'"'s test files alone") and contains("test slots") and contains("clock seconds")
-      and contains("CPU seconds") and contains("over the CPU budget of 8 CPU s") and contains("newly over the budget")
+      and contains("CPU seconds") and (contains("budget") | not)
       and contains("slowest lists") and contains("03:00 local time") and contains("write them to .conveyor/test-times.json")' "$STUB/filed" > /dev/null \
-    || fail "the survey issue does not ask for each file's clock and CPU seconds, written where the slow-test check reads its before (lib/testrun.sh beforetimes()), and the files over the budget: $(jq -sr '.[0].body' "$STUB/filed")"
+    || fail "the survey issue does not ask for each file's clock and CPU seconds, written to .conveyor/test-times.json, or it still names a CPU budget no file has: $(jq -sr '.[0].body' "$STUB/filed")"
 }
 # Filing in the quiet hour does not make the card run in it: a survey issue filed at 03:59 and picked at 04:00 would be
 # measured on a busy machine. So pick takes it only in the pack's test.surveyHour, of any day; other issues any time.
@@ -84,8 +83,8 @@ t_surveyprojects() {
   [ "$(kept),$(kept "$two/conveyor/state")" = '["2026-12",100101,"2026-12-01T03:10:00Z"],["2026-12",100102,"2026-12-01T03:30:00Z"]' ] \
     || fail "each project does not keep its own survey: $(kept) $(kept "$two/conveyor/state")"
 }
-# The pack's settings: test.survey false files none (the way to turn it off); test.surveyHour moves the hour and
-# test.fileBudget is the budget the issue names. First, with the pack's default (on), the running loop files it.
+# The pack's settings: test.survey false files none (the way to turn it off); test.surveyHour moves the hour; a
+# test.fileBudget left in the pack is ignored: no file has a CPU budget, so the issue names none (#349). First, with the pack's default (on), the running loop files it.
 # Bug: `serve` does not look for the survey by itself (run.sh's once-a-minute call dropped), so no survey is ever
 # filed: the other looks call `loop survey` straight. Here only the running loop can file it. (Here, not in a case of
 # its own: a fifth case waited for a test slot and made the file slower.)
@@ -107,6 +106,6 @@ t_surveyoff() {
   }
   sv_engine offthen22 || fail "a look failed with the survey off, or with test.surveyHour 22"
   [ "$(filed .title)" = '["Test-speed survey, December 2026"]' ] && [ "$(kept)" = '["2026-12",100101,"2026-12-01T22:30:00Z"]' ] \
-    && jq -e '.body | contains("over the CPU budget of 7 CPU s") and contains("22:00 local time")' "$STUB/filed" > /dev/null \
-    || fail "test.survey false filed a survey issue, or test.surveyHour 22 filed at 03:10 or not at 22:30, or the issue does not name the pack's 7 CPU s budget: $(kept) $(filed '[.title, .body]')"
+    && jq -e '.body | (contains("budget") | not) and contains("22:00 local time")' "$STUB/filed" > /dev/null \
+    || fail "test.survey false filed a survey issue, or test.surveyHour 22 filed at 03:10 or not at 22:30, or the issue names the pack's ignored test.fileBudget: $(kept) $(filed '[.title, .body]')"
 }

@@ -887,15 +887,15 @@ for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id' prep 'prep stop' 'prep 1
 done
 [ -z "$(calls)" ] || fail "release_run_takes_a_version_or_stop: ran '$(calls)'"
 pass=$((pass + 4))
-# The Tests page's limits and a file's budget or mark reach `conveyor.sh test-settings` on the record, each argument
-# one quoted word (a reason with spaces too). Bug: a Save reaches no command, or a shape the engine does not take
-# (no value, a budget below 1, a path that reads as an option, a reason of two lines) is sent on.
+# The Tests page's limits and a file's mark reach `conveyor.sh test-settings` on the record, each argument one quoted
+# word (a reason with spaces too). Bug: a Save reaches no command, or a shape the engine does not take (no value, a
+# path that reads as an option, a reason of two lines, a budget, which no test file has now: #349) is sent on.
 fresh_control
-[ "$(ctl "$(act test-settings file-budget conveyor/tests/merge.test.sh 30)")" = 200 ] && [ "$(ctl "$(act test-settings slow-mark conveyor/tests/e2e.test.sh 'runs the whole loop')")" = 200 ] \
-  && [ "$(calls)" = "CONVEYOR_MAIN=$HM test-settings file-budget conveyor/tests/merge.test.sh 30
+[ "$(ctl "$(act test-settings slow-issues true)")" = 200 ] && [ "$(ctl "$(act test-settings slow-mark conveyor/tests/e2e.test.sh 'runs the whole loop')")" = 200 ] \
+  && [ "$(calls)" = "CONVEYOR_MAIN=$HM test-settings slow-issues true
 CONVEYOR_MAIN=$HM test-settings slow-mark conveyor/tests/e2e.test.sh runs the whole loop" ] || fail "test_settings_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
 fresh_control
-for a in 'file-budget a.test.sh' 'file-budget a.test.sh 0.5' 'file-budget -x.test.sh 9' 'slow-mark a.test.sh' 'budget off' 'slow-issues yes' 'file-budget-clear /etc/x'; do
+for a in 'file-budget a.test.sh 30' 'budget 8' 'file-budget-clear a.test.sh' 'slow-mark a.test.sh' 'slow-mark-clear -x.test.sh' 'slow-issues yes' 'slow-mark-clear /etc/x'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act test-settings $a)")" = 400 ] || fail "test_settings_take_only_their_shapes: '$a' answered '$(cat "$M/ctl.out")'"
 done
@@ -916,7 +916,8 @@ done
 pass=$((pass + 2))
 # The Tests page's actions (#521) reach the engine's commands on the record, each argument one quoted word; an issue
 # filed has the pack's type and last priority. Bug: an action that reaches no command, or a shape the engine does not
-# take (a stop with no id, a path that reads as an option, a rule value of two words, a title of two lines) sent on; Keep a
+# take (a stop with no id, a path that reads as an option, a rule value of two words, the measure budget, which no test
+# file has now (#349), a title of two lines) sent on; Keep a
 # case off run as `flaky add`, which files an issue when its entry is the case's third source, though the action is "now".
 fresh_control
 [ "$(ctl "$(act testaction judge conveyor/tests/merge.test.sh)")" = 200 ] && [ "$(ctl "$(act testaction stop 0123456789ab)")" = 200 ] \
@@ -937,7 +938,7 @@ fresh_control
 Verdict: split" ] && [ "$(cat "$F/gh-writes")" = "issue close 480 --comment Done: before 12 CPU s, after 6 CPU s." ] \
   || fail "test_issue_and_close_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)' wrote '$(cat "$F/gh-writes" 2>&1)'"
 fresh_control
-for a in 'testaction judge' 'testaction stop 12' 'testaction judge -x.test.sh' 'testaction delete a.test.sh' 'testrules guard perDay off' 'testrules set r limit' 'testrules add r budget 1 3 3' 'tests codex' 'test-close x done' 'flaky-off a.test.sh why'; do
+for a in 'testaction judge' 'testaction stop 12' 'testaction judge -x.test.sh' 'testaction delete a.test.sh' 'testrules guard perDay off' 'testrules set r limit' 'testrules add r budget 1 3 3' 'testrules set r measure budget' 'tests codex' 'test-close x done' 'flaky-off a.test.sh why'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act $a)")" = 400 ] || fail "test_actions_take_only_their_shapes: '$a' answered '$(cat "$M/ctl.out")'"
 done

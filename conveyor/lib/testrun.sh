@@ -147,39 +147,25 @@ testrec() { # <worktree> <exit> <seconds>
     + if $tl[0] | type == "object" then {list: $tl[0]} else {} end' --slurpfile tl <(cat "$1.testlist" 2>/dev/null)
 }
 
-# The test files of a card's own run that used more than their budget (README.md, The test step): the file's own
-# (test.files.<file>.budget) when the pack gives it one, else the pack's test.fileBudget CPU seconds. A file the pack
-# marks slow on purpose (test.files.<file>.slowOnPurpose) is held to no budget. For its test line (slow): a note,
-# never a finding of its review, and filed only by a test rule (lib/testrules.sh). CPU seconds, not clock time, as a file's clock time on a
-# busy machine is the machine's load. A runner times each file it runs with a log line
+# The times of a card's own run (README.md, The test step), recorded and shown; no file is held to a CPU time. A
+# runner times each file it runs with a log line
 # `TESTRUN sec<TAB><file><TAB><seconds><TAB><CPU seconds>` as the file ends, the last such line of a file counting,
-# those of the run before a run again (<worktree>.times, tests()) first. Each is {file, sec, cpu, budget, changed}:
-# changed when the card's staged change adds or modifies the file. A file the change only modifies also has main's
-# own CPU seconds of it (before): the file's time recorded last (beforetimes()), with where it came from (from), null
-# when none is recorded: no test runs again only to be timed.
-# Written to <worktree>.slow, a JSON array ([] when no file is over); the times of each test file the change adds or
+# those of the run before a run again (<worktree>.times, tests()) first.
+# Written: the times of each test file the change adds or
 # modifies, {file, sec, cpu}, to <worktree>.timed, for its test line (timed); and the CPU seconds of every file the run
-# timed, {file: cpu}, to <worktree>.cpus, for its test line (times), where a later card finds them once this one has
-# landed; and the clock seconds of every file the run timed, {file: sec}, to <worktree>.clocks, for its test line
+# timed, {file: cpu}, to <worktree>.cpus, for its test line (times); and the clock seconds of every file the run
+# timed, {file: sec}, to <worktree>.clocks, for its test line
 # (clocks: the snapshot's tests part, testspart()), a file timed by the clock only (a runner's report, reported())
-# among them. A file whose line gives no CPU seconds (cpu null) is held to no budget.
+# among them.
 slowtests() { # <worktree>
-  local b o c m f t x y
-  rm -f "$1.slow" "$1.timed" "$1.cpus" "$1.clocks"
-  packget test.fileBudget b test.files o || return 1
+  local c t x y
+  rm -f "$1.timed" "$1.cpus" "$1.clocks"
   c=$(git -C "$1" diff --cached --no-renames --name-status -z --diff-filter=AM HEAD 2>/dev/null \
     | jq -cRs 'split("\u0000") | . as $a | [range(0; length - 1; 2) | {key: $a[. + 1], value: $a[.]}] | from_entries') || return 1
   t=$(timed "$1") || return 1
   jq -c --argjson c "$c" '[to_entries[] | select($c[.key] != null) | {file: .key} + .value]' <<<"$t" > "$1.timed" || return 1
   { IFS= read -r x && IFS= read -r y; } < <(jq -c '(with_entries(select(.value.cpu != null)) | map_values(.cpu)), map_values(.sec)' <<<"$t") \
-    && printf '%s\n' "$x" > "$1.cpus" && printf '%s\n' "$y" > "$1.clocks" || return 1
-  f=$(jq -c --argjson b "$b" --argjson o "$o" --argjson c "$c" 'to_entries | map(($o[.key] // {}) as $own
-    | select(.value.cpu != null and $own.slowOnPurpose == null) | ($own.budget // $b) as $b | select(.value.cpu > $b)
-    | {file: .key, sec: .value.sec, cpu: .value.cpu, budget: $b, changed: ($c[.key] != null)})' <<<"$t") || return 1
-  m='{}'; ! jq -e --argjson c "$c" 'any(.[]; $c[.file] == "M")' <<<"$f" > /dev/null || m=$(beforetimes "$1") || m='{}'
-  jq -c --argjson c "$c" --argjson m "$m" 'map(if $c[.file] == "M" then $m[.file] as $p
-    | . + {before: $p.cpu} + if $p then {from: $p.from} else {} end
-    else . end)' <<<"$f" > "$1.slow"
+    && printf '%s\n' "$x" > "$1.cpus" && printf '%s\n' "$y" > "$1.clocks"
 }
 # The files a run in <worktree> timed, {file: {sec, cpu}} (cpu null when the line gives none): its runners'
 # `TESTRUN sec` lines, those of the runs before a run after a fix session (<worktree>.oldtimes, tests()) first, then
@@ -209,33 +195,12 @@ suiterec() { # <worktree> <full | release> <commit>
       (capture("^-- (?<r>ok|FAIL) (?<f>.+)$") | {f, v: {result: (if .r == "ok" then "ok" else "fail" end)}})) as $x ({}; .[$x.f] += $x.v)
     | select(length > 0) | {time: $t, how: $h, sha: $s, files: map_values({result: null, sec: null, cpu: null} + .)}' >> "$SUITERUNS" 2>/dev/null
 }
-# Main's recorded CPU seconds of each test file, {file: {cpu, from}}, the newer of two records of it: the test lines
-# (times) of the newest card that ran it and landed, as of its landed line, "card #<issue>, <day>"; and the latest
-# test-speed survey's, the file .conveyor/test-times.json on the commit <worktree>'s change is on, {files: {file:
-# {sec, cpu}}}, as of the commit that last wrote it, "test-speed survey, <day>"; and a run of the file by hand that
-# passed (testaction run: its record in $TESTACTS), as of its end, "run by hand, <day>". A card's later test line of a
-# file counts over its earlier ones. A file none of them records is not in it.
-beforetimes() { # <worktree>
-  local s='[]' at h
-  at=$(git -C "$1" log -1 --format=%ct HEAD -- .conveyor/test-times.json 2>/dev/null)
-  [ -z "$at" ] || s=$(git -C "$1" show HEAD:.conveyor/test-times.json 2>/dev/null | jq -c --argjson at "$at" '[.files | objects | to_entries[]
-    | select(.value | objects | .cpu | type == "number") | {file: .key, cpu: .value.cpu, at: $at, from: "test-speed survey, \($at | todate | .[:10])"}]') || s='[]'
-  h=$(cat "$TESTACTS"/*.json 2>/dev/null | jq -cs '[.[] | objects | select(.action == "run" and .state == "done" and .result == "pass"
-    and (.file | type == "string") and (.cpu | type == "number") and (.end | strings | fromdate? | type == "number"))
-    | {file, cpu, at: (.end | fromdate), from: "run by hand, \(.end[:10])"}]') || h='[]'
-  s=$(jq -cn --argjson s "$s" --argjson h "$h" '$s + $h')
-  stdb ask lines cards | jq -cRn --argjson s "$s" 'reduce (inputs | fromjson? | objects | select(.step == "landed" or (.step == "test" and (.times | type == "object")))) as $l
-      ({l: {}, t: {}}; if $l.step == "landed" then .l[$l.card] = $l else .t[$l.card] += $l.times end)
-    | .l as $l | [.t | to_entries[] | $l[.key] as $d | select($d and ($d.time | fromdate? | type == "number")) | .value | to_entries[]
-      | select(.value | type == "number") | {file: .key, cpu: .value, at: ($d.time | fromdate), from: "card #\($d.issue), \($d.time[:10])"}] + $s
-    | group_by(.file) | map(max_by(.at) | {key: .file, value: {cpu, from}}) | from_entries'
-}
 # Its test line's part: {timed: <worktree>.timed} when the run timed a test file the change adds or modifies,
 # {times: <worktree>.cpus, clocks: <worktree>.clocks} when it timed any file (times is {} when each was timed by the
-# clock only), {slow: <worktree>.slow} when a file is over, and carriedrec()'s part, else {}.
+# clock only), and carriedrec()'s part, else {}.
 slowrec() { # <worktree>
-  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile s "$1.slow" --argjson o "$(carriedrec "$1")" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
-    + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end) + (if $s[0] | length > 0 then {slow: $s[0]} else {} end)
+  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --argjson o "$(carriedrec "$1")" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
+    + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end)
     + $o' 2>/dev/null || echo '{}'
 }
 # A card's test line's part for the files its run kept as passed and did not run, though a run before timed them
@@ -270,7 +235,7 @@ slowoff() { # <worktree>
   done < <(slowoffs | jq -r '[.file, .issue] | @tsv')
   [ -z "$add" ] || printf '%s' "$add" >> "$1.rerun"
 }
-# The test results cache (README.md, The CPU budget of a test file: The test results cache; the owner, 2026-11-14): each test file a run passed whole,
+# The test results cache (README.md, Test file times: The test results cache; the owner, 2026-11-14): each test file a run passed whole,
 # with the inputs its command's log named for it (`TESTRUN inputs<TAB><file><TAB><input>...`), one a line in
 # $TESTCACHE, `<hash>\t<file>\t<input>...` (cachekeep()), the hash of the file's and its inputs' contents
 # (cachesums()). A later run, of any card or the whole test on main, keeps off a file whose hash in its worktree is a
@@ -1359,29 +1324,14 @@ speedfile() { # <issue json> [title start: SPEEDUP]
   [ -n "$f" ] || { f=${t#"$p"}; f=${f%%[[:space:]]*}; }
   [ -n "$f" ] && printf '%s\n' "$f"
 }
-# The budget of its own that the build of a speed-up or Optimize card proposes for its test file (card()): the last
-# line of its session's reply, exactly `OWN-BUDGET: <CPU s> CPU s: <why>`, the CPU seconds a number of at least 1 (as
-# `conveyor.sh test-settings file-budget` takes it) and the reason not blank. The reply is the last of the session's
-# output: Claude's result (stream-json), Codex's agent message (exec --json) or OpenCode's text part (run --format
-# json). Prints `<CPU s><TAB><why>`; fails with no such line.
-OWNLINE='OWN-BUDGET: '
-ownbudget() { # <worktree>
-  local said
-  said=$(jq -Rrn '[inputs | fromjson? // empty | objects | if .type == "result" then .result
-      elif .type == "item.completed" and .item.type? == "agent_message" then .item.text elif .type == "text" then .part.text? else empty end
-      | strings] | last // ""' "$1.out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1)
-  [[ $said =~ ^${OWNLINE}([1-9][0-9]{0,5}(\.[0-9]{1,3})?)\ CPU\ s:[[:space:]]+([^[:space:]].*)$ ]] || return 1
-  printf '%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:0:600}"
-}
 # The target of a speed-up or Optimize card, for its build brief (card()): the file's CPU seconds on record (its median,
-# testspart()) and its budget (its own in test.files, else test.fileBudget); its cases, as its runner names them in a
+# testspart()); its cases, as its runner names them in a
 # run of the file alone on the commit the card is built on ($CARDS/mainrun/<card>.cases), with their count and their
-# average CPU seconds (no runner reports a case's own CPU seconds to the engine); how many files a split alone would
-# need to fit the budget, with test.splitAllowance for each file's start-up; what the check passes (speedproof()); and
-# the OWN-BUDGET line (ownbudget()) for cases that cannot fit the budget.
+# average CPU seconds (no runner reports a case's own CPU seconds to the engine); and what the check passes
+# (speedproof()), with test.splitAllowance for each file's start-up.
 speedbrief() { # <card> <worktree> <test file>
-  local mwt=$CARDS/mainrun/$1.cases f=$3 b fs sa before k='' sha rc
-  packget test.fileBudget b test.files fs test.splitAllowance sa || return 1
+  local mwt=$CARDS/mainrun/$1.cases f=$3 sa before k='' sha rc
+  packget test.splitAllowance sa || return 1
   before=$(testspart "$(date +%F)" 2>/dev/null | jq -r --arg f "$f" 'first(.files[]? | select(.file == $f) | .median | numbers) // empty' 2>/dev/null)
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) && [ "$(git -C "$2" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] \
     && { git worktree remove --force "$mwt"; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -1392,41 +1342,30 @@ speedbrief() { # <card> <worktree> <test file>
     k=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[(.passcases + .okcases)[]?.cases[]?, .files[]?.cases[]?.name | select(. != "")] | unique | length | select(. > 0)' 2>/dev/null)
   fi
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null
-  jq -rn --arg f "$f" --argjson b "$b" --argjson fs "$fs" --argjson a "$sa" --arg c "$before" --arg k "$k" '
+  jq -rn --arg f "$f" --argjson a "$sa" --arg c "$before" --arg k "$k" '
     def r: . * 100 | round / 100;
-    ($fs[$f].budget // null) as $own | ($own // $b) as $b | ($c | tonumber? // null) as $c | ($k | tonumber? // null) as $k
+    ($c | tonumber? // null) as $c | ($k | tonumber? // null) as $k
     | "# The target of this card",
-      "The test file \($f) " + (if $c == null then "has no CPU seconds on record" else "used \($c) CPU s on record (the median of its runs)" end)
-        + ", and its budget is \($b) CPU s (" + (if $own then "its own, in the pack'"'"'s test.files" else "the pack'"'"'s test.fileBudget" end) + ").",
+      "The test file \($f) " + (if $c == null then "has no CPU seconds on record." else "used \($c) CPU s on record (the median of its runs)." end),
       (if $k == null then "Its runner named none of its cases in a run of it alone on main'"'"'s code, so their count is not known."
        elif $c == null then "It has \($k) cases."
        else "It has \($k) cases, about \($c / $k | r) CPU s each on average (its runner does not give the CPU seconds of each case)." end),
-      (if $c == null then empty
-       elif $c <= $b then "On record it fits the budget: no split is needed for it."
-       elif $b <= $a then "No split can fit the budget: the start-up allowance of each file (\($a) CPU s, the pack'"'"'s test.splitAllowance) is at or over it."
-       elif $k != null and ((($b - $a) / ($c / $k)) | floor) < 1 then "A split alone cannot fit the budget: one case takes about \($c / $k | r) CPU s, and a file has \($b - $a | r) CPU s for its cases after its start-up (\($a) CPU s)."
-       elif $k != null then ((($b - $a) / ($c / $k)) | floor) as $m
-         | "A split alone would need \(($k / $m) | ceil) files of at most \($m) cases each to fit the budget, with a start-up allowance of \($a) CPU s for each file."
-       else "A split alone would need about \([((($c - $a) / ($b - $a)) | ceil), 1] | max) files to fit the budget, with a start-up allowance of \($a) CPU s for each file." end),
-      "The check passes a split only when every case passes, each file is at or under its budget, and the files'"'"' CPU seconds summed are at most the CPU seconds on record plus the start-up allowance for each file the split adds. So a split into fewer files does not pass: make the heavy cases faster, or make the split finer. A speed-up that keeps the file whole must make it faster than its CPU seconds on record.",
-      "If its cases cannot fit the budget without losing what they test, do not split them blindly. Keep \($f), make the change that keeps all that its cases test, and end your reply with one line, exactly: `'"$OWNLINE"'<the CPU s the file reached> CPU s: <why its cases cannot fit the budget>`. The card then stops for the owner'"'"'s yes to that budget of its own for \($f) in the pack'"'"'s test.files: with the yes, the budget is set and the card lands."'
+      "The check passes a split only when every case passes and the files'"'"' CPU seconds summed are at most the CPU seconds on record plus a start-up allowance of \($a) CPU s (the pack'"'"'s test.splitAllowance, when it cannot be measured) for each file the split adds. A speed-up that keeps the file whole must make it faster than its CPU seconds on record."'
 }
 # The check of a speed-up card (card(): a bug card whose issue speedfile() names a test file), in place of the bug-card
 # check (bugproof()): a speed-up keeps what the file tests, so its tests pass on main's code by design. The file runs
 # alone, on a test slot, with the pack's test.command, in a worktree of the commit the card was built on with the whole
 # staged change ($CARDS/mainrun/<card>.speed). It must pass, and its CPU seconds there (its runner's `TESTRUN sec` line,
-# timed()) must be lower than its median on record (the Tests page's, testspart()); the reason it is not names its
-# budget (its own in test.files, else test.fileBudget). A budget of its own that the build proposes (OWNBUDGET, set by
-# card() from ownbudget()) stands in for that budget, and the file must also be at or under it. Writes the result in
+# timed()) must be lower than its median on record (the Tests page's, testspart()). Writes the result in
 # <worktree>.unfixed, which the review is shown, its first line the reason when the check does not hold, and records a
 # bugproof line (result ok or fail) with speed: {file, before: the median, after: the CPU seconds now; each null when
 # not known; fix: sped up, or split, with into: the test files the split adds}. Fails when the check does not hold: no median on record, a run that could not be made, failed or gave no
 # CPU seconds, or CPU seconds not lower than the median. Given the test files a split adds (optproof()), it runs them
-# too, with the file when the change keeps it: they must all pass, each must be at or under its budget, and their CPU
+# too, with the file when the change keeps it: they must all pass, and their CPU
 # seconds summed (after) must be at most the file's median plus a start-up allowance for each file the split adds. The
-# allowance (splitstart()) is measured only when the sum is over the median. The reason names each file over its
-# budget and by how much, and a sum over its limit with the allowance and where it came from: the file it was measured
-# on, or the pack's value and why it was not measured.
+# allowance (splitstart()) is measured only when the sum is over the median. The reason names a sum over its limit
+# with the allowance and where it came from: the file it was measured on, or the pack's value and why it was not
+# measured.
 NOCASE=conveyor-no-case
 # The start-up allowance of each file a split adds (speedproof()): the CPU seconds of a run of <file>, the first file
 # the split adds, with no case selected, printed as `<CPU s><TAB>measured: a run of <file> with no case`. A runner of
@@ -1480,16 +1419,16 @@ splitstart() { # <worktree> <file> <the pack's test.command> <the pack's test.sp
 # (speedretry(), lib/run.sh). Lines written before that carry none, and are told by their reasons: version 1's two
 # ("the file is not faster: <n> CPU s on record, <n> CPU s now" and "the files of the split are not faster: ..."), and
 # version 2's three ("the file is not faster: ...; its budget is ...", "the split does not fit: ..." and "the file is
-# over the budget of its own that the build proposes: ...").
+# over the budget of its own that the build proposes: ..."). Version 4 holds no file to a CPU budget.
 # shellcheck disable=SC2034 # read by lib/card.sh and lib/run.sh
-SPEEDCHECK=3
+SPEEDCHECK=4
 speedproof() { # <card> <worktree> <issue json> <test file> [<test file the change adds>...]
-  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l b='' fs='{}' sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd
+  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
   before=$(testspart "$(date +%F)" 2>/dev/null | jq -r --arg f "$f" 'first(.files[]? | select(.file == $f) | .median | numbers) // empty' 2>/dev/null)
-  if ! packget test.fileBudget b test.files fs test.splitAllowance sa; then why="the pack could not be read for the budget of $f"
+  if ! packget test.splitAllowance sa; then why="the pack could not be read for the split allowance of $f"
   elif [ -z "$before" ]; then why="the file $f has no CPU seconds on record to compare with"
   elif sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -1500,16 +1439,13 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
     l=$(printf '%s, ' "${run[@]}"); l=${l%, }
     printf 'fail\t%s\n' "${run[@]}" > "$mwt.rerun"; tests "$mwt" test.command alone; rc=$?
     tl=$(tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000')
-    # Each file run, with its CPU seconds and its budget: OWNBUDGET for the file itself when the build proposes one.
-    cpus=$(timed "$mwt" 2>/dev/null | jq -c --argjson b "$b" --argjson fs "$fs" --arg f "$f" --arg own "${OWNBUDGET:-}" '. as $t
-      | [$ARGS.positional[] | {file: ., cpu: $t[.].cpu?, budget: (if . == $f and $own != "" then $own | tonumber else $fs[.].budget // $b end)}]' --args "${run[@]}" 2>/dev/null) || cpus='[]'
+    # Each file run, with its CPU seconds.
+    cpus=$(timed "$mwt" 2>/dev/null | jq -c '. as $t | [$ARGS.positional[] | {file: ., cpu: $t[.].cpu?}]' --args "${run[@]}" 2>/dev/null) || cpus='[]'
     after=$(jq -r 'map(.cpu) | if length > 0 and all(.[]; type == "number") then add | . * 1000 | round / 1000 else empty end' <<<"$cpus" 2>/dev/null)
-    over=$(jq -r 'map(select(.cpu > .budget) | "\(.file) takes \(.cpu) CPU s, \(.cpu - .budget | . * 1000 | round / 1000) over its budget of \(.budget) CPU s") | join("; ")' <<<"$cpus" 2>/dev/null)
     if [ $# = 4 ]; then
       if [ "$rc" != 0 ]; then why="the file $f fails with the change (exit $rc)"
       elif [ -z "$after" ]; then why="the run of $f with the change gave no CPU seconds"
-      elif ! jq -en --argjson a "$after" --argjson b "$before" '$a < $b' >/dev/null 2>&1; then why="the file is not faster: $before CPU s on record, $after CPU s now; its budget is $(jq -r '.[0].budget' <<<"$cpus") CPU s"
-      elif [ -n "${OWNBUDGET:-}" ] && [ -n "$over" ]; then why="the file is over the budget of its own that the build proposes: $over"; fi
+      elif ! jq -en --argjson a "$after" --argjson b "$before" '$a < $b' >/dev/null 2>&1; then why="the file is not faster: $before CPU s on record, $after CPU s now"; fi
     elif [ "$rc" != 0 ]; then why="the files of the split, $l, fail with the change (exit $rc)"
     elif [ -z "$after" ]; then why="the run of the files of the split, $l, with the change gave no CPU seconds for each"
     else
@@ -1520,14 +1456,14 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
         al=$(splitstart "$mwt" "$5" "$cmd" "$sa" "$cs" | tail -n 1); alf=${al#*$'\t'}; al=${al%%$'\t'*}
         lim=$(jq -n --argjson b "$before" --argjson a "$al" --argjson k "$(($# - 4))" '$b + $a * $k | . * 1000 | round / 1000')
         jq -en --argjson s "$after" --argjson m "$lim" '$s <= $m' >/dev/null 2>&1 \
-          || over+="${over:+; }the files take $after CPU s summed, $(jq -n --argjson s "$after" --argjson m "$lim" '$s - $m | . * 1000 | round / 1000') over the $lim CPU s a split of $f may take: $before CPU s on record plus a start-up allowance of $al CPU s ($alf) for each of the $(($# - 4)) files it adds"
+          || over="the files take $after CPU s summed, $(jq -n --argjson s "$after" --argjson m "$lim" '$s - $m | . * 1000 | round / 1000') over the $lim CPU s a split of $f may take: $before CPU s on record plus a start-up allowance of $al CPU s ($alf) for each of the $(($# - 4)) files it adds"
       fi
       [ -z "$over" ] || why="the split does not fit: $over"
     fi
   else why="the file $f could not be run with the change: ${out:0:300}"; fi
   { if [ -n "$why" ]; then printf '%s\n' "$why"
-    elif [ $# = 4 ]; then printf 'This issue speeds up the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, it passed in %s CPU s, lower than its median on record, %s CPU s; its budget is %s CPU s.\n' "$f" "$after" "$before" "$(jq -r '.[0].budget' <<<"$cpus")"
-    else printf 'This change splits the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, %s passed in %s CPU s summed (the median on record of %s is %s CPU s), each file at or under its budget: %s.\n' "$f" "$l" "$after" "$f" "$before" "$(jq -r 'map("\(.file) \(.cpu) of \(.budget) CPU s") | join(", ")' <<<"$cpus")"; fi
+    elif [ $# = 4 ]; then printf 'This issue speeds up the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, it passed in %s CPU s, lower than its median on record, %s CPU s.\n' "$f" "$after" "$before"
+    else printf 'This change splits the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, %s passed in %s CPU s summed (the median on record of %s is %s CPU s): %s.\n' "$f" "$l" "$after" "$f" "$before" "$(jq -r 'map("\(.file) \(.cpu) CPU s") | join(", ")' <<<"$cpus")"; fi
     [ -z "$rc" ] || { echo 'The end of that run'"'"'s output:'; echo '```'; printf '%s\n' "$tl"; echo '```'; }; } > "$2.unfixed"
   record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof "$(if [ -z "$why" ]; then echo ok; else echo fail; fi)" \
     "$(jq -cn --arg r "$why" --arg f "$f" --arg b "$before" --arg a "$after" '{reason: $r, speed: {file: $f, before: ($b | tonumber? // null), after: ($a | tonumber? // null),
@@ -1632,7 +1568,7 @@ HOLLOWFIX='Fix the hollow cases of the test file ' MAKERUN='Make the test file '
 # The check of a Fix hollow cases card: each case the issue names on its HOLLOW lines (as the Board's Fix hollow cases
 # writes them, tatagged() of lib/testaction.sh) now asserts the behaviour it names, or is deleted. A case is deleted
 # when the change removes the file, or its name is no longer in the file. Each deleted case needs a line of the
-# build's reply (<worktree>.out: its text, as ownbudget() reads it) `COVERED-BY: <test file>: <its case> | <the deleted
+# build's reply (<worktree>.out: its text, the session's last reply) `COVERED-BY: <test file>: <its case> | <the deleted
 # case>`, naming a test file the change keeps. The lines are kept in <worktree>.covered, so a check again after a fix
 # session (fixproof()) reads the build's lines with those of the fix's reply. A file the change keeps is read by the judge's hollow check
 # (TAHOLLOWASK, the judge's own words): one read-only session in the card's worktree (judgecall(), lib/review.sh) on
@@ -2048,7 +1984,7 @@ reportask() { # <worktree>
 # The times the runner's own report gives (the pack's test.report: format, and path, a file or folder from the
 # worktree, else <worktree>.report when its env or args has <file> (reportask()), else the run's output, <worktree>.test
 # (go test -v's, which env GOFLAGS asks for);
-# conveyor/README.md, The CPU budget of a test file), as `TESTRUN sec` lines with clock seconds only
+# conveyor/README.md, Test file times), as `TESTRUN sec` lines with clock seconds only
 # (tools/testreport.py), in <worktree>.reported: of the report files written since <start>, so one an earlier run left
 # is not read. None when the pack names no format.
 reported() { # <worktree> <the run's start, epoch seconds>

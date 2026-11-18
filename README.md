@@ -66,8 +66,8 @@ and judges ([how to install it](docs/board.md#install-the-board)).
 
 ## Tests
 
-Conveyor measures the CPU time of each test file on every card. It keeps a budget for each file and one for the
-project, and it finds the files that got slower or that are flaky. Its test rules can file an issue for such a file.
+Conveyor measures the CPU time of each test file on every card. It finds the files that got slower or that are
+flaky. Its test rules can file an issue for such a file.
 On the Board's Tests page, you can ask a model to judge if a test checks what it should, or to explain why a file got
 slower ([Tests page](docs/board.md#tests-page)).
 

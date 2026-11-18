@@ -5,15 +5,14 @@
 # A rule: name, on, measure, limit, runs (the runs in a row), minRuns (the least count of runs on record), and days
 # (flaky and failed) or minClock (clock). Its measures, of one test file, from the card test lines (times, clocks,
 # failures) and the flaky-test record ($FLAKY):
-#   budget  CPU seconds over limit times its budget (test.files.<file>.budget, else test.fileBudget), in each of its
-#           last runs runs;
-#   usual   CPU seconds over limit times its usual (the median of its runs before those runs), in each of its last runs
+#   usual  CPU seconds over limit times its usual (the median of its runs before those runs), in each of its last runs
 #           runs ("slower than its usual");
 #   clock   clock seconds over limit times its CPU seconds, with at least minClock clock seconds, in each of its last
 #           runs runs;
 #   flaky   at least limit entries of the flaky-test record (a case kept off as flaky) in the last days days;
 #   failed  at least limit test steps that failed in it in the last days days.
-# budget and usual are the CPU rules: a file the pack marks slow on purpose is never filed by one.
+# A rule with the measure budget, which the schema still takes, matches nothing: no file has a CPU budget.
+# usual is the CPU rule: a file the pack marks slow on purpose is never filed by it.
 # The guards, each a pack setting with a default: perDay (the most issues filed in one day; the rest wait for the next
 # day), maxOpen (the most issues of the rules open at one time), one issue a file (no second issue for a file while
 # the one last filed for it is open, whichever rule matched; an issue whose state cannot be read counts as open),
@@ -27,11 +26,10 @@ TESTRULES=${STATE%/*}/testrules.json
 TESTRULESLOG=${STATE%/*}/testrules.jsonl
 # shellcheck disable=SC2034 # read by testspart() in lib/testfiles.sh
 TESTRULES_SHOWN=50  # the lines of the log the snapshot holds (testspart(), lib/testfiles.sh), for the Board's Tests page
-TESTRULES_CPU='["budget", "usual"]'
+TESTRULES_CPU='["usual"]'
 # A match's measured values in words, for the preview and the issue.
 TESTRULES_SAID='def n: if . == floor then tostring else (. * 100 | round / 100 | tostring) end;
-  def said: if .measure == "budget" then "\(.values.cpu | length) card test runs in a row at \(.values.cpu | map(n) | join(", ")) CPU s, each over \(.limit | n) times its budget of \(.values.budget | n) CPU s"
-    elif .measure == "usual" then "\(.values.cpu | length) card test runs in a row at \(.values.cpu | map(n) | join(", ")) CPU s, each over \(.limit | n) times its usual of \(.values.usual | n) CPU s"
+  def said: if .measure == "usual" then "\(.values.cpu | length) card test runs in a row at \(.values.cpu | map(n) | join(", ")) CPU s, each over \(.limit | n) times its usual of \(.values.usual | n) CPU s"
     elif .measure == "clock" then "\(.values.sec | length) card test runs in a row at \([.values.sec, .values.cpu] | transpose | map("\(.[0] | n) s clock for \(.[1] | n) CPU s") | join(", ")), each clock time over \(.limit | n) times its CPU seconds"
     elif .measure == "flaky" then "kept off as flaky \(.values.count) times in \(.values.days) days (the limit is \(.limit | n))"
     else "failed in \(.values.count) test steps in \(.values.days) days (the limit is \(.limit | n))" end;'
@@ -48,12 +46,11 @@ testrulesettings() {
 # What the rules that are on match now (<now>, epoch seconds), in the order of the rules and then of the files:
 # [{rule, measure, limit, file, values, cards}]. A file counts its runs from the card test lines that timed it.
 testrulesmatches() { # <now> <settings: testrulesettings()>
-  local b fs fl defs refs
+  local fl defs refs
   jq -e 'any(.list[]; .on == true)' <<<"$2" > /dev/null || { echo '[]'; return 0; }
-  packget test.fileBudget b test.files fs || return 1
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   testowners
-  { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --argjson now "$1" --argjson s "$2" --argjson b "$b" --argjson fs "$fs" \
+  { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --argjson now "$1" --argjson s "$2" \
     --argjson fl "$fl" --argjson defs "$defs" --argjson refs "$refs" "$OWNERS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     [inputs | fromjson? | objects | select(.step == "test")] | sort_by(.time) as $ls
@@ -62,12 +59,9 @@ testrulesmatches() { # <now> <settings: testrulesettings()>
     | (reduce ($ls[] | . as $l | .times | objects | to_entries[] | select(.value | type == "number") | .key as $f
         | {f: $f, r: {cpu: .value, sec: (($l.clocks | objects | .[$f] | numbers) // null), card: $l.card}}) as $x ({}; .[$x.f] += [$x.r])) as $runs
     | ([$runs | keys[]] + [$fails[].files[], $flk[].files[]] | unique) as $all
-    | [$s.list[] | select(.on == true) | . as $u | ($u.days // 7) as $days
+    | [$s.list[] | select(.on == true and .measure != "budget") | . as $u | ($u.days // 7) as $days
       | $all[] as $f | ($runs[$f] // []) as $r | select(($r | length) >= $u.minRuns) | $r[-$u.runs:] as $last
-      | if $u.measure == "budget" then ($fs[$f].budget // $b) as $bud
-          | select(($last | length) == $u.runs and all($last[]; .cpu > $u.limit * $bud))
-          | {values: {cpu: [$last[].cpu], budget: $bud}, cards: [$last[].card]}
-        elif $u.measure == "usual" then select(($r | length) > $u.runs) | ($r[:-$u.runs] | map(.cpu) | median) as $m
+      | if $u.measure == "usual" then select(($r | length) > $u.runs) | ($r[:-$u.runs] | map(.cpu) | median) as $m
           | select($m > 0 and all($last[]; .cpu > $u.limit * $m))
           | {values: {cpu: [$last[].cpu], usual: ($m * 1000 | round / 1000)}, cards: [$last[].card]}
         elif $u.measure == "clock" then
@@ -210,7 +204,7 @@ testrules() { # <what> [<argument>...]
 testrulevalue() { # <key> <value>
   case $1 in
     on | burst) [[ $2 =~ ^(true|false)$ ]] && v=$2 || why="$1 is true or false, not \"$2\"" ;;
-    measure) [[ $2 =~ ^(budget|usual|clock|flaky|failed)$ ]] && v="\"$2\"" || why="the measure is budget, usual, clock, flaky or failed, not \"$2\"" ;;
+    measure) [[ $2 =~ ^(usual|clock|flaky|failed)$ ]] && v="\"$2\"" || why="the measure is usual, clock, flaky or failed, not \"$2\"" ;;
     limit | minClock) [[ $2 =~ ^[0-9]{1,6}(\.[0-9]{1,3})?$ ]] && v=$2 || why="$1 is a number of at least 0 (such as 1 or 1.5), not \"$2\"" ;;
     runs | perDay | maxOpen | days) [[ $2 =~ ^[1-9][0-9]{0,5}$ ]] && v=$2 || why="$1 is a whole number of at least 1, not \"$2\"" ;;
     minRuns | quietDays) [[ $2 =~ ^[0-9]{1,6}$ ]] && v=$2 || why="$1 is a whole number of at least 0, not \"$2\"" ;;

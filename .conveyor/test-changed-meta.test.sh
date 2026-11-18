@@ -148,8 +148,8 @@ p_enginecases() {
 
 # Bug (issue 642): the pack marked the case file conveyor/tests/wait.test.sh whole-only, a mark that controls nothing:
 # a card runs a case file's chosen cases through the engine runner, as a test file of its own (issue 214), never
-# whole and whatever its marks, so the mark only made --check list a meta-runner that is not one. A case file's own
-# CPU budget (test.files.<file>.budget) is no such mark. A pack setting, not code: it is read.
+# whole and whatever its marks, so the mark only made --check list a meta-runner that is not one. A case file's old
+# CPU budget (test.files.<file>.budget, ignored now) is no such mark. A pack setting, not code: it is read.
 p_packmarks() {
   got=$(jq -r '.test.files // {} | to_entries[] | select((.key | startswith("conveyor/tests/")) and (.value | has("wholeOnly") or has("cardMode"))) | .key' "$HERE/project.json")
   [ -z "$got" ] && ok "the pack marks no engine case file, which the engine runner runs" || no "pack marks engine case files: $got"

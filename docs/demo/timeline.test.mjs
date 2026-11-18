@@ -3,7 +3,7 @@
 // these snapshots say, so a timeline edit that loses a beat fails here, not in a minute-long render nobody watches.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BELT3D, createTimeline, REPO, URL } from './timeline.js';
+import { BELT3D, createTimeline, REPO, TEST_ANSWERS, URL } from './timeline.js';
 
 const card = (s, n) => s.panels.belt.data.cards.find((c) => c.issue === n);
 const landed = (s, n) => s.panels.landed.data.cards.find((c) => c.issue === n);
@@ -68,21 +68,21 @@ test('the controls the beats press change the snapshot; the data names only exam
 
 // Beat 9, the Tests page. Bug caught: the Tests tab shows no files ("No tests to show"), every row looks the same, or
 // Explain the slowdown and Judge this test show no answer, so the beat cannot show what the page is for. The statuses
-// are read from the fields the page's marks() reads (panels/tests.js): over (not slow on purpose), slower, flaky; a
+// are read from the fields the page's marks() reads (panels/tests.js): slower, flaky; a
 // fine file has none of them, nor a change of -25% or less, a last run over 2x its CPU, 2 failed steps or an issue.
-test('the Tests beat: one file Over budget, one Slower than usual, one Flaky, the rest fine; both test actions answer', () => {
+test('the Tests beat: two files Slower than usual, one Flaky, the rest fine; both test actions answer', () => {
   const tl = createTimeline();
   const d = tl.snapshot(3).panels.tests.data;
   assert.equal(d.repo, REPO);
   const files = d.tests.files, share = d.tests.settings.slower.share;
-  const status = (f) => [f.over && !f.slowOnPurpose && 'Over budget', f.slower && 'Slower than usual', f.flaky > 0 && 'Flaky',
+  const status = (f) => [f.slower && 'Slower than usual', f.flaky > 0 && 'Flaky',
     (f.change <= -share || f.lastRun.clockPerCpu > 2 || f.failedSteps >= 2 || f.issue !== null) && 'other'].filter(Boolean);
   assert.ok(files.length >= 8, `about 8 files: ${files.length}`);
-  assert.deepEqual(files.map(status).filter((s) => s.length).sort(), [['Flaky'], ['Over budget'], ['Slower than usual']]);
+  assert.deepEqual(files.map(status).filter((s) => s.length).sort(), [['Flaky'], ['Slower than usual'], ['Slower than usual']]);
   assert.ok(files.every((f) => f.cpu > 0 && f.median > 0 && f.runs.length > 0), 'each file has its CPU s, median and last runs');
   assert.deepEqual(d.control.tests, { cli: 'claude', model: 'claude-sonnet-5-5', effort: 'high' }, 'a Tests model is set: else Judge and Explain are disabled');
-  // Explain the slowdown on the file over its budget, then Judge this test on a second file.
-  const over = files.find((f) => f.over).file;
+  // Explain the slowdown on a file slower than usual, then Judge this test on a second file.
+  const over = files.find((f) => f.slower && f.file === TEST_ANSWERS.explain.file).file;
   const asked = tl.act('testaction', ['explain', over], 3);
   assert.match(asked, /\n[0-9a-f]{12}$/, 'the answer ends with the action id, as conveyor.sh testaction prints it');
   const judged = tl.act('testaction', ['judge', 'test/customers-lookup.test.ts'], 4);

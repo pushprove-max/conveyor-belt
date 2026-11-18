@@ -287,26 +287,26 @@ export const CARD_METRICS = { queueSec: 3600, slotSec: 60, buildSec: 600, review
     { step: 'test', result: 'fail', time: '2026-11-09T01:35:00Z', sec: 300, tokens: 0, usd: 0, model: null, effort: null, counts: null, tests: { files: 3, total: 12, passed: 9, failed: 1, skipped: 2 }, stats: null, unpriced: null },
   ] };
 // The snapshot's tests part (conveyor/lib/testfiles.sh testspart(), as dashboard.sh tags its runs): three files. e2e is
-// over the budget but slow on purpose; merge is over it, slower than usual, waits (2.5 times its CPU on the clock),
+// slow on purpose; merge is slower than usual, waits (2.5 times its CPU on the clock),
 // flaky, failed in 2 steps (from before verdicts were kept: both count for Fails often) and has an issue; the Board
 // one is faster than its median. 39 test steps in 7 days.
 const run = (cpu, sec, n, h) => ({ cpu, sec, card: `c${h}-${n}`, time: iso(T0 - h * 3600000), issue: n, repo: 'sample', url: `${P}/${n}` });
 // A failed test step of a file (#188), as the snapshot's failures has it: its card's issue n, h hours ago, its verdict.
 export const fail = (n, h, verdict, cases = ['mergeclean'], tail = null) => ({ card: `c${h}-${n}`, issue: n, time: iso(T0 - h * 3600000), verdict, cases, tail, repo: 'sample', url: `${P}/${n}` });
-const file = (o) => ({ runs: [], timedRuns: 6, failedSteps: 0, flaky: 0, issue: null, budget: 8, budgetFrom: 'project', slowOnPurpose: null, slower: false, ...o });
+const file = (o) => ({ runs: [], timedRuns: 6, failedSteps: 0, flaky: 0, issue: null, slowOnPurpose: null, slower: false, ...o });
 export const TESTS = {
-  settings: { fileBudget: 8, slowIssues: false, slower: { share: 0.25, runs: 3, minRuns: 5 }, files: { 'conveyor/tests/e2e.test.sh': { slowOnPurpose: 'runs the whole loop' } } },
+  settings: { slowIssues: false, slower: { share: 0.25, runs: 3, minRuns: 5 }, files: { 'conveyor/tests/e2e.test.sh': { slowOnPurpose: 'runs the whole loop' } } },
   files: [
     file({ file: 'conveyor/tests/e2e.test.sh', cpu: 40, median: 39, change: 0.026, runs: [run(40, 30, 509, 1)], lastRun: { sec: 30, cpu: 40, clockPerCpu: 0.75 },
-      slowOnPurpose: 'runs the whole loop', over: true, usual: 39 }),
+      slowOnPurpose: 'runs the whole loop', usual: 39 }),
     file({ file: 'conveyor/tests/merge.test.sh', cpu: 12, median: 6, change: 1, runs: [run(12, 30, 509, 1), run(11.5, 14, 451, 2), run(11, null, 435, 3)],
-      lastRun: { sec: 30, cpu: 12, clockPerCpu: 2.5 }, timedRuns: 7, failedSteps: 2, flaky: 1, issue: 480, over: true, usual: 6, slower: true,
+      lastRun: { sec: 30, cpu: 12, clockPerCpu: 2.5 }, timedRuns: 7, failedSteps: 2, flaky: 1, issue: 480, usual: 6, slower: true,
       failures: [fail(451, 2, null), fail(435, 3, null)] }),
     file({ file: '.claude/scripts/__tests__/x.test.mjs', cpu: 2, median: 4, change: -0.5, runs: [run(2, 2.2, 509, 1)], lastRun: { sec: 2.2, cpu: 2, clockPerCpu: 1.1 },
-      over: false, usual: 4 }),
+      usual: 4 }),
   ],
   slower: ['conveyor/tests/merge.test.sh'],
-  totals: { files: 3, overBudget: 1, slower: 1, steps: { count: 39, waitSec: 120, runSec: 3600 } },
+  totals: { files: 3, slower: 1, steps: { count: 39, waitSec: 120, runSec: 3600 } },
 };
 
 export function full(now = T0) {
@@ -689,12 +689,12 @@ export const TA = (() => {
   const MERGE = 'conveyor/tests/merge.test.sh', X = '.claude/scripts/__tests__/x.test.mjs', ID1 = '0123456789ab', ID2 = 'abcdef012345';
   const MODEL = { cli: 'claude', model: 'claude-sonnet-5-5', effort: 'medium' };
   const RULES = { on: false, perDay: 3, maxOpen: 5, quietDays: 14, burst: true,
-    list: [{ name: 'over budget', on: true, measure: 'budget', limit: 1, runs: 3, minRuns: 3 }],
+    list: [{ name: 'over usual', on: true, measure: 'usual', limit: 1, runs: 3, minRuns: 3 }],
     last: { time: iso(T0), on: false, burst: null, matches: [
-      { rule: 'over budget', measure: 'budget', limit: 1, file: MERGE, values: { cpu: [11, 11.5, 12], budget: 8 }, cards: ['c1-1'], result: 'stopped', guard: 'off', why: 'the switch is off' },
-      { rule: 'over budget', measure: 'budget', limit: 1, file: X, values: { cpu: [9, 9, 9], budget: 8 }, cards: ['c1-1'], result: 'would file' }] },
-    log: [{ time: iso(T0 - 3600000), event: 'filed', rule: 'over budget', measure: 'budget', file: MERGE, values: {}, cards: [], issue: 480 },
-      { time: iso(T0 - 7200000), event: 'stopped', rule: 'over budget', measure: 'budget', file: X, values: {}, cards: [], guard: 'perDay', why: '3 issues filed today' }] };
+      { rule: 'over usual', measure: 'usual', limit: 1, file: MERGE, values: { cpu: [11, 11.5, 12], usual: 6 }, cards: ['c1-1'], result: 'stopped', guard: 'off', why: 'the switch is off' },
+      { rule: 'over usual', measure: 'usual', limit: 1, file: X, values: { cpu: [9, 9, 9], usual: 4 }, cards: ['c1-1'], result: 'would file' }] },
+    log: [{ time: iso(T0 - 3600000), event: 'filed', rule: 'over usual', measure: 'usual', file: MERGE, values: {}, cards: [], issue: 480 },
+      { time: iso(T0 - 7200000), event: 'stopped', rule: 'over usual', measure: 'usual', file: X, values: {}, cards: [], guard: 'perDay', why: '3 issues filed today' }] };
   const NO_RULES = { on: false, perDay: 3, maxOpen: 5, quietDays: 14, burst: true, list: [], last: null, log: [] };
   const rec = (o = {}) => ({ id: ID1, action: 'judge', file: MERGE, project: 'sample', start: iso(Date.now() - 100000), end: null, state: 'running',
     cli: 'claude', model: 'claude-sonnet-5-5', effort: 'medium', limit: 900, verdict: null, text: 'first words\n', textCut: false, ...o });
