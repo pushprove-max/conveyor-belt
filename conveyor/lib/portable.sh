@@ -115,6 +115,15 @@ p_setsid() { # <command> [args]
   if p_darwin; then perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "$ARGV[0]: $!\n"' "$@"; else setsid -w "$@"; fi
 }
 
+# Replaces this shell with <command>, as the leader of a session of its own: the same pid, which is then its own
+# process group. For a background child (`p_execsid <command> &`, so $! names the command): no job control (set -m),
+# whose setpgid fails with "Operation not permitted" in a hook on macOS. The caller must lead no process group
+# (a background child of a shell without set -m does not): if it does, setsid forks on Linux and the pid changes,
+# and on macOS the command does not run and the shell exits with "setsid: Operation not permitted".
+p_execsid() { # <command> [args]
+  if p_darwin; then exec perl -MPOSIX -e 'POSIX::setsid() > 0 or die "setsid: $!\n"; exec @ARGV or die "$ARGV[0]: $!\n"' "$@"; else exec setsid "$@"; fi
+}
+
 # Every process, one line each: "<pid> <its parent's pid> <its command line>".
 p_procs() { ps -A -ww -o pid=,ppid=,args= 2>/dev/null; }
 

@@ -43,9 +43,13 @@ aged() { touch -t 200001010000 "$FD/waiter.log"; } # the last line written long 
 t_handoff() {
 fixture handoff
 put 'Alert: one'
-stop; rc=$?
-[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: one' ] || fail "the stop did not deliver the wake (exit $rc): $(cat "$T/wake")"
+# As a hook runs it: a session of its own, no terminal. Bug (issue 372): the handoff's set -m printed "child setpgid
+# ... Operation not permitted" there on macOS, into the wake, and could leave the held waiter in the stop's group.
+(. "$SRC/../lib/portable.sh"; echo '{}' | CONVEYOR_FOREMAN_WATCHERS=$W p_setsid bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null); rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: one' ] || fail "the stop did not deliver the wake alone (exit $rc): $(cat "$T/wake")"
 h=$(wpid); isheld "$h" || fail "no waiter listens after the wake was delivered: waiter.pid names $h"
+[ "$(ps -o pgid= -p "$h" | tr -d ' ')" = "$h" ] || fail "the held waiter $h is not its own process group: $(ps -o pgid= -p "$h")"
+[ "$(logged "the waiter $h that listens until the next stop is its own process group")" = 1 ] || fail "waiter.log does not say the held waiter's group is its own: $(cat "$FD/waiter.log")"
 [ "$(state)" = listening ] || fail "the state is not listening while a waiter listens: $(state)"
 wait_until '[ "$(wc -l < "$T/starts")" -ge 2 ]' || fail "the waiter that listens during the turn started no watcher"
 put 'Alert: two'

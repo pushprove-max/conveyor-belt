@@ -124,11 +124,13 @@ rm -f "$FD/watchers.pid"
 # waiter.pid before this one ends, so a stop that comes next finds it. The signals deliver ignores are set back first:
 # a shell started with one ignored cannot trap it, and a held waiter that ignores TERM is never taken over.
 handoff() {
-  local p
-  set -m
-  (trap - TERM HUP INT; CONVEYOR_FOREMAN_DOWN=${1:-} exec bash "$SELF" --held <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')" > /dev/null 2>&1) & p=$!
-  set +m
+  local p g
+  (trap - TERM HUP INT; export CONVEYOR_FOREMAN_DOWN=${1:-}; p_execsid bash "$SELF" --held <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')" > /dev/null 2>&1) & p=$!
   printf '%s %s %s %s\n' "$p" "${FROM:--}" "$CONVEYOR_FOREMAN_SESSION_PID" "$SID" > "$FD/waiter.pid"
+  # Its group is its own once its setsid ran; until then it is this waiter's, so this waits for that, 2 s at most.
+  for _ in $(seq 20); do g=$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' '); [ "$g" = "$p" ] && break; sleep 0.1; done
+  if [ "$g" = "$p" ]; then log "the waiter $p that listens until the next stop is its own process group"
+  else log "the waiter $p that listens until the next stop is not its own process group: its group is ${g:-gone}"; fi
   why="$why; the waiter $p listens until the next stop"
 }
 if [ "$MODE" = --check ]; then
@@ -186,7 +188,7 @@ else
   for w in watch-conveyor.sh watch-limit.sh watch-alerts.sh watch-idle.sh; do down "$w" || CMD[$w]="bash $(printf %q "$FHERE/$w")"; done
 fi
 start() { # <name>: in its own process group, so stopping it stops its sleep too; without the lock
-  set -m; bash -c "${CMD[$1]}" > /dev/null 2>&1 7>&- & PID[$1]=$!; set +m
+  p_execsid bash -c "${CMD[$1]}" > /dev/null 2>&1 7>&- & PID[$1]=$!
   local w; for w in "${!PID[@]}"; do printf '%s %s\n' "${PID[$w]}" "$(started "${PID[$w]}")"; done > "$FD/watchers.pid"
 }
 # wakes: how many wakes are pending. A held waiter delivers none, so a watcher that exits as their count grows put one.
