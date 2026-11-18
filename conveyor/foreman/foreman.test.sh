@@ -444,6 +444,17 @@ out=$(turn u2 'what now' 'Filed #9 and held it.'); [ -z "$out" ] || fail "a plai
 out=$(turn u3 'what now' 'Want me to file it.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "undone work passed: $out"
 out=$(turn u3b 'what now' 'I still need to file #9.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "work left undone passed: $out"
 out=$(turn u3d 'what now' 'You still need to approve #7 because it changes the sign-in page.'); [ -z "$out" ] || fail "the owner's own decision was refused as unfinished work: $out"
+# Bug (#362): an "I'll <verb>" tied to a later event or a standing rule was refused as undone work, costing a turn;
+# a bare deferral is still refused.
+for r in "When Conveyor sends its idle wake, I'll: pause the belt; write the 1.6.0 notes; run release-prep and the release" \
+  "Until #361 lands, I'll check the health record directly for blocked cards on every wake" "When the queue empties, I'll release 1.6.0."; do
+  out=$(turn "u3l $r" 'what now' "$r"); [ -z "$out" ] || fail "a future action tied to a later event was refused: $r: $out"
+done
+for r in "I'll file it." "I haven't filed it yet." "Released #9. I'll fix that next."; do
+  out=$(turn "u3n $r" 'what now' "$r"); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a bare deferral passed: $r: $out"
+done
+# A later event in one list item does not hide a bare deferral in the next item.
+out=$(turn u3m 'what now' $'- When the queue empties, I\'ll release 1.6.0\n- I\'ll file it'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a deferral in the next list item passed: $out"
 # The whole final reply is checked, not only its last text block.
 jq -cn '{type: "user", uuid: "u3e", message: {content: "what now"}}, {type: "assistant", message: {content: [{type: "text", text: "Should I file #9?"}, {type: "text", text: "Idle"}]}}' > "$T/t.jsonl"
 out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t}' | bash "$SRC/stop.sh" reply)

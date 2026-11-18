@@ -11,7 +11,8 @@
 #     your or owner, or a sentence reporting a card (landed, merged, done ...) without them; a reply to a wake says only
 #     what needs the owner, otherwise one word (Idle); a turn in which the owner typed a message (a queued_command
 #     entry of human origin after the opening) answers the owner, so its reply is not judged as a wake reply;
-#   - leaves the Foreman's own work undone ("haven't filed it", "I still need to file", "I'll fix", "want me to ...").
+#   - leaves the Foreman's own work undone ("haven't filed it", "I still need to file", "I'll fix", "want me to ..."); an "I'll <verb>" in a
+#     sentence that ties it to a later event or a standing rule (when, once, after, until, every, if ...) is not that.
 #   A line in the plugin-problem form (PLUG: "Plugin problem (for the conveyor-belt repo): <what was seen>") reports a
 #   suspected defect in Conveyor itself, which only the owner can fix or file: it needs the owner, so the wake and
 #   unfinished-work checks read the reply without it, and each such line is noted once in $FD/plugin-bugs.md (time,
@@ -77,6 +78,13 @@ if [ -n "$W" ] && jq -e --arg w "$W" '(.opening | contains($w)) and (.owner | no
     | grep -iwE 'landed|merged|pushed|passed|succeeded|finished|completed|released|deployed|done|running|in progress' | sed 's/^ *//' | head -3 | paste -sd'|' -)
   [ -z "$HIT" ] || refuse "A reply to a wake says only what needs the owner to act or decide ($HIT is not that). Rewrite it without that, or reply with the one word Idle if nothing needs them. A suspected defect in Conveyor itself needs the owner, who alone can fix or file it: keep it, as its own line in the form $FORM."
 fi
-HIT=$(grep -oiE "(haven'?t|have not|did not|didn'?t|not yet) (filed|file it|sent|fixed|checked)|not filed yet|want me to|shall i|should i |if you'?d like|i can (also )?(file|fix|send|check|do|open|run)|let me know if|\b(i|we) (still|yet) (need|have|got) to|\bi (need|have) to (file|fix|send|check|retry|open|run|hold|release)|\bi('ll| will) (file|fix|send|check|retry|open|run|hold|release)|\b(next|later),? i('ll| will)" <<<"$REST" | head -3 | paste -sd'|' -)
+HIT=$({ grep -oiE "(haven'?t|have not|did not|didn'?t|not yet) (filed|file it|sent|fixed|checked)|not filed yet|want me to|shall i|should i |if you'?d like|i can (also )?(file|fix|send|check|do|open|run)|let me know if|\b(i|we) (still|yet) (need|have|got) to|\bi (need|have) to (file|fix|send|check|retry|open|run|hold|release)|\b(next|later),? i('ll| will)" <<<"$REST"
+  # An "I'll <verb>" is undone work only in a sentence that ties it to no later event or standing rule ("When the
+  # queue empties, I'll release", "Until #361 lands, I'll check ... on every wake" leave nothing undone now). Each line
+  # (a list item) and each sentence in it is judged alone, so a later event in one never hides a deferral in another.
+  sed -E 's/([.!?])[[:space:]]+/\1\
+/g' <<<"$REST" \
+    | grep -viE '\b(when|whenever|once|after|until|as soon as|each|every|at the next|if)\b' \
+    | grep -oiE "\bi('ll| will) (file|fix|send|check|retry|open|run|hold|release)"; } | head -3 | paste -sd'|' -)
 [ -z "$HIT" ] || refuse "Unfinished work in your reply ($HIT). If it is yours to do (file, check, retry, fix), do it now and say it is done. Keep the line only when it truly needs the owner, and say why in the same sentence."
 exit 0
