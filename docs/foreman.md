@@ -37,6 +37,8 @@ see only that project. It shows:
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
   error and a problem of the engine
+- `not yet reported: blocked #N` for each card blocked for two polls or more that the Foreman has not got in a wake.
+  The next wake names it too.
 - the watcher's last poll: when it ended and how long it took, with what it read for each project
 - last, the Foreman's waiter: `waiter: listening`, `waiter: starting again` or `waiter: down: <why>`
 
@@ -110,7 +112,9 @@ Foreman answers the wake. A wake that comes during that turn waits. The Foreman 
 it once.
 
 When the waiter stops for any other reason, the next prompt or tool call of the Foreman session starts it again. A
-check of the waiter's process runs at each of them. It starts a waiter only when none runs, and only one. When the
+check of the waiter's process runs at each of them. It starts a waiter only when none runs, and only one. A session
+can go on in a new Claude process. The waiter of the old process then stops, and the next stop, prompt or tool call
+starts a waiter for the new one. A wake that the old process did not get stays, and the new process gets it. When the
 session is idle, no check runs, and the waiter stays down until your next message. The file `waiter.log` in the
 Foreman's folder (`foreman` in the folder that `conveyor.sh state-dir` prints) has a line each time a waiter starts and each time
 one stops, with the reason. A waiter that was killed has no time to write its reason. Its start line is then the last

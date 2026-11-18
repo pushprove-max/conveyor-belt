@@ -68,9 +68,12 @@ fd='' wstate=''
 { IFS= read -r fd; IFS= read -r wstate; } < <(export CONVEYOR_MAIN=$here
   . "${BASH_SOURCE[0]%/*}/../conveyor/foreman/lib.sh" > /dev/null 2>&1 && printf '%s\n%s\n' "$FD" "$(waiter_state)")
 if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
-  mark='' wpid='' wcommit='' wsid='' live=0 watch=''
+  mark='' wpid='' wcommit='' wsid='' live=0 watch='' w3=''
   { read -r mark _ < "$fd/session"; } 2>/dev/null
-  { read -r wpid wcommit wsid < "$fd/waiter.pid"; } 2>/dev/null
+  # "<pid> <commit> <session's process> <session>"; a waiter of an older engine writes "<pid> <commit> <session>": a
+  # third field is the session's process only when a fourth follows or it is a number, as a session id never is.
+  { read -r wpid wcommit w3 wsid < "$fd/waiter.pid"; } 2>/dev/null
+  [ -n "$wsid" ] || [[ $w3 =~ ^[0-9]+$ ]] || wsid=$w3
   if [[ $wpid =~ ^[0-9]+$ ]]; then
     procs=$(p_procs)
     if awk -v p="$wpid" '$1 == p && index($0, "/conveyor/foreman/waiter.sh") { f = 1 } END { exit !f }' <<<"$procs"; then

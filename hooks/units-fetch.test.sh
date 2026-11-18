@@ -102,7 +102,7 @@ echo "{\"plugin\": {\"commit\": \"$A\"}}" > "$M/bakery/.conveyor/project.json"
 hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
 printf '%s\n' '#!/usr/bin/env bash' 'exec 7>>"$1/waiter.lock"; flock -n 7 || exit 1' \
   'for w in conveyor limit alerts idle; do [ "$w" = "${3:-}" ] && continue; bash "${0%/*}/watch-$w.sh" & done' \
-  'printf "%s %s %s\n" "$$" "$2" s1 > "$1/waiter.pid"' 'wait' > "$M/v/$A/conveyor/foreman/waiter.sh"
+  'printf "%s %s %s %s\n" "$$" "$2" "$PPID" s1 > "$1/waiter.pid"' 'wait' > "$M/v/$A/conveyor/foreman/waiter.sh"
 for w in conveyor limit alerts idle; do echo 'sleep 60' > "$M/v/$A/conveyor/foreman/watch-$w.sh"; done
 echo 's1 2026-11-15T00:00:00Z' > "$FD/session"
 waiter() { # [<watcher left out>]: starts the stand-in in a process group of its own, once its watchers run
@@ -121,6 +121,11 @@ same 'D3: a waiter.pid whose waiter has exited is no live waiter' \
   "$(printf 'foreman\ts1\t%s\t%s\ts1\t0\t%s\t\tdown: the session'"'"'s process 77 has ended' "$WP" "$A" "$A")" "$(foreman)"
 waiter idle
 same 'a watcher that is not running is down' \
+  "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:down\tlistening' "$WP" "$A" "$A")" "$(foreman)"
+# A waiter of an older engine (the project pinned to it) writes no session's process: "<pid> <commit> <session>".
+# Bug: the session was read from a fourth field only, so /units lost it for that live waiter.
+echo "$WP $A s1" > "$FD/waiter.pid"
+same 'the waiter.pid of an older engine still names its session' \
   "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:down\tlistening' "$WP" "$A" "$A")" "$(foreman)"
 kill -- -"$WP"; wait "$WP" 2>/dev/null
 # D4: no role mark and no launcher settings: no Foreman is expected, so no line (the other machines above have no

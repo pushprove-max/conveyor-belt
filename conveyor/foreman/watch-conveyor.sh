@@ -39,7 +39,11 @@
 # then one line per item, each cut alone if it must be; the wake as a whole is never cut.
 # A problem reported is not reported again until it clears and comes back: conveyor-reported.txt holds the keys,
 # "<repo>/<key>", of the reported problems still there, so a restart repeats nothing. While a record gives no
-# snapshot, its reported problems stay reported.
+# snapshot, its reported problems stay reported. A watcher whose waiter's session's process has ended
+# (CONVEYOR_FOREMAN_SESSION_PID, waiter.sh) puts no wake and marks nothing reported: it ends, and the next waiter's
+# watcher finds the same problems new.
+# A card blocked for two polls or more that no session has got yet (unreported, below) is named again, on `foreman
+# status` and in the next wake: "not yet reported: blocked #N".
 # A card that only moves on the belt (build to review, review to tests) needs no one and wakes nothing.
 # Each poll writes one line to conveyor-polls.log in the Foreman's folder: its start, end, time taken, each record's
 # outcome and read, and whether it woke (the main loop, below).
@@ -166,12 +170,25 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (select($idle) | ["idle", "idle", "", "Conveyor is idle: nothing in flight and nothing to pick"])
   | join("\t")'
 
+# unreported <now>: of the problem lines on stdin (<repo> TAB <key> TAB <kind> TAB <issues> TAB <text>), each card
+# blocked since two polls or more before <now> that no session has got: no wake was put for it (its key is not in
+# conveyor-reported.txt: no watcher ran), or its wake is still in pending (no live session took it). One line each,
+# "<repo>: not yet reported: blocked <the card: #N, or a main-red fix card's name>".
+unreported() {
+  jq -rRs --argjson now "$1" --argjson poll "$POLL" --arg seen "$(cat "$SEEN" 2>/dev/null)" \
+    --arg pend "$(cat "$PENDING"/*.wake 2>/dev/null)" '($seen | split("\n")) as $seen | ($pend | split("\n")) as $pend
+    | split("\n")[] | select(. != "") | split("\t") | select(.[2] == "blocked") | .[0] as $repo | .[4] as $text
+    | ($text | capture(" is blocked since (?<t>[0-9T:-]+Z):") | .t | fromdate? // empty) as $t
+    | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or ("\($repo): \($text)" | IN($pend[]))))
+    | "\($repo): not yet reported: blocked \($text | sub(" is blocked since .*$"; ""))"'
+}
+
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
 # snapshot, with no wake put and nothing marked reported: the belt (its count, and while the loop runs its cards
 # building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
-# above), each "needs you: <text>". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
+# above), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
 # never empty. <project> names one record of mine; with none, every one of them. Then the watcher's last poll, from
 # the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
@@ -202,9 +219,10 @@ if [ "${1:-}" = --status ]; then
       echo "$repo: no snapshot ($why)"; continue
     fi
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
-    jq -r --argjson push -1 --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null \
-      | awk -F'\t' '$2 != "suite ended" { print "needs you: " $4 }'
-    [ "${PIPESTATUS[0]}" = 0 ] || echo "needs you: unknown, the snapshot holds no health record"
+    if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null); then
+      awk -F'\t' '$1 != "" && $2 != "suite ended" { print "needs you: " $4 }' <<<"$probs"
+      awk -v r="$repo" '$0 != "" { print r "\t" $0 }' <<<"$probs" | unreported "$now" | cut -d' ' -f2-
+    else echo "needs you: unknown, the snapshot holds no health record"; fi
   done <<<"$RECS"
   [ "$n" -gt 0 ] || { echo "foreman status: $2 is none of this Foreman's projects ($(cut -f1 <<<"$RECS" | paste -sd' ' -))" >&2; exit 2; }
   if read -r _ t1 took rest < <(tail -n 1 "$PLOG" 2>/dev/null); [ -n "${rest:-}" ]; then
@@ -313,8 +331,8 @@ wake() {
       ($all[] | "\(.repo): \(.text)")'
 }
 
-poll() { # 0 when a wake was put in pending
-  local now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} cur= new await repo main df
+poll() { # 0 when a wake was put in pending; 2 when one was due but the session's process has ended
+  local now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} cur='' new late await repo main df
   while IFS=$'\t' read -r repo main; do
     # [issue, its lines in await-<repo>.txt] for each awaited issue of the record past what was dropped: the count is
     # in its landed key, so an issue awaited again after its wake is a new key.
@@ -323,7 +341,13 @@ poll() { # 0 when a wake was put in pending
     cur+=$(record "$repo" "$main" "$now" "$await")$'\n'
   done <<<"$RECS"
   new=$(awk -F'\t' '!cur { seen[$0]; next } $2 != "" && !(($1 "/" $2) in seen) && $5 != ""' "$SEEN" cur=1 - <<<"$cur")
-  [ -z "$new" ] || wake <<<"$new" | pending_put || return 1
+  # A new wake also names each blocked card an earlier wake holds that no session has got (unreported): the new
+  # problems are this wake's own, so they are left out of that list.
+  if [ -n "$new" ]; then
+    [ -z "${CONVEYOR_FOREMAN_SESSION_PID:-}" ] || kill -0 "$CONVEYOR_FOREMAN_SESSION_PID" 2>/dev/null || return 2
+    late=$(awk -F'\t' '!cur { n[$1 FS $2]; next } !(($1 FS $2) in n)' - cur=1 <<<"$new" <(printf '%s' "$cur") | unreported "$now")
+    { wake <<<"$new"; [ -z "$late" ] || printf '%s\n' "$late"; } | pending_put || return 1
+  fi
   awk -F'\t' '$2 != "" { print $1 "/" $2 }' <<<"$cur" > "$SEEN.tmp" && mv "$SEEN.tmp" "$SEEN" || return 1
   # An awaited issue is dropped only once its wake is in pending or was reported before; await-<repo>.txt is never
   # rewritten.
@@ -344,9 +368,9 @@ while :; do
   # each record's outcome (record()) and whether it woke. Past PLOG_MAX lines it keeps the newest half.
   t1=$EPOCHSECONDS
   { printf '%s %s %ss %s; %s\n' "$(utc "$t0")" "$(utc "$t1")" "$((t1 - t0))" "$(paste -sd'|' - < "$POLLF" | sed 's/|/ | /g')" \
-      "$([ "$rc" = 0 ] && echo woke || echo 'no wake')" >> "$PLOG"
+      "$(case $rc in 0) echo woke ;; 2) echo "no wake: the session's process $CONVEYOR_FOREMAN_SESSION_PID has ended" ;; *) echo 'no wake' ;; esac)" >> "$PLOG"
     [ "$(wc -l < "$PLOG")" -le "$PLOG_MAX" ] || { tail -n $((PLOG_MAX / 2)) "$PLOG" > "$PLOG.tmp" && mv "$PLOG.tmp" "$PLOG"; }; } 2>/dev/null
-  [ "$rc" != 0 ] || exit 0
+  [ "$rc" != 0 ] && [ "$rc" != 2 ] || exit 0
   [ "${1:-}" != --once ] || exit 1
   sleep "$POLL"
 done

@@ -39,6 +39,7 @@ CASE=status; fixture status
 # Issue 357: the watcher's last poll, from its poll log. Bug it catches: a wake 5 minutes late, and nothing told how
 # long each poll had taken.
 mkdir -p "$FD" && echo '2026-11-15T11:59:00Z 2026-11-15T11:59:47Z 47s alpha: slow, read health; woke' > "$FD/conveyor-polls.log"
+echo alpha/blocked:c7 > "$FD/conveyor-reported.txt" # #7 was reported (t_unreported is the case of one that was not)
 snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it keeps the address typed' build),$(card 4 'Add a field' review),$(card 5 'Speed up tests' tests)"']
   | .queue.waiting = [{issue: 6, title: "Later", waitsFor: [3]}] | .open.held = [{issue: 8}]
   | .health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
@@ -249,8 +250,29 @@ poll
 tail -n 1 "$L" | grep -Eq ' alpha: failed, read none; no wake$' || fail "the last line is not this poll's failed read: $(tail -n 1 "$L")"
 }
 
+# Issue 361: a card blocked two polls ago or more that no session has got is named on the status and in the next
+# wake. Bug it catches: a block whose wake reached no session (or that no watcher saw) was told to no one, and the
+# Foreman learned of it only when the owner asked. #5: no wake put (not in the reported list); #8: its wake still
+# pending; #7: reported and delivered; #6: blocked under two polls ago.
+t_unreported() {
+CASE=unreported; fixture unreported; mkdir -p "$FD/pending"
+b() { echo "{card: \"c$1\", issue: $1, since: \"$2\", reason: \"tests failed twice\"}"; } # <issue> <since>
+snap ".health.blocked = [$(b 5 2026-11-15T11:00:00Z), $(b 6 2026-11-15T11:59:30Z), $(b 7 2026-11-15T11:00:00Z), $(b 8 2026-11-15T11:00:00Z)]"
+printf '%s\n' alpha/blocked:c6 alpha/blocked:c7 alpha/blocked:c8 > "$FD/conveyor-reported.txt"
+old=$FD/pending/20261115T110000Z-1-old.wake
+printf '%s\n' 'Conveyor: alpha: blocked: #8' 'alpha: #8 is blocked since 2026-11-15T11:00:00Z: tests failed twice' > "$old"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+[ "$(grep '^not yet reported: ' <<<"$out")" = $'not yet reported: blocked #5\nnot yet reported: blocked #8' ] \
+  || fail "the status does not name exactly the unreported blocked cards #5 and #8: $out"
+poll || fail "no wake for the new blocked card #5: $(cat "$T/err")"
+w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name "${old##*/}")")
+grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' <<<"$w" || fail "the wake does not name #5: $w"
+[ "$(grep 'not yet reported' <<<"$w")" = 'alpha: not yet reported: blocked #8' ] \
+  || fail "the wake does not name the pending #8 alone as not yet reported: $w"
+}
+
 cases=(status wake suite mainred building slowlive slowdown)
-cases=(status wake suite suitedead mainred building nosnapanew nosnapquiet healthwake polllog)
+cases=(status wake suite suitedead mainred building nosnapanew nosnapquiet healthwake polllog unreported)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

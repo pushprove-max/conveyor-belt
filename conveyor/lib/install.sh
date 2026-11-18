@@ -241,7 +241,7 @@ prune() { # [<refused>]
   [ ${#gone[@]} != 0 ] || return 0
   t=$(mktemp "$ENGINE.XXXXXX") && jq '.taken -= $ARGS.positional' "$ENGINE" --args "${gone[@]}" > "$t" && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
 }
-# The commit the Foreman's waiter of the Foreman folder <dir> runs from (its waiter.pid: "<pid> <commit> <session>",
+# The commit the Foreman's waiter of the Foreman folder <dir> runs from (its waiter.pid: "<pid> <commit> <session's process> <session>",
 # foreman/waiter.sh) while that pid runs; its watchers end before it does (waiter.sh, stop_all). The pid is asked,
 # not waiter.lock: a probe of the lock could make a waiter starting that instant find it taken and not start.
 foremanon() { # <dir>

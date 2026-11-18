@@ -120,7 +120,105 @@ wait_until "[ \"\$(wc -l < $T/long)\" = 2 ] && pgrep -P $h -xf 'sleep 1' > /dev/
 [ "$(wc -l < "$T/starts")" = 4 ] || fail "the watcher set down was started again before the next stop: $(wc -l < "$T/starts") starts"
 }
 
-cases=(handoff restart why downheld downstop)
+# Issue 361: the session goes on in a new process and the old one ends. Bug: the stop's waiter of the ended process
+# held waiter.lock, so the new process's stops started no waiter, and it then relayed the wake of a blocked card to
+# the ended process, where no session got it. belt: the real Conveyor watcher (BW) over one project, alpha, whose
+# snapshot is $T/snap (blocked <issue>: one blocked card, else none); ended: the session's process SP ends.
+belt() {
+  M=$T/alpha
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" "$M/.conveyor" && git init -q "$M" && echo '{}' > "$M/.conveyor/project.json" || exit 1
+  jq -n --arg s "$T/state" --arg m "$M" '{stateDir: $s, records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  export CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_ASK="cat $T/snap" CONVEYOR_FOREMAN_NOW=1763208000
+  BW="bash $SRC/watch-conveyor.sh"
+  blocked
+}
+blocked() { # [<issue>]
+  jq -n --arg i "${1:-}" '{belt: [], queue: {next: [{issue: 99}], waiting: []}, open: {held: []}, suites: [],
+    health: {time: "2025-11-15T12:00:00Z", loop: true, gh: true, waiting: [], stuck: [], pushFailingSince: null,
+      blocked: [$i | select(. != "") | {card: "c\(.)", issue: tonumber, since: "2025-11-15T11:59:00Z", reason: "tests failed twice"}]}}' > "$T/snap.new" \
+    && mv "$T/snap.new" "$T/snap"
+}
+ended() { kill "$SP"; wait "$SP" 2>/dev/null; }
+# paused <waiter>: it waits out its pause between two looks (CONVEYOR_FOREMAN_LOOK=600), past its first check of the
+# session's process.
+paused() { wait_until "pgrep -P $1 -xf 'sleep 600' > /dev/null" || fail "the waiter $1 never paused between two looks"; } # sleep: no sleep here, the pattern names the waiter's pause
+# A second process of the same session, ended with the case.
+second() { sleep 600 & SP2=$!; trap 'kill $SP2 2>/dev/null' EXIT; } # sleep: the stand-in for the session's new process
+
+# D1: the session's process ends, and a card is blocked: the watcher finds it, and the stop's waiter ends and frees
+# the lock, with nothing delivered and the card not marked reported. The watcher's first read of the snapshot waits
+# for the file gate, so its first poll comes after the process ended; with no look of its own until then
+# (CONVEYOR_FOREMAN_LOOK=600), the waiter ends only once the watcher has polled.
+t_goneblock() {
+fixture goneblock; belt
+export CONVEYOR_FOREMAN_ASK="touch $T/asked; while [ ! -e $T/gate ]; do sleep 0.1; done; cat $T/snap" # sleep: the gate's poll
+echo '{}' | CONVEYOR_FOREMAN_LOOK=600 CONVEYOR_FOREMAN_WATCHERS=$BW bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null & sw=$!
+wait_until "[ -e $T/asked ]" || fail "the watcher never read the snapshot"
+ended; blocked 255; touch "$T/gate"
+WAIT_CEILING=20 wait_until "! kill -0 $sw 2>/dev/null" || fail "the stop's waiter runs on after the session's process ended"
+wait "$sw"; rc=$?
+[ "$rc" = 0 ] && [ ! -s "$T/wake" ] || fail "the waiter delivered a wake to the ended process (exit $rc): $(cat "$T/wake")"
+tail -n 1 "$FD/conveyor-polls.log" | grep -qF "; no wake: the session's process $SP has ended" \
+  || fail "the watcher's poll did not find the blocked card due with the process ended: $(tail -n 1 "$FD/conveyor-polls.log")"
+flock -n "$FD/waiter.lock" true || fail "the waiter that ended still holds waiter.lock"
+! grep -qF blocked:c255 "$FD/conveyor-reported.txt" || fail "the blocked card is marked reported with no session told"
+tail -n 1 "$FD/waiter.log" | grep -qF "ended: the session's process $SP has ended" || fail "the waiter's end does not say why: $(cat "$FD/waiter.log")"
+}
+
+# D2: the stop of the session's new process takes over from the waiter of the ended one before that waiter's next
+# look (600 s here), and its first wake names the blocked card.
+t_takeover() {
+fixture takeover; belt
+echo '{}' | CONVEYOR_FOREMAN_LOOK=600 CONVEYOR_FOREMAN_WATCHERS=$BW bash "$SRC/waiter.sh" 2> "$T/wake1" > /dev/null & sw=$!
+wait_until '[ -s "$FD/conveyor-polls.log" ]' || fail "the watcher made no first poll"
+paused "$sw"; ended; blocked 255; second
+CONVEYOR_FOREMAN_SESSION_PID=$SP2 stop "$BW"; rc=$?
+[ "$rc" = 2 ] && grep -qxF 'Conveyor: alpha: blocked: #255' "$T/wake" || fail "the new process's stop did not wake on the blocked card (exit $rc): $(cat "$T/wake")"
+kill -0 "$sw" 2>/dev/null && fail "the waiter of the ended process still runs"
+[ ! -s "$T/wake1" ] || fail "the waiter of the ended process delivered: $(cat "$T/wake1")"
+[ "$(logged "takes over from the waiter $sw, whose session's process $SP has ended")" = 1 ] || fail "no takeover in the log: $(cat "$FD/waiter.log")"
+}
+
+# D3: a wake found after the session's process ended is not delivered: it stays pending, and the next stop (of the
+# session's new process) delivers it.
+t_undelivered() {
+fixture undelivered
+echo '{}' | CONVEYOR_FOREMAN_LOOK=600 CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" 2> "$T/wake1" > /dev/null & sw=$!
+paused "$sw"; ended; put 'Alert: blocked #9'
+WAIT_CEILING=20 wait_until "! kill -0 $sw 2>/dev/null" || fail "the waiter runs on after its watcher found a wake for the ended process"
+wait "$sw"; rc=$?
+[ "$rc" = 0 ] && [ ! -s "$T/wake1" ] || fail "the wake was delivered to the ended process (exit $rc): $(cat "$T/wake1")"
+[ "$(wakes)" = 1 ] || fail "the wake that was not delivered did not stay pending: $(cat "$FD/waiter.log")"
+second
+CONVEYOR_FOREMAN_SESSION_PID=$SP2 stop; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #9' ] || fail "the next stop did not deliver the pending wake (exit $rc): $(cat "$T/wake")"
+[ "$(wakes)" = 0 ] || fail "the delivered wake stayed pending"
+}
+
+# The same takeover by any other hook of the new process (--check): it starts a waiter that listens.
+t_takecheck() {
+fixture takecheck
+echo '{}' | CONVEYOR_FOREMAN_LOOK=600 CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" > /dev/null 2>&1 & sw=$!
+paused "$sw"; ended; second
+CONVEYOR_FOREMAN_SESSION_PID=$SP2 check
+kill -0 "$sw" 2>/dev/null && fail "the hook did not stop the waiter of the ended process"
+isheld "$(wpid)" || fail "the hook started no waiter of its own: $(cat "$FD/waiter.log")"
+}
+
+# A waiter of an older engine (a project pinned to it) writes waiter.pid with no session's process: "<pid> <commit>
+# <session>". Bug: claim read the session from a fourth field, found none, and stopped the waiter of the session that
+# claimed the role again.
+t_oldpid() {
+fixture oldpid; belt # a claim needs a host file with records
+flock "$FD/waiter.lock" sleep 600 & hp=$! # sleep: the stand-in older waiter, which holds the lock
+wait_until "! flock -n '$FD/waiter.lock' true"
+echo "$hp - s1" > "$FD/waiter.pid"
+(. "$SRC/lib.sh" && claim s1) || fail "the claim failed"
+kill -0 "$hp" 2>/dev/null || fail "the claim stopped the older waiter of the session that claimed the role again"
+kill "$hp"
+}
+
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

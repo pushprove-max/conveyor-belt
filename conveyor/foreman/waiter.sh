@@ -11,8 +11,11 @@
 # and delivers what is pending at once, so a wake seen during a turn reaches the session once that turn ends, once.
 # --check is every other hook of the Foreman session (UserPromptSubmit, PostToolUse): when nothing holds waiter.lock
 # (the waiter died, or its hook was ended at its timeout) it starts a --held waiter; when a waiter runs it does
-# nothing. A held waiter ends when the session's process has gone (the nearest process above the hook that is no
-# shell; CONVEYOR_FOREMAN_SESSION_PID in tests), as nothing else would end it.
+# nothing. Every waiter ends when the session's process has gone (the nearest process above the hook that is no
+# shell; CONVEYOR_FOREMAN_SESSION_PID in tests): it checks at each look, and again before and after it relays a wake,
+# so a wake it could not relay stays in pending. A session that goes on in a new process runs its hooks from that
+# one: a stop or hook that finds waiter.lock held by a waiter of another process that has ended takes over (stops it,
+# then takes the lock), as that waiter would hold the lock and relay its wakes to no one.
 # waiter.log, in the Foreman's folder, has a line when a waiter starts and when it ends, with why (lib.sh
 # waiter_state reads it); a waiter killed with no chance to write leaves its start line last.
 # The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. One that exits with nothing put
@@ -70,7 +73,8 @@ if [ -z "${CONVEYOR_FOREMAN_SESSION_PID:-}" ]; then
 fi
 # held <pid>: 0 when that process is a waiter that listens until the next stop.
 held() { [[ $1 =~ ^[0-9]+$ ]] && ps -o args= -p "$1" 2>/dev/null | grep -q '/conveyor/foreman/waiter\.sh --held'; }
-# waiter.pid (in the Foreman's folder, lib.sh FD), "<pid> <commit it runs from, - from a checkout> <session>", names
+# waiter.pid (in the Foreman's folder, lib.sh FD), "<pid> <commit it runs from, - from a checkout> <session's process>
+# <session>", names
 # the live waiter: a claim by another session of the same Foreman stops it (lib.sh claim), and an update keeps that
 # commit's install. The session is last, as it may be empty. The mark is read again once waiter.pid is written: a claim or off
 # between the first check and then read the old waiter.pid, so it is this waiter that stands down.
@@ -80,10 +84,15 @@ if [ "$MODE" = --held ]; then
 else
   exec 7>>"$FD/waiter.lock" || exit 0
   if ! flock -n 7; then
-    [ -z "$MODE" ] || exit 0 # --check: a waiter runs
-    { read -r old _ < "$FD/waiter.pid"; } 2>/dev/null
-    held "${old:-}" || exit 0 # the waiter that runs can wake the session itself
-    log "the stop takes over from the waiter $old, which listened during the turn"
+    { read -r old _ osp _ < "$FD/waiter.pid"; } 2>/dev/null
+    if [[ ${osp:-} =~ ^[0-9]+$ ]] && [ "$osp" != "$CONVEYOR_FOREMAN_SESSION_PID" ] && ! kill -0 "$osp" 2>/dev/null; then
+      log "the $([ -z "$MODE" ] && echo stop || echo hook) of the session's process $CONVEYOR_FOREMAN_SESSION_PID takes over from the waiter $old, whose session's process $osp has ended"
+    else
+      osp=''
+      [ -z "$MODE" ] || exit 0 # --check: a waiter runs
+      held "${old:-}" || exit 0 # the waiter that runs can wake the session itself
+      log "the stop takes over from the waiter $old, which listened during the turn"
+    fi
     kill -TERM "$old" 2>/dev/null
     flock -w 10 7 || { log "the waiter $old did not stop in 10 s; this stop passes"; exit 0; }
   fi
@@ -119,29 +128,35 @@ handoff() {
   set -m
   (trap - TERM HUP INT; CONVEYOR_FOREMAN_DOWN=${1:-} exec bash "$SELF" --held <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')" > /dev/null 2>&1) & p=$!
   set +m
-  printf '%s %s %s\n' "$p" "${FROM:--}" "$SID" > "$FD/waiter.pid"
+  printf '%s %s %s %s\n' "$p" "${FROM:--}" "$CONVEYOR_FOREMAN_SESSION_PID" "$SID" > "$FD/waiter.pid"
   why="$why; the waiter $p listens until the next stop"
 }
 if [ "$MODE" = --check ]; then
   foreman "$SID" || exit 0
-  why='nothing held waiter.lock'; log "a hook of the session found no waiter running: it starts one"
+  why='nothing held waiter.lock'; [ -z "${osp:-}" ] || why="the waiter of the ended process $osp held waiter.lock"
+  log "a hook of the session found no waiter running${osp:+ for its process}: it starts one"
   handoff; exit 0
 fi
 # Listed for the prune of every project of this machine, whose own lists may not name this Foreman's folder.
 FOREMEN=${VERSIONS%/*}/foremen
 { grep -qxF "$FD" "$FOREMEN" || echo "$FD" >> "$FOREMEN"; } 2>/dev/null
-printf '%s %s %s\n' "$$" "${FROM:--}" "$SID" > "$FD/waiter.pid"
+printf '%s %s %s %s\n' "$$" "${FROM:--}" "$CONVEYOR_FOREMAN_SESSION_PID" "$SID" > "$FD/waiter.pid"
 foreman "$SID" || exit 0
 [ ! -f "$LOG" ] || [ "$(wc -l < "$LOG")" -le 400 ] ||{ tail -n 200 "$LOG" > "$LOG.new" && mv "$LOG.new" "$LOG"; } 2>/dev/null
 why='' sp=''
 log "started from ${FROM:-a checkout}${MODE:+, listening until the next stop}"
 trap 'log "ended: ${why:-it stopped for no known reason}"' EXIT
 ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
-deliver() { # 0 when anything pending went to stderr
+# deliver: 0 when anything pending went to stderr while the session's process was alive. What it relays leaves
+# pending only then: a wake relayed to an ended process, or one stderr would not take, waits for the next stop.
+deliver() {
   : > "$ACK"
+  live
   local text; text=$(pending_run "$ACK") || return 1
   trap '' TERM HUP INT
-  printf '%s\n' "$text" >&2 && printf '%s\n' "$text" > "$FD/last-wake.txt"
+  printf '%s\n' "$text" >&2 || { trap onterm TERM HUP INT; return 1; }
+  live
+  printf '%s\n' "$text" > "$FD/last-wake.txt"
   while IFS= read -r f; do rm -f "$f"; done < "$ACK"
   why='it delivered a wake'
 }
@@ -152,7 +167,16 @@ stop_all() {
   stop_groups "${PID[@]}"
   wait "${PID[@]}" 2>/dev/null; rm -f "$ACK" "$FD/watchers.pid"
 }
-trap 'kill "${sp:-}" 2>/dev/null; why="it was stopped (a claim, a stop that took over, or the end of its hook)"; stop_all; exit 0' TERM HUP INT
+# live: returns when the session's process is alive; else the waiter ends here, its watchers stopped and the lock
+# freed, with nothing relayed.
+live() {
+  kill -0 "$CONVEYOR_FOREMAN_SESSION_PID" 2>/dev/null && return 0
+  why="the session's process $CONVEYOR_FOREMAN_SESSION_PID has ended"; stop_all; exit 0
+}
+onterm() {
+  kill "${sp:-}" 2>/dev/null; why="it was stopped (a claim, a stop that took over, or the end of its hook)"; stop_all; exit 0
+}
+trap onterm TERM HUP INT
 [ -n "$MODE" ] || ! deliver || { rm -f "$ACK"; handoff; exit 2; }
 # down <name>: 0 when the waiter that started this one left that watcher out (CONVEYOR_FOREMAN_DOWN).
 down() { [ -n "${CONVEYOR_FOREMAN_DOWN:-}" ] && [ "$1" = "$CONVEYOR_FOREMAN_DOWN" ]; }
@@ -175,10 +199,9 @@ renew=${CONVEYOR_FOREMAN_RENEW:-82800} look=${CONVEYOR_FOREMAN_LOOK:-60}
 end=${CONVEYOR_FOREMAN_END:-$(( $(date +%s) + renew ))}
 while :; do
   left=$(( end - $(date +%s) ))
+  live
   if [ -n "$MODE" ]; then
     left=$look
-    kill -0 "$CONVEYOR_FOREMAN_SESSION_PID" 2>/dev/null \
-      || { why="the session's process $CONVEYOR_FOREMAN_SESSION_PID has ended"; stop_all; exit 0; }
   elif [ "$left" -le 0 ]; then
     echo "Renew: $((renew / 3600)) hours with nothing to report; no action needed. Reply: Idle" | pending_put
     deliver; why="$why (the renew)"; stop_all; handoff; exit 2

@@ -109,7 +109,7 @@ told() { awk -v s="$1" '{ print ($0 == s ? s " told" : $0) }' "$FD/former" > "$F
 # Foreman's cannot be told then, and a mark in the wrong one would make a second Foreman.
 claim() { locked claim_ "${1:-}"; }
 claim_() {
-  local old pid sid
+  local old pid sid w3=''
   mine > /dev/null || return 1
   old=$(marked)
   [ -z "$old" ] || [ "$old" = "$1" ] || { forget "$old" && printf '%s\n' "$old" >> "$FD/former"; } || return 1
@@ -117,7 +117,9 @@ claim_() {
   if [ -n "$1" ]; then printf '%s %s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARK.new"; else : > "$MARK.new"; fi
   mv "$MARK.new" "$MARK" || return 1
   # A waiter writes waiter.pid, then checks the mark (waiter.sh): one that wrote it after this read sees the new mark.
-  { read -r pid _ sid < "$FD/waiter.pid"; } 2>/dev/null || return 0
+  # The session is the fourth field, or the third in a waiter.pid of an older engine's waiter (no session's process).
+  { read -r pid _ w3 sid < "$FD/waiter.pid"; } 2>/dev/null || return 0
+  [ -n "$sid" ] || [[ $w3 =~ ^[0-9]+$ ]] || sid=$w3
   [ "$sid" != "$1" ] || return 0
   flock -n "$FD/waiter.lock" true 2>/dev/null && return 0 # no waiter alive
   kill -TERM "$pid" 2>/dev/null; flock -w 10 "$FD/waiter.lock" true \
