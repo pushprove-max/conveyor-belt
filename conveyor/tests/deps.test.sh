@@ -88,6 +88,26 @@ t_startqueue() {
   out=$(loop snapshot 2>/dev/null); rmdir "$C.new"
   [ "$(jq -c '[.queue.order // [] | .[].issue | select(. == 14)]' <<<"$out")" = '[]' ] || fail "an unsaved hold shown queued: $(jq -c .queue <<<"$out")"
 }
+# Issue 330: the filing hook's hold (`control adopt`, foreman.sh filed) comes after the command that filed the issues.
+# A release given in between stays: `control hold` held #6 again, a few seconds after the owner said yes. The other
+# issues filed in the same command (#7, #8) are held; #4, opened before the filing, and #9, held and released before,
+# are not.
+t_startadopt() {
+  startsetup
+  ctl start held >/dev/null; ctl hold 9 >/dev/null; ctl release 6 9 >/dev/null
+  add "$(issue 6 2000-01-01T00:00:00Z P2),$(issue 7 2000-01-01T00:00:00Z P2),$(issue 8 2000-01-01T00:00:00Z P2),$(issue 9 2000-01-01T00:00:00Z P2)"
+  # The record saved, not only the one printed, holds all three filed and unreleased.
+  [ "$(ctl adopt 4 6 7 8 9 | jq -c '[.held, .startSeen]')" = '[[7,8],[6,7,8,9]]' ] && [ "$(jq -c '[.held, .startSeen]' "$C")" = '[[7,8],[6,7,8,9]]' ] \
+    || fail "adopt: $(cat "$C")"
+  # Released after the hold, #7 stays released when the hook's hold is asked again.
+  ctl release 7 >/dev/null; ctl adopt 7 8 >/dev/null; [ "$(jq -c .held "$C")" = '[8]' ] || fail "adopt after a release: $(cat "$C")"
+  # The owner selects Queue while the command files more: #10, filed after the span ended, is held too, as the hook
+  # filed it; held only up to the span's end, it was left open to be picked.
+  ctl start queue >/dev/null; add "$(issue 10 2000-01-01T00:00:00Z P2)"
+  [ "$(jq -c .startHeld "$C")" = '[{"from":4,"to":9}]' ] && ctl adopt 10 >/dev/null && [ "$(jq -c .held "$C")" = '[8,10]' ] \
+    || fail "an issue filed after Queue was selected was not held: $(cat "$C")"
+  out=$(ctl adopt 0); [ $? = 2 ] || fail "adopt 0 was not refused: $out"
+}
 dep() { jq -c --arg b "$2" '.body = "body\n" + $b' <<<"$1"; } # <issue json> <Depends on: lines>
 order() { st 'select(.step == "picked" or .step == "landed") | "\(.step):\(.issue)"' | tr '\n' ' '; }
 t_depends() {

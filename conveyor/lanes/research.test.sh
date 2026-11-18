@@ -403,7 +403,7 @@ out=$(hook PreToolUse Bash "$(bash_in "$cmd")"); [ -z "$out" ] || fail "filing a
 grep -qx 'alpha control start held' "$T/calls" || fail "new issues do not start held before the filing command runs: $(cat "$T/calls")"
 out=$(hook PostToolUse Bash "$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {command: $c},
   tool_response: {stdout: "https://github.com/example/alpha/issues/41\n", stderr: ""}}')")
-grep -qx 'alpha control hold 41' "$T/calls" || fail "the issue the lane filed is not held: $(cat "$T/calls")"
+grep -qx 'alpha control adopt 41' "$T/calls" || fail "the issue the lane filed is not held: $(cat "$T/calls")"
 [ "$(sed -n '$p' "$T/calls")" = 'alpha control start queue' ] || fail "new issues are not set back to the queue once the filed one is held: $(cat "$T/calls")"
 [ -d "$T/state/lanes/research" ] || fail "the lane's folder is not in the state folder"
 # Filing through GitHub's API starts held just the same.
@@ -476,7 +476,7 @@ for title in 'example title' serve; do
   [ "$out" = https://github.com/example/alpha/issues/42 ] || fail "the filing command did not print the issue's link: $title: $out"
   [ "$(grep -c '^issue create' "$T/issues")" = 1 ] && grep -qx -- "issue create --title $title --body-file -" "$T/issues" && grep -qx found "$T/issues" \
     || fail "the filing command did not file one issue with its title and body: $(cat "$T/issues")"
-  [ "$(cat "$T/calls")" = $'alpha control\nalpha control start held\nalpha control hold 42\nalpha control start queue' ] \
+  [ "$(cat "$T/calls")" = $'alpha control\nalpha control start held\nalpha control adopt 42\nalpha control start queue' ] \
     || fail "the issue filed was not held, its record starting new issues held first and in the queue again after: $title: $(cat "$T/calls")"
 done
 # The filer keeps what it relies on where the shell cannot write it.
@@ -497,7 +497,7 @@ until flock -n "$T/state/lanes/research-filer/filing.lock" true; [ $? = 1 ]; do 
 wait_until 'under "$second" flock || ! kill -0 "$second" 2>/dev/null' # it waits at the turn's lock, or has ended
 [ ! -s "$T/calls" ] && [ ! -s "$T/issues" ] || fail "a filer filed while another held the turn: $(cat "$T/calls" "$T/issues")"
 echo go > "$T/turn"; wait "$turn"; wait "$second" || fail "the waiting filer failed once the turn was free: $(cat "$T/second")"
-[ "$(cat "$T/calls")" = $'alpha control\nalpha control start held\nalpha control hold 42\nalpha control start queue' ] && grep -qx 'issue create --title second --body-file -' "$T/issues" \
+[ "$(cat "$T/calls")" = $'alpha control\nalpha control start held\nalpha control adopt 42\nalpha control start queue' ] && grep -qx 'issue create --title second --body-file -' "$T/issues" \
   || fail "the waiting filer did not file its issue held once the turn was free: $(cat "$T/calls" "$T/issues")"
 # Nor do the lane's own hooks start new issues in the queue again while the filer holds the turn: a Bash call's filing
 # hook set them held (so the filer, seeing them held, sets nothing), and its filed hook waits for the turn to be free.

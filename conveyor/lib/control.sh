@@ -749,7 +749,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -760,6 +760,13 @@ control() { # [action [arguments]]
     cap) [ $# = 1 ] && [[ $1 =~ ^(100|[1-9][0-9]?|off)$ ]] || { bad; return; }; f='.cap = ($v[0] | if . == "off" then null else tonumber end)' ;;
     guard) [ $# = 1 ] && [[ $1 =~ ^(100|[1-9][0-9]?|off)$ ]] || { bad; return; }; f='.guard = ($v[0] | if . == "off" then null else tonumber end)' ;;
     hold) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held = (.held + ($v | map(tonumber)) | unique)' ;;
+    # adopt: the filing hooks' hold (foreman/foreman.sh filed) of the issues named: each one opened after a span of
+    # startHeld began, whether or not it has ended (the owner may select Queue while a command files several), that
+    # startSeen does not have yet, whatever its labels (adopted() also passes over a follow-up). One released already,
+    # even a moment after it was filed, or held once, is left as it is, so a release is never undone.
+    adopt) [ $# != 0 ] && nums "$@" || { bad; return; }
+      f='. as $c | [$v[] | tonumber | select(. as $i | (IN($c.startSeen[]) | not) and ($c.startHeld | any($i > .from)))] as $n
+         | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique)' ;;
     release) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held -= ($v | map(tonumber)) | if .startHeld == [] then . else .startSeen = (.startSeen + ($v | map(tonumber)) | unique) end' ;;
     order) nums "$@" || { bad; return; }; f='.order = reduce ($v[] | tonumber) as $n ([]; if index($n) then . else . + [$n] end)' ;;
     unpin) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.order -= ($v | map(tonumber))' ;;
@@ -819,8 +826,9 @@ control() { # [action [arguments]]
   esac
   new=$(jq -c --arg a "$a" --arg p "$p" --argjson n "$top" "\$ARGS.positional as \$v | $f" --args "$@" <<<"$c") && [ -n "$new" ] || return 1
   ctlput "$c" "$new" || return 1
-  # A release dates only the issues the record held.
-  case $a in hold) movedlocked movedhold hold "$new" "$@" ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
+  # A release dates only the issues the record held; an adopt only those it held now.
+  case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
+    [ -z "$x" ] || movedlocked movedhold hold "$new" $x ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
     [ -z "$x" ] || movedlocked movedhold release "$new" $x ;; esac
   # A resume puts back the cards a sign-in failure blocked, once each (signinback()).
   [ "$a" != resume ] || signinback

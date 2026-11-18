@@ -511,18 +511,33 @@ ready
 # held; after it, each issue linked is held in its own record, and the records start new issues in the queue again.
 : > "$T/calls"
 fileask
-cmd='conveyor.sh gh-write issue create --repo example/beta --title example --body example; gh issue create --title example --body example'
+cmd='conveyor.sh gh-write issue create --repo example/beta --title example --body example; gh issue create -R example/beta --title example --body example; gh issue create --title example --body example'
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing)
 [ -z "$out" ] || fail "the filing command was refused: $out"
 [ "$(grep -c 'control start held' "$T/calls")" = 2 ] || fail "not every record starts new issues held before the command runs: $(cat "$T/calls")"
 : > "$T/calls"
+# Issue 330: three issues filed in one command are all held, and each by `control adopt`, which leaves one the owner
+# released before this hook ran released (deps.test.sh t_startadopt), where `control hold` held it again.
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {command: $c},
   tool_response: {stdout: "https://github.com/example/beta/issues/12\nhttps://github.com/example/beta/issues/15\nhttps://github.com/example/alpha/issues/30\n", stderr: ""}}' \
   | bash "$SRC/foreman.sh" filed)
-grep -qx 'beta control hold 12 15' "$T/calls" && grep -qx 'alpha control hold 30' "$T/calls" || fail "each issue filed is not held in its own record: $(cat "$T/calls")"
+grep -qx 'beta control adopt 12 15' "$T/calls" && grep -qx 'alpha control adopt 30' "$T/calls" || fail "each issue filed is not held in its own record: $(cat "$T/calls")"
 [ "$(grep -c 'control start queue' "$T/calls")" = 2 ] || fail "the records do not start new issues in the queue again: $(cat "$T/calls")"
 [ "$(sed -n '$p' "$T/calls" | cut -d' ' -f2-)" = 'control start queue' ] || fail "the queue was set back before every issue was held: $(cat "$T/calls")"
 jq -e '.hookSpecificOutput.additionalContext | test("#?12") and test("15") and test("30")' <<<"$out" >/dev/null || fail "the Foreman is not told what was held: $out"
+# Issue 330: the Foreman is told as held only the issues the record holds after the adopt: one released already
+# (#15) is named apart, not as held with a word to release it again.
+in=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {command: $c}, tool_response: {stdout: "https://github.com/example/beta/issues/12\nhttps://github.com/example/beta/issues/15\n"}}')
+out=$(CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" != 'control adopt 12 15' ] || echo '{\"held\":[3,12]}'" bash "$SRC/foreman.sh" filed <<<"$in")
+jq -e '.hookSpecificOutput.additionalContext | test("Held in Conveyor \\(beta: 12\\)") and test("released already \\(beta: 15\\)")' <<<"$out" >/dev/null \
+  || fail "a released issue was told to the Foreman as held: $out"
+# Issue 330: a record whose engine has no `control adopt` (it pins an older one) refuses it as a usage error: the
+# issues are held with `control hold` there, not reported as not held after GitHub filed them.
+: > "$T/calls"
+out=$(CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_CMD\" >> $T/calls; case \$CONVEYOR_CMD in 'control adopt'*) echo 'usage: conveyor.sh control [hold <issue>...]' >&2; exit 2 ;; 'control hold'*) echo '{\"held\":[12,15]}' ;; esac" \
+  bash "$SRC/foreman.sh" filed <<<"$in")
+grep -qx 'control hold 12 15' "$T/calls" && jq -e '.hookSpecificOutput.additionalContext | test("Held in Conveyor \\(beta: 12, 15\\)")' <<<"$out" >/dev/null \
+  || fail "an older engine's record did not hold the issues filed: $out $(cat "$T/calls")"
 # Nor does the Foreman start new issues in the queue again while the research lane's filer holds its turn: the filer,
 # seeing them set held by the Foreman's filing, set nothing, and its issue is not yet held.
 printf 'alpha\n' > "$FH"; : > "$T/calls"; mkdir -p "$T/state/lanes/research-filer"; mkfifo "$T/turn"
@@ -543,7 +558,7 @@ grep -q 'control start held' "$T/calls" || fail "a quoted filing command was not
 : > "$T/calls"
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {command: $c}, tool_response: {stdout: "https://github.com/example/alpha/issues/31\n"}}' \
   | bash "$SRC/foreman.sh" filed)
-grep -qx 'alpha control hold 31' "$T/calls" || fail "a quoted filing command's issue was not held: $(cat "$T/calls")"
+grep -qx 'alpha control adopt 31' "$T/calls" || fail "a quoted filing command's issue was not held: $(cat "$T/calls")"
 # A subcommand made by an expansion cannot be read, so it is held as filing; flags before the subcommand do not hide it.
 # Another HTTP client (curl, wget, a script) files an issue on the issues list or GraphQL endpoint just as gh does, and
 # whether it writes cannot be read: a script POSTs whenever it sends a body, a quoted `;` is no command break, and an
@@ -589,6 +604,12 @@ out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {comma
   | bash "$SRC/foreman.sh" filed)
 jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "an issue filed with no record to hold it in was let pass: $out"
 mv "$T/h0" "$XDG_CONFIG_HOME/conveyor/host.json"
+# Issue 330: a filing command run in the background has its filed hook as it starts, so the records went back to the
+# queue before its issues were filed, and its output linked none: none was held. It is refused, with nothing set.
+: > "$T/calls"
+out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {command: $c, run_in_background: true}}' | bash "$SRC/foreman.sh" filing)
+jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$out" >/dev/null && [ ! -s "$T/calls" ] \
+  || fail "a filing command run in the background was not refused, or set records: $out $(cat "$T/calls")"
 }
 
 t_ask_pin() {
@@ -879,7 +900,7 @@ jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/bet
 grep -qx 'beta control start held' "$T/calls" || fail "filing in beta from alpha's Foreman left beta's new issues buildable: $(cat "$T/calls")"
 jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/beta --title example --body example"}, tool_response: {stdout: "https://github.com/example/beta/issues/60\n"}}' \
   | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filed) > /dev/null
-grep -qx 'beta control hold 60' "$T/calls" && grep -qx 'beta control start queue' "$T/calls" || fail "the issue filed in beta was not held, or beta's gate not set back: $(cat "$T/calls")"
+grep -qx 'beta control adopt 60' "$T/calls" && grep -qx 'beta control start queue' "$T/calls" || fail "the issue filed in beta was not held, or beta's gate not set back: $(cat "$T/calls")"
 # Two Foremen filing at once share the gate: alpha's filing sets both held, beta's finds them held and sets nothing,
 # and alpha's ending does not start new issues in the queue again while beta's command runs on; beta's ending does.
 : > "$T/calls"; ci='{tool_input: {command: "gh issue create -R example/beta --title example --body example"}, tool_response: {stdout: ""}}'

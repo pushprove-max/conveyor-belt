@@ -50,8 +50,10 @@
 #   built before the owner's yes; the Foreman releases it (conveyor.sh control release) once the owner says yes.
 #   filing, before the command runs, sets every record whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
-#   when a record cannot be set, the command is refused. filed holds every issue the command's output links
-#   (github.com/<owner>/<name>/issues/<n>) in the record named <name> (conveyor.sh control hold), then sets back to
+#   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
+#   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record named <name>, unless it was
+#   released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
+#   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
 #   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below). The
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
 set -uo pipefail
@@ -410,6 +412,10 @@ filing() {
   local in recs repo main c bad=() sl
   in=$IN
   files "$in" || return 0
+  # A command run in the background has its filed hook as soon as it starts: the records would start new issues in
+  # the queue again before it files any, and its output links none, so nothing it files would be held.
+  ! jq -e '.tool_input.run_in_background == true' <<<"$in" >/dev/null 2>&1 \
+    || { deny "Not run: a command that files an issue runs in the background, so the issues it files would not be held. Run it again in the foreground."; return 0; }
   mkdir -p "$SF" && exec {sl}>>"$SF/lock" && flock -w 300 "$sl" && touch "$SF/held" && printf '%s\t%s\t%s\n' "$SID" "$FD" "$TID" >> "$SF/in" \
     || { deny "Not run: the filing lock ($SF/lock) was not had, so new issues could not be set to start held, and an issue you file could be built before the owner's yes. Try again; if it fails again, tell the owner."; return 0; }
   # Every record, not only the Foreman's own: the command may file in another project (`gh issue create -R`), and
@@ -471,7 +477,7 @@ ends() {
 }
 
 filed() {
-  local in ev recs repo main c n nums left said=() bad=()
+  local in ev recs repo main c rc h r n nums left said=() freed=() bad=()
   in=$IN
   files "$in" || return 0
   ev=$(jq -r '.hook_event_name // "PostToolUse"' <<<"$in")
@@ -484,15 +490,25 @@ filed() {
     nums=$(awk -v r="$repo" '$1 == r { print $2 }' <<<"$n" | paste -sd' ' -)
     main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$recs")
     if [ -z "$main" ]; then bad+=("${nums// /, } of $repo: no record of the host file is named $repo")
-    elif c=$(ask "$repo" "$main" control hold $nums 2>&1); then said+=("$repo: ${nums// /, }")
-    else bad+=("${nums// /, } of $repo (${c##*$'\n'})"); fi
+    else
+      c=$(ask "$repo" "$main" control adopt $nums 2>&1); rc=$?
+      # An engine before `control adopt` (a record's pack pins its own) refuses it as a usage error (2): hold them.
+      [ "$rc" != 2 ] || [[ $c != *'usage: conveyor.sh control'* ]] || { c=$(ask "$repo" "$main" control hold $nums 2>&1); rc=$?; }
+      if [ "$rc" = 0 ]; then
+        # The record printed last tells which it holds; one not held was released already, and stays so.
+        h=$(jq -er '.held | arrays' <<<"${c##*$'\n'}" >/dev/null 2>&1 \
+          && jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args $nums <<<"${c##*$'\n'}" | paste -sd' ' -) || h=$nums
+        r=$(printf '%s\n' $nums | grep -vxF -f <(printf '%s\n' $h) | paste -sd' ' -)
+        [ -z "$h" ] || said+=("$repo: ${h// /, }"); [ -z "$r" ] || freed+=("$repo: ${r// /, }")
+      else bad+=("${nums// /, } of $repo (${c##*$'\n'})"); fi
+    fi
   done < <(awk '{ print $1 }' <<<"$n" | uniq)
   # Only once every issue is held do the records start new issues in the queue again.
   left=$(queue_again | paste -sd' ' -)
   if [ ${#bad[@]} != 0 ] || [ -n "$left" ]; then
     jq -cn --arg r "${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+New issues of $left still start held: set them back (conveyor.sh control start queue, in each) unless the owner set them held.}" '{decision: "block", reason: $r}'
-  elif [ ${#said[@]} != 0 ]; then
-    jq -cn --arg e "$ev" --arg c "Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it." \
+  elif [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ]; then
+    jq -cn --arg e "$ev" --arg c "${said[*]:+Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it. }${freed[*]:+Not held, as released already (${freed[*]}).}" \
       '{hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
   fi
 }
