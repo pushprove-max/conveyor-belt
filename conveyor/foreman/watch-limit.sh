@@ -18,11 +18,14 @@ read_limit() {
   else timeout -k 2 30 python3 "$FHERE/../../.claude/scripts/dashboard_limit.py" fetch; fi
 }
 poll() { # 0 when a wake was put in pending
-  local r used reset key
-  r=$(read_limit 2>/dev/null | jq -er '.seven_day | select(.utilization | numbers) | "\(.utilization) \(.resets_at // "unknown")"') || return 1
-  read -r used reset <<<"$r"
+  local r used reset hour key
+  # The reset time comes back with a jitter of a second or so (05:59:59.7, then 06:00:00.4), so the key holds it rounded
+  # to the hour: one wake a window, not one a poll.
+  r=$(read_limit 2>/dev/null | jq -er '.seven_day | select(.utilization | numbers) | (.resets_at // null) as $r
+    | "\(.utilization) \($r // "unknown") \(if $r == null then "unknown" else ($r | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601 + 1800) / 3600 | floor | tostring end)"') || return 1
+  read -r used reset hour <<<"$r"
   awk -v u="$used" -v t="$T" 'BEGIN { exit !(u >= t) }' || return 1
-  key=limit-$T-$reset
+  key=limit-$T-$hour
   [ "$reset" != unknown ] || key=$key-$(TZ=UTC p_date "@${CONVEYOR_FOREMAN_NOW:-$(date +%s)}" +%F) || return 1
   ! grep -qxF -- "$key" "$SEEN" || return 1
   printf '7-day usage limit at %.0f%% (threshold %s%%; resets %s)\n' "$used" "$T" "$reset" | pending_put || return 1
