@@ -28,10 +28,17 @@ function snap(onboarded = null, over = {}, part = {}) {
 }
 const ALL = ['build', 'never', 'land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite', 'builder', 'reviewer', 'judge', 'account', 'review-account', 'cap', 'guard', 'visible'];
 
+// What a page keeps for the next visit: localStorage, sessionStorage and cookies.
+const kept = (w) => JSON.stringify([w.localStorage, w.sessionStorage].map((st) => Array.from({ length: st.length }, (_, i) => [st.key(i), st.getItem(st.key(i))]).sort())
+  .concat(w.document.cookie));
+const leavesNothing = (w, fn, what) => { const before = kept(w); fn(); assert.equal(kept(w), before, `${what} keeps nothing for the next visit`); };
+
 // Bug: a new repository's rules were left at whatever the defaults were, and nobody was asked. The modal opens over
 // the tab shown (Overview here), Later shuts it for this visit only, and the line at the top stays to open it again.
+// Bug: Later kept the setup shut on the next Board load too. Each load is a new page, so Later and Escape must leave
+// nothing in what a page keeps for its next visit.
 // The title names owner/repo from the repository's address, with no issue to read it from.
-test('Setup: a project with no onboarded opens the modal; Later closes it and a reload opens it again', () => {
+test('Setup: a project with no onboarded opens the modal; Later closes it for this visit only', () => {
   const w = boot();
   const none = (d) => ({ queue: [], held: [], open: { ...d.panels.rules.data.open, issues: [], held: [] } });
   deliver(w, snap(null, {}, none(full())));
@@ -46,7 +53,7 @@ test('Setup: a project with no onboarded opens the modal; Later closes it and a 
   assert.ok(w.document.activeElement && dlg.contains(w.document.activeElement), 'the focus is in the modal');
   assert.equal(line(w).hidden, false);
   assert.match(line(w).textContent, /Conveyor is not set up for this repository yet/);
-  act(box(w), 'onboard-later').click();
+  leavesNothing(w, () => act(box(w), 'onboard-later').click(), 'Later');
   assert.ok(!shown(w), 'Later closes it');
   next(w, snap());
   assert.ok(!shown(w), 'a new snapshot in the same visit keeps it closed');
@@ -54,32 +61,26 @@ test('Setup: a project with no onboarded opens the modal; Later closes it and a 
   act(line(w), 'onboard-open').click();
   assert.ok(shown(w), 'Set up opens it again');
   // Escape is Later.
-  key(w, w.document.activeElement, 'Escape');
+  leavesNothing(w, () => key(w, w.document.activeElement, 'Escape'), 'Escape');
   assert.ok(!shown(w), 'Escape closes it');
-  const again = boot();
-  deliver(again, snap());
-  assert.ok(shown(again), 'the next Board load opens it again');
 });
 
 // Bug guarded: a rule counted as set with nothing saved (a check that sent nothing, a refusal), a preselected choice
 // sent nothing, a value in force that is not the default showed as preselected, and a choice made by keyboard left
-// the focus outside the modal. Next waits for each rule of its step to be saved; each choice is the Rules tab's command.
+// the focus outside the modal. Next waits for each rule of its step to be saved; each choice is the Rules tab's command
+// (P0_OFF, which the Rules tab's own case below checks the tab sends).
+const stepSnap = () => snap(null, { rules: { ...CONTROL.rules, push: true, visible: false, wholeSuite: false } });
+const P0_OFF = [{ action: 'rules', args: ['P0=off'], repo: 'sample' }];
 test('Setup: Next stays disabled until each rule on the step is saved; a preselected default sends it; each choice sends the Rules tab\'s command', async () => {
-  const s = () => snap(null, { rules: { ...CONTROL.rules, push: true, visible: false, wholeSuite: false } });
-  const tab = boot({ tab: 'rules' });
-  deliver(tab, s());
-  act(box(tab), 'onboard-later').click();
-  const fromTab = await sent(tab, () => act(rulesP(tab), 'rule-P0').click());
   const w = boot();
-  deliver(w, s());
+  deliver(w, stepSnap());
   assert.equal(nextB(w).disabled, true, 'nothing set yet');
   // Bug: clicking the selected P0 turned it off, though a click on the selected choice keeps the default.
   assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'sample' }],
     'the selected P0 keeps the Build default');
   assert.equal(count(w), '1 of 16 rules set');
   assert.equal(pressed(w, 'rule-P0'), 'true');
-  assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), fromTab, 'once set, P0 off is the command the Rules tab sends');
-  assert.deepEqual(fromTab, [{ action: 'rules', args: ['P0=off'], repo: 'sample' }]);
+  assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), P0_OFF, 'once set, P0 off is the command the Rules tab sends');
   // Add with an empty field sends nothing: Never build is not set.
   assert.deepEqual(await sent(w, () => act(box(w), 'area-off').click()), []);
   assert.equal(isSet(w, 'never'), 'false', 'a check that sent nothing does not set the rule');
@@ -128,9 +129,18 @@ test('Setup: Next stays disabled until each rule on the step is saved; a presele
   assert.equal(count(w), '8 of 16 rules set');
 });
 
+// Bug guarded: the setup's P0 off differed from the Rules tab's. The case above compares the setup's to P0_OFF;
+// this one proves P0_OFF is what the Rules tab sends on the same snapshot, the setup shut with Later.
+test('Setup: the Rules tab sends P0_OFF for P0 on the setup\'s snapshot', async () => {
+  const tab = boot({ tab: 'rules' });
+  deliver(tab, stepSnap());
+  act(box(tab), 'onboard-later').click();
+  assert.deepEqual(await sent(tab, () => act(rulesP(tab), 'rule-P0').click()), P0_OFF);
+});
+
 // Bug guarded: the setup reopened for ever, or not when the engine added a rule; a model picked stayed a draft until
 // Save; the Judge's default left its always-accepted kinds in force. Finish writes onboarded with every rule's key;
-// the modal and the line go, and a later load does not open it.
+// the modal and the line go (the case after it proves a later load does not open it).
 test('Setup: Finish writes onboarded and the modal stops opening', async () => {
   const w = boot();
   deliver(w, snap(null, { guard: 98, judgeAlways: ['security'] }, { cap: null }));
@@ -179,14 +189,18 @@ test('Setup: Finish writes onboarded and the modal stops opening', async () => {
   await settle();
   assert.ok(!shown(w), 'the modal closes');
   assert.equal(line(w).hidden, true, 'the line goes');
-  const later = boot();
-  deliver(later, snap(clone(on)));
-  assert.ok(!shown(later), 'an onboarded project does not open it');
-  assert.equal(line(later).hidden, true);
+});
+
+// Bug guarded: the setup reopened on every load after Finish.
+test('Setup: an onboarded project does not open the modal on a Board load', () => {
+  const w = boot();
+  deliver(w, snap({ at: '2026-11-09T17:00:00.000Z', rules: ALL }));
+  assert.ok(!shown(w), 'an onboarded project does not open it');
+  assert.equal(line(w).hidden, true);
 });
 
 // Bug guarded: a rule the engine added later went unasked, or every rule was asked again. A record whose
-// onboarded.rules lacks one opens at that rule's step alone; an engine with no onboarded key is never asked.
+// onboarded.rules lacks one opens at that rule's step alone.
 test('Setup: a record whose onboarded.rules lacks one rule opens with only that rule\'s step', async () => {
   const w = boot();
   deliver(w, snap({ at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'visible') }));
@@ -198,9 +212,13 @@ test('Setup: a record whose onboarded.rules lacks one rule opens with only that 
   assert.deepEqual(await sent(w, () => act(box(w), 'visible-on').click()), [{ action: 'rules', args: ['visible=on'], repo: 'sample' }]);
   assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'onboarded', args: ALL.filter((k) => k !== 'visible').concat(['visible']), repo: 'sample' }],
     'the rules confirmed before are kept');
-  const old = boot();
-  deliver(old, full());
-  assert.ok(!shown(old) && (!line(old) || line(old).hidden), 'a record with no onboarded key (an older engine) is never asked');
+});
+
+// Bug guarded: a project on an engine with no onboarding was asked to set up, and its Finish had nowhere to go.
+test('Setup: a record with no onboarded key is never asked', () => {
+  const w = boot();
+  deliver(w, full());
+  assert.ok(!shown(w) && (!line(w) || line(w).hidden), 'a record with no onboarded key (an older engine) is never asked');
 });
 
 // Bug guarded: after another project was picked under Show on Overview, with no new snapshot, Set up still sent to
