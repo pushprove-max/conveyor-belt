@@ -2558,7 +2558,8 @@ donewhen() { # <worktree> <issue json>
 # 300 characters: a JSON array, for the session's line (doneLines; the pull request of Land as pr lists them). With no
 # such file (the issue has no Done-when section) jq 1.8 still prints the slurped value, [], and then fails, so the file
 # is read on jq's input and jq's output is kept only when it worked: printed with the fallback, it was two arrays, no
-# JSON text for --argjson, and the line lost all its fields.
+# JSON text for --argjson, dwfields() gave nothing, and record() wrote the line without the session's fields (its tokens,
+# stats and Done-when check).
 donelines() { local d; d=$(jq -Rsc '[splits("\n") | select(. != "" and (startswith("Note: ") | not)) | .[0:300]]' 2>/dev/null < "$1.donewhen") && printf '%s\n' "$d" || echo '[]'; }
 # A session's fields for its line in checked(), with the Done-when check put on them by <jq filter> ($k the check,
 # $d the reply's D<n> lines); when they cannot be put together, the log names the card and the line, and the line is
