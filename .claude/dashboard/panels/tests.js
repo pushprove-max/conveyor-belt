@@ -2026,12 +2026,17 @@
   // ---- the Benchmarks part (#236): SWE-bench Verified run through Conveyor (conveyor.sh bench swe) ----
   // The snapshot's bench is the run's board.json (bench/swe.sh swe_board()): live (the run in progress or the last
   // one), versions, presets, max, perTask (each arm's usual and worst-case sessions and minutes a task), soloKey (the
-  // key a Claude alone run takes now) and keys (each engine commit's, or Claude alone's, results by task, and at: their
+  // key a Claude alone run takes now) and keys (each engine commit's, Claude alone's or another arm's results by task, and at: their
   // places in the pinned order). Before Start the part shows the sessions and minutes expected for the tasks of the n
   // chosen that the version picked has not run yet; while a run goes, a bar of its tasks done with Stop; then the results side by side, one
-  // column a version, and Compare, which shows `bench swe diff` of two versions.
+  // column a version or arm, and Compare, which shows `bench swe diff` of two columns.
   const BENCH = { n: 5, solo: false, engine: 'main', a: '', b: '', diff: null };  // the n, version and Compare pair picked, the last Compare's text
-  const keyName = (k) => (k.arm === 'solo' ? `Claude alone${k.model ? ` (${k.model})` : ''}` : `${k.version || 'commit'} ${String(k.engine || '').slice(0, 12)}`);
+  // Another arm (bench/arms/, `bench swe <n> --arm`) shows by its label, with its engine version when it runs one.
+  const otherArm = (x) => typeof x.arm === 'string' && x.arm !== 'conveyor' && x.arm !== 'solo';
+  const keyName = (k) => (otherArm(k) ? `${k.label || k.arm}${k.engine ? ` ${k.version || 'commit'} ${String(k.engine).slice(0, 12)}` : ''}`
+    : k.arm === 'solo' ? `Claude alone${k.model ? ` (${k.model})` : ''}` : `${k.version || 'commit'} ${String(k.engine || '').slice(0, 12)}`);
+  // A run's arms: its label (each arm's name, bench/swe.sh swe_run()) when it runs another arm or more than one.
+  const runArms = (l) => (otherArm(l) || list(l.arms).length > 1 ? String(l.label || l.arm) : null);
   // How many tasks a difference must reach to be told from run-to-run noise (swe_noise(), bench/swe.sh).
   function noise(n) {
     const d = Math.ceil(Math.sqrt(2 * n));
@@ -2045,12 +2050,14 @@
     if (running) {
       const line = h('p', 'tests-bench-state');
       line.append(progress(`SWE-bench: ${live.done} of ${live.n} tasks`, num(live.done) || 0, num(live.n) || 0),
-        h('span', null, ` Running: ${live.done} of ${live.n} tasks done, ${live.resolved} resolved${live.current ? `, now ${live.current}` : ''} · ${live.arm === 'solo' ? 'Claude alone' : `engine ${live.version || String(live.engine || '').slice(0, 12)}`}.`));
+        h('span', null, ` Running: ${live.done} of ${live.n} tasks done, ${live.resolved} resolved${live.current ? `, now ${live.current}` : ''} · ${runArms(live) || (live.arm === 'solo' ? 'Claude alone' : `engine ${live.version || String(live.engine || '').slice(0, 12)}`)}.`));
       el.append(line, button('Stop', 'btn-quiet', 'bench-stop', 'Stop the SWE-bench run', () => send('bench', ['stop'], (t) => `Stop sent: the SWE-bench run. ${t}`)));
     } else {
-      if (live && live.state) {
+      // A run refused after the Board's answer (an arm's preflight failed) shows why it did not start.
+      if (live && live.state === 'refused') el.append(h('p', 'tests-bench-last', `Last run: did not start · ${live.why || 'no reason recorded'}`));
+      else if (live && live.state) {
         const tasks = list(live.tasks), notRun = tasks.filter((t) => String(t.result).startsWith('not run')).length;
-        el.append(h('p', 'tests-bench-last', `Last run: ${live.state === 'done' ? 'ended' : live.state === 'guard' ? 'stopped at the usage guard' : 'stopped'} · ${live.resolved} of ${live.n} resolved${notRun ? `, ${notRun} not run` : ''} · ${live.arm === 'solo' ? 'Claude alone' : `engine ${live.version || ''} ${String(live.engine || '').slice(0, 12)}`.trim()}.`));
+        el.append(h('p', 'tests-bench-last', `Last run: ${live.state === 'done' ? 'ended' : live.state === 'guard' ? 'stopped at the usage guard' : 'stopped'} · ${live.resolved} of ${live.n} resolved${notRun ? `, ${notRun} not run` : ''} · ${runArms(live) || (live.arm === 'solo' ? 'Claude alone' : `engine ${live.version || ''} ${String(live.engine || '').slice(0, 12)}`.trim())}.`));
       }
       const ctl = h('div', 'tests-act-row');
       list(b.presets).concat(b.presets ? [] : [1, 5, 20, 50]).forEach((p) => {
@@ -2111,14 +2118,16 @@
       el.append(wrap);
       const common = ids.filter((id) => keys.every((k) => k.tasks[id]));
       if (keys.length > 1 && common.length) el.append(h('p', 'board-from', `On the ${common.length} tasks every column ran: ${noise(common.length)}`));
-      const engines = keys.filter((k) => k.arm !== 'solo' && typeof k.engine === 'string');
-      if (engines.length > 1) {
+      // Any two columns: each sends its results key, so two arms on one engine commit, or an arm with no engine, are
+      // each read as their own column.
+      const cols = keys.filter((k) => typeof k.key === 'string');
+      if (cols.length > 1) {
         const cmp = h('div', 'tests-act-row');
         const choose = (which, label) => {
           const s = h('select', null);
           s.dataset.act = `bench-${which}`; s.setAttribute('aria-label', label);
-          engines.forEach((k) => { const o = h('option', null, keyName(k)); o.value = k.engine; s.append(o); });
-          if (!engines.some((k) => k.engine === BENCH[which])) BENCH[which] = engines[which === 'a' ? 0 : 1].engine;
+          cols.forEach((k) => { const o = h('option', null, keyName(k)); o.value = k.key; s.append(o); });
+          if (!cols.some((k) => k.key === BENCH[which])) BENCH[which] = cols[which === 'a' ? 0 : 1].key;
           s.value = BENCH[which];
           s.addEventListener('change', () => { BENCH[which] = s.value; });
           return s;

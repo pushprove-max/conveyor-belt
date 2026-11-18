@@ -1,0 +1,6 @@
+{
+  "label": "Aider",
+  "kind": "agent",
+  "offered": false,
+  "why": "Aider runs on a model provider's API key; it cannot run on a Claude or ChatGPT subscription login, and the benchmark uses no API keys"
+}

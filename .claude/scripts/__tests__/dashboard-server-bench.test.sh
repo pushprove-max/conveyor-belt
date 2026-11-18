@@ -47,6 +47,12 @@ ok = lambda args: ds.control_ok({'action': 'bench', 'args': args, 'repo': 'proje
 for args in (['run', '1'], ['run', '500', '--solo'], ['run', '5', '--engine', 'v1.2.0'], ['run', '20', '--engine', 'main'],
              ['run', '50', '--engine', 'a' * 40], ['stop'], ['versions'], ['diff', 'v1.0.0', 'main']):
     check('takes_%s' % '_'.join(args)[:30], ok(args), args)
+# Bug: Compare sends each column's results key, but only versions were taken, so comparing two arms on one engine
+# commit (or an arm that runs no engine) got HTTP 400.
+for args in (['diff', 'codex-sol', 'conveyor-codex-claude-' + 'a' * 40], ['diff', 'solo-claude-opus-5-5', 'a' * 40]):
+    check('compare_takes_results_key_%s' % args[1], ok(args), args)
+for args in (['diff', 'main', '-x'], ['diff', '--json', 'main'], ['diff', 'main', 'a b'], ['diff', 'main', 'x' * 121]):
+    check('compare_refuses_%s' % '_'.join(args)[:30], not ok(args), args)
 for args in (['run', '0'], ['run', '501'], ['run', '05'], ['run', '5', '--solo', '--engine', 'main'], ['run', '5', '--engine', 'v1.2'],
              ['run', '5', '--engine', 'main;rm -rf ~'], ['run', '5', '--engine', 'a' * 12], ['diff', 'main'], ['diff', 'main', '$(id)'], ['stop', 'now'], []):
     check('refuses_%s' % '_'.join(args)[:30], not ok(args), args)

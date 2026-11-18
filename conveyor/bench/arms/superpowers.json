@@ -1,0 +1,12 @@
+{
+  "label": "Claude with Superpowers",
+  "kind": "agent",
+  "model": "builder",
+  "login": ["claude"],
+  "install": "set -e; mkdir -p ~/.local; curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz | tar -xJ -C ~/.local --strip-components=1; curl -fsSL https://claude.ai/install.sh | bash; claude plugin marketplace add obra/superpowers-marketplace; claude plugin install superpowers@superpowers-marketplace",
+  "preflight": "claude plugin list | grep -q superpowers",
+  "run": "{ cat \"$SWE_PROMPT\"; printf '\\nWork without asking questions: no one will answer. Where a skill asks for a choice or an approval, take its recommended choice and go on.\\n'; } | claude -p --output-format stream-json --verbose --permission-mode bypassPermissions ${SWE_MODEL:+--model \"$SWE_MODEL\"}",
+  "fired": "any(.type == \"assistant\" and ((.message.content // []) | any(.type == \"tool_use\" and .name == \"Skill\" and (.input | tostring | test(\"superpowers:\"))))) and any(.type == \"result\" and (.is_error | not))",
+  "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
+  "sessions": 1
+}

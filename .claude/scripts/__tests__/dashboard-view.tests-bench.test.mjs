@@ -121,3 +121,40 @@ test('Benchmarks: results show side by side with the noise line, and Compare sho
   await settle();
   assert.match(part(w).querySelector('.tests-bench-diff').textContent, /p__a-1: resolved by v1\.2\.0 only; the runs went apart at: review/);
 });
+
+// Bug it guards (#325): an arm other than Conveyor or Claude alone (`bench swe <n> --arm`) showed as "commit" with no
+// name, and a run of two arms was named by its first arm's engine alone.
+test('Benchmarks: another arm shows by its label, and a run of two arms names both', async () => {
+  const w = boot({ tab: 'tests' });
+  const r = { resolved: true, sessions: 1, tokens: 10, minutes: 2 };
+  deliver(w, withBench({ ...BASE, live: { state: 'done', arm: 'codex-sol', arms: ['codex-sol', 'conveyor-codex-claude'], label: 'Codex alone, Codex builds on engine main', n: 2, done: 2, resolved: 1, tasks: [] },
+    keys: [{ key: 'codex-sol', arm: 'codex-sol', label: 'Codex alone', engine: null, model: 'gpt-6.2-sol', tasks: { 'p__a-1': r } },
+      { key: `conveyor-codex-claude-${EB}`, arm: 'conveyor-codex-claude', label: 'Codex builds', engine: EB, version: 'main', tasks: { 'p__a-1': r } }] }));
+  const head = Array.from(part(w).querySelectorAll('.tests-bench-table tr')[0].children, (c) => c.textContent);
+  assert.deepEqual(head, ['Task', 'Codex alone', `Codex builds main ${'b'.repeat(12)}`]);
+  assert.match(part(w).querySelector('.tests-bench-last').textContent, /· Codex alone, Codex builds on engine main\.$/);
+});
+
+// Bug it guards (#325): Compare sent each column's engine commit, so Conveyor and another Conveyor arm on the same
+// commit both read the Conveyor arm's results, and an arm with no engine (Codex alone) could not be compared at all.
+// Each column now sends its own results key. A run refused after the Board's answer (a failed preflight) showed as
+// "stopped" with no reason.
+test('Benchmarks: Compare sends the results keys of any two columns; a refused run says why it did not start', async () => {
+  const w = boot({ tab: 'tests' });
+  const r = { resolved: true, sessions: 1, tokens: 10, minutes: 2 };
+  deliver(w, withBench({ ...BASE, live: { state: 'refused', why: 'the arm caveman cannot run: its preflight failed: no claude login', arms: ['caveman'], n: 1, done: 0, resolved: 0, tasks: [] },
+    keys: [{ key: EB, arm: 'conveyor', engine: EB, version: 'main', tasks: { 'p__a-1': r } },
+      { key: `conveyor-codex-claude-${EB}`, arm: 'conveyor-codex-claude', label: 'Codex builds', engine: EB, version: 'main', tasks: { 'p__a-1': r } },
+      { key: 'codex-sol', arm: 'codex-sol', label: 'Codex alone', engine: null, tasks: { 'p__a-1': r } }] }));
+  assert.equal(part(w).querySelector('.tests-bench-last').textContent, 'Last run: did not start · the arm caveman cannot run: its preflight failed: no claude login');
+  w.reply = reply('compared');
+  act(part(w), 'bench-compare').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['diff', EB, `conveyor-codex-claude-${EB}`]]);
+  await settle();
+  w.reply = reply('compared');
+  const b = act(part(w), 'bench-b');
+  b.value = 'codex-sol'; b.dispatchEvent(new w.Event('change'));
+  act(part(w), 'bench-compare').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['diff', EB, 'codex-sol']]);
+  await settle();
+});

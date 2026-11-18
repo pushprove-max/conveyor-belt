@@ -7,7 +7,8 @@ swebench, which brings datasets) and a Docker it can use; swe.sh starts it with 
 Usage:
   swe_harness.py tasks <dataset> <revision> <out>
       every task of the dataset at that revision, one JSON line each, in the dataset's order, to <out>:
-      {id, repo, url, base, issue, image, test}: no reference fix and no hidden test.
+      {id, repo, url, base, issue, image, cmd}: no reference fix and no hidden test (cmd: the task's test command,
+      run in a container of its image).
   swe_harness.py image <image>
       fetches the task's image; exit 3 when it cannot be fetched.
   swe_harness.py grade <dataset> <revision> <id> <patch file> <folder>
@@ -22,7 +23,6 @@ end or are stopped (SIGTERM or SIGHUP), so no copy of a row is on disk while a c
 import glob
 import json
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -55,11 +55,11 @@ def tasks(dataset, revision, out):
             if isinstance(cmd, list):
                 cmd = ' && '.join(cmd)
             image = image_of(r['instance_id'])
-            # The repo's test command, run in the task's own environment: its image, the worktree as /testbed.
-            test = ('docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$(pwd -P):/testbed" -w /testbed %s '
-                    '/bin/bash -c %s' % (image, shlex.quote('source /opt/miniconda3/bin/activate && conda activate testbed && ' + cmd)))
+            # The repo's test command, run in the task's own environment: inside a container of its image (every
+            # arm builds the task in one, bench/swe_arms.sh), in the folder the command starts in.
+            test = 'source /opt/miniconda3/bin/activate && conda activate testbed && ' + cmd
             f.write(json.dumps({'id': r['instance_id'], 'repo': r['repo'], 'url': 'https://github.com/%s.git' % r['repo'],
-                                'base': r['base_commit'], 'issue': r['problem_statement'], 'image': image, 'test': test}) + '\n')
+                                'base': r['base_commit'], 'issue': r['problem_statement'], 'image': image, 'cmd': test}) + '\n')
 
 
 def image(name):

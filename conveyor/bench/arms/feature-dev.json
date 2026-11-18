@@ -1,0 +1,12 @@
+{
+  "label": "Claude with feature-dev",
+  "kind": "agent",
+  "model": "builder",
+  "login": ["claude"],
+  "install": "set -e; curl -fsSL https://claude.ai/install.sh | bash; claude plugin marketplace add anthropics/claude-plugins-official; claude plugin install feature-dev@claude-plugins-official",
+  "preflight": "claude plugin list | grep -q feature-dev",
+  "run": "{ printf '/feature-dev '; cat \"$SWE_PROMPT\"; printf '\\nWork without asking questions: no one will answer. At each point where the workflow asks for a choice or an approval, take the recommended choice and go on to the end.\\n'; } | claude -p --output-format stream-json --verbose --permission-mode bypassPermissions ${SWE_MODEL:+--model \"$SWE_MODEL\"}",
+  "fired": "any(.type == \"system\" and .subtype == \"init\" and ((.slash_commands // []) | any(tostring | test(\"feature-dev\")))) and any(.type == \"result\" and (.is_error | not))",
+  "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
+  "sessions": 1
+}

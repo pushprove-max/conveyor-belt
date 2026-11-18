@@ -1,0 +1,12 @@
+{
+  "label": "Claude alone, then one review pass",
+  "kind": "agent",
+  "model": "builder",
+  "login": ["claude"],
+  "install": "curl -fsSL https://claude.ai/install.sh | bash",
+  "preflight": "claude --version",
+  "run": "c() { claude -p --output-format json --permission-mode dontAsk ${SWE_MODEL:+--model \"$SWE_MODEL\"} --setting-sources \"\" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools \"Edit(/$PWD/**)\"; }; c < \"$SWE_PROMPT\" && { printf 'Review the uncommitted change in the repository in the current folder against the issue below, as a strict code reviewer. Fix every real problem you find in it; change nothing else; do not commit.\\n\\n'; cat \"$SWE_PROMPT\"; } | c",
+  "fired": "(map(select(.type == \"result\" and (.is_error | not))) | length) >= 2",
+  "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
+  "sessions": 2
+}

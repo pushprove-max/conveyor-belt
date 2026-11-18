@@ -1,0 +1,13 @@
+{
+  "label": "Claude with Spec Kit",
+  "kind": "agent",
+  "model": "builder",
+  "login": ["claude"],
+  "install": "set -e; curl -fsSL https://claude.ai/install.sh | bash; curl -LsSf https://astral.sh/uv/install.sh | sh; uv tool install specify-cli --from git+https://github.com/github/spec-kit.git",
+  "preflight": "claude --version && specify --help > /dev/null",
+  "run": "set -e; specify init --here --ai claude --force --ignore-agent-tools --no-git > /dev/null; c() { claude -p --output-format stream-json --verbose --permission-mode bypassPermissions ${SWE_MODEL:+--model \"$SWE_MODEL\"} \"$@\"; }; { printf '/speckit.specify '; cat \"$SWE_PROMPT\"; } | c; for s in /speckit.plan /speckit.tasks /speckit.implement; do printf '%s Work without asking questions: no one will answer. Take the recommended choice at each point.\\n' \"$s\" | c --continue; done",
+  "fired": "any(.type == \"system\" and .subtype == \"init\" and ((.slash_commands // []) | any(tostring | test(\"speckit\")))) and (map(select(.type == \"result\" and (.is_error | not))) | length) >= 4",
+  "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
+  "sessions": 4,
+  "exclude": [".specify/", "specs/", ".claude/"]
+}

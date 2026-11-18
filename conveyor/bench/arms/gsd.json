@@ -1,0 +1,13 @@
+{
+  "label": "Claude with GSD (Get Shit Done)",
+  "kind": "agent",
+  "model": "builder",
+  "login": ["claude"],
+  "install": "set -e; mkdir -p ~/.local; curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz | tar -xJ -C ~/.local --strip-components=1; curl -fsSL https://claude.ai/install.sh | bash",
+  "preflight": "claude --version && npx --version",
+  "run": "set -e; npx -y get-shit-done-cc --claude --local > /dev/null; { printf '/gsd:quick '; cat \"$SWE_PROMPT\"; printf '\\nWork without asking questions: no one will answer. Take the recommended choice at each point.\\n'; } | claude -p --output-format stream-json --verbose --permission-mode bypassPermissions ${SWE_MODEL:+--model \"$SWE_MODEL\"}",
+  "fired": "any(.type == \"system\" and .subtype == \"init\" and ((.slash_commands // []) | any(tostring | test(\"gsd\")))) and any(.type == \"result\" and (.is_error | not))",
+  "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
+  "sessions": 1,
+  "exclude": [".claude/", ".planning/"]
+}

@@ -217,6 +217,9 @@ VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0
 # An engine a SWE-bench run builds with, and the number of its tasks, as conveyor.sh's bench swe takes them.
 BENCH_ENGINE = re.compile(r'main|v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})|[0-9a-f]{40}')
 BENCH_N = re.compile(r'[1-9][0-9]{0,2}')
+# One side of a Compare, as `bench swe diff` takes it: a version, or a column's results key (an arm's name, solo-<model>,
+# <arm>-<engine commit>), so two arms on one engine commit are each their own side; never one that starts with -.
+BENCH_SIDE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,119}')
 # every other action: 30 s. start outlasts conveyor.sh's 60 s `timeout 60 gh issue list` (control start), so the
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
@@ -408,8 +411,8 @@ def control_ok(body):
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testmap':  # the Tests page's Build the test map, or its Stop
         return v in (['build'], ['stop'])
-    if a == 'bench':  # the Tests page's Benchmarks: Start (n, then --solo or --engine <version>), Stop, List versions, Compare (two versions)
-        return v in (['stop'], ['versions']) or (n == 3 and v[0] == 'diff' and all(BENCH_ENGINE.fullmatch(x) for x in v[1:])) or (
+    if a == 'bench':  # the Tests page's Benchmarks: Start (n, then --solo or --engine <version>), Stop, List versions, Compare (two versions or results keys)
+        return v in (['stop'], ['versions']) or (n == 3 and v[0] == 'diff' and all(BENCH_SIDE.fullmatch(x) for x in v[1:])) or (
             2 <= n <= 4 and v[0] == 'run' and BENCH_N.fullmatch(v[1]) is not None and int(v[1]) <= 500
             and (n == 2 or v[2:] == ['--solo'] or (n == 4 and v[2] == '--engine' and BENCH_ENGINE.fullmatch(v[3]) is not None)))
     if a == 'mutate':  # the Tests page's Mutation check: one test file or a list of them, to the front of the idle queue

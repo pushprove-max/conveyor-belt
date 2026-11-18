@@ -2,7 +2,7 @@
 # `conveyor.sh bench responsiveness`: a short command start and a 10 ms CPU task timed beside card work, steered and
 # not by turns (bench_responsiveness, lib/busy.sh). `conveyor.sh bench drift [<engine commit>]`: the cards of an engine
 # commit against those of the one before it, from the card records and the retried file (bench/drift.sh).
-# `conveyor.sh bench swe ...`: SWE-bench Verified tasks built through Conveyor (bench/swe.sh, which says its forms).
+# `conveyor.sh bench swe ...`: SWE-bench Verified tasks built by Conveyor or another arm (bench/swe.sh, which says its forms).
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 if [ "${2:-}" = swe ]; then
