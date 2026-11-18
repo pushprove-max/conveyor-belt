@@ -410,16 +410,17 @@ conditional() { # <issue json>
     | gsub("\\(Board user ([A-Za-z0-9._-]{1,40}|this device)\\)|r-[0-9A-Za-z-]+|[0-9]{4}-[0-9]{2}-[0-9]{2}|\\b(" + $o + "|yes|ruling)\\b|[[:space:][:punct:]]"; ""; "i") != "")' <<<"$1" >/dev/null 2>&1
 }
 # A follow-up inherits its parent's yes. A follow-up Conveyor filed (its body opens "Follow-up
-# to #N (Conveyor card ") with no approval line of its own reads up its chain, up to MAX_DEPTH + 1 issues, for the
-# first issue whose body has one, and prints {from, line, sentence}: that issue, its approval line, and the
+# to #N (Conveyor card ", or, a slice of a split, "Follow-up of #N: slice ") with no approval line of its own reads up its chain, up to MAX_DEPTH + 1 issues, for the
+# first issue whose body has one, and prints {from, line, section, sentence}: that issue, its approval line, its section
+# headed `## What customers or staff will see` ("" when none: a split parent's card ends before any review, so it has no review sentence), and the
 # USER-VISIBLE sentence of its last review that gave one (the card records; "" when none is there). Nothing when the
 # issue has its own line, is no follow-up, no issue up its chain has a line, or GitHub does not answer.
 inherit() { # <issue json>
-  local body p i=0 j l s
+  local body p i=0 j l s sec
   body=$(jq -r '.body // ""' <<<"$1")
   ! grep -q '^Visible change approved:' <<<"$body" || return 0
   while [ $i -le "$MAX_DEPTH" ]; do
-    p=$(head -n 1 <<<"$body" | sed -nE 's/^Follow-up to #([0-9]{1,9}) \(Conveyor card .*/\1/p')
+    p=$(head -n 1 <<<"$body" | sed -nE 's/^Follow-up to #([0-9]{1,9}) \(Conveyor card .*/\1/p; s/^Follow-up of #([0-9]{1,9}): slice [0-9]+ of [0-9]+\. Conveyor card .*/\1/p')
     [ -n "$p" ] || return 0
     i=$((i + 1))
     j=$(timeout 60 gh issue view "$p" --json number,body 2>/dev/null) && body=$(jq -er '.body // ""' <<<"$j" 2>/dev/null) || return 0
@@ -427,17 +428,20 @@ inherit() { # <issue json>
     [ -z "$l" ] || break
   done
   [ -n "$l" ] || return 0
+  sec=$(jq -r "$SEE"' section // ""' <<<"$j" 2>/dev/null)
   # The newest such review by its time, wherever it is kept (a retried card's lines are older than the current ones,
   # but not every time). The approval line is passed whole: a condition at its end must reach the reviewer.
   s=$(stdb ask issue retried "$p" -- issue cards "$p" 2>/dev/null | jq -rs --argjson n "$p" '[.[] | select(.issue == $n and .step == "review" and (.visible // "" | startswith("yes: ")))] | sort_by(.time // "") | last | .visible // "" | ltrimstr("yes: ")' 2>/dev/null)
-  jq -cn --argjson f "$p" --arg l "$l" --arg s "${s:0:1000}" '{from: $f, line: $l, sentence: $s}'
+  jq -cn --argjson f "$p" --arg l "$l" --arg c "$sec" --arg s "${s:0:1000}" '{from: $f, line: $l, section: $c, sentence: $s}'
 }
 # What the brief of a follow-up that may inherit a yes holds (both the session and the reviewer read it).
 inherited_brief() { # <inherit json>
-  local f l s
-  f=$(jq -r .from <<<"$1"); l=$(jq -r .line <<<"$1"); s=$(jq -r .sentence <<<"$1")
-  printf '# The yes of #%s\nThis issue is a follow-up of #%s, and the owner approved the change of #%s that customers or staff see. Its approval line:\n%s\nWhat that change shows customers or staff, as its review said: %s\n' \
-    "$f" "$f" "$f" "$l" "${s:-not recorded}"
+  local f l c s
+  f=$(jq -r .from <<<"$1"); l=$(jq -r .line <<<"$1"); c=$(jq -r '.section // ""' <<<"$1"); s=$(jq -r .sentence <<<"$1")
+  printf '# The yes of #%s\nThis issue is a follow-up of #%s, and the owner approved the change of #%s that customers or staff see. Its approval line:\n%s\n' \
+    "$f" "$f" "$f" "$l"
+  [ -z "$c" ] || printf 'What that change shows customers or staff, as its issue says:\n%s\n' "$c"
+  [ -n "$c" ] && [ -z "$s" ] || printf 'What that change shows customers or staff, as its review said: %s\n' "${s:-not recorded}"
   ! conditional "$(jq -cn --arg b "$l" '{body: $b}')" \
     || printf 'That yes gives a condition. It holds for this follow-up too: hold the change to it.\n'
 }

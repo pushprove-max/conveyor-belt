@@ -67,7 +67,9 @@ t_slicesshadow() {
 # the parent's it covers, the second depending on the first), queued; the parent is held, told which slice covers each
 # Done-when item, and its card ends closed before any worktree (1). Bug caught: a split issue was also built whole.
 t_sliceson() {
-  slices on "$SPLIT2" "[$(big 7 P1 | jq -c '.body |= sub("src/app.sh"; "src/app.sh and .claude/x.js")')]"
+  YES='Visible change approved: yes, 2026-11-02; condition: only for admins'
+  SEEN='The Save button reads Keep.'
+  slices on "$SPLIT2" "[$(big 7 P1 | jq -c --arg l "$YES" --arg c "$SEEN" '.body |= sub("src/app.sh\\."; "src/app.sh and .claude/x.js.\n\n## What customers or staff will see\n" + $c + "\n\n" + $l)')]"
   mkdir -p "$R/.claude" && echo 'hidden split' > "$R/.claude/x.js" && git -C "$R" add .claude && git -C "$R" commit -qm hidden || fail "main's .claude/x.js"
   fx_in 'splitcheck c1-7 7'
   # Bug caught: a path in a hidden directory was not read as a file, so the judge never saw it.
@@ -87,6 +89,15 @@ t_sliceson() {
   # While it is open, the snapshot's Held names the umbrella's slices (the Board: "Umbrella of #100101, #100102").
   [ "$(loop snapshot | jq -c '.open.held | map(select(.issue == 7)) | .[0].umbrella')" = '[100101,100102]' ] \
     || fail "the snapshot's Held does not name the umbrella's slices: $(loop snapshot | jq -c '.open.held')"
+  # Bug caught (#445): a slice did not inherit its parent's visible-change approval, as inherit() read only the
+  # "Follow-up to #N (Conveyor card" header of a review follow-up, so its review lost the yes and its condition.
+  # Bug caught (E1): the parent's card ends before any review (the issue stays open and held), so its review sentence is "not recorded"; the slice's
+  # brief must carry the parent's own section, or the reviewer cannot tell what the owner approved.
+  fx_in 'inherited_brief "$(inherit "$(jq -sc ".[0]" "$STUB/filed")")"'
+  grep -q '^# The yes of #7$' "$T/$CASE/run.out" && grep -qxF "$YES" "$T/$CASE/run.out" && grep -q '^That yes gives a condition' "$T/$CASE/run.out" \
+    || fail "a slice does not inherit its parent's approval line and its condition: $(cat "$T/$CASE/run.out")"
+  grep -qxF "$SEEN" "$T/$CASE/run.out" && ! grep -q 'not recorded' "$T/$CASE/run.out" \
+    || fail "a slice's brief lacks what its parent's section says customers or staff will see: $(cat "$T/$CASE/run.out")"
   # Bug caught: a run limited by --only to the parent left its slices out (the run reads its set through followups).
   fx_in "ONLY='[7]' upnext '[$(big 100101 conveyor-followup), $(big 100102 conveyor-followup), $(big 9)]' | jq -c '[.[].number]'"
   [ "$(cat "$T/$CASE/run.out")" = '[100101,100102]' ] || fail "a run limited to the split parent does not take its slices: $(cat "$T/$CASE/run.out")"
