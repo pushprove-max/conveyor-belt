@@ -106,7 +106,10 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
   data.panels.declined.data.rest = [line({ id: 'd00000000000f', time: iso(T0 - 9 * 86400000), card: 'c1-380', issue: 380, url: `${P}/380`,
     finding: '[P2] conveyor/lib/claim.sh:99 shows a ready card waiting. Proof: none', round: 1, findings: null }),
     old('d000000000011', '[P1] conveyor/lib/rules.sh:20 a default leaves the rule unset. Proof: none'),
-    old('d000000000012', '[P1] conveyor/lib/rules.sh:20 a click changes its row. Proof: none')];
+    old('d000000000012', '[P1] conveyor/lib/rules.sh:20 a click changes its row. Proof: none'),
+    // Declined after the reason below was written (#409), so it cannot be the finding the reason names.
+    line({ id: 'd000000000013', time: iso(T0 - 30000), card: 'c1-260', issue: 260, url: `${P}/260`,
+      finding: '[P1] conveyor/lib/rules.sh:20 a later finding. Proof: none', round: 1, findings: null })];
   deliver(w, data);
   const judge = rowOf(w, '[P2] conveyor/lib/issues.sh:630 reads the old list').querySelector('.reason');
   const links = Array.from(judge.querySelectorAll('a.why-at'));
@@ -118,7 +121,7 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
   assert.equal(red.href, `${REPO}/blob/HEAD/conveyor/lib/snapshot.sh#L525`, "a main-red fix card's reason links to its repository");
   const both = rowOf(w, '[P1] conveyor/lib/rules.sh:80 one switch resets its row').querySelector('.reason a.why-at');
   assert.equal(both.title, '2 findings start at conveyor/lib/rules.sh:20: Declined on #250: [P1] conveyor/lib/rules.sh:20 a default leaves the rule unset.'
-    + ' Declined on #250: [P1] conveyor/lib/rules.sh:20 a click changes its row.', 'hover names every finding at that line, not one picked of them');
+    + ' Declined on #250: [P1] conveyor/lib/rules.sh:20 a click changes its row.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
 });
 
 // Audit UX14. Bug: a line left the panel 7 days after its time with no word before, and said "More than 7 days old"

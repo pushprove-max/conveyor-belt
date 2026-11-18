@@ -98,7 +98,11 @@
   // card; when several findings start there, it says each of them. An F<n> whose finding is not found is left as written, with "finding not found" on hover. The text is never
   // changed.
   const why = (x, h, pool) => {
-    const kin = pool.filter((y) => y && y.repo === x.repo && typeof y.finding === 'string' && key(y) !== key(x));
+    // Only a finding declined by the time the reason was written can be the one it names; a line with no readable
+    // time is not known to be earlier.
+    const when = Date.parse(x.time);
+    const kin = pool.filter((y) => y && y.repo === x.repo && typeof y.finding === 'string' && key(y) !== key(x)
+      && Date.parse(y.time) <= when);
     const known = new Set([x.finding, x.why].concat(Array.isArray(x.findings) ? x.findings.map((y) => y && y.finding) : [], kin.map((y) => y.finding)).flatMap(pathsIn));
     const text = x.why || 'no reason given';
     const box = h('div', 'reason why-block');
