@@ -58,6 +58,8 @@ part() {
   PARTS+=("$1")
   (B=$T; T=$T/$1; mkdir "$T" && cp -a "$B/r" "$T/r" && cp "$B/scratch.json" "$T/map" || exit 1; R=$T/r
     [ -z "${2:-}" ] || { cp -a "$B/m" "$T/m" && M=$T/m; } || exit 1
+    # A name with no p_ function (a typo in the list) fails, rather than skipping its cases with no result.
+    declare -F "p_$1" > /dev/null || { echo "not ok - no part p_$1"; exit 1; }
     "p_$1"; : > "$B/$1.end") > "$T/$1.res" 2>&1 &
 }
 
@@ -512,6 +514,17 @@ p_mainmoved() {
   got=$(CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
   [ "$got" = "aone atwo " ] && ok "after main changed the map, the runner's cases the change selects run again" || no "main changed the map: ran '$got': $(cat "$T/out")"
 }
+# Bug (#345): a file that passed, run again because the cards landed since touch what it tests (conveyor's unshare():
+# a `fail` line and a `shared` line), was logged as "did not pass". Its log now says main changed what it tests, of an
+# engine case file run through the runner too. (A file that failed still says it did not pass: p_mainmoved.)
+p_sharedwhy() {
+  wchange
+  printf 'change\tabc\nfail\tlib/w.test.sh\nshared\tlib/w.test.sh\nfail\tconveyor/tests/b.test.sh\nshared\tconveyor/tests/b.test.sh\nok\tconveyor/conveyor.test.sh\taone\nok\tconveyor/conveyor.test.sh\tatwo\n' > "$T/rerun"
+  mkdir "$T/slog"; got=$(CONVEYOR_TEST_LOG=$T/slog CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
+  [ "$got" = "bone w " ] && [ "$(sed -n 's/^TESTRUN why\t//p' "$T/slog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/tests/b.test.sh:main changed what it tests since it passed|lib/w.test.sh:main changed what it tests since it passed|" ] \
+    && ok "a file run again on main's change says main changed what it tests, not that it did not pass" \
+    || no "shared files: ran '$got': $(cat "$T/slog/test-changed.log" "$T/out")"
+}
 p_fixpassed() {
   wchange
   # The runner had passed whole; the fix changed x.sh: only area a's cases run, not the whole engine test.
@@ -674,7 +687,7 @@ p_linked() {
 }
 
 for p in checkout area selected boardcount shellcount ended realstate filter named owned ownedpy deleted mapadd mapmove mapcore emptyarea casefile caseshared scnew scold enginetime cputime \
-  rerun closurequick mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved fixpassed core firstwhy handrun noarea why unlisted badline union cover linked; do part "$p"; done
+  rerun closurequick mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed core firstwhy handrun noarea why unlisted badline union cover linked; do part "$p"; done
 
 # This checkout's own map, on a scratch copy of every file it names, each case file holding one case named after it
 # (t_<file>): a change to one engine file runs the case files its area names, not the whole engine test; a change to

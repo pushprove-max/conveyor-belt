@@ -493,7 +493,8 @@ ended ok (`-- ok <file>`, below), `ok<TAB><file><TAB><case>` for each case of a 
 line `ok <case>` says it passed (a file killed part-way), and `fail<TAB><file><TAB><case>` for each case that failed.
 A command that reads it runs no file it lists as passed; of a file it names passed cases of, the rest of its cases;
 of a file it names only failed cases of, only those cases; a file it does not name (one that failed naming no case, never finished or never
-began) runs whole. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
+began) runs whole. A file that passed, but that main changed what it tests since then, has a `fail<TAB><file>` line
+and a `shared<TAB><file>` line: it runs whole, and the log can say it passed before. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
 file the session changed: the command runs the tests it selects for those files too, whether or not they passed, and
 says in its log how many cases of its selection it kept as passed and did not run (`TESTRUN kept=<n>`; the test line's
 `selected.kept`). Of a file that ran again in that run, a case that failed is no longer listed as passed, and the

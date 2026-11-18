@@ -495,13 +495,14 @@ sharedtests() { # <worktree> <the commit its tests ran on>
 # The run again for <sharedtests() of the card> (card()): the card's list (<worktree>.rerun, which tests() keeps on a
 # main that moved, rerunsince()) loses its `pass` and `ok` lines of the shared files and names each as failed with no
 # case, so the command runs it whole, though it passed before and main's change alone does not select it. When the
-# shared files could not be listed, it loses every `pass` and `ok` line.
+# shared files could not be listed, it loses every `pass` and `ok` line. Each such file that no `fail` line names gets a
+# `shared` line too: it runs because main changed what it tests, and its log says so, not that it did not pass (#345).
 unshare() { # <worktree> <sharedtests() of it>
   [ -s "$1.rerun" ] || return 0
   awk -F'\t' -v S="$2" 'BEGIN { all = S ~ /^\(/; n = split(S, a, "\n"); for (i = 1; i <= n; i++) if (!all && a[i] != "") s[a[i]] = 1 }
-    ($1 == "pass" || $1 == "ok") && (all || ($2 in s)) { next }
-    $1 == "fail" && $3 == "" { delete s[$2] }
-    { print } END { for (f in s) print "fail\t" f }' "$1.rerun" > "$1.rerun.new" && mv -f "$1.rerun.new" "$1.rerun"
+    ($1 == "pass" || $1 == "ok") && (all || ($2 in s)) { d[$2] = 1; next }
+    $1 == "fail" { f[$2] = 1; if ($3 == "") delete s[$2] }
+    { print } END { for (x in s) { print "fail\t" x; d[x] = 1 } for (x in d) if (!(x in f)) print "shared\t" x }' "$1.rerun" > "$1.rerun.new" && mv -f "$1.rerun.new" "$1.rerun"
 }
 gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batch's cards in order, one a line (nothing when it takes none), each other one marked taken (<worktree>.batch)
   local max ord o r x m all d

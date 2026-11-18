@@ -75,7 +75,8 @@
 # the list was made), the tests those files select run too, only where the change's own selection holds them: a test
 # file it selects, of the engine's runner the cases both select. Each file such a run runs, and each file a first run
 # of the loop's test step runs (CONVEYOR_TEST_LOG set, no list), its log says why
-# (`TESTRUN why<TAB><file><TAB><reason>`: "the card changed <file>", "main changed <file>", "did not pass", and of the
+# (`TESTRUN why<TAB><file><TAB><reason>`: "the card changed <file>", "main changed <file>", "did not pass" ("main changed what it tests since it passed" for a file a `shared` line
+# names: one that passed, which the loop runs again on main's change), and of the
 # runner, "the area <name> runs all engine tests" when an "all" area selected it). A run of every engine case file
 # says so in its log (`TESTRUN whole-suite`). A run again's log says how many cases of the selection passed before and are not run:
 # `TESTRUN kept=<n>`. A file the list names as passed and also names failed cases of (it passed, then failed them in
@@ -1089,9 +1090,12 @@ if [ -s "$RERUN" ]; then
     left=$(tr ' ' '\n' <<<"${sel:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh)}" | grep . | grep -vFxf <(echo "$oks") | sort -u | tr '\n' ' ')
     if [ -n "$left" ]; then cases=$left; else unset "run[conveyor/conveyor.test.sh]"; fi
   fi
+  # A file a `shared` line names passed, and runs again because main changed what it tests (conveyor's unshare()).
+  shr=$(awk -F'\t' '$1 == "shared" {print $2}' "$RERUN")
+  notpass() { if grep -qxF -- "$1" <<<"$shr"; then echo 'main changed what it tests since it passed'; else echo 'did not pass'; fi; }
   [ -n "$first" ] || for t in "${!run[@]}"; do
-    why[$t]+=$'did not pass\n'
-    [ "$t" != conveyor/conveyor.test.sh ] || [ -z "$cases" ] || while IFS= read -r af; do cwhy[$af]+=$'did not pass\n'; done < <(casefiles "$cases")
+    why[$t]+=$(notpass "$t")$'\n'
+    [ "$t" != conveyor/conveyor.test.sh ] || [ -z "$cases" ] || while IFS= read -r af; do cwhy[$af]+=$(notpass "$af")$'\n'; done < <(casefiles "$cases")
   done
   # The tests of the files the session changed run beside what had not passed: a test file whole, and of the runner
   # the cases of their areas (all of them for an "all" area), added to its cases that had not passed.

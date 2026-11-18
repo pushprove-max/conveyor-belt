@@ -266,6 +266,7 @@ EOF
   cat >> "$STUB/test-cmd" <<'EOF'
 case $PWD in *-8) [ -e "$STUB/tested.8" ] || { : > "$STUB/tested.8"
   while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done; } ;; esac
+! grep -qx "shared	lib/view.test.sh" "${CONVEYOR_TEST_RERUN:-/dev/null}" || : > "$STUB/shared.8"
 ! grep -qx "pass	lib/view.test.sh" "${CONVEYOR_TEST_RERUN:-/dev/null}" || grep -qx "fail	lib/view.test.sh.*" "$CONVEYOR_TEST_RERUN" || exit 0
 echo "== lib/view.test.sh"; printf "%s\n" "== lib/view.test.sh" >> "$CONVEYOR_TEST_LOG/run.log"
 ! { grep -qx seven lib/panel.sh && grep -qx eight lib/rows.sh && ! grep -qx fixed lib/rows.sh; } \
@@ -276,9 +277,28 @@ EOF
   grep -q 'card .*-8: cards landed since its tests ran touch its test files too.*lib/view.test.sh' <<<"$out" \
     && [ "$(st 'select(.issue == 8 and .step == "test") | .result' | tr '\n' ' ')" = "pass fail pass " ] \
     || fail "#8 landed on the tests it passed before #7 landed, not run again with #7's change: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  # #345: the run again's list says the file passed and runs for main's change (a `shared` line), so its log does not
+  # say it did not pass; the list made after main moved (rerunsince()) keeps that line.
+  [ -e "$STUB/shared.8" ] || fail "the run again's list did not name lib/view.test.sh as a file that passed and runs for main's change"
   grep -q '^# The changed tests fail' "$STUB/brief" && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] \
     && [ "$(tr '\n' ' ' < "$R/lib/rows.sh")" = "rows eight fixed " ] \
     || fail "#8's failure on the combined code did not go to its fix before it landed: $(cat "$R/lib/rows.sh")"
+}
+
+# Bug (#345): unshare() named a shared file that had passed only as failed, so the run again logged "did not pass" for
+# it. Each shared file no `fail` line names gets a `shared` line beside its `fail` line; one that failed a case (c) gets
+# none, as it did fail; so does each file whose passes it drops when the shared files could not be listed.
+t_mergeunshare() {
+  eval "$(sed -n '/^unshare() {/,/^}/p' "$SRC/lib/claim.sh")"
+  local w=$T/$CASE/w
+  mkdir -p "$T/$CASE"; printf 'change\tx\npass\ta\npass\tb\nfail\tc\tone\nok\tc\ttwo\n' > "$w.rerun"
+  unshare "$w" $'a\nc\ne'
+  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:a|fail:c|fail:c:one|fail:e|pass:b|shared:a|shared:e|" ] \
+    || fail "the shared files that passed are not each named shared, or one that failed is: $(cat "$w.rerun")"
+  printf 'change\tx\npass\ta\nfail\tc\tone\nok\tc\ttwo\n' > "$w.rerun"
+  unshare "$w" "(the test files of the change or of main's could not be listed)"
+  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:c:one|shared:a|" ] \
+    || fail "with no list of shared files, the files that passed are not each named shared: $(cat "$w.rerun")"
 }
 
 # Bug (#451: #415's merge, which git called clean, left a test file with two openings and one end, and only its test

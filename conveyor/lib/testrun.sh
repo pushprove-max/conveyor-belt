@@ -425,7 +425,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     # suite (the owner, 2026-11-14): refused. It runs what the list did not keep as passed, and says why on its line.
     if [ $r = 1 ] && [ -n "$p" ] && [ -z "$mw" ] && { { [ -n "$ob" ] && [ "$ob" = "$b" ]; } || testedbefore "$1"; }; then
       TEST_REFUSED="refused full run: $RERUN_WHY"
-      if [ -s "$1.rerun" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail)\t' "$1.rerun"; } > "$1.rerun.new" \
+      if [ -s "$1.rerun" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; } > "$1.rerun.new" \
         && mv -f "$1.rerun.new" "$1.rerun"; then r=0; fi
     fi
     if [ $r = 0 ]; then [ -z "$o" ] || printf '%s\n' "$o" > "$1.times"; else rm -f "$1.rerun"; fi
@@ -2128,7 +2128,7 @@ rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
   fi
   RERUN_WHY="the list for this run could not be written"
   { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$2" "$3" "$4"; [ "$ob" = "$3" ] || printf 'from\t%s\n' "$ob"
-    grep -E $'^(pass|ok|fail)\t' "$1.rerun"; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
+    grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
     && mv -f "$1.rerun.new" "$1.rerun"
 }
 # Whether the card of a worktree has a test line in the records: a run of its tests ended before (tests()).
