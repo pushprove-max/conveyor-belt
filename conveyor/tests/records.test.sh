@@ -285,7 +285,7 @@ donesetup() {
 echo x >> "$STUB/sessions"
 case $(tee "$STUB/brief") in
   *'# Issue #9:'*) r='ALREADY-DONE: a.txt holds it\nI changed nothing.' ;;
-  *'# Issue #10:'*) r='Nothing to do.' ;;
+  *'# Issue #10:'*) r='I looked.\n\nI could not find the file named in the issue' ;;
   *) r='I looked.\n\nALREADY-DONE: a.txt already holds the word one\n' ;;
 esac
 echo "{\"type\":\"result\",\"is_error\":false,\"result\":\"$r\",\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":999,\"output_tokens\":5}}"
@@ -314,6 +314,9 @@ t_done() {
 t_donenogo() {
   donesetup 8; echo "$NOGO" > "$STUB/review.1"
   loop run 1 >/dev/null || fail "run exited non-zero"
+  # Bug (#495): the reason said the kept folder holds the session's errors, but the review writes its own in their place.
+  local c; c=$(st 'select(.issue == 8 and .step == "blocked") | .card')
+  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -qF "the issue asks. Its session's output and the last error output (of its review, when the review started) are kept in kept/$c/. ALREADY-DONE: a.txt already" || fail "a NO-GO on ALREADY-DONE does not say the kept errors are the review's: $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'reviewer says that main does not do what the issue asks.*ALREADY-DONE: a.txt already' || fail "a NO-GO on ALREADY-DONE did not block with the reason: $(st 'select(.issue == 8) | "\(.step) \(.reason)"')"
   [ "$(st 'select(.issue == 8 and .step == "review") | .result')" = NO-GO ] && grep -q '^8 --body .*blocked' "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the disagreeing review is not recorded or not posted on the issue"
   [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "issue #8 was closed over a NO-GO, or it got a fix round or a second review"
@@ -332,11 +335,20 @@ t_donemoved() {
 }
 
 # No change and no ALREADY-DONE last line (#9 says it, but not last; #10 does not say it): blocked as before, with no review.
+# Bug (#495): the reason did not say what the session replied or where its output and errors are kept, so the owner
+# could not tell why it stopped. It quotes the last reply, on one line, and names the kept folder, which holds both.
 t_doneempty() {
   donesetup 9 10
   loop run >/dev/null || fail "run exited non-zero"
+  local c r said
   for n in 9 10; do
-    [ "$(st "select(.issue == $n and .step == \"blocked\") | .reason")" = "the session made no change, so there is nothing to review" ] || fail "issue $n: no change and no ALREADY-DONE last line was not blocked as before: $(st "select(.issue == $n) | .step")"
+    c=$(st "select(.issue == $n and .step == \"blocked\") | .card"); r=$(st "select(.issue == $n and .step == \"blocked\") | .reason")
+    case $n in 9) said='ALREADY-DONE: a.txt holds it I changed nothing.' ;; 10) said='I looked. I could not find the file named in the issue' ;; esac
+    [ "$r" = "the session made no change, so there is nothing to review. Its session's output and errors are kept in kept/$c/. Its last reply: $said" ] \
+      || fail "issue $n: no change and no ALREADY-DONE last line was not blocked with its reply and kept folder: $r"
+    [ -s "$ST/kept/$c/$c.out" ] && [ -e "$ST/kept/$c/$c.err" ] && [ ! -e "$T/$CASE/cards/$c.out" ] || fail "issue $n: the session's output and errors are not in kept/$c/: $(ls "$ST/kept/$c" 2>&1)"
+    # Bug: with no findings and no patch, block() did not post the reason, so the issue did not say where the logs are.
+    grep -qF "$n --body Conveyor card $c is blocked: $r" "$STUB/comments" || fail "issue $n: the reason naming its kept folder was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
   done
   [ ! -e "$STUB/reviews" ] && [ ! -e "$STUB/closed" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a card with no change and no ALREADY-DONE line was reviewed, closed or landed"
 }

@@ -78,7 +78,7 @@ t_followtake() {
   till '[ -n "$(st '"'"'select(.issue == 8 and .step == "blocked")'"'"')" ] && [ -n "$(st '"'"'select(.issue == 7 and .step == "blocked")'"'"')" ]' \
     || fail "#7 and #8 did not both end: $(cat "$STUB/serve.out")"
   # #7's build ran to its end, on the engine it started on: it was neither killed nor moved by the restart.
-  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "the session made no change, so there is nothing to review" ] \
+  [[ $(st 'select(.issue == 7 and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. "* ]] \
     && [ "$(st 'select(.issue == 7 and .step == "worktree") | .engine')" = "$A" ] && kill -0 $pid 2>/dev/null \
     || fail "#7 did not end on the engine it started on, or the loop ended: $(st 'select(.issue == 7)')"
 }

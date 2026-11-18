@@ -350,6 +350,21 @@ visible() { # <review file> [held | any]
   grep -E "^USER-VISIBLE: ($f)\$" "$1" | sed 's/^USER-VISIBLE: //'
 }
 
+# The last reply of a session's stream (a Claude result, a Codex agent_message or an OpenCode text part) that holds
+# more than white space, on one line, cut to 1000 characters; nothing when it has none.
+lastreply() { # <session output>
+  jq -Rrjn '[inputs | fromjson? // empty | objects | if .type == "result" then .result
+      elif .type == "item.completed" and .item.type? == "agent_message" then .item.text elif .type == "text" then .part.text? else empty end
+      | strings | select(test("\\S"))] | last // "" | [splits("\\s+")] | map(select(. != "")) | join(" ") | .[0:1000]' "$1" 2>/dev/null
+}
+
+# block(), with the given words added at the end of the reason's first line, before the output a reason may carry.
+# The reason is posted on the issue whatever the review holds: it says where the session's logs are kept.
+ncblock() { # <card> <issue> <worktree> <reason> <words>
+  local l=${4%%$'\n'*}
+  block "$1" "$2" "$3" "$l$5${4#"$l"}" post
+}
+
 # The session left no change. If its reply ends with an ALREADY-DONE line and the worktree is untouched, one review
 # confirms that main already does what the issue asks, and on its GO the issue is closed with that line and the
 # card's closing line is `closed`. Anything else blocks the card with the reason; there is no fix round.
@@ -359,37 +374,46 @@ visible() { # <review file> [held | any]
 # main as it is now (redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
 # closes as not needed, its closed line saying so. Else it is blocked, saying why, whatever its reply says: only that
 # run, not a review of an ALREADY-DONE line, shows main is no longer red.
+# Every reason it blocks with names the card's kept folder, where block() moves the session's output and errors, so
+# the owner finds why the session stopped (issue 495), and is posted on the issue. A review of an ALREADY-DONE line
+# writes its own error output in place of the session's, and a reason after it says so.A reason of a main-red card, or of a card with no ALREADY-DONE
+# line, also quotes the session's last reply (lastreply()); with none it says so, and the end of the session's error
+# output is the line's tail. A card reaches here only after its session ended well: session() fails on any other exit.
 nochange() { # <card> <issue> <worktree> <brief>
-  local c=$1 n=$2 wt=$3 said t res err
+  local c=$1 n=$2 wt=$3 said t res err kept why r
+  kept=" Its session's output and errors are kept in kept/$c/."; why=$kept
+  if r=$(lastreply "$wt.out") && [ -n "$r" ]; then why+=" Its last reply: $r"
+  elif [ -e "$wt.out" ]; then why+=" The session ended well (exit 0) but left no reply."$'\n'"$(tail -n 20 "$wt.err" 2>/dev/null)"; fi
   if [ "$n" = 0 ] && jq -e --arg c "$c" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1; then
     t="the session made no change, so there is nothing to review"
     [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] && err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
-      || { block "$c" "$n" "$wt" "$t. The engine could not run its cases again on main: the worktree is not clean or could not be moved to main. ${err:0:400}"; return; }
+      || { ncblock "$c" "$n" "$wt" "$t. The engine could not run its cases again on main: the worktree is not clean or could not be moved to main. ${err:0:400}" "$why"; return; }
     redproof "$c" "$wt"
-    [ $? = 3 ] || { block "$c" "$n" "$wt" "$t. Its cases on main as it is now: $(head -n 1 "$wt.unfixed")"; return; }
+    [ $? = 3 ] || { ncblock "$c" "$n" "$wt" "$t. Its cases on main as it is now: $(head -n 1 "$wt.unfixed")" "$why"; return; }
     t="Not needed: the session made no change, and the cases ran again on main. $(head -n 1 "$wt.unfixed")"
     res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$res" \
-      || { block "$c" "$n" "$wt" "$t The engine could not write the closed line"; return; }
+      || { ncblock "$c" "$n" "$wt" "$t The engine could not write the closed line." "$why"; return; }
     clean "$wt"; return
   fi
   said=$(jq -r 'select(.type == "result") | .result // "" | tostring' "$wt.out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1)
   [[ $said == "ALREADY-DONE: "*[![:space:]]* ]] && [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] \
-    || { block "$c" "$n" "$wt" "the session made no change, so there is nothing to review"; return; }
+    || { ncblock "$c" "$n" "$wt" "the session made no change, so there is nothing to review." "$why"; return; }
   said=${said:0:1000}
   err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
-    || { block "$c" "$n" "$wt" "the session said that main already fixes the issue, but the engine could not move the worktree to main for the review:${err:0:400}. $said"; return; }
+    || { ncblock "$c" "$n" "$wt" "the session said that main already fixes the issue, but the engine could not move the worktree to main for the review:${err:0:400}." "$kept $said"; return; }
   began "$c" "$n" review
+  kept=" Its session's output and the last error output (of its review, when the review started) are kept in kept/$c/."
   t=$(reviewed "$wt" "$4"$'\n\n# The session changed nothing and ended its reply with this line\n'"$said" "$CONFIRM") \
-    || { block "$c" "$n" "$wt" "review of the session's ALREADY-DONE line: $t"; return; }
+    || { ncblock "$c" "$n" "$wt" "review of the session's ALREADY-DONE line: $t" "$kept"; return; }
   res=$(verdict "$wt.review")
   record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --argjson k "$(counts "$wt.review")" 'sub("\n+$"; "") as $r | $t + {reason:$r,counts:$k} + (if $res == "NO-GO" then {tail: $r} else {} end)')"
   case $res in
     GO) ;;
-    NO-GO) block "$c" "$n" "$wt" "the session made no change and said that main already fixes the issue. The reviewer says that main does not do what the issue asks. $said"; return ;;
-    *) block "$c" "$n" "$wt" "the session made no change and said that main already fixes the issue. The review of that claim ended without one clear verdict. $said"; return ;;
+    NO-GO) ncblock "$c" "$n" "$wt" "the session made no change and said that main already fixes the issue. The reviewer says that main does not do what the issue asks." "$kept $said"; return ;;
+    *) ncblock "$c" "$n" "$wt" "the session made no change and said that main already fixes the issue. The review of that claim ended without one clear verdict." "$kept $said"; return ;;
   esac
   reading fresh >/dev/null 2>&1 # the after reading of the closed line, asked for outside the lock
-  err=$(locked closed "$c" "$n" "$wt" "$said") || { block "$c" "$n" "$wt" "$err. $said"; return; }
+  err=$(locked closed "$c" "$n" "$wt" "$said") || { ncblock "$c" "$n" "$wt" "$err." "$kept $said"; return; }
   clean "$wt"
 }
 

@@ -534,7 +534,7 @@ t_mainrednochangered() {
   git -C "$R" worktree add -q --detach "$w" HEAD && echo '{"type":"result","result":"ALREADY-DONE: main fixes it"}' > "$w.out" \
     || fail "the fix card's worktree could not be made"
   out=$(eng 'nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
-  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. Its cases on main as it is now: "*'`a.test: one`, `c.test` still fails on main'"'"'s code at '*', and there is no change to run them with.' ]] \
+  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. Its cases on main as it is now: "*'`a.test: one`, `c.test` still fails on main'"'"'s code at '*', and there is no change to run them with. Its session'"'"'s output and errors are kept in kept/cfix/. Its last reply: ALREADY-DONE: main fixes it' ]] \
     && [ -z "$(st 'select(.card == "cfix" and (.step | IN("closed", "review", "start")))')" ] \
     || fail "the fix card whose cases still fail on main was not blocked naming the run, or went to review: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }

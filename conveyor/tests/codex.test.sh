@@ -196,3 +196,19 @@ t_codexapi() {
   jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex build the API refused marked no API error"
   [ "$(st 'select(.step == "build") | .tokens.codex')" = 11 ] || fail "the build line: $(st 'select(.step == "build")')"
 }
+
+# Bug (#495): a build that changes nothing and leaves no reply was blocked as "nothing to review", with no word that it
+# said nothing and no sign of what went wrong. Its reason says it left no reply and names the kept folder, and the end
+# of its error output is the line's tail. A Codex turn that completes with no agent_message is such a session.
+t_codexnoreply() {
+  cxsetup
+  printf '%s\n' 'echo "{\"type\":\"thread.started\",\"thread_id\":\"th-6\"}"' 'echo "early warning" >&2; echo "model stream closed early" >&2' \
+    'echo "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":10,\"cached_input_tokens\":0,\"output_tokens\":1}}"' > "$STUB/cx-cmd"
+  loop run >/dev/null 2>&1 || fail "run exited non-zero"
+  local c; c=$(st 'select(.issue == 7 and .step == "blocked") | .card')
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "the session made no change, so there is nothing to review. Its session's output and errors are kept in kept/$c/. The session ended well (exit 0) but left no reply." ] \
+    || fail "the no-reply build was not blocked saying it left no reply: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .tail')" = $'early warning\nmodel stream closed early' ] \
+    || fail "the blocked line's tail is not the session's error output: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
+  grep -q 'model stream closed early' "$ST/kept/$c/$c.err" && [ -s "$ST/kept/$c/$c.out" ] || fail "the session's output and errors are not in kept/$c/: $(ls "$ST/kept/$c" 2>&1)"
+}

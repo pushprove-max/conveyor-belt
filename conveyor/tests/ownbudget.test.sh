@@ -62,7 +62,7 @@ t_ownbudget() {
 # no file can have now. It is blocked as a session that made no change (nochange()), with no review and no budget set.
 t_ownnochange() {
   ownstart $'Nothing to split.\nOWN-BUDGET: 9 CPU s: each case starts a whole loop'
-  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "the session made no change, so there is nothing to review" ] && [ ! -s "$STUB/reviews" ] \
+  [[ $(st 'select(.issue == 7 and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. Its session's output and errors are kept in kept/"*"/. Its last reply: Nothing to split. OWN-BUDGET: 9 CPU s: each case starts a whole loop" ]] && [ ! -s "$STUB/reviews" ] \
     || fail "the no-change build with an OWN-BUDGET line did not go to nochange(): $(steps)"
   [ "$(files)" = null ] || fail "an OWN-BUDGET line set a budget in the pack: $(files)"
 }
