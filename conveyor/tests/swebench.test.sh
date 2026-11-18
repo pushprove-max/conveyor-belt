@@ -311,6 +311,15 @@ t_sweguard() {
   out=$(CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":90}}"' loop bench swe arms check solo 2>&1) && fail "a preflight ran at the usage guard: $out"
   grep -q 'the usage guard is reached' <<<"$out" && [ ! -s "$STUB/sessions" ] || fail "the refusal does not name the guard, or a session ran: $out"
 }
+# Bug: Claude's usage guard held back an arm with only a Codex login: its preflight and its run refused to start.
+t_swecodexguard() {
+  swe; local out
+  jq -c '.guard = 50' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  export CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":90}}"'
+  out=$(loop bench swe 1 --arm stub-codex 2>&1) && grep -q "Resolved .* of 1 with " <<<"$out" && ! grep -q 'usage guard' <<<"$out" \
+    || fail "a Codex-only run was held back by Claude's guard: $out"
+  out=$(loop bench swe arms check stub-codex 2>&1) && grep -q '^stub-codex: ready$' <<<"$out" || fail "a Codex-only preflight was held back by Claude's guard: $out"
+}
 # Bug: with Codex in both seats the guard read no account, so a solo run started its Claude session on the builder's
 # named account (`control account`) past that account's limit.
 t_swesologuard() {

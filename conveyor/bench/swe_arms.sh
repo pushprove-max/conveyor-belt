@@ -193,7 +193,7 @@ swe_arms() { # [check <arm>...]
   if [ "${1:-}" = check ]; then
     shift; [ $# -gt 0 ] || { echo "usage: conveyor.sh bench swe arms [check <arm>...]" >&2; return 2; }
     # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run.
-    for n; do a=$(swe_arm "$n") || continue; if [ "$(jq -r .kind <<<"$a")" = conveyor ]; then gc=1; else ga=1; fi; done
+    for n; do a=$(swe_arm "$n") || continue; case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
     ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no preflight starts while it stands" >&2; return 1; }
     tf=$(swe_tasks) || return 1; img=$(head -n 1 "$tf" | jq -r .image)
     swe_h image "$img" > /dev/null 2>&1 || { echo "conveyor: the base image $img could not be fetched" >&2; return 1; }

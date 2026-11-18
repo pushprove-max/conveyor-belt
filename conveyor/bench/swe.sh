@@ -232,9 +232,12 @@ swe_end() { # <state>
   [ ! -d "$SWE_DIR/work" ] || { chmod -R u+w "$SWE_DIR/work"; rm -rf "$SWE_DIR/work"; }
   rm -f "$SWE_DIR/stop"; swe_board; SWE_RUN=
 }
-# Whether the usage guard holds back a run of these kinds of arm: <conveyor> and <agent> are each non-empty when the
-# run has an arm of that kind.
+# Whether the usage guard holds back a run of these kinds of arm: <conveyor> is non-empty when the run has a conveyor
+# arm, <agent> when it has another arm that uses the Claude login (swe_guards).
 swe_held() { { [ -n "$1" ] && swe_guarded; } || { [ -n "$2" ] && swe_guarded 1; }; } # <conveyor> <agent>
+# Which guard an arm is held back by: "conveyor" (the engine's), "agent" (the Claude account an arm that is not the
+# engine's uses) or nothing, for an arm with no Claude login (Codex alone): the Claude guard does not hold it.
+swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] | index("claude")) then "agent" else empty end' <<<"$1"; } # <arm json>
 # A run: the first n tasks, each built by every arm in turn, so a run stopped early has compared the arms on the same
 # tasks. Each arm is picked only once its preflight passed (swe_ready).
 swe_run() { # <n> <engine> <arm>...
@@ -242,7 +245,7 @@ swe_run() { # <n> <engine> <arm>...
   shift 2
   mkdir -p "$SWE_DIR" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7 || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
   for x; do a=$(swe_arm "$x") || { echo "conveyor: no arm $x: \`conveyor.sh bench swe arms\` lists them" >&2; return 2; }
-    if [ "$(jq -r .kind <<<"$a")" = conveyor ]; then gc=1; else ga=1; fi; done
+    case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
   ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
   tf=$(swe_tasks) || return 1; all=$(wc -l < "$tf")
   [ "$n" -le "$all" ] || { echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
@@ -276,7 +279,7 @@ swe_run() { # <n> <engine> <arm>...
         swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: true}] | .done += 1 | .resolved += (if $r == "resolved" then 1 else 0 end)'
         continue
       fi
-      if [ "$SWE_KIND" = conveyor ]; then ! swe_held 1 ''; else ! swe_held '' 1; fi \
+      case $(swe_guards "$SWE_ARMJ") in conveyor) ! swe_held 1 '' ;; agent) ! swe_held '' 1 ;; esac \
         || { echo "conveyor: the usage guard is reached: the run stops before $id"; swe_end guard; return 0; }
       swe_live --arg t "$id" '.current = $t'
       r=$(swe_task "$t"); echo "$i/$n $id$tag: $r"

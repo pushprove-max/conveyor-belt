@@ -36,7 +36,8 @@ is not run again: its result is used again, at no cost.
 Before it starts, a run prints the sessions it usually takes and the worst case, and the minutes it is expected to
 take. A run does not start while the usage guard (`conveyor.sh control guard`, in [the control
 record](configuration.md#the-control-record)) is reached, and it stops before the next task when the guard is reached
-during the run. `conveyor.sh bench swe stop` ends a run.
+during the run. The guard reads the Claude account, so it does not stop an arm that does not use the Claude login.
+`conveyor.sh bench swe stop` ends a run.
 
 Each task is built in a sandbox of its own: a local clone of the task's repository at its base commit, with the issue
 text as the card's issue. Conveyor builds the task in a Docker container made from the task's own image, with a pack
@@ -129,7 +130,7 @@ conveyor.sh bench swe arms check codex-sol caveman
 ```
 
 The first command lists each arm with the state of its last preflight. The second runs the preflight of the arms that
-you name. It does not start while the usage guard is reached.
+you name. It does not start while the usage guard is reached, unless no arm that you name uses the Claude login.
 
 ### An arm that does not fire
 
