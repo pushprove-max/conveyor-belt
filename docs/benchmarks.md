@@ -40,11 +40,11 @@ during the run. `conveyor.sh bench swe stop` ends a run.
 
 Each task is built in a sandbox of its own: a local clone of the task's repository at its base commit, with the issue
 text as the card's issue. Conveyor builds the task in a Docker container made from the task's own image, with a pack
-made for it (the task's test command, run in the container) and the sandbox as the only folder of this machine it can
-see. Conveyor builds, reviews, fixes and tests the card as it does any card. A card that lands is pushed only to the
-sandbox's own bare origin, never to the task's repository, and no issue is filed on GitHub. What lands on the
-sandbox's main is the final patch. A blocked card has none. The harness then grades the patch with the task's hidden
-tests.
+made for it (the task's test command, run in the container). The container can see the sandbox and, read-only, the
+folder of the installed Conveyor version, and no other folder of this machine. Conveyor builds, reviews, fixes and
+tests the card as it does any card. A card that lands is pushed only to the sandbox's own bare origin, never to the
+task's repository, and no issue is filed on GitHub. What lands on the sandbox's main is the final patch. A blocked
+card has none. The harness then grades the patch with the task's hidden tests.
 
 ### Another version
 
@@ -107,7 +107,8 @@ login. The benchmark uses no API keys.
 Each arm builds each task in a Docker container of its own, made from the task's image. Every arm gets the same CPU
 and memory limits (the `limits` setting in `conveyor/bench/swe.json`) and the same time limit for a task (the
 `taskTimeout` setting in the same file). The container can see the task's sandbox and no other folder of this
-machine. The official harness grades the patch of every arm in the same way.
+machine, except for a Conveyor arm: its container can also see the folder of the installed Conveyor version,
+read-only. The official harness grades the patch of every arm in the same way.
 
 An arm uses the subscription logins that the cards use. The Claude login is the one of the builder's account
 (`conveyor.sh control account`). The Codex login is the one in `~/.codex`. Conveyor copies the login files into the
@@ -183,7 +184,8 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
 - A task's tests run in the task's Docker image, which holds the repository's own environment. A project whose build
   makes compiled parts can fail there for reasons other than the change.
 - The minutes are those of this machine and depend on the other work on it.
-- The sessions of an arm run in its container and see only the task's sandbox. Conveyor also reads the reference
+- The sessions of an arm run in its container and see only the task's sandbox (a Conveyor arm also sees the folder of
+  the installed Conveyor version, read-only). Conveyor also reads the reference
   fixes and hidden tests only to make the task list and to grade a patch, and then removes them.
 - The task images are for x86-64. Each arm installs its tools in each task's container, with the network, so each
   task takes more minutes than the build alone, and an install that the network stops makes the arm fail that task.
