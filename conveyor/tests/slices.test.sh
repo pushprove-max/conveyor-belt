@@ -231,12 +231,24 @@ t_slicesgrown() {
   jq -sc --argjson i "$(big 9)" 'map(.authorAssociation = "OWNER") + [$i]' "$STUB/filed" > "$STUB/up.json"
   fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" | jq -c "[.[].number]"'
   [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] || fail "a run limited to the parent does not take its size slice: $(cat "$T/$CASE/run.out")"
+  # Bug caught: a parent that blocked (for the owner's yes) in place of landing left its slice in the run, waiting on
+  # it, and pick answered wait on every poll (the whole list, all, is what it reads), so the run never ended.
+  cp "$ST/cards.jsonl" "$STUB/cards.landed"
+  jq -c 'if .step == "landed" or .step == "pushed" then .step = "blocked" else . end' "$STUB/cards.landed" > "$ST/cards.jsonl"
+  fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" all | jq -c "[.[].number]"'
+  [ "$(cat "$T/$CASE/run.out")" = '[]' ] || fail "a run limited to a blocked parent still waits on its size slice: $(cat "$T/$CASE/run.out")"
+  cp "$STUB/cards.landed" "$ST/cards.jsonl"
   # Bug caught: once `retry` gave back the parent (approved(), after the owner's yes), its grown line is in the retried
   # file, and a run limited by --only to the parent left the slice queued.
   jq -c 'select(.step == "grown")' "$ST/cards.jsonl" > "$ST/retried.jsonl"; jq -c 'select(.step != "grown")' "$ST/cards.jsonl" > "$STUB/cards.new"
   mv "$STUB/cards.new" "$ST/cards.jsonl"
   fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" | jq -c "[.[].number]"'
   [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] || fail "a run limited to a retried parent does not take its size slice: $(cat "$T/$CASE/run.out")"
+  # Bug caught: a retried parent whose card blocked again kept the run waiting on its slice, as above.
+  jq -c 'if .step == "landed" or .step == "pushed" then .step = "blocked" else . end' "$ST/cards.jsonl" > "$STUB/cards.new"
+  mv "$STUB/cards.new" "$ST/cards.jsonl"
+  fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" all | jq -c "[.[].number]"'
+  [ "$(cat "$T/$CASE/run.out")" = '[]' ] || fail "a run limited to a retried parent that blocked again still waits on its size slice: $(cat "$T/$CASE/run.out")"
 }
 
 # Shadow: the judge's answer is recorded on the grown line, and the card lands its change as it was: nothing filed,
