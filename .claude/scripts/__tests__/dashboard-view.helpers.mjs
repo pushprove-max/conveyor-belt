@@ -181,7 +181,7 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       (w.excerptsAsks = w.excerptsAsks || []).push(url);
       return Promise.resolve(w.excerptsReply || { ok: false, status: 502, text: () => Promise.resolve('no reviewed lines') });
     }
-    assert.ok(['answer', 'restart', 'control', 'machine'].includes(url), `the page writes to nothing but its own answer, restart, control and machine addresses: ${url}`);
+    assert.ok(['answer', 'restart', 'control', 'machine', 'time'].includes(url), `the page writes to nothing but its own answer, restart, control, machine and time addresses: ${url}`);
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');
     w.posts.push({ url, body: JSON.parse(opt.body) });

@@ -63,7 +63,7 @@ export const fmtSec = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Ma
 export const fmtStep = (s: number) => (s < 60 ? `${Math.max(0, Math.round(s))}s` : fmtSec(s))
 export const since = (t: number | null, now: number) => (t ? fmtSec(Math.max(0, Math.round((now - t) / 1000))) : '')
 // A time of day as the Board's Time setting writes it: 12-hour ("3:04 PM", the default) or 24-hour ("15:04"). The
-// Board keeps its setting in the browser, so the mod has its own `time` option with the same two values, set by register.
+// mod takes the Board's own setting where the Board on this machine has one, else its own `time` option (units.tsx readTime).
 let hour24 = false
 export const setClock = (time: unknown) => { hour24 = time === '24-hour' }
 export const clockOf = (t: number) => {

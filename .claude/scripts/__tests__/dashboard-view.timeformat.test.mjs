@@ -34,6 +34,28 @@ test('a card\'s start and the head\'s clock follow Customize\'s Time and Date, a
   assert.deepEqual([saved(w).time, saved(w).date], ['24-hour', 'dd/mm/yyyy'], 'kept with the layout');
   pick(w, 'time', '12-hour');
   assert.match(times(), /^started 08\/11\/2026, 3:15 PM · /, 'back to 12-hour with dd/mm/yyyy kept');
+  // Issue 506. Bug it catches: the Time kept in this browser alone, so the /units pane wrote AM and PM with 24-hour set.
+  assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour' } }, { url: 'time', body: { time: '12-hour' } }],
+    'each Time chosen is sent to the server, and the Date is not');
+});
+
+// Issue 506. Bugs it catches: a 24-hour Time this browser kept before the page sent it never reaching the server
+// (only a click sent it), and Restore putting the Board back to 12-hour while the /units pane kept 24-hour.
+test('a kept Time is sent when the Board opens, and the Time Restore puts back is sent too', () => {
+  const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }) } });
+  assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour' } }], 'sent on opening, with no click');
+  w.document.getElementById('customize-open').click();
+  w.document.getElementById('restore-layout').click();
+  assert.deepEqual(w.posts.slice(1), [{ url: 'time', body: { time: '12-hour' } }], 'Restore sends 12-hour');
+});
+
+// Bug it catches (review E4): each visit sent the kept Time again, so a browser whose only change was Density (which
+// saves the default 12-hour) or one that set a Time earlier undid the Time set later in another browser.
+test('a browser that has sent a Time, or kept only the default, sends nothing when the Board opens', () => {
+  const sentBefore = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }), 'conveyor-board-time-sent': '1' } });
+  assert.deepEqual(sentBefore.posts, [], 'a Time sent on an earlier visit is not sent again');
+  const densityOnly = boot({ store: { [STORE]: JSON.stringify({ density: 'compact', time: '12-hour' }) } });
+  assert.deepEqual(densityOnly.posts, [], 'the default Time that a Density change saved is not sent');
 });
 
 // The metrics panel's days are dates in the kept Date: 9 November with dd/mm/yyyy is 09/11/2026. Bug it catches: a

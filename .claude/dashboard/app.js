@@ -13,6 +13,7 @@
   const STORE_KEY = 'conveyor-board-layout';  // the layout of each tab, density, theme, time and date, in this browser only
   const TAB_KEY = 'conveyor-board-tab';        // the tab in view last
   const SEEN_KEY = 'conveyor-board-seen';     // the "Needs you" items already shown once
+  const TIME_SENT_KEY = 'conveyor-board-time-sent';  // set once this browser has sent a Time to the server
   // Overview first, with 3D View, the one to look at rather than act on, beside it (#87); then Control and Rules; then
   // Tests, the test files and the test limits (#520).
   const TABS = [['overview', 'Overview'], ['belt3d', '3D View'], ['control', 'Control'], ['rules', 'Rules'], ['tests', 'Tests']];
@@ -1087,7 +1088,8 @@
     if (r && (r.status === 401 || (r.redirected && /\/login$/.test(String(r.url || ''))))) window.location.assign('/login');
     return r;
   }
-  // The page's only writes: an answer to an open decision, a control action and the collector restart, all to its own host.
+  // The page's only writes: an answer to an open decision, a control action, the collector restart and the Time set in
+  // Customize, all to its own host.
   function post(path, body) {
     return window.fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(goLogin);
   }
@@ -1149,6 +1151,12 @@
     const kept = s.tabs && typeof s.tabs === 'object' ? s.tabs : { overview: s };
     layouts = Object.fromEntries(TABS.map(([t]) => [t, tidy(t, kept[t])]));
     prefs = prefsOf(s);
+  }
+  // The Time goes to the server (time.json) for the /units pane on its machine; a send that fails leaves the pane on
+  // its own `time` option or the Time sent before.
+  function sendTime() {
+    try { window.localStorage.setItem(TIME_SENT_KEY, '1'); } catch (e) { /* then a kept 24-hour is sent again on the next visit */ }
+    post('time', { time: prefs.time }).catch(() => {});
   }
   function save() {
     try { window.localStorage.setItem(STORE_KEY, JSON.stringify({ tabs: layouts, ...prefs })); } catch (e) { /* the layout then lasts for this visit */ }
@@ -1231,6 +1239,8 @@
     // A new Time or Date shows at once: each panel's times are written when it is drawn, so every panel is drawn again
     // (the other tabs' when they are opened), with the head and its clock.
     if (`${prefs.time} ${prefs.date}` !== was) { redrawAll(); tick(); }
+    // A new Time, from its choice or from Restore, also goes to the server.
+    if (!was.startsWith(`${prefs.time} `)) sendTime();
     if (message) say(message);
   }
   function move(id, by) {
@@ -2359,6 +2369,11 @@
     modules.clear();
     ordered.forEach(([id, mod]) => modules.set(id, mod));
     readLayout();
+    // A 24-hour Time this browser kept before the Board sent any is sent once. It is not sent on each visit: the kept
+    // Time is also the default that any other change saves, and would undo a Time set later in another browser.
+    let sent = null;
+    try { sent = window.localStorage.getItem(TIME_SENT_KEY); } catch (e) { sent = null; }
+    if (!sent && prefs.time !== PREFS0.time) sendTime();
     let kept = null;
     try { kept = window.localStorage.getItem(TAB_KEY); } catch (e) { kept = null; }
     tab = tabFromAddress() || (TABS.some((x) => x[0] === kept) ? kept : 'overview');

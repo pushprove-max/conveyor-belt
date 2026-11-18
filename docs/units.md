@@ -145,12 +145,14 @@ this page says that it wraps.
 - The Fast and Research lanes, and the lines about what could not be read.
 
 A section with nothing to show has one dim line: `nothing on the belt`, `nothing waiting`, `nothing landed today`.
-The pane and `/units` write times of day in the form that the `time` setting gives ([Settings](#settings)).
+The pane and `/units` write times of day in the form that the Board's **Time** setting gives, or the `time` setting
+([Settings](#settings)).
 
 ## Settings
 
-`time`, in `/config` under the plugin: `12-hour` (`3:04 PM`, the default) or `24-hour` (`15:04`). The Board keeps its
-own **Time** setting in the browser, so set `time` to the same value.
+`time`, in `/config` under the plugin: `12-hour` (`3:04 PM`, the default) or `24-hour` (`15:04`). When the Board runs on
+this machine and you set its **Time** in Customize, the pane uses the Board's setting in place of `time`, within a
+minute. The pane uses the **Time** of the browser that last set it or last opened the Board.
 
 The pane has its option in `/config`, under the plugin: `pane`, `auto`, `on` or `off`. `auto` is on in main, where the
 Foreman runs, off in every other worktree (a card's, a lane's). `/units pane on|off` sets it for the current session.

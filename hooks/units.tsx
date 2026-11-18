@@ -138,6 +138,17 @@ const readLimit = async ($: EngineInterface): Promise<{ limit: State['limit']; o
   if (dataRead?.file !== file || dataRead.at !== st.mtimeMs) dataRead = { file, at: st.mtimeMs, limit: parseLimit((await $.fs.read(file)) as string) }
   return { limit: dataRead.limit, over: null }
 }
+// The Board's Time setting, as its page last sent it, on a change or on opening (dashboard_server.py's POST /time writes
+// time.json in the Board's folder). It wins over the plugin's `time` option, which stands where the Board here has
+// sent none: else 24-hour on the Board left the pane writing AM and PM.
+let optionTime: unknown
+const readTime = async ($: EngineInterface) => {
+  const file = feedDir && `${feedDir}/time.json`
+  const st = file ? await $.fs.stat(file).catch(() => undefined) : undefined
+  let t: unknown
+  if (file && st && st.size <= 1024) t = await $.fs.read(file).then(s => JSON.parse(s as string)?.time, () => undefined).catch(() => undefined)
+  setClock(t === '12-hour' || t === '24-hour' ? t : optionTime)
+}
 // The data file's over-cap line as the limit was last read: a feed board laid over the state keeps it, as it keeps
 // the limit. A board with no snapshot is drawn as its note alone, so the
 // line leads the note too.
@@ -226,6 +237,8 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   // Read whether or not the host answered: a failed fetch must not drop the data file's over-cap line.
   const lim = await readLimit($).catch(() => NO_LIMIT)
   dataOver = lim.over
+  // Before the state is published: the views it draws write their times in the Board's Time.
+  await readTime($).catch(() => undefined)
   // Under the board; with no board, the one line every view draws says them first.
   const over = [got && 'over' in got ? got.over : null, lim.over].filter((x): x is string => !!x)
   const st: State = {
@@ -319,6 +332,7 @@ const drawFeed = async ($: EngineInterface, got: { board: Board; at: number; key
   // (the poll's fetch can take 75 s), and the limit is this machine's file.
   const lim = drawn ? null : await readLimit($).catch(() => NO_LIMIT)
   if (lim) dataOver = lim.over
+  await readTime($).catch(() => undefined)
   const rest = lim && { limit: lim.limit, fast: { state: 'unread' }, research: { state: 'none' } }
   feedSeq++
   feedBoard = { board: boardPart(fed), at: got.at }
@@ -444,6 +458,8 @@ export const register: Register = (on, options) => {
   option = { pane: String(options.pane ?? 'auto') }
   // A changed option reloads the plugin and runs register again, so `motion` is read once here.
   motion = options.motion === 'on'
+  // Until a poll reads the Board's Time (readTime).
+  optionTime = options.time
   setClock(options.time)
 
   // The plugin's one session.start hook (Claude Code refuses a second with no matcher, and session.start takes none):

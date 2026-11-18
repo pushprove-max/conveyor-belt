@@ -39,7 +39,7 @@
     "time": {
       "type": "string",
       "title": "Time",
-      "description": "How the pane writes a time of day: 12-hour (3:04 PM) or 24-hour (15:04). Set it as the Board's Time setting in Customize.",
+      "description": "How the pane writes a time of day: 12-hour (3:04 PM) or 24-hour (15:04). Where the Board runs on this machine, the Time last set in its Customize is used instead.",
       "options": [
         "12-hour",
         "24-hour"

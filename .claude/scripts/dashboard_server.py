@@ -6,8 +6,8 @@ It serves the folder dashboard.sh --loop writes (the page and its data.js), ever
 revalidates the page's code instead of guessing it is fresh. Scripts and the stylesheet go gzip-compressed to a
 browser that accepts it, and a connection is kept (HTTP/1.1) for the next file. Everything is served over HTTPS
 behind a login (the owner's ruling): the only public routes are PUBLIC below.
-The page keeps its layout in the browser, so nothing in the served folder is writable. A logged-in caller can do three
-things and nothing else: answer one open decision through `POST /answer`, restart the collector through
+The page keeps its layout in the browser. A logged-in caller can do these things and nothing else: send the Board's
+Time setting through `POST /time` (time.json, the one file written in the served folder, for the /units pane); answer one open decision through `POST /answer`, restart the collector through
 `POST /restart`, and steer the Conveyor loop from the Board through `POST /control`: one action of
 `conveyor.sh control`, or the yes, the no or the retry of a card, run on the host conveyor/host.json names (here on one
 machine: conveyor_host()), on the
@@ -108,6 +108,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # An answer is {id, answer, askedAt, repo}, each checked before decision.sh sees it; repo is the host file's record
 # whose ledger holds the decision.
 MAX_ANSWER_BODY = 4096
+MAX_TIME_BODY = 64     # POST /time: {"time": "24-hour"}
 RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because the restart kills this server
 HISTORY_TTL = 60       # GET /history serves dashboard.sh's copy while it is this young, with no process (its HISTORY_TTL)
 HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
@@ -1508,6 +1509,35 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b'ok')
 
+    def set_time(self):
+        """POST /time {time}: the Board's Time setting (12-hour or 24-hour), as a browser last set it or opened the Board with it.
+        Same checks and order as /answer. It is written whole to time.json in the served folder, where the /units
+        pane on this machine reads it (hooks/units.tsx readTime): the one file this server writes there."""
+        if not self.own_page():
+            return self.send_error(403)
+        user = self.authed()
+        if not user:
+            return self.reply(401, 'log in to set the time')
+        body = self.json_body(MAX_TIME_BODY)
+        if body is None:
+            return None
+        if set(body) != {'time'} or body['time'] not in ('12-hour', '24-hour'):
+            return self.send_error(400)
+        tmp = os.path.join(self.directory, '.time.json.%d' % threading.get_ident())
+        try:
+            with open(tmp, 'w') as f:
+                json.dump({'time': body['time']}, f)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, os.path.join(self.directory, 'time.json'))
+        except OSError as e:
+            try:
+                os.remove(tmp)  # each thread names its own: one left behind would never be replaced
+            except OSError:
+                pass
+            return self.reply(500, 'the Time could not be kept: %s' % e.strerror)
+        print('dashboard: Time set to %s by %s from %s' % (body['time'], user, self.client_address[0]), file=sys.stderr, flush=True)
+        self.reply(200, 'kept')
+
     def restart_collector(self):
         """POST /restart: restarts the collector job through dashboard.sh --restart, which kills this server
         too. Same checks and order as /answer; no body is read and the command is fixed. The reply goes out before
@@ -2040,6 +2070,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.control(machine=True)
         if self.path in ('/me', '/users'):
             return self.users_post(self.path)
+        if self.path == '/time':
+            return self.set_time()
         if self.path != '/answer' or not self.own_page():
             return self.send_error(403)
         user = self.authed()

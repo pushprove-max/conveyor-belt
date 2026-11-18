@@ -584,6 +584,18 @@ test('with the time option 24-hour, Worker activity and Landed today write 24-ho
   expect(pane).not.toMatch(/\d [AP]M\b/)
 })
 
+// Issue 506. Bug it catches: with the plugin left at its default, the Board's Time set to 24-hour in Customize (the
+// time.json its server keeps) did not reach the pane, which still wrote AM or PM.
+test('with the Board\'s Time 24-hour and the time option left at its default, the pane writes 24-hour times', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [`${BOARD}/time.json`]: '{"time":"24-hour"}' })
+  await start($, 'main')
+  await w.clock.settle()
+  const pane = await draw($, 'Pane')
+  expect(pane).toMatch(/WORKER ACTIVITY. #3863  build +\d\d:\d\d PICK ORDER/)
+  expect(pane).toMatch(/Cost\d\d:\d\d +#3862 /)
+  expect(pane).not.toMatch(/\d [AP]M\b/)
+})
+
 test('outside a checkout with a Conveyor pack the mod registers nothing and fetches nothing', async ($, on) => {
   const w = world(on, 'main', answer(FULL), {}, false)
   await start($, 'main')
@@ -930,6 +942,21 @@ test('a fresh session draws the live feed within a second while its first fetch 
   await start($, 'main')
   await w.clock.advance(1000)
   expect(await draw($, 'Pane')).toContain('#3863')
+  w.hold = undefined
+  release()
+})
+
+// Issue 506. Bug it catches: the board the live feed draws before the first fetch answers kept the plugin's default
+// 12-hour Time, with the Board's Time (time.json) set to 24-hour.
+test('the live feed\'s board drawn before the first fetch answers writes the Board\'s 24-hour Time', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [FEED]: feed(FULL), [`${BOARD}/time.json`]: '{"time":"24-hour"}' })
+  let release = () => {}
+  w.hold = new Promise<void>(r => { release = r })
+  await start($, 'main')
+  await w.clock.advance(1000)
+  const pane = await draw($, 'Pane')
+  expect(pane).toMatch(/WORKER ACTIVITY. #3863  build +\d\d:\d\d PICK ORDER/)
+  expect(pane).not.toMatch(/\d [AP]M\b/)
   w.hold = undefined
   release()
 })

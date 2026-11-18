@@ -83,6 +83,7 @@ Customize also sets how the Board writes times and dates, in this browser:
 - **Date**: mm/dd/yyyy (the default) or dd/mm/yyyy.
 
 All the Board's times and dates use these settings, the Account page and the Belt 3D clock too. A change shows at once.
+The `/units` pane on the Board's machine also uses the last **Time** you set.
 
 **Restart the Board's feed** is in each place that tells you to press it:
 
