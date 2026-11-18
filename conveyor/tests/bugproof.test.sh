@@ -7,14 +7,19 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
+# The control record's rule "Push when a card lands" off, after setup: no case here checks a push, and the push after a
+# landing was about a seventh of a landing card's CPU (where the pack sets test.fileCommand, it runs the landing's test
+# files before the push, pushtests(); with the default pack it runs none).
+nopush() { jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"; }
+
 # One card of #7 with the given labels: its build fixes a.txt (adds `two`; runs $FIX in its place when set, `:` for no
 # fix) and, unless <test> is empty, adds a.test.sh (or the file $TF names) holding <test>. The run on main (a worktree under cards/mainrun/) notes its folder and staged files in
 # $STUB/mainran and runs that test file, or what $MAINRUN holds when set; the reviewer's prompt is kept in $STUB/asked;
-# one GO review. $TUNE, when set, is a jq filter of the pack (tune).
+# one GO review. $TUNE, when set, is a jq filter of the pack (tune). No push (nopush).
 bugcard() { # <test> <label>...
   # shellcheck disable=SC2034 # tf is read in the build's and the run's commands below
   local t=$1 tf=${TF:-a.test.sh}; shift
-  setup "[$(issue 7 2026-01-01 "$@")]"
+  setup "[$(issue 7 2026-01-01 "$@")]"; nopush
   [ -z "${TUNE:-}" ] || tune "$TUNE"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
@@ -181,7 +186,7 @@ t_bugnotalone() {
 # #137. Bug it catches: a pack whose test command cannot run one file alone has no way to run a change's test files.
 # With test.fileCommand set, the check runs it once for each test file, given the file, in place of test.command:
 # the file fails on main without the fix, and the card lands. Only the check's runs (in its worktree on main) are
-# counted: the run before the push (pushtests()) runs the landing's test file too.
+# counted.
 t_bugfilecommand() {
   TUNE='.test.fileCommand = "case $PWD in */mainrun/*) echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\" ;; esac; bash"' bugcard 'grep -qx two a.txt' bug
   [ "$(cat "$STUB/fileran" 2>&1)" = a.test.sh ] && [ ! -e "$STUB/mainran" ] \
@@ -193,9 +198,9 @@ t_bugfilecommand() {
 # A bug card of #7 whose build writes <card> into the product file <file>, which holds <main> on main: its fix and its
 # new test are both in that file, and it adds no test file. Its test command is <runner>, on main's code (the check)
 # and on the card (its test step, which must pass for it to land); each run on main notes in $STUB/mainran its staged
-# files and <file> as it is there. The reviewer's prompt is kept in $STUB/asked; one GO review.
+# files and <file> as it is there. The reviewer's prompt is kept in $STUB/asked; one GO review. No push (nopush).
 inlinecard() { # <file> <main> <card> <runner>
-  setup "[$(issue 7 2026-01-01 bug)]"
+  setup "[$(issue 7 2026-01-01 bug)]"; nopush
   mkdir -p "$(dirname "$R/$1")" && printf '%s\n' "$2" > "$R/$1" && git -C "$R" add "$1" && git -C "$R" commit -qm 'a product file' \
     && git -C "$R" push -q origin main || fail "main's file"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
@@ -252,8 +257,9 @@ t_buginlineshared() {
 # holds s.sh and w.test.sh holding <test>; its issue's body is <body>. The run on main runs each file its
 # CONVEYOR_TEST_RERUN list names as `fail`; with none, it selects nothing (its log says files=0), as a runner does for a
 # comment-only change. Each run notes in $STUB/mainran its staged files, whether s.sh holds the fix and its fail lines.
+# No push (nopush).
 commentcard() { # <test> <body>
-  setup "[$(issue 7 2026-01-01 bug | jq -c --arg b "$2" '.body = $b')]"
+  setup "[$(issue 7 2026-01-01 bug | jq -c --arg b "$2" '.body = $b')]"; nopush
   printf '#!/usr/bin/env bash\n# an old word\n' > "$R/s.sh"; printf '%s\n' "$1" > "$R/w.test.sh"
   git -C "$R" add s.sh w.test.sh && git -C "$R" commit -qm 'a comment and its test' && git -C "$R" push -q origin main || fail "main's files"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
@@ -328,9 +334,9 @@ t_notbug() {
 # One card of #7, a bug filed from the Tests page to speed up f.test.sh, whose median on record is 10 CPU s (three
 # whole-suite runs: 9, 10, 11). Its build changes f.test.sh. The file's run with the change (under cards/mainrun/)
 # notes its folder, the file as it runs and its list in $STUB/mainran, times the file at <cpu> CPU s and exits <exit>.
-# The reviewer's prompt is kept in $STUB/asked; one GO review.
+# The reviewer's prompt is kept in $STUB/asked; one GO review. No push (nopush).
 speedcard() { # <cpu> [exit]
-  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Speed up the test file f.test.sh"')]"
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Speed up the test file f.test.sh"')]"; nopush
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
   echo 'echo fast > f.test.sh' > "$STUB/build"
@@ -381,15 +387,21 @@ t_speedfails() {
 # the files of its list: it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each
 # as passed, and times each at the CPU seconds $STUB/cpu-<file> holds. The run of f on main for the build's brief
 # (speedbrief(), under cards/mainrun/<card>.cases) is not noted: ownbudget.test.sh holds that brief to its lines.
-# The reviewer's prompt is kept in $STUB/asked.
+# The reviewer's prompt is kept in $STUB/asked. No push (nopush).
 optcard() { # <build> <cpu of f> [<cpu of f1> <cpu of f2>]
-  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"
+  local b=$1; shift
+  optmain "$@"
   echo 'echo slow' > "$R/f.test.sh"; echo 'echo other' > "$R/g.test.sh"
   git -C "$R" add f.test.sh g.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
+  echo "$b" > "$STUB/build"
+  loop run >/dev/null || fail "run exited non-zero"
+}
+# optcard's case folder, but for main's two files and the card's build: its issue, review, median and runs on main.
+optmain() { # <cpu of f> [<cpu of f1> <cpu of f2>]
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"; nopush
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
-  echo "$1" > "$STUB/build"
-  echo "$2" > "$STUB/cpu-f.test.sh"; echo "${3:-}" > "$STUB/cpu-f1.test.sh"; echo "${4:-}" > "$STUB/cpu-f2.test.sh"
+  echo "$1" > "$STUB/cpu-f.test.sh"; echo "${2:-}" > "$STUB/cpu-f1.test.sh"; echo "${3:-}" > "$STUB/cpu-f2.test.sh"
   for c in 9 10 11; do
     jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
   done
@@ -399,7 +411,6 @@ while IFS=$'\t' read -r k f; do
   printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
 done < "$CONVEYOR_TEST_RERUN"
 EOF
-  loop run >/dev/null || fail "run exited non-zero"
 }
 
 # D1. Bug it catches: an Optimize card, whose tests pass on main by design, is blocked for not failing there, or a
@@ -451,8 +462,13 @@ t_optdelete() {
 }
 
 # Bug it catches (#74): a merge recorded as a delete, so the Tests page could not name the file that took the cases of
-# the file it removed. A change that removes the file and changes another test file is a merge into that file.
+# the file it removed. A change that removes the file and changes another test file is a merge into that file. What
+# it records is the Optimize check's (optproof()) alone: the check is called on such a change in a card's worktree, as
+# t_optdelete proves a whole card takes it there.
 t_optmerge() {
-  optcard 'rm f.test.sh; echo "echo slow" >> g.test.sh' 4
+  optmain 4
+  fx_wt 'rm f.test.sh; echo "echo slow" >> g.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
+  fx_in 'optproof c7 "$FXWT" "{\"number\": 7}" f.test.sh'
+  [ "$RC" = 0 ] || fail "the Optimize check failed a merge: $(cat "$T/$CASE/run.out")"
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null,"fix":"merged","into":["g.test.sh"]}' ] || fail "a merge's record: $(st 'select(.step == "bugproof")')"
 }
