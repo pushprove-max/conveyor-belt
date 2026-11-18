@@ -828,6 +828,12 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-wait { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }
 .rules-deps, .board-deps { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: baseline; }
 .board-deps { margin-top: var(--sp-1); }
+/* A card's builder, reviewer and judge: its own ones marked; Settings and Pick for me under them. */
+.board-seats, .board-seats-form, .board-seats-picked { display: grid; gap: var(--sp-1); margin-top: var(--sp-1); min-width: 0; }
+.board-seats-line, .board-seat-pick { overflow-wrap: anywhere; }
+.board-seat.is-own { font-weight: 650; color: var(--text); }
+.board-seat-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.board-seat-row select { min-width: 0; max-width: 100%; }
 .rules-held-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .rules-search { flex: 1 1 22ch; min-height: 32px; }
 .rules-by { display: inline-flex; align-items: center; gap: var(--sp-2); }

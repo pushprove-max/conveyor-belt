@@ -86,6 +86,8 @@ Cards:
   lists the blocked ones by card id.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.
+  `control card <issue> ...` sets an issue's own builder, reviewer and judge, and `control card <issue> pick` asks the
+  judge to choose them ([Configuration](configuration.md#settings-for-one-card)).
 
 Tests:
 

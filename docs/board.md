@@ -250,6 +250,21 @@ Each card in the Held and Queue columns has **Depends on…**: type or pick open
 writes the issue's `Depends on: #N` line on GitHub (`conveyor.sh control depends`). It refuses a self-dependency, an
 issue that is not open, a cycle, or an issue whose card already runs.
 
+## Settings for one card
+
+Each card in the Held, Queue, Building, Review and Needs you columns shows its builder, reviewer and judge. A seat
+that is the card's own, not the project's, says "(this card)". You can change a blocked card's settings before you
+retry it.
+
+- **Settings** opens a model list and an effort list for each seat. Pick **Project's** to use the project's seat.
+  The lists show only the models that the pack allows the seat. **Save** sends each changed seat
+  (`conveyor.sh control card`).
+- **Pick for me** asks the project's judge to choose the three seats for the issue. The card shows the judge's model,
+  effort and reason for each seat. Nothing changes until you press **Apply**. **Discard** drops the choice.
+
+A step that already runs keeps its settings. The next step uses the new ones. [Configuration](configuration.md#settings-for-one-card)
+tells more.
+
 ## Push landed and Run full test suite
 
 The Rules tab's **Push when a card lands** rule is Off by default. Conveyor lands each card on main and pushes when you

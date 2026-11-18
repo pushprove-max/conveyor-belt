@@ -382,7 +382,8 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 
 - the number of cards at once (`conveyor.sh control cap`, or Cards at once on the Rules tab),
 - the usage at which no new card starts,
-- the builder, reviewer and judge, each a CLI, a model and an effort,
+- the builder, reviewer and judge, each a CLI, a model and an effort, and the ones an issue has of its own ([Settings
+  for one card](#settings-for-one-card)),
 - the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card, split large issues and the
   dependency guard,
 - where new issues start,
@@ -496,6 +497,27 @@ CLI cannot run fails in the card, and the card shows the error.
 `conveyor.sh control model|reviewer|judge <cli> <model> [effort]`, or the Rules tab, sets a seat. `default` clears it.
 The effort is one that the CLI takes. The judge can run on the reviewer's CLI, and the Rules tab then says it is of
 the same family. Left at default, the judge runs on another CLI than the reviewer's.
+
+### Settings for one card
+
+An issue can have its own builder, reviewer and judge, before it is picked or while its card is on the belt. Each one
+is a model and an effort. A seat you do not set uses the project's.
+
+- `conveyor.sh control card <issue> builder|reviewer|judge <model> [effort]` sets one seat. The model must be one
+  that `models.allowed` lists for that seat: the builder's models for the builder, the review's models for the
+  reviewer and the judge. Conveyor refuses any other model and names the allowed ones. The effort is one that the
+  model's CLI takes. With no effort, the seat uses the project's effort, or `medium` when the model's CLI does not
+  take that effort.
+- `conveyor.sh control card <issue> <seat> clear` clears one seat. `conveyor.sh control card <issue> clear` clears
+  all three.
+- `conveyor.sh control card <issue> pick` asks the project's judge one time to choose the three seats for the issue.
+  The judge gets the issue's text, its size and areas, the allowed models and their prices. It answers with a model,
+  an effort (none for a model whose CLI takes none) and one line of reason for each seat. This changes nothing. To use the choice, set the seats.
+
+The control record keeps these settings by issue number, so a retry of the card keeps them. The card's build, fix
+and fitting sessions use its builder. Its review uses its reviewer, and its judge calls use its judge. A step that
+already runs keeps its settings. The next step uses the new ones. On the Board, each card has Settings and Pick for
+me ([The Board](board.md#settings-for-one-card)).
 
 The host asks each CLI for its models:
 

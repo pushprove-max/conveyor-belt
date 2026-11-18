@@ -6,7 +6,9 @@
 # lib/testrun.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
 # a model of the pack's models.allowed, whose program it is (seatnow()); tests (the Tests seat, the test actions'
-# sessions: testaction(), lib/testaction.sh) is null or {cli, model, effort}, always with its CLI;
+# sessions: testaction(), lib/testaction.sh) is null or {cli, model, effort}, always with its CLI; cards holds the
+# per-card seats by issue number ({"<issue>": {builder, reviewer, judge}}, each left out or {model, effort (null: the
+# project's)}, `control card`), which that issue's card runs on in place of the project's (seat(), SEATCARD);
 # judgeOn is whether the judge reads the reviews (judged()) and judgeAlways the finding kinds it always accepts; account and
 # reviewAccount are null or the name of one of the host file's accounts (ACCT, above); start is where
 # new issues start, queue or held, startHeld the spans it was held ({from, to}: the newest issue number at each switch;
@@ -68,6 +70,9 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and ([.model, .reviewer, .judge, .tests] | all(. == null or (type == "object" and (keys - ["effort", "cli"]) == ["model"] and (.model | type == "string")
         and (.effort == null or (.effort | type == "string")) and (.cli == null or (.cli | IN("claude", "codex", "opencode"))))))
       and (.tests == null or .tests.cli != null)
+      and (.cards | type == "object" and all(to_entries[]; (.key | test("^[1-9][0-9]{0,8}$")) and (.value | type == "object" and length > 0
+        and (keys - ["builder", "reviewer", "judge"]) == [] and all(.[]; type == "object" and (keys - ["effort"]) == ["model"] and (.model | type == "string")
+          and (.effort == null or (.effort | type == "string"))))))
       and (.judgeOn | type == "boolean") and (.judgeAlways | type == "array" and all(type == "string"))
       and (.depGuard | type == "boolean") and (.forced | type == "array" and all(type == "number"))
       and (.signin == null or (.signin | type == "string")) and (.landAs == null or (.landAs | IN("main", "pr")))
@@ -133,20 +138,38 @@ jqget() { # <json> <key> <variable> [<key> <variable>]...
       --args "${k_[@]}" <<<"$j_" 2>/dev/null) && [ "${#x_[@]}" = "${#k_[@]}" ] || return 1
   for i_ in "${!v_[@]}"; do printf -v "${v_[i_]}" '%s' "${x_[i_]}"; done
 }
+# The control record $c with the seats it keeps for issue $n (cards; models.allowed is the input) in place of the
+# project's: each named by its model alone, so it runs on the CLI the pack lists it under, at its own effort, else the
+# project's seat's. One whose model the pack no longer allows the seat is passed over: the project's stands.
+# cardfit: a per-card seat that took the project's effort, and whose CLI does not take that effort ($e, EFFORTS),
+# runs at medium.
+PERCARD='def cardset($c; $n): ($c // {} | .cards // {} | .[$n] // {});
+  def percard($c; $n): cardset($c; $n) as $p | okmodels("builder") as $ob | okmodels("reviewer") as $or
+    | reduce (["builder", "model", $ob], ["reviewer", "reviewer", $or], ["judge", "judge", $or]) as [$k, $f, $ok] ($c;
+        if $p[$k].model != null and ([$ok[][]] | index($p[$k].model)) != null
+        then .[$f] = {model: $p[$k].model, effort: ($p[$k].effort // (.[$f] // {}).effort)} else . end);
+  def cardfit($c; $n; $e; $k): cardset($c; $n)[$k] as $o
+    | if . == null or $o.model == null or $o.effort != null or .effort == null then .
+      else .effort as $f | if ($e[.agent // ""] // [] | index($f)) == null then .effort = "medium" else . end end;'
 # The seats in force, the builder's, the reviewer's and the judge's (judgeseat), worked out together in one jq run and
 # kept, keyed on the exact text of the control record and of models.allowed (SEAT_K), so a step that asks for a seat
 # again starts no program for it, nor does a subshell or card started after; any other text is worked out again.
 # Read without a record given, the control record is read in the calling shell (ctlread), so it is kept there too.
+# Within a card (SEATCARD: its issue, set by card()), the seats the record keeps for that issue (cards, `control card`)
+# stand in for the project's (percard), each read when its step starts, so a step already running keeps its seat.
 declare -gA SEAT_V=(); SEAT_K=''
 seat() { # <builder|reviewer|judge> [the control record, when the caller has read it]
-  local a c=${2:-} x CTL_V; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
+  local a c=${2:-} x CTL_V n=${SEATCARD:-}; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
+  # A record with no key "<issue>" keeps no seats for the card: the project's, worked out (and kept) once for all cards.
+  [[ $c == *"\"$n\":"* ]] || n=''
   modelsallowed a || return 1
-  if [ "$SEAT_K" != "$c"$'\037'"$a" ]; then
+  if [ "$SEAT_K" != "$n"$'\037'"$c"$'\037'"$a" ]; then
     # Each seat on its own (try): one that fails to work out is none, as it was read alone.
-    mapfile -d '' -t x < <(jq -j --argjson c "$c" "$SEATNOW$JUDGENOW"'([try seatnow("builder"; $c)] | first) as $b | ([try seatnow("reviewer"; $c)] | first) as $r
-        | ($b, $r, (if $r == null then null else [try judgenow($c; $r)] | first end)) | (if . == null then "" else tojson end) + "\u0000"' <<<"$a" 2>/dev/null) \
+    mapfile -d '' -t x < <(jq -j --argjson c0 "$c" --arg n "$n" --argjson e "$EFFORTS" "$SEATNOW$JUDGENOW$PERCARD"'percard($c0; $n) as $c
+        | ([try seatnow("builder"; $c)] | first | cardfit($c0; $n; $e; "builder")) as $b | ([try seatnow("reviewer"; $c)] | first | cardfit($c0; $n; $e; "reviewer")) as $r
+        | ($b, $r, (if $r == null then null else [try judgenow($c; $r)] | first | cardfit($c0; $n; $e; "judge") end)) | (if . == null then "" else tojson end) + "\u0000"' <<<"$a" 2>/dev/null) \
       && [ "${#x[@]}" = 3 ] || return 1
-    SEAT_V=([builder]=${x[0]} [reviewer]=${x[1]} [judge]=${x[2]}); SEAT_K=$c$'\037'$a
+    SEAT_V=([builder]=${x[0]} [reviewer]=${x[1]} [judge]=${x[2]}); SEAT_K=$n$'\037'$c$'\037'$a
   fi
   [ -n "${SEAT_V[$1]:-}" ] && printf '%s\n' "${SEAT_V[$1]}"
 }
@@ -758,6 +781,75 @@ modelsettings() { # [the control record, when the caller has read it]
   modelsallowed a || { echo null; return; }
   jq -c --argjson c "$c" --argjson e "$EFFORTS" --argjson h "$(hostclis)" "$SETTINGS"'settings($c; $e; $h)' <<<"$a" 2>/dev/null || echo null
 }
+# Why a per-card seat (`control card`) is refused, on stdout, or nothing when it is taken: its model is one the
+# pack's models.allowed lists for the seat (the builder's list for the builder, the review's for the reviewer and the
+# judge), and its effort, when one is given, one that model's CLI takes (an OpenCode builder takes none). Fails when
+# models.allowed cannot be read.
+cardok() { # <builder|reviewer|judge> <model> [effort]
+  local a; modelsallowed a || { echo "conveyor: the pack's models.allowed cannot be read; nothing changed" >&2; return 1; }
+  jq -r --arg s "$1" --arg m "$2" --arg f "${3:-}" --argjson e "$EFFORTS" "$OKMODELS"'okmodels(if $s == "builder" then "builder" else "reviewer" end) as $ok
+    | ([$ok | to_entries[] | select(.value | index($m)) | .key] | first) as $g
+    | if $g == null then "\($m) is not one of the models the pack'"'"'s models.allowed lets the \($s) run: \([$ok[][]] | if . == [] then "it lists none" else "it allows " + join(", ") end)"
+      elif $f == "" then empty
+      elif $s == "builder" and $g == "opencode" then "an OpenCode builder takes no effort: name the model alone"
+      elif ($e[$g] | index($f)) == null then "\($g) takes no effort \($f) (it takes \($e[$g] | join(", ")))" else empty end' <<<"$a"
+}
+# Pick for me (`control card <issue> pick`, the Board's): one call to the project's judge (the judge seat, never the
+# issue's own), with no tools and PICK_TIMEOUT at most, that chooses the builder, reviewer and judge settings for the
+# issue from the models the pack allows each seat, given the issue's title and body, its size and areas (SPLITSIZE,
+# lib/slices.sh), the project's seats in force and each allowed model's price (the price table the Board shows,
+# dashboard_limit.py, with the pack's prices over it). Prints one JSON line, {issue, builder, reviewer, judge, model:
+# the judge's}, each seat {model, effort (null: none, as an OpenCode builder takes), why}; changes nothing: the owner applies it (`control card`). An answer
+# with a seat missing, a model or effort the seat does not take (cardok), or no reason, is refused with why: exit 1.
+PICK_TIMEOUT=300
+PICKASK='Choose the settings for the one issue below: the model and effort of its builder (the coding session that
+builds and fixes the change), its reviewer (who reviews each round of the change) and its judge (who decides which
+review findings count). Choose each from the models allowed for that seat, and an effort that model'"'"'s program takes
+(null where it takes none).
+Fit the choice to the issue: a small, clear change needs no large model or high effort; a large or risky one may.
+Weigh the price of each model. Answer with one JSON object and nothing else:
+{"builder": {"model": "...", "effort": "...", "why": "one line"}, "reviewer": {...}, "judge": {...}}'
+cardpick() { # <issue>
+  local n=$1 c a s x issue size prices pp p d rc ans out effort model
+  c=$(ctl) || return 1; modelsallowed a || { echo "conveyor: the pack's models.allowed cannot be read" >&2; return 1; }
+  names || return 1
+  issue=$(gh issue view "$n" --json number,title,body,labels 2>/dev/null) && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 \
+    || { echo "conveyor: issue #$n cannot be read" >&2; return 1; }
+  size=$(jq -c --arg area "$AREA" "$SPLITSIZE"' | .doneWhen |= length | .files |= length' <<<"$issue") || return 1
+  packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
+  prices=$(jq -cn --argjson p "$pp" '{cards: [], prices: $p}' | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards 2>/dev/null \
+    | jq -c --argjson p "$pp" '.table | with_entries(.value = {input: .value[0], output: .value[1]}) + ($p | with_entries(select(.value.input != null and .value.output != null) | .value |= {input, output}))' 2>/dev/null) \
+    && [ -n "$prices" ] || prices='{}'
+  s=$(SEATCARD='' seat judge "$c") && jqget "$s" model model effort effort || { echo "conveyor: the project has no judge to ask" >&2; return 1; }
+  p=$PICKASK$'\n\n'$(jq -r --argjson s "$size" --argjson pr "$prices" --argjson e "$EFFORTS" --argjson i "$issue" \
+      --argjson now "$(for x in builder reviewer judge; do SEATCARD='' seat "$x" "$c" || echo null; done | jq -cs '{builder: .[0], reviewer: .[1], judge: .[2]}')" "$OKMODELS"'
+    def list($s): okmodels($s) | to_entries | map(.key as $g | .value[] | "- \(.) (\($g); efforts: \(if $s == "builder" and $g == "opencode" then "none" else $e[$g] | join(", ") end); "
+      + (($pr[.] // $pr[sub("^opencode:"; "")]) as $x | if $x == null then "no price" else "$\($x.input) input, $\($x.output) output per million tokens" end) + ")") | join("\n");
+    "# Models allowed for the builder\n\(list("builder"))\n\n# Models allowed for the reviewer and the judge\n\(list("reviewer"))\n\n"
+    + "# The project'"'"'s settings now\n" + ($now | to_entries | map("- \(.key): \(.value.model // "none") at \(.value.effort // "no effort")") | join("\n"))
+    + "\n\n# The issue'"'"'s size\n\($s.doneWhen) Done-when items, \($s.files) file paths named, \($s.areas) areas, \($s.chars) characters; labels: \([$i.labels[]?.name] | join(", "))"
+    + "\n\n# The issue\n#\($i.number) \($i.title // "")\n\n\($i.body // "")"' <<<"$a") || return 1
+  d=$(mktemp -d) || return 1
+  # The judge is the review's, as judgecall() (lib/review.sh) runs it: on the reviewer's route (proxyroute()) and on
+  # the account a card's review uses (cardaccts(): its second line, the reviewAccount, only with a Claude reviewer;
+  # else the builder's account, as RACCT is then unset).
+  mapfile -t x < <(SEATCARD='' cardaccts "$c")
+  out=$(PROXY_ROLE=reviewer ASKSEAT=judge askmodel "$d" "$PICK_TIMEOUT" "${effort:-medium}" "$(jq -c --arg a "${x[1]-${x[0]-}}" '.account = (if $a == "" then null else $a end)' <<<"$c")" "$p"); rc=$?
+  ans=$(cat "$d/answer" 2>/dev/null); rm -rf "$d"
+  [ "$rc" = 0 ] && [ -z "$out" ] || { echo "conveyor: the judge ($model) did not answer: ${out:-exit $rc; 124 is the ${PICK_TIMEOUT}s timeout}" >&2; return 1; }
+  # The answer's JSON object: from its first { to its last }.
+  out=$(jq -Rsc '(index("{")) as $i | (rindex("}")) as $j | if $i == null or $j == null then error("no JSON object") else .[$i:$j + 1] | fromjson end
+      | {builder, reviewer, judge} | map_values(if type == "object" then {model, effort: (.effort | if . == "" then null else . end), why} else null end)' <<<"$ans" 2>/dev/null) \
+    || { echo "conveyor: the judge's answer held no JSON object of the three seats: ${ans:0:300}" >&2; return 1; }
+  for x in builder reviewer judge; do
+    jqget "$out" "$x" s || return 1
+    jq -e '(.model | type == "string") and (.effort == null or (.effort | type == "string")) and (.why | type == "string" and test("\\S")) and (.why | test("\n") | not)' <<<"$s" >/dev/null 2>&1 \
+      || { echo "conveyor: the judge's answer gave the $x no model, effort and one line of reason: ${s:0:300}" >&2; return 1; }
+    s=$(cardok "$x" "$(jq -r .model <<<"$s")" "$(jq -r '.effort // ""' <<<"$s")") || return 1
+    [ -z "$s" ] || { echo "conveyor: the judge's choice for the $x is refused: $s" >&2; return 1; }
+  done
+  jq -c --argjson n "$n" --arg m "$model" '{issue: $n} + . + {model: $m}' <<<"$out"
+}
 # The cap in force: the control record's, else the seed's (CAP0); nothing when the record does not read.
 capnow() { # [the control record, when the caller has read it]
   local c=${1:-}; [ -n "$c" ] || c=$(ctl 2>/dev/null) || c=null
@@ -769,7 +861,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | rules split=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>...]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | rules split=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -835,6 +927,18 @@ control() { # [action [arguments]]
       [ $# = 2 ] || jq -en --argjson e "$es" --arg x "$3" '$e | index($x)' >/dev/null \
         || { echo "conveyor: $ag takes no effort $3 (it takes $(jq -r 'if length == 0 then "none: name the model alone" else join(", ") end' <<<"$es")); nothing changed" >&2; return 2; }
       f='.[$a] = {cli: $v[0], model: $v[1], effort: ($v[2] // null)}'; fi; fi ;;
+    # One issue's own seats (cards, by issue number; percard()): its builder, reviewer or judge set to a model the
+    # pack's models.allowed lists for that seat, at an effort its CLI takes (none: the project's); clear takes one seat
+    # off, or all of them, so the project's stands again.
+    card) [ $# -ge 2 ] && nums "$1" || { bad; return; }
+      if [ "$2" = clear ]; then [ $# = 2 ] || { bad; return; }; f='del(.cards[$v[0]])'
+      else [[ $2 =~ ^(builder|reviewer|judge)$ ]] && [ $# -ge 3 ] && [ $# -le 4 ] || { bad; return; }
+        if [ "$3" = clear ]; then [ $# = 3 ] || { bad; return; }
+          f='if .cards[$v[0]] == null then . else del(.cards[$v[0]][$v[1]]) | if .cards[$v[0]] == {} then del(.cards[$v[0]]) else . end end'
+        else x=$(cardok "$2" "$3" "${4:-}") || return 1
+          [ -z "$x" ] || { echo "conveyor: $x; nothing changed" >&2; return 2; }
+          f='.cards[$v[0]][$v[1]] = {model: $v[2]} + (if $v[3] == null then {} else {effort: $v[3]} end)'; fi
+      fi ;;
     # An account the host file lists, by name; with no name, none: the host's default login (for a review, the
     # builder's account). No word stands for none, so every name the host file lists can be chosen, default too.
     account | review-account) [ $# -le 1 ] || { bad; return; }

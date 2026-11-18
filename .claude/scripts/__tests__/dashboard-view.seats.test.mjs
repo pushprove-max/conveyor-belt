@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: Apache-2.0
+// The Board's per-card settings (#387): each card and queued issue shows its builder, reviewer and judge, marks those
+// of its own, changes them (POST control card), and Pick for me asks the project's judge and changes nothing until
+// Apply. Shared setup: dashboard-view.helpers.mjs.
+import assert from 'node:assert/strict';
+import { boot, deliver, settle, full, bcard, act, cases, clone, pickProject } from './dashboard-view.helpers.mjs';
+
+const test = cases(import.meta.url);
+
+const PICK = { issue: 22, builder: { model: 'claude-fable-5-2', effort: 'high', why: 'a wide change' }, reviewer: { model: 'gpt-6-astra', effort: 'low', why: 'a small diff' },
+  judge: { model: 'claude-sonnet-5-5', effort: 'medium', why: 'the cheapest that reads it well' }, model: 'claude-opus-5-5' };
+const answer = (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text), headers: { get: () => null } });
+const seatLine = (w, n) => bcard(w, n).querySelector('.board-seats-line');
+const pickLines = (w, n) => Array.from(bcard(w, n).querySelectorAll('.board-seat-pick'), (p) => p.textContent);
+function setTo(w, sel, v) { sel.value = v; sel.dispatchEvent(new w.Event('change')); }
+async function settled() { for (let i = 0; i < 6; i += 1) await settle(); }
+
+// Bug: a card showed no builder, reviewer or judge, did not mark the one it has of its own, or its Settings did not
+// send the changed seats (a model with its effort, and Project's as clear) to the host.
+test('Settings shows each seat, marks the card\'s own, and Save sends one control card a changed seat', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.cards = { 20: { judge: { model: 'claude-sonnet-5-5', effort: 'low' } } };
+  deliver(w, d);
+  assert.equal(seatLine(w, 20).textContent, 'Builder claude-opus-5-5 at high; Reviewer gpt-6.1-sol at medium; Judge claude-sonnet-5-5 at low (this card)');
+  assert.deepEqual(Array.from(seatLine(w, 20).querySelectorAll('.is-own'), (x) => x.dataset.seat), ['judge'], 'only the judge is the card\'s own');
+  assert.ok(act(bcard(w, 63), 'seats'), 'a card on the belt has Settings too');
+  assert.equal(act(bcard(w, 5), 'seats'), null, 'a card of another project (widgetshop) is not set in this one\'s record');
+  act(bcard(w, 20), 'seats').click();
+  const form = () => bcard(w, 20).querySelector('.board-seats-form');
+  assert.equal(act(form(), 'seat-model-judge').value, 'claude-sonnet-5-5', 'the form starts from the card\'s own seats');
+  assert.equal(act(form(), 'seat-model-builder').value, '', 'a seat of the project\'s starts at Project\'s');
+  setTo(w, act(form(), 'seat-model-builder'), 'claude-fable-5-2');
+  setTo(w, act(form(), 'seat-effort-builder'), 'max');
+  setTo(w, act(form(), 'seat-model-judge'), '');
+  act(form(), 'seats-save').click();
+  await settled();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [
+    { action: 'card', args: ['20', 'builder', 'claude-fable-5-2', 'max'], repo: 'sample' },
+    { action: 'card', args: ['20', 'judge', 'clear'], repo: 'sample' }]);
+});
+
+// Bug: Pick for me changed the card's settings on its own, showed no reason for a choice, or its Apply did not send
+// the picked seats; Discard left them to be applied later.
+test('Pick for me shows the judge\'s settings with a reason each, sends nothing more until Apply, and Apply sets them', async () => {
+  const w = boot({ tab: 'control' });
+  deliver(w, full());
+  w.reply = answer(JSON.stringify(PICK));
+  act(bcard(w, 22), 'seats-pick').click();
+  assert.equal(bcard(w, 22).querySelector('.board-seats-picked').textContent, 'Asking the judge…');
+  await settled();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'card', args: ['22', 'pick'], repo: 'sample' }]);
+  assert.deepEqual(pickLines(w, 22), ['Builder: claude-fable-5-2 at high. a wide change', 'Reviewer: gpt-6-astra at low. a small diff',
+    'Judge: claude-sonnet-5-5 at medium. the cheapest that reads it well']);
+  assert.match(bcard(w, 22).querySelector('.board-seats-picked').textContent, /Nothing changed yet/);
+  act(bcard(w, 22), 'seats-discard').click();
+  assert.deepEqual(pickLines(w, 22), [], 'Discard drops the picked settings');
+  assert.deepEqual(w.posts, [], 'showing and discarding a pick sends nothing');
+  act(bcard(w, 22), 'seats-pick').click();
+  await settled();
+  w.posts.splice(0);
+  w.reply = answer('sent to main');
+  act(bcard(w, 22), 'seats-apply').click();
+  await settled();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['22', 'builder', 'claude-fable-5-2', 'high'], ['22', 'reviewer', 'gpt-6-astra', 'low'], ['22', 'judge', 'claude-sonnet-5-5', 'medium']]);
+  assert.deepEqual(pickLines(w, 22), [], 'an applied pick leaves the card');
+});
+
+// Bugs: a blocked card, or one waiting for a yes, had no Settings or Pick for me, so its seats could not be set before
+// its Retry; and a card's own seat with no effort of its own showed the project's effort where the card's CLI does not
+// take it (a Codex judge under a Claude judge at max), not the medium its session runs at (cardfit, lib/control.sh).
+test('Needs you cards have Settings and Pick for me, and an own seat shows the effort its session runs at', () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.modelSettings.judge.effort = 'max';
+  d.panels.board.data.control.cards = { 20: { judge: { model: 'gpt-6.1-sol' } } };
+  deliver(w, d);
+  for (const n of [12, 13]) assert.ok(act(bcard(w, n), 'seats') && act(bcard(w, n), 'seats-pick'), `#${n} in Needs you has Settings and Pick for me`);
+  assert.equal(seatLine(w, 20).querySelector('[data-seat="judge"]').textContent, '; Judge gpt-6.1-sol at medium (this card)');
+  assert.equal(seatLine(w, 21).querySelector('[data-seat="judge"]').textContent, '; Judge claude-opus-5-5 at max', 'a card on the project\'s judge shows its effort');
+});
+
+// Bug: a pick, or an open Settings, of one project stayed on screen after a switch to another project with the same
+// issue number, where its Apply or Save wrote the first project's choice into the other project's record.
+test('a project switch drops every pick and open Settings, one still being asked too', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full(), b = d.panels.board.data;
+  const wb = { ...clone(b), repo: 'widgetshop', queue: b.queue.map((x) => ({ ...x, repo: 'widgetshop' })) };
+  Object.assign(b, { repos: ['sample', 'widgetshop'], others: { widgetshop: wb } });
+  Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(d.panels.rules.data), repo: 'widgetshop' } } });
+  d.panels.machine.data.repos = ['sample', 'widgetshop'];
+  deliver(w, d);
+  w.reply = answer(JSON.stringify(PICK));
+  act(bcard(w, 22), 'seats-pick').click();
+  await settled();
+  act(bcard(w, 20), 'seats').click();
+  assert.equal(pickLines(w, 22).length, 3);
+  pickProject(w, 'widgetshop');
+  assert.deepEqual(pickLines(w, 22), [], 'the other project\'s #22 shows no pick of sample\'s');
+  assert.equal(bcard(w, 20).querySelector('.board-seats-form'), null, 'nor its Settings form');
+  // A pick asked in widgetshop whose answer comes after the switch back to sample is not shown on sample's #22.
+  let give;
+  w.reply = { ok: true, status: 200, text: () => new Promise((r) => { give = r; }), headers: { get: () => null } };
+  act(bcard(w, 22), 'seats-pick').click();
+  await settled();
+  pickProject(w, 'sample');
+  give(JSON.stringify(PICK));
+  await settled();
+  assert.equal(bcard(w, 22).querySelector('.board-seats-picked'), null, 'widgetshop\'s answer is not sample\'s pick');
+  assert.equal(bcard(w, 20).querySelector('.board-seats-form'), null);
+});

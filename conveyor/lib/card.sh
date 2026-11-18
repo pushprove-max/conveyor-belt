@@ -35,6 +35,8 @@ card() { # <card> <issue> [<branch> <tip>]
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' # kw: keptway()'s answer for a kept patch
   local shared sb # shared: this test step runs its shared test files again (sharedtests()); sb: the commit its last tests ran on
+  # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
+  local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
   [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \

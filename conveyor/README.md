@@ -118,6 +118,8 @@ reviewer's that the pack's `models.allowed` lists for the review (Claude Code or
 so on), at medium effort. The Board's Judge row offers every installed CLI, says "same family as the reviewer" when
 the judge runs on the reviewer's CLI, and shows the model the judge runs on when it is left at default. When the judge cannot run, fails
 or gives an answer that cannot be read, every finding is accepted: no card is blocked by the judge.
+An issue can have its own judge, builder and reviewer (`conveyor.sh control card`: docs/configuration.md, Settings
+for one card); its card uses them in place of the project's.
 
 ## Accounts
 

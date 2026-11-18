@@ -132,8 +132,9 @@ test('the Board: each column with its cards, each one empty, and the queue when 
   for (const n of [5, 63, 12, 7]) assert.equal(bcard(w, n).getAttribute('draggable'), null, `#${n} is not the loop's to reorder`);
   // Issue 407: the Needs you column carries no buttons of its own (it had a plain Yes and No and Retry alone, beside the
   // panel's Approve, Approve with this condition, Decline, Retry and Close): each card links into the Needs you panel.
+  // Its Settings and Pick for me (issue 387) are no answer: they set the seats its Retry builds on.
   for (const n of [12, 13]) {
-    assert.equal(bcard(w, n).querySelector('button'), null, `#${n} in the column has no button`);
+    assert.deepEqual(Array.from(bcard(w, n).querySelectorAll('button'), (b) => b.closest('.board-seats') ? null : b.textContent).filter(Boolean), [], `#${n} in the column has no answer button`);
     assert.equal(act(bcard(w, n), 'needs-open').getAttribute('href'), 'index.html?tab=overview#panel-needs', `#${n} links into Needs you`);
   }
   assert.equal(act(bcard(w, 12), 'needs-open').textContent, 'Answer it in Needs you');

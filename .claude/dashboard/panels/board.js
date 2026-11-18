@@ -32,6 +32,8 @@
 // beside it); the host writes the issue's `Depends on: #N` line (POST control depends), and the card says "Now waits
 // on #N." until the next snapshot shows it. A cycle the host refuses is said as "#12 cannot wait on #15: #15 already
 // waits on #12".
+// Every card in Held, Queue, Building, Review and Needs you shows its builder, reviewer and judge, each its own or the
+// project's, and has Settings and Pick for me (seats(), below): a blocked card's are set before its Retry.
 // The head says how the open issues split: queued, held by you, held by a label or skipped by a rule, on the belt.
 // Its part (dashboard.sh, board): {repo (null: no record is on the host's main), state, reason (why it picks nothing | null), loop, control, cap, guard,
 // modelSettings, limit, held, queue (room on the one the machine holds back: why, as "waiting for a machine slot: ..."), skipped, waits (issues waiting on another, with waitsFor), issuesError,
@@ -66,6 +68,7 @@
   const S = { d: null, ctl: null, at: new Map(), from: 'board', heard: new WeakSet(), raw: null, ctx: null, armed: false, unarm: null, dragging: null, busy: false, keep: null, ctlAt: null, moved: new Map(), floor: null, read: null, turned: false, lanesOpen: {}, lanesShown: {},
     groups: new Map(), filter: { text: '' }, text: null, unlabeled: new Set(), released: new Set(),
     dep: null, depText: '', depSaid: new Map(),
+    seats: null, picks: new Map(),  // the card whose Settings is open ({issue, draft}), and each card's Pick for me ({busy}, {data} or {error})
     dw: new Map(), dwOpen: new Set() };  // a card's Done-when items by card and check stamp ({busy, data, error}), and the cards whose line is open
   const DEPENDS_MAX = 20;  // the issues one depends takes (dashboard_server.py)
 
@@ -681,6 +684,132 @@
     });
     card.append(a);
   }
+  // ---- a card's own builder, reviewer and judge ----
+  // Settings: the card's (or queued issue's) builder, reviewer and judge, each its own (the control record's cards,
+  // `conveyor.sh control card`) or the project's (modelSettings); one of its own is marked. Opened, each seat has a
+  // model (Project's, or one the pack allows the seat) and an effort (Project's, or one that model's CLI takes); Save
+  // sends one POST control card a changed seat. Pick for me asks the project's judge (POST control card <issue> pick):
+  // its settings and a reason each are shown, and change nothing until Apply sends them; Discard drops them.
+  const SEATS = [['builder', 'Builder'], ['reviewer', 'Reviewer'], ['judge', 'Judge']];
+  const ownSeats = (n) => { const c = ctl(), o = c && c.cards && typeof c.cards === 'object' ? c.cards[String(n)] : null; return o && typeof o === 'object' ? o : {}; };
+  const projSeat = (k) => { const m = S.d.modelSettings, s = m && typeof m === 'object' ? m[k] : null; return s && typeof s === 'object' ? s : null; };
+  // The efforts a model's CLI takes in the seat: the CLI that the pack lists the model under (allowed).
+  function effortsOf(k, model) {
+    const s = projSeat(k);
+    if (!s || !model) return [];
+    const bare = model.replace(/^opencode:/, '');
+    const cli = Object.keys(s.allowed || {}).find((c) => issues(s.allowed[c]).includes(bare));
+    const e = cli && s.clis && s.clis[cli] ? s.clis[cli].efforts : null;
+    return issues(e).filter((x) => typeof x === 'string');
+  }
+  // The effort a card's own seat with no effort of its own runs at, as the engine works it out (cardfit, lib/control.sh):
+  // the project's, else medium when the model's CLI does not take it; none when the CLI takes none (an OpenCode builder).
+  function ownEffort(k, model, pe) {
+    const e = effortsOf(k, model);
+    return !pe || !e.length ? null : e.includes(pe) ? pe : 'medium';
+  }
+  const seatText = (x) => `${S.ctx.modelName(x.model)}${x.effort ? ` at ${x.effort}` : ''}`;
+  function seats(el, item) {
+    const h = S.ctx.h, n = item.issue, own = ownSeats(n), t = `#${n}`;
+    const box = h('div', 'board-seats');
+    const line = h('p', 'board-from board-seats-line');
+    SEATS.forEach(([k, name], i) => {
+      const p = projSeat(k), o = own[k] && typeof own[k].model === 'string' ? own[k] : null;
+      const x = o ? { model: o.model, effort: o.effort || ownEffort(k, o.model, p && p.effort) } : p && p.model ? p : null;
+      const part = h('span', o ? 'board-seat is-own' : 'board-seat', `${i ? '; ' : ''}${name} ${x ? seatText(x) : 'not set'}${o ? ' (this card)' : ''}`);
+      part.dataset.seat = k;
+      line.append(part);
+    });
+    const open = S.seats && S.seats.issue === n;
+    const b = button('Settings', 'btn-quiet', 'seats', `The builder, reviewer and judge of ${t}`, () => {
+      S.seats = open ? null : { issue: n, repo: S.d.repo, draft: Object.fromEntries(SEATS.map(([k]) => [k, { model: own[k] ? own[k].model : '', effort: own[k] && own[k].effort ? own[k].effort : '' }])) };
+      draw();
+    });
+    b.setAttribute('aria-expanded', String(!!open));
+    const pk = S.picks.get(n);
+    const ask = button('Pick for me', 'btn-quiet', 'seats-pick', `Ask the project's judge to pick the settings of ${t}`, () => pick(item));
+    ask.disabled = !!(pk && pk.busy);
+    const acts = h('div', 'board-acts');
+    acts.append(b, ask);
+    box.append(line, acts);
+    if (open) box.append(seatsForm(item));
+    if (pk) box.append(picked(item, pk));
+    el.append(box);
+  }
+  function seatsForm(item) {
+    const h = S.ctx.h, n = item.issue, d = S.seats.draft, f = h('div', 'board-seats-form');
+    SEATS.forEach(([k, name]) => {
+      const p = projSeat(k), row = h('div', 'board-seat-row');
+      row.dataset.seat = k;
+      const m = h('select', null), e = h('select', null);
+      m.dataset.act = `seat-model-${k}`; e.dataset.act = `seat-effort-${k}`;
+      m.setAttribute('aria-label', `${name} model of #${n}`); e.setAttribute('aria-label', `${name} effort of #${n}`);
+      const opt = (v, text) => { const o = h('option', null, text); o.value = v; return o; };
+      m.append(opt('', `Project's: ${p && p.model ? seatText(p) : 'not set'}`), ...issues(p && p.choices).map((c) => opt(c, S.ctx.modelName(c))));
+      m.value = d[k].model;
+      const fill = () => {
+        e.replaceChildren(opt('', 'Project\'s effort'), ...effortsOf(k, d[k].model).map((x) => opt(x, x)));
+        e.disabled = !d[k].model;
+        if (!effortsOf(k, d[k].model).includes(d[k].effort)) d[k].effort = '';
+        e.value = d[k].effort;
+      };
+      fill();
+      m.addEventListener('change', () => { d[k].model = m.value; fill(); });
+      e.addEventListener('change', () => { d[k].effort = e.value; });
+      row.append(h('span', 'board-label', name), m, e);
+      f.append(row);
+    });
+    f.append(button('Save', 'btn-quiet', 'seats-save', `Save the settings of #${n}`, () => {
+      const own = ownSeats(n);
+      const changes = SEATS.map(([k]) => k).filter((k) => (d[k].model || '') !== (own[k] ? own[k].model : '') || (d[k].model && (d[k].effort || '') !== (own[k] && own[k].effort ? own[k].effort : '')))
+        .map((k) => (d[k].model ? [String(n), k, d[k].model].concat(d[k].effort ? [d[k].effort] : []) : [String(n), k, 'clear']));
+      if (!changes.length) { say('Nothing changed.'); return; }
+      sendAll(changes, S.seats.repo).then((ok) => { if (ok) S.seats = null; });
+    }));
+    return f;
+  }
+  // One POST control card after another to the project the settings were opened or picked in (repo), each once the
+  // one before it was done; stops at the first refused.
+  const sendAll = (list, repo) => list.reduce((p, args) => p.then((ok) => ok && send('card', args, undefined, repo)), Promise.resolve(true));
+  // Pick for me: one judge call on the build machine, which can take minutes; the rest of the Board stays usable.
+  // Its answer is kept only while that project is still shown: a project switch drops every pick (render()).
+  function pick(item) {
+    const n = item.issue, repo = S.d.repo, ask = { busy: true, repo };
+    S.picks.set(n, ask);
+    draw();
+    const keep = (v) => { if (S.picks.get(n) === ask) S.picks.set(n, { ...v, repo }); };
+    S.ctx.post('control', { action: 'card', args: [String(n), 'pick'], repo }).then((r) => r.text().then((t) => {
+      const said = String(t).trim();
+      let x = null;
+      try { x = JSON.parse(said); } catch (e) { x = null; }
+      const ok = r.ok && x && typeof x === 'object' && SEATS.every(([k]) => x[k] && typeof x[k].model === 'string' && typeof x[k].why === 'string');
+      keep(ok ? { data: x } : { error: r.ok ? 'the judge gave no settings that the Board can read' : (said ? S.ctx.refusal(said) : `the build machine answered ${r.status}`) });
+    })).catch(() => { keep({ error: 'the build machine did not answer. Make sure that it is on. Then try again' }); })
+      .then(() => { if (S.d && S.d.repo === repo) draw(); });
+  }
+  function picked(item, pk) {
+    const h = S.ctx.h, n = item.issue, box = h('div', 'board-seats-picked');
+    box.setAttribute('role', 'status');
+    if (pk.busy) { box.append(h('p', 'board-from', 'Asking the judge…')); return box; }
+    if (pk.error) {
+      box.append(h('p', 'board-from', `Not picked: ${pk.error}.`), button('Close', 'btn-quiet', 'seats-discard', 'Close this line', () => { S.picks.delete(n); draw(); }));
+      return box;
+    }
+    const x = pk.data;
+    box.append(h('p', 'board-label', 'The judge picked these. Nothing changed yet.'));
+    SEATS.forEach(([k, name]) => {
+      const p = h('p', 'board-seat-pick', `${name}: ${seatText(x[k])}. ${x[k].why}`);
+      p.dataset.seat = k;
+      box.append(p);
+    });
+    const acts = h('div', 'board-acts');
+    acts.append(button('Apply', 'btn-quiet', 'seats-apply', `Apply the picked settings to #${n}`, () => {
+      sendAll(SEATS.map(([k]) => [String(n), k, x[k].model].concat(x[k].effort ? [x[k].effort] : [])), pk.repo).then((ok) => { if (ok) { S.picks.delete(n); draw(); } });
+    }), button('Discard', 'btn-quiet', 'seats-discard', 'Discard the picked settings', () => { S.picks.delete(n); draw(); }));
+    box.append(acts);
+    return box;
+  }
+
   function card(col, item) {
     const h = S.ctx.h, ctx = S.ctx, el = h('li', 'bcard');
     el.dataset.col = col; el.dataset.issue = String(item.issue);
@@ -742,6 +871,11 @@
       el.append(h('p', 'row-meta', item.step === 'closed' ? (splitFiled(item).length ? 'split, not built' : 'already fixed') : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${ctx.money(item.usd)}`));
     }
     if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); splitNote(el, item); }
+    // A landed card has no step left to run; a main-red fix card has no issue to keep settings by. A card in Needs you
+    // has them too, so a blocked card's are set before its Retry; it is still answered in the Needs you panel (issue
+    // 407): its settings are no answer. A card of another project is not set from here: its seats are in that project's record.
+    const mine = typeof item.repo !== 'string' || !item.repo || item.repo === S.d.repo;
+    if (col !== 'landed' && mine && num(item.issue) !== null && item.issue > 0) seats(el, item);
     return el;
   }
   // The cards of one batch (batch: the cards that landed together, itself among them) are one landing: its cards are
@@ -1204,7 +1338,7 @@
     if (id === PART) ctx.title(issues(view.repos).length > 1 && view.repo ? `Board: ${view.repo}` : null);
     if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
     S.raw = [d, read, view.repo]; S.ctx = ctx; S.read = read;
-    if (S.d && view.repo !== S.d.repo) { S.ctl = null; S.ctlAt = null; S.moved.clear(); S.floor = null; S.turned = false; S.unlabeled.clear(); S.groups.clear(); S.released.clear(); S.armed = false; S.dep = null; S.depSaid.clear(); }
+    if (S.d && view.repo !== S.d.repo) { S.ctl = null; S.ctlAt = null; S.moved.clear(); S.floor = null; S.turned = false; S.unlabeled.clear(); S.groups.clear(); S.released.clear(); S.armed = false; S.dep = null; S.depSaid.clear(); S.seats = null; S.picks.clear(); }
     d = view;
     // A dependency answered shows on the card until a snapshot begun at or after the answer (with no time, the next).
     S.depSaid.forEach((v, k) => { if (v.at === null || (read !== null && read >= v.at)) S.depSaid.delete(k); });

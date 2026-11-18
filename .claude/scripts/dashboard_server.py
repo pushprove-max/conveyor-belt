@@ -182,6 +182,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or build of a declined finding (the Declined panel's "File as issue": the id of its line in the record's declined list),
 # or dismiss of declined findings (its "Dismiss" and "Dismiss all shown": the ids of their lines),
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
+# or card (a card's Settings: `conveyor.sh control card`, one issue's own builder, reviewer or judge; and its Pick for
+# me, `control card <issue> pick`, whose answer is the judge's settings, changing nothing),
 # or full-test (the Rules tab's Run full test suite, Push landed and Push anyway: `conveyor.sh full-test [push | anyway <run id>]`),
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
 # or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`,
@@ -217,6 +219,7 @@ MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,191}')
 ACCOUNT = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')  # an account name, as conveyor.sh's control takes it
 EFFORTS = frozenset({'minimal', 'low', 'medium', 'high', 'xhigh', 'max'})  # claude's, codex's and opencode's, as conveyor.sh's EFFORTS
 KIND = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,39}')  # a finding kind the judge always accepts, as conveyor.sh's control takes it
+CARD_SEATS = frozenset({'builder', 'reviewer', 'judge'})  # the seats one issue keeps of its own (`conveyor.sh control card`)
 KINDS_MAX = 20
 # The standing kinds of routine yes, as conveyor.sh's auto standing takes them (conveyor/lib/standing.sh).
 STANDING = frozenset({'asked-fix', 'review-followup', 'release-check', 'fixed-block'})
@@ -238,7 +241,8 @@ DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as co
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
                    'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60,  # testaction and testmap stop wait up to 40 s for the end
-                   'bench': 600}  # bench diff makes one model call a flipped task; its stop waits up to 30 s for the end
+                   'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 30 s for the end
+                   'card': 360}  # Pick for me (card <issue> pick) waits up to conveyor.sh's PICK_TIMEOUT, 300 s, for the judge
 DEPENDS_MAX = 20  # the issues one `control depends` names
 # The condition the owner gives with their yes, or why they say no: one line of plain text.
 MAX_SAID = 300
@@ -376,6 +380,12 @@ def control_ok(body):
         return n <= 1 + KINDS_MAX and all(KIND.fullmatch(x) for x in v[1:])
     if a in ('model', 'reviewer', 'judge', 'tests'):  # tests: the Tests seat of the Tests page's actions
         return v == ['default'] or (n in (2, 3) and v[0] in CLIS and MODEL.fullmatch(v[1]) is not None and (n == 2 or v[2] in EFFORTS))
+    if a == 'card':  # one issue's own seat: a model (the host checks the pack allows it) and an effort, or clear; or Pick for me
+        if n < 2 or not ISSUE.fullmatch(v[0]):
+            return False
+        if v[1:] in (['clear'], ['pick']):
+            return True
+        return v[1] in CARD_SEATS and (v[2:] == ['clear'] or (n in (3, 4) and MODEL.fullmatch(v[2]) is not None and v[2] != 'clear' and (n == 3 or v[3] in EFFORTS)))
     if a in ('account', 'review-account'):  # one of the host file's accounts, by name (the host checks it is listed); none: no account
         return n == 0 or (n == 1 and ACCOUNT.fullmatch(v[0]) is not None)
     if a == 'start':  # where new issues start

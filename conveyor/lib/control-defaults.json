@@ -28,6 +28,7 @@
     "model": "claude-opus-5-5",
     "effort": "medium"
   },
+  "cards": {},
   "tests": null,
   "judgeOn": true,
   "judgeAlways": [],
