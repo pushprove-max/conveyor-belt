@@ -151,7 +151,7 @@ cards() {
 # change; stuck (card, issue, step: the last one recorded or begun, since): every open card with neither a new line
 # nor, from the step it is running, any output (its live record's `last`, which a card waiting at its claim brings up
 # to date each poll, and a session its `progress`: a file or commit of its worktree, watch(); a test run's, its start and
-# its cases beginning or ending) for STUCK seconds;
+# its cases beginning or ending; between two steps, its bug-card check's run on main's code, proofs()) for STUCK seconds;
 # every open card running a step again after the engine ended the step before it for no progress (since: when its
 # progress stopped; did: "ended and retried", on any stuck entry of such a card); and at once every open
 # card whose process (the pid and start its worktree line names) is gone, as nothing is left to write its line (but for
@@ -218,7 +218,8 @@ live() { # every live record there is, as one object by card
   if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
 }
 # The live record of each bug-card check that runs now (testrun.sh bugproof(): its run on main's code without the fix,
-# in $CARDS/mainrun/<card>.unfixed), as one object by card. That run is no step of the card's records: between its build
+# or a main-red fix card's run of main's failing cases, redproof(), in $CARDS/mainrun/<card>.unfixed), as one object by
+# card; the Board shows it as the card's proof, and health counts it as the card's output. That run is no step of the card's records: between its build
 # line and its review's start line, the card's own live record is gone.
 proofs() {
   local f c o=''
@@ -319,7 +320,7 @@ health() {
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
     [ -z "$a" ] || ! git rev-parse -q --verify "$a^{commit}" >/dev/null 2>&1 || not+=("$a")
   done
-  jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" \
+  jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson mnow "$mn" --argjson pressure "$pr" --argjson steer "$sr" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
@@ -332,7 +333,10 @@ health() {
         # Its closing line as rows.jq names it: a blocked line a later landed, pushed or closed line of the record follows does not count.
         | {card: .[0].card, issue: .[0].issue, last: last, end: (map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | . as $e
              | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last),
-           out: (last as $l | [$live[.[0].card] | select(. != null and $l.step == "start" and $l.of == .step) | [.last, .progress] | map(strings) | max | strings] | first)}] as $c
+           # Its output: the live record of the step it began, or, between two steps (its last line no start), that of
+           # the run of its bug-card check on main code (proofs(): the run of main failing cases of a main-red fix card too).
+           out: (last as $l | [($live[.[0].card] | select(. != null and $l.step == "start" and $l.of == .step)), ($proof[.[0].card] | select(. != null and $l.step != "start"))
+             | [.last, .progress] | map(strings) | max | strings] | max)}] as $c
     | ($c | map(select(.end.step == "blocked") | {card, issue, reason: .end.reason, since: .end.time})) as $b
     # The card a card waits on, its issue and where it is: its step on the belt, blocked, landed, closed, queued (`retry`
     # gave its issue back) or gone (in no record).

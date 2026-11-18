@@ -192,6 +192,28 @@ t_sessionquiet() {
   [ "$(CONVEYOR_NOW=$((at + 600)) tuned '.tunables.sessionStuck = 900' loop health | jq -c .stuck)" = '[]' ] || fail "the session limit is not the pack's tunables.sessionStuck"
 }
 
+# Issue 366: a main-red fix card's run of main's failing cases after its build (testrun.sh redproof(), redrun()) keeps
+# its live record in $CARDS/mainrun/<card>.unfixed.live, not <card>.live, and its last line is its build's: health
+# called it stuck 20 minutes after the build while its tests ran. The card's records end with its build, 1300 s ago
+# (past tunables.stuck), and the run is watched as tests() watches it (the engine's own watch()), with no card run.
+t_proofrun() {
+  local c=c0-0 w now live s; setup '[]'; now=$(date +%s); mkdir -p "$ST" "$T/$CASE/cards/mainrun"
+  for s in picked start build; do
+    jq -cn --arg c "$c" --arg s "$s" --argjson t "$((now - 1300))" '{card:$c,issue:0,step:$s,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
+      + {picked: {title:"Main is red: t", mainRed:"0123456789abcdef", created:"2026-01-01T00:00:00Z"}, start: {of:"build"}, build: {}}[$s]' >> "$ST/cards.jsonl"
+  done
+  [ "$(loop health | jq -c '.stuck | map(.card)')" = "[\"$c\"]" ] || fail "the card is not stuck with no run: $(loop health | jq -c .stuck)"
+  w=$T/$CASE/cards/mainrun/$c.unfixed; mkdir -p "$w.testlog"
+  ( . "$SRC/lib/portable.sh"; eval "$(for g in watch testlogs testcases testdone testprogress; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done)"
+    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=1200; (while [ -d "$STUB" ] && [ ! -e "$STUB/end" ]; do echo "ok a case"; sleep 0.1; done) > "$w.test" 2>&1 &
+    watch $! "$w.test" "$w.live" test ) > "$T/$CASE/run.out" 2>&1 & run=$!
+  wait_until "[ -s '$w.live' ]" || fail "the run kept no live record"
+  live=$(cat "$w.live"); [ "$(jq -r .step <<<"$live")" = test ] || fail "the run's live record is not of step test: $live"
+  [ "$(loop health | jq -c .stuck)" = '[]' ] || fail "a main-red fix card is stuck while its run of main's failing cases makes progress: $(loop health | jq -c .stuck) $live"
+  : > "$STUB/end"; wait $run || fail "the watch of the run exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug: a stalled session was still sent keep-alive bytes, lines with nothing in them, and each counted as output, so
 # the session was never silent for tunables.sessionStuck. Only a line that says something is output. The session here
 # calls one tool, then is sent an empty line every 0.1 s until $STUB/go: its last output stays the tool call, and it is
