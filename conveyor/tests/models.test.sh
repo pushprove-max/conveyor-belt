@@ -202,7 +202,7 @@ t_opencodereview() {
     || fail "the live record of an OpenCode review lost its turns, action or usage: $live"
   [ ! -e "$STUB/codex-ran" ] && ! grep -q -- '--tools' "$STUB/sessions" || fail "an OpenCode reviewer ran Codex or Claude"
   [ "$(st 'select(.issue == 7 and .step == "review") | "\(.result) \(.counts.P1) \(.model) \(.effort)"' | tr '\n' ,)" = 'NO-GO 1 opencode:prov/vendor/m-1 high,GO 0 opencode:prov/vendor/m-1 high,' ] \
-    && grep -qxF '[P1] a.txt:1 wrong word' "$STUB/brief" && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
+    && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
     || fail "an OpenCode reviewer's NO-GO, its finding, and its GO were not read: $(st 'select(.issue == 7)')"
   # What it reports: input, cache writes and output (reasoning counted as output) as tokens; its cost, summed, in its
   # usage (usage.cost), where the Board prices an OpenCode step from: anywhere else the review is unpriced.

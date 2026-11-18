@@ -70,13 +70,16 @@ test('a card shows one line a finished review: none, one, three, and one recorde
   assert.deepEqual(lines([r(1, 'NO-GO', counts(1, 0, 2, 1)), r(2, 'NO-GO', null), r(3, 'GO', null)]),
     ['Review 1: changes asked 1 P0, 2 P2, 1 P3', 'Review 2: changes asked', 'Review 3: passed']);
   assert.doesNotMatch(panel(w, 'belt').textContent, /counts not recorded/);
+  // Issue 306: a finding that came back after its fix rounds (the review's survived) showed as one more finding.
+  const back = { ...r(3, 'NO-GO', counts(0, 1, 0, 0)), survived: [{ id: 'E2', rounds: 2 }] };
+  assert.deepEqual(lines([back]), ['Review 3: changes asked 1 P1 E2 came back after 2 fix rounds']);
   // A landed card: its reviews, how many findings became follow-ups, and an issue GitHub did not close.
   const data = full();
-  Object.assign(data.panels.landed.data.cards[0], { reviews: 3, followups: [31, 32], rounds: [r(1, 'NO-GO', counts(0, 2, 0, 0)), r(2, 'NO-GO', null), r(3, 'NO-GO', counts(0, 1, 1, 0))],
+  Object.assign(data.panels.landed.data.cards[0], { reviews: 3, followups: [31, 32], rounds: [r(1, 'NO-GO', counts(0, 2, 0, 0)), r(2, 'NO-GO', null), { ...r(3, 'NO-GO', counts(0, 1, 1, 0)), survived: [{ id: 'E1', rounds: 2 }] }],
     track: trackOf('+++++!', '', { reason: 'GitHub did not close the issue' }) });
   next(w, data);
   const text = Array.from(panel(w, 'landed').querySelector('li').querySelectorAll('.row-meta span'), (n) => n.textContent).join(' | ');
-  assert.ok(text.includes('Review 1: changes asked, 2 P1 | Review 2: changes asked | Review 3: changes asked, 1 P1, 1 P2 | 2 became follow-ups'), text);
+  assert.ok(text.includes('Review 1: changes asked, 2 P1 | Review 2: changes asked | Review 3: changes asked, 1 P1, 1 P2, E1 came back after 2 fix rounds | 2 became follow-ups'), text);
   assert.ok(panel(w, 'landed').querySelector('li').textContent.includes('Issue still open'));
   assert.doesNotMatch(panel(w, 'landed').textContent, /counts not recorded/);
   assert.ok(!panel(w, 'landed').querySelectorAll('li')[1].textContent.includes('Review 1'), 'a landed card with no review listed shows none');

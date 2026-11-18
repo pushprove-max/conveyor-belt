@@ -235,6 +235,7 @@
 {"area": "testrun", "test": "testfails.test.sh"}
 {"area": "testrun", "test": "testlog.test.sh"}
 {"area": "testrun", "test": "review.test.sh"}
+{"area": "testrun", "test": "findingid.test.sh"}
 {"area": "testrun", "test": "donewhen.test.sh"}
 {"area": "testrun", "test": "visible.test.sh"}
 {"area": "testrun", "test": "slots.test.sh"}

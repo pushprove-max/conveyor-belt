@@ -6,7 +6,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
-  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
+  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
   "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
@@ -50,6 +50,10 @@ def ok: . as $r | (keys - known) == need
         and (.account // "" | type == "string") and (.reviewAccount // "" | type == "string") and (.engine // "" | type == "string")
         and (.stats // {} | type == "object") and (.judge // {} | type == "object") and (.firstTry // {} | type == "object") and (.spent // {step: "build"} | type == "object" and (.step | IN("build", "fix", "rebase", "review")))
         and (.tests // {} | type == "object" and all(. == null or type == "number"))
+        # A NO-GO review's findings that came back after a fix round (card.sh): each its id and how many fix rounds.
+        and (.survived // [] | type == "array" and all(.[]; type == "object" and (.id | type == "string") and (.rounds | type == "number")))
+        # A review's answers on the findings fix rounds were told (card.sh, answers()): each its id, answer and first record.
+        and (.answers // [] | type == "array" and all(.[]; type == "object" and (.id | type == "string") and (.answer | type == "string") and (.first | type == "object")))
         and ([.wait, .run, .slotsFree] | all(. == null or type == "number"))
         and (.selected // {files: null, filesOf: null, cases: null, casesOf: null} | type == "object" and keys - ["kept"] == ["cases", "casesOf", "files", "filesOf"] and all(. == null or type == "number"))
         and (.ended // "passed" | IN("passed", "failed", "killed", "timed out", "nothing selected"))

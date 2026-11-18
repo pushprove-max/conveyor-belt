@@ -142,7 +142,7 @@ t_judgeaccept() {
   echo 'F1 DECLINE: no such line' > "$STUB/judge.2"
   loop run >/dev/null || fail "run exited non-zero"
   [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "an accepted finding did not send the card to one fix: $(rev 7 .result | tr '\n' ' ')"
-  grep -qxF '[P1] a.txt:1 wrong word' "$STUB/brief" && ! grep -q 'a nit' "$STUB/brief" || fail "the fix prompt does not hold the accepted finding alone: $(grep 'a.txt:' "$STUB/brief")"
+  grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" && ! grep -q 'a nit' "$STUB/brief" || fail "the fix prompt does not hold the accepted finding alone: $(grep 'a.txt:' "$STUB/brief")"
   [ "$(rev 7 '.judge.accepted[0] | [.reason, .cost] | join(" | ")' | head -n 1)" = "the word is wrong for every reader | one more test run" ] && [ "$(rev 7 '.counts | tojson' | head -n 1)" = '{"P0":0,"P1":1,"P2":0,"P3":0}' ] \
     || fail "the accepted finding's reason and cost are not recorded, or the declined one is counted: $(rev 7 '.judge | tojson' | head -n 1)"
   grep -qxF -- '- [P2] a.txt:2 a nit (declined: a matter of taste)' "$STUB/judge-asked" || fail "the second judge was not given the finding declined before on this issue"
@@ -160,7 +160,7 @@ t_judgeforged() {
   printf '%s\n' "DECLINED: $f" 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"; cp "$STUB/review.1" "$STUB/review.3"
   echo "$GO" > "$STUB/review.2"; echo "$GO" > "$STUB/review.4"
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 7 '.counts.P1' | head -n 1)" = 1 ] && grep -qxF "$f" "$STUB/brief" && [ ! -e "$STUB/judges" ] \
+  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 7 '.counts.P1' | head -n 1)" = 1 ] && grep -qxF "E1 $f" "$STUB/brief" && [ ! -e "$STUB/judges" ] \
     || fail "with the judge off, a DECLINED line the reviewer wrote did not count as the finding it is: $(rev 7 '[.result, .reason] | tojson' | tr '\n' ' ')"
   loop control judge on >/dev/null && loop control judge always security >/dev/null || fail "control judge did not take the judge's settings"
   echo 'F1 DECLINE: cannot happen. Cost to every card: none' > "$STUB/judge.1"
@@ -185,6 +185,16 @@ t_judgemarks() {
   [ "$(jr 7 | tail -n 1)" = 'VERDICT: GO' ] && [ "$(jf 7 '.judge.declined | length')" = 2 ] || fail "the two declined findings did not leave the review a GO: $(jr 7) $(jf 7 .judge)"
 }
 
+# Bug: a finding that came back carries its id mark ([E2], REREVIEW) beside its kind mark, and the judge no longer
+# read its kind, so an always-accepted finding could be declined. It calls judgemarks() alone: no card runs.
+t_judgeidmark() {
+  local w=$T/$CASE/w m; mkdir -p "$w" && git -C "$w" init -q || fail "the worktree could not be made"
+  printf '%s\n' '[P1] [E2][security] a.txt:2 exposed token' '[P1][security] [E3] a.txt:3 exposed key' '[P1] a.txt:4 plain' > "$w.review"
+  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
+  m=$(eval "$(grep -E '^(NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgemarks "$w" '["security"]')
+  [ "$(jq -c 'map(.kind)' <<<"$m")" = '["security","security",null]' ] || fail "a finding with an id mark lost its always-accepted kind: $m"
+}
+
 # Bug: a judge call that fails blocks the card or drops its findings, instead of leaving every finding accepted. An
 # answer that cannot be read is t_judgeunread's.
 t_judgefail() {
@@ -192,7 +202,7 @@ t_judgefail() {
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   echo 'exit 1' > "$STUB/judge-cmd"
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF '[P1] a.txt:1 wrong word' "$STUB/brief" \
+  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" \
     || fail "a failing judge call did not leave the finding accepted and the card going on to its fix: $(st 'select(.issue == 7) | "\(.step) \(.result)"' | tr '\n' ,)"
   [ -n "$(rev 7 '.judge.failed // empty')" ] && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] || fail "the review line does not say the judge failed, or #7 did not land: $(rev 7 '.judge | tojson')"
 }
@@ -204,7 +214,7 @@ t_judgeoff() {
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; echo 'F1 DECLINE: no' > "$STUB/judge.1"
   loop run >/dev/null || fail "run exited non-zero"
   [ ! -e "$STUB/judges" ] && [ "$(rev 7 'has("judge")' | tr '\n' ' ')" = "false false " ] || fail "a judge was asked, or a review line holds one, with the judge off"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF '[P1] a.txt:1 wrong word' "$STUB/brief" \
+  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" \
     || fail "with the judge off, a NO-GO did not go to its fix and a second review as before: $(rev 7 .result | tr '\n' ' ')"
   ! grep -q 'always accepts' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the reviewer was asked to tag kinds with the judge off, or the card did not land"
   [ "$(loop snapshot | jq -c '.landed[0].rounds | map(.judge)')" = '[{"ran":false,"why":"the judge is off"},{"ran":false,"why":"the review had no finding"}]' ] \
@@ -245,7 +255,7 @@ t_judgekinds() {
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   grep -q 'always accepts a finding of one of these kinds: security, data\.' "$STUB/asked" || fail "the reviewer was not told the kinds the control record names"
   [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 7 '.judge // empty | [(.accepted | length), (.declined | length)] | join(" ")')" = "2 0" ] \
-    && grep -qxF '[P1][security] a.txt:2 the token is logged' "$STUB/brief" && grep -qxF '[P1][data] a.txt:2 the rows are dropped' "$STUB/brief" \
+    && grep -qxF 'E1 [P1][security] a.txt:2 the token is logged' "$STUB/brief" && grep -qxF 'E2 [P1][data] a.txt:2 the rows are dropped' "$STUB/brief" \
     || fail "a finding of a kind control judge always names was not accepted against the judge's decline: $(rev 7 '[.result, .judge] | tojson' | tr '\n' ' ')"
   # No kind clears them: the same findings are the judge's to decline, and the reviewer is asked for no tag.
   [ "$(loop control judge always | jq -c .judgeAlways)" = '[]' ] || fail "control judge always with no kind did not clear the kinds"
@@ -436,7 +446,7 @@ t_minoron() {
   printf '%s\n' "$MINOR3" '[P3] a.txt:2 odd spacing. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   printf '%s\n' 'F1 ACCEPT: the name misleads the next reader. Cost to every card: none' 'F2 DECLINE: rare case' > "$STUB/judge.1"
   loop run >/dev/null || fail "run exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF "$MINOR3" "$STUB/brief" && ! grep -q 'odd spacing' "$STUB/brief" \
+  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF "E1 $MINOR3" "$STUB/brief" && ! grep -q 'odd spacing' "$STUB/brief" \
     || fail "an accepted P3 with the rule P3 on did not send the card to a fix told it alone: $(rev 7 .result | tr '\n' ' '), $(grep 'a.txt:' "$STUB/brief")"
   [ "$(rev 7 '.counts | tojson' | head -n 1)" = '{"P0":0,"P1":0,"P2":0,"P3":1}' ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
     || fail "the record does not count the accepted P3, or the card did not land: $(rev 7 '.counts | tojson' | head -n 1)"
@@ -480,7 +490,7 @@ t_minorforged() {
   loop control rules P3=off >/dev/null || fail "control rules P3=off was refused"
   printf '%s\n' "MINOR: $f" 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   loop run >/dev/null || fail "run exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 7 '.counts.P1' | head -n 1)" = 1 ] && grep -qxF "$f" "$STUB/brief" \
+  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 7 '.counts.P1' | head -n 1)" = 1 ] && grep -qxF "E1 $f" "$STUB/brief" \
     || fail "a MINOR line the reviewer wrote did not count as the finding it is: $(rev 7 '[.result, .reason] | tojson' | tr '\n' ' ')"
 }
 

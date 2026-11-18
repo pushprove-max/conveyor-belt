@@ -51,7 +51,8 @@
 #   counts (the findings by level; null for a review recorded before they were counted), sec, fixed (a fix round
 #   followed it), and judge, what the judge (judged()) made of it: {ran: true, accepted, declined (how many findings of
 #   each), go (its GO came from the judge declining every finding)}, or {ran: false, why} for a review the judge did
-#   not read (its call failed, the judge is off, or the review held no finding or no verdict).
+#   not read (its call failed, the judge is off, or the review held no finding or no verdict). survived: the findings
+#   of a NO-GO that came back after a fix round told to fix them, each {id, rounds: how many fix rounds}, else [].
 # track (the same two, and a card in needsYou): steps, the six steps every card is drawn with, Build, Review,
 #   Fix, Test, Land, Push, each {name, state, sec}: done, now, skipped (the card did not need it: Fix after a GO, Build
 #   of a card landed from a kept patch), failed or todo, with its measured seconds. Build is the set-up (worktree,

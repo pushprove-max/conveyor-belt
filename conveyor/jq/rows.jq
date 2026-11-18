@@ -79,4 +79,6 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                  elif .result | IN("GO", "NO-GO") | not then {ran: false, why: "the review did not end with a verdict"}
                  elif .reason // "" | split("\n") | any(test("^(NEW CARD|UNPROVEN|DECLINED):|^[[:space:]]*$") | not) then {ran: false, why: "the judge is off"}
                  else {ran: false, why: "the review had no finding"} end),
+               # A NO-GO review's findings that came back after a fix round told to fix them (card.sh), {id, rounds}.
+               survived: (if .step == "review" then .survived else null end),
                took: (if $i == 0 then null else (.time | fromdate) - ($all[$i - 1].time | fromdate) end)} | with_entries(select(.value != null))]}})

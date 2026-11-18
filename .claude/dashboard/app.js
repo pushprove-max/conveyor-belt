@@ -138,6 +138,12 @@
     if (!c || typeof c !== 'object') return '';
     return ['P0', 'P1', 'P2', 'P3'].filter((k) => typeof c[k] === 'number' && c[k] > 0).map((k) => `${c[k]} ${k}`).join(', ');
   }
+  // The findings of a review that came back after the fix rounds told to fix them (its survived, each {id, rounds}):
+  // "E2 came back after 2 fix rounds"; '' when none did.
+  function survived(r) {
+    const s = r && Array.isArray(r.survived) ? r.survived.filter((x) => x && typeof x.id === 'string' && num(x.rounds)) : [];
+    return s.map((x) => `${x.id} came back after ${x.rounds} ${x.rounds === 1 ? 'fix round' : 'fix rounds'}`).join(', ');
+  }
   // A review's verdict in words: GO is "passed", NO-GO "changes asked" (the records' codes are never shown on a card).
   const verdictSaid = (v) => (v === 'GO' ? 'passed' : v === 'NO-GO' ? 'changes asked' : 'no verdict');
   // A finished review on a card: "Review 2: changes asked", its chip toned by the verdict.
@@ -1555,7 +1561,7 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, modelName, findings, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each

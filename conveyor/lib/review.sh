@@ -295,7 +295,8 @@ A reason that names another finding by its number quotes that finding'"'"'s file
 KINDS='The project always accepts a finding of one of these kinds: <kinds>. A finding of one of them names its kind in
 square brackets right after its level, as `[P1][<kind>] file:line what. Proof: <proof>`. Tag no other finding.'
 # The findings of the review beside the worktree as the judge is given them, one JSON array: {n, finding, place:
-# "inside", "outside" or "none", kind: the always-accepted kind it is tagged with, or null}.
+# "inside", "outside" or "none", kind: the always-accepted kind it is tagged with, or null; an id mark of a finding
+# that came back ([E2], REREVIEW) before or after its kind mark leaves it tagged}.
 judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
   grep -Ev "$NOTFINDING" "$1.review" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk 'NF && !seen[$0]++' \
     | jq -cRn --argjson always "$2" --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" --rawfile names <(git -C "$1" diff --cached --no-renames --name-only) \
@@ -307,7 +308,7 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
         | {n: (.key + 1), finding: $l,
            place: (if $w == null then "none" else ($w[0] | ltrimstr("./")) as $p | ($w[1] | tonumber) as $ln
              | if any($files[]; . == $p) and (all($h[]; .file != $p) or any($h[]; .file == $p and .from <= $ln and $ln <= .to)) then "inside" else "outside" end end),
-           kind: ([$always[] | select(. as $k | $l | test("^\\[P[0-3]\\]\\[" + ($k | rx) + "\\]"; "i"))] | first)})'
+           kind: ([$always[] | select(. as $k | $l | gsub("\\s*\\[E[0-9]+\\]"; "") | test("^\\[P[0-3]\\]\\[" + ($k | rx) + "\\]"; "i"))] | first)})'
 }
 # One judge call, read-only as a review is (claudereview(), codexreview(), opencodereview()): its answer in
 # <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens and

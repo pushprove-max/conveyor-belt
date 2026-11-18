@@ -21,6 +21,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
+  local sv an ids fl # sv, an: a review's survived findings and its answers (repeats(), answers()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
@@ -342,7 +343,13 @@ card() { # <card> <issue> [<branch> <tip>]
       refix=''
       res=$(verdict "$wt.review"); vis=$(visible "$wt.review" "$vmode"); unclear=''
       [ -n "$vis" ] || { [ "$res" = none ] || unclear=": it does not hold exactly one USER-VISIBLE line, written as asked"; res=none; }
-      record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" 'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end)')"
+      # A NO-GO's line names the findings that came back after a fix round told to fix them (survived: id, rounds), for the Board.
+      # Every review's line keeps its answers on the findings fix rounds were told, each beside its first location
+      # and proof (answers()), so a review that blocks or ends the loop keeps them too.
+      sv='[]'; [ "$res" != NO-GO ] || sv=$(repeats "$wt" | jq -sc 'map({id, rounds})')
+      an=$(answers "$wt")
+      record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
+        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end)')"
       [ "$res" != none ] || { block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
     fi
     # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
@@ -372,12 +379,13 @@ card() { # <card> <issue> [<branch> <tip>]
       locked giveway "$c" "$wt" fix; began "$c" "$n" fix
       old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
       # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), or a P3 listed only
-      # (a MINOR line, minor()), is not its to fix.
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$FIX"$'\n'"$(grep -Ev '^(DECLINED|MINOR):' "$wt.review")$more" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
+      # (a MINOR line, minor()), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
+      ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
+      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$FIX"$'\n'"$fl$more" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
       checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-      # This fix round's findings and the diff it made, for the review after it (repeats(), rereview()).
+      # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
       mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
-        && findings "$wt.review" | jq -c --argjson r "$((pass + rounds))" '. + {round: $r}' >> "$wt.rounds/findings.jsonl" && refix=$((pass + rounds))
+        && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds))
       continue
     fi
     # This review would let the card land. A change customers or staff would see needs the owner's yes first, when

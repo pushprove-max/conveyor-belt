@@ -317,6 +317,10 @@ t_camebackp1() {
     && [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = 'the fix for [P1] a.txt:1 wrong word. Proof: line 3 reads fix2 did not hold after 1 round' ] \
     || fail "a P1 finding back after its fix did not block the card with the reason: $(steps 8) $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ ! -e "$STUB/filed" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#8 landed, filed, or left its worktree"
+  # Issue 306: the review that blocks keeps its answer beside the finding's first location and proof.
+  [ "$(st 'select(.issue == 8 and .step == "review") | .answers | tojson' | tr '\n' ' ')" \
+    = 'null [{"id":"E1","answer":"[P1] a.txt:1 wrong word. Proof: line 3 reads fix2","first":{"round":1,"at":"a.txt:1","line":"[P1] a.txt:1 wrong word"}}] ' ] \
+    || fail "the review that blocked lost its answer or the first proof: $(st 'select(.issue == 8 and .step == "review") | .answers | tojson' | tr '\n' ' ')"
 }
 
 t_camebacktold() {
@@ -325,7 +329,7 @@ t_camebacktold() {
   # finding and the diff of the fix round after it; the GO after it lands the card.
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 2 reads fix1' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 3 reads fix2' '[P1] b.txt:2 a new bug' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
-  echo "$GO" > "$STUB/review.3"
+  printf '%s\n' 'EARLIER: E2 holds' "$GO" > "$STUB/review.3"
   loop run --only 9 >/dev/null || fail "run of #9 exited non-zero"
   [ "$(steps 9)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] \
     || fail "a P2 repeat beside a new P1 was not fixed and reviewed again: $(steps 9)"
@@ -334,6 +338,15 @@ t_camebacktold() {
     && grep -qx 'It came back after 1 fix round for it. The earlier review said:' "$b" && grep -qx '\[P2\] a.txt:1 a nit. Proof: line 2 reads fix1' "$b" \
     && grep -qx '+fix2' "$b" && ! grep -qx '+fix1' "$b" || fail "the fix session after a repeat was not told it came back with the earlier fix's diff: $(cat "$b")"
   ! grep -q '^## \[P1\] b.txt:2' "$b" || fail "a new finding was given as one that came back"
+  # Issue 306: the finding that came back keeps its id in the fix brief, the new one has the next id, and the
+  # review's line and the Board's snapshot name the one that came back.
+  grep -qx 'E1 \[P2\] a.txt:1 a nit. Proof: line 3 reads fix2' "$b" && grep -qx 'E2 \[P1\] b.txt:2 a new bug' "$b" || fail "the fix session was not given the findings' ids: $(cat "$b")"
+  [ "$(st 'select(.issue == 9 and .step == "review") | .survived | tojson' | tr '\n' ' ')" = 'null [{"id":"E1","rounds":1}] null ' ] \
+    && [ "$(loop snapshot | jq -c '.landed[] | select(.issue == 9) | .rounds | map(.survived)')" = '[[],[{"id":"E1","rounds":1}],[]]' ] \
+    || fail "the review line or the snapshot does not name the finding that came back: $(st 'select(.issue == 9 and .step == "review") | .survived | tojson' | tr '\n' ' ') $(loop snapshot | jq -c '.landed[] | select(.issue == 9) | .rounds')"
+  # The GO that ends the loop keeps its `EARLIER: E2 holds` beside E2's first location and proof.
+  [ "$(st 'select(.issue == 9 and .step == "review" and .result == "GO") | .answers | tojson')" = '[{"id":"E2","answer":"holds","first":{"round":2,"at":"b.txt:2","line":"[P1] b.txt:2 a new bug"}}]' ] \
+    || fail "the GO lost its answer on E2: $(st 'select(.issue == 9 and .step == "review" and .result == "GO") | .answers | tojson')"
 }
 
 # A card retried from a kept patch carries its earlier review rounds. Bug: a retry began the round count again, so

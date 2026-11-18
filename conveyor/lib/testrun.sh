@@ -2425,24 +2425,109 @@ counts() { # <review file>
     | {P0: 0, P1: 0, P2: 0, P3: 0} | with_entries(.key as $k | .value = ($p | map(select(. == $k)) | length))'
 }
 # A finding that comes back after its fix. Each fix round after a NO-GO keeps, in the folder <worktree>.rounds, the
-# findings it was told to fix (findings.jsonl: round, line, level, key) and the diff it made (<round>.diff); a card
-# that blocks keeps that folder, and the card that retries from its patch starts from it. Two
-# findings are the same when their keys are: the first file:line the finding names and its first six words, lower
-# case, letters and digits only, leaving out its level mark, that file:line and any proof after `Proof:`.
-findings() { # <review file>: one JSON line per finding, {line, level, key}
+# findings it was told to fix (findings.jsonl, rounded()) and the diff it made (<round>.diff); a card that blocks
+# keeps that folder, and the card that retries from its patch starts from it. Each finding has an id, E1, E2 and so
+# on, given when it is first recorded and kept by every later finding that is the same one (numbered()). A finding's
+# key is the first file:line it names (at) and its first six words (words), lower case, letters and digits only,
+# leaving out its level mark, an id mark ([E3]), that file:line and any proof after `Proof:`. named is the id its
+# id mark names, else null.
+findings() { # <review file>: one JSON line per finding, {line, level, at, named, words, key}
   grep -Ev "$NOTFINDING" "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk 'NF && !seen[$0]++' | jq -cR '. as $f
     | ([scan("[A-Za-z0-9_./-]+:[0-9]+")] | first // "") as $w
-    | {line: $f, level: (capture("\\[(?<p>P[0-3])\\]").p // "P1"),
-       key: ($w + " " + (gsub("\\[P[0-3]\\]"; "") | if $w == "" then . else index($w) as $i | .[:$i] + .[$i + ($w | length):] end
-         | split("Proof:")[0] | ascii_downcase | [scan("[a-z0-9]+")] | .[:6] | join(" ")))}'
+    | (gsub("\\[P[0-3]\\]|\\[E[0-9]+\\]"; "") | if $w == "" then . else index($w) as $i | .[:$i] + .[$i + ($w | length):] end
+         | split("Proof:")[0] | ascii_downcase | [scan("[a-z0-9]+")] | .[:6] | join(" ")) as $k
+    | {line: $f, level: (capture("\\[(?<p>P[0-3])\\]").p // "P1"), at: $w, named: (capture("\\[(?<e>E[0-9]+)\\]").e // null), words: $k, key: ($w + " " + $k)}'
 }
-# The findings of the review beside the worktree that a fix round was already told to fix, one JSON line each:
-# {line, level, rounds: how many fix rounds were told it, before: the finding as the last of them was told it, diff:
-# the file of that round's diff}.
+# The findings of the review beside the worktree, each with its id (findings() lines with id and seen). A finding
+# keeps the id of an earlier one (seen true) when its id mark names a recorded id, or when its key is the moved key
+# (mkey, rounded()) of the latest record of that id: its location where the diff of that fix round put it. One whose
+# location needs review has no moved key, so only its id joins it. Each other finding is new, numbered on from the
+# highest id recorded on the card.
+numbered() { # <worktree>
+  findings "$1.review" | jq -sc --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) '
+    [$h | group_by(.id)[] | last] as $l | ([$h[].id | ltrimstr("E") | tonumber] | max // 0) as $n
+    | reduce .[] as $f ({n: $n, out: []};
+        (if $f.named != null and any($h[]; .id == $f.named) then $f.named else [$l[] | select(.mkey == $f.key) | .id] | first end) as $id
+        | if $id != null then .out += [$f + {id: $id, seen: true}] else .n += 1 | .out += [$f + {id: "E\(.n)", seen: false}] end)
+    | .out[]'
+}
+# Where a diff puts line <n> of the file <p> (a path, or its end after a /, as a finding names it): "<path>:<line>",
+# the same file:line when the diff does not change that file or the lines above it, the new path when it renames the
+# file, or null when it removes or replaces that line or deletes the file. The file is the path <p> names exactly, in
+# the worktree's files ($ls) or the diff; else the one file whose path ends in "/<p>"; when more than one does, which
+# file it names is not known, so null too.
+# shellcheck disable=SC2016 # jq's $ names, not the shell's
+MOVEJQ='def files: reduce (split("\n")[]) as $l ([];
+    if $l | startswith("diff --git ") then . + [{old: null, new: null, hunks: []}]
+    elif length == 0 then .
+    elif .[-1].hunks == [] and ($l | startswith("--- ")) then .[-1].old = ($l[4:] | if . == "/dev/null" then null else ltrimstr("a/") end)
+    elif .[-1].hunks == [] and ($l | startswith("+++ ")) then .[-1].new = ($l[4:] | if . == "/dev/null" then null else ltrimstr("b/") end)
+    elif .[-1].hunks == [] and ($l | startswith("rename from ")) then .[-1].old = $l[12:]
+    elif .[-1].hunks == [] and ($l | startswith("rename to ")) then .[-1].new = $l[10:]
+    elif $l | test("^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@") then ($l | capture("^@@ -(?<a>[0-9]+)(,(?<b>[0-9]+))? \\+(?<c>[0-9]+)(,(?<d>[0-9]+))? @@")) as $m
+      | .[-1].hunks += [{a: ($m.a | tonumber), b: ($m.b // "1" | tonumber), c: ($m.c | tonumber), d: ($m.d // "1" | tonumber), m: []}]
+    elif .[-1].hunks != [] and ($l | test("^[ +-]")) then .[-1].hunks[-1].m += [$l[:1]]
+    else . end);
+  def moveto($fs; $ls; $p; $n): ($p | ltrimstr("./")) as $q
+    | ($ls + [$fs[].old | strings] | unique) as $all
+    | (if any($all[]; . == $q) then [$q] else [$all[] | select(endswith("/" + $q))] end) as $c
+    | ([$fs[] | select(.old == $c[0])] | first) as $f
+    | if ($c | length) > 1 then null elif $f == null then "\($p):\($n)" elif $f.new == null then null
+      else reduce $f.hunks[] as $h ({off: 0, at: null, gone: false};
+          if .at != null or .gone then .
+          elif ($h.b > 0 and $n < $h.a) or ($h.b == 0 and $n <= $h.a) then .at = $n + .off
+          elif $h.b == 0 or $n >= $h.a + $h.b then .off += $h.d - $h.b
+          else reduce $h.m[] as $k (. + {o: $h.a, w: $h.c};
+              if .at != null or .gone then .
+              elif $k == "+" then .w += 1
+              elif .o == $n then if $k == " " then .at = .w else .gone = true end
+              elif $k == "-" then .o += 1
+              else .o += 1 | .w += 1 end) end)
+        | if .gone then null else "\(if $f.new == $f.old then $p else $f.new end):\(.at // ($n + .off))" end end;'
+# Records the findings fix round <round> was told to fix, with the ids numbered() gave them, in findings.jsonl: each
+# {round, id, line, level, at, words, key} with, after the round's diff (<round>.diff), moved (the file:line its
+# location is at now, moveto()) and mkey (moved and its words), or location "needs review" when the diff removed or
+# replaced its line: such a finding keeps its first line and proof, and is joined to a later one by its id alone. A
+# finding with no location keeps its key as mkey. A finding recorded before carries first, its first record's round,
+# location and line (with its proof). Each earlier finding this round was not told (one a review said holds) is
+# followed through the round's diff too, in a record {round, id, words, tracked: true} with moved and mkey, or location
+# "needs review": its key keeps to its code, so a later finding at the line that took its place is not joined to it.
+rounded() { # <worktree> <round> <numbered() lines>
+  [ -n "$3" ] || return 0
+  jq -cs --argjson r "$2" --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
+    ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l | map(.id) as $ids
+    | def follow($at; $w): ($at | capture("^(?<p>.*):(?<n>[0-9]+)$")) as $a | moveto($fs; $l; $a.p; ($a.n | tonumber))
+        | if . == null then {location: "needs review"} else {moved: ., mkey: (. + " " + $w)} end;
+    (.[] | . as $f | ([$h[] | select(.id == $f.id)] | first) as $o
+      | del(.named, .seen) + {round: $r}
+      + (if $f.at == "" then {mkey: $f.key} else follow($f.at; $f.words) end)
+      + (if $o == null then {} else {first: ($o | {round, at, line})} end)),
+    ($h | group_by(.id)[] | last | select(.moved != null and (.id | IN($ids[]) | not))
+      | {round: $r, id, words, tracked: true} + follow(.moved; .words))' <<<"$3" >> "$1.rounds/findings.jsonl"
+}
+# The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED and MINOR ones,
+# each finding led by its id (<numbered() lines>).
+fixlines() { # <worktree> <numbered() lines>
+  grep -Ev '^(DECLINED|MINOR):' "$1.review" | jq -Rr --slurpfile n <(printf '%s\n' "$2") '($n | map({key: .line, value: .id}) | from_entries) as $m
+    | (sub("^\\s+"; "") | sub("\\s+$"; "")) as $t | if $t != "" and $m[$t] then "\($m[$t]) \(.)" else . end'
+}
+# The findings of the review beside the worktree that a fix round was already told to fix (numbered(): the same id),
+# one JSON line each: {id, line, level, rounds: how many fix rounds were told it, before: the finding as the last of
+# them was told it, diff: the file of that round's diff}.
 repeats() { # <worktree>
   [ -s "$1.rounds/findings.jsonl" ] || return 0
-  findings "$1.review" | jq -c --slurpfile h "$1.rounds/findings.jsonl" --arg d "$1.rounds" '. as $f | [$h[] | select(.key == $f.key)] | select(length > 0)
-    | {line: $f.line, level: $f.level, rounds: (map(.round) | unique | length), before: last.line, diff: "\($d)/\(last.round).diff"}'
+  numbered "$1" | jq -c --slurpfile h "$1.rounds/findings.jsonl" --arg d "$1.rounds" 'select(.seen) | . as $f | [$h[] | select(.id == $f.id and (.tracked | not))]
+    | select(length > 0) | {id: $f.id, line: $f.line, level: $f.level, rounds: (map(.round) | unique | length), before: last.line, diff: "\($d)/\(last.round).diff"}'
+}
+# The review beside the worktree's answers on the findings fix rounds were told, for its record line, one JSON array:
+# {id, answer: its finding again (numbered()), or "holds" for its `EARLIER: E<n> holds` line, first: the round, location
+# and line (with its proof) the finding was first recorded with}. Lines are cut at 500 characters.
+answers() { # <worktree>
+  [ -s "$1.rounds/findings.jsonl" ] || { echo '[]'; return 0; }
+  { numbered "$1" | jq -c 'select(.seen) | {id, answer: .line}'
+    grep -E '^EARLIER: E[0-9]+ holds[[:space:]]*$' "$1.review" | jq -cR '{id: capture("(?<e>E[0-9]+)").e, answer: "holds"}'; } \
+    | jq -sc --slurpfile h "$1.rounds/findings.jsonl" 'map(. as $a | ([$h[] | select(.id == $a.id and (.tracked | not))] | first) as $o
+        | select($o != null) | {id, answer: .answer[:500], first: ($o | {round, at, line: .line[:500]})})'
 }
 # What the fix session after a review that repeats a finding is told, after the review: each finding that came back,
 # the finding as the earlier review gave it (its proof with it) and the diff of the fix round after that review.
@@ -2471,12 +2556,15 @@ fixonly() { # <worktree> <round>
 }
 # What the review after fix round <round> is told, in its brief (REREVIEW): what else it may raise (the whole change,
 # or with fix as fourth argument the fix's lines and their callers alone), the findings that round was told to fix,
-# numbered E1, E2 and so on, the file of its diff, and the findings declined on this card so far, each with its reason.
+# each led by its id (rounded()) and followed by where the fix moved its location or that its location needs review,
+# the file of its diff, and the findings declined on this card so far, each with its reason.
 rereview() { # <card> <worktree> <round> [fix]
   local dec t=$REREVIEWALL
   [ "${4:-}" != fix ] || t=$REREVIEWFIX
   printf '%s\n%s\n\n## The findings the fix was told to fix\n' "$REREVIEW" "$t"
-  jq -rs --argjson r "$3" 'map(select(.round == $r)) | to_entries[] | "E\(.key + 1) \(.value.line)"' "$2.rounds/findings.jsonl"
+  jq -rs --argjson r "$3" 'map(select(.round == $r and (.tracked | not)))[] | "\(.id) \(.line)"
+    + if .location == "needs review" then "\n  Its location needs review: the fix removed or replaced the lines it named. Find where the defect is now, if it is anywhere."
+      elif .moved != null and .moved != .at then "\n  The fix moved its location to \(.moved)." else "" end' "$2.rounds/findings.jsonl"
   printf '\n## The diff of the fix\nThe file %s\n' "$2.rounds/$3.diff"
   dec=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" 'fromjson? | objects | select(.card == $c) | "- \(.finding) (declined: \(.why))"' 2>/dev/null | awk '!seen[$0]++')
   printf '\n## The findings declined on this card\n%s\n' "${dec:-None.}"

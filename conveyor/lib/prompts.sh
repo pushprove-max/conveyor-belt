@@ -492,9 +492,11 @@ NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|VERDICT|USER-VISIBLE|I
 # test files that cover the cases of a file an Optimize deleted (testspart()).
 # shellcheck disable=SC2034 # used in lib/card.sh, lib/followups.sh and lib/push.sh
 UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|/}
-# What the fix session after a NO-GO is told, after the brief; the review follows it.
+# What the fix session after a NO-GO is told, after the brief; the review follows it, each finding led by its id
+# (fixlines()).
 FIX='# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else
-An `UNPROVEN:` line is not a finding: change nothing for it.'
+An `UNPROVEN:` line is not a finding: change nothing for it. Each finding starts with its id (E1, E2 and so on):
+the review after this fix names the finding by that id.'
 # The Done-when check (donewhen(), checked()): what the one fix session after a failed check is told, after the brief;
 # the failed items follow it. And what the review is told beside the card's D<n> lines.
 DWFIX='# The Done-when check failed: fix these items, and end your reply with the whole `## Done when` section again
@@ -619,10 +621,12 @@ file ran: a check dropped so that the file can run alone is a finding. Its resul
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.
 REREVIEW='# This review follows a fix of the last review'"'"'s findings
-A fix session was told to fix the findings of the last review of this change, given below as E1, E2 and so on. Read
-what that fix changed first: its diff is the file named below. Then say for each of those findings whether the fix
-holds: write `EARLIER: E<n> holds` when it does; one whose fix does not hold is a finding again, written as any
-finding is, its proof saying why the fix does not hold. A finding declined on this card (listed below, each with its
+A fix session was told to fix the findings of the last review of this change, given below, each after its id (E1,
+E2 and so on). Read what that fix changed first: its diff is the file named below. Then say for each of those
+findings whether the fix holds: write `EARLIER: E<n> holds` when it does; one whose fix does not hold is a finding
+again, written as any finding is with its id in brackets after its level mark and any kind mark (`[P1] [E2]
+<file:line> ...`), at its
+location now, its proof saying why the fix does not hold. A finding declined on this card (listed below, each with its
 reason) is raised again only with a new, concrete reason its decline does not answer, given in its proof.'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 REREVIEWALL='A new defect anywhere in the change, in what the fix changed or elsewhere, may still be raised, at any level.'

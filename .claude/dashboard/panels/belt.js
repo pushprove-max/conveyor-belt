@@ -148,6 +148,9 @@
           const row = h('li', 'review'), f = ctx.findings(r);
           row.append(ctx.reviewChip(r));
           if (f) row.append(h('span', null, f));
+          // The findings that came back after their fix rounds (ctx.survived).
+          const s = ctx.survived(r);
+          if (s) row.append(h('span', 'survived', s));
           // What the judge made of it (ctx.judged).
           const j = ctx.judged(r, c.card);
           if (j) row.append(j);
