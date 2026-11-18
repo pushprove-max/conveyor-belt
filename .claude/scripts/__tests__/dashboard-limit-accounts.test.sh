@@ -121,17 +121,18 @@ answer["Bearer tok-2"] = 40
 check(run_fetch(X)[0] == 0 and asked == ["Bearer tok-2"], "fetch did not read the account once its hour had passed: %s" % asked)
 # Issue 404: a 429 with no Retry-After was kept as "rate limited (429)" with no wait in it, so fetch() did not honour
 # its kept deadline: switching back to that account asked the refusing API at once, and on each Board refresh after.
-# X is read while the other account is in use; then the Board switches to X and fetches the account in use (None).
+# X's read is refused with no Retry-After. Then a Board refresh runs with the other account in use, and the next one
+# with X in use again, 60 s after the 429. On each of the two, dashboard.sh's limit() finds a cached reading of a
+# different account and deletes it with its claude-usage.retry. So cached() runs fetch with X's folder, and only
+# fetch's own kept deadline stops the read.
 t2 = t1 + 10000
 clock[0] = t2
 answer["Bearer tok-2"] = "429 bare"
-in_use(HC)
 asked.clear()
 check(run_fetch(X) == (1, "rate limited (429)") and asked == ["Bearer tok-2"], "a 429 with no Retry-After: %s" % asked)
-in_use(X)
 asked.clear()
 clock[0] = t2 + 60
-got = run_fetch(None)
+got = run_fetch(X)
 check(asked == [] and got == (1, "rate limited (429); retry after %d s" % (d.ACCOUNT_TTL - 60)),
       "fetch asked again 60 s after a 429 with no Retry-After: %s %s" % (asked, got))
 clock[0] = t2 + d.ACCOUNT_TTL
