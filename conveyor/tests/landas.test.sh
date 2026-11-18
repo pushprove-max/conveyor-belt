@@ -23,7 +23,10 @@ la_eng() { # <command...>
 # Card <n> of issue <n> lands: a commit on main and its lines, as a card that passed its Done-when check (its reply's
 # D<n> lines on the build line) and tests: a run of two cases of one file (its why names a second file, which the test
 # cache kept off: the body must not list it as run), then a pass that reused that run (its line
-# names no test, as card() writes it). With <fix rounds>, that many fix lines come before the tests.
+# names no test, as card() writes it), then later runs that must not hide the cases run before: one that names both
+# files and no case (the cache kept them all), one that ran one case of a third file only, one that selected that file
+# and no case (its times carried from the run before), and one that selected no file. With <fix rounds>, that many
+# fix lines come before the tests.
 la_land() { # <n> [<fix rounds>]
   local sha fx='' i
   for ((i = 0; i < ${2:-0}; i++)); do fx+="record c$1 $1 fix ok '{}'"$'\n'; done
@@ -32,6 +35,10 @@ la_land() { # <n> [<fix rounds>]
     record c$1 $1 build ok '{\"doneWhen\":{\"items\":2,\"met\":2,\"failed\":[]},\"doneLines\":[\"D1 met: t/a.test.sh case one\",\"D2 met: f$1.txt holds $1\"]}'
     $fx record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":4,\"failed\":0},\"ran\":[\"t/a.test.sh\"],\"why\":{\"t/a.test.sh\":[\"changed\"],\"t/b.test.sh\":[\"passed before with the same inputs\"]},\"ranCases\":{\"t/a.test.sh\":[\"one\",\"two\"]}}'
     record c$1 $1 test pass '{\"sec\":1,\"usage\":{\"input\":0,\"write\":0,\"write1h\":0,\"read\":0,\"output\":0},\"reused\":true}'
+    record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":0,\"failed\":0},\"ran\":[\"t/a.test.sh\",\"t/c.test.sh\"],\"ranCases\":{}}'
+    record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":1,\"failed\":0},\"ran\":[\"t/c.test.sh\"],\"ranCases\":{\"t/c.test.sh\":[\"three\"]}}'
+    record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":null,\"failed\":null},\"selected\":{\"files\":1,\"filesOf\":null,\"cases\":0,\"casesOf\":12,\"kept\":1},\"carried\":[\"t/c.test.sh\"],\"times\":{\"t/c.test.sh\":1}}'
+    record c$1 $1 test pass '{\"ended\":\"nothing selected\",\"tests\":{\"passed\":0,\"failed\":0},\"selected\":{\"files\":0,\"filesOf\":12,\"cases\":null,\"casesOf\":null}}'
     record c$1 $1 landed ok '{\"sha\":\"$sha\",\"product\":false}'" \
     || fail "card $1's lines could not be written"
 }
@@ -60,7 +67,8 @@ EOF
 # open; a body rewritten with only the cards of the last push (the earlier ones would not close on the merge); and a
 # landing push not counted as pushed (atorigin), so the loop would push the same commit again at every turn; a body
 # without each card's D<n> lines or its fix rounds (card 2 has two, card 1 none), or with the tests of its last test line (a
-# reused pass names none) in place of the run that ran them, its files and their cases; and a card pushed into the pull request shown on the Board's belt as
+# reused pass names none, a later run that selected no case or no file none) in place of the run that ran them, or only the files and
+# cases of its last run (a later run reruns only what changed) in place of those of all its runs; and a card pushed into the pull request shown on the Board's belt as
 # waiting for its issue to close (Push failed once the wait ends), when it closes only when the owner merges.
 # The pack sets pr; cards 1 and 2 land and push, then card 3. Their issues are open, as they are until the merge.
 t_landpr() {
@@ -76,7 +84,7 @@ t_landpr() {
   body=$(jq -r .body "$STUB/pr.7")
   [ "$(grep -o '^Closes #[0-9]*' <<<"$body" | paste -sd ' ')" = 'Closes #1 Closes #2' ] || fail "the body does not close both issues, in landing order: $body"
   want=$(printf '%s\n' '## #2 T2' '' 'Closes #2' '- Card: `c2`' '- Done when: 2 of 2 met' '  - D1 met: t/a.test.sh case one' '  - D2 met: f2.txt holds 2' \
-    '- Fix rounds: 2' '- Tests: passed, 4 passed, 0 failed' '  - `t/a.test.sh`: one, two')
+    '- Fix rounds: 2' '- Tests: passed, 1 passed, 0 failed' '  - `t/a.test.sh`: one, two' '  - `t/c.test.sh`: three')
   [ "$(awk '/^## / {p = ($0 == "## #2 T2")} p && NF' <<<"$body")" = "$(grep . <<<"$want")" ] || fail "card 2's part of the body is not its Done-when lines, its fix rounds and the tests it ran: $body"
   # Card 1 has none: with card 2's two, a count fixed at any one value fails one of these checks.
   [ "$(awk '/^## / {p = ($0 == "## #1 T1")} p && /^- Fix rounds:/' <<<"$body")" = '- Fix rounds: 0' ] || fail "card 1's part of the body does not give its zero fix rounds: $body"

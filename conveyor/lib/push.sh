@@ -308,8 +308,12 @@ landpr() { # <"card issue sha" of each card this push carries>...
       (.[] | . as $l | [$all[] | select(.card == $l.card)] as $c
         | ([$c[] | .title // empty | strings | select(. != "")] | first // "(no title)" | .[0:200]) as $t
         | ([$c[] | select(.doneWhen)] | last // null) as $dl | ($dl.doneWhen // null) as $d
-        # The tests it ran: its last test line that ran them (a line that reused an earlier pass names none).
-        | ([$c[] | select(.step == "test" and (.reused | not))] | last // null) as $x
+        # The tests it ran: the outcome of its last test line that ran them (a line that reused an earlier pass names
+        # none, and a later run that selected no file or no case ran none of them; a card with no run of a case shows
+        # its last run), and the files and cases of all its runs: a later run runs only what changed, as the test cache
+        # keeps the rest off it.
+        | [$c[] | select(.step == "test" and (.reused | not))] as $r
+        | (($r | map(select(.ended != "nothing selected" and .selected.files != 0 and .selected.cases != 0)) | last) // ($r | last)) as $x
         | "## \(if $l.issue != 0 then "#\($l.issue) " else "" end)\($t)", "",
           (if $l.issue != 0 then "Closes #\($l.issue)" else empty end),
           "- Card: `\($l.card)`",
@@ -319,8 +323,9 @@ landpr() { # <"card issue sha" of each card this push carries>...
           "- Fix rounds: \([$c[] | select(.step == "fix")] | length)",
           (if $x == null then "- Tests: none ran"
            else "- Tests: \($x.ended // $x.result)\($x.tests // {} | to_entries | map(select(.value != null) | ", \(.value) \(.key)") | join(""))",
-             ([($x.ran // [] | arrays | .[] | strings), ($x.times, $x.clocks, $x.ranCases | objects | keys[])] | unique[]
-               | . as $f | "  - `\($f)`\($x.ranCases // {} | .[$f] // [] | if . == [] then "" else ": " + join(", ") end)") end), "")' --args "${@%% *}") \
+             ([$r[] | (.ran // [] | arrays | .[] | strings), (.times, .clocks, .ranCases | objects | keys[])] | unique[]
+               | . as $f | "  - `\($f)`\([$r[] | .ranCases | objects | .[$f] | arrays | .[] | strings] | unique
+                 | if . == [] then "" else ": " + join(", ") end)") end), "")' --args "${@%% *}") \
     || { echo "the pull request's body could not be made from the card records"; return 1; }
   if [ "$n" = 0 ]; then
     out=$(gh_write pr create --base "$BRANCH" --head "$LANDING" --title "${text%%$'\n'*}" --body "${text#*$'\n'}" 2>&1) && n=$(tail -n 1 <<<"$out") && n=${n##*/pull/} && [[ $n =~ ^[1-9][0-9]*$ ]] \
