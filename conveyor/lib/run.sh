@@ -191,6 +191,13 @@ revive() { # <the loop's own cards, one a line>
 cardrun() { # <card> <issue>
   ( card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
 }
+# The Conveyor commit a card of the loop runs now: the one its last switch to new code named on its start line
+# (began(), lib/card.sh), else the one it started on.
+cardcode() { # <card> <the commit it started on>
+  local t
+  t=$(stdb ask card "$1" 2>/dev/null | jq -rs --arg c "$1" 'map(select(.card == $c and .step == "start" and .engine)) | last | .engine // empty' 2>/dev/null) \
+    && [ -n "$t" ] && echo "$t" || echo "$2"
+}
 # A card's last step: its last record line's (the step a start line opens).
 cardstep() { # <card>
   stdb ask card "$1" 2>/dev/null | jq -rs --arg c "$1" 'map(select(.card == $c)) | last | if .step == "start" then .of else .step end | strings' 2>/dev/null
@@ -361,7 +368,8 @@ run() { # [max-cards] [serve]
     # Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new loop
     # would start a second push beside one still running, and nothing is picked meanwhile; no other push starts once
     # the restart is due (new, above), so it never waits for a push of a card that landed meanwhile. The cards carry on in
-    # this same process on the code they started with (its install stays as it is), and the new loop adopts them
+    # this same process on the code they started with (its install stays as it is) until their next step, which begins
+    # on the new code where the card can switch (switchcode(), lib/card.sh), and the new loop adopts them
     # (CONVEYOR_ADOPT, with the run lock on fd 8): it counts them against the cap, keeps their claims (their process
     # lives), sees to their ends and the push as for its own, and records one whose process ends without a result as
     # blocked. A pin that is not installed ends the loop only once nothing of its own runs. A `run` ends then too.
@@ -371,10 +379,12 @@ run() { # [max-cards] [serve]
         while read -r p t; do [ -z "$p" ] || echo "$k $p $t"; done <<<"${kids[$k]:-}"
         for p in $(tree "$k"); do t=$(p_started "$p") && echo "$k $p $t"; done
       done | sort -u)
-      echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${took[$k]:-$RAN}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')"
+      local -A on=() # the commit each card runs now (cardcode())
+      for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-$RAN}"); done
+      echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')"
       # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
       # hundreds every card's test runner got fd 255, bash's own.
-      CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${took[$k]:-$RAN}"; done) exec "$BASH" "$new" serve {LOGFD}>&-
+      CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${on[$k]}"; done) exec "$BASH" "$new" serve {LOGFD}>&-
     fi
     if [ -n "$old" ] && [ "$running" = 0 ] && [ -z "$pusher" ]; then
       # A `run` ends here; a card that landed after this turn's push check is owed a push first, as below.

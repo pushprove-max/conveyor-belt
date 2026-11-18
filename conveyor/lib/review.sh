@@ -69,7 +69,8 @@ reviewed() { # <worktree> <brief> [instructions]: prints and fails as review() d
   r=$(jq -r .reason <<<"$x"); printf '%s\n' "${r%%$'\n'*}; run again after ${REVIEW_PAUSE}s: $u"; return 1
 }
 review() { # <worktree> <brief> [instructions, in place of REVIEW]
-  local model effort agent s rc ins=${3:-$REVIEW} PROXY_ROLE=reviewer # the reviewer's route (proxyroute())
+  local model effort agent s rc ins=${3:-$REVIEW} br=$2 PROXY_ROLE=reviewer # the reviewer's route (proxyroute())
+  newtexts ins; newtexts br # the new code's texts in place of the old code's, for a card that switched (newtexts(), lib/session.sh)
   s=$(seat reviewer) && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no reviewer model"; return 1; }
   rc=$(seatready reviewer "$s") || { echo "$rc"; return 1; } # the CLI the seat names, never another
   rm -f "$1.review.new" "$1.spent"
@@ -77,11 +78,11 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
   # alone) is told what not to raise; the check of an ALREADY-DONE claim (CONFIRM) lists what the issue still lacks,
   # and is not.
   [[ $ins != "$REVIEW"* && $ins != "$REVIEWOFF"* && $ins != "$FIXREVIEW"* ]] || ins+=$(donotraise)
-  if [ "$agent" = claude ]; then apitries "$1" review "$1.events" claudereview "$1" "$2" "$ins" "$model" "$effort"
-  elif [ "$agent" = opencode ]; then apitries "$1" review "$1.events" opencodereview "$1" "$2" "$ins" "$model" "$effort"
+  if [ "$agent" = claude ]; then apitries "$1" review "$1.events" claudereview "$1" "$br" "$ins" "$model" "$effort"
+  elif [ "$agent" = opencode ]; then apitries "$1" review "$1.events" opencodereview "$1" "$br" "$ins" "$model" "$effort"
   else
     model=$(codexmodel "$model") || { echo "$model"; return 1; } # a family name, as the proxy lists it now
-    apitries "$1" review "$1.events" codexreview "$1" "$2" "$ins" "$model" "$effort"
+    apitries "$1" review "$1.events" codexreview "$1" "$br" "$ins" "$model" "$effort"
   fi; rc=$?
   # A `DECLINED:` or `MINOR:` line is the engine's alone to write (NOTFINDING): one the reviewer wrote is a finding, as
   # any line is.

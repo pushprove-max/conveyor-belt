@@ -101,7 +101,9 @@ t_follow() {
   copies() { local f n m=''; for _ in 1 2 3 4 5; do n=0; for f in /proc/$pid/fd/*; do [ ! "$f" -ef "$STUB/serve.out" ] || n=$((n + 1)); done; [ -n "$m" ] && [ "$m" -le $n ] || m=$n; sleep 0.1; done; echo "$m"; } # sleep: the looks are spread over 0.5 s
   [ ! -d /proc/$pid/fd ] || fds=$(copies)
   # A new commit lands in the checkout while #7 is in flight: the loop restarts on it at once, in its own process,
-  # and #7 carries on on $A; then #7 and #8 both land through the restarted loop, which restarts no more.
+  # and #7 carries on on $A, then goes on with $B's code from its review step (switchcode(), lib/card.sh: the old
+  # code's files read from the checkout at $A); then #7 and #8 both land through the restarted loop, which restarts
+  # no more.
   git -C "$D" merge -q --ff-only "$B" || fail "the new commit did not land in the checkout"
   till 'grep -q "restarting on the new code; 1 cards in flight carry on on $A" "$STUB/serve.out"' || fail "the loop did not restart on the checkout's new commit: $(cat "$STUB/serve.out")"
   grep -q "the checkout has moved on from this loop's $A" "$STUB/serve.out" && [ -z "$(st 'select(.issue == 7 and .step == "landed")')" ] \
@@ -112,6 +114,8 @@ t_follow() {
   till '[ -n "$(st '"'"'select(.issue == 8 and .step == "landed")'"'"')" ] && [ -n "$(st '"'"'select(.issue == 7 and .step == "landed")'"'"')" ]' \
     || fail "#7 and #8 did not both land through the restarted loop: $(cat "$STUB/serve.out")"
   kill -0 $pid 2>/dev/null && [ "$(grep -c restarting "$STUB/serve.out")" = 1 ] || fail "serve did not restart once in its own process: $(cat "$STUB/serve.out")"
+  grep -qF "card $(st 'select(.issue == 7 and .step == "picked") | .card'): Conveyor took commit $B; the card goes on with the new code from its review step" "$STUB/serve.out" \
+    || fail "#7 did not go on with the checkout's new code from its review step: $(cat "$STUB/serve.out")"
   loopend $pid
   # doctor warns of a running loop behind its checkout's HEAD, or, from an install, behind the pin; not of one on it.
   sleep 60 & z=$!; t=$(p_started $z) # sleep: a stand-in for a running loop's process

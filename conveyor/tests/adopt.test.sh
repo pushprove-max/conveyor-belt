@@ -32,7 +32,7 @@ adoptserve() {
 
 # Bugs: new code lands with cards in review and the loop waits for them before it restarts, so free slots sit idle;
 # the restarted loop forgets those cards (does not count them, drops their claims, never pushes their landings), or
-# runs them on the new code; it restarts beside a push still running and starts a second one, or waits for the push
+# starts them again on the new code in place of their own processes (they switch at their next step: t_switchcode); it restarts beside a push still running and starts a second one, or waits for the push
 # of a card that landed during that push; a forged adoption takes the run lock beside a running loop.
 t_adopt() {
   adoptsetup "[$(issue 5 2025-12-31), $(issue 6 2026-01-01), $(issue 7 2026-01-02), $(issue 8 2026-01-03)]"
@@ -93,7 +93,7 @@ EOF2
   h=$(loop health); [ "$(jq -c --arg a "$(card 7)" --arg b "$(card 8)" '[.loop, (.stuck | map(select(.card == $a or .card == $b)) | length)]' <<<"$h")" = '[true,0]' ] \
     || fail "health does not see the adopted cards as running: $(jq -c '[.loop, .stuck]' <<<"$h")"
   [ "$(loop cards | jq -c '[.open, ([.cards[] | select(.result == "") | .issue] | sort)]')" = '[3,[7,8,9]]' ] || fail "the Board does not show the adopted cards: $(loop cards)"
-  # #7 lands on the code it started with, then #8 and #9; the new loop pushes them all, one push at a time.
+  # #7 lands, in the process it started in (with $B's code from its land step: t_switchcode), then #8 and #9; the new loop pushes them all, one push at a time.
   : > "$STUB/go.8"; : > "$STUB/go.7"
   till '[ "$(ends 7)" = landed ] && [ "$(ends 8)" = landed ] && [ "$(ends 9)" = landed ] && [ "$(git -C "$O" rev-parse main)" = "$(git -C "$R" rev-parse main)" ]' \
     || fail "the cards did not all land and push through the new loop: $(st '"\(.issue) \(.step)"' | tr '\n' ,) $(cat "$STUB/serve.out")"
@@ -189,6 +189,73 @@ gonestop() { local k; kill -STOP "$1" 2>/dev/null; echo "$1"; for k in $(pgrep -
 gonecard() {
   jq -cn --arg c "$1" --argjson n "$2" --argjson p "$3" --arg s "$4" --arg o "${5:-build}" '{card:$c,issue:$n,time:"2026-01-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
     | (. + {step:"picked"}), (. + {step:"worktree",pid:$p,started:$s}), (. + {step:"start",of:$o})' >> "$ST/cards.jsonl"
+}
+
+# switchrun [<sed script>]: N, a commit after $B, installed: its redbrief() (lib/card.sh, called as the land step
+# begins) writes the commit the card runs to $STUB/newcode, the card's settings file to $STUB/settings, and to
+# $STUB/prompt card()'s sprompt (made before the switch, as the copies other functions are handed are) as session()
+# and review() send it (newtexts(), lib/session.sh); its card rules (rules/card-core.md) end with a line of its own; <sed script>, run on
+# its lib/card.sh, changes it more. #5 then started on $A, the pin moved to N while #5 is in its test step, and #5 let
+# go on to its end.
+switchrun() {
+  adoptsetup "[$(issue 5 2026-01-01)]"
+  printf '%s\n' 'eval "old$(declare -f redbrief)"; redbrief() { echo "$RAN" >> "$STUB/newcode"; cp "$wt.settings" "$STUB/settings"; local p=$sprompt; newtexts p; printf %s "$p" > "$STUB/prompt"; oldredbrief "$@"; }' >> "$D/conveyor/lib/card.sh"
+  echo 'A rule of commit N.' >> "$D/conveyor/rules/card-core.md"
+  [ -z "${1:-}" ] || sed -i "$1" "$D/conveyor/lib/card.sh"
+  git -C "$D" commit -qam N && N=$(git -C "$D" rev-parse HEAD) && git -C "$D" push -q origin main \
+    && bash "$D/conveyor/conveyor.sh" install "$N" >/dev/null || fail "the new commit was not installed"
+  echo 'echo two >> f5.txt' > "$STUB/build"
+  echo 'case $PWD in *-5) : > "$STUB/testing"; while [ -d "$STUB" ]; do [ -e "$STUB/go" ] && break; sleep 0.5; done ;; esac' >> "$STUB/test-cmd"
+  adoptserve
+  till '[ -e "$STUB/testing" ]' || fail "#5 did not reach its test step: $(cat "$STUB/serve.out")"
+  tune --arg c "$N" '.plugin.commit = $c'
+  till '[ "$(jq -r .commit "$S/loop.json" 2>/dev/null)" = "$N" ]' || fail "the loop did not restart on $N: $(cat "$STUB/serve.out")"
+  : > "$STUB/go"; till '[ "$(ends 5)" = landed ]' || fail "#5 did not land: $(st 'select(.issue == 5) | .step' | tr '\n' ' ') $(cat "$STUB/serve.out")"
+}
+
+# Bugs (#449): a card in its test step when Conveyor takes a new commit lands on the code it started with (on
+# 2026-11-18 a fix to how cards test missed the three cards running when it landed), or its passed test step runs
+# again after the switch, or its log does not say it switched; its next session runs the old install's hooks
+# (its settings file) or the old rules (its prompt, a copy made before the switch too); prune() removes the install it
+# switched to while it runs; a later restart says, and hands on, the commit it started on in place of the one it runs.
+t_switchcode() {
+  switchrun
+  grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with the new code from its land step, and no passed step runs again" "$STUB/serve.out" \
+    || fail "#5 did not say it switched at its land step: $(cat "$STUB/serve.out")"
+  [ "$(sort -u "$STUB/newcode" 2>&1)" = "$N" ] || fail "#5's land step did not run $N's code: $(cat "$STUB/newcode" 2>&1)"
+  [ "$(st 'select(.issue == 5 and .step == "start") | .of' | grep -c '^test$')" = 1 ] && [ "$(st 'select(.issue == 5 and .step == "test") | .result' | tr '\n' ' ')" = 'pass ' ] \
+    || fail "#5's passed test step ran again: $(st 'select(.issue == 5) | .of // .step' | tr '\n' ' ')"
+  grep -qF "$V/$N" "$STUB/settings" && ! grep -qF "$V/$A" "$STUB/settings" || fail "#5's settings after the switch do not run $N's hooks: $(cat "$STUB/settings" 2>&1)"
+  grep -qxF 'A rule of commit N.' "$STUB/prompt" && [ "$(grep -c '^# Rules$' "$STUB/prompt")" = 1 ] || fail "#5's prompt after the switch does not carry $N's rules alone: $(cat "$STUB/prompt" 2>&1)"
+  # The lines of #5 up to its land step, as prune() reads a card in flight (inflight(), lib/install.sh).
+  jq -c 'select(.issue == 5 and .step != "landed")' "$ST/cards.jsonl" > "$STUB/inflight.jsonl"
+  ( . "$SRC/lib/install.sh" && inflight "$STUB/inflight.jsonl" ) | grep -qxF "$N" || fail "prune() would remove $N's install while #5 runs on it: $(cat "$STUB/inflight.jsonl")"
+  # The commit a loop that restarts names for #5 and hands its next loop (cardcode(), lib/run.sh), the store read as
+  # its lines: not $A, which #5 left.
+  t=$(stdb() { cat "$STUB/inflight.jsonl"; }; eval "$(sed -n '/^cardcode() {/,/^}/p' "$SRC/lib/run.sh")"; cardcode "$(card 5)" "$A")
+  [ "$t" = "$N" ] || fail "a restart would say #5 runs $t, not $N"
+  kill $pid; wait $pid 2>/dev/null; return 0
+}
+
+# Bug (#449): a card switches to new code that reads another form of step files than its old code saved, or does not
+# say why it stays on its old code.
+t_switchkeep() {
+  switchrun "s/^STEPFILES=.*/STEPFILES=2/"
+  grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with its old code, commit $A: the new code cannot read the step files that the old code saved (form 1; the new code reads form 2)" "$STUB/serve.out" \
+    || fail "#5 did not say why it kept its old code: $(cat "$STUB/serve.out")"
+  [ ! -e "$STUB/newcode" ] || fail "#5 ran $N's code: $(cat "$STUB/newcode")"
+  kill $pid; wait $pid 2>/dev/null; return 0
+}
+
+# Bug (#449 review): a card switches while it runs in a function the new code changes, so the rest of that function
+# runs its old body beside the new code's other functions (a fix inside card() never reaches it); or its log does not
+# say why it stays on its old code.
+t_switchbusy() {
+  switchrun '/^card() {/a :'
+  grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with its old code, commit $A: the new code changes card(), which the card is running in" "$STUB/serve.out" \
+    || fail "#5 did not say why it kept its old code: $(cat "$STUB/serve.out")"
+  [ ! -e "$STUB/newcode" ] || fail "#5 ran $N's code: $(cat "$STUB/newcode")"
+  kill $pid; wait $pid 2>/dev/null; return 0
 }
 
 # The owner, 2026-11-14: a power cut left five cards open for good, each listed stuck, the restarted loop not picking

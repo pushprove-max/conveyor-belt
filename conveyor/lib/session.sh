@@ -450,7 +450,14 @@ apitries() { # <worktree> <step> <output file> <command ...>
     sleep "$w"
   done
 }
-session() { apitries "$1" "${3:-build}" "$1.out" session1 "$@"; } # <worktree> <prompt> [step: build (when none is given), fix or rebase]
+session() { local p=$2; newtexts p; apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"; } # <worktree> <prompt> [step: build (when none is given), fix or rebase]
+# The texts of a card's prompts that its old code made, each with the one the new code makes in its place, in the
+# order of its switches (switchcode(), lib/card.sh); newtexts() puts the new ones in a prompt, in that order.
+SWAPOLD=() SWAPNEW=()
+newtexts() { # <the name of a variable that holds a prompt>
+  local -n fr=$1; local i
+  for i in "${!SWAPOLD[@]}"; do fr=${fr//"${SWAPOLD[i]}"/"${SWAPNEW[i]}"}; done
+}
 # The builder program, the one seat() names for the model (its agent: the CLI the control record names, or the one the
 # pack's models.allowed lists the model under): OpenCode, Codex or Claude Code. Run in the background (watch() follows it), so it
 # execs the program in its own subshell, which a stall's kill ends, behind the words session1 puts it on the cores left for card work with (KEEP).

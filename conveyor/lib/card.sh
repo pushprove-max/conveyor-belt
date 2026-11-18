@@ -6,7 +6,96 @@
 # Before the worktree, the rule Split large issues checks the card's issue (splitcheck(), lib/slices.sh): an issue it
 # splits ends its card there, closed, its slices filed.
 . "$HERE/lib/slices.sh" || exit 1
-began() { rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"; record "$1" "$2" start ok "{\"of\":\"$3\"}"; } # <card> <issue> <what begins>
+began() { # <card> <issue> <what begins>
+  local e=''
+  switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"
+  # A card on the code of a commit it switched to: its start line names that commit, so prune() (inflight(),
+  # lib/install.sh) keeps its install while the card runs; its worktree line names the commit it started on.
+  [ -z "$RAN" ] || [ "$RAN" != "${CODESEEN:-}" ] || e=",\"engine\":\"$RAN\""
+  record "$1" "$2" start ok "{\"of\":\"$3\"$e}"
+}
+# The form of the files a card saves for its steps (<worktree>.review, .test, .ready, .rerun and the rest): a commit
+# whose code cannot read the files that the code before it saved raises it, and a running card then keeps its old
+# code (switchcode()).
+STEPFILES=1
+# A card the loop runs, at the start of each step (began()): when the loop runs a newer Conveyor commit than the card
+# (loop.json; a loop that takes a commit stays the same process, as run() restarts by exec, so its pid is the card's
+# $$), the card goes on with that commit's code from this step. The commit's engine files are loaded into the card's
+# own process between two steps, never in a session: its worktree, claim, passed steps and their results stay as they
+# are, and no passed step runs again. What the card set while it ran stays: a variable or function takes the new value
+# only where the new files load another value than the old files do (codediff()). The parts of the card's prompts and
+# settings that the engine made when the card started are made again by the new code: its settings file (the hooks,
+# from the new install), and the card's rules, its header and the engine's review texts in each prompt a session or
+# review is given from then on: switchcode() keeps each old text with its new one (SWAPOLD, SWAPNEW) and session()
+# and review() put the new one in its place (newtexts()), so a copy of the prompt a function was handed before the
+# switch gets them too. The rules and header are the ones card() made (its rules and hdr: began() runs only in card()).
+# A function that is running (card(), and settle() or began() under it) goes on in its old body to its end, as bash
+# runs it: so the card keeps its old code, and says why once, when the new code changes one of them, reads another
+# form of step files (STEPFILES), or its files do not load or do not make the card's rules, header and settings.
+# shellcheck disable=SC2034 # CONVEYOR_MAIN and NAMED: read by paths.sh and names() (lib/prompts.sh)
+switchcode() { # <card> <the step it begins>
+  local s p d v old why='' tmp f i k o=() nv=()
+  s=$(jq -r --argjson p "$$" 'select(.pid == $p) | [.commit // "", .checkout // ""] | @tsv' "$SAYS" 2>/dev/null) || return 0
+  IFS=$'\t' read -r p d <<<"$s"
+  [ -n "$p" ] && [ -n "$RAN" ] && [ "$p" != "$RAN" ] && [ "$p" != "${CODESEEN:-}" ] || return 0
+  CODESEEN=$p; [ -n "$d" ] || d=$VERSIONS/$p/conveyor
+  v=$(sed -n 's/^STEPFILES=\([0-9][0-9]*\)$/\1/p' "$d/lib/card.sh" 2>/dev/null)
+  tmp=$(mktemp -d) || return 0
+  # The old code's files, to compare with: an install's own folder, or the checkout's engine folder at the card's
+  # commit (git archive, run in a folder of the checkout, gives that folder's files alone).
+  if [ -n "$OWN" ]; then old=$HERE
+  else old=$tmp/old; mkdir "$old" && git -C "$HERE" archive -o "$tmp/old.tar" "$RAN" && tar -xf "$tmp/old.tar" -C "$old" || old=''; fi
+  if [ "$v" != "$STEPFILES" ]; then why="the new code cannot read the step files that the old code saved (form $STEPFILES; the new code reads form ${v:-none})"
+  elif [ -z "$old" ] || ! ( CONVEYOR_MAIN=$MAIN; codediff "$old" "$d" ) > "$tmp/load" 2>/dev/null || ! ( . "$tmp/load" && NAMED='' && names ) >/dev/null 2>&1; then
+    why="the new code's engine files did not load"
+  else
+    # The functions running now, from began() up to card(): declare -f heads each one the new code changes "<name> () ".
+    for f in "${FUNCNAME[@]:1}"; do
+      ! grep -qxF "$f () " "$tmp/load" || { why="the new code changes $f(), which the card is running in"; break; }
+      [ "$f" != card ] || break
+    done
+    [ -n "$why" ] || ( . "$tmp/load" && NAMED='' && names && cardrules "$issue" > "$tmp/rules" && header "$vrule" > "$tmp/hdr" && cardsettings "$tmp/settings" ) >/dev/null 2>&1 \
+      || why=${why:-"the new code could not make the card's rules, header and settings"}
+  fi
+  if [ -z "$why" ]; then
+    # The texts card() made its prompts of, before the switch and after it: its header and rules, and the review
+    # texts its rv is made of (KINDS with the kinds judgeon names now). After the next switch, its new ones are old.
+    k=$(judgeon 2>/dev/null) && [ "$k" != '[]' ] && k=$(jq -r 'join(", ")' <<<"$k") || k=''
+    o=("$hdr" "$rules" "$REVIEWOFF" "$REVIEW" "$INHERIT" "$HELD" "${k:+${KINDS//'<kinds>'/"$k"}}")
+    . "$tmp/load"; NAMED=''; names >/dev/null 2>&1
+    nv=("$(<"$tmp/hdr")" "$(<"$tmp/rules")" "$REVIEWOFF" "$REVIEW" "$INHERIT" "$HELD" "${k:+${KINDS//'<kinds>'/"$k"}}")
+    for i in "${!o[@]}"; do [ -z "${o[i]}" ] || [ "${o[i]}" = "${nv[i]}" ] || { SWAPOLD+=("${o[i]}"); SWAPNEW+=("${nv[i]}"); }; done
+    mv -f "$tmp/settings" "$CARDS/$1.settings"
+    hdr=${nv[0]}; rules=${nv[1]}
+  fi
+  rm -rf "$tmp"
+  if [ -n "$why" ]; then echo "conveyor: card $1: Conveyor took commit $p; the card goes on with its old code, commit $RAN: $why"
+  else echo "conveyor: card $1: Conveyor took commit $p; the card goes on with the new code from its $2 step, and no passed step runs again"; fi
+}
+# The engine files of an engine folder, loaded into this shell as `serve` loads them (conveyor.sh, commands/serve.sh).
+# shellcheck disable=SC1090 # the engine folder is named at run time
+codeload() { # <engine folder>
+  local f
+  HERE=$1; . "$1/lib/portable.sh" && . "$1/lib/paths.sh" serve && . "$1/lib/records.sh" serve || return 1
+  for f in $(sed -n 's/^\. "\$HERE\/\(lib\/[a-z]*\.sh\)" || exit 1$/\1/p' "$1/commands/serve.sh"); do . "$1/$f" serve || return 1; done
+}
+# In a subshell of the card: the declarations, to load with `.`, of what the new folder's engine files load other than
+# the old folder's do: the variables named in capitals (the engine's own; the rest are the shell's or a function's)
+# and the functions. A top-level declare in an engine file needs -g, as this loads inside a function.
+codediff() { # <old engine folder> <new engine folder>
+  local n d wd=$PWD sh='BASH.*|EPOCH.*|S?RANDOM|SECONDS|LINENO|PIPESTATUS|FUNCNAME|PWD|OLDPWD|OPTIND|OPTARG|PPID|UID|EUID|GROUPS|DIRSTACK|HISTCMD|SHLVL|COLUMNS|LINES|IFS'
+  local -A was=()
+  # Both from the card's folder: records.sh moves into the main checkout, and paths.sh and records.sh read where they start.
+  codeload "$1" >/dev/null 2>&1 && cd "$wd" || return 1
+  for n in $(compgen -v | grep -xE '[A-Z][A-Z0-9_]*' | grep -vxE "$sh"); do was[v$n]=$(declare -p "$n" 2>/dev/null); done
+  for n in $(compgen -A function); do was[f$n]=$(declare -f "$n"); done
+  codeload "$2" >/dev/null 2>&1 || return 1
+  for n in $(compgen -v | grep -xE '[A-Z][A-Z0-9_]*' | grep -vxE "$sh"); do
+    d=$(declare -p "$n" 2>/dev/null) && [ "$d" != "${was[v$n]-}" ] && [[ ! $d =~ ^declare\ -[a-zA-Z]*r ]] || continue
+    case $d in "declare -- "*) printf '%s\n' "declare -g ${d#declare -- }" ;; *) printf '%s\n' "declare -g${d#declare -}" ;; esac
+  done
+  for n in $(compgen -A function); do d=$(declare -f "$n"); [ "$d" = "${was[f$n]-}" ] || printf '%s\n' "$d"; done
+}
 # A main-red fix card (issue 0, no branch): a case found failing on its commit while it runs (mainred()) joins its
 # brief. card() calls this right before each session, review, judge, settle() and land, as a case can come at any time
 # (during a review too, with the fix session straight after it). Sets card()'s issue and sprompt. A case that joined
