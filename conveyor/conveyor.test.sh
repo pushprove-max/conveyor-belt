@@ -28,7 +28,9 @@ unset CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_TIMES
 for CASE in $SEL; do case " $ALL " in *" $CASE "*) ;; *) echo "unknown case $CASE" >&2; exit 2 ;; esac; done
 # As many cases at once as it gets of the machine's test slots (lib/slots.sh), never a number of its own: a case
 # starts once the runner holds a slot for it (the run's home slot, or one of the pool), and the slot is the case's from
-# there (run_case). The slowest (conveyor.slowest) start first. What the runner does before its first case and after its
+# there (run_case). A run started inside a card's session gets at most the pack's tunables.sessionTestSlots of them
+# (slot_session, read by slot_pool in tests/lib.sh before that file unsets the session's mark). The slowest
+# (conveyor.slowest) start first. What the runner does before its first case and after its
 # last starts no program a case (a grep or cat each): 300 of each held a whole-suite run up for about 1.3 s.
 FIRST=$(for CASE in $(sed -n 's/^\([a-z0-9]*\) .*/\1/p' "$SRC/conveyor.slowest"); do case " $SEL " in *" $CASE "*) echo "$CASE" ;; esac; done)
 REST=$(for CASE in $SEL; do case $'\n'$FIRST$'\n' in *$'\n'$CASE$'\n'*) ;; *) echo "$CASE" ;; esac; done)

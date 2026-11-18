@@ -40,6 +40,8 @@ Some pack settings that this site names:
   example `npm ci`. Use it in place of `linkFromMain` when a card can change a lockfile. When it fails, the card is
   blocked with the end of its output.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
+- `tunables.sessionTestSlots`: the most test slots that a test run in a card's build, fix or rebase session holds at
+  one time. The default is 2. The loop's own test step keeps its full share.
 - `push.landAs`: the rule Land as, `main` (the default) or `pr`, until the control record sets it ([Land
   as](#land-as)).
 - `prices`: your model prices, added models and aliases, by model ID. Set them on the Board's Rules tab (Model

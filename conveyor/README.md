@@ -292,7 +292,9 @@ starts without a slot of their own share that one core, and one that cannot be p
 `CONVEYOR_TEST_SLOTS` names and, for each worker, calls `slot_pool` once, then `slot_take` before the worker,
 `slot_mine` in it and `slot_free` after starting it. When Conveyor runs a card's failing tests on main next to the
 controls, it sets `CONVEYOR_TEST_ONESLOT`: `slot_take` then gives each worker the run's own slot, one at a time, so
-the controls and the failing tests use the same core.
+the controls and the failing tests use the same core. A test run that a card's build, fix or rebase session starts
+holds at most the pack's `tunables.sessionTestSlots` slots at once (default 2), so one session cannot fill the
+machine while other cards build. The loop's own test step, the check on main and a release run keep their share.
 
 A card with no slot waits before its tests start, and the Board says "waiting for a test slot (n of N in use)". The
 wait does not count against its test timeout. Builds and reviews take no slot.

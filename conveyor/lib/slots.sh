@@ -91,11 +91,48 @@ slot_pool() {
     [ -e "$SLOT_DIR/$f" ] || : >> "$SLOT_DIR/$f" || { echo "conveyor: the test slot $SLOT_DIR/$f cannot be made: no test can take a slot" >&2; return 1; }
   done
   SLOT_ONE=${CONVEYOR_TEST_ONESLOT:-}; SLOT_HOME=''; SLOT_HOME_K=''; SLOT_TURN=${fd#"${fd%%.*}"}; fd=${fd%%.*}
+  slot_session || return 1
   case $fd in ''|*[!0-9]*) return 0 ;; esac
   # Only slots 1 to SLOT_N: a numbered file of the folder beyond them (a slot of a larger pool, since cut) is no slot.
   for ((f = 1; f <= SLOT_N; f++)); do
     if [ "/dev/fd/$fd" -ef "$SLOT_DIR/$f" ] && flock -n "$fd" 2>/dev/null; then SLOT_HOME=$fd; SLOT_HOME_K=$f; break; fi
   done
+}
+
+# A test run started inside a card's build, fix or rebase session (CONVEYOR_CARD, which builder() in lib/session.sh
+# exports to the session) holds at most the pack's tunables.sessionTestSlots of the pool's slots at once, however
+# many it could get: one session's run of 342 cases held about 12 slots while five other cards built, and slowed
+# them all. The loop's own test step, the check on main and a release run carry no mark and keep their share. Sets
+# SLOT_CAP, the folder of the card's permits ($SLOT_DIR/session/<card>, one file each, shared by every run of the
+# session), empty for a run with no mark; slot_take, and slot_whole for a home slot, take a permit before each slot of the pool (slot_permit), and
+# SLOT_CAPFD, a permit's descriptor inherited from the worker that started this run, is no permit of this run's. The pack is the
+# one of the checkout the run is started in; with none that can be read, the cap is 2. SLOT_LIB, this file's folder
+# as a full path, is read as the file is sourced: a case's keeper defines these functions again from a copy of them
+# (tests/lib.sh run_case), where BASH_SOURCE names no file of the engine's.
+SLOT_LIB=.; [[ ${BASH_SOURCE[0]} != */* ]] || SLOT_LIB=${BASH_SOURCE[0]%/*}; [[ $SLOT_LIB == /* ]] || SLOT_LIB=$PWD/$SLOT_LIB
+slot_session() {
+  local n i
+  SLOT_CAP=''; SLOT_CAPN=0; SLOT_CAPFD=''
+  [ -n "${CONVEYOR_CARD:-}" ] || return 0
+  n=$(bash "$SLOT_LIB/pack.sh" get tunables.sessionTestSlots 2>/dev/null) && [[ $n =~ ^[1-9][0-9]{0,5}$ ]] || n=2
+  SLOT_CAP=$SLOT_DIR/session/${CONVEYOR_CARD//[!A-Za-z0-9._-]/_}
+  mkdir -p "$SLOT_CAP" || { echo "conveyor: the session's test slot permits folder $SLOT_CAP cannot be made: no test can take a slot" >&2; return 1; }
+  for ((i = 1; i <= n; i++)); do
+    [ -e "$SLOT_CAP/$i" ] || : >> "$SLOT_CAP/$i" || { echo "conveyor: the session's test slot permit $SLOT_CAP/$i cannot be made: no test can take a slot" >&2; return 1; }
+  done
+  SLOT_CAPN=$n
+}
+
+# Takes a permit of the session's (slot_session) that is free now: SLOT_CAPFD is the descriptor that holds it, which
+# the worker inherits with its slot's, so the permit comes back when the slot does. 1 when none is free.
+slot_permit() {
+  local i
+  for ((i = 1; i <= SLOT_CAPN; i++)); do
+    { exec {SLOT_CAPFD}>>"$SLOT_CAP/$i"; } 2>/dev/null || continue
+    flock -n "$SLOT_CAPFD" && return 0
+    exec {SLOT_CAPFD}>&-
+  done
+  SLOT_CAPFD=''; return 1
 }
 
 # The Test step's word for a card that waits for a slot: how many of the pool are held.
@@ -188,15 +225,19 @@ slot_asked() {
 # (asked five times a second, so the next worker starts as the one before it ends), else a slot of the pool. A run
 # told to keep to one slot (CONVEYOR_TEST_ONESLOT, read by slot_pool: the run of a card's failing cases on main beside
 # the controls, verdicts() in lib/testrun.sh) never takes one of the pool: its workers run one at a time on its home
-# slot, so a control that passes there passed on the slot of every failing case.
+# slot, so a control that passes there passed on the slot of every failing case. A run in a card's session
+# (slot_session) holds a permit of the session's for each slot of the pool it takes, and waits for one before it
+# takes one; a turn on its home slot, a slot it holds already, needs none (a runner a worker of the session's run
+# starts, whose permits that run's workers hold, then runs its workers one at a time on its home slot).
 slot_take() {
   local i=0
   while :; do
     if [ -n "$SLOT_HOME" ] && { exec {SLOT_FD}>>"$SLOT_DIR/$SLOT_HOME_K$SLOT_TURN.t"; } 2>/dev/null; then
-      flock -n "$SLOT_FD" && { SLOT_K=$SLOT_HOME_K; SLOT_ENV=$SLOT_HOME$SLOT_TURN.t; return 0; }
+      flock -n "$SLOT_FD" && { SLOT_K=$SLOT_HOME_K; SLOT_ENV=$SLOT_HOME$SLOT_TURN.t; [ -z "${SLOT_CAPFD:-}" ] || { exec {SLOT_CAPFD}>&-; SLOT_CAPFD=''; }; return 0; }
       exec {SLOT_FD}>&-
       [ -z "${SLOT_ONE:-}" ] || { sleep 0.2; continue; }
     fi
+    [ -z "${SLOT_CAP:-}" ] || [ -n "${SLOT_CAPFD:-}" ] || slot_permit || { sleep 0.2; continue; }
     if [ $((i++ % 5)) = 0 ] && slot_try; then return 0; fi
     slot_wait 0.2 && return 0
   done
@@ -233,6 +274,10 @@ slot_whole() {
   case $fd in ''|*[!0-9]*) ;; *)
     for t in "$d"/[0-9]*; do [ "/dev/fd/$fd" -ef "$t" ] && flock -n "$fd" 2>/dev/null && return 0; done ;;
   esac
+  # A run in a card's session with no slot yet waits for a permit of its session's (slot_session) before it asks for
+  # a turn: a ticket left empty while it waits for a permit would make every run that asked after it, the check on
+  # main too, wait behind it while turns and slots are free.
+  while [ -n "${SLOT_CAP:-}" ] && [ -z "$SLOT_HOME" ] && [ -z "${SLOT_CAPFD:-}" ] && ! slot_permit; do sleep 0.5; done
   { exec {l}>>"$d/lock"; } 2>/dev/null || { echo "conveyor: the whole-suite turns lock $d/lock cannot be opened" >&2; return 1; }
   flock "$l"
   # Above every number given out (next) and every ticket still there, so a lost next file puts no run ahead of one
@@ -268,7 +313,11 @@ slot_whole() {
     flock -u "$l"
     if [ -z "$SLOT_HOME" ] && [ -n "$first" ]; then
       if [ -n "$gave" ]; then flock -w 0.5 "$gave" && SLOT_HOME=$gave SLOT_HOME_K=$gk gave=''
-      elif slot_try || slot_wait 0.5; then SLOT_HOME=$SLOT_FD SLOT_HOME_K=$SLOT_K SLOT_TURN=''
+      elif slot_try || slot_wait 0.5; then
+        # A home slot of the pool in a card's session holds a permit (slot_session) as long as the run holds the slot:
+        # the turns slot_take gives on it take none. SLOT_CAPFD is emptied, not closed, so slot_take and slot_free,
+        # which close SLOT_CAPFD, leave the permit's descriptor open.
+        SLOT_HOME=$SLOT_FD SLOT_HOME_K=$SLOT_K SLOT_TURN='' SLOT_CAPFD=''
       fi
       [ -z "$SLOT_HOME" ] || { flock "$l"; echo s > "$d/$n"; flock -u "$l"; continue; }
     fi
@@ -284,10 +333,11 @@ slot_whole() {
 
 # Run by a worker as it starts, in its own process: what it starts is told the slot it holds, and it is pinned to
 # the slot's core, with all it starts. A worker that cannot be pinned there would share another slot's core: it ends
-# here, before its work starts.
+# here, before its work starts. A worker holds its session's permit (slot_permit) but takes none for the runners it
+# starts: the slot it holds is theirs (SLOT_CAP emptied).
 slot_mine() {
   local c
-  export CONVEYOR_TEST_SLOT=$SLOT_ENV
+  export CONVEYOR_TEST_SLOT=$SLOT_ENV; SLOT_CAP=''
   [ -n "$SLOT_CPUS" ] || return 0
   read -ra c <<<"$SLOT_CPUS"
   [ -n "${c[SLOT_K - 1]:-}" ] && taskset -cp "${c[SLOT_K - 1]}" "$BASHPID" >/dev/null 2>&1 \
@@ -330,7 +380,7 @@ slot_left() { # <process group>
 slot_watch() { # <mark>
   local f g
   trap '' TERM
-  closefds "$SLOT_FD"
+  closefds "$SLOT_FD" ${SLOT_CAPFD:+"$SLOT_CAPFD"} # the session's permit too (slot_permit)
   read -r g; cat > /dev/null
   # The processes' environments are read into a variable: a search started for the mark would carry it itself.
   while pgrep -g "${g:-none}" >/dev/null 2>&1 || { f=$(ps axeww -o pid= -o command= 2>/dev/null); [[ $f == *" $1"* ]]; }; do sleep 0.5; done
@@ -338,7 +388,7 @@ slot_watch() { # <mark>
 
 # Closes the runner's own descriptor of the slot, once the worker it started holds it too: the slot is then the
 # worker's, and comes back when the worker and all it started have ended.
-slot_free() { exec {SLOT_FD}>&-; }
+slot_free() { exec {SLOT_FD}>&-; [ -z "${SLOT_CAPFD:-}" ] || { exec {SLOT_CAPFD}>&-; SLOT_CAPFD=''; }; }
 
 # How many slots of the pool are held now.
 slot_used() {

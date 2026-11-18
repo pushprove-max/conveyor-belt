@@ -32,6 +32,7 @@
 {"area": "slots", "test": "mutate.test.sh"}
 {"area": "slots", "test": "inheritedfds.test.sh"}
 {"area": "slots", "test": "reserve.test.sh"}
+{"area": "slots", "test": "sessionslots.test.sh"}
 {"area": "slots", "file": "conveyor/lib/slots.sh"}
 {"area": "prompts", "test": "rules.test.sh"}
 {"area": "prompts", "test": "checkrun.test.sh"}
