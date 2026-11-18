@@ -667,8 +667,11 @@ card() { # <card> <issue> [<branch> <tip>]
         [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$old" ] && [ "$t" = 0 ] || continue
       fi
       while :; do
-        # An ordered card went past this one since its claim (it holds its files only from its landing step, so that is
-        # where it is passed): it claims again, waits for that card, and is reviewed again when main moved meanwhile.
+        # An ordered or a ready card went past this one since its claim (it holds its files only from its landing step,
+        # so that is where it is passed): it claims again, waits for that card, and is fitted onto main as that card
+        # left it. Gone past by an ordered card, it is reviewed again when main moved meanwhile; gone past only by ready
+        # cards (claim(): fit), only when the fit changed its change, and its tests run again only where the cards that
+        # landed touch its test files (sharedtests()).
         # land() reads the same mark under the lock, so a card passed after this reading does not land: it comes back here.
         # A card that tested in a batch is tested again after it.
         if jq -e '.passed == true' "$wt.claim" >/dev/null 2>&1; then

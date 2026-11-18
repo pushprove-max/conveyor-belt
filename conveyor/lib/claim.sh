@@ -19,12 +19,18 @@
 # waits while another card holds one of its files, older or younger, or while a card that goes before it waits for one
 # of them. A card whose issue is in the control record's order list (an ordered card) does not wait for a holder that
 # is not ordered: it claims the files and goes on, and that card waits for it at its own next claim (before it
-# lands); two ordered cards never go past each other. Among waiting cards with no holder, an
-# ordered card goes before any other, the earlier in order first, and otherwise the older pick (its picked line comes
+# lands); two ordered cards never go past each other. A ready card lands first (the owner, 2026-11-18): a card whose
+# tests passed on the change it holds on main (readysince(), its change fitting main as it is now: ready()) does not
+# wait for a holder of the same rank in order whose tests have not passed, or passed later: it claims the files and
+# goes on, and that card waits for it at its own next claim, then is fitted onto main with its change (settle()),
+# marked fit, so it is reviewed again only when the fit changed its change. Among waiting cards with no holder, an
+# ordered card goes before any other, the earlier in order first, then a card whose tests passed before one whose
+# tests have not, the one whose tests passed first (since) first, and otherwise the older pick (its picked line comes
 # first) goes first. This prints {on: that card, paths: the files they share}, naming of several such cards the one
-# that goes first (an ordered one before any other). A card that is ready (ready()) does not wait for an older waiting card
-# that is not ready and does not go before it in order: that card could not land yet anyway. So of the cards whose changes do not apply together, only one at a time is past its claim on a file, even when a fix adds a file
-# another card holds, except while an ordered card has gone past a card that is not; landing stays one at a time under
+# that goes first (an ordered one before any other). A card that is ready (ready()) does not wait for a waiting card
+# that goes before it only by those tests or its pick and is not ready: that card could not land yet anyway. So of the
+# cards whose changes do not apply together, only one at a time is past its claim on a file, even when a fix adds a file
+# another card holds, except while an ordered or a ready card has gone past a card that is not; landing stays one at a time under
 # the lock. A waiting card holds nothing, so two cards never wait on
 # each other. A card that gave way (giveway(): away) holds nothing and waits for no card until it claims the files
 # again: a card that is ready (ready()) goes past it, and one that is not waits for it as for a holder until it is
@@ -32,7 +38,7 @@
 # and have not yet claimed the files, and stays away. Its claims keep its count of give-ways (gave). The card that
 # claims the files of one that gave way is named on it (to: its issue), for the Board and its live record (watch()).
 claim() { # <card> <worktree> <the card's pid>; under the lock
-  local mine others o c w ord passed gave away for='[]' apart='[]' notready=0 unready='[]' stk t
+  local mine others o c w ord passed fit gave away for='[]' apart='[]' notready=0 unready='[]' stk t ms=null rdy='{}'
   ord=$(ctl 2>/dev/null) && ord=$(jq -c .order <<<"$ord") || ord='[]'
   away=$(jq -c 'select(.away == true) | {away, for: (.for // [] | arrays), to: (.to // null), fixing: (.fixing == true)}' "$2.claim" 2>/dev/null) && [ -n "$away" ] || away='{"for": []}'
   # This runs every turn of a wait (settle()), so it starts no program whose answer is known (#532): a card not away
@@ -72,29 +78,45 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
     # Ready, it does not wait behind a waiting card that shares its files and is not ready (it may wait on a card away).
     [ $notready = 1 ] || unready=$(jq -r --argjson m "$mine" '.[] | select(.held != true and (.paths - (.paths - $m)) != []) | .card' <<<"$others" \
       | while IFS= read -r o; do [ ! -d "$CARDS/$o" ] || ready "$CARDS/$o" || printf '%s\n' "$o"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
+    # When its tests passed (ms, readysince(); null when they have not or its change no longer fits main), and those of
+    # each card that shares its files (rdy: {card: since}), for which goes first.
+    [ $notready = 1 ] || ms=$(readysince "$2") || ms=null
+    rdy=$(jq -r --argjson m "$mine" '.[] | select((.paths - (.paths - $m)) != []) | .card' <<<"$others" \
+      | while IFS= read -r o; do ! t=$(readysince "$CARDS/$o") || printf '%s\t%s\n' "$o" "$t"; done \
+      | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}') || return 1
   fi
-  w=$(stdb ask lines cards | jq -cn --argjson mine "$mine" --argjson o "$others" --arg me "$1" --argjson ord "$ord" --argjson for "$for" --argjson un "$unready" \
+  w=$(stdb ask lines cards | jq -cn --argjson mine "$mine" --argjson o "$others" --arg me "$1" --argjson ord "$ord" --argjson for "$for" --argjson un "$unready" --argjson ms "$ms" --argjson rdy "$rdy" \
       '[inputs] as $all | [$all[] | select(.step == "picked")] as $p | ($p | map(.card)) as $order | ($ord | length) as $n
       | [$all[] | select(.step | IN("landed", "closed", "blocked")) | .card] as $ended
       | def at($c): $order | index($c) // -1;
         def rank($c): ($p | map(select(.card == $c)) | first | .issue) as $i | ($ord | index($i)) // $n;
+        def rs($c): if $c == $me then $ms else $rdy[$c] end;
+        def key($c): [rank($c), (rs($c) == null), (rs($c) // 0), at($c)];
       rank($me) as $r
-      | [$o[] | select(at(.card) >= 0 and (.card | IN($ended[]) | not)) | . + {shared: (.paths - (.paths - $mine))} | select(.shared != [])] as $s
-      | ([$s[] | select(if .held == true then $r == $n or rank(.card) < $n else [rank(.card), at(.card)] < [$r, at($me)] and (rank(.card) < $r or (.card | IN($un[]) | not)) or (.card | IN($for[])) and rank(.card) <= $r end)]
-        | min_by([rank(.card), at(.card)])) as $w
-      | if $w then {on: $w.card, paths: $w.shared} else {past: [$s[] | select(.held == true) | .card]} end') || return 1
-  # w is {"on":…} (the card it waits on) or {"past":[…]} (the cards it went past), as jq -c prints them.
+      # A holder it goes past as a ready card (fit): of its rank, its tests not passed, or passed after its own.
+      | def fit($c): $ms != null and rank($c) == $r and key($c) > key($me);
+      [$o[] | select(at(.card) >= 0 and (.card | IN($ended[]) | not)) | . + {shared: (.paths - (.paths - $mine))} | select(.shared != [])] as $s
+      | ([$s[] | select(if .held == true then ($r == $n or rank(.card) < $n) and (fit(.card) | not) else key(.card) < key($me) and (rank(.card) < $r or (.card | IN($un[]) | not)) or (.card | IN($for[])) and rank(.card) <= $r end)]
+        | min_by(key(.card))) as $w
+      | if $w then {on: $w.card, paths: $w.shared} else {past: [$s[] | select(.held == true and (fit(.card) | not)) | .card], fit: [$s[] | select(.held == true and fit(.card)) | .card]} end') || return 1
+  # w is {"on":…} (the card it waits on) or {"past":[…],"fit":[…]} (the cards it went past, as an ordered card and as
+  # a ready one), as jq -c prints them. One an ordered card went past is reviewed again (was, settle()); one only ready
+  # cards went past is marked fit, and is not.
   case $w in
     '{"on":'*) ;;
-    *) [ "$w" = '{"past":[]}' ] || for o in $(jq -r '.past[]?' <<<"$w"); do
-         { jq -c '. + {passed: true}' "$CARDS/$o.claim" > "$CARDS/$o.claim.new" && mv -f "$CARDS/$o.claim.new" "$CARDS/$o.claim"; } 2>/dev/null || :
+    *) [ "$w" = '{"past":[],"fit":[]}' ] || for o in $(jq -r '.past[]?' <<<"$w"); do
+         { jq -c '. + {passed: true} | del(.fit)' "$CARDS/$o.claim" > "$CARDS/$o.claim.new" && mv -f "$CARDS/$o.claim.new" "$CARDS/$o.claim"; } 2>/dev/null || :
+       done
+       [ "$w" = '{"past":[],"fit":[]}' ] || for o in $(jq -r '.fit[]?' <<<"$w"); do
+         { jq -c '.fit = (.passed != true or .fit == true) | .passed = true' "$CARDS/$o.claim" > "$CARDS/$o.claim.new" && mv -f "$CARDS/$o.claim.new" "$CARDS/$o.claim"; } 2>/dev/null || :
        done
        w='' ;;
   esac
   passed=$(jq -c '.passed == true' "$2.claim" 2>/dev/null) || passed=false
+  fit=$(jq -c '.passed == true and .fit == true' "$2.claim" 2>/dev/null) || fit=false
   gave=$(jq -c '.gave // 0 | numbers' "$2.claim" 2>/dev/null) && [ -n "$gave" ] || gave=0
-  jq -cn --argjson p "$3" --argjson m "$mine" --argjson h "$([ -z "$w" ] && echo true || echo false)" --argjson was "$passed" --argjson g "$gave" --argjson a "$away" \
-    '{pid: $p, paths: $m, held: $h, gave: $g} + if $h then {was: $was} else {passed: $was} + (($a | select(.away) | . + {back: true}) // {}) end' > "$2.claim.new" && mv -f "$2.cpatch.new" "$2.cpatch" && mv -f "$2.claim.new" "$2.claim" || return 1
+  jq -cn --argjson p "$3" --argjson m "$mine" --argjson h "$([ -z "$w" ] && echo true || echo false)" --argjson was "$passed" --argjson f "$fit" --argjson g "$gave" --argjson a "$away" \
+    '{pid: $p, paths: $m, held: $h, gave: $g} + if $h then {was: ($was and ($f | not))} else {passed: $was} + (if $f then {fit: true} else {} end) + (($a | select(.away) | . + {back: true}) // {}) end' > "$2.claim.new" && mv -f "$2.cpatch.new" "$2.cpatch" && mv -f "$2.claim.new" "$2.claim" || return 1
   if [ -z "$w" ] && [[ ${1##*-} =~ ^[0-9]+$ ]]; then
     for o in "$CARDS"/*.claim; do
       c=${o##*/}
@@ -293,12 +315,18 @@ giveway() { # <card> <worktree> [fixing|fix]; under the lock
 # more: it is fitted onto main alone and lands, and H is brought onto it after its fix. When H's kept change changes
 # after the stack (or the card is to wait on another card), the card is stacked again once; after that it waits, as a
 # card did before stacking. A card whose
-# issue names H's in a `Depends on:` line only waits. <worktree>.stack: {on: H, id: git patch-id of H's change at the
+# issue names H's in a `Depends on:` line only waits. Nor is a card stacked on an H of its rank in the control record's
+# order list (claim()) whose tests have not passed (readysince()): it waits running its own on main (settle()), and
+# once they passed it goes past H and lands first (claim(): a ready card lands first). <worktree>.stack: {on: H, id: git patch-id of H's change at the
 # stack, base: the base commit, restacks}. Prints the base when the card is to be stacked now; else returns 1.
 stackto() { # <card> <worktree> <claim()'s wait> <issue json>
-  local h n id s d b rc
-  h=$(jq -r .on <<<"$3") && [[ ${h##*-} =~ ^[0-9]+$ ]] && packget landBatch n && [ "$n" -gt 1 ] || return 1
+  local h n id s d b rc o
+  h=$(jq -r .on <<<"$3") && [[ ${h##*-} =~ ^[0-9]+$ ]] && [[ ${1##*-} =~ ^[0-9]+$ ]] && packget landBatch n && [ "$n" -gt 1 ] || return 1
   jq -e --argjson h $((10#${h##*-})) "$DEPS"' needs | index($h) | not' <<<"$4" >/dev/null 2>&1 || return 1
+  if ! readysince "$CARDS/$h" >/dev/null; then
+    o=$(ctl 2>/dev/null) && o=$(jq -c '.order | arrays' <<<"$o") && [ -n "$o" ] || o='[]'
+    jq -e --argjson a $((10#${1##*-})) --argjson b $((10#${h##*-})) '(index($a) // -1) != (index($b) // -1)' <<<"$o" >/dev/null || return 1
+  fi
   d=$(mktemp -d) || return 1
   cp "$CARDS/$h.cpatch" "$d/patch" 2>/dev/null && id=$(git patch-id --stable < "$d/patch") && id=${id%% *} && [ -n "$id" ] || { rm -rf "$d"; return 1; }
   n=0; s=$(jq -c objects "$2.stack" 2>/dev/null) || s=''
@@ -488,7 +516,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
 # Batches. The test step runs 10 to 25 minutes, so cards that share files and are ready to land land together, on one
 # test run. A card ready to land: one whose own product checks and changed tests passed after a GO, its message and
 # commit trailers written (<worktree>.ready: {issue, msg, extra, tested, tree and head: the tree and commit they passed on, since: when
-# they passed; alone: a card that files a last NO-GO's follow-ups, never in a batch}), gone past by no ordered card since: one that waits at its landing claim (settle(); not one away,
+# they passed; alone: a card that files a last NO-GO's follow-ups, never in a batch}), gone past by no ordered or ready card since: one that waits at its landing claim (settle(); not one away,
 # giveway()), or the card whose turn it is (card()). When a
 # card's turn to land comes and it is ready, it takes every ready card that shares a file with it or with one taken
 # before it, in turn, up to the pack's landBatch cards in all, never one that shares a file with another card that
@@ -508,6 +536,13 @@ tested() { [ ! -e "$1.ready" ] || { jq -c --arg t "$(git -C "$1" write-tree)" --
 # change that passed its tests and still applies to a main that moved is not tested again; each landing made every
 # other card run its tests anew, and one card landed per test run), save for sharedtests() below.
 testedhere() { jq -e --arg p "$(cardpatch "$1")" '.tested == true and $p != "" and .patch == $p' "$1.ready" >/dev/null 2>&1; } # <worktree>
+# When its tests passed (since, tested()), for a card whose tests passed on the change it holds (testedhere()), not on
+# a stack's base (stackto(): there they ran with another card's change); fails for any other card (claim()).
+readysince() { # <worktree>
+  local s
+  s=$(jq -e 'select(.tested == true) | .since | numbers' "$1.ready" 2>/dev/null) && testedhere "$1" \
+    && ! jq -e --arg h "$(git -C "$1" rev-parse HEAD 2>/dev/null)" '.base == $h' "$1.stack" >/dev/null 2>&1 && printf '%s\n' "$s"
+}
 # The test files that the staged change at <worktree> and the change main made from <the commit its tests ran on> to
 # the worktree's HEAD both touch, one a line; fails when there are none, or when HEAD is that commit or none is given.
 # The change's: testsel() narrow of it, and the files its runs passed (the units of <worktree>.ready and .bpass,
@@ -866,7 +901,7 @@ rebatch() { # <card> <worktree>; card()'s mates is the batch
 # edits the card's files meanwhile keeps that edit as their own uncommitted change. Nothing written to the checkout
 # is ever taken back: once main has moved, another writer's commit may hold it, so the card is blocked for the owner.
 # The branch is always named (refs/heads/<the pack's defaultBranch>), never HEAD: HEAD is whatever the checkout was last switched to.
-PASSED="an ordered card went past it since its claim; nothing was landed" # what land() prints for that: card() reads it
+PASSED="an ordered or ready card went past it since its claim; nothing was landed" # what land() prints for that: card() reads it
 # What land() prints when main is not the commit the card's checks and tests ran on (its worktree's HEAD; for a card
 # of a batch, the HEAD of the worktree of the card that took it, where the batch's run was, or where that run was found
 # to stand since, rebatch()): card() fits the change onto main as it is now, and runs them again there when they do not

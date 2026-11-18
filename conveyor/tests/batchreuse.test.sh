@@ -19,8 +19,11 @@
 # listed `pass` does not run, a case listed `ok` does not run (unless its file is named in $STUB/whole: a file
 # whose cases cannot run apart, which honours only `pass`, as closure.test.sh does), and a file a `changed` line
 # selects runs whole. Each run writes a line to $STUB/runs, `<card> <cases it ran>`, and its log says how many cases ran and how many it kept.
+# The cards are in the control record's order list in the order they become ready (#8, #9, #7), as batch.test.sh's
+# batchsetup says: so #8 waits on #7, as ordered cards never go past each other.
 reusesetup() { # <issues json> <map lines>...
   setup "$1"; shift; tune '.landBatch = 8'; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
+  jq -c '.order = [8, 9, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   seq 20 > "$R/a.txt"; seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qam "a longer a.txt, and b.txt"
   printf '%s\n' "$@" > "$STUB/map"; printf '%s\n' 's.test s1' 'x.test x1 x2' 'y.test y1 y2' 'z.test z1 z2' > "$STUB/cases"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt b.txt; echo x > x.txt ;; *-8) echo eight | tee -a a.txt >> b.txt; echo y > y.txt ;; *) sed -i 10s/.*/nine/ a.txt; echo z > z.txt ;; esac' > "$STUB/build"

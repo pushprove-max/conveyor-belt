@@ -102,8 +102,16 @@ to a main that moved lands on the tests it already passed, with no second run an
 run again on main. A change that had to be reworked to fit is reviewed and tested again (`conveyor/README.md`,
 Same-file cards).
 
+A ready card lands first. A card is ready when its review gave a GO and its tests passed. It does not wait for a card
+that changes the same files and is still in its tests or its fix, even when that card was picked first. When two cards
+are ready, the card that became ready first lands first. The other card is then put on main with the change that
+landed. When its change applies there, it is not reviewed again, and it runs again only its test files that the
+landed change touched too. When its change clashes, one session fits it onto main, and it is reviewed again before it
+lands. A card in the `order` list still goes before the cards that are not in it. So the Board shows a ready card as
+"waiting on card" only when the other card became ready first or is in the `order` list.
+
 With batches on (the pack's `landBatch` over 1), a card whose change does not apply with the change of the card that
-holds its files does not wait for that card to land. It is stacked: its change is put on main plus the other card's
+holds its files, and that will not go past that card, does not wait for that card to land. It is stacked: its change is put on main plus the other card's
 change, then reviewed and tested there. When the other card passes its tests, the two land in one batch, the other
 card first. When the other card fails its tests, the stacked card is put on main alone and lands first. When the other
 card's change changes, the card is stacked again once; after that it waits. A card whose issue has a `Depends on:`

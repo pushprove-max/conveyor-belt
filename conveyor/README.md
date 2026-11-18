@@ -1330,7 +1330,11 @@ their changes do not apply together: a card whose change merges three-way (`git 
 onto main with the other card's change already merged there does not wait on it, so changes to different parts of one
 file land in turn without waiting, each tested on main as the one before left it. Two cards that change the same lines
 of a file still wait, one behind the other. A card waits while a card it overlaps holds one of those files, then goes
-on from main as it is then. Its change is put on main with a plain apply, or, where that fails, with a three-way
+on from main as it is then. A ready card lands first: a card whose review gave a GO and whose tests passed on main does
+not wait for a card it overlaps that is still in its tests or its fix, even one picked before it. When both are
+ready, the card that became ready first lands first. The card that was passed is then put on main with the landed
+change, as below: it is reviewed again only when a session had to fit it, and it runs again only its test files that
+the landed change touched too. A card in `order` still goes before a card that is not in it. Its change is put on main with a plain apply, or, where that fails, with a three-way
 merge: when either leaves no conflict it goes on to its tests and lands with no rebuild session and no second review
 (the merged change's own added and removed lines are what was reviewed and tested; only the lines around them moved).
 A merge counts only when it leaves those same lines: a change main holds already merges to nothing and does not.
@@ -1404,7 +1408,8 @@ the cards that were waiting for its files when it gave way. The Board shows it a
 #N)", N being the card that took its turn, or as "gave way to #N while fixing" when its tests failed and it gave way
 for their fix; its live record names that card too (gaveWay). A card that has given way 3 times keeps its next turn.
 
-With batches on (`landBatch` over 1), a card that would wait on a card that holds its files does not sleep. It is
+With batches on (`landBatch` over 1), a card that would wait on a card that holds its files, and that it does not go
+past once its own tests pass (a card whose tests passed first, or a card in `order`), does not sleep. It is
 stacked on that card: its change is put on main plus the holder's change, with the one session it needs to fit there,
 and it is reviewed and tested there while the holder goes on. When the holder's tests pass, the holder's batch takes
 the stacked card after the holder, and both land in one batch. When the holder's tests fail, the stacked card waits no

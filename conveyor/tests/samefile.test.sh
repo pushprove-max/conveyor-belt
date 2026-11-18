@@ -222,24 +222,24 @@ EOF
   [ "$(tr '\n' ' ' < "$R/a.txt")" = "one seven eight " ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "both did not land, #8 reviewed again once brought onto main"
 }
 
-# Bug: an older card that claimed a file after a younger card had claimed it either went past its claim too, both
-# past their claim on the same file, or waited for the younger one to land even when the younger one claimed again.
-# Both are reviewed with no wait; the older card waits at its landing claim on the younger one, which holds the file
-# through its tests. Those fail once, so the younger one claims again after its fix and review: there it waits on the
-# older one (the older waiting pick goes first), the older one lands, and the younger one is brought onto main and
-# reviewed again.
+# Bug: an older card that claimed a file after a younger card had claimed it went past its claim too, both past
+# their claim on the same file. Both are reviewed with no wait; the older card waits at its landing claim on the
+# younger one, which holds the file through its tests. Those fail once, so the younger one gives way for its fix and
+# the older one claims the file and goes on to its tests. Bug it catches too (a ready card lands first, the owner,
+# 2026-11-18): the younger one, its tests passed after its fix and review, waited on the older one, still in its
+# tests. It lands, and the older one is brought onto main by a session and reviewed again.
 t_sameorder() {
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then :
-elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
+elif grep -q '^# Main moved: apply the same change\|^# Landing conflict' "$STUB/brief"; then printf 'one\neight\nseven\n' > a.txt
 else case $PWD in
   *-7) echo seven >> a.txt ;;
   *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done; echo eight >> a.txt ;;
 esac; fi
 EOF
-  # #7's review ends once #8 holds a.txt; #8's first tests fail once #7 waits on it; #7's tests end once #8 waits on
-  # it at #8's next claim. Each wait gives up once the card it waits on is gone (a card that holds a.txt lands or is
+  # #7's review ends once #8 holds a.txt; #8's first tests fail once #7 waits on it; #7's first tests end once #8 has
+  # landed ($STUB/during then). Each wait gives up once the card it waits on is gone (a card that holds a.txt lands or is
   # blocked, its worktree removed), so a change in who waits fails the case below rather than hanging it. A failed run
   # writes the runner's log naming its file: one that names only the test command is no result (voidrun()).
   cat > "$STUB/review-cmd" <<'EOF'
@@ -253,41 +253,43 @@ EOF
 case $PWD in *-8) echo x >> "$STUB/failed.8"; [ "$(wc -l < "$STUB/failed.8")" -gt 2 ] || { # its first run and its run again (tests()) fail
   while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
   echo "FAIL a.test"; printf "%s\n" "== a.test" "-- FAIL a.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;;
-  *-7) [ -e "$STUB/waitlive8" ] || while [ -d "$STUB" ]; do grep -q waiting ../*-8.live 2>/dev/null && { cp ../*-8.live "$STUB/waitlive8"; break; }; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
+  *-7) [ -e "$STUB/during" ] || while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
 esac
 EOF
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
-  [ "$(grep -c 'waits on card' <<<"$out")" = 2 ] && grep -q "card $c7 waits on card $c8, which changes the same files: a.txt" <<<"$out" \
-    && grep -q "card $c8 waits on card $c7, which changes the same files: a.txt" <<<"$out" || fail "#7 did not wait on #8, then #8 on #7: $out"
+  grep -q "card $c7 waits on card $c8, which changes the same files: a.txt" <<<"$out" && ! grep -q "card $c8 waits on card $c7" <<<"$out" \
+    || fail "#7 did not wait on #8, or #8, ready after its fix, waited on #7: $out"
   [ "$(jq -r .step "$STUB/waitlive" 2>/dev/null)" = land ] && [ "$(jq -c .waits "$STUB/waitlive")" = "{\"on\":\"$c8\",\"paths\":[\"a.txt\"]}" ] \
     || fail "#7 did not wait to land on #8 while #8 held a.txt: $(cat "$STUB/waitlive" 2>/dev/null)"
-  [ "$(jq -r .step "$STUB/waitlive8" 2>/dev/null)" = land ] && [ "$(jq -c .waits "$STUB/waitlive8")" = "{\"on\":\"$c7\",\"paths\":[\"a.txt\"]}" ] \
-    || fail "#8 was not waiting on #7 at its next claim while #7 ran its tests: $(cat "$STUB/waitlive8" 2>/dev/null)"
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  grep -q '^feat(product): title 8 (#8)' "$STUB/main-at-7" && fail "#7 was reviewed after #8 landed: $(cat "$STUB/main-at-7")"
-  st '.reason' | grep -q 'rebase onto main conflicts' && fail "a card met a landing conflict: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  st 'select(.issue == 8 and .step == "fix") | .reason' | grep -q '^main moved since the card' || fail "#8 was not brought onto main after #7 landed"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "one seven eight " ] \
-    && [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "8 GO,7 GO,8 GO,8 GO," ] && [ -z "$(ls "$T/$CASE/cards")" ] \
-    || fail "#7 did not land first, or #8 was not reviewed again once brought onto main: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
+  [ -e "$STUB/during" ] || fail "#8 did not land while #7 was in its tests"
+  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at a review"
+  grep -q '^feat(product): title 8 (#8)' "$STUB/main-at-7" || fail "#7 was not reviewed again after #8 landed: $(cat "$STUB/main-at-7")"
+  # #7's tests ran while #8 landed: its change, put back as it was, meets the conflict at landing, and the landing's
+  # rebuild session brings it onto main (settle(): caught).
+  [ "$(st 'select(.step == "rebase") | .issue')" = 7 ] || fail "#7 was not brought onto main by its landing's rebuild after #8 landed: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "one eight seven " ] \
+    && [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "8 GO,7 GO,8 GO,7 GO," ] && [ -z "$(ls "$T/$CASE/cards")" ] \
+    || fail "#8 did not land first, or #7 was not reviewed again once brought onto main: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
 }
 
 # Bug: an older card holding x.txt whose fix added a.txt, while a younger card held a.txt, ignored the younger holder:
 # both were past their claim on a.txt. The older card must wait on the younger one at its landing claim until the
-# younger one's next claim (its tests fail once), where the younger one waits on it; the older one lands first.
+# younger one gives way for the fix of its tests (they fail once). The younger one, ready after its fix, lands first,
+# while the older one is in its tests (a ready card lands first, the owner, 2026-11-18), and the older one is then
+# brought onto main and reviewed again.
 t_samelast() {
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4 5; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF2'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then :
-elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
+elif grep -q '^# Main moved: apply the same change\|^# Landing conflict' "$STUB/brief"; then printf 'one\neight\nseven\n' > a.txt; echo seven > x.txt
 else case $PWD in
   *-7) if [ -e "$STUB/seven-built" ]; then echo seven >> a.txt; else : > "$STUB/seven-built"; echo seven > x.txt; fi ;;
   *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; sleep 0.1; done; echo eight >> a.txt ;;
 esac; fi
 EOF2
   # #7's first review ends once #8 holds a.txt, with a NO-GO: its fix adds a.txt. #8's first tests fail once #7 waits
-  # on it; #7's tests end once #8 waits on it at #8's next claim. A failed run writes the runner's log, as above.
+  # on it; #7's first tests end once #8 has landed, or is gone. A failed run writes the runner's log, as above.
   cat > "$STUB/review-cmd" <<'EOF2'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
 case $PWD in
@@ -302,20 +304,20 @@ EOF2
 case $PWD in *-8) echo x >> "$STUB/failed.8"; [ "$(wc -l < "$STUB/failed.8")" -gt 2 ] || { # its first run and its run again (tests()) fail
   while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; sleep 0.1; done
   echo "FAIL a.test"; printf "%s\n" "== a.test" "-- FAIL a.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;;
-  *-7) while [ -d "$STUB" ]; do grep -q waiting ../*-8.live 2>/dev/null && { cp ../*-8.live "$STUB/waitlive8"; break; }; sleep 0.1; done ;;
+  *-7) [ -e "$STUB/during" ] || while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
 esac
 EOF2
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
   [ "$(jq -r .step "$STUB/waitlive" 2>/dev/null)" = land ] && [ "$(jq -c .waits "$STUB/waitlive")" = "{\"on\":\"$c8\",\"paths\":[\"a.txt\"]}" ] \
     || fail "#7 did not wait on #8 once its fix added a.txt: $(cat "$STUB/waitlive" 2>/dev/null)"
-  [ "$(jq -r .step "$STUB/waitlive8" 2>/dev/null)" = land ] && [ "$(jq -c .waits "$STUB/waitlive8")" = "{\"on\":\"$c7\",\"paths\":[\"a.txt\"]}" ] \
-    || fail "#8 did not wait on #7 at its next claim: $(cat "$STUB/waitlive8" 2>/dev/null)"
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  st '.reason' | grep -q 'rebase onto main conflicts' && fail "a card met a landing conflict: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "one seven eight " ] \
-    && [ "$(cat "$R/x.txt")" = seven ] && [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "8 GO,7 NO-GO,7 GO,8 GO,8 GO," ] \
-    && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#7 did not land first, or #8 was not reviewed again from main: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
+  [ -e "$STUB/during" ] && ! grep -q "card $c8 waits on card $c7" <<<"$out" || fail "#8, ready after its fix, waited on #7, or did not land while #7 was in its tests: $out"
+  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at a review"
+  # The landing's rebuild session brings #7 onto main, as in t_sameorder.
+  [ "$(st 'select(.step == "rebase") | .issue')" = 7 ] || fail "#7 was not brought onto main by its landing's rebuild after #8 landed: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "one eight seven " ] \
+    && [ "$(cat "$R/x.txt")" = seven ] && [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "8 GO,7 NO-GO,7 GO,8 GO,7 GO," ] \
+    && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#8 did not land first, or #7 was not reviewed again from main: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
 }
 
 # Bug: a card the owner ordered first sat built behind an older card that was not ordered and held the same file

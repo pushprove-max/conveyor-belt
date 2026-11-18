@@ -24,11 +24,18 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # A live record every second (the pack's default), not the test pack's 0.2 s: a card waiting at its claim, or on the
 # card whose batch took it, looks again each `live` seconds, and these cases' cards wait a lot; at 0.2 s those looks
 # were 10 to 17% of each case's instructions. The cases wait on what the cards do, not on those seconds.
+# #7's review puts the cards in the control record's order list in the order they become ready (#8, #9, #7), unless
+# the case set an order of its own: ordered cards never go past each other (claim()), so #8 and #9, ready, wait on #7
+# while it holds a.txt in its checks (not in it, a ready card lands first and goes past #7: readyfirst.test.sh), and a
+# batch keeps the order they became ready. It is set there, once #7 is picked: ordered cards are picked first. #10
+# comes after #7: an ordered #7 would go past an unordered #10 that holds a.txt, and #10 would be reviewed again.
 batchsetup() { # <issues json>
   setup "$1"; tune '.landBatch = 8 | .tunables.live = 1'; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   cat > "$STUB/review-cmd" <<'EOF'
 n=${PWD##*-}
+[ "$n" != 7 ] || jq -e '.order != []' "$ST/control.json" >/dev/null 2>&1 \
+  || { jq -c '.order = [8, 9, 7, 10]' "$ST/control.json" > "$STUB/c.new.7" && mv "$STUB/c.new.7" "$ST/control.json"; }
 [ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
   [ -e "$STUB/overlap" ] || rm -f ../*-7.cpatch
   [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; }
@@ -328,9 +335,11 @@ t_batchalone() {
 # batches on it is stacked on #7 in place of that wait (stackto(), #223), onto main plus the change #7's claim keeps,
 # the whole batch's: its line 2 then meets #8's line 1 there, so a session fits it (stacked onto #7's own change alone,
 # it would apply as it is). It lands after the batch, brought onto main as the batch left it, never past what the
-# batch was tested on.
+# batch was tested on. Only #7 is in the order list: ordered first, #8 waits on it, and #6 names it, the card that
+# holds the batch's files, as the card to wait on (of #7 and #8, which goes first); the batch is #7, then #8.
 t_batchhold() {
   batchsetup "[$(issue 6 2025-12-31),$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
+  jq -c '.order = [7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"
   echo 'case $PWD in *-6) sed -i 2s/.*/six/ b.txt ;; *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt; sed -i 1s/.*/eight/ b.txt ;; esac' > "$STUB/build"
   echo '[ "$n" != 6 ] || [ -e "$STUB/rev6" ] || { : > "$STUB/rev6"; while [ -d "$STUB" ]; do [ -e "$STUB/inbatch" ] && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done; }' >> "$STUB/review-cmd"
@@ -344,8 +353,8 @@ EOF
   grep -q "card $c6 is stacked on card $c7, which changes the same files" <<<"$out" \
     && st "select(.issue == 6 and .step == \"fix\") | .reason" | grep -q "^stacked on card $c7, " \
     || fail "#6 was not stacked on the batch's card for b.txt, onto the batch's change: $(st 'select(.issue == 6) | "\(.step) \(.reason)"' | tr '\n' ,) $out"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 6 " ] && [ "$(st 'select(.step == "landed" and .issue != 6) | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] \
-    || fail "#6 did not land after the batch of #8 and #7: $(st 'select(.step == "landed")')"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 6 " ] && [ "$(st 'select(.step == "landed" and .issue != 6) | .batch | join(" ")' | sort -u)" = "$c7 $c8" ] \
+    || fail "#6 did not land after the batch of #7 and #8: $(st 'select(.step == "landed")')"
   [ "$(sed -n '1p;2p' "$R/b.txt" | tr '\n' ' ')" = "eight six " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/b.txt")"
 }
 
@@ -393,7 +402,7 @@ during() { # <shell that commits to main>
 t_batchmovedleft() {
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   cat > "$STUB/build" <<'EOF'
-if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 10s/.*/nine-ten/ a.txt
+if grep -q '^# Main moved: apply the same change\|^# Stacked: apply the same change' "$STUB/brief"; then sed -i 10s/.*/nine-ten/ a.txt
 else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
 EOF
   during 'sed -i 10s/.*/ten/ a.txt; git commit -qam "line ten"'
@@ -407,7 +416,9 @@ EOF
     || fail "#8 and #7 did not land on main as it moved, #9 after them: $(git -C "$R" log --format=%s | tr '\n' ,)"
   [ "$(st "select(.issue == 9 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test landed " ] \
     || fail "steps of #9: $(st "select(.issue == 9) | .step" | tr '\n' ' ')"
-  st 'select(.issue == 9 and .step == "fix") | .reason' | grep -q '^main moved since the card' || fail "#9 was not brought onto main after the batch landed"
+  # Left out, #9 waits on #8, ordered first and held by the batch, and is stacked on it: its one session fits it onto
+  # main with #8's change.
+  st 'select(.issue == 9 and .step == "fix") | .reason' | grep -q "^stacked on card $c8, " || fail "#9 was not brought onto main after the batch landed: $(st 'select(.issue == 9 and .step == "fix") | .reason')"
   st '.reason' | grep -q 'rebase onto main conflicts' && fail "a card met a landing conflict: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven nine-ten eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/a.txt")"
 }

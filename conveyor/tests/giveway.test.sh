@@ -13,7 +13,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # $STUB/late once #7 gave way) changes its first line and line 8 too, so the two changes do not apply together and #8
 # is ready to land whenever main moves. #7's first tests end once #8 waits on it (with
 # $STUB/late at once), and then main's last line changes under #7: its landing conflicts and it needs a rebase. The
-# rebase session runs $STUB/rebase, then keeps #7's claim (as it is in the first such session), #8's wait record and claim and, with $STUB/snapit (a snapshot costs
+# rebase session of #7 runs $STUB/rebase, then keeps #7's claim (as it is in the first such session), #8's wait record and claim and, with $STUB/snapit (a snapshot costs
 # the case's one core about a second, so only the cases that read it take one), the Board's
 # line for #7, and appends #7's line: line 8 it leaves alone, unless $STUB/rebase changes it again, so #7's change then
 # applies on #8's. A session that brings #8 onto main changes its first line alone. Every test run notes when two cards hold a.txt at once, and keeps #7's claim
@@ -23,7 +23,8 @@ gwsetup() { # [a line of the rebase session, before #7's change]
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in $(seq 6); do echo "$GO" > "$STUB/review.$i"; done
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   { printf 'SRC=%q\n' "$SRC"; cat <<'EOF'; } > "$STUB/build"
-if grep -q '^# Landing conflict' "$STUB/brief"; then
+if grep -q '^# Landing conflict' "$STUB/brief" && [ "${PWD##*-}" = 8 ]; then { echo eight; tail -n +2 a.txt; } > a.new && mv a.new a.txt
+elif grep -q '^# Landing conflict' "$STUB/brief"; then
   . "$STUB/rebase"
   [ -e "$STUB/rebaseclaim" ] || cp ../*-7.claim "$STUB/rebaseclaim"; cp ../*-8.live "$STUB/rebaselive8" 2>/dev/null; cp ../*-8.claim "$STUB/rebaseclaim8" 2>/dev/null
   [ ! -e "$STUB/snapit" ] || CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot > "$STUB/snap" 2>/dev/null
@@ -103,8 +104,9 @@ t_givewaylate() {
 
 # Bug: a card that gave way could take its turn back before the card it gave way to looked again. #8 waits on #7 and
 # sleeps between its looks from #7's tests through its whole rebase and review (stopped, $STUB/back): #7, ready again,
-# waits for #8, which then lands first. #7's rebase keeps its change to line 8, so it overlaps #8's still: after #8
-# landed, a second session brings #7 onto #8's main, and it is reviewed and tested there before it lands.
+# waits for #8 until #8 has looked again and claimed a.txt. #7's rebase keeps its change to line 8, so it overlaps #8's
+# still. #8 then runs its tests holding a.txt (with batches off, a waiting card runs none), and #7, ready, goes past it
+# and lands first (a ready card lands first, the owner, 2026-11-18): #8's landing's rebuild brings it onto #7's main.
 t_givewayback() {
   gwsetup 'sed -i 8s/.*/seven-8/ a.txt'
   cat > "$STUB/back" <<'EOF'
@@ -117,10 +119,12 @@ EOF
     || fail "#7 did not give way to the waiting #8: $(cat "$STUB/rebaseclaim" 2>/dev/null)"
   [ "$(jq -r .waits.on "$STUB/backlive" 2>/dev/null)" = "$c8" ] || fail "#7, ready again, did not wait for #8: $(cat "$STUB/backlive" 2>/dev/null)"
   [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] && [ "$(sed -n '1p;8p;$p' "$R/a.txt" | tr '\n' ' ')" = "eight seven-8 seven " ] \
-    || fail "#8 did not land first, then #7 on its main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test rebase review test landed " ] \
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(sed -n '1p;8p;$p' "$R/a.txt" | tr '\n' ' ')" = "eight seven-8 seven " ] \
+    || fail "#7, ready, did not land first, then #8 on its main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test landed " ] \
     || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
+  [ "$(st "select(.issue == 8 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test landed " ] \
+    || fail "#8 was not brought onto #7's main by a session and reviewed and tested there: $(st "select(.issue == 8) | .step" | tr '\n' ' ')"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or claim is left: $(ls "$T/$CASE/cards")"
 }
 
@@ -225,7 +229,7 @@ t_givewaypast() {
   echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"away\":true,\"gave\":1,\"for\":[],\"to\":null}" > "$CARDS/c7-7.claim"
   echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"passed\":false}" > "$CARDS/c8-8.claim"
   # claim() and ready() as the engine has them, and what they call, run from main's checkout.
-  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^testedhere() {/p; /^readysince() {/,/^}/p' "$SRC/lib/claim.sh")"
   # The card records are read through the state helper (state.py), as the engine reads them.
   eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
@@ -279,9 +283,12 @@ EOF
 # claim, its live record and the Board name #8, "while fixing"), and #8, stacked on a card that failed, is brought onto
 # main alone, reviewed and tested there, and lands alone during that session (#7's re-run of its failed tests, which
 # fails again, still holds a.txt). #7, fixed and reviewed, tests holding nothing, claims a.txt again, is brought onto
-# #8's main, tests there and lands: both changes are on main. Never two cards hold a.txt at once.
+# #8's main, tests there and lands: both changes are on main. Never two cards hold a.txt at once. The two are in the
+# control record's order list, #8 then #7: ordered cards never go past each other, so #8 does not go past #7 once its
+# own tests pass, and is stacked on it (not in it, a ready card lands first: readyfirst.test.sh).
 t_givewayfix() {
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
+  jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   # #7's first tests end once #8 waits stacked and red, or once #8 took another path: tested (not stacked, or its tests
   # passed on #7's change) or gone. #7's fix session waits for #8 to land, then for its live record to name #8, unless #7
   # kept its claim (it did not give way). Each then fails the case below rather than hanging it.
@@ -336,19 +343,26 @@ t_givewayfixalone() {
 # Stacking is bounded (stackto()): a card stacked on a holder whose change kept changing would be ported and reviewed
 # again each time. #8 waits on #7: it is stacked onto main plus #7's kept change; with that change the same, not
 # again; changed, once more (restacks 1); changed again, not: #8 waits, as before stacking. Bug it catches too: a card
-# whose issue says `Depends on: #7` was stacked; it only waits.
+# whose issue says `Depends on: #7` was stacked; it only waits. Bug it catches too (a ready card lands first, the
+# owner, 2026-11-18): #8 was stacked on #7 while #7's tests had not passed, so #8, tested on #7's change, waited for
+# them; it waits running its own on main instead, and goes past #7 once they pass (claim()).
 t_stackonce() {
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"; git -C "$R" worktree add -q "$CARDS/c7-7" -b card-7 main
-  # stackto() as the engine has it, and what it calls; the pack's landBatch at its default.
+  # stackto() as the engine has it, and what it calls; the pack's landBatch at its default. #7's tests passed
+  # (readysince(), which t_readyclaim runs) but where named.
   eval "$(sed -n '/^stackto() {/,/^}/p; /^merge3() {/,/^}/p' "$SRC/lib/claim.sh")"
   # shellcheck disable=SC2034 # read by DEPS
   local MAX_DEPTH=2 BRANCH=main b
   eval "$(sed -n '/^DEPS=/,/unique;'"'"'$/p' "$SRC/lib/prompts.sh")"
   packget() { printf -v "$2" 8; }
+  readysince() { [ ! -e "$STUB/untested" ] && echo 1; }
   st8() { (cd "$R" && stackto c8-8 "$CARDS/c8-8" '{"on":"c7-7","paths":["a.txt"]}' "${1:-{\}}"); } # [#8's issue json]
   keep7() { sed -i "$1s/.*/seven/" "$CARDS/c7-7/a.txt"; git -C "$CARDS/c7-7" diff > "$CARDS/c7-7.cpatch"; } # <a line #7 changes too>
   keep7 1
+  : > "$STUB/untested"
+  ! st8 >/dev/null && [ ! -e "$CARDS/c8-8.stack" ] || fail "#8 was stacked on #7, whose tests have not passed"
+  rm -f "$STUB/untested"
   b=$(st8) && [ "$(git -C "$R" show "$b:a.txt" | head -n 1)" = seven ] && [ "$(git -C "$R" rev-parse "$b^")" = "$(git -C "$R" rev-parse main)" ] \
     && [ "$(jq -c '[.on, .restacks, .base]' "$CARDS/c8-8.stack")" = "[\"c7-7\",0,\"$b\"]" ] || fail "#8 was not stacked onto main plus #7's change: $b $(cat "$CARDS/c8-8.stack")"
   ! st8 >/dev/null || fail "#8 was stacked again on #7's change as it was"
@@ -380,7 +394,7 @@ t_stackfirst() {
   echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"passed\":false}" > "$CARDS/c8-8.claim"
   jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
   # claim(), giveway() and what they call, as the engine has them, run from main's checkout.
-  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^testedhere() {/p; /^readysince() {/,/^}/p' "$SRC/lib/claim.sh")"
   eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
   local HERE=$SRC GIVEWAY=3
@@ -416,7 +430,7 @@ t_stackfixround() {
   echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"passed\":false}" > "$CARDS/c8-8.claim"
   jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
   # claim(), giveway() and what they call, as the engine has them, run from main's checkout.
-  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p; /^readysince() {/,/^}/p' "$SRC/lib/claim.sh")"
   eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
   local HERE=$SRC GIVEWAY=3
