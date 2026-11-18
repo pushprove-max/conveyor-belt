@@ -183,8 +183,9 @@ t_narrowownsetup() {
 # (t_<x>one, which closes inline on its last line, `  echo one; }`, and t_<x>two), a comment line above each: a case
 # that closes so must not leave its file's other cases unnamed (E1: t_slotnoroom ran slots.test.sh whole, its end not
 # found). t_<x>two holds a quoted string of two lines, the first ending in `}` and the second at the first column
-# (`{"y":2}'`), above its `echo 2`: a line inside quotes must not end the case early, so a change below it counts as
-# one outside all cases (a JSON line ended t_testmapstate so, and the whole file ran). The pack runs each test file
+# (`{"y":2}'`), above its `echo 2`: a line inside quotes must not end the case early, so a change below it, to
+# `echo 2`, still selects t_<x>two (were the case ended there, that change would count as one outside all cases: a
+# JSON line ended t_testmapstate so, and the whole file ran). The pack runs each test file
 # alone (test.fileCommand, which adds
 # `one:<file>|<the cases CONVEYOR_TEST_CASES names of it, by commas>` to $STUB/got). The card's change, <change>, is
 # staged and tested as narrowrun() does; ownedit <file> <ERE> <text> puts <text> for <ERE> in each line of <file>.
