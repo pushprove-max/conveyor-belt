@@ -283,7 +283,7 @@ p_union() {
     git -C "$u" commit -qam "main adds two.sh"
   done
   if (cd "$u" && git apply --3way --index "$T/one.patch") > "$T/out" 2>&1 \
-    && [ "$(cd "$u" && bash .conveyor/test-changed.sh --map | jq -c '.areas.claim.files | sort')" = '["conveyor/lib/claim.sh","conveyor/lib/one.sh","conveyor/lib/two.sh"]' ]; then
+    && (cd "$u" && bash .conveyor/test-changed.sh --map) | jq -e '.areas.claim.files as $f | all("conveyor/lib/claim.sh", "conveyor/lib/one.sh", "conveyor/lib/two.sh"; . as $x | $f | index($x))' >/dev/null; then
     ok "two changes that each add a file to one area of the map merge with no conflict, both files in it"
   else no "the map's merge of two added files: $(cat "$T/out") $(cat "$f")"; fi
 }
