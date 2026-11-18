@@ -126,3 +126,41 @@ t_installkept() {
   [ -z "$(find "$V/$B" ! -type l -perm /222)" ] || fail "a writable version folder was taken as installed and left writable"
   [ ! -e "$D/conveyor/state" ] || fail "install made a state folder in the checkout it ran from"
 }
+
+# Bug: two projects' loops take the same commit at once. The second install waits on the mirror's lock while the
+# first makes the version folder and moves it in; it then made its own .part and moved it into that read-only folder
+# ("mv: cannot move ... Permission denied"), so its project took the commit only at its next take.
+t_installrace() {
+  coderepo; X=$D/conveyor/conveyor.sh; local w=$T/$CASE ip lk rc
+  # Set aside in the same folder: a read-only folder cannot be moved to another one.
+  bash "$X" install "$A" >/dev/null && mv "$V/$A" "$V/first" || fail "the first install was not made"
+  trap 'kill ${lk:-} ${ip:-} 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT
+  # The first install holds the mirror's lock; the second is started and waits on it.
+  ( flock 9 && : > "$w/locked" && until [ -e "$w/go" ]; do sleep 0.1; done ) 9>>"$V/mirror.git.lock" & lk=$!
+  until [ -e "$w/locked" ]; do kill -0 $lk 2>/dev/null || fail "the lock was not taken"; sleep 0.1; done
+  bash "$X" install "$A" > "$w/out" 2>&1 & ip=$!
+  until for p in $(below $ip); do ps -o args= -p "$p"; done 2>/dev/null | grep -q '^flock -w 600'; do
+    kill -0 $ip 2>/dev/null || fail "the second install did not wait on the lock: $(cat "$w/out")"; sleep 0.1; done
+  # The first one's folder is moved in, and its lock let go.
+  mv "$V/first" "$V/$A" && : > "$w/go" || fail "the first install's folder was not moved in"
+  wait $ip; rc=$?
+  [ "$rc" = 0 ] && grep -q "conveyor: $A is installed in $V/$A, read-only" "$w/out" || fail "the second install of the same commit failed: $(cat "$w/out")"
+  [ ! -e "$V/$A.part" ] && [ ! -e "$V/$A/$A.part" ] && [ -z "$(find "$V/$A" ! -type l -perm /222)" ] \
+    || fail "the second install left its own copy, or the folder writable: $(ls -a "$V" "$V/$A")"
+}
+
+# Bug: an engine older than the mirror lock moves its own folder of the same commit in after this install's check
+# that none is there; this install's move then failed into that read-only folder, and its project took the commit
+# only at its next take. A stand-in mv puts the other folder in place just before this install's move.
+t_installmv() {
+  coderepo; X=$D/conveyor/conveyor.sh; local w=$T/$CASE rc
+  bash "$X" install "$A" >/dev/null && mv "$V/$A" "$V/first" || fail "the first install was not made"
+  trap 'chmod -R u+w "$T/$CASE"' EXIT
+  mkdir -p "$w/bin" && printf '%s\n' '#!/usr/bin/env bash' \
+    '[ "$1 $2" != "$V/$A.part $V/$A" ] || [ ! -e "$V/first" ] || command -p mv "$V/first" "$V/$A"' 'exec command -p mv "$@"' > "$w/bin/mv" \
+    && chmod +x "$w/bin/mv" || fail "the stand-in mv was not made"
+  export V A; PATH=$w/bin:$PATH bash "$X" install "$A" > "$w/out" 2>&1; rc=$?
+  [ "$rc" = 0 ] && [ ! -e "$V/first" ] && grep -q "conveyor: $A is installed in $V/$A, read-only" "$w/out" \
+    || fail "the install whose move met the other engine's folder failed: rc=$rc $(cat "$w/out")"
+  [ ! -e "$V/$A.part" ] && [ -z "$(find "$V/$A" ! -type l -perm /222)" ] || fail "the install left its own copy, or the folder writable: $(ls -a "$V")"
+}

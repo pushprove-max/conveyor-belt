@@ -160,11 +160,17 @@ EOF2
   kill $pid; wait $pid 2>/dev/null; return 0
 }
 
-# Bug: a restart with no card in flight is not what it was: on the pin, in the same process, holding the lock, picking.
+# Bugs: a restart with no card in flight is not what it was: on the pin, in the same process, holding the lock,
+# picking; after the restart, a ready issue with a free slot waits more than one turn to be picked.
 t_adoptidle() {
+  local k
   adoptsetup '[]'; adoptserve; turns 1; tune --arg c "$B" '.plugin.commit = $c'
   till 'grep -q "restarting on the new code; 0 cards in flight carry on on $A" "$STUB/serve.out"' || fail "the idle loop did not restart: $(cat "$STUB/serve.out")"
-  add 11 2026-01-06; till '[ "$(ends 11)" = landed ]' || fail "the loop restarted with no card in flight did not pick: $(cat "$STUB/serve.out")"
+  # The loop's waits (TURNS) when #11 is made ready, and when its build starts: the turn running then may be past its
+  # pick, so the next one picks it, with one wait between.
+  echo 'wc -l < "$TURNS" > "$STUB/builtat"; echo two >> a.txt' > "$STUB/build"
+  k=$(wc -l < "$TURNS"); add 11 2026-01-06; till '[ "$(ends 11)" = landed ]' || fail "the loop restarted with no card in flight did not pick: $(cat "$STUB/serve.out")"
+  [ "$(cat "$STUB/builtat")" -le $((k + 1)) ] || fail "#11 was picked $(( $(cat "$STUB/builtat") - k )) waits after it was ready, past one turn: $(cat "$STUB/serve.out")"
   kill -0 $pid 2>/dev/null && ps -o args= -p $pid | grep -qF "$V/$B/conveyor/conveyor.sh serve" || fail "the idle restart is not on $B in its own process"
   out=$(loop serve 2>&1) && fail "a second serve ran beside the loop restarted idle"
   kill $pid; wait $pid 2>/dev/null; return 0

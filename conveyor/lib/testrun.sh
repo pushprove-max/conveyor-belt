@@ -2508,20 +2508,29 @@ donewhen() { # <worktree> <issue json>
 # is read on jq's input and jq's output is kept only when it worked: printed with the fallback, it was two arrays, no
 # JSON text for --argjson, and the line lost all its fields.
 donelines() { local d; d=$(jq -Rsc '[splits("\n") | select(. != "" and (startswith("Note: ") | not)) | .[0:300]]' 2>/dev/null < "$1.donewhen") && printf '%s\n' "$d" || echo '[]'; }
+# A session's fields for its line in checked(), with the Done-when check put on them by <jq filter> ($k the check,
+# $d the reply's D<n> lines); when they cannot be put together, the log names the card and the line, and the line is
+# written without them.
+dwfields() { # <card> <worktree> <step> <the Done-when check, or ""> <jq filter> [jq options]... (the session's fields on stdin)
+  local c=$1 wt=$2 s=$3 k=$4 f=$5 x; shift 5
+  x=$(jq -c --argjson k "${k:-null}" --argjson d "$(donelines "$wt")" "$@" "$f") \
+    || { echo "conveyor: card $c: the $s session's fields (its tokens, stats and Done-when check) could not be put on its $s line; the line is written without them" >&2; return 0; }
+  printf '%s\n' "$x"
+}
 # A build, fix or rebase session's line, with the Done-when check of its reply on it (doneWhen, and the reply's D<n>
 # lines: doneLines). A failed check is not a block: one fix session is told the failed items, as a NO-GO's findings
 # are, and the check runs again on its reply, its line carrying that result; a second failure blocks the card with the items listed. Fails when the card blocked.
 checked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <step> <the session's fields>
   local k t f
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
-  record "$1" "$2" "$6" ok "$(jq -c --argjson k "${k:-null}" --argjson d "$(donelines "$3")" 'if $k == null then . else . + {doneWhen: $k, doneLines: $d} end' <<<"$7")"
+  record "$1" "$2" "$6" ok "$(dwfields "$1" "$3" "$6" "$k" 'if $k == null then . else . + {doneWhen: $k, doneLines: $d} end' <<<"$7")"
   [ -n "$k" ] && [ "$(jq '.failed | length' <<<"$k")" != 0 ] || return 0
   f=$(jq -r '.failed | join("; ")' <<<"$k")
   began "$1" "$2" fix
   t=$(session "$3" "$5"$'\n\n'"$DWFIX"$'\n'"$(jq -r '.failed[] | "- " + .' <<<"$k")" fix) || { block "$1" "$2" "$3" "fix: $t"; return 1; }
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
-  record "$1" "$2" fix ok "$(jq -c --argjson k "${k:-null}" --argjson d "$(donelines "$3")" --arg r "the Done-when check failed: $f" \
-    '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k, doneLines: $d} end)' <<<"$t")"
+  record "$1" "$2" fix ok "$(dwfields "$1" "$3" fix "$k" '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k, doneLines: $d} end)' \
+    --arg r "the Done-when check failed: $f" <<<"$t")"
   [ -z "$k" ] || [ "$(jq '.failed | length' <<<"$k")" = 0 ] \
     || { block "$1" "$2" "$3" "the Done-when check failed again after its one fix session: $(jq -r '.failed | join("; ")' <<<"$k")"; return 1; }
 }

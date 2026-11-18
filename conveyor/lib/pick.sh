@@ -124,7 +124,7 @@ roomed() { # <machine settings>; under the machine lock: prints why not, else ta
   slotput "$((RUNNING + 1))" false "$s"
 }
 pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [acctkey of the record the reading was taken for]
-  local issues=${3:-} n card l again c
+  local issues=${3:-} n card l again c u m f
   check && c=$(ctl) || return 1
   [ -z "$issues" ] || adopt "$issues" || return 1
   [ "$(state "$c" "${2:-}")" = running ] || return 0
@@ -138,7 +138,16 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   if [ -z "${1:-}" ] && [ -z "$ONLY" ] && [ -s "${MAINRED:-}" ] && n=$(redpick) && [ -n "$n" ]; then echo "$n"; return 0; fi
   # A pick for the slot beyond the project's cap (BEYOND, set by run(): redfix()) takes a main-red fix card or nothing.
   [ -z "${BEYOND:-}" ] || return 0
-  n=$(upnext "$issues" "${1:-}" | jq -r '.[0] | select(.) | "\(.number) \(.again)"') || return 1
+  u=$(upnext "$issues" "${1:-}" | jq -r '.[] | "\(.number) \(.again)"') || return 1
+  # The first issue whose fields for its picked line read as JSON: one that does not is named in the log and skipped,
+  # and the next one is taken on this same pick, so it holds back no other ready issue.
+  n=''
+  while read -r m; do
+    [ -n "$m" ] || continue
+    f=$(jq -c --argjson n "${m% *}" 'map(select(.number == $n))[0] | {title: (.title // "")[0:200], created: (.createdAt // "" | tostring)}' <<<"$issues" 2>/dev/null) \
+      && { n=$m; break; }
+    echo "conveyor: the pick step could not read the title and created time of #${m% *} as JSON; #${m% *} is skipped, and the next ready issue is picked" >&2
+  done <<<"$u"
   # The machine's yes (room()): a card it holds back waits, and the loop asks again at its next turn.
   [ -z "$n" ] || room "${n% *}" >/dev/null || { echo wait; return 0; }
   if [ -z "$n" ]; then
@@ -150,7 +159,7 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   # A card id is its second, its project and its issue. One retried within the second its blocked card was picked in waits for
   # the next: the two would share a kept folder, and the patch kept there is what the new card starts from.
   while card="c$(date -u +%Y%m%dT%H%M%S)-$CTAG-$n"; stdb ask lines retried | grep -F "\"card\":\"$card\"" >/dev/null; do sleep 1; done
-  l=$(line "$card" "$n" picked ok "$(jq -c --argjson n "$n" 'map(select(.number == $n))[0] | {title: (.title // "")[0:200], created: (.createdAt // "" | tostring)}' <<<"$issues")") && append "$l" && echo "$card $n $again"
+  l=$(line "$card" "$n" picked ok "$f") && append "$l" && echo "$card $n $again"
 }
 
 # `pick --dry` (plan section 13, A7: the shadow-comparison contract): the issue pick would take now, from frozen inputs:

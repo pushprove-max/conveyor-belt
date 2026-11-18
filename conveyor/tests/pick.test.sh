@@ -183,3 +183,18 @@ t_dry() {
   [ "$(loop pick --dry --issues "$STUB/issues.json" --state "$d")" = '' ] || fail "a paused record was picked from"
   loop pick --dry --issues "$STUB/issues.json" --state "$d/none" 2>/dev/null; [ $? = 2 ] || fail "a missing state folder is not a usage error"
 }
+
+# Bug: a ready issue whose number is no JSON text made the pick step's jq --argjson fail; the pick failed with only
+# jq's own error in the log (no step, no issue), and the other ready issue was not picked on that turn, nor on any later
+# one, as the same issue came first again. pick() is called as the loop calls it, once.
+t_pickjson() {
+  setup "[$(issue 5 2026-01-01 | jq -c '.number = "5x"'), $(issue 6 2026-02-01)]"
+  local out err; mkdir -p "$ST" && : > "$ST/cards.jsonl"
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && pick '' '' "$(cat "$STUB/issues.json")" ) 2> "$T/$CASE/err") \
+    || fail "the pick failed: $(cat "$T/$CASE/err")"
+  err=$(cat "$T/$CASE/err")
+  [ "${out#* }" = '6 false' ] && [ "$(st 'select(.step == "picked") | .issue')" = 6 ] || fail "the other ready issue was not picked by the same pick: out=$out $(st .)"
+  grep -qF 'conveyor: the pick step could not read the title and created time of #5x as JSON; #5x is skipped, and the next ready issue is picked' <<<"$err" \
+    || fail "the issue skipped is not named with the step in the log: $err"
+}

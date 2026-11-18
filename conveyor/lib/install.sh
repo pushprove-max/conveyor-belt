@@ -34,34 +34,44 @@ installed() { # <commit> [ro] [folder]
 # when it is that commit as installed() verifies it: a hook (a Git template's post-checkout) may change the files the
 # checkout wrote.
 install() { # <commit> [<repository>]
-  local c=$1 d=$VERSIONS/$1 src=${2:-} m=$VERSIONS/mirror.git
+  local c=$1 d=$VERSIONS/$1 src=${2:-} m=$VERSIONS/mirror.git rc
   [[ $c =~ ^[0-9a-f]{40}$ ]] || { echo "conveyor: $c is not a full commit id: an install cannot be verified against it" >&2; return 1; }
-  if [ -e "$d" ]; then
-    # A folder already there is taken only when it is that commit with nothing changed or added; it is then made read-only.
-    installed "$c" || { echo "conveyor: $d is there and is not commit $c as it was cloned" >&2; return 1; }
-    chmod -R a-w "$d" && echo "conveyor: $c is installed in $d, read-only"; return
+  if [ ! -e "$d" ]; then
+    [ -n "$src" ] || src=$(git -C "$HERE" remote get-url origin 2>/dev/null) || { echo "conveyor: $HERE is in no git checkout with an origin to clone" >&2; return 1; }
+    mkdir -p "$VERSIONS" || return 1
+    # The repository's branches and tags are fetched into one bare mirror kept in VERSIONS (mirror.git, never pruned),
+    # so a new commit costs only the objects the mirror lacks, not a whole download; the version folder is then a local
+    # clone of the mirror, with the whole history (olderthan reads it), and the repository as its origin. file://, so
+    # no file is hard-linked to the mirror's or another install's (prune's chmod of one would change the other). Under
+    # the mirror's own lock, as installs of other projects of this machine use it too, and so is the move into place:
+    # two projects that take the same commit at once install it one after the other, and the second takes the folder
+    # the first made (exit 3), where it took the first one's folder away before it was moved, or moved its own into it.
+    ( flock -w 600 9 || exit 1
+      [ ! -e "$d" ] || exit 3
+      git init -q --bare "$m" \
+        && { git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" \
+          || timeout 600 git -C "$m" fetch -q --no-tags "$src" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; } \
+        && git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" || exit 1
+      # Made beside its place and moved in once read-only, so a version folder is never there half made.
+      [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 1
+      { git clone -q --no-checkout "file://$m" "$d.part" && git -C "$d.part" remote set-url origin "$src" \
+        && git --no-replace-objects -C "$d.part" -c advice.detachedHead=false checkout -q --detach "$c" && installed "$c" '' "$d.part"; } \
+        || { rm -rf "$d.part"; exit 1; }
+      # An engine older than this lock moves its folder in outside it, after this check: when the move fails with the
+      # folder there, that folder is taken now, as at exit 3, and this one's copy put away.
+      chmod -R a-w "$d.part" && mv "$d.part" "$d" \
+        || { [ -e "$d" ] || exit 2; [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 2; exit 3; }
+    ) 9>>"$m.lock" 2>/dev/null; rc=$?
+    case $rc in
+      0) echo "conveyor: $c is installed in $d, read-only"; return 0 ;;
+      2) echo "conveyor: commit $c was checked out and verified in $d.part, and could not be made read-only and moved to $d" >&2; return 1 ;;
+      3) ;;
+      *) echo "conveyor: commit $c could not be fetched from $src, checked out and verified" >&2; return 1 ;;
+    esac
   fi
-  [ -n "$src" ] || src=$(git -C "$HERE" remote get-url origin 2>/dev/null) || { echo "conveyor: $HERE is in no git checkout with an origin to clone" >&2; return 1; }
-  mkdir -p "$VERSIONS" || return 1
-  # The repository's branches and tags are fetched into one bare mirror kept in VERSIONS (mirror.git, never pruned),
-  # so a new commit costs only the objects the mirror lacks, not a whole download; the version folder is then a local
-  # clone of the mirror, with the whole history (olderthan reads it), and the repository as its origin. file://, so
-  # no file is hard-linked to the mirror's or another install's (prune's chmod of one would change the other). Under
-  # the mirror's own lock, as installs of other projects of this machine use it too.
-  if ! ( flock -w 600 9 || exit 1
-    git init -q --bare "$m" \
-      && { git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" \
-        || timeout 600 git -C "$m" fetch -q --no-tags "$src" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; } \
-      && git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" || exit 1
-    # Made beside its place and moved in once read-only, so a version folder is never there half made.
-    [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 1
-    { git clone -q --no-checkout "file://$m" "$d.part" && git -C "$d.part" remote set-url origin "$src" \
-      && git --no-replace-objects -C "$d.part" -c advice.detachedHead=false checkout -q --detach "$c" && installed "$c" '' "$d.part"; } \
-      || { rm -rf "$d.part"; exit 1; }
-  ) 9>>"$m.lock" 2>/dev/null; then
-    echo "conveyor: commit $c could not be fetched from $src, checked out and verified" >&2; return 1
-  fi
-  chmod -R a-w "$d.part" && mv "$d.part" "$d" && echo "conveyor: $c is installed in $d, read-only"
+  # A folder already there is taken only when it is that commit with nothing changed or added; it is then made read-only.
+  installed "$c" || { echo "conveyor: $d is there and is not commit $c as it was cloned" >&2; return 1; }
+  chmod -R a-w "$d" && echo "conveyor: $c is installed in $d, read-only"
 }
 # The commit the project runs on this machine: the pack's pin, or, for a pack that follows the plugin's main, the
 # newest commit taken here (ENGINE; empty while none is). The second variable, when named, is set to the branch the

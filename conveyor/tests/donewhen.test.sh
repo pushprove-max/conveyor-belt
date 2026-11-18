@@ -135,14 +135,18 @@ t_dwnotes() {
     && ! grep -qF '"notes":false' "$ST/cards.jsonl" || fail "the record check took doneWhen notes that are not a list of strings: $(cat "$ST/quarantined.jsonl" 2>&1)"
 }
 
-# Bug: an issue with no `## Done when` is checked, or its reviewer is given Done-when lines.
+# Bugs: an issue with no `## Done when` is checked, or its reviewer is given Done-when lines; its build line loses the
+# session's tokens and stats (with no Done-when file, the reply's D<n> lines read as two JSON arrays, which jq's
+# --argjson refuses, and the line was written bare, the loop's log showing only jq's own error).
 t_dwnone() {
   # #10: no `## Done when`: no check, and a reply with no section lands.
   dwsetup "$(issue 10 2026-01-04)"
   echo "$GO" > "$STUB/review.1"; echo 'echo four >> b.txt' > "$STUB/build"
-  loop run --only 10 >/dev/null || fail "run of #10 exited non-zero"
+  loop run --only 10 > /dev/null 2> "$STUB/run.err" || fail "run of #10 exited non-zero"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.issue == 10) | select(has("doneWhen"))')" = '' ] && [ -n "$(st 'select(.issue == 10 and .step == "landed") | .sha')" ] \
     || fail "an issue with no Done when section was checked, or did not land: $(st 'select(.issue == 10)')"
+  [ "$(st 'select(.issue == 10 and .step == "build") | .usage.read == 999 and .tokens.claude > 0')" = true ] && ! grep -q 'invalid JSON text' "$STUB/run.err" \
+    || fail "the build line of an issue with no Done when section lost the session's fields: $(st 'select(.issue == 10 and .step == "build")') $(cat "$STUB/run.err")"
   ! grep -q "Done-when lines" "$STUB/asked" || fail "the reviewer of #10 was given Done-when lines"
 }
 
@@ -165,4 +169,17 @@ t_movedmarker() {
   k=$(marked 7 "rm t.txt; echo 'TODO later' > t2.txt"); [ "$k" = '{"items":1,"met":1,"failed":[]}' ] || fail "a TODO line moved to another file failed the reply check: $k"
   k=$(marked 8 ": > v.txt; echo '[VERIFY] the limit' > v2.txt"); [ "$k" = '{"items":1,"met":1,"failed":[]}' ] || fail "a [VERIFY] line moved to another file failed the reply check: $k"
   k=$(marked 9 "echo 'TODO again' > n.txt"); [ "$(jq -c .failed <<<"$k")" = '["TODO added in n.txt is not named in the reply"]' ] || fail "a new TODO line passed the reply check unnamed: $k"
+}
+
+# Bug: a session's fields that cannot be put on its line (not JSON) leave the line bare with nothing in the log but
+# jq's own error, which names no card and no step. dwfields() (lib/testrun.sh) is called as checked() calls it.
+t_dwfields() {
+  setup '[]'
+  local out err
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...)
+  out=$( ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"; dwfields c7 "$T/$CASE/c7" build '' '.' <<<'not json' ) 2> "$T/$CASE/err") \
+    || fail "dwfields failed on fields that are not JSON"
+  err=$(cat "$T/$CASE/err")
+  [ -z "$out" ] && grep -qF "conveyor: card c7: the build session's fields (its tokens, stats and Done-when check) could not be put on its build line; the line is written without them" <<<"$err" \
+    || fail "fields that are not JSON were not left out with the card and step named: out=$out err=$err"
 }
