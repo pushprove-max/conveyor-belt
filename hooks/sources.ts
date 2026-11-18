@@ -58,12 +58,13 @@ export type Need = Card & Times & { yes: boolean; text: string; since: number | 
 // began, reason why Push failed. No time is estimated from past cards. A track of any other shape (an older loop's) is none.
 // files: the test files run of all in the Test step, and over: how many more ran than were selected (run is never above of); tests: its tests done of all, and failed (none until it gives them).
 // list: the list of tests that step's run was given: the files its change touches (changed, files: how many) or the
-// whole suite (null when the pack sets no test.list).
+// whole suite (null when the pack sets no test.list). grown: the files of its change before and after it was split for
+// its size (null when it was not).
 const STATES = ['done', 'now', 'skipped', 'failed', 'todo'] as const
 export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as const
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
 export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null }
-export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null; over: number | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null }
+export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null; over: number | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
 // reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0; atEnd: in
 // that time the running session's route reports no usage until its step ends: "cost shown when the step ends".
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
@@ -197,6 +198,7 @@ const trackOf = (v: any): Track | null => {
     files: v.files && typeof v.files === 'object' && num(v.files.run) !== null ? { run: v.files.run, of: num(v.files.of), over: num(v.files.over) } : null,
     tests: v.tests && typeof v.tests === 'object' && [v.tests.done, v.tests.of, v.tests.failed].every(x => num(x) !== null) ? { done: v.tests.done, of: v.tests.of, failed: v.tests.failed } : null,
     list: v.list?.mode === 'changed' && num(v.list.files) !== null ? { mode: 'changed', files: v.list.files } : v.list?.mode === 'whole' ? { mode: 'whole' } : null,
+    grown: v.grown && typeof v.grown === 'object' && num(v.grown.before) !== null && num(v.grown.after) !== null ? { before: v.grown.before, after: v.grown.after } : null,
   }
 }
 const timesOf = (x: any): Times => ({ start: time(x.start) ?? time(x.pickedAt), pickedAt: time(x.pickedAt), priorSec: num(x.priorSec) ?? 0, totalSec: num(x.totalSec) })
@@ -444,8 +446,10 @@ const stepCount = (st: Step, short: boolean): string => {
   return st.name === 'Fix' ? ` ${n}` : ''
 }
 // A reply-check fix is Build's, never Fix's (the dashboard's names): "▶ Build · reply check fix", "✓ Build · reply check fixed".
-const stepNote = (st: Step): string =>
-  st.name !== 'Build' ? '' : st.replyFix === 'now' && st.state === 'now' ? ' · reply check fix' : st.replyFix === 'done' && st.state === 'done' ? ' · reply check fixed' : ''
+// Build also says when the card was split for its size (track.jq grown): ' · split for its size, 5 → 2 files'.
+const stepNote = (st: Step, t: Track): string =>
+  st.name !== 'Build' ? '' : (st.replyFix === 'now' && st.state === 'now' ? ' · reply check fix' : st.replyFix === 'done' && st.state === 'done' ? ' · reply check fixed' : '')
+    + (t.grown ? ` · split for its size, ${t.grown.before} → ${t.grown.after} files` : '')
 const trackFit = (t: Track, w: number): { segs: Seg[]; count: 'full' | 'short' | null; times: number } => {
   const done = t.steps.flatMap((st, i) => (st.state === 'done' && st.sec !== null ? [i] : []))
   // wide: the joins ` ━━ ` (else `━`); count: 'full', 'short' or none; times: how many done steps, from the first, keep their time.
@@ -454,7 +458,7 @@ const trackFit = (t: Track, w: number): { segs: Seg[]; count: 'full' | 'short' |
     const segs: Seg[] = [{ t: ' ' }]
     t.steps.forEach((st, i) => {
       if (i) segs.push(st.state === 'todo' ? { t: wide ? ' ── ' : '─', c: C.dim } : { t: wide ? ' ━━ ' : '━', c: st.state === 'failed' ? C.bad : C.ok })
-      const name = `${st.name}${count ? stepCount(st, count === 'short') : ''}`, note = count ? stepNote(st) : ''
+      const name = `${st.name}${count ? stepCount(st, count === 'short') : ''}`, note = count ? stepNote(st, t) : ''
       if (st.state === 'done') segs.push({ t: `✓ ${name}${timed.has(i) ? ` ${fmtStep(st.sec as number)}` : ''}${note}`, c: C.ok })
       else if (st.state === 'now') segs.push({ t: `▶ ${name}${note}`, c: C.work, b: true })
       else if (st.state === 'skipped') segs.push({ t: `– ${name}`, c: C.dim })
@@ -483,7 +487,7 @@ export const trackLines = (t: Track, w: number, lead = ''): Line[] => {
   const timed = new Set(t.steps.flatMap((st, i) => (st.state === 'done' && st.sec !== null ? [i] : [])).slice(0, fit.times))
   const dropped = t.steps.flatMap((st, i) => {
     const time = st.state === 'done' && st.sec !== null && !timed.has(i) ? ` ${fmtStep(st.sec)}` : ''
-    const n = fit.count === null ? stepCount(st, false) : '', note = fit.count === null ? stepNote(st) : ''
+    const n = fit.count === null ? stepCount(st, false) : '', note = fit.count === null ? stepNote(st, t) : ''
     return time || n || note ? [`${st.name}${n}${time}${note}`] : []
   })
   return [[...(lead ? [{ t: lead }] : []), ...fit.segs], ...(dropped.length ? wrapParts(dropped, w, '    ') : [])]

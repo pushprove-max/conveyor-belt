@@ -69,7 +69,8 @@
 #   run's {run, of}, tests its cases {done, of, failed} (null when its command said no count: a line
 #   `TESTRUN cases=N`; done and failed are the cases its runner named as ended, session.sh watch()), list the list of
 #   tests it was given ({mode: "changed", files, by: "map" or "name", age: the made test map's commits behind} or
-#   {mode: "whole", why}; null with no test.list: testrun.sh tests()). No time is estimated from past cards. detail is every recorded step, the 17 of before (queued,
+#   {mode: "whole", why}; null with no test.list: testrun.sh tests()), grown {before, after} the files of its change
+#   before and after it was split for its size (growcheck(), lib/slices.sh; else null). No time is estimated from past cards. detail is every recorded step, the 17 of before (queued,
 #   picked, worktree ready, dependencies linked, brief written, building, review 1, fix 1, review 2, fix 2, review 3,
 #   tests, rebuild, landing, pushed, issue closed, follow-ups filed), each {name, state, sec} (follow-ups filed also
 #   n), and detailAt the place in it of the step in progress.

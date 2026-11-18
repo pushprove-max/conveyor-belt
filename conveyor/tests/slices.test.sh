@@ -3,8 +3,9 @@
 # timeout: 120
 # Engine cases (#270): the rule Split large issues (splitcheck(), umbrellas(), lib/slices.sh) with a stub judge
 # (CONVEYOR_SPLIT_CMD: the prompt on its stdin, $STUB/answer its answer, a line in $STUB/judged per call). Each case
-# calls the engine's functions as card() and the loop call them; only the shadow case runs a whole card, as only a
-# card proves that a split verdict in shadow still builds and lands the issue as one card.
+# calls the engine's functions as card() and the loop call them; only the shadow case and the two of a grown change
+# run a whole card, as only a card proves that a split verdict in shadow still builds and lands the issue as one card,
+# and that card() asks about a grown change before its review and lands what the answer leaves.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -13,11 +14,11 @@
 # An issue of three Done-when items that names src/app.sh, with the labels given; the pack's split thresholds ask the
 # judge from three Done-when items (split.doneWhen 3), so this issue goes to the judge and a two-item one does not.
 # Its items follow a "Done when:" line, which the split check reads and a card's own Done-when check (a heading) does
-# not: the stub build ends with no D<n> lines.
+# not: the stub build ends with no D<n> lines. The owner opened it, so the queue does not hold it (INSIDE).
 big() { # <number> [<label>...]
   local n=$1; shift
   jq -cn --argjson n "$n" '{number: $n, title: "big \($n)", body: "Change src/app.sh.\n\nDone when:\n- first\n- second\n- third",
-    milestone: null, createdAt: "2026-11-01", labels: ($ARGS.positional | map({name: .}))}' --args "$@"
+    milestone: null, createdAt: "2026-11-01", labels: ($ARGS.positional | map({name: .})), authorAssociation: "OWNER"}' --args "$@"
 }
 # A valid split: slice 1 covers D1 and D2, slice 2 covers D3 and depends on slice 1.
 SPLIT2='{"verdict":"split","why":"two parts","slices":[{"title":"part one","doneWhen":["one done"],"covers":[1,2]},{"title":"part two","doneWhen":["two done"],"covers":[3],"dependsOn":[1]}]}'
@@ -181,4 +182,79 @@ t_slicesonce() {
   jq -c '.[0].body += "\n- fourth"' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
   fx_in 'splitcheck c3-7 7'
   [ "$(judged)" = 2 ] || fail "an edited issue was not checked again: $(judged) calls"
+}
+
+# A change that grew while it was built (#448, growcheck()): issue 7 (two Done-when items, so under the split check,
+# and the owner's visible-change approval GYES), the pack's split.growFiles 3, the rule <rule>, the stub judge
+# answering GROWN. The five-file change FIVE edits src/s1.sh and adds src/c1.sh to c3.sh and src/s2.sh.
+GROWN='{"verdict":"split","why":"the tests apart","core":["src/c1.sh","src/c2.sh","src/c3.sh"],"slices":[{"title":"the rest","doneWhen":["rest done"],"files":["src/s1.sh","src/s2.sh"]}]}'
+FIVE='for f in c1 c2 c3; do echo "$f" > "src/$f.sh"; done; echo more >> src/s1.sh; echo new > src/s2.sh'
+GYES='Visible change approved: yes, 2026-11-02'
+grown() { # <rule>
+  slices "$1" "$GROWN" "[$(big 7 | jq -c --arg l "$GYES" '.body = "Change src/app.sh.\n\nDone when:\n- first\n- second\n\n" + $l')]"; tune '.split.growFiles = 3'
+}
+# The whole card of issue 7, as only a card proves that card() asks before its review: main has src/s1.sh, the build
+# makes FIVE (once: the fix session after a split builds nothing again), and the review is a GO.
+grownrun() { # <rule>
+  grown "$1"; echo 'main s1' > "$R/src/s1.sh"; git -C "$R" add src && git -C "$R" commit -qm s1 || fail "main's src/s1.sh"
+  echo "[ -e src/c1.sh ] || { $FIVE; }" > "$STUB/build"; echo "$GO" > "$STUB/review.1"
+  loop run 1 >/dev/null
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card of issue 7 did not land: $(st .step | tr '\n' ' ')"
+}
+landedfiles() { git -C "$R" show --name-only --format= HEAD | sort | tr '\n' ' '; }
+
+# On: the judge keeps three core files and moves two into one slice; the slice is filed under the issue, its files go
+# back to main's (the edited one restored, the added one removed), one fix session is told why, and the card is
+# reviewed and lands the core files alone. Bug caught: a card whose change grew to 60 files was reviewed and tested whole.
+t_slicesgrown() {
+  grownrun on
+  [ "$(judged)" = 1 ] || fail "the judge was asked $(judged) times about a grown change"
+  grep -q 'grown to 5 files' "$STUB/prompt" && grep -q 'past the 3 files' "$STUB/prompt" && grep -q '^+more$' "$STUB/prompt" \
+    || fail "the judge was not given the size and the change: $(cat "$STUB/prompt")"
+  [ "$(landedfiles)" = 'src/c1.sh src/c2.sh src/c3.sh ' ] || fail "the card did not land only the core files: $(landedfiles)"
+  jq -se 'length == 1 and (.[0] | .title == "the rest" and (.labels | map(.name) == ["conveyor-followup"])
+    and (.body | startswith("Follow-up of #7: slice 1 of 1. Conveyor card ") and contains("- src/s2.sh") and contains("Depends on: #7") and endswith("## Done when\n- rest done")))' "$STUB/filed" >/dev/null \
+    || fail "the slice was not filed as a follow-up of the issue that depends on it: $(cat "$STUB/filed" 2>/dev/null)"
+  grep -q '^# The change was split for its size' "$STUB/brief" && grep -qF -- '- #100101 the rest: src/s1.sh, src/s2.sh' "$STUB/brief" \
+    || fail "the fix session was not told what was moved out: $(cat "$STUB/brief")"
+  [ "$(st 'select(.step == "grown") | [.result, .grown.mode, .grown.files, .grown.after, .grown.filed] | @json')" = '["split","on",5,3,[100101]]' ] \
+    && [ "$(st 'select(.step == "fix") | .reason')" = 'split for its size: 5 files, 3 after; its slices are #100101' ] \
+    || fail "the card's lines do not record the split for its size: $(cat "$ST/cards.jsonl")"
+  recok "$ST/cards.jsonl" "a card split for its size"
+  # The track (the Board and /units) says it, with the count before and after.
+  [ "$(loop snapshot | jq -c '.landed[] | select(.issue == 7) | .track | [.grown, any(.records[]; .name == "split for its size: 5 files, 3 after")]')" = '[{"before":5,"after":3},true]' ] \
+    || fail "the track does not say the card was split for its size: $(loop snapshot | jq -c '.landed[] | select(.issue == 7) | .track | {grown, records}')"
+  # Bug caught: the slice's opening line did not match inherit()'s slice header, so it lost its parent's approval.
+  fx_in 'inherit "$(jq -sc ".[0]" "$STUB/filed")" | jq -r .from'
+  [ "$(cat "$T/$CASE/run.out")" = 7 ] || fail "a slice split for size does not inherit its parent's approval: $(cat "$T/$CASE/run.out")"
+  # Bug caught: a run limited by --only to the parent left out its slices, as only the grown line names them.
+  jq -sc --argjson i "$(big 9)" 'map(.authorAssociation = "OWNER") + [$i]' "$STUB/filed" > "$STUB/up.json"
+  fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" | jq -c "[.[].number]"'
+  [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] || fail "a run limited to the parent does not take its size slice: $(cat "$T/$CASE/run.out")"
+  # Bug caught: once `retry` gave back the parent (approved(), after the owner's yes), its grown line is in the retried
+  # file, and a run limited by --only to the parent left the slice queued.
+  jq -c 'select(.step == "grown")' "$ST/cards.jsonl" > "$ST/retried.jsonl"; jq -c 'select(.step != "grown")' "$ST/cards.jsonl" > "$STUB/cards.new"
+  mv "$STUB/cards.new" "$ST/cards.jsonl"
+  fx_in 'ONLY="[7]" upnext "$(cat "$STUB/up.json")" | jq -c "[.[].number]"'
+  [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] || fail "a run limited to a retried parent does not take its size slice: $(cat "$T/$CASE/run.out")"
+}
+
+# Shadow: the judge's answer is recorded on the grown line, and the card lands its change as it was: nothing filed,
+# no fix. Bug caught: Shadow changed what the card lands.
+t_slicesgrownshadow() {
+  grownrun shadow
+  [ "$(judged)" = 1 ] || fail "the judge was asked $(judged) times about a grown change in Shadow"
+  [ "$(landedfiles)" = 'src/c1.sh src/c2.sh src/c3.sh src/s1.sh src/s2.sh ' ] && [ ! -s "$STUB/filed" ] && [ -z "$(st 'select(.step == "fix")')" ] \
+    || fail "Shadow changed the change, filed a slice or ran a fix: $(landedfiles) $(cat "$STUB/filed" 2>/dev/null)"
+  [ "$(st 'select(.step == "grown") | [.result, .grown.mode, .grown.files, (.grown.slices | length), .grown.filed] | @json')" = '["split","shadow",5,1,null]' ] \
+    || fail "the Shadow answer was not recorded: $(cat "$ST/cards.jsonl")"
+  recok "$ST/cards.jsonl" "a grown line in Shadow"
+}
+
+# Two files, and two documents (*.md, left out), are not past a size of 3: no judge call and no line. Bug caught: a
+# small change, or its documentation, cost a judge call.
+t_slicesgrownsmall() {
+  grown on; fx_wt 'echo a > src/c1.sh; echo b > src/c2.sh; echo d > one.md; echo e > two.md' src/s1.sh 'main s1'
+  fx_in 'growcheck c7 7 "$FXWT" "$(big 7)" brief'
+  [ "$RC" = 0 ] && [ "$(judged)" = 0 ] && [ ! -s "$ST/cards.jsonl" ] || fail "a change of 2 files was sent to the judge (exit $RC, $(judged) calls): $(cat "$ST/cards.jsonl" 2>/dev/null)"
 }

@@ -260,6 +260,13 @@ test('a reply-check fix is drawn on Build, and Fix is not ticked before the firs
   expect(beltCard({ track: fixed }, 45)[2]).toBe('    Build 30s · reply check fixed')
 })
 
+// A card split for its size (#448, track.jq grown): without the note, /units drew a change cut from 5 files to 2 as
+// any other card, and the owner could not tell that part of the work went to follow-ups.
+test('a card split for its size says so on Build, with the count of files before and after', () => {
+  const t = track('++>...', 'review 1 of 3', { grown: { before: 5, after: 2 } })
+  expect(beltCard({ track: t }, 120)[1]).toBe(' ✓ Build 30s · split for its size, 5 → 2 files ━━ ✓ Review 31s ━━ ▶ Fix ── Test ── Land ── Push')
+})
+
 // at the panel's 62 columns, Push in progress after five 960-second steps, three reviews of three and two fixes
 // lost the Test and Land times from the track; they are on the line under it.
 test('a track too full for its width keeps the dropped times and counts on a line under it', () => {

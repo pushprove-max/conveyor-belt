@@ -82,6 +82,18 @@ SPLITREAD='def nums: type == "array" and all(.[]; type == "number" and . == floo
     elif .verdict == "keep" then {verdict: "keep", why: $why}
     else {verdict: "split", why: $why, slices: [.slices[] | {title: (.title | gsub("\\s+"; " ") | .[0:200]), doneWhen: (.doneWhen | map(gsub("\\s+"; " "))),
       covers: (.covers | unique), dependsOn: (.dependsOn // [] | unique)}]} end'
+# One call of the judge (the seat judgeseat() names; CONVEYOR_SPLIT_CMD in the cases), no tools, SPLIT_TIMEOUT at
+# most: sets the caller's ans to its answer and model to the judge's model; fails with why in ans.
+splitcall() { # <the control record> <prompt>
+  local s effort='' d rc
+  model=''; s=$(seat judge "$1" 2>/dev/null) && jqget "$s" model model effort effort || { model='' effort=''; }
+  d=$(mktemp -d) || { ans="the judge call failed (no folder for it)"; return 1; }
+  if [ -n "${CONVEYOR_SPLIT_CMD:-}" ]; then
+    (cd "$d" && exec timeout --kill-after=10 "$SPLIT_TIMEOUT" bash -c "$CONVEYOR_SPLIT_CMD" <<<"$2" > "$d/answer" 2>/dev/null 8>&- 9>&-); rc=$?; s=''
+  else s=$(ASKSEAT=judge askmodel "$d" "$SPLIT_TIMEOUT" "${effort:-medium}" "$1" "$2"); rc=$?; fi
+  ans=$(cat "$d/answer" 2>/dev/null); rm -rf "$d"
+  [ "$rc" = 0 ] && [ -z "$s" ] || { ans="the judge call failed (${s:-exit $rc; 124 is the ${SPLIT_TIMEOUT}s timeout})"; return 1; }
+}
 # The judge's prompt: SPLITASK, the issue, its Done-when items and the files it names, as main has them.
 splitprompt() { # <issue json> <size json>
   local f n=0 t p
@@ -96,7 +108,7 @@ splitprompt() { # <issue json> <size json>
   printf '%s' "$p"
 }
 splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the issue was split and the card has ended
-  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p d rc s ans v model='' effort nums x split
+  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.split // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
@@ -110,13 +122,8 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   if jq -e --argjson t "[$t1,$t2,$t3,$t4]" '(.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3]' <<<"$size" >/dev/null; then
     v=$(jq -c '{verdict: "under", why: "under the pack'"'"'s split thresholds: \(.doneWhen | length) Done-when items, \(.files | length) files, \(.areas) areas, \(.chars) characters"}' <<<"$size")
   else
-    s=$(seat judge "$c" 2>/dev/null) && jqget "$s" model model effort effort || { model='' effort=''; }
-    p=$(splitprompt "$issue" "$size"); d=$(mktemp -d) || return 0
-    if [ -n "${CONVEYOR_SPLIT_CMD:-}" ]; then
-      (cd "$d" && exec timeout --kill-after=10 "$SPLIT_TIMEOUT" bash -c "$CONVEYOR_SPLIT_CMD" <<<"$p" > "$d/answer" 2>/dev/null 8>&- 9>&-); rc=$?; s=''
-    else s=$(ASKSEAT=judge askmodel "$d" "$SPLIT_TIMEOUT" "${effort:-medium}" "$c" "$p"); rc=$?; fi
-    ans=$(cat "$d/answer" 2>/dev/null); rm -rf "$d"
-    if [ "$rc" != 0 ] || [ -n "$s" ]; then v=$(jq -cn --arg r "the judge call failed (${s:-exit $rc; 124 is the ${SPLIT_TIMEOUT}s timeout})" '{verdict: "failed", why: $r}')
+    p=$(splitprompt "$issue" "$size")
+    if ! splitcall "$c" "$p"; then v=$(jq -cn --arg r "$ans" '{verdict: "failed", why: $r}')
     else v=$(jq -Rsc --argjson n "$(jq '.doneWhen | length' <<<"$size")" "$SPLITREAD" <<<"$ans" 2>/dev/null)
       [ -n "$v" ] || v=$(jq -cn --arg a "${ans:0:2000}" '{verdict: "invalid", why: "the answer held no JSON object", answer: $a}'); fi
   fi
@@ -140,7 +147,9 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
 }
 # The slices of a split, filed as follow-ups of <issue>: its priority, area and type labels and its milestone, the
 # follow-up label, a body that opens "Follow-up of #<issue>", its Done-when items, the items of the parent it covers,
-# and a `Depends on:` line naming the slices it depends on. They start where the parent is: held when the control
+# and a `Depends on:` line naming the slices it depends on. A slice of a grown change (one with files, growcheck())
+# names the files of the change it builds again in place of the items it covers, and depends on <issue> too, as it
+# builds on the change that lands it. They start where the parent is: held when the control
 # record holds it, else queued. Prints their numbers as a JSON array; when one cannot be filed, prints why and fails,
 # the ones filed before it withdrawn.
 splitfile() { # <card> <issue json> <slices json> <the control record>
@@ -152,9 +161,15 @@ splitfile() { # <card> <issue json> <slices json> <the control record>
   for ((i = 0; i < k; i++)); do
     body=$(jq -r --argjson i "$i" --argjson k "$k" --arg c "$1" --arg area "$AREA" --argjson sl "$3" --argjson nums "$(jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}")" \
       '. as $iss | ('"$SPLITSIZE"' | .doneWhen) as $dw | $iss | .number as $n | $sl[$i] as $s
-      | "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) split #\($n) under the rule Split large issues. #\($n) stays open and held until each of its slices lands or is already done on main.\n\n"
-        + "## The Done-when items of #\($n) this slice covers\n" + ($s.covers | map("- D\(.): \($dw[. - 1])") | join("\n"))
-        + (if $s.dependsOn == [] then "" else "\n\nDepends on: " + ($s.dependsOn | map("#\($nums[. - 1])") | join(" ")) end)
+      | if $s.files == null then
+          "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) split #\($n) under the rule Split large issues. #\($n) stays open and held until each of its slices lands or is already done on main.\n\n"
+          + "## The Done-when items of #\($n) this slice covers\n" + ($s.covers | map("- D\(.): \($dw[. - 1])") | join("\n"))
+          + (if $s.dependsOn == [] then "" else "\n\nDepends on: " + ($s.dependsOn | map("#\($nums[. - 1])") | join(" ")) end)
+        else
+          "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) moved this part out of its change for #\($n), which grew past the pack'"'"'s split.growFiles files, under the rule Split large issues: #\($n) lands without it.\n\n"
+          + "## The files of that change this slice builds again\n" + ($s.files | map("- " + .) | join("\n"))
+          + "\n\nDepends on: #\($n)" + ($s.dependsOn | map(" #\($nums[. - 1])") | join(""))
+        end
         + "\n\n## Done when\n" + ($s.doneWhen | map("- " + .) | join("\n"))' <<<"$2") \
       && out=$(gh_write issue create --title "$(jq -r --argjson i "$i" '.[$i].title' <<<"$3")" --label "$FOLLOWUP" "${more[@]}" --body "$body" 2>&1) \
       && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
@@ -168,6 +183,110 @@ splitfile() { # <card> <issue json> <slices json> <the control record>
 splitwithdraw() { # <issue> <slice>...
   local n=$1 x; shift
   for x; do gh_write issue close "$x" --reason "not planned" --comment "Conveyor: the split of #$n could not be filed whole, so this slice is withdrawn and #$n is built as one card." >/dev/null 2>&1; done
+}
+# A change that grew while it was built (#448). card() calls growcheck() before each review of a card of an issue of
+# its own (not a main-red fix card nor a branch), until it has asked the judge once (it sets the caller's grown). With
+# the rule Shadow or On, a card whose issue is no follow-up, and whose staged change holds more files than the pack's
+# split.growFiles (documentation, *.md, left out), the judge is given the issue, the files with their lines added and
+# removed, and the change (its first GROW_DIFF characters), once and SPLIT_TIMEOUT at most. It answers keep, or the
+# core files that stay on the card and 1 to 3 slices, each a title, Done-when items and the files it takes (GROWASK).
+# An answer is used only when it holds to the rules (GROWREAD): every file of the change is in exactly one part, the
+# core holds one at least, and a slice depends only on slices before it.
+# The card's grown line records it: result split or kept, grown {mode, files (the count before), limit, verdict
+# (keep, split, invalid, failed), why, core, slices ({title, doneWhen, files, dependsOn}), filed and after (On: the
+# issues filed, and the count once their files are dropped), answer}, and model. In Shadow that is all. On, the slices
+# are filed as follow-ups of the issue (splitfile(), held or queued as the issue is; a run limited by --only to the
+# issue takes them too, jq/upnext.jq), their files are put back to what
+# HEAD has (a file the change added is removed), and one fix session (GROWFIX) makes what is left work alone; the card
+# then goes on to its review. Slices that cannot be filed leave the change whole, and the line says why.
+GROW_DIFF=60000
+GROWASK='A coding session built the change below for the issue below. The change has grown to <files> files (documentation
+left out), past the <limit> files the project allows one change: a change this large is slow to review and to test.
+Decide whether to keep only its core on this card, and move the rest into 1 to 3 follow-up issues (slices), each
+built later as a change of its own.
+The rules of a split:
+- The core is the part the issue needs. It stays a complete change that works on its own and meets every Done-when
+  item of the issue.
+- A slice is a part the issue does not need: a complete change that works on its own once the core has landed. It
+  has a title, Done-when items of its own, and the files of the change it takes (those files go back to what main
+  has on this card, and the slice builds them again).
+- Each file of the change is in exactly one part: the core or one slice. The core has one file at least.
+- A slice that changes the same code as an earlier slice depends on it: give the numbers of the earlier slices it
+  depends on (1 is the first slice).
+Keep the change whole when its parts cannot each work on their own. When you are not sure, keep it.
+Answer with exactly one JSON object and nothing else, one of:
+{"verdict": "keep", "why": "<one line>"}
+{"verdict": "split", "why": "<one line>", "core": ["<file>"], "slices": [{"title": "<title>", "doneWhen": ["<item>"], "files": ["<file>"], "dependsOn": [<number of an earlier slice>]}]}'
+# The judge's answer (its input, raw) against those rules, $files the change's files: as SPLITREAD reads one.
+GROWREAD='def nums: type == "array" and all(.[]; type == "number" and . == floor);
+  def strs: type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"));
+  def twice: group_by(.) | map(select(length > 1) | .[0]);
+  . as $raw | (index("{")) as $s | (rindex("}")) as $e | select($s != null and $e != null and $s < $e) | .[$s:$e + 1] | fromjson? | objects
+  | (.why | if type == "string" then .[0:300] else "" end) as $why
+  | (if .verdict == "keep" then null
+     elif .verdict != "split" then "the verdict is neither keep nor split"
+     elif (.slices | type) != "array" or (.slices | length) < 1 or (.slices | length) > 3 then "not 1 to 3 slices"
+     elif (.core | strs | not) then "the core has no files"
+     elif any(.slices[]; (.title | type) != "string" or (.title | test("\\S") | not)) then "a slice has no title"
+     elif any(.slices[]; .doneWhen | strs | not) then "a slice has no Done-when items of its own"
+     elif any(.slices[]; .files | strs | not) then "a slice takes no files"
+     elif any(.slices | to_entries[]; .key as $k | .value.dependsOn // [] | (nums | not) or any(.[]; . < 1 or . > $k)) then "a slice depends on a slice that is not before it"
+     else [.core[], .slices[].files[]] as $all
+       | if ($all - $files) != [] then "it names \(($all - $files) | unique | join(", ")), which the change does not hold"
+         elif ($files - $all) != [] then "no part holds \(($files - $all) | join(", "))"
+         elif ($all | twice) != [] then "more than one part holds \($all | twice | join(", "))" else null end end) as $bad
+  | if $bad != null then {verdict: "invalid", why: $bad, answer: $raw[0:2000]}
+    elif .verdict == "keep" then {verdict: "keep", why: $why}
+    else {verdict: "split", why: $why, core: (.core | unique), slices: [.slices[] | {title: (.title | gsub("\\s+"; " ") | .[0:200]), doneWhen: (.doneWhen | map(gsub("\\s+"; " "))),
+      files: (.files | unique), dependsOn: (.dependsOn // [] | unique)}]} end'
+GROWFIX='# The change was split for its size
+The change grew past the files the project allows one change. The judge kept its core on this card and moved the
+parts below into follow-up issues, and the engine put their files back to what main has. Make the change that is left
+complete and working on its own: fix what still uses the parts moved out. Do not build those parts again here; their
+issues build them. Change nothing else.'
+# The files of the staged change of <worktree>, documentation (*.md) left out, as a JSON list.
+growfiles() { git -C "$1" add -A && git -C "$1" diff --cached --no-renames --name-only HEAD -- . ':!*.md' | jq -Rsc 'split("\n") | map(select(. != ""))'; }
+growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0 when the card goes on as it was; 2 when it goes on split; 1 when it blocked
+  local c=${CARDCTL:-} rule lim files k p d ans model='' v g nums f t after
+  [ "$2" != 0 ] || return 0
+  [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
+  rule=$(jq -r '.rules.split // "off"' <<<"$c" 2>/dev/null)
+  [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
+  ! jq -e --arg fu "$FOLLOWUP" 'any(.labels[]?; .name == $fu)' <<<"$4" >/dev/null 2>&1 || return 0
+  packget split.growFiles lim && files=$(growfiles "$3") && k=$(jq length <<<"$files") || return 0
+  [ "$k" -gt "$lim" ] || return 0
+  # shellcheck disable=SC2034 # card()'s local: its later reviews ask no more
+  grown=1
+  p=${GROWASK//'<files>'/$k}; p=${p//'<limit>'/$lim}
+  p+=$'\n\n'$(jq -r '"# The issue: #\(.number) \(.title // "")\n\n\(.body // "")"' <<<"$4")
+  p+=$'\n\n# The files of the change (lines added, lines removed)\n'$(git -C "$3" diff --cached --no-renames --numstat HEAD -- . ':!*.md')
+  d=$(git -C "$3" diff --cached --no-renames HEAD -- . ':!*.md')
+  p+=$'\n\n# The change\n'"${d:0:$GROW_DIFF}"; [ "${#d}" -le "$GROW_DIFF" ] || p+=$'\n(the rest of the change is left out)'
+  if ! splitcall "$c" "$p"; then v=$(jq -cn --arg r "$ans" '{verdict: "failed", why: $r}')
+  else v=$(jq -Rsc --argjson files "$files" "$GROWREAD" <<<"$ans" 2>/dev/null)
+    [ -n "$v" ] || v=$(jq -cn --arg a "${ans:0:2000}" '{verdict: "invalid", why: "the answer held no JSON object", answer: $a}'); fi
+  g=$(jq -c --arg m "$rule" --argjson k "$k" --argjson l "$lim" '{mode: $m, files: $k, limit: $l} + .' <<<"$v") || return 0
+  if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$g")" = split ]; then
+    if nums=$(splitfile "$1" "$4" "$(jq -c .slices <<<"$g")" "$c"); then
+      # Each file a slice takes goes back to what HEAD has; one the change added is removed.
+      while IFS= read -r f; do
+        if git -C "$3" cat-file -e "HEAD:$f" 2>/dev/null; then git --literal-pathspecs -C "$3" restore --source=HEAD --staged --worktree -- "$f"
+        else git --literal-pathspecs -C "$3" rm -qf -- "$f"; fi >/dev/null 2>&1 \
+          || { record "$1" "$2" grown split "$(jq -c --argjson f "$nums" --arg m "$model" '{grown: (. + {filed: $f})} + (if $m != "" then {model: $m} else {} end)' <<<"$g")"
+               block "$1" "$2" "$3" "split for its size: the engine could not drop $f from the change; its slices are filed as $(jq -r 'map("#\(.)") | join(", ")' <<<"$nums")"; return 1; }
+      done < <(jq -r '.slices[].files[]' <<<"$g")
+      after=$(growfiles "$3" | jq length) || after=null
+      g=$(jq -c --argjson f "$nums" --argjson a "${after:-null}" '. + {filed: $f, after: $a}' <<<"$g")
+    else g=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the change is kept whole: \($r)"' <<<"$g"); fi
+  fi
+  record "$1" "$2" grown "$(jq -r 'if .verdict == "split" then "split" else "kept" end' <<<"$g")" \
+    "$(jq -c --arg m "$model" '{grown: .} + (if $m != "" then {model: $m} else {} end)' <<<"$g")"
+  jq -e '.filed' <<<"$g" >/dev/null || return 0
+  began "$1" "$2" fix
+  t=$(session "$3" "$5"$'\n\n'"$GROWFIX"$'\n'"$(jq -r '[.filed, .slices] | transpose[] | "- #\(.[0]) \(.[1].title): \(.[1].files | join(", "))"' <<<"$g")" fix) \
+    || { block "$1" "$2" "$3" "fix: $t"; return 1; }
+  checked "$1" "$2" "$3" "$4" "$5" fix "$(jq -c --arg r "split for its size: $k files, $(jq -r .after <<<"$g") after; its slices are $(jq -r '.filed | map("#\(.)") | join(", ")' <<<"$g")" '. + {reason: $r}' <<<"$t")" || return 1
+  return 2
 }
 # At a turn of the loop, outside the lock: each open issue of the list that is the umbrella of a split (a split line
 # with filed slices) whose slices each have a landed line, or a closed line (main already does it: ALREADY-DONE) that

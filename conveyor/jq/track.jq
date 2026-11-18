@@ -126,6 +126,8 @@
              elif $i == 5 and $u.filed != null then {followups: $u.filed} else {} end)],
          at: $six, label: $label, since: (if $at == null then null elif $kind == "proof" then ($c.proof.at | strings) // $last.time else ($c.live.at | strings) // $last.time end),
          reason: $why,
+         # The card split for its size (growcheck(), lib/slices.sh): the files of its change before and after; else null.
+         grown: ([$log[] | select(.step == "grown" and .grown.after != null) | .grown] | last | if . == null then null else {before: .files, after} end),
          files: (if $kind == "test" then ($c.live // {} | .files // null) elif $kind == "proof" then $c.proof.files else null end),
          tests: (if $kind == "test" then ($c.live // {} | .tests // null) elif $kind == "proof" then $c.proof.tests else null end),
          # The list of tests the run was given (tests()): {mode: "changed", files, by, age} or {mode: "whole", why}.
@@ -148,7 +150,10 @@
                   elif $l.step == "closed" then "landing (issue closed)" elif $l.step == "pushed" then "pushed"
                   elif $l.step == "push" then (if $l.result == "ok" then "push" else "push failed" end)
                   elif $l.step == "issue" then (if $l.result == "ok" then "issue closed" else "issue not closed" end)
-                  elif $l.step == "filed" then "follow-ups filed" elif $l.step == "blocked" then "stopped" else $l.step end),
+                  elif $l.step == "filed" then "follow-ups filed" elif $l.step == "blocked" then "stopped"
+                  elif $l.step == "grown" then (if $l.grown.after != null then "split for its size: \($l.grown.files) files, \($l.grown.after) after"
+                    elif $l.result == "split" then "would split for its size: \($l.grown.files) files" else "kept at its size: \($l.grown.files) files" end)
+                  else $l.step end),
                  state: (if ($l.step == "test" and $l.result == "fail") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
                    or ($l.step == "blocked" and $l.stop != "yes") then "failed" else "done" end),
                  sec: (if $l.step == "picked" then null else $l.took // null end), at: $l.time}

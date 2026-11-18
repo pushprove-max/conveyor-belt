@@ -85,4 +85,6 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                  else {ran: false, why: "the review had no finding"} end),
                # A NO-GO review's findings that came back after a fix round told to fix them (card.sh), {id, rounds}.
                survived: (if .step == "review" then .survived else null end),
+               # A grown line (growcheck(), lib/slices.sh): the files of the change before, and after the split (On).
+               grown: (if .step == "grown" then {files: .grown.files, after: (.grown.after // null)} else null end),
                took: (if $i == 0 then null else (.time | fromdate) - ($all[$i - 1].time | fromdate) end)} | with_entries(select(.value != null))]}})

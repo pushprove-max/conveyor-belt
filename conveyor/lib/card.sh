@@ -25,6 +25,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
+  local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
@@ -317,6 +318,9 @@ card() { # <card> <issue> [<branch> <tip>]
       # Same-file cards review in parallel: no claim and no wait before a review. They line up only to land (at
       # settle() below), and a card is reviewed again there only when an earlier landing changed the lines it changed,
       # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
+      # A change grown past the pack's split.growFiles (growcheck(), lib/slices.sh): asked once a card; split, its one
+      # fix session dropped the slices' parts, so this review reads the whole change, not that fix alone.
+      if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix='' ;; esac; fi
       # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
       # what this review reads, and the card is blocked when it no longer holds.
       if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then

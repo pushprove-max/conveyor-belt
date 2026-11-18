@@ -5,7 +5,11 @@
     | map(.number) as $open | graph($cards) as $g | (if $all == "" then [] else cyclesof($g) | add // [] end) as $cyc
     | landed($cards) as $done | ($cards | map(select(.followups))) as $fc
     | ($cards | map(select(.step == "landed") | .followups // [] | .[])) as $ready
-    | (if $only == null then null else ups($cards; $only) end) as $only
+    # --only takes the slices of a split for size too (a grown line's filed, growcheck()), with those of a card `retry`
+    # gave back (approved(): a parent blocked for the owner's yes), whose grown line is in $retried; they are no
+    # followups for waits(), as each such slice depends on its parent, and would wait on itself.
+    | (if $only == null then null else ups($cards | map(.followups //= .grown.filed)
+        + [$retried[] | select(.grown.filed) | {issue, followups: .grown.filed}]; $only) end) as $only
     | ($retried | map(.issue) | unique) as $again
     | ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | localtime | .[3] != $sh) as $loud
     | map((.labels | map(.name)) as $l

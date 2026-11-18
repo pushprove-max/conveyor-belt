@@ -275,6 +275,23 @@ records the verdict, the slices and the reason.
 The Health panel shows the cards that Conveyor checked while the rule was Shadow or On: how many it kept and how many
 would split, and the first-review GO rate and the fix rounds of each group.
 
+### A change that grows while it is built
+
+A card's change can grow large while it is built and fixed. Before each review, Conveyor counts the files of the
+card's change, with documentation (`*.md`) left out. When the count is more than `split.growFiles` in
+`.conveyor/project.json`, the next review also asks the judge one time. The judge gets the issue and the change. It
+answers keep, or it keeps the core change of the issue on the card and names 1 to 3 slices. Each slice has a title,
+Done-when items of its own and the files of the change that it takes. Each file is in the core or in one slice.
+
+- **Off**: Conveyor does not count the files.
+- **Shadow**: the card's `grown` line records the answer, and the change stays as it is.
+- **On**: Conveyor files each slice as a follow-up of the issue, with `Depends on:` the issue. The slices of a held
+  issue are held, and the others go in the queue. Conveyor puts the files of the slices back to what main has, and
+  one fix session makes the rest work alone. Then the card goes on to its review. The track on the Board and in
+  /units shows that the card was split for its size, with the count of files before and after.
+
+Conveyor does not count the files of a follow-up or of a fix card that has no issue.
+
 ## The project's checks
 
 Set `test.checkCommand` in `.conveyor/project.json` to a command that runs your project's checks, for example a lint
