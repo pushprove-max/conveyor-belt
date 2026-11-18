@@ -184,13 +184,20 @@ without your yes".
 or changes. A card that changes no test file runs 5 of the test files linked to its change. The test files linked to
 the landings run before each push, and the whole suite runs only in a release. The tab says "off: a card runs only the
 test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run before
-each push, and the whole suite runs only in a release". On, a card runs the whole suite when it cannot find the tests of
+each push, and the whole suite runs only in a release". While **Test before a push** is Off, that line does not
+name the run before a push. On, a card runs the whole suite when it cannot find the tests of
 its change ([Whole suite in a card](configuration.md#whole-suite-in-a-card)).
 
 **Land as** is **Main** or **Pull request**. Until you set it, it shows the pack's `push.landAs`. Main pushes the
 landed cards to the default branch. Pull request pushes them to the branch `conveyor/landing`, and one pull request
 from there collects them until you merge it. The tab then says "one pull request from conveyor/landing collects the
 cards; merge it to close their issues" ([Land as](configuration.md#land-as)).
+
+**Test before a push** is a switch per project. On, before each push Conveyor runs the test files linked to the
+landings since the last push, and a file that fails holds the push. Off, a push runs no test first, and the tab says
+"off: a push runs no test first". The switch shows the pack's `push.check` (on in a new project) until you change it
+here. Your change goes in the control record and wins over the pack
+([Which tests a card runs](configuration.md#whole-suite-in-a-card)).
 
 ## Held issues and dependencies
 

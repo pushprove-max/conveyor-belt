@@ -121,7 +121,8 @@ main. This run never runs a test runner or the whole suite. If a file fails, Con
 in turn to find the landing that broke it. Then it files a main-fix card that names that landing, and it holds the
 push until main changes. Push landed pushes the commit that its full test run tested, so it skips this run. The run
 needs `test.fileCommand`, or a `test.list` form that can give the test command one file. Without them, the push goes
-on without the run.
+on without the run. With `push.check` off, or the Rules tab's **Test before a push** Off, the push goes on without
+the run too ([Which tests a card runs](configuration.md#whole-suite-in-a-card)).
 
 A push that fails is one of two kinds:
 

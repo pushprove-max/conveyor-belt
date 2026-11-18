@@ -382,7 +382,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
-  "areaPrefix": "team/", "packLandAs": "pr", "standing": ["asked-fix"],
+  "areaPrefix": "team/", "packLandAs": "pr", "standing": ["asked-fix"], "pushCheck": false,
   "health": {"state": "paused", "reason": "the loop says why", "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
     "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
@@ -505,8 +505,9 @@ q '.panels.rules.data | has("unpushed") or has("fullTest") | not' "the Rules par
 # The pack's Land as (#247): without it, the Rules tab shows Main for a project whose pack lands as a pull request.
 q '.panels.rules.data.packLandAs == "pr"' "the Rules part gives the pack's push.landAs"
 # The Rules tab has the loop's state (its tab's count), the models, the limit reading, the waits and every held
-# issue with its labels and reasons, as the Board has them.
-q '.panels.rules.data | .state == "paused" and .modelSettings.builder.choices == ["claude-x"] and .areaPrefix == "team/" and .standing == ["asked-fix"] and .limit == {pct: 42, from: "loop"} and (.waits | type) == "array"
+# issue with its labels and reasons, as the Board has them; the pack's push.check false is kept false, not dropped as
+# null (a `//` would drop it, and the Test before a push row would show On).
+q '.panels.rules.data | .state == "paused" and .modelSettings.builder.choices == ["claude-x"] and .areaPrefix == "team/" and .standing == ["asked-fix"] and .pushCheck == false and .limit == {pct: 42, from: "loop"} and (.waits | type) == "array"
   and (.open.held | map([.issue, .url, (.reasons | map(.label // .kind))])) == [[30, "'"$PU"'/30", ["you"]], [33, "'"$PU"'/33", ["backlog"]]]' "the Rules part: state, models, limit, waits and the held issues with why"
 # Every open issue reaches the Board, each held one with its reasons and a link; a record without it gives null.
 q '.panels.board.data.open | .count == 6 and .split == {queued: 2, you: 1, labelOrRule: 2, belt: 1} and (.held | map([.issue, .url, (.reasons | map(.label // .kind))])) == [[30, "'"$PU"'/30", ["you"]], [33, "'"$PU"'/33", ["backlog"]]]' "the Board has every open issue: the split and the held ones with why"

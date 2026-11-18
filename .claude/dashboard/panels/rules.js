@@ -11,7 +11,8 @@
 // accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
 // card lands (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull request, the
-// record's landAs or else the pack's; disabled the same way for a record with no landAs), Visible changes need your yes (On or
+// record's landAs or else the pack's; disabled the same way for a record with no landAs), Test before a push (On or Off: the
+// record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
 // way for a record with no rules.wholeSuite), Card work yields to you (On or Off, the machine's
 // steer, sent as POST /machine; disabled the same way when the snapshot does not say it), Cores kept for you (shown,
@@ -119,6 +120,9 @@
   // names landAs (null too: the pack's); an older engine is never sent `land-as`.
   const landNow = (c) => (c && (c.landAs === 'main' || c.landAs === 'pr') ? c.landAs : (S.d.packLandAs === 'pr' ? 'pr' : 'main'));
   const landKnown = () => { const c = ctl(); return !!c && Object.prototype.hasOwnProperty.call(c, 'landAs'); };
+  // Whether the run before a push runs (pushcheck(), conveyor/lib/push.sh): the record's pushCheck when it sets one,
+  // else the pack's push.check as the snapshot gives it; on when neither says.
+  const pushCheckOn = (c) => (c && typeof c.pushCheck === 'boolean' ? c.pushCheck : S.d.pushCheck !== false);
   // The rule that skips an issue, in words.
   function why(rule) {
     if (rule === 'follow-ups') return 'follow-ups are off';
@@ -266,6 +270,7 @@
     if (action === 'start') return `new issues start in ${a[0] === 'held' ? 'Held' : 'the Queue'}`;
     if (action === 'dep-guard') return `dependency guard ${a[0]}`;
     if (action === 'land-as') return a[0] === 'pr' ? 'land as one pull request' : 'land on main';
+    if (action === 'push-check') return `test before a push ${a[0]}`;
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
     if (action === 'depends') return `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`;
     if (action === 'prices') return priceWords(a);
@@ -299,6 +304,7 @@
     if (action === 'start') { r.start = a[0]; return [r, 'start']; }
     if (action === 'dep-guard') { r.depGuard = a[0] === 'on'; return [r, 'dep-guard']; }
     if (action === 'land-as') { r.landAs = a[0]; return [r, 'land-as']; }
+    if (action === 'push-check') { r.pushCheck = a[0] === 'on'; return [r, 'push-check']; }
     return null;
   }
 
@@ -905,6 +911,15 @@
     lMain.disabled = lPr.disabled = !landK;
     el.append(row('land-as', 'Land as', 'where the push sends the cards that landed',
       lMain, lPr, landK ? (land === 'pr' ? h('span', 'board-from', 'one pull request from conveyor/landing collects the cards; merge it to close their issues') : null) : newer(landK)));
+    // Test before a push: On (the default of a new pack) runs the test files linked to the landings since the last
+    // push before each push, and a file that fails holds it; Off pushes with no test first. The pack's push.check
+    // sets it until a change here, which the control record keeps over the pack.
+    const checkOn = pushCheckOn(c), checkKnown = typeof S.d.pushCheck === 'boolean';
+    const cOn = choice('On', 'push-check-on', 'Test before a push: on', checkOn, () => { if (!checkOn) send('push-check', ['on'], null, ['push-check', ['off']]); });
+    const cOff = choice('Off', 'push-check-off', 'Test before a push: off', !checkOn, () => { if (checkOn) send('push-check', ['off'], null, ['push-check', ['on']]); });
+    cOn.disabled = cOff.disabled = !checkKnown;
+    el.append(row('push-check', 'Test before a push', 'the test files linked to the landings run before each push, and one that fails holds the push',
+      cOn, cOff, checkKnown ? offLine(checkOn, 'a push runs no test first') : newer(checkKnown)));
     // Visible changes need your yes: On stops a card whose change customers or staff will see until its
     // issue has a `Visible change approved:` line; Off (the default) lets it land without one, and says so beside the switch, so a
     // landed visible change is not read as approved.
@@ -915,14 +930,14 @@
     el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
       yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
     // Whole suite in a card: Off (the default; a record without it reads as Off) runs only the test files a card's
-    // change adds or changes (with none, 5 linked to it), the linked files before each push, and the whole suite only
-    // in a release; On lets a card run the whole suite when its tests cannot be found.
+    // change adds or changes (with none, 5 linked to it), the linked files before each push (while Test before a push
+    // is On), and the whole suite only in a release; On lets a card run the whole suite when its tests cannot be found.
     const wholeOn = r.wholeSuite === true, wholeKnown = typeof r.wholeSuite === 'boolean';
     const wOn = choice('On', 'whole-suite-on', 'Whole suite in a card: on', wholeOn, () => { if (!wholeOn) send('rules', ['wholeSuite=on'], null, ['rules', ['wholeSuite=off']]); });
     const wOff = choice('Off', 'whole-suite-off', 'Whole suite in a card: off', !wholeOn, () => { if (wholeOn) send('rules', ['wholeSuite=off'], null, ['rules', ['wholeSuite=on']]); });
     wOn.disabled = wOff.disabled = !wholeKnown;
     el.append(row('wholeSuite', 'Whole suite in a card', 'a card may run every test file when it cannot find the tests of its change',
-      wOn, wOff, wholeKnown ? offLine(wholeOn, 'a card runs only the test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run before each push, and the whole suite runs only in a release') : newer(wholeKnown)));
+      wOn, wOff, wholeKnown ? offLine(wholeOn, `a card runs only the test files it adds or changes (with none, 5 linked to its change)${checkOn ? ', the test files linked to the landings run before each push,' : ''} and the whole suite runs only in a release`) : newer(wholeKnown)));
     // Card work yields to you: the machine's (the host file's steer, every project's alike), sent as POST /machine.
     // On (the default) runs card sessions at lowered priority and card test runs at idle priority; Off runs them at
     // normal priority. Undo sends the other value.

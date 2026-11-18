@@ -188,7 +188,8 @@
       "additionalProperties": false,
       "properties": {
         "env": { "description": "Variables set for the engine's push.", "type": "object", "additionalProperties": { "type": "string" } },
-        "landAs": { "description": "The rule Land as, until the control record sets it (docs/configuration.md, Land as): main pushes main to defaultBranch; pr pushes main to the branch conveyor/landing and keeps one pull request open from it into defaultBranch, which closes the cards' issues when it is merged.", "type": "string", "enum": ["main", "pr"], "default": "main" }
+        "landAs": { "description": "The rule Land as, until the control record sets it (docs/configuration.md, Land as): main pushes main to defaultBranch; pr pushes main to the branch conveyor/landing and keeps one pull request open from it into defaultBranch, which closes the cards' issues when it is merged.", "type": "string", "enum": ["main", "pr"], "default": "main" },
+        "check": { "description": "Whether, before each push of main, the test files the test map and the links give the landings since the last push run, each alone, and a file that fails holds the push. Off, a push runs no test first. The control record's pushCheck (conveyor.sh control push-check on|off, or the Rules tab) wins over it.", "type": "boolean", "default": true }
       }
     },
     "remote": { "type": "string", "minLength": 1 },

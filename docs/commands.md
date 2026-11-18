@@ -47,7 +47,7 @@
   After `conveyor.sh control release <issue>`, the loop picks the issue again and starts from that kept work. This is
   the Board's **Hold**.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
-  the judge, accounts, the dependency guard) are in `conveyor/README.md`, Control.
+  the judge, accounts, the dependency guard, the push check) are in `conveyor/README.md`, Control.
 
 ## Every command `conveyor.sh` takes
 

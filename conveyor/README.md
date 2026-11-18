@@ -60,6 +60,10 @@ adds the issue to `forced`, and it is picked despite its open dependencies; it l
 landed or its issue is closed. With the guard on, `control force` is refused (exit 2) and changes nothing; a forced
 issue waits again while the guard is on.
 
+`conveyor.sh control push-check on|off` (the Rules tab's Test before a push) sets whether the test files linked to the
+landings since the last push run before a push (`pushCheck` in the record). A record that does not set it, as a new
+one does not, takes the pack's `push.check` (on by default). Off, a push runs no test first.
+
 `conveyor.sh control depends <issue> add|remove <issue>...` (the Board's "Depends on…", on the Control and Rules tabs)
 changes the issue's `Depends on:` line on GitHub, through `gh-write`; the control record is not touched. add puts the
 numbers on the body's last `Depends on:` line, or writes `Depends on: #N` at the end of the body; remove takes them off,
@@ -534,7 +538,8 @@ output says so; one with none of those runs nothing and passes, its list `{"mode
 before the push runs them all. The Board shows this note with the step. Before each push, the loop runs the test
 files the test map and the links give each landing since the last push, each alone, once a commit; a file that fails
 is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that broke it, and holds
-the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)). A list the command cannot be given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
+the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)), unless the push check is off (`push.check`,
+`conveyor.sh control push-check`). A list the command cannot be given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
 test step with a reason that names `test.list` and `test.fileCommand`. A run that reports more than ten test files for
 each it is given is stopped, and the card is blocked the same way; so is the bug-card check's run of `test.command`
 ([Whole suite in a card](../docs/configuration.md#whole-suite-in-a-card)).

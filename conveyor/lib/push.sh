@@ -157,13 +157,16 @@ pushone() { # <card> <issue> [<commit>]
 # for it then: brokeby()). Each such file goes to the main-fix card of the commit (mainred(), naming that landing),
 # and the push is held: a push line, result fail, kind check, its check the first file, so the loop pushes again only
 # once main moves (checkheld()). It fails then, and when its worktree or the test slots cannot be had (kind
-# transport, tried again later).
+# transport, tried again later). With the push check off (pushcheck()), it runs nothing and the push goes on.
+# The start of the reason of a push the run before it failed (checkheld() reads it).
+PUSHRAN='the run before the push failed'
 PUSHNOFILE='the test files linked to the landings did not run before the push: the test command cannot be given one test file; set test.fileCommand in .conveyor/project.json'
 pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
   local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s tc fc lm by why='' took=$SECONDS
   shift 3
   # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order).
   [ ! -f "$ST/push.check.off" ] || return 0
+  pushcheck || { echo "conveyor: the push check is off (push.check, control push-check): no test file runs before the push" >&2; return 0; }
   [ "$(cat "$PUSHED.tested" 2>/dev/null)" != "$sha" ] || return 0
   rm -f "$wt.log" "$wt.at.log"
   packget test.command tc test.fileCommand fc test.list lm 2>/dev/null || return 0
@@ -200,9 +203,17 @@ pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
   pushwt "$wt"; pushwt "$wt.at"
   [ ${#bad[@]} != 0 ] || { echo "$sha" > "$PUSHED.tested"; return 0; }
   record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) --arg f "${bad[0]}" \
-    --arg r "the run before the push failed ${#bad[@]} test file(s) linked to the landings since the last push: $why. Each goes to the main-fix card of ${sha:0:12}, and main is pushed again once it moves" \
+    --arg r "$PUSHRAN ${#bad[@]} test file(s) linked to the landings since the last push: $why. Each goes to the main-fix card of ${sha:0:12}, and main is pushed again once it moves" \
     '{sha: $s, reason: $r, sec: $t, kind: "check", check: ($f | .[0:100])}')"
   return 1
+}
+# Whether the run before a push (pushtests()) runs: the control record's pushCheck (`control push-check on|off`) when it
+# sets one, else the pack's push.check; on when neither gives a value (no record or pack read, or no push.check).
+pushcheck() {
+  local v
+  v=$(ctl 2>/dev/null | jq -r '.pushCheck | booleans' 2>/dev/null)
+  [ -n "$v" ] || packget push.check v 2>/dev/null || v=true
+  [ "$v" != false ]
 }
 # A worktree of the run before the push (pushtests()), with main's dependency links, made anew at <commit>; with no
 # commit, removed.
@@ -330,11 +341,14 @@ hookfailed() { # <trace2 event file>
         elif $e.event == "child_exit" and $e.code != 0 and (.hooks | index([$e.child_id])) != null then .failed = true else . end) | .failed' "$1" >/dev/null 2>&1
 }
 # The last push failed its check (kind check) on the commit main is at now: the loop does not push again until main
-# moves (a fix lands), for the check fails the same way on the same commit.
+# moves (a fix lands), for the check fails the same way on the same commit. A failure of the run before the push
+# (pushtests()) holds it only while the push check is on (pushcheck()): turned off, that run does not run again.
 checkheld() {
-  local tip
+  local tip on=true
   tip=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || return 1
-  turncards 2>/dev/null | jq -Rne --arg s "$tip" 'last(inputs | fromjson? | objects | select(.step == "push")) | .result == "fail" and .kind == "check" and .sha == $s' >/dev/null 2>&1
+  pushcheck || on=false
+  turncards 2>/dev/null | jq -Rne --arg s "$tip" --arg ran "$PUSHRAN " --argjson on "$on" 'last(inputs | fromjson? | objects | select(.step == "push"))
+    | .result == "fail" and .kind == "check" and .sha == $s and ($on or (.reason | tostring | startswith($ran) | not))' >/dev/null 2>&1
 }
 # Has the pack's remote this commit? Yes when the last push that worked to its branch, or that branch as last seen
 # here, holds it.

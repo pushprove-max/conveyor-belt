@@ -205,6 +205,10 @@ Before each push, Conveyor runs the test files that the test map and `.conveyor/
 landings since the last push. Each file runs alone. If a file fails, Conveyor finds the landing that broke it, files
 a main-fix card, and holds the push ([Push](cards.md#push)).
 
+`push.check` in `.conveyor/project.json` turns this run on or off. It is on in a new project. Set it to `false`, and
+a push runs no test first. `conveyor.sh control push-check on` or `off`, or the Rules tab's **Test before a push**,
+sets it in the control record, and that value wins over the pack's.
+
 The check of a bug card on main's code runs at most `test.cardFiles` test files (in `.conveyor/project.json`). If
 more are linked, the files that failed most recently in a test step run first.
 
@@ -337,7 +341,8 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card and the dependency guard,
 - where new issues start,
 - Land as: `main` or `pr` (`conveyor.sh control land-as main|pr`, or Land as on the Rules tab; [Land
-  as](#land-as)).
+  as](#land-as)),
+- the test run before a push (`conveyor.sh control push-check on|off`), when you set it over the pack's `push.check`.
 
 A card that only waits on another card does not take one of the cards at once: for example, a card that waits to land
 after a card that changes the same files. The loop leaves out no more waiting cards than the cap. Each waiting card

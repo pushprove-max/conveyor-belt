@@ -155,7 +155,7 @@ test('Rules: no switch says "(set)"; the choice in force is the pressed one', ()
   for (const b of tog) assert.doesNotMatch(`${b.textContent} ${b.getAttribute('aria-label')}`, /\(set\)/, b.dataset.act);
   assert.doesNotMatch(ruled(w).textContent, /\(set\)/);
   const on = tog.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.act);
-  assert.deepEqual(on.filter((a) => /^(judge|start|dep-guard|push|visible)-/.test(a)), ['judge-on', 'start-held', 'dep-guard-off', 'push-off', 'visible-off']);
+  assert.deepEqual(on.filter((a) => /^(judge|start|dep-guard|push|visible)-/.test(a)), ['judge-on', 'start-held', 'dep-guard-off', 'push-off', 'push-check-on', 'visible-off']);
 });
 
 // Bug: Never build and the judge's always-accepted kinds were free-text boxes whose only hint was grey example text.

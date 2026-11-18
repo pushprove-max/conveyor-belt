@@ -14,7 +14,8 @@
 # depGuard is the dependency guard (true, the seed's, for a record written before it: no issue is picked while an
 # issue it depends on is open) and forced the issues `control force` lets past their open dependencies while it is
 # off (adopted() drops each once it lands or its issue closes). landAs is null (the pack's push.landAs) or the rule
-# "Land as", main or pr (landas(), lib/push.sh). signin is null, or why the loop paused itself: a session
+# "Land as", main or pr (landas(), lib/push.sh). pushCheck is null (the pack's push.check holds) or whether the run before a push runs
+# (`control push-check`, over the pack's: pushcheck(), lib/push.sh). signin is null, or why the loop paused itself: a session
 # whose sign-in failed, with no fallback route left (signinpause()); resume clears it. A key this copy of the engine does not know, at the top
 # or in rules (one a newer copy added, while a card runs on the older copy in its worktree), is passed through
 # unchecked, so a control action keeps it when it writes the record. Anything else is not a record: the reason on
@@ -34,7 +35,8 @@ CTL_K=()
 # judge reads the reviews (judgeOn) and always accepts no kind. A cap, seat or effort the record sets null is the
 # seed's: six cards at once (CAP0), and for a seat the first model the pack's models.allowed lists for it (seed()) at
 # medium effort (an OpenCode builder at none: it is given no effort, seatnow). The dependency guard is on: no issue is
-# picked while an issue it depends on is open; nothing is forced past it. A card that lands is not pushed (rules.push
+# picked while an issue it depends on is open; nothing is forced past it. The pack's push.check says whether the run
+# before a push runs (pushCheck null). A card that lands is not pushed (rules.push
 # off: land only, owed()): it waits for the Board's Push landed, or for the owner to turn the rule on. A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
 # `Visible change approved:` line, yesrule()). A card never runs the whole suite (rules.wholeSuite off: it runs the
 # test files of its change alone, listcmd()). No Tests seat is set: no test action starts (testaction()). Empty when
@@ -54,6 +56,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
   jq -ce --argjson d "$CTL0" '($d * .) | .rules = ($d.rules * .rules) | select((.mode | IN("run", "pause", "stop")) and (.cap == null or (.cap | type == "number" and . >= 1 and . <= 100 and . == floor))
       and (.guard == null or (.guard | type == "number" and . >= 1 and . <= 100))
       and ([.held, .order] | all(type == "array" and all(type == "number")))
+      and (.pushCheck == null or (.pushCheck | type == "boolean"))
       and (.start | IN("queue", "held")) and (.startSeen | type == "array" and all(type == "number"))
       and (.startHeld | type == "array" and all(type == "object" and keys == ["from", "to"] and (.from | type == "number") and (.to == null or (.to | type == "number"))))
       and ((.start == "held") == (.startHeld | length > 0 and (last.to == null)))
@@ -750,7 +753,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>...]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -779,6 +782,8 @@ control() { # [action [arguments]]
       [ "$(jq -r .depGuard <<<"$c")" = false ] \
         || { echo "conveyor: the dependency guard is on: #$1 is not built before the issues it depends on; turn the guard off first (control dep-guard off); nothing changed" >&2; return 2; }
       f='.forced = (.forced + ($v | map(tonumber)) | unique)' ;;
+    # The run before a push (pushtests(), lib/push.sh), on or off over the pack's push.check.
+    push-check) [ $# = 1 ] && [[ $1 =~ ^(on|off)$ ]] || { bad; return; }; f='.pushCheck = ($v[0] == "on")' ;;
     rules) [ $# != 0 ] || { bad; return; }
       # An area rule is the pack's area prefix and a name; push is whether a card that lands is pushed, visible whether
       # a change customers or staff will see needs the owner's yes, wholeSuite whether a card may run the whole suite.

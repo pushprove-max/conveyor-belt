@@ -56,7 +56,8 @@
     "node_modules"
   ],
   "push": {
-    "env": {}
+    "env": {},
+    "check": false
   },
   "remote": "origin",
   "defaultBranch": "main",

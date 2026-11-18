@@ -114,6 +114,8 @@
 #   when the pack cannot be read.
 # standing: the pack's auto.standing, the standing kinds of routine yes that are on (lib/standing.sh), for the Rules
 #   tab; null when the pack cannot be read.
+# pushCheck: the pack's push.check (true or false), whether the run before a push runs when the control record's
+#   pushCheck is null, for the Rules tab; null when the pack cannot be read.
 # waitWake: the pack's foreman.waitWake (default 10), the minutes a card waits for main to change, or on another card,
 #   before the Foreman's watcher wakes it; read here, on the belt's host, as the Foreman's machine may hold no pack.
 # awaitingDeploy: the open issues labelled awaiting-deploy (built, waiting for the owner's deploy), apart from next and
@@ -473,6 +475,7 @@ snapshot() (
   # has none. The models the steps of the last 30 days ran are counted from since (seen).
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
   packget auto.standing sk 2>/dev/null && [ -n "$sk" ] || sk=null
+  packget push.check pc 2>/dev/null && [[ $pc =~ ^(true|false)$ ]] || pc=null
   packget lanes.research.model rmodel 2>/dev/null || rmodel=''
   # The research lane's sessions are no card's step: seen counts the models they ran from their transcripts in the
   # default login's projects folder (researchwt(), lib/control.sh); none, and none is read.
@@ -851,7 +854,7 @@ snapshot() (
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
-  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk
+  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc
     | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = $bn[0] | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1
