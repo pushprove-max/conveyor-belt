@@ -119,7 +119,8 @@ t_listguess() {
 # is a runner (no folder such as tests, no file that only a pattern matches), as is the file a command of a shell
 # script among them starts (tests/b.test.sh, which ci/full.sh runs; not tests/a.test.mjs, which it only names), and
 # each of test.wholeCommands: the runners that the patterns match are no test files (testpaths(), with -v and -z
-# too), and the test map names them as not mapped, with the reason.
+# too, and with -vz, bugproof()'s call: #365, the flags together were not read, so the runners were dropped from the
+# files that are not tests and the NULs lost, and a change with source code was taken as test-only), and the test map names them as not mapped, with the reason.
 t_testpathsrunner() {
   setup '[]'; tpfiles tools/prep.mjs scripts/run-tests.mjs scripts/lint.mjs ci/full.sh tests/a.test.mjs tests/b.test.sh tests/c.test.mjs
   printf '%s\n' '[ -f tests/a.test.mjs ] || exit 1 # tests/c.test.mjs' 'exec timeout 60 bash tests/b.test.sh "$@"' > "$R/ci/full.sh"
@@ -129,7 +130,8 @@ t_testpathsrunner() {
     | .test.wholeCommands = ["tests/c.test.mjs"]'
   local out ps='scripts/run-tests.mjs scripts/lint.mjs tests/a.test.mjs ci/full.sh tools/prep.mjs tests/b.test.sh tests/c.test.mjs'
   out=$(tpeng 'runnerfiles | paste -sd " " -; printf "%s\n" '"$ps"' | testpaths | paste -sd " " -; printf "%s\n" '"$ps"' | testpaths -v | paste -sd " " -
-    printf "%s\0" '"$ps"' | testpaths -z | tr "\0" "\n" | paste -sd " " -; mapwrite "$R" /dev/null "" node 1 && jq -c .notMapped "$(mappath)"
+    printf "%s\0" '"$ps"' | testpaths -z | tr "\0" "\n" | paste -sd " " -; printf "%s\0" '"$ps"' | testpaths -vz | tr "\0" "\n" | paste -sd " " -
+    mapwrite "$R" /dev/null "" node 1 && jq -c .notMapped "$(mappath)"
     echo "{\"scripts\": {\"test\": \"node scripts/lint.mjs\"}}" > "$R/package.json"; names && printf "%s\n" '"$ps"' | testpaths | paste -sd " " -') || fail "the engine failed: $out"
   # The last line: package.json's test script now runs scripts/lint.mjs, and no full script names ci/full.sh; from the
   # next names(), lint.mjs is the runner, and full.sh and the b.test.sh it runs are test files.
@@ -137,6 +139,7 @@ t_testpathsrunner() {
 scripts/lint.mjs tests/a.test.mjs
 scripts/run-tests.mjs ci/full.sh tools/prep.mjs tests/b.test.sh tests/c.test.mjs
 scripts/lint.mjs tests/a.test.mjs
+scripts/run-tests.mjs ci/full.sh tools/prep.mjs tests/b.test.sh tests/c.test.mjs
 [{"file":"ci/full.sh","why":"the test runner, not a test"},{"file":"scripts/run-tests.mjs","why":"the test runner, not a test"},{"file":"tests/b.test.sh","why":"the test runner, not a test"},{"file":"tests/c.test.mjs","why":"the test runner, not a test"}]
 scripts/run-tests.mjs tests/a.test.mjs ci/full.sh tests/b.test.sh' ] \
     || fail "the test runners were not found, or were taken for test files: $out"

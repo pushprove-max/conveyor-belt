@@ -312,7 +312,8 @@ testpaths() { # [-v] [-z]
   [ -n "${TESTRUNNERS:-}" ] || { grep -E "$@" -e "$TESTRX" || :; return 0; }
   local a v='' z=() zf=() l rs=() t
   local -A rn=()
-  for a; do case $a in -v) v=1 ;; -z) z=(-d ''); zf=(-z) ;; esac; done
+  # The flags may come together, as bugproof()'s -vz (#365).
+  for a; do [[ $a != -*v* ]] || v=1; [[ $a != -*z* ]] || { z=(-d ''); zf=(-z); }; done
   while IFS= read -r l; do rn[$l]=1; rs+=(-e "$l"); done <<<"$TESTRUNNERS"
   if [ -z "$v" ]; then grep -E "$@" -e "$TESTRX" | { grep -vxF "${zf[@]}" "${rs[@]}" || :; }; return 0; fi
   while IFS= read -r "${z[@]}" l || [ -n "$l" ]; do
