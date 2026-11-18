@@ -350,11 +350,19 @@ $plug
 # Your saved state is $s: keep it current, under $CAP bytes; mark a finished item "- DONE" and it is archived at the next start.
 EOF
   # There, each noted plugin problem that names no issue (no "filed as #<n>"), so an older one is not lost, with the
-  # line that marks it filed: its own text (between its card and its evidence), which stop.sh matches exactly.
+  # line that marks it filed: in the form, its own text (between its card and its evidence) with the note's card and
+  # evidence fields after it, unless the text already ends with them (a note saved from a line in the form), which
+  # stop.sh matches exactly.
   if [ -n "$home" ] && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE ' filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: ') && [ -n "$n" ]; then
     echo "# WARNING: plugin problems noted in $FD/plugin-bugs.md and not filed yet: file each one now, and then say the line under it with the issue's number, word for word, so the entry is marked filed."
+    local l t f re='^- [^ ]* · card ([^ ]*) · (.*) · evidence: (.*)$'
     while IFS= read -r l; do
-      printf '%s\n  Plugin problem (for the conveyor-belt repo): %s, filed as #<n>\n' "$l" "$(sed 's/^- [^ ]* · card [^ ]* · //; s/\(.*\) · evidence: .*$/\1/' <<<"$l")"
+      t=$l
+      if [[ $l =~ $re ]]; then
+        t=${BASH_REMATCH[2]} f=", card ${BASH_REMATCH[1]}, evidence ${BASH_REMATCH[3]}"
+        [[ $t == *"$f" ]] || t+=$f
+      fi
+      printf '%s\n  Plugin problem (for the conveyor-belt repo): %s, filed as #<n>\n' "$l" "$t"
     done <<<"$n"
   fi
   # An empty state.md still runs archive: only archive reports a late write kept beside it.

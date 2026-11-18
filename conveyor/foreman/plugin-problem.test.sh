@@ -85,7 +85,8 @@ t_zero() {
 # Older notes (made in other words, before the form) filed from the start-up list. Bugs: a filed line that only
 # shared a note's card and evidence path replaced that note, so a different problem erased it; and a note with no
 # card or evidence, filed in the form with "card -, evidence -", stayed listed as unfiled. The start-up list gives
-# each note the line that marks it filed; saying it, or the form built from the note's own fields, replaces only it.
+# each note the line that marks it filed, in the form with the note's card and evidence fields (bug #481: they were
+# left out, so the line did not say the card and evidence the form asks for); saying it, or the form built from the note's own fields, replaces only it.
 # A wake refusal there gives the filed form.
 t_legacy() {
   local L1='- 2026-11-18T09:54:00Z · card c20261116T101500-alpha-7 · setup never sets linkFromMain, so card c20261116T101500-alpha-7 has no packages; evidence ~/cards/c20261116T101500-alpha-7/test.log. · evidence: ~/cards/c20261116T101500-alpha-7/test.log'
@@ -96,7 +97,7 @@ t_legacy() {
   grep -qxF -- "$L1" "$FD/plugin-bugs.md" && [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 3 ] \
     || fail "a different problem with the same card and evidence replaced an older note: $(cat "$FD/plugin-bugs.md")"
   say=$(start | grep -A1 -xF -- "$L1" | sed -n '2s/^ *//p')
-  [ "$say" = 'Plugin problem (for the conveyor-belt repo): setup never sets linkFromMain, so card c20261116T101500-alpha-7 has no packages; evidence ~/cards/c20261116T101500-alpha-7/test.log., filed as #<n>' ] \
+  [ "$say" = 'Plugin problem (for the conveyor-belt repo): setup never sets linkFromMain, so card c20261116T101500-alpha-7 has no packages; evidence ~/cards/c20261116T101500-alpha-7/test.log., card c20261116T101500-alpha-7, evidence ~/cards/c20261116T101500-alpha-7/test.log, filed as #<n>' ] \
     || fail "the start-up text does not give the line that marks the older note filed: $say"
   out=$(turn u2 "${say%<n>}449"$'\nPlugin problem (for the conveyor-belt repo): npm ci runs twice, card -, evidence -, filed as #451')
   [ -z "$out" ] || fail "a filed plugin problem was refused: $out"
@@ -121,6 +122,11 @@ t_split() {
   out=$(start)
   grep -q 'filed as #<n>' <<<"$out" && grep -q '^- .*running cards keep' <<<"$out" \
     || fail "with its belt on another host the start-up text does not say to file the plugin problem and list it: $out"
+  # The note saved from a line in the form is listed with the line that files it: that line, not its card and
+  # evidence said twice (bug #481 E1: the start-up list appended them again).
+  say=$(grep -A1 '^- .*running cards keep' <<<"$out" | sed -n '2s/^ *//p')
+  [ "$say" = "$LINE, filed as #<n>" ] || fail "the start-up text does not give the noted line to file: $say"
+  out=$(turn u2 "${say%<n>}449"); [ -z "$out" ] || fail "the line the start-up text gives to file was refused: $out"
 }
 
 # D2: in another project the same line with no number passes, as before, and the owner files it: the start-up text
