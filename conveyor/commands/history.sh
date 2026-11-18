@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh history`: the lists the snapshot cuts to their newest, whole, as the last snapshot left them (history(),
 # lib/snapshot.sh); `conveyor.sh history test <test file>`: the older runs and test edits of one test file, which the
-# snapshot leaves out (testolder(), lib/testfiles.sh). Sourced by conveyor.sh.
+# snapshot leaves out (testolder(), lib/testfiles.sh); `conveyor.sh history donewhen <card id>`: a card's last
+# Done-when check item by item, which the snapshot leaves out too (dwdetail(), lib/testrun.sh). Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1
@@ -24,5 +25,6 @@ names || exit 1
 case $#:${2:-} in
   1:) history ;;
   3:test) testolder "$3" ;;
-  *) echo "usage: conveyor.sh history [test <test file>]" >&2; exit 2 ;;
+  3:donewhen) dwdetail "$3" ;;
+  *) echo "usage: conveyor.sh history [test <test file> | donewhen <card id>]" >&2; exit 2 ;;
 esac

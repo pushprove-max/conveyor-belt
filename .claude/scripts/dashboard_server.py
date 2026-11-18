@@ -30,6 +30,8 @@ the page asks for it when its Landed, Metrics, Cost or Declined panel is drawn, 
 panel asks for it when the owner opens Work now or reads it again.
 `GET /older?repo=<repo>&file=<test file>`, behind the login too, gives the older runs and test edits of one test file
 that data.js no longer carries (dashboard.sh --older): the Tests page asks for it when that file's Timeline is opened.
+`GET /donewhen?repo=<repo>&card=<card id>`, behind the login too, gives a card's last Done-when check item by item,
+which data.js does not carry (dashboard.sh --donewhen): the Board asks for it when that card's Done-when line is opened.
 
 The login: users in dashboard-auth.json beside the ruling log (env CONVEYOR_DASHBOARD_AUTH), each with a name, a
 role (admin or member), an scrypt hash, when it was created and last logged in, its MFA state and its trusted
@@ -105,6 +107,7 @@ HISTORY_TTL = 60       # GET /history serves dashboard.sh's copy while it is thi
 HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
 WORK_LIMIT = 90        # GET /work: dashboard.sh --work's one ssh command (its SSH_LIMIT, 60 s) and the merge
 OLDER_LIMIT = 90       # GET /older: dashboard.sh --older's one ssh command (its SSH_LIMIT, 60 s) and the tagging
+DONEWHEN_LIMIT = 90    # GET /donewhen: dashboard.sh --donewhen's one ssh command (its SSH_LIMIT, 60 s) and its check
 ANSWER_KEYS = {'id', 'answer', 'askedAt', 'repo'}
 DECISION_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$')
 ASKED_AT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
@@ -198,6 +201,7 @@ CONTROL_KEYS = {'action', 'args', 'repo'}
 REPO = re.compile(r'[A-Za-z0-9._-]+')  # a record's repo, as dashboard.sh checks it
 ISSUE = re.compile(r'[1-9][0-9]{0,8}')
 REDCARD = re.compile(r'c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0')  # a main-red fix card, which has no issue, as conveyor.sh's retry and shut take it
+CARD = re.compile(r'c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]{1,200}')  # any card id, as the engine makes it
 # A seat: the CLI that runs it, then a model as that CLI names it (OpenCode's <provider>/<model> may hold / and :; a
 # Claude alias may hold [1m]), one word that starts with a letter or a digit, as conveyor.sh's control takes it.
 CLIS = frozenset({'claude', 'codex', 'opencode'})
@@ -1615,6 +1619,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.work()
         if path == '/older':
             return self.older()
+        if path == '/donewhen':
+            return self.donewhen()
         if path in ('/me', '/users'):
             return self.users_get(path)
         if path == '/me/qr':
@@ -1851,6 +1857,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--older', repo, file], OLDER_LIMIT)
         except subprocess.TimeoutExpired:
             return self.reply(502, 'the older runs did not come in %d s' % OLDER_LIMIT)
+        except OSError as e:
+            return self.reply(502, 'could not start dashboard.sh: %s' % e)
+        if run.returncode != 0:
+            return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
+        body = run.stdout.encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def donewhen(self):
+        """GET /donewhen?repo=<repo>&card=<card id>: a card's last Done-when check item by item, which data.js does not
+        carry: dashboard.sh --donewhen's JSON, read afresh on each ask (the Board asks when a card's Done-when line is
+        opened). 400 for a repo or card of another shape, 502 with the reason when it gives none."""
+        if not self.authed():
+            return self.reply(401, 'log in to see the Done-when check')
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        repo, card = (q.get('repo') or [''])[0], (q.get('card') or [''])[0]
+        if not REPO.fullmatch(repo) or not CARD.fullmatch(card):
+            return self.reply(400, 'no repo or card of the shape the Board names')
+        try:
+            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--donewhen', repo, card], DONEWHEN_LIMIT)
+        except subprocess.TimeoutExpired:
+            return self.reply(502, 'the Done-when check did not come in %d s' % DONEWHEN_LIMIT)
         except OSError as e:
             return self.reply(502, 'could not start dashboard.sh: %s' % e)
         if run.returncode != 0:

@@ -6,7 +6,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
-  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
+  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
   "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
@@ -109,6 +109,11 @@ def ok: . as $r | (keys - known) == need
         and (.doneWhen // {items: 0, met: 0, failed: []} | type == "object" and (keys - ["notes"]) == ["failed", "items", "met"]
           and (.items | type == "number") and (.met | type == "number") and (.failed | type == "array" and all(type == "string"))
           and ((has("notes") | not) or (.notes | type == "array" and all(type == "string"))))
+        # Each Done-when item of the check (donewhen()): the issue's text and the reply's D<n> line; and the D<n> a review
+        # said hold (its DONE-WHEN lines).
+        and (.doneWhenItems // [] | type == "array" and all(type == "object" and keys == ["n", "said", "text"] and (.n | type == "number")
+          and (.text | type == "string") and (.said | . == null or type == "string")))
+        and (.doneWhenHolds // [] | type == "array" and all(type == "number"))
         # What a landed card did to the test files main had (testedits()): counts null on a file it could not read.
         and (.testedits // [] | type == "array" and all(type == "object" and keys == ["casesDeleted", "changedExpected", "file", "read", "removedAsserts", "skipsAdded", "timeoutsRaised"]
           and (.file | type == "string") and (.read | type == "boolean") and (.read as $read

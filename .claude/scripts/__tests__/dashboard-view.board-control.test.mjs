@@ -20,6 +20,105 @@ test("the Board's card shows how many times the engine ended a stalled step of i
   assert.equal(bcard(w, 63).querySelector('.board-stalls'), null, 'a card with no stall shows none');
 });
 
+// #305. A fully met check showed only "Done when: 2 of 2 met", so the owner could not read what each item's evidence
+// was or whether the reviewer checked it. Bugs: the line does not open to each item with its text, the builder's
+// evidence and the reviewer's answer, each saying who gave it; the items are read before the line is opened (or carried
+// in the snapshot) instead of on demand; a redraw closes the open line or reads the items again.
+test("the Board's Done-when line opens to each item, its evidence and who gave it, read from the server when opened", async () => {
+  const w = boot({ tab: 'control' });
+  const data = full();
+  data.panels.board.data.landed[0].doneWhen = { items: 2, met: 2, failed: [] };
+  w.donewhenReply = { ok: true, status: 200, json: () => Promise.resolve({ card: 'c5-7', items: [
+    { n: 1, text: 'the first thing', builder: 'D1 met: lib/t.test.sh case one succeeds', reviewer: 'holds' },
+    { n: 2, text: 'the second thing', builder: 'D2 met: a.txt:2 holds it', reviewer: null }] }) };
+  deliver(w, data);
+  const det = () => bcard(w, 7).querySelector('details.board-donewhen');
+  assert.equal(det().querySelector('summary').textContent, 'Done when: 2 of 2 met');
+  assert.equal(w.donewhenAsks, undefined, 'nothing is read before the line is opened');
+  det().querySelector('summary').focus();
+  det().open = true; det().dispatchEvent(new w.Event('toggle'));
+  assert.equal(det().querySelector('.board-from').textContent, 'Reading the items…');
+  assert.equal(w.document.activeElement, det().querySelector('summary'), 'opening the line by the keyboard keeps the focus on its summary');
+  await settle();
+  assert.deepEqual(w.donewhenAsks, ['donewhen?repo=sample&card=c5-7'], "the card's own items are asked for, once");
+  const items = () => Array.from(det().querySelectorAll('.board-donewhen-items > li'), (li) =>
+    [li.querySelector('.board-donewhen-item').textContent, ...Array.from(li.querySelectorAll('.board-donewhen-said > li'), (x) => x.textContent)]);
+  const want = [['D1: the first thing', 'Builder: D1 met: lib/t.test.sh case one succeeds', 'Reviewer: the evidence holds'],
+    ['D2: the second thing', 'Builder: D2 met: a.txt:2 holds it']];
+  assert.deepEqual(items(), want, 'each item: its text, the builder line, and the reviewer line where there is one');
+  next(w, data);
+  await settle();
+  assert.ok(det().open, 'a redraw keeps the line open');
+  assert.deepEqual(items(), want, 'and its items');
+  assert.equal(w.donewhenAsks.length, 1, 'a redraw of the same check reads nothing again');
+  // A review's answer leaves the check's count as it was: the line opened again reads the items again.
+  det().open = false; det().dispatchEvent(new w.Event('toggle'));
+  w.donewhenReply = { ok: true, status: 200, json: () => Promise.resolve({ card: 'c5-7', items: [
+    { n: 1, text: 'the first thing', builder: 'D1 met: lib/t.test.sh case one succeeds', reviewer: '[P1] D1 has no such case' }] }) };
+  det().open = true; det().dispatchEvent(new w.Event('toggle'));
+  await settle();
+  assert.equal(w.donewhenAsks.length, 2, 'the line opened again is read again');
+  assert.deepEqual(items(), [['D1: the first thing', 'Builder: D1 met: lib/t.test.sh case one succeeds', 'Reviewer: [P1] D1 has no such case']]);
+  // While it is open, a move of the card with the same count reads it again too: its step, the step's start, its time.
+  let asks = 2;
+  for (const [k, v] of [['step', 'push'], ['stepAt', iso(T0 + 30000)], ['time', iso(T0 + 60000)]]) {
+    data.panels.board.data.landed[0][k] = v;
+    next(w, data);
+    await settle();
+    asks += 1;
+    assert.equal(w.donewhenAsks.length, asks, `an open line of a card whose ${k} moved is read again`);
+    next(w, data);
+    await settle();
+    assert.equal(w.donewhenAsks.length, asks, `the same ${k} reads nothing again`);
+  }
+});
+
+// Bugs: a card in Needs you and in Landed today at once (its pre-push check failed after it landed) shows two
+// stamps; one shared entry made each redraw read the other stamp again, without end, and the focus on the Landed
+// today summary went to the same card in Needs you after the first redraw.
+test("the Board's Done-when line of a card in two columns reads each stamp once, and keeps the focus in its column", async () => {
+  const w = boot({ tab: 'control' });
+  const data = full();
+  data.panels.board.data.landed[0].doneWhen = { items: 2, met: 2, failed: [] };
+  data.panels.board.data.blocked.push({ repo: 'sample', card: 'c5-7', issue: 7, title: 'Landed one', url: `${P}/7`, reason: 'the pre-push check failed',
+    since: iso(T0), step: 'push', stepAt: iso(T0), doneWhen: { items: 2, met: 1, failed: ['D2 not met: no case'] } });
+  w.donewhenReply = { ok: true, status: 200, json: () => Promise.resolve({ card: 'c5-7', items: [{ n: 1, text: 'the first thing', builder: 'D1 met: a.txt:1', reviewer: null }] }) };
+  deliver(w, data);
+  const det = (k) => column(w, k).querySelector('.bcard[data-issue="7"] details.board-donewhen');
+  det('landed').querySelector('summary').focus();
+  det('landed').open = true; det('landed').dispatchEvent(new w.Event('toggle'));
+  for (let i = 0; i < 5; i += 1) await settle();
+  assert.ok(det('needs').open, 'the line is open by card: the Needs you line of the same card opens too');
+  assert.equal(w.donewhenAsks.length, 2, 'each stamp is read once');
+  assert.equal(w.document.activeElement, det('landed').querySelector('summary'), 'the focus stays on the Landed today summary');
+  next(w, data);
+  for (let i = 0; i < 5; i += 1) await settle();
+  assert.equal(w.donewhenAsks.length, 2, 'a redraw reads neither stamp again');
+  assert.ok(det('landed').querySelector('.board-donewhen-items') && det('needs').querySelector('.board-donewhen-items'), 'each line shows its items');
+});
+
+// Bug: the open line was kept by column and card, so a card that moved from Review to Building for its tests drew its
+// line shut and never read the reviewer's answer.
+test("the Board's open Done-when line stays open when its card moves to another column, and reads the reviewer's answer", async () => {
+  const w = boot({ tab: 'control' });
+  const data = full(), b = data.panels.board.data;
+  b.review[0].doneWhen = { items: 1, met: 1, failed: [] };
+  w.donewhenReply = { ok: true, status: 200, json: () => Promise.resolve({ card: 'c3-63', items: [{ n: 1, text: 'the thing', builder: 'D1 met: a.txt:1', reviewer: null }] }) };
+  deliver(w, data);
+  const det = () => bcard(w, 63).querySelector('details.board-donewhen');
+  det().open = true; det().dispatchEvent(new w.Event('toggle'));
+  for (let i = 0; i < 5; i += 1) await settle();
+  assert.equal(w.donewhenAsks.length, 1);
+  w.donewhenReply = { ok: true, status: 200, json: () => Promise.resolve({ card: 'c3-63', items: [{ n: 1, text: 'the thing', builder: 'D1 met: a.txt:1', reviewer: 'holds' }] }) };
+  b.building.push({ ...b.review.shift(), step: 'tests', stepAt: iso(T0) });
+  next(w, data);
+  for (let i = 0; i < 5; i += 1) await settle();
+  assert.equal(bcard(w, 63).dataset.col, 'building');
+  assert.ok(det().open, 'the line is still open in Building');
+  assert.equal(w.donewhenAsks.length, 2, 'the moved card is read again');
+  assert.deepEqual(Array.from(det().querySelectorAll('.board-donewhen-said > li'), (x) => x.textContent), ['Builder: D1 met: a.txt:1', 'Reviewer: the evidence holds']);
+});
+
 test('the Board: each column with its cards, each one empty, and the queue when GitHub did not list the issues', () => {
   const w = boot({ tab: 'control' });
   const data = full();

@@ -65,7 +65,8 @@
   const KINDS = ['you', 'label', 'rule', 'standing', 'approve', 'card', 'parent', 'waits', 'other'];
   const S = { d: null, ctl: null, at: new Map(), from: 'board', heard: new WeakSet(), raw: null, ctx: null, armed: false, unarm: null, dragging: null, busy: false, keep: null, ctlAt: null, moved: new Map(), floor: null, read: null, turned: false, lanesOpen: {}, lanesShown: {},
     groups: new Map(), filter: { text: '' }, text: null, unlabeled: new Set(), released: new Set(),
-    dep: null, depText: '', depSaid: new Map() };
+    dep: null, depText: '', depSaid: new Map(),
+    dw: new Map(), dwOpen: new Set() };  // a card's Done-when items by card and check stamp ({busy, data, error}), and the cards whose line is open
   const DEPENDS_MAX = 20;  // the issues one depends takes (dashboard_server.py)
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -761,17 +762,74 @@
     return li;
   }
   // A card's last Done-when check (the engine's, of its session's reply: doneWhen {items, met, failed}): how many of the
-  // issue's Done-when items are met, and each failed one on demand. A card with no check shows nothing.
+  // issue's Done-when items are met, and, opened, each failed one and each item with its text, the builder's D<n> line
+  // and the reviewer's answer where there is one. The items are not in the snapshot: they are read from the page
+  // server (GET donewhen: `conveyor.sh history donewhen <card>` on the build machine) each time the owner opens the
+  // line, and again while it is open when the card's check or step changes (its stamp: a review's answer leaves the
+  // check's count as it was, but moves the card's step). The summary keeps the focus across the draw (data-act).
+  // The line stays open by card, not by column: a card that moves (Review to Building for tests) keeps it open and
+  // reads the reviewer's answer. A card in two columns (Needs you and Landed today) can show two stamps: its lines open
+  // together, and each stamp is read and kept on its own. A card with no check shows nothing.
   function doneWhen(el, item) {
     const h = S.ctx.h, d = item.doneWhen;
     if (!d || typeof d !== 'object' || num(d.items) === null) return;
     const failed = issues(d.failed).filter((x) => typeof x === 'string'), line = `Done when: ${num(d.met) ?? 0} of ${d.items} met`;
-    if (!failed.length) { el.append(h('p', 'board-from board-donewhen', line)); return; }
-    const det = h('details', 'board-donewhen'), ul = h('ul', 'board-donewhen-list');
-    det.append(h('summary', null, `${line}, ${failed.length} failed`));
-    failed.forEach((x) => ul.append(h('li', null, x)));
-    det.append(ul);
+    const card = typeof item.card === 'string' && item.card ? item.card : null;
+    if (!failed.length && !card) { el.append(h('p', 'board-from board-donewhen', line)); return; }
+    const det = h('details', 'board-donewhen');
+    const sum = h('summary', null, failed.length ? `${line}, ${failed.length} failed` : line);
+    sum.dataset.act = 'donewhen';
+    det.append(sum);
+    if (failed.length) {
+      const ul = h('ul', 'board-donewhen-list');
+      failed.forEach((x) => ul.append(h('li', null, x)));
+      det.append(ul);
+    }
+    if (card) {
+      const stamp = JSON.stringify([d, item.step, item.stepAt, item.time]), got = S.dw.get(JSON.stringify([card, stamp])), at = card;
+      det.open = S.dwOpen.has(at);
+      det.addEventListener('toggle', () => {
+        if (det.open === S.dwOpen.has(at)) return;  // the draw's own open, not the owner's
+        if (det.open) S.dwOpen.add(at); else S.dwOpen.delete(at);
+        if (det.open) readDoneWhen(item, stamp, true);
+        relength();
+      });
+      // An open line of a card with a newer check reads its items again, after this draw.
+      if (det.open && !got) Promise.resolve().then(() => readDoneWhen(item, stamp));
+      if (got && got.data) det.append(dwItems(got.data));
+      else if (got && got.error) det.append(h('p', 'board-from', `The items did not come: ${got.error}`));
+      else if (got && got.busy) det.append(h('p', 'board-from', 'Reading the items…'));
+    }
     el.append(det);
+  }
+  // again: the owner opened the line, so it is read even when this check's items were read before.
+  function readDoneWhen(item, stamp, again) {
+    const card = item.card, repo = typeof item.repo === 'string' && item.repo ? item.repo : S.d.repo, k = JSON.stringify([card, stamp]), was = S.dw.get(k);
+    if (typeof repo !== 'string' || (was && (was.busy || (was.data && !again)))) return;
+    const o = { busy: true, data: null, error: null };
+    S.dw.set(k, o);
+    draw();
+    window.fetch(`donewhen?repo=${encodeURIComponent(repo)}&card=${encodeURIComponent(card)}`)
+      .then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(new Error(String(t).trim() || `the server answered ${r.status}`)))))
+      .then((x) => { if (x && typeof x === 'object' && Array.isArray(x.items)) o.data = x; else o.error = 'the answer did not read'; },
+        (e) => { o.error = e && e.message ? e.message : 'no answer'; })
+      .then(() => { o.busy = false; if (S.dw.get(k) === o) draw(); });
+  }
+  // Each item of a card's check: `D<n>: <its text>`, then who gave each line: the builder's D<n> line, and the
+  // reviewer's answer when the review gave one.
+  function dwItems(data) {
+    const h = S.ctx.h, list = issues(data.items).filter((x) => x && typeof x === 'object' && num(x.n) !== null);
+    if (!list.length) return h('p', 'board-from', 'No item of this check is on record.');
+    const ul = h('ul', 'board-donewhen-items');
+    list.forEach((x) => {
+      const li = h('li', null), said = h('ul', 'board-donewhen-said');
+      li.append(h('p', 'board-donewhen-item', `D${x.n}: ${typeof x.text === 'string' ? x.text : ''}`));
+      said.append(h('li', null, `Builder: ${typeof x.builder === 'string' && x.builder ? x.builder : `no D${x.n} line`}`));
+      if (typeof x.reviewer === 'string' && x.reviewer) said.append(h('li', null, `Reviewer: ${x.reviewer === 'holds' ? 'the evidence holds' : x.reviewer}`));
+      li.append(said);
+      ul.append(li);
+    });
+    return ul;
   }
   // How many times a build, fix or review of the card made no progress and the engine ended it (stalls). None shows nothing.
   function stalls(el, item) {
@@ -1028,7 +1086,7 @@
     }
     const a = document.activeElement, from = a ? Array.from(S.at).find(([, p]) => p.el.contains(a)) : null;
     // The focus a pending action took (its control was off) comes back when the controls do.
-    const keep = (from ? { panel: from[0], issue: a.closest('.bcard') && a.closest('.bcard').dataset.issue, act: a.dataset.act || null, card: a.classList.contains('bcard'), filter: a.dataset.filter || null } : null) || S.keep;
+    const keep = (from ? { panel: from[0], issue: a.closest('.bcard') && a.closest('.bcard').dataset.issue, col: a.closest('.bcard') && a.closest('.bcard').dataset.col, act: a.dataset.act || null, card: a.classList.contains('bcard'), filter: a.dataset.filter || null } : null) || S.keep;
     S.keep = null;
     if (top) {
       if (!top.querySelector('.board-top')) top.replaceChildren(h('div', 'board-top'), noteLine());
@@ -1043,7 +1101,8 @@
     if (el) cards(el, motion);
     const to = keep && at(keep.panel);
     if (to) {
-      const c = keep.issue ? to.querySelector(`.bcard[data-issue="${keep.issue}"]`) : null;
+      // A card in two columns: the one in the column the focus was in, else (it moved) the card where it is now.
+      const c = keep.issue ? (keep.col && to.querySelector(`.bcard[data-col="${keep.col}"][data-issue="${keep.issue}"]`)) || to.querySelector(`.bcard[data-issue="${keep.issue}"]`) : null;
       const again = keep.filter ? to.querySelector(`[data-filter="${keep.filter}"]`) : keep.card ? c : (keep.act ? (c || to).querySelector(`[data-act="${keep.act}"]`) : null);
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (S.busy) S.keep = keep;

@@ -2498,14 +2498,16 @@ trailerview() { # <worktree>
 # named in the reply, on a line that names its file exactly. DONEWHEN reads the
 # issue (its input), $r (the reply), $m (the added markers, [<file>, <marker>] pairs) and $wt; it prints nothing for
 # an issue with no such section or no bullet in it, else {items, met (the items met so far), failed, paths ({n, p}:
-# the files each met line names), lines (the reply's D<n> lines)}.
+# the files each met line names), lines (the reply's D<n> lines), detail (each item {n, text: the issue's bullet,
+# said: the reply's D<n> line, null with none}, each cut to 500 characters)}.
 DONEWHEN='def sect($t; $atend): [$t | splits("\r?\n")] as $l
     | [range($l | length) | select($l[.] | test("^#{1,2}\\s+Done when\\s*$"; "i"))] | (if $atend then last else first end) as $i
     | if $i == null then null else $l[($i + 1):] | (map(test("^#{1,2}\\s")) | index(true)) as $e | if $e == null then . else .[:$e] end end;
   def refs($s): [$s | scan("[^\\s`\"(),;<>]+") | sub("::.*$"; "") | capture("^(?<p>.*?)(?<l>:[0-9]+(-[0-9]+)?)?[.,:;]*$")
     | .p |= if startswith($wt + "/") then .[($wt | length) + 1:] else . end];
   def toks($s): [refs($s)[] | .p];
-  (sect(.body // ""; false) // [] | map(capture("^(?<i>\\s*)[-*+]\\s+\\S") | .i | length) | (min // 0) as $min | map(select(. == $min)) | length) as $items
+  (sect(.body // ""; false) // [] | map(capture("^(?<i>\\s*)[-*+]\\s+(?<t>\\S.*?)\\s*$")) | (map(.i | length) | min // 0) as $min
+    | map(select((.i | length) == $min) | .t)) as $texts | ($texts | length) as $items
   | select($items > 0)
   | [sect($r; true) // [] | .[] | . as $x | capture("^\\s*(?:[-*+]\\s+)?`?D(?<n>[0-9]+)`?\\s+(?<k>met|not met)\\s*:\\s*(?<e>.*?)\\s*$"; "i")
       | .n |= tonumber | .k |= ascii_downcase | .line = $x] as $d
@@ -2519,9 +2521,12 @@ DONEWHEN='def sect($t; $atend): [$t | splits("\r?\n")] as $l
   | [$m[] | . as [$f, $k]
       | select(any($r | splits("\r?\n"); index($k) != null and IN(toks(.)[]; $f)) | not) | "\($k) added in \($f) is not named in the reply"] as $hid
   | {items: $items, met: [$c[] | select(.met) | .n], failed: ([$c[] | .why // empty] + $hid),
-     paths: [$c[] | select(.met) | {n, p: .paths[]}], lines: [$d[] | select(.n <= $items) | .line]}'
+     paths: [$c[] | select(.met) | {n, p: .paths[]}], lines: [$d[] | select(.n <= $items) | .line],
+     detail: [range(1; $items + 1) as $n | {n: $n, text: $texts[$n - 1][:500],
+       said: ([$d[] | select(.n == $n) | .line | gsub("^\\s+|\\s+$"; "")[:500]] | first)}]}'
 # The check of the last session's reply (its stream in <worktree>.out) against the staged change: prints
-# {items, met, failed} (and notes, the files named that are not there, when there is one), nothing when it is skipped
+# {items, met, failed} (and notes, the files named that are not there, when there is one), and detail (DONEWHEN's),
+# nothing when it is skipped
 # (no such section, or no change: an ALREADY-DONE goes its own way), and keeps the reply's D<n> lines and those notes
 # in <worktree>.donewhen for the review.
 donewhen() { # <worktree> <issue json>
@@ -2548,7 +2553,23 @@ donewhen() { # <worktree> <issue json>
   done < <(jq -r '.paths[] | "\(.n)\t\(.p)"' <<<"$k")
   miss=$(jq -c 'unique_by([.n, .p])[] | "D\(.n): names \(.p), which is not in this worktree"' <<<"$miss" | jq -sc .)
   { jq -r '.lines[]' <<<"$k"; jq -r '.[] | "Note: " + .' <<<"$miss"; } > "$1.donewhen"
-  jq -c --argjson x "$miss" '{items, met: (.met | length), failed} + (if $x == [] then {} else {notes: $x} end)' <<<"$k"
+  jq -c --argjson x "$miss" '{items, met: (.met | length), failed} + (if $x == [] then {} else {notes: $x} end) + {detail}' <<<"$k"
+}
+# `conveyor.sh history donewhen <card>`: the card's last Done-when check, item by item, which the snapshot leaves out
+# (the Board asks for it when a card's Done-when line is opened): {card, items: [{n, text, builder, reviewer}]}, from
+# the card's last line with doneWhenItems and the last review after it. builder is the session's D<n> line; reviewer
+# is "holds" for a D<n> the review said holds (doneWhenHolds), else its findings that name D<n> (from its reason, cut to
+# 1500 characters, and a NO-GO's tail, which keeps its last lines whole), else null. items is []
+# when no line of the card has the check.
+dwdetail() { # <card>
+  { olds; recs; } 2>/dev/null | jq -cRn --arg c "$1" '[inputs | fromjson? | objects | select(.card == $c)] as $l
+    | ([$l | to_entries[] | select(.value.doneWhenItems | type == "array")] | last) as $b
+    | ([$l[(($b.key // -1) + 1):][] | select(.step == "review")] | last) as $r
+    | [$r.tail | strings | splits("\n")] as $t
+    | ([$r.reason | strings | splits("\n") | . as $x | select(any($t[]; startswith($x)) | not)] + $t) as $f
+    | {card: $c, items: [($b.value.doneWhenItems // [])[] | objects | .n as $n | {n, text, builder: .said,
+        reviewer: (if $r == null then null elif any($r.doneWhenHolds[]?; . == $n) then "holds"
+          else [$f[] | select(test("\\bD\($n)\\b"))] | if . == [] then null else join("\n") end end)}]}'
 }
 # The reply's D<n> lines as donewhen() kept them in <worktree>.donewhen, each with its state (met or not met), cut to
 # 300 characters: a JSON array, for the session's line (doneLines; the pull request of Land as pr lists them). With no
@@ -2557,12 +2578,14 @@ donewhen() { # <worktree> <issue json>
 # JSON text for --argjson, dwfields() gave nothing, and record() wrote the line without the session's fields (its tokens,
 # stats and Done-when check).
 donelines() { local d; d=$(jq -Rsc '[splits("\n") | select(. != "" and (startswith("Note: ") | not)) | .[0:300]]' 2>/dev/null < "$1.donewhen") && printf '%s\n' "$d" || echo '[]'; }
-# A session's fields for its line in checked(), with the Done-when check put on them by <jq filter> ($k the check,
-# $d the reply's D<n> lines); when they cannot be put together, the log names the card and the line, and the line is
-# written without them.
+# A session's fields for its line in checked(), with the Done-when check put on them by <jq filter> ($k the check
+# donewhen() printed, less its detail; $i that detail, doneWhenItems, which the snapshot leaves out: the Board reads it
+# on demand, history donewhen; $d the reply's D<n> lines); when they cannot be put together, the log names the card
+# and the line, and the line is written without them.
 dwfields() { # <card> <worktree> <step> <the Done-when check, or ""> <jq filter> [jq options]... (the session's fields on stdin)
   local c=$1 wt=$2 s=$3 k=$4 f=$5 x; shift 5
-  x=$(jq -c --argjson k "${k:-null}" --argjson d "$(donelines "$wt")" "$@" "$f") \
+  x=$(jq -c --argjson k "$(jq -c 'if . == null then . else del(.detail) end' <<<"${k:-null}")" --argjson i "$(jq -c '.detail?' <<<"${k:-null}")" \
+    --argjson d "$(donelines "$wt")" "$@" "$f") \
     || { echo "conveyor: card $c: the $s session's fields (its tokens, stats and Done-when check) could not be put on its $s line; the line is written without them" >&2; return 0; }
   printf '%s\n' "$x"
 }
@@ -2587,13 +2610,13 @@ checked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <ste
 dwchecked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <step> <the session's fields>: the Done-when part of checked()
   local k t f
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
-  record "$1" "$2" "$6" ok "$(dwfields "$1" "$3" "$6" "$k" 'if $k == null then . else . + {doneWhen: $k, doneLines: $d} end' <<<"$7")"
+  record "$1" "$2" "$6" ok "$(dwfields "$1" "$3" "$6" "$k" 'if $k == null then . else . + {doneWhen: $k, doneWhenItems: $i, doneLines: $d} end' <<<"$7")"
   [ -n "$k" ] && [ "$(jq '.failed | length' <<<"$k")" != 0 ] || return 0
   f=$(jq -r '.failed | join("; ")' <<<"$k")
   began "$1" "$2" fix
   t=$(session "$3" "$5"$'\n\n'"$DWFIX"$'\n'"$(jq -r '.failed[] | "- " + .' <<<"$k")" fix) || { block "$1" "$2" "$3" "fix: $t"; return 1; }
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
-  record "$1" "$2" fix ok "$(dwfields "$1" "$3" fix "$k" '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k, doneLines: $d} end)' \
+  record "$1" "$2" fix ok "$(dwfields "$1" "$3" fix "$k" '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k, doneWhenItems: $i, doneLines: $d} end)' \
     --arg r "the Done-when check failed: $f" <<<"$t")"
   [ -z "$k" ] || [ "$(jq '.failed | length' <<<"$k")" = 0 ] \
     || { block "$1" "$2" "$3" "the Done-when check failed again after its one fix session: $(jq -r '.failed | join("; ")' <<<"$k")"; return 1; }

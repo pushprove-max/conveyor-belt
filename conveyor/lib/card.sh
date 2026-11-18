@@ -349,8 +349,11 @@ card() { # <card> <issue> [<branch> <tip>]
       # and proof (answers()), so a review that blocks or ends the loop keeps them too.
       sv='[]'; [ "$res" != NO-GO ] || sv=$(repeats "$wt" | jq -sc 'map({id, rounds})')
       an=$(answers "$wt")
+      # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
+      # Board reads them on demand (history donewhen).
       record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
-        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end)')"
+        --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" \
+        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end)')"
       [ "$res" != none ] || { block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
     fi
     # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's

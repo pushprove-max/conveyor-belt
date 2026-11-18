@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older] -- the collector of the Conveyor dashboard (the
+# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older|--donewhen] -- the collector of the Conveyor dashboard (the
 # strip-down to Conveyor). It writes one file, data.js in dashboard/ of the state folder (`conveyor.sh state-dir`)
 # (`window.DASH = {...};`), which the static page in .claude/dashboard/ reads, through the page server's /events as it
 # changes, or every 15 s when that stream is not open. No model call, ever.
@@ -1117,6 +1117,23 @@ older() {
     || { echo "dashboard: $host gave no older runs" >&2; return 1; }
 }
 
+# --donewhen <repo> <card id>: a card's last Done-when check of a record, item by item, which the snapshot leaves out:
+# its `conveyor.sh history donewhen <card id>`, in one command to the host (hostof, onhost), as {card, items: [{n, text,
+# builder, reviewer}]}. The page server gives it at GET /donewhen, which the Board asks for when a card's Done-when line
+# is opened; never kept.
+donewhen() {
+  local host main engine target recs why remote cmd
+  hostof || { echo "dashboard: no Done-when detail: $why" >&2; return 1; }
+  cmd=$(jq -er --arg r "$1" --arg c "$2" --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | select(.repo == $r) | .main | @sh)
+      | "CONVEYOR_MAIN=\(.) bash \($e | @sh) history donewhen \($c | @sh)"' <<<"$recs") \
+    || { echo "dashboard: no Done-when detail: the host file names no record $1" >&2; return 1; }
+  RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
+  onhost "$cmd" > "$RUN/donewhen" 2>"$RUN/err-donewhen" \
+    || { echo "dashboard: $host gave no Done-when detail: $(tail -n 1 "$RUN/err-donewhen" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
+  jq -ce 'objects | select(.items | type == "array")' "$RUN/donewhen" 2>"$RUN/err-donewhen" \
+    || { echo "dashboard: $host gave no Done-when detail" >&2; return 1; }
+}
+
 # view_files -- the page's files, relative to .claude/dashboard: the page, its core, its tab icon and one file per panel.
 view_files() { (cd "$VIEW_SRC" && find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.svg' \) | sed 's|^\./||' | LC_ALL=C sort); }
 # copy_view -- copy each page file from the primary checkout into $OUT, skipping one that is already the same. Each
@@ -1350,8 +1367,11 @@ case "${1:-}" in
   --older) [ $# = 3 ] || { echo "usage: dashboard.sh --older <repo> <test file>" >&2; exit 2; }
            mkdir -p "$OUT" || exit 1
            older "$2" "$3" || exit 1 ;;
+  --donewhen) [ $# = 3 ] || { echo "usage: dashboard.sh --donewhen <repo> <card id>" >&2; exit 2; }
+              mkdir -p "$OUT" || exit 1
+              donewhen "$2" "$3" || exit 1 ;;
   --check) check || exit 1 ;;
   "") mkdir -p "$OUT" || exit 1
       render || { echo "dashboard: collection FAILED; data.js keeps the last snapshot" >&2; exit 1; } ;;
-  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--check]" >&2; exit 2 ;;
+  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--check]" >&2; exit 2 ;;
 esac

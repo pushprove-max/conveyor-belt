@@ -374,6 +374,23 @@ o=''; ! o=$(orun nosuch a.test.sh 2>/dev/null) && [ -z "$o" ] || fail "a record 
 o=''; ! o=$(orun widgetshop a.test.sh 2>/dev/null) && [ -z "$o" ] || fail "a host that gave no older runs was passed off as a file with none: $o"
 ) & started older
 
+# --- --donewhen (#305): a card's Done-when items, which data.js does not carry: the named record's `conveyor.sh
+# history donewhen <card>` in one host command. Bugs: another record was asked; the card reached the host unquoted; a
+# host that gives no answer is passed off as a check with no item ---
+( fresh donewhen
+jq -cn '{card: "c1 x", items: [{n: 1, text: "the thing", builder: "D1 met: a.test.sh", reviewer: "holds"}]}' > "$T/ssh-out"
+: > "$T/ssh-calls"
+drun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" \
+  CONVEYOR_DASHBOARD_DIR="$OUT" timeout 20 bash "$DASH" --donewhen "$@"; }
+d=$(drun widgetshop 'c1 x') || fail "--donewhen exited non-zero"
+[ "$(jq -c '.items | map([.n, .builder, .reviewer])' <<<"$d")" = '[[1,"D1 met: a.test.sh","holds"]]' ] || fail "--donewhen does not give the card's items: $d"
+[ "$(wc -l < "$T/ssh-calls")" = 1 ] && grep -q "CONVEYOR_MAIN='/srv/cd' bash .*conveyor.sh' history donewhen 'c1 x'" "$T/ssh-calls" \
+  || fail "--donewhen does not ask the host once, for the named record and the card quoted: $(cat "$T/ssh-calls")"
+d=''; ! d=$(drun nosuch c1 2>/dev/null) && [ -z "$d" ] || fail "a record the host file does not name gave Done-when items: $d"
+: > "$T/ssh-out"
+d=''; ! d=$(drun widgetshop c1 2>/dev/null) && [ -z "$d" ] || fail "a host that gave no answer was passed off as a check with no item: $d"
+) & started donewhen
+
 # --- cards on both records: every row names its repo and links to that repo's issue ---
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
@@ -1306,7 +1323,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 RETIRED='\b([u]nits?|[s]eats?|[p]ass(es)?|[m]erge queue|[c]hain)\b'

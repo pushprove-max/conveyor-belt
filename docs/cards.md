@@ -11,7 +11,8 @@ The card builds in a fresh git worktree. Claude build, fix and review sessions s
 
 When the issue has a `## Done when` section, Conveyor checks the build or fix session's reply before the review. The
 reply needs a `D<n> met:` or `D<n> not met:` line for each item. It must also name each TODO or [VERIFY] marker that
-the change adds, on a line with its file.
+the change adds, on a line with its file. On the Board, open a card's `Done when` line to see each item: its text,
+the builder's line for it, and the reviewer's answer when the review gave one.
 
 A build, fix or review session can end with no turn and no token. Its CLI then stopped before any work. The card's
 reason names the cause from the CLI's own error output: not logged in, a model the account does not have, a settings

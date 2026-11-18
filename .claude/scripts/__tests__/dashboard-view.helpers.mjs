@@ -167,6 +167,13 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       (w.olderAsks = w.olderAsks || []).push(url);
       return Promise.resolve(w.olderReply || { ok: true, status: 200, json: () => Promise.resolve({ olderRuns: [], olderEdits: [] }) });
     }
+    // The Board's Done-when items of a card (GET donewhen?repo=…&card=…): w.donewhenReply is the server's answer; with
+    // none, a 502. w.donewhenAsks lists the addresses asked.
+    if (/^donewhen\?/.test(url)) {
+      assert.equal(opt, undefined, 'the Done-when items are read with a plain GET');
+      (w.donewhenAsks = w.donewhenAsks || []).push(url);
+      return Promise.resolve(w.donewhenReply || { ok: false, status: 502, text: () => Promise.resolve('no Done-when detail') });
+    }
     assert.ok(['answer', 'restart', 'control', 'machine'].includes(url), `the page writes to nothing but its own answer, restart, control and machine addresses: ${url}`);
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');

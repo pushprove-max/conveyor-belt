@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# The page server's work for each open page (issue 566), by function: GET /events, GET /history, GET /work and GET /older called on a
+# The page server's work for each open page (issue 566), by function: GET /events, GET /history, GET /work, GET /older and GET /donewhen called on a
 # stand-in request, with no server, socket or login. Every open page did again work one could do for all: each /events
 # connection serialised every panel of data.js (about 1.1 MB) on each update, and each GET /history started bash,
 # every 60 s a page, though dashboard.sh kept the answer for 60 s.
@@ -157,6 +157,31 @@ bad.path = '/older?repo=sample&file=a.test.sh'
 ds.Handler.older(bad)
 check(bad.code == 502 and 'gave no older runs' in bad.text and bad.out.getvalue() == b'',
       'older: a failed read is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
+
+# #305. Bugs: data.js would carry every card's Done-when detail, so the Board reads one card's from the server; GET
+# /donewhen ran dashboard.sh --donewhen for another repo or card than the page asked for, or for one of a shape no card
+# has; a failed read reached the page as a check with no item.
+started.clear()
+ds.run_script = lambda *a, **k: (started.append(a[0]), subprocess.CompletedProcess(a[0], 0, '{"card":"c20260101T000000-sample-7","items":[]}\n', ''))[1]
+dw = Page()
+dw.path = '/donewhen?repo=sample&card=c20260101T000000-sample-7'
+ds.Handler.donewhen(dw)
+check(started == [started[0]] and started[0][-3:] == ['--donewhen', 'sample', 'c20260101T000000-sample-7'] and dw.code == 200
+      and json.loads(dw.out.getvalue())['items'] == [],
+      'donewhen: an ask runs dashboard.sh --donewhen for its repo and card and gives its answer: %r %s' % (started, dw.code))
+started.clear()
+for q in ('repo=sample&card=-x', 'repo=a%20b&card=c20260101T000000-sample-7', 'repo=sample'):
+    bad = Page()
+    bad.path = '/donewhen?' + q
+    ds.Handler.donewhen(bad)
+    check(bad.code == 400, 'donewhen: %s is refused: %s' % (q, bad.code))
+check(started == [], 'donewhen: a refused ask starts no process: %r' % started)
+ds.run_script = lambda *a, **k: subprocess.CompletedProcess(a[0], 1, '', 'dashboard: devbox gave no Done-when detail: refused\n')
+bad = Page()
+bad.path = '/donewhen?repo=sample&card=c20260101T000000-sample-7'
+ds.Handler.donewhen(bad)
+check(bad.code == 502 and 'gave no Done-when detail' in bad.text and bad.out.getvalue() == b'',
+      'donewhen: a failed read is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
 
 for f in fail:
     print('FAIL: ' + f, file=sys.stderr)

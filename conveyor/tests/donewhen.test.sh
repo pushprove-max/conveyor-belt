@@ -55,6 +55,37 @@ t_dwland() {
   snap=$(loop snapshot) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[] | select(.issue == 7) | .doneWhen' <<<"$snap")" = '{"items":2,"met":2,"failed":[]}' ] \
     || fail "the snapshot does not carry the landed card's Done-when check: $(jq -c '.landed | map({issue, doneWhen})' <<<"$snap")"
+  # #305. Bugs: the Board's Done-when detail (each item's text, the build's D<n> line, the review's answer) is not kept,
+  # or is carried in the snapshot (its size budget) instead of read on demand (history donewhen); a line keeping it is
+  # refused by the record check.
+  ! grep -q 'doneWhenItems\|doneWhenHolds\|case one passes' <<<"$snap" || fail "the snapshot carries the Done-when detail"
+  recok "$ST/cards.jsonl" "#7's run"
+  [ "$(loop history donewhen "$(st 'select(.issue == 7 and .step == "build") | .card')" | jq -c .items)" \
+    = '[{"n":1,"text":"the first thing","builder":"D1 met: lib/t.test.sh case one passes","reviewer":"holds"},{"n":2,"text":"the second thing","builder":"D2 met: a.txt:2 holds the second thing","reviewer":null}]' ] \
+    || fail "history donewhen does not give each item with its text, the build's line and the review's answer: $(loop history donewhen "$(st 'select(.issue == 7) | .card' | head -n 1)")"
+}
+
+# #305. Bugs: history donewhen takes the reviewer's answer from a review before the last check (an earlier round's), or
+# drops a finding that names the item, or one past the reason's cut that only the tail keeps (c1's D10); a finding
+# about D10 is given to D1 too. The reader is called on record lines alone.
+t_dwdetail() {
+  setup '[]'
+  jq -c . >> "$ST/cards.jsonl" <<'EOF'
+{"card":"c1","issue":5,"step":"build","doneWhenItems":[{"n":1,"text":"old","said":"D1 met: old"}]}
+{"card":"c1","issue":5,"step":"review","reason":"","doneWhenHolds":[1]}
+{"card":"c1","issue":5,"step":"fix","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: a.test.sh case a"},{"n":2,"text":"two","said":null},{"n":10,"text":"ten","said":"D10 met: b.c:3"}]}
+{"card":"c2","issue":6,"step":"review","reason":"","doneWhenHolds":[1,2,10]}
+{"card":"c1","issue":5,"step":"review","reason":"[P1] D1's evidence: a.test.sh has no case a\n[P2] D10's evid","tail":"[P1] D1's evidence: a.test.sh has no case a\n[P2] D10's evidence: b.c:3 does not hold it","doneWhenHolds":[2]}
+{"card":"c3","issue":7,"step":"build","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: old"}]}
+{"card":"c3","issue":7,"step":"review","reason":"[P1] D1 is not met","doneWhenHolds":[]}
+{"card":"c3","issue":7,"step":"fix","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: new"}]}
+EOF
+  # c3's last check has no review after it: the review of the build before it is not its answer.
+  [ "$(loop history donewhen c3 | jq -c .items)" = '[{"n":1,"text":"one","builder":"D1 met: new","reviewer":null}]' ] \
+    || fail "history donewhen gave the last check a review from before it: $(loop history donewhen c3)"
+  [ "$(loop history donewhen c1 | jq -c .items)" = '[{"n":1,"text":"one","builder":"D1 met: a.test.sh case a","reviewer":"[P1] D1'"'"'s evidence: a.test.sh has no case a"},{"n":2,"text":"two","builder":null,"reviewer":"holds"},{"n":10,"text":"ten","builder":"D10 met: b.c:3","reviewer":"[P2] D10'"'"'s evidence: b.c:3 does not hold it"}]' ] \
+    || fail "history donewhen did not pair the last check with the review after it: $(loop history donewhen c1)"
+  [ "$(loop history donewhen c9)" = '{"card":"c9","items":[]}' ] || fail "a card with no check is not an empty list: $(loop history donewhen c9)"
 }
 
 # Bugs: a missing D<n> line, an empty evidence, or an added TODO the reply hides (naming another file that ends in the
@@ -171,7 +202,7 @@ t_movedmarker() {
     git -C "$R" worktree add -q --detach "$w" && (cd "$w" && eval "$2") || { echo "the worktree of #$1 could not be made"; return; }
     jq -cn '{type: "result", is_error: false, result: "Done.\n\n## Done when\nD1 met: the change holds it"}' > "$w.out"
     # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...)
-    ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"; donewhen "$w" "$(issue "$1" 2026-01-01 | jq -c '.body = "## Done when\n- the thing"')" ) || echo "the check of #$1 failed to run"
+    ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"; donewhen "$w" "$(issue "$1" 2026-01-01 | jq -c '.body = "## Done when\n- the thing"')" | jq -c 'del(.detail)' ) || echo "the check of #$1 failed to run"
   }
   k=$(marked 7 "rm t.txt; echo 'TODO later' > t2.txt"); [ "$k" = '{"items":1,"met":1,"failed":[]}' ] || fail "a TODO line moved to another file failed the reply check: $k"
   k=$(marked 8 ": > v.txt; echo '[VERIFY] the limit' > v2.txt"); [ "$k" = '{"items":1,"met":1,"failed":[]}' ] || fail "a [VERIFY] line moved to another file failed the reply check: $k"
