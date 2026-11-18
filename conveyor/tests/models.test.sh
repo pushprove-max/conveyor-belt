@@ -12,11 +12,14 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # An engine function called alone in the engine shell, as `conveyor.sh <command>` loads it (the libraries
 # commands/<command>.sh sources), with no loop run: a case about one function (the review, a session's route, doctor's
 # route lines) pays for that function, not for a whole card around it.
-modelsengine() { # <run|doctor> <the engine command>
+modelsengine() { # <run|doctor|snapshot> <the engine command>
   mkdir -p "$T/$CASE/cards"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/$1.sh")" && names && eval "$2" )
 }
+# The snapshot's modelSettings (what the Board's model choices show), as snapshot() makes it: the host's CLI report read
+# when due (hostclis), then modelsettings(), with no whole snapshot around them.
+msettings() { modelsengine snapshot 'hostclis due >/dev/null 2>&1; modelsettings'; }
 # reviewed() alone, as a card's review step calls it, on a worktree of main (cards/c<n>) with the build's change
 # staged: what it prints, then a last line of its exit and the verdict it left (rc=<exit> <verdict>).
 rvcall() { # <n>
@@ -35,7 +38,7 @@ t_claudereview() {
   echo 'AGENTS-RULES-MARK' > "$R/AGENTS.md"; git -C "$R" add AGENTS.md; git -C "$R" commit -qm agents
   tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]'; seatset reviewer gpt-6.1-sol
   ctl() { loop control "$@" 2>&1; }
-  rv() { loop snapshot | jq -c '.modelSettings.reviewer | [.choices, .efforts]'; }
+  rv() { msettings | jq -c '.reviewer | [.choices, .efforts]'; }
   [ "$(rv)" = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"],["minimal","low","medium","high","xhigh"]]' ] \
     || fail "the Reviewer choices are not the five models, or a Codex reviewer's efforts are not Codex's: $(rv)"
   was=$(cat "$ST/control.json")
@@ -186,9 +189,9 @@ EOF
 }
 t_opencodereview() {
   opencode_reviewer
-  [ "$(loop snapshot | jq -c '.modelSettings.reviewer | [.choices, .agent, .efforts]')" \
+  [ "$(msettings | jq -c '.reviewer | [.choices, .agent, .efforts]')" \
     = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
-    || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(loop snapshot | jq -c .modelSettings.reviewer)"
+    || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(msettings | jq -c .reviewer)"
   echo 'git status --porcelain > "$STUB/status"; cat a.txt > "$STUB/a"' > "$STUB/test-cmd"
   # #7: a NO-GO, its finding sent to the fix, then a GO.
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
@@ -346,7 +349,7 @@ t_proxyv() {
   # A key variable named like a variable of the engine's own (v, e), or ENV0, still carries the key it holds. v is a
   # variable of proxyenv()'s callers in a card, so a whole card proves it; e is envof()'s, which proxyenv() called
   # alone runs as well; ENV0 is no card variable, so proxyenv() called alone proves it too.
-  tune '.models.claudeProxy.keyEnv = "v"'; echo "[$(issue 11 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
+  tune '.models.claudeProxy.keyEnv = "v"'; echo "[$(issue 11 2026-01-02)]" > "$STUB/issues.json"
   v=v-secret loop run >/dev/null || fail "run exited non-zero"
   [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=v-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
     || fail "a key in a variable named v did not reach the session: $(cat "$STUB/env")"
@@ -375,8 +378,10 @@ t_proxyfetch() {
   : > "$STUB/auth"; sed -i 's/env_key = "PROXY_KEY"/env_key = "FETCH"/' "$CODEX_HOME/config.toml"; sed -i '2i printf %s "$FETCH" > "$STUB/codex-fetch"' "$STUB/codex"
   # So does the claudeProxy key variable ENV0 (Codex reads a provider's env_key from the reviewer's own environment).
   tune '.models.claudeProxy.keyEnv = "ENV0"'; echo 'printf %s "${ENV0-unset}" > "$STUB/review-env0"' > "$STUB/review-cmd"
-  echo "[$(issue 14 2026-01-02)]" > "$STUB/issues.json"; echo "$GO" > "$STUB/review.1"
-  FETCH=fetch-secret ENV0=env0-secret loop run >/dev/null || fail "run exited non-zero"
+  # The review alone (rvcall), as a card's review step calls it: it asks the proxy for the family's newest model and
+  # runs Codex on it.
+  out=$(FETCH=fetch-secret ENV0=env0-secret rvcall 14)
+  [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] || fail "the review through the proxy did not end GO: $out"
   [ "$(sort -u "$STUB/auth")" = "Bearer fetch-secret" ] && [ "$(cat "$STUB/codex-fetch")" = fetch-secret ] \
     || fail "a key in a variable named FETCH was not sent, or Codex did not inherit it: $(cat "$STUB/auth") $(cat "$STUB/codex-fetch")"
   [ "$(cat "$STUB/review-env0")" = env0-secret ] || fail "the variable ENV0 did not reach the Codex reviewer: $(cat "$STUB/review-env0")"
