@@ -221,7 +221,8 @@ test('every tab: one word, Queue, for an issue joining the queue, and File as is
     const w = boot({ tab });
     deliver(w, d);
     if (tab === 'rules') { const open = act(panel(w, 'rules-produce'), 'waits-open'); if (open && !open.disabled) open.click(); await settle(); }
-    const words = Array.from(w.document.querySelectorAll('#grid button'), (b) => b.textContent);
+    // The Release panel's "Release <version>" button makes a project release, not a card joining the queue.
+    const words = Array.from(w.document.querySelectorAll('#grid button')).filter((b) => !b.closest('#panel-release')).map((b) => b.textContent);
     for (const old of ['Release', 'Build this', 'Queue again', 'Build anyway']) assert.ok(!words.some((x) => x === old || x.startsWith(`${old} `)), `${tab}: no "${old}" button: ${words.join(' | ')}`);
     if (tab === 'overview') assert.ok(words.includes('Queue') && words.includes('File as issue'), `${tab}: ${words.join(' | ')}`);
     if (tab === 'control') assert.ok(words.includes('Queue'), `${tab}: ${words.join(' | ')}`);
