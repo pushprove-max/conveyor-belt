@@ -210,7 +210,9 @@ t_apidoctor() {
   routesrc() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; mkdir -p "$CONVEYOR_CARDS"; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/doctor.sh")" && names && routes > /dev/null 2>&1 ); }
   routesrc || fail "doctor's routes failed with each key where the service reads it"
-  out=$(loop doctor 2>&1)
+  # Doctor runs in the project's checkout, as a user runs it: from the case's own folder, which is no checkout, it
+  # stops at "missing: a git checkout of the project" before its route lines (here and in t_routedoctor).
+  out=$(cd "$R" && loop doctor 2>&1)
   grep -qxF "builder: m (claude) through the Anthropic API at $b, key in ANTHROPIC_API_KEY; the service reads the key from ANTHROPIC_API_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and the API works" <<<"$out" \
     && grep -qxF "reviewer: x (codex) through $b/v1, Codex's model_provider conveyor-proxy, key in OPENAI_API_KEY; the service reads the key from the key file $f, and the API works" <<<"$out" \
     || fail "doctor did not show each role's API route with where the service reads its key and the API's answer: $out"
@@ -219,7 +221,7 @@ t_apidoctor() {
   # The API needs a key, so doctor fails with a missing: line that says where to put it (bug: the route line alone
   # did not say whether that was a fault).
   ANTHROPIC_API_KEY=$ak routesrc && fail "doctor's routes passed with no key the service can find for the API"
-  out=$(ANTHROPIC_API_KEY=$ak loop doctor 2>&1)
+  out=$(cd "$R" && ANTHROPIC_API_KEY=$ak loop doctor 2>&1)
   grep -qxF "builder: m (claude) through the Anthropic API at $b, key in ANTHROPIC_API_KEY; the service finds no key: no ANTHROPIC_API_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and no key file named (keyFile)" <<<"$out" \
     || fail "doctor took the calling shell's key, which the service does not have: $out"
   grep -qxF "missing: a key the service can find for the claude route through $b; fix: put it in ANTHROPIC_API_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, or name a key file of mode 600 as keyFile of claudeProxy in $XDG_CONFIG_HOME/conveyor/host.json" <<<"$out" \
@@ -248,7 +250,7 @@ t_routedoctor() {
   echo 'if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then curl -sf -o /dev/null -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" -d "{}" "$ANTHROPIC_BASE_URL/v1/messages" || { echo "API Error: Unable to connect to API"; exit 1; }
     else echo "Not logged in · Please run /login"; exit 1; fi' > "$STUB/build"
   echo '[ -n "${out:-}" ] || { echo called > "$STUB/codex-called"; exit 0; }' > "$STUB/review-cmd"
-  out=$(loop doctor 2>&1) && fail "doctor passed with a proxy route whose proxy is stopped: $out"
+  out=$(cd "$R" && loop doctor 2>&1) && fail "doctor passed with a proxy route whose proxy is stopped: $out"
   grep -qxF "builder: m (claude) through http://127.0.0.1:$p, key in CLAUDE_PROXY_KEY; the service reads the key from CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and one call through it fails (API Error: Unable to connect to API)" <<<"$out" \
     || fail "doctor did not call the stopped proxy as the service does: $out"
   grep -qxF "conveyor: checking claude (m) through http://127.0.0.1:$p with one call (up to 120 s)..." <<<"$out" || fail "doctor printed no progress line before the proxy call: $out"
@@ -257,23 +259,23 @@ t_routedoctor() {
   # No key the service can find, and the proxy stopped: the call fails, but not for a key, so doctor names no missing
   # key (bug: any failed call with no key was shown as "missing:" a key).
   echo '{}' > "$CONVEYOR_CLAUDE_SETTINGS"
-  out=$(loop doctor 2>&1)
+  out=$(cd "$R" && loop doctor 2>&1)
   grep -qxF "builder: m (claude) through http://127.0.0.1:$p, key in CLAUDE_PROXY_KEY; the service finds no key: no CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and no key file named (keyFile), and one call through it with none fails (API Error: Unable to connect to API)" <<<"$out" \
     && ! grep -q '^missing: a key' <<<"$out" || fail "doctor named a missing key for a proxy that is stopped: $out"
   # The proxy refuses the call with no key: doctor says the key is missing and where to put it.
   echo 'if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then echo "API Error: 401 {\"type\":\"authentication_error\"}"; else echo "Not logged in · Please run /login"; fi; exit 1' > "$STUB/build"
-  out=$(loop doctor 2>&1)
+  out=$(cd "$R" && loop doctor 2>&1)
   grep -qxF "missing: a key the service can find for the claude route through http://127.0.0.1:$p; fix: put it in CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, or name a key file of mode 600 as keyFile of claudeProxy in $XDG_CONFIG_HOME/conveyor/host.json" <<<"$out" \
     || fail "doctor did not name the key a refusing proxy needs: $out"
   jq '.claudeProxy = {kind: "subscription"}' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json"
-  out=$(loop doctor 2>&1)
+  out=$(cd "$R" && loop doctor 2>&1)
   grep -qxF "builder: m (claude) on the subscription login; its login fails (Not logged in · Please run /login)" <<<"$out" || fail "doctor did not call Claude on its own login: $out"
   # Bug: doctor checked the default login when the project's cards run on a named account (control account): the
   # stub is signed in only in that account's folder, as the cards' sessions run it (acctrun()).
   jq --arg d "$T/$CASE/acct2" '.accounts = [{name: "second", configDir: $d}]' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json"
   loop control account second >/dev/null 2>&1 || fail "the account was not set"
   echo '[ "${CLAUDE_CONFIG_DIR:-}" = "$(dirname "$STUB")/acct2" ] && { echo OK; exit 0; }; echo "Not logged in · Please run /login"; exit 1' > "$STUB/build"
-  out=$(loop doctor 2>&1)
+  out=$(cd "$R" && loop doctor 2>&1)
   grep -qxF "builder: m (claude) on the subscription login; its login works" <<<"$out" || fail "doctor did not check the login of the account the cards run on: $out"
 }
 
