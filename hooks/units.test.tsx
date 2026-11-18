@@ -1089,6 +1089,43 @@ test('plugin problems the Foreman noted: "N plugin problems noted" with a link t
   expect(await draw($, 'Pane')).toContain('2 plugin problems noted')
 })
 
+// Issue 383: /units ran the plugin copy's fetch, an older one than the engine that wrote waiter.pid with four fields;
+// it read `<session's process> <session>` as the waiter's session, which never equals this one, so /units said the
+// Foreman was not listening while it was. Here the plugin copy's fetch answers that misread, and the fetch of the
+// install of the commit this machine took (a pack that follows main) answers as the engine that wrote the file.
+const INSTALL = `${HOME}/.local/share/conveyor/versions/${COMMIT_A}/hooks/units-fetch.sh`
+const installWorld = (on: On, pack: object, files: Record<string, string>) => {
+  const w = world(on, 'main', '', files, true, { HOME })
+  w.files.set(`${MAIN}/.conveyor/project.json`, { text: JSON.stringify(pack), at: 0 })
+  on('session.id', () => ({ value: 'me' }))
+  const run = w.run
+  w.run = (argv, cwd) => {
+    if (argv[0] === 'bash' && argv[1].endsWith('/hooks/units-fetch.sh'))
+      w.fetch = withForeman(['me', '4242', COMMIT_A, argv[1] === INSTALL ? 'me' : '30156 me', '1', COMMIT_A, UP])
+    return run(argv, cwd)
+  }
+  return w
+}
+
+test('issue 383: the fetch runs from the install of the engine the project took, so a four-field waiter.pid reads as listening', async ($, on) => {
+  const w = installWorld(on, { plugin: { follow: 'main' } }, { [`${MAIN}/.git/conveyor-engine.json`]: JSON.stringify({ commit: COMMIT_A }), [INSTALL]: '#!/bin/bash' })
+  await start($, 'main')
+  await w.clock.settle()
+  expect(fetches(w).length).toBeGreaterThan(0)
+  expect(fetches(w).every(r => r.argv[1] === INSTALL)).toBe(true)
+  expect(await units($)).toContain('\nForeman listening\n')
+})
+
+// The other side: a pack whose pinned commit has no install on this machine yet still gets a fetch (the plugin's own).
+test('issue 383: a pinned commit with no install yet runs the plugin copy\'s fetch', async ($, on) => {
+  const w = installWorld(on, { plugin: { commit: COMMIT_A } }, {})
+  await start($, 'main')
+  await w.clock.settle()
+  expect(fetches(w).length).toBeGreaterThan(0)
+  expect(fetches(w).every(r => r.argv[1] !== INSTALL)).toBe(true)
+  expect(await units($)).toContain('\nForeman not listening')
+})
+
 test('D4: no Foreman is expected (the fetch prints no foreman line): no indicator anywhere', async ($, on) => {
   const { text } = await foremanWorld($, on, answer(FULL))
   expect(text).not.toContain('Foreman')

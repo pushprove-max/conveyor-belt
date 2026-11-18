@@ -43,6 +43,25 @@ const WAITING = 'units: reading the Conveyor snapshot'
 // what the feed lacks.
 const FETCH = 'hooks/units-fetch.sh'
 
+// The fetch from the install of the project's engine, found as shim.sh finds it: the commit the pack pins, else, for
+// a pack that follows the plugin's main, the commit this machine took (the main checkout's .git/conveyor-engine.json),
+// in <XDG_DATA_HOME, else ~/.local/share>/conveyor/versions/<commit>. That engine wrote the records the fetch reads,
+// so an older plugin copy's fetch never misreads them (issue 383: its waiter.pid). Until the project has an install
+// (no commit, or no fetch in its folder), the plugin's own fetch.
+const fetchPath = async ($: EngineInterface, main: string): Promise<string> => {
+  const own = `${$.plugin.root}/${FETCH}`
+  const json = async (file: string) => { try { return JSON.parse((await $.fs.read(file)) as string) } catch { return null } }
+  const plugin = (await json(`${main}/.conveyor/project.json`))?.plugin
+  const commit = plugin?.commit || (plugin?.follow ? (await json(`${main}/.git/conveyor-engine.json`))?.commit : '')
+  // Only a full commit id names a version folder: anything else could name a path outside versions/.
+  if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) return own
+  const home = (await $.env.get('HOME').catch(() => undefined)) || ''
+  const data = (await $.env.get('XDG_DATA_HOME').catch(() => undefined)) || (home && `${home}/.local/share`)
+  if (!data) return own
+  const path = `${data}/conveyor/versions/${commit}/${FETCH}`
+  return (await $.fs.stat(path).catch(() => undefined)) ? path : own
+}
+
 // The Board's folder, named as the plugin's dashboard.sh names its OUT, from the Board job installed on this
 // machine (`dashboard.sh --install`: the Mac's launchd plist, else the systemd user unit): the job's script and the
 // overrides the job keeps, never this session's. The job's CONVEYOR_DASHBOARD_DIR; else dashboard/ in the state folder
@@ -195,7 +214,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   const got = await readFeed($).catch(() => null)
   const fed = got && 'board' in got ? got : null
   // The script gives the host 50 s; the engine's own 30 s default would cut a slow answer short.
-  const r = await $.process.run(['bash', `${$.plugin.root}/${FETCH}`, ...(fed ? ['feed'] : [])], { cwd, timeoutMs: 75_000 }).catch(() => undefined)
+  const r = await $.process.run(['bash', await fetchPath($, cwd), ...(fed ? ['feed'] : [])], { cwd, timeoutMs: 75_000 }).catch(() => undefined)
   const f = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
   const now = await $.clock.now()
   if (f) own = f.own
