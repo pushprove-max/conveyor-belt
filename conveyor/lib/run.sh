@@ -146,26 +146,32 @@ speedretry() {
 # its worktree was gone too. One whose change could not be kept stays blocked, its worktree where it is, and so does a
 # card of issue 0 (a branch, land-branch: no issue to pick again).
 GONE='its process was gone: the machine or the loop stopped'
+# The worktree of a card whose process is gone, made ready for block() to keep (revive(), and run() for a card of its
+# own). Stopped in its batch's tests (batch(), rebatch()): its worktree holds the batch's changes, not its own; its
+# own goes back first, on the commit it was on, and no list of passes goes with it: the batch's run, of the batch's
+# change, writes <worktree>.rerun (batchlist()). It fails, saying so, when its change cannot be put back: the card is
+# left open, as block() would keep the batch's changes as its work and remove its own .bpatch.
+gonewt() { # <card> <worktree> <its last step>
+  local c=$1 wt=$2 f
+  if [ -s "$wt.lent" ] && [ -d "$wt" ]; then
+    git -C "$wt" reset -q --hard "$(<"$wt.lent")" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null || {
+      echo "conveyor: card $c had an open record and its process was gone mid-batch, and its change could not be put back in its worktree; it is left open: its change is the patch $wt.bpatch on commit $(<"$wt.lent")"
+      return 1; }
+    rm -f "$wt.lent" "$wt.rerun"
+  elif [ "$3" = test ] && [ -d "$wt" ] && [ -d "$wt.testlog" ] && f=$(testfails "$wt.test" 137); then
+    rerunlist "$wt" "$(git -C "$wt" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)" "$f" \
+      "$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null)" "$(git -C "$wt" write-tree 2>/dev/null)"
+  fi
+}
 revive() { # <the loop's own cards, one a line>
-  local c n p t step wt f
+  local c n p t step wt
   while IFS=$'\t' read -r c n p t step; do
     [ -n "$c" ] && ! grep -qxF "$c" <<<"$1" && ! p_alive "$p" "$t" || continue
     # Read again now its process is gone: a card writes its closing line before its process ends, so one that closed
     # since the read above (another process's: a land-branch) is closed, not gone.
     [ "$(stdb ask ended "$c" 2>/dev/null)" != true ] || continue
     wt=$CARDS/$c
-    # Stopped in its batch's tests (batch(), rebatch()): its worktree holds the batch's changes, not its own; its own
-    # goes back first, on the commit it was on, and no list of passes goes with it: the batch's run, of the batch's
-    # change, writes <worktree>.rerun (batchlist()).
-    if [ -s "$wt.lent" ] && [ -d "$wt" ]; then
-      git -C "$wt" reset -q --hard "$(<"$wt.lent")" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null || {
-        echo "conveyor: card $c had an open record and its process was gone mid-batch, and its change could not be put back in its worktree; it is left open: its change is the patch $wt.bpatch on commit $(<"$wt.lent")"
-        continue; }
-      rm -f "$wt.lent" "$wt.rerun"
-    elif [ "$step" = test ] && [ -d "$wt" ] && [ -d "$wt.testlog" ] && f=$(testfails "$wt.test" 137); then
-      rerunlist "$wt" "$(git -C "$wt" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)" "$f" \
-        "$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null)" "$(git -C "$wt" write-tree 2>/dev/null)"
-    fi
+    gonewt "$c" "$wt" "$step" || continue
     ( block "$c" "$n" "$wt" "$GONE" )
     if [ -d "$wt" ] || [ "$n" = 0 ]; then
       echo "conveyor: card $c had an open record and its process was gone; it is blocked$([ "$n" = 0 ] || echo ", its change left in its worktree: \`retry $n\` takes issue #$n again")"
@@ -179,12 +185,34 @@ revive() { # <the loop's own cards, one a line>
       | map(select(.step == "worktree" and (.pid | type) == "number" and (.started | type) == "string")) | last | select(.)
       | [.card, .issue, .pid, .started, $s] | @tsv] | .[]' < <(turncards) 2>/dev/null)
 }
+# A card of the loop: card() in a process of its own, under this one, which writes that process's exit status to
+# <cards>/<card>.exit when it ends (128 + N when signal N killed it), so the loop can say why a card that wrote no
+# closing line ended (cardgone()).
+cardrun() { # <card> <issue>
+  ( card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
+}
+# A card's last step: its last record line's (the step a start line opens).
+cardstep() { # <card>
+  stdb ask card "$1" 2>/dev/null | jq -rs --arg c "$1" 'map(select(.card == $c)) | last | if .step == "start" then .of else .step end | strings' 2>/dev/null
+}
+# Why a card of the loop ended with no closing line, for its blocked line and its error output: its last step
+# (cardstep()), its last action in that step (<worktree>.live, when it is of that step) and its exit status or the
+# signal that killed it (<cards>/<card>.exit, cardrun()). A card that an older loop started has no exit status.
+cardgone() { # <card> <its last step>
+  local s=$2 a='' rc why
+  [ -z "$s" ] || a=$(jq -r --arg s "$s" 'select(.step == $s) | .action | strings' "$CARDS/$1.live" 2>/dev/null)
+  why="its process ended without a result${s:+ in its $s step}${a:+ (last action: ${a:0:300})}"
+  read -r rc 2>/dev/null < "$CARDS/$1.exit" || rc=''
+  if [[ ! $rc =~ ^[0-9]{1,3}$ ]]; then echo "$why; its exit status is not known"
+  elif [ "$rc" -gt 128 ] && a=$(kill -l $((rc - 128)) 2>/dev/null); then echo "$why; signal $a killed it (exit status $rc)"
+  else echo "$why; it exited with status $rc"; fi
+}
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
-  local mhold htold='' prober='' htried=-1000000
+  local mhold htold='' prober='' htried=-1000000 gone gs
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
-  # kids: an adopted card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
+  # kids: a card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
   # before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's first turn still
   # has its review and tests ended before its worktree goes.
   local -A mine=() took=() kids=() shuts=()
@@ -249,8 +277,10 @@ run() { # [max-cards] [serve]
     # The guard reads the account the next card will use (a record that does not read keeps the last one read).
     pct=''; [ -z "$guard" ] || pct=$(guardread "$ctl" ask | jq -r '.pct // empty')
     now=$(state "$ctl" "$pct")
-    # An adopted card whose process ended with no closing line (it was killed) is recorded blocked, so it is not
-    # left open for good and `retry` takes it; a card of this loop's own is waited on, and ends with its line.
+    # A card of the loop whose process ended with no closing line (it was killed, or its shell stopped on an error) is
+    # recorded blocked, so it is not left open for good and `retry` takes it. Its line and its error output
+    # (<worktree>.err, kept with it) say why (cardgone()): its last step and action, and its exit status or signal.
+    # One stopped mid-batch has its own change put back first (gonewt()), or is left open when it cannot be.
     # Its session, review or tests outlive it (no longer under it, they are found from the last turn's list) and
     # still use its worktree: they are ended, and gone, before block() takes the worktree away. They are stopped, all
     # under them with them, then killed: one that ignores TERM never holds the loop, and none starts another on TERM
@@ -258,20 +288,22 @@ run() { # [max-cards] [serve]
     for p in "${!mine[@]}"; do
       if kill -0 "$p" 2>/dev/null; then
         # Those of the last list still alive are kept: one killed during this look has none under it to be found.
-        [ -z "${took[$p]:-}" ] || kids[$p]=$( { while read -r k t; do [ -n "$k" ] && p_alive "$k" "$t" && echo "$k $t"; done <<<"${kids[$p]:-}"
+        kids[$p]=$( { while read -r k t; do [ -n "$k" ] && p_alive "$k" "$t" && echo "$k $t"; done <<<"${kids[$p]:-}"
           for k in $(tree "$p"); do t=$(p_started "$k") && echo "$k $t"; done; } | sort -u)
         continue
       fi
-      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]'
-      [ -n "${took[$p]:-}" ] || continue; unset 'took[$p]'
+      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]'
       k=${kids[$p]:-}; unset 'kids[$p]'
       # Its closing line is looked for in the whole lines only: a last line still being written (check() says why)
       # made the whole read fail, and a card that had landed was blocked; its push is the loop's, as for any landing.
-      [ "$(stdb ask ended "$c" 2>/dev/null)" = true ] && continue
+      [ "$(stdb ask ended "$c" 2>/dev/null)" = true ] && { rm -f "$CARDS/$c.exit"; continue; }
+      gs=$(cardstep "$c"); gone=$(cardgone "$c" "$gs"); rm -f "$CARDS/$c.exit"
       k=$(while read -r p t; do [ -n "$p" ] && p_alive "$p" "$t" && echo "$p $t"; done <<<"$k")
       kill -KILL $(while read -r p t; do [ -z "$p" ] || freeze "$p"; done <<<"$k") 2>/dev/null
       while read -r p t; do while [ -n "$p" ] && p_alive "$p" "$t"; do sleep 0.1; done; done <<<"$k"
-      ( block "$c" "$n" "$CARDS/$c" "its process ended without a result" ); stdbkeeps; echo "conveyor: card $c ended without a result; it is blocked, and \`retry $n\` takes issue #$n again"
+      printf 'conveyor: card %s: %s\n' "$c" "$gone" >> "$CARDS/$c.err"
+      gonewt "$c" "$CARDS/$c" "$gs" || continue
+      ( block "$c" "$n" "$CARDS/$c" "$gone" ); stdbkeeps; echo "conveyor: card $c ended without a result: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
     done
     # Any other open card whose process is gone (revive()): blocked, its work kept, and picked again.
     revive "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)"
@@ -281,7 +313,7 @@ run() { # [max-cards] [serve]
         # An adopted card is no job of this shell's: wait cannot wait on it, so it is watched until it is gone.
         wait "$p" 2>/dev/null; while kill -0 "$p" 2>/dev/null; do sleep 0.1; done
         read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
-        stopped "$c" "$n"; clean "$CARDS/$c"
+        stopped "$c" "$n"; clean "$CARDS/$c"; rm -f "$CARDS/$c.exit"
         locked moveout '.card == $c' --arg c "$c" && echo "conveyor: stopped card $c; issue #$n is back in the queue" \
           || echo "conveyor: stopped card $c, but its lines could not be moved out of the card records: retry #$n by hand" >&2
       done < <(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done | locked halt)
@@ -422,7 +454,7 @@ run() { # [max-cards] [serve]
       [ "$picked" != wait ] || { waits=1; picked=''; }
       if [ -n "$picked" ]; then
         read -r c n again <<<"$picked"
-        CARDCTL=$ctl card "$c" "$n" & mine[$!]="$c $n"
+        CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"
         [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
         continue
       fi

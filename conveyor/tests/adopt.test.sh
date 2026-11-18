@@ -149,7 +149,9 @@ EOF2
     || fail "the second restart did not say #8 runs $A and #9 runs $B: $(cat "$STUB/serve.out")"
   till 'ps -o args= -p $pid | grep -qF "$V/$A/conveyor/conveyor.sh serve"' || fail "the loop did not restart on $A: $(ps -o args= -p $pid)"
   till '[ "$(ends 8)" = blocked ]' || fail "a card killed while adopted was not recorded blocked: $(st 'select(.issue == 8)')"
-  [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = "its process ended without a result" ] || fail "reason: $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
+  # Its line says where it was and what ended it: the review step, and the KILL it was sent above.
+  [[ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" =~ ^"its process ended without a result in its review step".*"; signal KILL killed it (exit status 137)"$ ]] \
+    || fail "reason: $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   # The loop stops then kills, so it sends no TERM: had it sent one, the process that ignores TERM would have started
   # another (checked above), which would have written $STUB/spawned and could outlive the card unseen.
   [ ! -e "$STUB/spawned" ] || fail "the loop sent TERM to #8's processes, and one started another: $(ps -o pid=,args= -p "$(cat "$STUB/spawned")")"
@@ -251,6 +253,44 @@ EOF
     || fail "the new card's run was not told what the cut run had passed: $(cat "$STUB/rerun.2" 2>&1)"
   [ "$(sed -n 's/^2 //p' "$STUB/ran" | tr '\n' ' ')" = "b.test " ] || fail "the new card's run did not run b.test alone: $(cat "$STUB/ran")"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the new card did not land: $(st 'select(.issue == 7) | .step' | tr '\n' ' ')"
+}
+
+# A card of the loop's own whose process a signal ends mid-test, the loop still running. Bugs (#390: two cards ended
+# with nothing anywhere saying why): its blocked line says only that it ended, or the machine or the loop stopped,
+# with no step or signal, and its kept error output says nothing; its test run outlives it in a worktree that is gone.
+# The run is a batch's, its own change set aside (<worktree>.bpatch) and another card's alone in its worktree, as a
+# split does. Bug: the other card's change is kept as its work and its own is lost with its .bpatch.
+t_killedtest() {
+  local lp c tp r
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo 'echo two >> a.txt' > "$STUB/build"
+  echo 'git add -A && git diff --cached --binary --no-renames > "$PWD.bpatch" && git rev-parse HEAD > "$PWD.lent" && git reset -q --hard && echo eight > m.txt && git add -A
+    echo $$ > "$STUB/testpid"; exec sleep 600' > "$STUB/test-cmd" # sleep: a test run under way when the card is killed
+  watchturns; ( loop run > "$STUB/run.out" 2>&1 ) & lp=$!
+  wait_until '[ -s "$STUB/testpid" ]' || fail "#7's test run did not start: $(cat "$STUB/run.out")"
+  tp=$(cat "$STUB/testpid"); turns 2 # the loop has looked under the card since its test run began
+  kill -TERM "$(st 'select(.issue == 7 and .step == "worktree") | .pid')"
+  wait_until '[ "$(st "select(.issue == 7) | .step" | tail -n 1)" = blocked ]' || { kill -KILL "$tp"; fail "the killed card was not blocked: $(st 'select(.issue == 7)') $(cat "$STUB/run.out")"; }
+  kill $lp 2>/dev/null; wait $lp 2>/dev/null
+  ! kill -0 "$tp" 2>/dev/null || { kill -KILL "$tp"; fail "the killed card's test run ran on after it was blocked"; }
+  c=$(st 'select(.issue == 7 and .step == "picked") | .card'); r=$(st 'select(.issue == 7 and .step == "blocked") | .reason')
+  [[ $r =~ ^"its process ended without a result in its test step".*"; signal TERM killed it (exit status 143)"$ ]] || fail "the blocked line does not name the step and the signal: $r"
+  grep -qxF "conveyor: card $c: $r" "$ST/kept/$c/$c.err" || fail "the kept error output does not say why: $(cat "$ST/kept/$c/$c.err" 2>&1)"
+  [ "$(git apply --numstat "$ST/kept/$c/$c.patch" | cut -f3 | tr '\n' ' ')" = "a.txt " ] \
+    || fail "the kept patch is not the card's own change: $(cat "$ST/kept/$c/$c.patch" 2>&1)"
+}
+
+# The same for a card whose shell stopped on an error (#390: `own: unbound variable`, exit 1, no signal), from
+# cardgone() alone. Bugs: its line names no step, action or exit status; it names the action of an earlier step that
+# the live file still holds; a card with no exit status written (an older loop's) is said to have one.
+t_cardgone() {
+  local CARDS=$T/$CASE/cards out
+  mkdir -p "$CARDS"
+  out=$( eval "$(sed -n '/^cardstep() {/,/^}/p;/^cardgone() {/,/^}/p' "$SRC/lib/run.sh")"; cg() { cardgone "$1" "$(cardstep "$1")"; }
+    stdb() { printf '%s\n' '{"card":"c-7","step":"review"}' '{"card":"c-7","step":"start","of":"fix"}' '{"card":"c-8","step":"land"}'; }
+    echo '{"step":"fix","action":"reading a.txt"}' > "$CARDS/c-7.live"; echo 1 > "$CARDS/c-7.exit"; cg c-7
+    echo '{"step":"build","action":"reading b.txt"}' > "$CARDS/c-7.live"; rm "$CARDS/c-7.exit"; cg c-7 )
+  [ "$out" = "its process ended without a result in its fix step (last action: reading a.txt); it exited with status 1
+its process ended without a result in its fix step; its exit status is not known" ] || fail "cardgone said: $out"
 }
 
 # Bugs: the loop takes up a card whose process still runs (a card of another process: a land-branch, or a loop's that
