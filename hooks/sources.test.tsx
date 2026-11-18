@@ -728,6 +728,16 @@ test('the pane from two projects with 4 cards building, 5 waiting and 20 landed:
   expect(text).toMatch(/\nLANDED TODAY · 20 +5 most recent of 20\n[^]*\n\S+ [AP]M +#400 +✓ GO r2 +\S+ +\$4\.21\n/)
 })
 
+// Issue 508. Bug it catches: at 60 columns a Pick order row with four dependencies, each with its state, was cut at the
+// width and lost #488, the last issue it waits for.
+test('a Pick order row too long for the pane wraps at each issue it waits for, and loses none', () => {
+  const waiting = [{ issue: 489, title: 'Waits', waitsFor: [485, 486, 487, 488], waitsOn: [485, 486, 487, 488].map(n => ({ issue: n, state: 'building' })) }]
+  const lines = paneModel(board({ queue: { next: [], held: {}, waiting } }), 60, 0).map(plain)
+  const at = lines.indexOf(lines.find(l => l.startsWith('#489 '))!)
+  expect(lines.slice(at, at + 3)).toEqual(['#489     #485 (building)  #486 (building)  #487 (building)', '         #488 (building)', ''])
+  for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(60)
+})
+
 // Issue 497. Bug it catches: a forced issue, which the snapshot lists both in the pick order and (marked forced) among
 // the waiting, was counted READY and WAITING at once, and listed in Pick order as waiting.
 test('a forced issue counts as ready only, and is not in Pick order', () => {

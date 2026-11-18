@@ -112,7 +112,8 @@ sign-in failed, shows the reason after the state (`shop paused: build: Claude Co
 
 ## The pane
 
-The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut. It does not wrap.
+The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut, unless
+this page says that it wraps.
 
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
   today.
@@ -136,7 +137,8 @@ The pane shows the board as tables, from top to bottom. A line that is wider tha
   part. On the right: the tool (`Bash`) and the time the step started. A card that runs no command shows its step.
 - **PICK ORDER**: on the right, how many issues the loop can pick now (`2 ready`). Then two columns, `Waiting` and
   `Requires`: each issue that waits on other issues and is not forced, and the issues it waits for (`#489  #485  #486  #487  #488`), in
-  the order that the loop picks them. The held-back line follows.
+  the order that the loop picks them. When the issues it waits for do not fit on one line, they go on to more lines
+  under `Requires`, so none is lost. The held-back line follows.
 - **LANDED TODAY · 20**: on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`).

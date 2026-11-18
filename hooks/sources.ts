@@ -1030,15 +1030,26 @@ export const activityModel = (s: State, snap: Snap, w: number, frame: number): L
 ]
 
 // PICK ORDER: the issues that wait on another, in the order the engine will pick them, each with the issues it waits
-// for; the count the engine can pick now on the right.
+// for; the count the engine can pick now on the right. The issues it waits for wrap at each one, under the Requires
+// column: cut at the width, a row lost the last of them.
 export const pickModel = (snap: Snap, w: number): Line[] => {
   const ready = snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} ready`
   const ids = snap.waits.map(x => (x.repo ? `${x.repo}#${x.issue}` : `#${x.issue}`))
   const idW = Math.max(7, ...ids.map(cols))
+  const requires = (x: Waiting): string[] => {
+    const out: string[] = []
+    for (const r of x.waitsFor.map(n => waitRef(x, n))) {
+      const last = out.at(-1)
+      if (last !== undefined && idW + 2 + cols(`${last}  ${r}`) <= w) out[out.length - 1] = `${last}  ${r}`
+      else out.push(r)
+    }
+    return out.length ? out : ['']
+  }
   return [
     section('PICK ORDER', ready, w),
     ...(snap.waits.length ? [fitWidth([{ t: `${padR('Waiting', idW)}  Requires`, d: true }], w)] : [empty('nothing waiting')]),
-    ...snap.waits.map((x, i): Line => fitWidth([{ t: `${padR(ids[i], idW)}  `, c: C.name, b: true }, { t: x.waitsFor.map(n => waitRef(x, n)).join('  ') }], w)),
+    ...snap.waits.flatMap((x, i): Line[] => requires(x).map((r, j): Line => fitWidth([
+      { t: `${padR(j ? '' : ids[i], idW)}  `, c: C.name, b: true }, { t: r }], w))),
   ]
 }
 
