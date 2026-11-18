@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: a batch run again when main moved during its run reuses its last run's passes (rebatch(), batchkeep()).
+# Engine cases: a batch run again when main moved during its run reuses its last run's passes (rebatch(), batchkeep()),
+# and is run again when what landed meanwhile shares a test file with it (sharedtests()).
 # Its own file, with the fixture of batchreuse.test.sh (reusesetup): each case of the batch's reuse is a whole batch
 # run, and together they were over the test step's CPU budget for one file.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -30,4 +31,29 @@ t_batchreusemoved() {
     || fail "#7's last test line does not say no case ran and five passes were kept: $(st 'select(.issue == 7 and .step == "test")')"
   landedtogether "$c8 $c7" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
   [ "$(cat "$R/other.txt")" = other ] && [ "$(sed -n '1p;$p' "$R/b.txt" | tr '\n' ' ')" = "seven eight " ] || fail "main does not hold both changes and the other file"
+}
+
+# Bug (#334: two changes that each passed alone failed together on main): a batch whose run passed while main moved
+# landed on that run, though what landed meanwhile touched a test file of the batch's change. #7 changes lib/mine.sh;
+# during the batch's run main changes lib/other.sh, and lib/mine-other.test.sh tests both (sharedtests()): the batch
+# is tested again on main as it is now, not landed on the run before; and that run keeps none of the passes of the run
+# before (a batch formed again of the same cards would else reuse them, batchkeep(), and run no case): its case m1 runs
+# again after main moved.
+t_batchsharedmoved() {
+  reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test' \
+    'lib/mine.sh lib/mine-other.test.sh' 'lib/other.sh lib/mine-other.test.sh' 'lib/mine-other.test.sh lib/mine-other.test.sh'
+  echo 'lib/mine-other.test.sh m1' >> "$STUB/cases"
+  mkdir -p "$R/lib"; echo mine > "$R/lib/mine.sh"; echo other > "$R/lib/other.sh"; echo case1 > "$R/lib/mine-other.test.sh"
+  git -C "$R" add lib; git -C "$R" commit -qm "two sources and their shared test"
+  echo 'case $PWD in *-7) echo seven >> lib/mine.sh ;; esac' >> "$STUB/build"
+  # #8 changes after its own run, so the batch's run runs its cases (a run of none would not start the test command).
+  echo 'd=$(echo ../*-8); echo more >> "$d/y.txt"; git -C "$d" add -A' > "$STUB/held-then"
+  echo 'grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; echo moved >> "$STUB/runs"; (cd "$R" && echo main >> lib/other.sh && git commit -qam "main changes the other source"); }; :' >> "$STUB/test-cmd"
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  c7=$(cardof 7); c8=$(cardof 8)
+  grep -q "card $c7: cards landed during its batch's run touch its test files too, so the batch is tested again: lib/mine-other.test.sh on main as it is now" <<<"$out" \
+    || fail "the batch landed on its run though main's change shares a test file with it: $out"
+  sed -n '/^moved$/,$p' "$STUB/runs" | grep -q ' m1\b' || fail "the shared test's case m1 did not run again after main moved: $(runs)"
+  [ "$(st 'select(.step == "landed") | .issue' | sort | tr '\n' ' ')" = "7 8 " ] && [ "$(tail -n 1 "$R/lib/other.sh")" = main ] \
+    && [ "$(tail -n 1 "$R/lib/mine.sh")" = seven ] || fail "both cards did not land on main as it moved: $(st 'select(.step == "landed")')"
 }

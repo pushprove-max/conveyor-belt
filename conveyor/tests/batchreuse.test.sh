@@ -44,7 +44,7 @@ tf() { while read -r f; do awk -v f="$f" '$1 == f {print $2}' "$STUB/map"; done 
 fresh=$(awk -F'\t' '$1 == "changed" {print $2}' "$RR" | tf)
 ran=''; k=0; kept=0
 for t in $({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | tf); do
-  cs=$(sed -n "s/^$t //p" "$STUB/cases" | tr ' ' '\n')
+  cs=$(awk -v t="$t" '$1 == t { for (i = 2; i <= NF; i++) print $i }' "$STUB/cases")
   if ! grep -qxF "$t" <<<"$fresh"; then
     if grep -qxF "pass	$t" "$RR"; then kept=$((kept + $(wc -w <<<"$cs"))); continue; fi
     all=$cs; grep -qxF "$t" "$STUB/whole" 2>/dev/null || cs=$(grep -vxFf <(awk -F'\t' -v f="$t" '$1 == "ok" && $2 == f {print $3}' "$RR") <<<"$cs")

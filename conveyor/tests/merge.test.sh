@@ -243,6 +243,44 @@ EOF
   [ "$(tr '\n' ' ' < "$R/a.test.sh")" = "case1 main-case case7 fixed " ] || fail "main does not hold both cases and the fix: $(cat "$R/a.test.sh")"
 }
 
+# Bug (#334: two cards that each added a row to one panel passed their tests alone, and its test file failed on main
+# once both landed): a card whose change still applied to a main that moved landed on the tests it passed before, though
+# the card landed meanwhile touched a test file of its own. #7 changes lib/panel.sh and #8 lib/rows.sh, both tested by
+# lib/view.test.sh, which fails with both changes. No name or map links that file to them: only the project's test
+# command selects it, so the shared file is found from what each card's run ran (its log), not from testsel(). #8's
+# tests pass before #7 lands; at its landing that test file runs again on main with #7's change, fails, and #8 goes to
+# its fix: it does not land red.
+t_mergesharedtests() {
+  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
+  mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo rows > "$R/lib/rows.sh"; echo case1 > "$R/lib/view.test.sh"
+  git -C "$R" add lib; git -C "$R" commit -qm "a panel, its rows and their test"
+  cat > "$STUB/build" <<'EOF'
+case $PWD in
+  *-7) echo seven >> lib/panel.sh ;;
+  *) if grep -q '^# The changed tests fail' "$STUB/brief"; then echo fixed >> lib/rows.sh; else echo eight >> lib/rows.sh; fi ;;
+esac
+EOF
+  # #8's first run ends only once #7 landed. The run fails, naming the test file, on both changes with no fix. As the
+  # project's own command does, it skips the file when its list (CONVEYOR_TEST_RERUN) names it passed and not failed:
+  # #7's change does not select it, so a run again that kept its pass would pass without running it.
+  cat >> "$STUB/test-cmd" <<'EOF'
+case $PWD in *-8) [ -e "$STUB/tested.8" ] || { : > "$STUB/tested.8"
+  while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done; } ;; esac
+! grep -qx "pass	lib/view.test.sh" "${CONVEYOR_TEST_RERUN:-/dev/null}" || grep -qx "fail	lib/view.test.sh.*" "$CONVEYOR_TEST_RERUN" || exit 0
+echo "== lib/view.test.sh"; printf "%s\n" "== lib/view.test.sh" >> "$CONVEYOR_TEST_LOG/run.log"
+! { grep -qx seven lib/panel.sh && grep -qx eight lib/rows.sh && ! grep -qx fixed lib/rows.sh; } \
+  || { echo "FAIL lib/view.test.sh: the two rows clash"; echo "-- FAIL lib/view.test.sh" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }
+printf "%s\n" "-- ok lib/view.test.sh" "TESTRUN sec	lib/view.test.sh	1	1" >> "$CONVEYOR_TEST_LOG/run.log"
+EOF
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  grep -q 'card .*-8: cards landed since its tests ran touch its test files too.*lib/view.test.sh' <<<"$out" \
+    && [ "$(st 'select(.issue == 8 and .step == "test") | .result' | tr '\n' ' ')" = "pass fail pass " ] \
+    || fail "#8 landed on the tests it passed before #7 landed, not run again with #7's change: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  grep -q '^# The changed tests fail' "$STUB/brief" && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] \
+    && [ "$(tr '\n' ' ' < "$R/lib/rows.sh")" = "rows eight fixed " ] \
+    || fail "#8's failure on the combined code did not go to its fix before it landed: $(cat "$R/lib/rows.sh")"
+}
+
 # Bug (#451: #415's merge, which git called clean, left a test file with two openings and one end, and only its test
 # step, minutes later, found the file no longer parsed; a broken file that no selected test loads would have landed).
 # A clean three-way merge: a.test.mjs holds a test turned off in a block comment; #7 rewrites a line inside it to open a

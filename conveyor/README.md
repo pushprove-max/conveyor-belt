@@ -1403,10 +1403,9 @@ tests; a check that fails is a red run. A batch whose run passed lands on that r
 main moved meanwhile (a card on other files landed during it), with no second run, when no card of it has changed since
 the run and its changes still apply, in its order, to main as it is now: the product checks run again on the batch's
 combined change there before it lands, and a check that fails is a red run: the batch is run again there and split, and
-the card that breaks it goes to its fix. A card of it whose
-change no longer applies to main leaves the batch and is fitted afterwards; the others land. The accepted limit is the
-one of a card alone: changes that passed apart from what landed meanwhile can fail with it, and the next card's run shows
-it (and the whole test on main, for a project whose pack names `test.main`: below, The whole test on main). A batch
+the card that breaks it goes to its fix. When the cards that landed meanwhile touch a test file the batch touches too,
+the batch is tested again on main as it is now before it lands. A card of it whose
+change no longer applies to main leaves the batch and is fitted afterwards; the others land. A batch
 that does not land for another reason sends that card to its tests again, alone, before it lands alone. A card whose change does not apply on top of the
 earlier ones, the card whose turn it is too, leaves the batch and is fitted afterwards, as a waiting card is. A card with follow-ups to file lands on
 its own. The Board's Landed today panel shows a batch as one landing with its cards in it.
@@ -1434,9 +1433,9 @@ and tests ran (while it was away, during its tests or before its landing), its c
 When it applies there unchanged, or merges there three-way with no conflict (the same added and removed lines; only the
 lines around them moved), its product checks run again and it lands on the tests it already passed; a change a
 session had to rework to fit is reviewed and tested again (not one it changed only in documentation files), and one whose test files were merged keeping both sides is
-tested again. Accepted limit, not a finding: two changes that each passed
-their tests alone can fail together on main, a change merged three-way onto lines another card moved among them, and
-the next card's test run shows it.
+tested again. When the cards that landed since its tests ran touch a test file its change touches too, those tests
+run again on main as it is now before it lands: two changes that each passed alone can fail together. A failure there
+goes to the card's fix, and the card does not land.
 
 A card whose issue is in the control record's `order` list does not wait for a card that is not in the list: it claims
 the files and goes on to land while that card holds them. The card it went past waits for it at its own next claim

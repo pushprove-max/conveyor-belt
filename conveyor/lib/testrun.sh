@@ -629,9 +629,10 @@ runnercmd() { # <command> <worktree> <file>...
 # selects the tests the test map and its links give it (none for a file they give none), a document selects the test
 # files the test map and its links name (with the rule on, a change of documents alone runs the whole suite), a map that cannot be read
 # is read as no map (the links and the names still give tests), and a change that selects none prints the first line
-# alone.
-testsel() { # <worktree> [narrow]
-  local out tm
+# alone. Given two commits, the change between them stands in for the staged change (sharedtests(), lib/claim.sh).
+testsel() { # <worktree> [narrow] [<from commit> <to commit>]
+  local out tm d=(--cached HEAD)
+  [ -z "${3:-}" ] || d=("$3" "$4")
   tm=$(mapread "$1") || { [ "${2:-}" = narrow ] || { printf '%s\n' "$tm"; return 1; }; tm=null; }
   out=$(jq -rn "$RX"'def ls: split("\n") | map(select(. != ""));
       def base: split("/")[-1]; def dir: split("/")[:-1];
@@ -663,8 +664,8 @@ testsel() { # <worktree> [narrow]
         | if . == [] and ($nw | not) then error("the change touches no test")
           else {by: (if any($l[]; type == "object" and (.map // []) != []) then "map" else "name" end), age: $tm.age} as $b
           | ($b | tojson), .[] end end' --argjson tm "${tm:-null}" --argjson nw "$([ "${2:-}" = narrow ] && echo true || echo false)" \
-    --rawfile ch <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null) \
-    --rawfile ct <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | testpaths) \
+    --rawfile ch <(git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null) \
+    --rawfile ct <(git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null | testpaths) \
     --rawfile all <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) \
     --slurpfile map <(jq -c . "$1/.conveyor/test-links.json" 2>/dev/null || :) 2>&1) \
     || { out=${out#jq: error (at <unknown>): }; printf '%s\n' "${out:-the list of tests could not be made}"; return 1; }

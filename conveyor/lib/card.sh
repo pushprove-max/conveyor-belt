@@ -487,9 +487,11 @@ card() { # <card> <issue> [<branch> <tip>]
     # under the lock. Its tests run again only when the fitted change is not the one that passed (testedhere(): a
     # session changed it, or brought it onto main when it no longer applied, or its test files were merged keeping
     # both sides; a clean three-way merge onto main is the change that passed, settle(), and so is one a session changed
-    # only in documentation files, settle() and the rebuild marking it tested again). Accepted limit (the owner,
-    # 2026-11-13): a passed test is not repeated when main moves, its change merged three-way or not, so changes that
-    # passed apart can fail together on main.
+    # only in documentation files, settle() and the rebuild marking it tested again), and when the cards landed since
+    # its last run touch a test file its change touches too (sharedtests(): two changes that passed apart can fail
+    # together, #334). That run keeps the passes of the run before but those of the shared
+    # files, which it runs whole (unshare()), its list naming what main changed (rerunsince()); a failure there goes to
+    # the card's fix, as main alone passes it.
     # Batches: after a GO it is ready to land once its own checks and tests pass (tested()), and a batch may take it
     # while it waits (gather()); one with follow-ups to file lands on its own. Holding its files on main as it is now,
     # its tests passed, it takes the ready cards that share them, and one run judges them all (batch()). Tests that
@@ -548,7 +550,10 @@ card() { # <card> <issue> [<branch> <tip>]
         # A test file its own run found over the time budget (slowtests()) is a note on its test line (slow), never a
         # finding: the card goes on with the pass. Only a test rule files an issue about it (testrulespass(), after the
         # test line is recorded).
-        testedhere "$wt" || { ran=1; own=1; tests "$wt"; rc=$?; [ $rc != 0 ] || { slowtests "$wt" || rm -f "$wt.slow"; }; }
+        testedhere "$wt" || own=1
+        [ -n "$own" ] || ! t=$(sharedtests "$wt" "$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)") \
+          || { own=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; }
+        [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || { slowtests "$wt" || rm -f "$wt.slow"; }; }
         [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
         if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
           out=$(locked gather "$c" "$wt" "$me") || out=''
