@@ -53,15 +53,23 @@ FORM="'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>,
 # Each plugin-problem line is noted once: a reply that says it again (after a refusal) adds no second note. A line
 # that ends "filed as #<n>" names the issue it was filed as; said after the same line without it (or as the line
 # context gives a listed note), it takes that note's place, so the note names the issue (context lists those with none).
+# An issue number is 1 or more: "filed as #0" names no issue, so that line is refused and noted without it, as unfiled.
 NOTES=$FD/plugin-bugs.md
-FILED='[,;]?[[:space:]]*filed as #([0-9]+)[[:space:]]*\.?$'
+FILED='[,;]?[[:space:]]*filed as #([1-9][0-9]*)[[:space:]]*\.?$'
+NOISSUE='[,;]?[[:space:]]*filed as #[0-9]+[[:space:]]*\.?$'
 UNFILED=()
 shopt -s nocasematch
 while IFS= read -r l; do
   [[ $l =~ $PLUG ]] || continue
   seen=${l:${#BASH_REMATCH[0]}}; seen=${seen%"${seen##*[![:space:]]}"}; [ -n "$seen" ] || continue
   what=$seen
-  if [[ $seen =~ $FILED ]]; then what=${seen:0:${#seen}-${#BASH_REMATCH[0]}}; else UNFILED+=("$what"); fi
+  if [[ $seen =~ $FILED ]]; then what=${seen:0:${#seen}-${#BASH_REMATCH[0]}}
+  else
+    # A number that names no issue is left out of the note, so the line with a valid number later takes its place.
+    [[ $seen =~ $NOISSUE ]] && { seen=${seen:0:${#seen}-${#BASH_REMATCH[0]}}; what=$seen; }
+    [ -n "$seen" ] || continue
+    UNFILED+=("$what")
+  fi
   ! grep -qF -- " · $seen · evidence: " "$NOTES" 2>/dev/null || continue
   card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]|#[0-9]+' <<<"$what" | head -n 1)
   ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$what" | head -n 1); ev=${ev%.}
@@ -71,7 +79,7 @@ while IFS= read -r l; do
   if [ "$what" != "$seen" ] && [ -s "$NOTES" ] \
     && W="$what" S="$seen" LC_ALL=C awk '
       BEGIN { D = " · "; C = " · card "; E = " · evidence: " }
-      !done && /^- / && tolower($0) !~ / filed as #[0-9]+[[:space:]]*\.? · evidence: / && (i = index($0, C)) {
+      !done && /^- / && tolower($0) !~ / filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: / && (i = index($0, C)) {
         r = substr($0, i + length(C)); j = index(r, D); card = substr(r, 1, j - 1); t = substr(r, j + length(D))
         k = 0; while ((m = index(substr(t, k + 1), E))) k += m
         if (j && k) { ev = substr(t, k + length(E)); t = substr(t, 1, k - 1)

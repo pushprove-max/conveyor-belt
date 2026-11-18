@@ -46,11 +46,29 @@ t_home() {
   [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] && grep -qE '^- .* · card c20261118T045400-alpha-7 · running cards keep .*, filed as #449 · evidence: ~/cards/c20261118T045400-alpha-7\.err$' "$FD/plugin-bugs.md" \
     || fail "the note does not name the issue it was filed as, once: $(cat "$FD/plugin-bugs.md")"
   # D3: the start-up text names a noted entry with no issue, and leaves out the one that names its issue.
-  printf -- '- 2026-11-18T09:54:00Z · card - · setup never sets linkFromMain · evidence: -\n' >> "$FD/plugin-bugs.md"
+  # (E2, #479) A saved note "filed as #0" (written by hand, or by a stop hook before #479) names no issue, so it is
+  # listed as unfiled: the start-up filter took any number and hid it.
+  printf -- '- 2026-11-18T09:54:00Z · card - · setup never sets linkFromMain · evidence: -\n- 2026-11-18T10:10:00Z · card - · npm ci runs twice, filed as #0 · evidence: -\n' >> "$FD/plugin-bugs.md"
   out=$(start)
   grep -q 'filed as #<n>' <<<"$out" || fail "the role text does not say to file a plugin problem and name its issue: $out"
   grep -q '^- .*setup never sets linkFromMain' <<<"$out" || fail "the start-up text does not list the unfiled entry: $out"
+  grep -q '^- .*npm ci runs twice, filed as #0 · evidence: ' <<<"$out" || fail "the start-up text hides a saved note filed as #0: $out"
   ! grep -q 'running cards keep' <<<"$out" || fail "the start-up text lists an entry filed as #449: $out"
+}
+
+# Bug (#479): "filed as #0" names no issue, yet the stop hook passed it as filed and the start-up list hid its note,
+# so a problem never filed was lost. Now the line is refused and its note stays in the unfiled list. And (E1) the note
+# kept "#0" in its text, so the line said again with a valid number added a second note and left the #0 one listed.
+t_zero() {
+  fixture zero "git@github.com:${OWN#https://github.com/}.git"
+  out=$(turn u1 "$LINE, filed as #0")
+  jq -e '.decision == "block" and (.reason | contains("Not filed: running cards keep"))' <<<"$out" >/dev/null \
+    || fail "a plugin problem filed as #0 passed as filed: $out"
+  out=$(start); grep -q '^- .*running cards keep .*evidence: ' <<<"$out" || fail "the start-up text hides a note filed as #0: $out"
+  out=$(turn u2 "$LINE, filed as #449"); [ -z "$out" ] || fail "the line with a valid issue number was refused: $out"
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] && grep -q 'running cards keep .*, filed as #449 · evidence: ' "$FD/plugin-bugs.md" \
+    || fail "the valid number did not take the place of the #0 note: $(cat "$FD/plugin-bugs.md")"
+  out=$(start); ! grep -q 'running cards keep' <<<"$out" || fail "the start-up text lists the note filed as #449 as unfiled: $out"
 }
 
 # Older notes (made in other words, before the form) filed from the start-up list. Bugs: a filed line that only
@@ -106,6 +124,7 @@ t_other() {
 }
 
 cases=(home legacy split other)
+cases=(home zero legacy other)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 rc=0; pids=()
 for c in $SEL; do (CASE=$c; "t_$c") & pids+=($!); done

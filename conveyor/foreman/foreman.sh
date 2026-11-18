@@ -351,7 +351,7 @@ $plug
 EOF
   # There, each noted plugin problem that names no issue (no "filed as #<n>"), so an older one is not lost, with the
   # line that marks it filed: its own text (between its card and its evidence), which stop.sh matches exactly.
-  if [ -n "$home" ] && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE ' filed as #[0-9]+[[:space:]]*\.? · evidence: ') && [ -n "$n" ]; then
+  if [ -n "$home" ] && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE ' filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: ') && [ -n "$n" ]; then
     echo "# WARNING: plugin problems noted in $FD/plugin-bugs.md and not filed yet: file each one now, and then say the line under it with the issue's number, word for word, so the entry is marked filed."
     while IFS= read -r l; do
       printf '%s\n  Plugin problem (for the conveyor-belt repo): %s, filed as #<n>\n' "$l" "$(sed 's/^- [^ ]* · card [^ ]* · //; s/\(.*\) · evidence: .*$/\1/' <<<"$l")"
