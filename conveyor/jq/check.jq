@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -57,6 +57,10 @@ def ok: . as $r | (keys - known) == need
         # changed tests, how many and by what (the test map or names), with the map's age when known.
         and (.list // {mode: "whole", why: ""} | type == "object" and ((.mode == "whole" and (.why | type == "string"))
           or (.mode == "changed" and (.files | type == "number") and (.by | type == "string") and (.age // 0 | type == "number"))))
+        # The changed lines no test reached, from the run's coverage report (uncovered(), testrun.sh), or why unknown.
+        and (.coverage // {unknown: ""} | type == "object" and (if has("unknown") then keys == ["unknown"] and (.unknown | type == "string")
+          else keys == ["checked", "count", "uncovered"] and ([.count, .checked] | all(type == "number"))
+            and (.uncovered | type == "array" and all(type == "object" and keys == ["file", "lines"] and ([.file, .lines] | all(type == "string")))) end))
         # The test files over the CPU budget, on a line written while test files had one (none is written now, #349):
         # before and finding only of a file the card changed; no cpu on a line written while the budget was clock
         # seconds. The records still hold such lines.

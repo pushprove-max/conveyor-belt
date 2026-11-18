@@ -162,6 +162,8 @@
                       elif $l.step == "test" and ($l.list.left? // 0) > 0 then $l.list.why else null end),
                     output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail else null end),
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
+                    # A test run's changed lines no test reached, from its coverage report (uncovered(), testrun.sh).
+                    coverage: (if $l.step == "test" then $l.coverage else null end),
                     reason: (if $l.step == "fix" then $l.reason else null end)}
                    | with_entries(select(.value != null and .value != "")))]
            + (if $label == "" or $after == "wait" then [] else [{name: $label, sec: null} + (if $after | IN("pushfail", "pushheld", "issuefail")

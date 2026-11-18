@@ -496,6 +496,23 @@
     if (files.length) box.append(rows);
     return box;
   }
+  // The changed lines no test reached in a test run, from the coverage report its command wrote (the record's
+  // coverage: {uncovered: [{file, lines}], count, checked} or {unknown: why}): one line that sums it up, then a row a
+  // file with its lines. A lead for the reviewer, never a failure. null when the record has no coverage.
+  function testCoverage(c) {
+    if (!c || typeof c !== 'object') return null;
+    const box = h('div', 'test-coverage');
+    if (typeof c.unknown === 'string') { box.append(h('p', 'test-sum', `Changed lines no test reached: unknown${c.unknown ? ` (${c.unknown})` : ''}`)); return box; }
+    if (!num(c.count) || !num(c.checked)) return null;
+    box.append(h('p', 'test-sum', `Changed lines no test reached: ${c.count ? c.count : 'none'} of ${c.checked}`));
+    const files = (Array.isArray(c.uncovered) ? c.uncovered : []).filter((x) => x && typeof x.file === 'string' && typeof x.lines === 'string');
+    if (files.length) {
+      const rows = h('ul', 'test-files');
+      files.forEach((x) => rows.append(h('li', 'test-file', `${x.file}: ${/[-,]/.test(x.lines) ? 'lines' : 'line'} ${x.lines}`)));
+      box.append(rows);
+    }
+    return box;
+  }
   // Every recorded step, on demand, as a timeline: one bar a step on one time axis, from the card's pick-up to now (or
   // to its end), each as long as the step ran, with its time on it. The time the issue waited in the queue is said
   // apart, so a long wait squashes no bar. The set-up (picked, worktree, dependencies, brief) is one bar that opens
@@ -642,6 +659,8 @@
         // Its bar's words on hover or focus say the same line, not the exit code.
         if (fails) { li.append(fails); b.why = fails.firstChild.textContent; }
         else if (typeof s.why === 'string' && s.why) li.append(h('p', 'detail-why', s.why));
+        const cov = testCoverage(s.coverage);
+        if (cov) li.append(cov);
         const step = `${all.indexOf(s)}:${s.name}`;
         const old = mine ? Array.from(mine.querySelectorAll('details.output')).find((x) => x.dataset.step === step) : null;
         const out = output(s.output, card, s.name === 'tests failed' ? 'Show full output' : null, old);

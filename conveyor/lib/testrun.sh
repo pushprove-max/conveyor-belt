@@ -123,7 +123,9 @@ keeprun() { # <worktree> <output file to> <log folder to> <first run's record to
 # engine (`TESTRUN whole-suite`); ranCases, the cases it selected of each file it ran only part of, {file: [cases]},
 # from its log lines `TESTRUN case<TAB><file><TAB><case>` (brokeby()); refused, "refused full run: <why>", when
 # tests() refused the whole selection (TEST_REFUSED); and list, the list of tests the command was given (listcmd():
-# {mode: "changed", files} or {mode: "whole", why}), when the pack sets test.list.
+# {mode: "changed", files} or {mode: "whole", why}), when the pack sets test.list; and coverage, the changed lines no
+# test reached ({uncovered: [{file, lines}], count, checked} or {unknown: why}: uncovered()), when the pack sets
+# test.coverage.
 testrec() { # <worktree> <exit> <seconds>
   local k l logs=()
   k=$(testcounts "$1.test"); mapfile -t logs < <(testlogs "$1")
@@ -144,7 +146,8 @@ testrec() { # <worktree> <exit> <seconds>
     + if any($in[]; . == "TESTRUN whole-suite") then {wholeSuite: true} else {} end
     + if $cs == [] then {} else {ranCases: ($cs | group_by(.f) | map({key: .[0].f, value: (map(.c) | unique)}) | from_entries)} end
     + if $z == "" then {} else {refused: $z} end
-    + if $tl[0] | type == "object" then {list: $tl[0]} else {} end' --slurpfile tl <(cat "$1.testlist" 2>/dev/null)
+    + if $tl[0] | type == "object" then {list: $tl[0]} else {} end
+    + if $cv[0] | type == "object" then {coverage: $cv[0]} else {} end' --slurpfile tl <(cat "$1.testlist" 2>/dev/null) --slurpfile cv <(cat "$1.uncovered" 2>/dev/null)
 }
 
 # The times of a card's own run (README.md, The test step), recorded and shown; no file is held to a CPU time. A
@@ -366,14 +369,14 @@ cacheoff() { # <worktree>
 # with no test.fileCommand, does not run and fails with <worktree>.stop saying why; and a run that reports more test
 # files than it was given (TEST_GIVEN, with TEST_ADDS for a test command's own picks: watch() ends it, <worktree>.wide) does not run again and fails the same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off kp ko ka cw='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-} TEST_ADDS=0 TEST_ONE=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
   # either goes.
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
-  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
+  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then
     listcmd "$1" "$cmd" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
@@ -425,7 +428,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
         action: $a}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     done
   fi
-  TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS
+  TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS; t0=$(date +%s)
   # The `off` lines (flakyoff(), slowoff()), which rerunlist() does not keep: given to the run again too, so it runs no
   # case or file kept off that its list would otherwise select (a case of the runner that did not finish).
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
@@ -440,12 +443,17 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
       '{exit: $rc, failures: del(.passed, .okcases, .passcases)} + ($t | sub("\n+$"; "") | if . == "" then {} else {tail: .} end)' <<<"$f" > "$1.first"
     # The files the first run timed, which the run again does not run, after those of the runs before it (slowtests()).
     mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } >> "$1.times" 2>/dev/null
+    # The first run's coverage report, which the run again may write over: kept for uncovered() (covkeep()).
+    covkeep "$1"
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
       [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
     else rc=1; fi
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
   TEST_RUN=$((SECONDS - w))
+  # A card's run: the changed lines its coverage report says no test reached (uncovered()), the first run's report
+  # (covkeep()) and a run again's together.
+  [ -n "${2:-}" ] || uncovered "$1" "$t0"; rm -rf "$1.covfirst"
   # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not: carried (carriedrec()).
   [ -z "$kp" ] || [ ! -s "$1.oldtimes" ] || { ko=$(timed "$1" own) && ka=$(timed "$1") \
     && jq -cn --argjson o "$ko" --argjson a "$ka" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null)] | unique' > "$1.oldfiles"; } \
@@ -2075,6 +2083,32 @@ reported() { # <worktree> <the run's start, epoch seconds>
   packget test.report.format f test.report.path p test.report.env e test.report.args a 2>/dev/null && [ -n "$f" ] || return 0
   if [[ $e$a == *'<file>'* ]]; then p=$1.report; elif [ -z "$p" ]; then p=$1.test; elif [[ $p != /* ]]; then p=$1/$p; fi
   python3 -I "$HERE/tools/testreport.py" "$f" "$1" "$2" "$p" > "$1.reported" 2>/dev/null || rm -f "$1.reported"
+}
+# The changed lines no test reached, from the coverage report a card's run already writes (the pack's
+# test.coverage: format and path, a file or folder from the worktree; conveyor/README.md, Changed lines no test
+# reached), in <worktree>.uncovered for its test line (testrec()): the lines the staged patch adds that the report
+# names and no report hit (tools/uncovered.py), or why they are unknown. Only the report files written since <start>
+# are read, with the first run's that covkeep() kept when the run ran again. None when the pack names no format. A
+# lead for the reviewer: it never fails a run, and starts none.
+uncovered() { # <worktree> <the run's start, epoch seconds>
+  local f p ps
+  rm -f "$1.uncovered"
+  packget test.coverage.format f test.coverage.path p 2>/dev/null && [ -n "$f" ] || return 0
+  [[ $p == /* ]] || p=$1/$p
+  ps=("$p"); [ ! -d "$1.covfirst" ] || ps+=("$1.covfirst")
+  git -C "$1" -c core.quotePath=false diff --cached -U0 --no-renames --no-color HEAD -- 2>/dev/null \
+    | python3 -I "$HERE/tools/uncovered.py" "$f" "$1" "$2" "${ps[@]}" > "$1.uncovered" 2>/dev/null \
+    || printf '{"unknown":"the coverage report could not be read"}\n' > "$1.uncovered"
+}
+# A card's run that runs again (tests()): its first run's coverage report, which the run again may write over at the
+# same path (the pack's test.coverage.path), copied with its file times into <worktree>.covfirst for uncovered(), so
+# the lines the first run's tests reached stay reached. None when the pack names no format or no report is there.
+covkeep() { # <worktree>
+  local f p
+  rm -rf "$1.covfirst"
+  packget test.coverage.format f test.coverage.path p 2>/dev/null && [ -n "$f" ] || return 0
+  [[ $p == /* ]] || p=$1/$p
+  [ ! -e "$p" ] || { mkdir "$1.covfirst" && cp -Rp "$p" "$1.covfirst/"; } 2>/dev/null || rm -rf "$1.covfirst"
 }
 # What the next run of the card need not run again (tests()), in <worktree>.rerun: a line `change\t<id>` (the hash of
 # the staged diff), `base\t<HEAD>` and `tree\t<the index's tree>` (what rerunsince() compares), then `pass\t<file>` for

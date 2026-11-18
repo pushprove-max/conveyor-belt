@@ -131,6 +131,12 @@
             "env": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
             "args": { "type": "string", "minLength": 1 }
           } },
+        "coverage": { "description": "The coverage report a card's test command already writes, from which the card's test step lists the changed lines no test reached (conveyor/README.md, Changed lines no test reached): format, the report's format; path, the report file or a folder of report files, from the repository root. A lead for the reviewer: it never fails a run, and Conveyor starts no other run for it. None: no such list.",
+          "type": "object", "additionalProperties": false, "required": ["format", "path"],
+          "properties": {
+            "format": { "type": "string", "enum": ["lcov"] },
+            "path": { "type": "string", "minLength": 1 }
+          } },
         "changed": { "description": "The script that runs the tests a change touches, as a path from the repository root: the command guard refuses it a second time in one card session.", "type": "string", "minLength": 1 },
         "sessionBudget": { "description": "The CPU seconds of test commands (node --test, a *.test.sh, pytest, vitest or jest) one card build or fix session may use: once the session's test commands have used more, the command guard refuses its next test command (conveyor/README.md, The session test budget). The card's test step still runs the tests. 3600 CPU s is an estimate, not a measurement: the 95th percentile (3596.5 CPU s), rounded up, of 175 logged sessions' test commands, each given its test files' CPU seconds from other runs' test steps, or its clock seconds where none was recorded.", "type": "number", "minimum": 1, "default": 3600 }
       }

@@ -689,6 +689,20 @@ cheaper. The full test suite and the whole test on main are given no such list a
 lists the files kept off, with why and their issue; the Board's Health panel draws them as its "Kept off card tests"
 line. An issue a test rule files keeps no file off.
 
+### Changed lines no test reached
+
+When a card's test command already writes a coverage report, the pack's `test.coverage` names it: `format` (`lcov`),
+and `path`, the report file or a folder of report files, from the repository root. After the card's test run,
+Conveyor reads the report files written during that run. The card's test step then shows the lines that the tested
+patch adds and that the report counts but that no test reached, by file, and how many of the counted lines that is.
+When two reports count the same line, the line counts once, and a hit in either report reaches it. When the run
+runs the failed tests again, Conveyor reads the first run's reports too, so a line that the first run reached stays
+reached. A file that no
+report names, such as a test file or a document, is not counted. The step shows the coverage as unknown, with the
+reason, when the run wrote no report, or when the report does not match the tested patch: it names no file of the
+card's worktree, or it names a line past the end of a changed file. The list is a lead for the reviewer. It never
+fails or holds a card, and Conveyor starts no other test run for it.
+
 ### The test files in the snapshot
 
 The snapshot's `tests` part compares each test file with its own usual time. It is made from the card test lines (those of retried cards too), the whole-suite runs
