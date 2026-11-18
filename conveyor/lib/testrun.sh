@@ -1972,7 +1972,8 @@ redpick() {
   # A document's case (.md, .txt, .rst), which an engine before #367 took for main red, goes, with an entry it leaves
   # with no case: no fix card could make it pass, and the cards that wait on it (mainwait()) run again.
   s=$(jq -c 'map(.cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != []))' <<<"$rec") || s=$rec
-  [ "$s" = "$rec" ] || { jq -cn --argjson r "$s" '{reds: $r}' > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" && rec=$s; } \
+  # The record goes to jq on its input, not as an argument: Linux refuses one over 128 KiB (issue 369).
+  [ "$s" = "$rec" ] || { jq -c '{reds: .}' <<<"$s" > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" && rec=$s; } \
     || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }
   while IFS=$'\t' read -r s c; do
     if [ -n "$c" ]; then l=$(stdb ask card "$c") && [ -z "$l" ] || continue; fi

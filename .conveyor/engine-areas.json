@@ -263,6 +263,7 @@
 {"area": "testrun", "test": "rerun.test.sh"}
 {"area": "testrun", "test": "voidrun.test.sh"}
 {"area": "testrun", "test": "mainred.test.sh"}
+{"area": "testrun", "test": "redpickbig.test.sh"}
 {"area": "testrun", "test": "machinehold.test.sh"}
 {"area": "testrun", "test": "bugproof.test.sh"}
 {"area": "testrun", "test": "widerun.test.sh"}
