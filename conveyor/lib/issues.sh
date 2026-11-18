@@ -316,7 +316,8 @@ testpaths() { # [-v] [-z]
   for a; do [[ $a != -*v* ]] || v=1; [[ $a != -*z* ]] || { z=(-d ''); zf=(-z); }; done
   [ -z "${TESTRUNNERS:-}" ] || while IFS= read -r l; do rn[$l]=1; rs+=(-e "$l"); done <<<"$TESTRUNNERS"
   if [ -z "$v" ]; then
-    grep -E "$@" -e "$TESTRX" | { grep -vE "${zf[@]}" -e "$dx" || :; } | if [ ${#rs[@]} = 0 ]; then cat; else grep -vxF "${zf[@]}" "${rs[@]}" || :; fi
+    grep -E "$@" -e "$TESTRX" | if [ ${#rs[@]} = 0 ]; then grep -vE "${zf[@]}" -e "$dx" || :; else
+      { grep -vE "${zf[@]}" -e "$dx" || :; } | { grep -vxF "${zf[@]}" "${rs[@]}" || :; }; fi
     return 0
   fi
   while IFS= read -r "${z[@]}" l || [ -n "$l" ]; do

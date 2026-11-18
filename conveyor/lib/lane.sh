@@ -112,7 +112,10 @@ lanepath() {
   local d=''
   [ ! -e "$HOST" ] || d=$(jq -r '.lanesDir // "" | strings' "$HOST") || { echo "conveyor: the host file $HOST cannot be read: the lane cannot be found" >&2; return 2; }
   [[ $d != "~/"* ]] || d=$HOME/${d#"~/"}
-  LANE=${d:-$(dirname "$MAIN")}/$(basename "$MAIN")-fast-lane
+  # MAIN's folder and name (its trailing slashes off) by the shell's own expansions, as dirname and basename give them.
+  local m=${MAIN%"${MAIN##*[!/]}"}
+  [ -n "$d" ] || case $m in */*) d=${m%/*}; d=${d:-/} ;; *) d=. ;; esac
+  LANE=$d/${m##*/}-fast-lane
 }
 # The lane is there: a linked worktree of this repository at its folder, on its branch fast-lane (LBR).
 lanefind() {

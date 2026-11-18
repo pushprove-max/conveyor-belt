@@ -1,6 +1,7 @@
 {
   ".conveyor/engine-areas.json": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
   ],
   "commands/setup.md": [
     ".claude/scripts/__tests__/dashboard.test.sh"
@@ -15,27 +16,243 @@
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/lib/card.sh": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/push.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/lib/setup.sh": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/schema/pack.schema.json": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/tests/workdeps.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "docs/commands.md": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
   ],
   "docs/configuration.md": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
   ],
   "docs/setup.md": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/dashboard/app.css": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/dashboard/app.js": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/dashboard/panels/belt.js": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/dashboard/panels/health.js": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/dashboard/panels/tests.js": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-server.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.cards-needs.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.health.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.helpers.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.output-rows.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-actions.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-alone.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-autofile.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-every.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-files.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-fixes.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-limits.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-row.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-select.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".claude/scripts/dashboard_server.py": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".conveyor/project.json": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".conveyor/test-changed-meta.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".conveyor/test-changed-text.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".conveyor/test-changed.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".conveyor/test-changed.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "CLAUDE.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "CONTRIBUTING.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "README.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/README.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/conveyor.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/jq/check.jq": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/jq/rows.jq": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/jq/track.jq": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/claim.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/issues.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/prompts.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/slots.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/survey.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/testaction.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/testfiles.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/testrules.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/testrun.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/views.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/rules/card-core.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/budget.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/budgetkept.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/budgetoff.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/budgetrun.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/budgetwait.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/bugproof.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/cardrules.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/doctorbudget.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/lib.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/ownbudget.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/setup.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/speed/README.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/splitcheck.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/survey.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/testaction.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/testactrun.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/testfiles.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/testrules.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tests/testtime.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tools/testreport.py": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/tools/testtime.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "docs/board.md": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "docs/demo/capture-board.js": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "docs/demo/index.html": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "docs/demo/timeline.js": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "docs/demo/timeline.test.mjs": [
+    "conveyor/tests/snapexec.test.sh"
   ]
 }
