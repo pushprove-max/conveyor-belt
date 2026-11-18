@@ -18,7 +18,7 @@ t_pushable() {
   mkdir -p "$ST"; landed 5 '[50]' > "$ST/cards.jsonl" # #50's parent landed; #51's did not; #52 was filed by hand
   out=$(loop pushable) && fail "pushable with a P1 follow-up waiting"
   grep -q '^#50 P1 title 50$' <<<"$out" && ! grep -Eq '^#(51|52|6) ' <<<"$out" || fail "pushable listed: $out"
-  echo 'exit 1' > "$STUB/build"; loop run 1 >/dev/null
+  tune '.worktree.setup = "exit 1"'; loop run 1 >/dev/null
   [ "$(st 'select(.step == "picked") | .issue')" = 50 ] || fail "first pick was not the follow-up (its backlog label is for information only): $(st 'select(.step == "picked") | .issue')"
   ! loop pushable >/dev/null || fail "pushable with the P1 follow-up blocked, not landed"
 }
@@ -32,15 +32,16 @@ t_pushablenext() {
     jq -cn --arg s "$s" '{card:"c1-50",issue:50,step:$s,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:(if $s == "blocked" then "blocked" else "ok" end),sha:"",reason:""}' >> "$ST/cards.jsonl"
   done
   loop pushable >/dev/null && fail "pushable with the P1 follow-up blocked, not landed"
-  echo 'exit 1' > "$STUB/build"
+  tune '.worktree.setup = "exit 1"'
   loop run >/dev/null; [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "50 52 6 " ] || fail "a follow-up whose parent has not landed was picked, or one filed by hand was not picked before #6: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
   landed 50 >> "$ST/cards.jsonl"
   out=$(loop pushable) || fail "not pushable though the P1 follow-up has a landed line and only a P2 one waits: $out"
 }
 
-# Bug: a common area word pulls hundreds of rulings into the brief, and the review refuses it as too large.
+# Bug: a common area word pulls hundreds of rulings into the brief, and the review refuses it as too large. The
+# brief is the check, so the card's build fails and ends it there.
 t_bulk() {
-  setup "[$(issue 7 2026-01-01 area:billing)]"; echo "$GO" > "$STUB/review.1"
+  setup "[$(issue 7 2026-01-01 area:billing)]"; echo 'exit 1' > "$STUB/build"
   for i in $(seq 1 25); do jq -cn --arg i "$i" '{id: ("r-b" + $i), question: "billing?", answer: ("y" * 5000)}'; done >> "$STUB/rulings"
   loop run >/dev/null || fail "run exited non-zero"
   grep -q '"r-b25"' "$STUB/brief" && ! grep -q '"r-b5"' "$STUB/brief" || fail "brief does not hold just the newest 20 rulings"
@@ -70,13 +71,13 @@ t_emptyrelease() {
   setup "$(jq -cs . <(issue 1 2026-01-01 backlog) <(issue 2 2026-01-01 dormant) <(issue 3 2026-01-01 ux-change) \
     <(issue 4 2026-01-01 awaiting-deploy P0) <(issue 5 2026-01-01 conveyor-followup awaiting-deploy P0))"
   loop control hold 1 2 3 >/dev/null
-  loop control release 1 2 3 >/dev/null; echo 'exit 1' > "$STUB/build"; CONVEYOR_SKIP='["backlog","dormant","ux-change"]' loop run >/dev/null
+  loop control release 1 2 3 >/dev/null; tune '.worktree.setup = "exit 1"'; CONVEYOR_SKIP='["backlog","dormant","ux-change"]' loop run >/dev/null
   [ "$(st 'select(.step == "picked") | .issue' | sort -n | tr '\n' ' ')" = "1 2 3 " ] || fail "a released backlog, dormant or ux-change issue was not picked: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
 }
 # The qualifying issue listed after the first 1,000 open ones, a case of its own beside t_empty. The 1,000 are made
 # from one issue in one jq, not one jq each (that took about 2 s).
 t_emptyfar() {
-  setup "[$(issue 1001 2026-01-01 P1)]"
+  setup "[$(issue 1001 2026-01-01 P1)]"; tune '.worktree.setup = "exit 1"'
   jq -c --argjson t "$(issue 0 2026-01-01 awaiting-deploy)" '[range(1; 1001) as $n | $t | .number = $n | .title = "title \($n)" | .body = "body of \($n)"] + .' \
     "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
   [ "$(jq -c '[length, .[0].number, .[999].number, .[1000].number, (.[:1000] | all(.labels == [{name: "awaiting-deploy"}]))]' "$STUB/issues.json")" = '[1001,1,1000,1001,true]' ] \
@@ -92,7 +93,7 @@ t_prism() {
   setup "$(jq -cs . <(issue 6 2026-01-01 area:prism "$vi") <(issue 7 2026-01-02 area:prism | jq -c --arg m "$vi" '.milestone = {title: $m}') \
     <(issue 8 2026-01-03 area:prism "$vi"))"
   loop control hold 8 >/dev/null || fail "control hold failed"
-  echo 'exit 1' > "$STUB/build"; loop run >/dev/null
+  tune '.worktree.setup = "exit 1"'; loop run >/dev/null
   [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "6 7 " ] || fail "the unheld prism issues were not both picked, or the held one was: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
   [ "$(loop snapshot | jq -c '[.open.held[] | select(.issue == 8) | .reasons[].kind]')" = '["you"]' ] || fail "the held prism issue is not held by the control record alone: $(loop snapshot | jq -c .open.held)"
 }
@@ -100,10 +101,11 @@ t_prism() {
 # Bugs: P3 cannot be turned off like P0-P2, so the owner cannot stop the loop building the lowest level; off, an
 # issue labelled P3 or with no priority (read as P3) is picked, or is not listed as skipped by the rule P3; on again,
 # they are not picked; a record saved before P3 had a switch does not read as P3 on. What is picked is the check, so
-# each card's build fails and ends it there (a card that lands costs a review and a test run more).
+# in this file's cases that check only the pick, each card's worktree setup fails and ends it there, before its brief
+# and build session (a card that lands costs those, a review and a test run more).
 t_p3rule() {
   setup "$(jq -cs . <(issue 5 2026-01-01 P3) <(issue 6 2026-02-01) <(issue 7 2026-03-01 P1))"
-  echo 'exit 1' > "$STUB/build"
+  tune '.worktree.setup = "exit 1"'
   picks() { st 'select(.step == "picked") | .issue' | sort | tr '\n' ' '; }
   jq -e '.rules | has("P3") | not' "$ST/control.json" >/dev/null || fail "the seeded record already has a P3 key"
   [ "$(loop control | jq -c .rules.P3)" = true ] || fail "a record with no P3 key does not read as P3 on: $(loop control)"
@@ -116,7 +118,7 @@ t_p3rule() {
 # issues are picked. A case's processes share one core (lib/slots.sh), so it has those two cards alone.
 t_p3on() {
   setup "$(jq -cs . <(issue 5 2026-01-01 P3) <(issue 6 2026-02-01))"
-  echo 'exit 1' > "$STUB/build"
+  tune '.worktree.setup = "exit 1"'
   picks() { st 'select(.step == "picked") | .issue' | sort | tr '\n' ' '; }
   [ "$(loop control rules P3=off | jq -c .rules.P3)" = false ] || fail "rules P3=off did not turn P3 off: $(cat "$ST/control.json")"
   [ "$(loop control rules P3=on | jq -c .rules.P3)" = true ] || fail "rules P3=on did not turn P3 on: $(cat "$ST/control.json")"
@@ -127,7 +129,7 @@ t_p3on() {
 # loop started beside a running one, so the two together pass the builder cap.
 t_pick() {
   setup "$(jq -cs . <(issue 5 2026-01-01 P3) <(issue 6 2026-02-01 P1) <(issue 4 2026-03-01 P1) <(issue 8 2026-04-01) <(issue 9 2026-05-01))"
-  echo 'exit 1' > "$STUB/build"; mkdir -p "$ST"
+  tune '.worktree.setup = "exit 1"'; mkdir -p "$ST"
   echo '{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}' > "$ST/cards.jsonl"
   # Every card writes its lines under the records' lock, so a slow GitHub must never be waited for while it is held:
   # the open issues are never asked for under it. The asker is under it when it inherited the lock's descriptor (an open
@@ -138,9 +140,10 @@ t_pick() {
   [ -s "$STUB/list-asked" ] || fail "the loop picked without asking for the open issues"
   [ ! -e "$STUB/list-locked" ] || fail "the open issues were asked for while the records' lock was held"
   rm -f "$STUB/list-cmd"
-  # The first loop's build holds from $STUB/building until $STUB/go (or the stub folder is gone: the test's end), so the
-  # second loop is tried while the first runs, however slowly a loaded machine starts either.
-  echo ': > "$STUB/building"; while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done; exit 1' > "$STUB/build"; loop run 1 >/dev/null & run=$!
+  # The first loop's card holds in its worktree setup from $STUB/building until $STUB/go (or the stub folder is gone:
+  # the test's end), so the second loop is tried while the first runs, however slowly a loaded machine starts either.
+  tune --arg s ': > "$STUB/building"; while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done; exit 1' '.worktree.setup = $s'
+  loop run 1 >/dev/null & run=$!
   until [ -e "$STUB/building" ] || ! kill -0 $run 2>/dev/null; do sleep 0.1; done
   out=$(loop run 2>&1) && fail "a second loop ran beside the first"; grep -q 'already running' <<<"$out" || fail "second loop: $out"
   : > "$STUB/go"; wait; [ "$(st 'select(.step == "picked") | .issue' | sort | tr '\n' ' ')" = "4 5 6 " ] || fail "picks: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
@@ -152,7 +155,7 @@ t_pick() {
 t_dry() {
   local d=$T/$CASE/frozen mark=$T/$CASE.mark a b before
   setup "$(jq -cs . <(issue 5 2026-01-01 P3) <(issue 6 2026-02-01 P1) <(issue 4 2026-03-01 P1) <(issue 7 2026-04-01 P0))"
-  echo 'exit 1' > "$STUB/build"
+  tune '.worktree.setup = "exit 1"'
   jq -c '.start = "held" | .startHeld = [{from: 6, to: null}]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   echo '{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}' > "$ST/cards.jsonl"
   mkdir -p "$d"; cp "$ST/cards.jsonl" "$ST/control.json" "$d/"
