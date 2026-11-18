@@ -87,9 +87,76 @@
     }
     return { url: `https://github.com/${repo[1]}/blob/HEAD/${path}#L${m[2]}${m[3] ? `-L${m[3]}` : ''}`, at: `${path}:${m[2]}` };
   };
+  // A file path with a directory and a line ("shared/taxonomy/fields.ts:239") written without backticks.
+  const BARE = /(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_-][A-Za-z0-9_.-]*\.[A-Za-z0-9]+:[0-9]+(?:[–-][0-9]+)?/g;
+  // Plain text, each bare path in it given to at (drawn as code), the rest to plain; the text is kept as written.
+  const barePaths = (s, at, plain) => {
+    let from = 0;
+    for (const m of s.matchAll(BARE)) {
+      if (m.index > from) plain(s.slice(from, m.index));
+      at(m[0]);
+      from = m.index + m[0].length;
+    }
+    if (from < s.length) plain(s.slice(from));
+  };
+  // A span of code: monospace, italic and in the accent colour (app.css .why-code); a file and line in it is a link to
+  // that line on GitHub (lineUrl), with the link returned so a caller can say more of it on hover.
+  const codeEl = (h, x, s, known, cls) => {
+    const c = h('code', cls === 'why' ? 'why-code' : `why-code ${cls}-code`, s), to = lineUrl(x, s, known);
+    if (!to) return { el: c, to: null };
+    const a = h('a', `${cls}-at`);
+    a.href = to.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.append(c);
+    return { el: a, to };
+  };
+  const LEVELS = new Set(['0', '1', '2', '3']);
+  // A finding, as "[P<n>] <file>:<line> <claim>. <more> Proof: <proof>": a head line (the level as a coloured badge,
+  // the file and line as code linked to that line), the claim in bold on its own line, then the proof under a "Proof"
+  // label, a sentence a line. Text in backticks and bare file paths are code. A finding of another shape is drawn as
+  // its sentences. The text drawn is the finding as written, without its backticks.
+  const findingEl = (h, x, known) => {
+    const text = typeof x.finding === 'string' && x.finding ? x.finding : 'no finding';
+    const box = h('div', 'title declined-finding');
+    const fill = (el, s) => {
+      for (const parts of sentences(s)) {
+        const line = h('span', 'declined-line');
+        for (const p of parts) {
+          if ('code' in p) line.append(codeEl(h, x, p.code, known, 'declined').el);
+          else barePaths(p.text, (q) => line.append(codeEl(h, x, q, known, 'declined').el), (q) => line.append(q));
+        }
+        el.append(line);
+      }
+    };
+    // A review's id for the finding ("[E1]", "[F2]"), when it has one, stands between the level and the file.
+    const m = /^(\[P([0-9])\])(\s+)((?:\[[A-Za-z]+[0-9]+\]\s+)*)(\S+?:[0-9]+(?:[–-][0-9]+)?)(\s+)([\s\S]*)$/.exec(text);
+    if (!m) { fill(box, text); return box; }
+    const head = h('div', 'declined-head');
+    const badge = h('span', 'declined-level', m[1]);
+    badge.dataset.level = LEVELS.has(m[2]) ? `P${m[2]}` : 'none';
+    head.append(badge, m[3]);
+    if (m[4]) head.append(h('span', 'declined-ids', m[4]));
+    head.append(codeEl(h, x, m[5], known, 'declined').el, m[6]);
+    box.append(head);
+    const rest = m[7];
+    // "Proof:" outside backticks splits the claim (and what follows it) from the proof.
+    let cut = -1;
+    for (const p of rest.matchAll(/`[^`]*`|\bProof:\s*/g)) if (p[0][0] !== '`') { cut = p.index; break; }
+    const said = cut < 0 ? rest : rest.slice(0, cut), proof = cut < 0 ? '' : rest.slice(cut);
+    const claim = /^\S[\s\S]*?(?:[.!?](?=\s|$)|$)\s*/.exec(said)?.[0] || said; // the first sentence, its space kept
+    if (claim) { const b = h('strong', 'declined-claim'); fill(b, claim); box.append(b); }
+    if (said.length > claim.length) { const r = h('div', 'declined-more'); fill(r, said.slice(claim.length)); box.append(r); }
+    if (proof) {
+      const label = /^Proof:\s*/.exec(proof)[0];
+      const p = h('div', 'declined-proof');
+      p.append(h('span', 'declined-proof-label', label));
+      fill(p, proof.slice(label.length));
+      box.append(p);
+    }
+    return box;
+  };
   // The line's reason, in its own block under the finding: a tinted panel with a left rule in the colour of who
   // declined it, led by a bold "Why the judge declined it" (or the code, or the owner). Each sentence is a line of its
-  // own; text in backticks is code, and a file and line in it a link to them on GitHub. In the judge's, each F<n> (the
+  // own; text in backticks and a bare path with a line are code, and a file and line a link to them on GitHub. In the judge's, each F<n> (the
   // n-th finding of the card's review it was declined in, as the judge numbered them: the snapshot's round and
   // findings) is a button: on hover and on click (a line under the reason, a second click hides it) it says which
   // finding it means, its first sentence and its review round; a `file:line` that a finding of that review starts with
@@ -97,13 +164,18 @@
   // of another review or card of the project starts with (pool: every line of the list) says that finding and its
   // card; when several findings start there, it says each of them. An F<n> whose finding is not found is left as written, with "finding not found" on hover. The text is never
   // changed.
-  const why = (x, h, pool) => {
+  // The project's other lines declined by the time x's reason was written (kin), and the paths the line's findings and
+  // reasons name (known, for lineUrl).
+  const near = (x, pool) => {
     // Only a finding declined by the time the reason was written can be the one it names; a line with no readable
     // time is not known to be earlier.
     const when = Date.parse(x.time);
     const kin = pool.filter((y) => y && y.repo === x.repo && typeof y.finding === 'string' && key(y) !== key(x)
       && Date.parse(y.time) <= when);
     const known = new Set([x.finding, x.why].concat(Array.isArray(x.findings) ? x.findings.map((y) => y && y.finding) : [], kin.map((y) => y.finding)).flatMap(pathsIn));
+    return { kin, known };
+  };
+  const why = (x, h, { kin, known }) => {
     const text = x.why || 'no reason given';
     const box = h('div', 'reason why-block');
     box.dataset.by = WHO[x.by] ? x.by : 'none';
@@ -141,13 +213,9 @@
     };
     for (const parts of sentences(text)) {
       const line = h('span', 'why-line');
-      for (const part of parts) {
-        if (!('code' in part)) { refsIn(line, part.text); continue; }
-        const c = h('code', 'why-code', part.code), to = lineUrl(x, part.code, known);
-        if (!to) { line.append(c); continue; }
-        const a = h('a', 'why-at');
-        a.href = to.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-        a.append(c);
+      const code = (s) => {
+        const { el: a, to } = codeEl(h, x, s, known, 'why');
+        if (!to) { line.append(a); return; }
         const at = new RegExp(`^\\[P[0-9]\\]\\s+${to.at.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b(?![-–])`);
         // Every finding that starts there, not only the first found: two findings can start at the same line, and the
         // text alone does not say which one the reason means.
@@ -158,6 +226,10 @@
         if (tells.length === 1) opener(a, tells[0]);
         else if (tells.length) opener(a, `${tells.length} findings start at ${to.at}: ${tells.join(' ')}`);
         line.append(a);
+      };
+      for (const part of parts) {
+        if ('code' in part) code(part.code);
+        else barePaths(part.text, code, (q) => refsIn(line, q));
       }
       body.append(line);
     }
@@ -206,10 +278,11 @@
         const head = h('div', 'row-main');
         head.append(ctx.issueLink(x));
         if (done) head.append(h('span', 'chip chip-quiet done-tag', done));
-        head.append(h('span', 'title', x.finding || 'no finding'));
+        const ns = near(x, pool);
+        head.append(findingEl(h, x, ns.known));
         const meta = h('p', 'row-meta');
         meta.append(ctx.tag(x.repo), h('span', null, `declined by ${WHO[x.by] || 'no one named'}`), ctx.since(x.time, ' ago'));
-        li.append(head, meta, ...why(x, h, pool));
+        li.append(head, meta, ...why(x, h, ns));
         if (x.dismissed) {
           const m = h('p', 'row-meta mark');
           m.append(h('span', null, `Dismissed by ${x.dismissed.by || 'no one named'}`), ctx.since(x.dismissed.time, ' ago'));
