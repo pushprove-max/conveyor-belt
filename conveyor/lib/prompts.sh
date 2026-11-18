@@ -123,7 +123,8 @@ runnerfiles() {
   packget test.command c test.full a test.fileCommand b test.wholeCommands e 2>/dev/null || return 0
   # Each to read: W, a command whose every word counts; F, a shell script's text, whose commands' first words count.
   q=("W$c" "W$a" "W$b")
-  while IFS= read -r w; do [ -z "$w" ] || cs+=("${w#./}"); done < <(jq -r '.[]? | strings' <<<"${e:-[]}" 2>/dev/null)
+  # The schema's default, [], names none: no jq for it.
+  [ "${e:-[]}" = '[]' ] || while IFS= read -r w; do [ -z "$w" ] || cs+=("${w#./}"); done < <(jq -r '.[]? | strings' <<<"$e" 2>/dev/null)
   while [ ${#q[@]} != 0 ] && [ $d -lt 4 ]; do
     n=("${q[@]}"); q=(); d=$((d + 1))
     for c in "${n[@]}"; do
@@ -170,8 +171,14 @@ runnerfiles() {
     done
   done
   [ ${#cs[@]} != 0 ] || return 0
-  mapfile -t cs < <(printf '%s\n' "${cs[@]}" | LC_ALL=C sort -u)
-  git -C "$MAIN" -c core.quotePath=false ls-files -- "${cs[@]/#/:(literal)}" 2>/dev/null | grep -xF -f <(printf '%s\n' "${cs[@]}") | LC_ALL=C sort -u
+  # Each tracked file a word names, once, in git's order (by bytes, as LC_ALL=C sort's); a word that names a folder
+  # lists the files under it, which are no file a word names. By the shell, not sort and grep: names() runs this in
+  # every snapshot.
+  local -A want=() got=()
+  for w in "${cs[@]}"; do want[$w]=1; done
+  while IFS= read -r w; do [ -z "${want[$w]:-}" ] || [ -n "${got[$w]:-}" ] || { got[$w]=1; printf '%s\n' "$w"; }; done \
+    < <(git -C "$MAIN" -c core.quotePath=false ls-files -- "${cs[@]/#/:(literal)}" 2>/dev/null)
+  return 0
 }
 # The pack's tunables (plan section 5), each the pack's value, else the schema's default; in seconds. TUNED is the
 # pack's own tunables object, so health can say which home each value came from.

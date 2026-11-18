@@ -520,7 +520,10 @@ snapshot() (
     git apply --numstat -z "$k/$c.patch" 2>/dev/null | jq -Rcs --arg c "$c" '{($c): (split("\u0000") | map(select(. != "") | split("\t") | .[2:] | join("\t") | .[0:300])) | select(length > 0)}' 2>/dev/null
   done < "$d/yes" | jq -cs 'add // {}' > "$d/paths" 2>/dev/null || echo '{}' > "$d/paths"
   # Today and the 7 days are reckoned from the health record's time (CONVEYOR_NOW when set), as now is.
-  day=$(p_date "@$(jq -r '.time | fromdate' <<<"$h")" +%F) && since=$(p_date "$day 6 days ago" +%F) && prev=$(p_date "$day 13 days ago" +%F) || exit 1
+  # Each of the three days with its midnight's epoch (t0d, t0w, t0p), from one date program: day by bash's own printf.
+  ht=$(jq -r '.time | fromdate' <<<"$h") && [[ $ht =~ ^[0-9]+$ ]] && printf -v day '%(%F)T' "$ht" \
+    && { read -r day t0d && read -r since t0w && read -r prev t0p; } < <(printf '%s\n' "$day" "$day 6 days ago" "$day 13 days ago" | p_dates '+%F %s') \
+    && [[ $t0p =~ ^[0-9]+$ ]] || exit 1
   # A failure stands only while the pack still names a whole test (maintest() runs none without one, so nothing clears
   # it) and, when the open issues were listed, while the issue it filed is open.
   packget test.main mt && [ -n "$mt" ] && mt=$(jq -ce --slurpfile iss "$d/issues" \
@@ -554,7 +557,7 @@ snapshot() (
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
-    --argjson t0d "$(p_date "$day" +%s)" --argjson t0w "$(p_date "$since" +%s)" --argjson t0p "$(p_date "$prev" +%s)" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL"'
+    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.

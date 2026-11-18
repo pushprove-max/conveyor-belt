@@ -62,6 +62,9 @@ t_host() {
   [ "$(p p_filekey "$T/f")" != "$k" ] || fail "a file written again to the same size and mtime kept its key: $k"
   ! p p_filekey "$T/none" >/dev/null || fail "a file not there has a key"
   [ "$(TZ=UTC p p_date 2026-11-10 +%s)" = 1794268800 ] || fail "date: $(TZ=UTC p p_date 2026-11-10 +%s)"
+  # The snapshot reads its three days, each with its midnight, from one p_dates: a line each, in order.
+  k=$(printf '%s\n' 2026-11-10 '2026-11-10 6 days ago' | TZ=UTC p p_dates '+%F %s' | paste -sd ' ' -)
+  [ "$k" = "2026-11-10 1794268800 2026-11-04 1793750400" ] || fail "dates: $k"
   p p_newer "$T/f" 60 && fail "a file changed long ago is new"
   touch "$T/f"; p p_newer "$T/f" 60 || fail "a file changed now is not new"
   sleep 30 & k=$!; s=$(p p_started $k) # sleep: a stand-in for a running process

@@ -95,6 +95,8 @@ p_filekey() { stat -c '%s %.9Y %.9Z %i %n' -- "$1" 2>/dev/null; } # <file>
 
 # <date> (as GNU date -d reads it: "6 days ago", "2026-11-10") in <format>.
 p_date() { date -d "$1" "$2"; } # <date> <+format>
+# Each <date> on stdin (one a line, as p_date's) in <format>, one a line, from one date program.
+p_dates() { date -f - "$1"; } # <+format>
 
 # True when <file> changed in the last <seconds>.
 p_newer() { [ -n "$(find "$1" -newermt "@$(($(date +%s) - $2))" 2>/dev/null)" ]; } # <file> <seconds>
