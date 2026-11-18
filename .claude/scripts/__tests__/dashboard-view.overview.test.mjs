@@ -119,7 +119,9 @@ test('metrics: each chart draws from the totals, inline SVG and no library', () 
   assert.equal(panel(w, 'metrics').querySelector('details.metrics-all').open, true);
   assert.deepEqual(Array.from(w.document.querySelectorAll('script'), (s) => s.getAttribute('src')).filter((s) => !/^(data|alive)\.js(\?|$)/.test(s)),
     ['app.js', 'head.js', 'panels/index.js', 'boot.js'], 'no script was added');
-  assert.deepEqual(Object.keys(w).filter((k) => !globals.has(k)), [], 'no new global');
+  // An element with an id (the setup's box, #onboard) is a named property of the window, not a global a script set:
+  // a key is skipped only while its value is that element, so a library's global of the same name still fails.
+  assert.deepEqual(Object.keys(w).filter((k) => !globals.has(k) && w[k] !== w.document.getElementById(k)), [], 'no new global');
 });
 
 test('metrics: a new Conveyor with 3 cards shows "—" and why, never "missing"', () => {
