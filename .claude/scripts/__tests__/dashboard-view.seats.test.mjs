@@ -3,7 +3,7 @@
 // of its own, changes them (POST control card), and Pick for me asks the project's judge and changes nothing until
 // Apply. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, settle, full, bcard, act, cases, clone, pickProject } from './dashboard-view.helpers.mjs';
+import { css, boot, deliver, settle, full, bcard, act, cases, clone, pickProject } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -131,4 +131,80 @@ test('a project switch drops every pick and open Settings, one still being asked
   await settled();
   assert.equal(bcard(w, 22).querySelector('.board-seats-picked'), null, 'widgetshop\'s answer is not sample\'s pick');
   assert.equal(bcard(w, 20).querySelector('.board-seats-form'), null);
+});
+
+// jsdom does no layout, so widths are checked by the computed styles of app.css, loaded into the page here.
+function openForm() {
+  const w = boot({ tab: 'control' });
+  deliver(w, full());
+  const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st);
+  act(bcard(w, 20), 'seats').click();
+  return { w, form: bcard(w, 20).querySelector('.board-seats-form') };
+}
+const chosen = (m) => m.options[m.selectedIndex].textContent;
+
+// Bug: on a queue card the model menus and Save ran past the card's edge.
+test('each model menu is held to the card\'s width with its text cut, and Save is no wider than its text', () => {
+  const { w, form } = openForm();
+  for (const k of ['builder', 'reviewer', 'judge']) {
+    const m = act(form, `seat-model-${k}`), c = w.getComputedStyle(m);
+    assert.equal(c.maxWidth, '100%');
+    assert.match(c.minWidth, /^0(px)?$/);
+    assert.equal(c.textOverflow, 'ellipsis');
+    assert.equal(c.overflow, 'hidden');
+    assert.match(m.title, /^Project's: /);
+    assert.equal(m.title, chosen(m), 'the title holds the full text');
+  }
+  const save = w.getComputedStyle(act(form, 'seats-save'));
+  assert.ok(save.width === 'auto' || save.width === '', 'Save keeps the width its text needs');
+  assert.equal(save.justifySelf, 'start', 'Save is not stretched across the grid');
+});
+
+// Bug: the effort menu sat greyed out with no reason while the model was the project's.
+test('the effort menu is hidden while the model is the project\'s, and shown, enabled and labelled Effort once one is chosen', () => {
+  const { w, form } = openForm();
+  const row = form.querySelector('[data-seat="builder"]'), eff = row.querySelector('.board-seat-effort'), same = row.querySelector('.board-seat-same');
+  assert.equal(eff.hidden, true);
+  assert.equal(same.hidden, false);
+  assert.equal(same.textContent, 'the project\'s effort');
+  const m = act(form, 'seat-model-builder');
+  setTo(w, m, 'claude-fable-5-2');
+  assert.equal(eff.hidden, false);
+  assert.equal(same.hidden, true);
+  assert.equal(act(form, 'seat-effort-builder').disabled, false);
+  assert.equal(eff.querySelector('.board-label').textContent, 'Effort');
+  assert.equal(m.title, chosen(m), 'the title follows the chosen model');
+});
+
+// Bug: a card's saved model that left the allowed list made Settings throw (no selected option for the title).
+test('Settings opens on a card whose saved model is no longer allowed, showing the project\'s', () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.cards = { 20: { builder: { model: 'claude-gone-9', effort: 'high' } } };
+  deliver(w, d);
+  act(bcard(w, 20), 'seats').click();
+  const m = act(bcard(w, 20).querySelector('.board-seats-form'), 'seat-model-builder');
+  assert.equal(m.value, '');
+  assert.match(m.title, /^Project's: /);
+});
+
+// Bug: Save on that form, with no edit, sent "builder clear" and deleted the saved setting.
+test('Save with no edit does not clear a saved model that is no longer allowed', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.cards = { 20: { builder: { model: 'claude-gone-9', effort: 'high' } } };
+  deliver(w, d);
+  act(bcard(w, 20), 'seats').click();
+  act(bcard(w, 20).querySelector('.board-seats-form'), 'seats-save').click();
+  await settled();
+  assert.deepEqual(w.posts.splice(0), [], 'nothing is sent');
+});
+
+// Bug: a queue card showed the raw "next: 1".
+test('queue cards read Next in the queue, then #2 in the queue', () => {
+  const w = boot({ tab: 'control' });
+  deliver(w, full());
+  const line = (n) => Array.from(bcard(w, n).querySelectorAll('.board-from'), (x) => x.textContent).find((x) => /in the queue/.test(x));
+  assert.equal(line(20), 'Next in the queue');
+  assert.equal(line(21), '#2 in the queue');
 });

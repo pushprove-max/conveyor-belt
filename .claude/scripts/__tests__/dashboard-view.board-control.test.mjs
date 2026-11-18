@@ -248,7 +248,7 @@ test('the Board: a card dragged between Held and Queue, or onto a queued card, s
   dragTo(w, bcard(w, 22), bcard(w, 20));
   await settle();
   assert.deepEqual(inCol(w, 'queue'), [22, 20, 21]);
-  assert.equal(bcard(w, 22).textContent.includes('next: 1'), true);
+  assert.equal(bcard(w, 22).textContent.includes('Next in the queue'), true);
   const later2 = full(T0 + 60000); later2.panels.board.data.landed.pop();  // begun after the answers
   next(w, later2);
   assert.deepEqual([inCol(w, 'held'), inCol(w, 'queue')], [[76, 23], [20, 21, 22]], 'the snapshot replaces what the host answered');

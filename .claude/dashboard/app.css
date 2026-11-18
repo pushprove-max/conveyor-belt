@@ -839,7 +839,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .board-seats-line, .board-seat-pick { overflow-wrap: anywhere; }
 .board-seat.is-own { font-weight: 650; color: var(--text); }
 .board-seat-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
-.board-seat-row select { min-width: 0; max-width: 100%; }
+.board-seat-row select { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-seat-row { min-width: 0; }
+.board-seat-effort { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 100%; }
+.board-seat-same { color: var(--muted); font-size: var(--fs-xs); }
+.board-seats-form > .btn-quiet { width: auto; justify-self: start; }
 .rules-held-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .rules-search { flex: 1 1 22ch; min-height: 32px; }
 .rules-by { display: inline-flex; align-items: center; gap: var(--sp-2); }

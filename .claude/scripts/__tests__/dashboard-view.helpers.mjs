@@ -517,7 +517,7 @@ export const SAYS = {
   empty: 'No project on the build machine', failed: 'The Board could not read the projects' },
   board: { title: 'Board', count: '', data: ['Conveyor', 'Running', 'Pause sample after current', 'Stop now and requeue 2 cards', 'Weekly limit', '44%',
     '2 landed', '$3.00',
-    'Held', 'Split the PROD stack', 'Held by you', 'Queue', 'Next up', 'next: 1', 'Follow-up', 'Later', 'next: 2', 'Retried', 'Infra thing', 'Skipped by a rule: area:infra',
+    'Held', 'Split the PROD stack', 'Held by you', 'Queue', 'Next up', 'Next in the queue', 'Follow-up', 'Later', '#2 in the queue', 'Retried', 'Infra thing', 'Skipped by a rule: area:infra',
     'Building', 'Plugin thing', 'building', 'no reading yet', 'Review', 'Rebuild the dashboard', 'review 2 of 3', '$1.25',
     'Needs you', 'Button copy', 'Visible change: Staff see a new button.', 'Waiting for your yes', 'Broken build', 'tests failed twice', 'Landed today', 'Landed one', '2 reviews · $2.50', 'Fixed before', 'already fixed'],
   empty: 'Nothing to steer here', failed: 'The Board could not read the Board panel' },

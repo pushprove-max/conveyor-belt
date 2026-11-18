@@ -293,7 +293,9 @@ Each card in the Held, Queue, Building, Review and Needs you columns shows its b
 that is the card's own, not the project's, says "(this card)". You can change a blocked card's settings before you
 retry it.
 
-- **Settings** opens a model list and an effort list for each seat. Pick **Project's** to use the project's seat.
+- **Settings** opens a group for each seat: the seat name, its model list, and an effort list labelled **Effort**.
+  Pick **Project's** to use the project's seat. The effort list shows only once you pick another model. Until then
+  the line says "the project's effort".
   The lists show only the models that the pack allows the seat. **Save** sends each changed seat
   (`conveyor.sh control card`).
 - **Pick for me** asks the project's judge to choose the three seats for the issue. The card shows the judge's model,

@@ -758,22 +758,28 @@
     SEATS.forEach(([k, name]) => {
       const p = projSeat(k), row = h('div', 'board-seat-row');
       row.dataset.seat = k;
-      const m = h('select', null), e = h('select', null);
+      const m = h('select', null), e = h('select', null), eff = h('label', 'board-seat-effort'), same = h('span', 'board-seat-same', 'the project\'s effort');
       m.dataset.act = `seat-model-${k}`; e.dataset.act = `seat-effort-${k}`;
       m.setAttribute('aria-label', `${name} model of #${n}`); e.setAttribute('aria-label', `${name} effort of #${n}`);
       const opt = (v, text) => { const o = h('option', null, text); o.value = v; return o; };
       m.append(opt('', `Project's: ${p && p.model ? seatText(p) : 'not set'}`), ...issues(p && p.choices).map((c) => opt(c, S.ctx.modelName(c))));
       m.value = d[k].model;
+      // A saved model no longer in the allowed list matches no option: show the project's. The base follows, so Save
+      // does not read this as an edit and clear the saved setting.
+      if (m.selectedIndex < 0) { m.value = ''; d[k].model = ''; S.seats.base[k].model = ''; }
+      m.title = m.options[m.selectedIndex].textContent;
       const fill = () => {
         e.replaceChildren(opt('', 'Project\'s effort'), ...effortsOf(k, d[k].model).map((x) => opt(x, x)));
-        e.disabled = !d[k].model;
+        // With the project's model there is no effort to pick: say so, in place of a greyed menu with no reason.
+        eff.hidden = !d[k].model; same.hidden = !!d[k].model;
         if (!effortsOf(k, d[k].model).includes(d[k].effort)) d[k].effort = '';
         e.value = d[k].effort;
       };
       fill();
-      m.addEventListener('change', () => { d[k].model = m.value; fill(); });
+      m.addEventListener('change', () => { d[k].model = m.value; m.title = m.options[m.selectedIndex].textContent; fill(); });
       e.addEventListener('change', () => { d[k].effort = e.value; });
-      row.append(h('span', 'board-label', name), m, e);
+      eff.append(h('span', 'board-label', 'Effort'), e);
+      row.append(h('span', 'board-label', name), m, eff, same);
       f.append(row);
     });
     f.append(button('Save', 'btn-quiet', 'seats-save', `Save the settings of #${n}`, () => {
@@ -848,7 +854,7 @@
       // The machine holds this card back (its cap, its load or its free memory): why, with the reading.
       if (col === 'queue' && typeof item.room === 'string' && item.room) tags.append(ctx.chip(item.room, 'warn'));
       if (tags.firstChild) el.append(tags);
-      if (num(item.next) !== null) el.append(h('p', 'board-from', `next: ${item.next}`));
+      if (num(item.next) !== null) el.append(h('p', 'board-from', item.next === 1 ? 'Next in the queue' : `#${item.next} in the queue`));
       // A split issue (the rule Split large issues On) is held as the umbrella of its slices until each one lands or is already done on main.
       const um = issues(item.umbrella).filter((x) => num(x) !== null);
       if (um.length) el.append(h('p', 'board-from board-umbrella', `Umbrella of ${um.map((x) => `#${x}`).join(', ')}: not built itself, and closed when they land or are already done on main`));
