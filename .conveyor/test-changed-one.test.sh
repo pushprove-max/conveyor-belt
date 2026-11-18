@@ -31,7 +31,7 @@ cat > "$R/conveyor/conveyor.test.sh" <<'EOF'
 echo "$CONVEYOR_TEST_FILE:${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/../ran"
 for c in $CONVEYOR_SHELL_TEST_CASE; do echo "ok $c"; done
 EOF
-printf '%s\n' 'echo "hooks/h.test.sh:ALL" >> "$(dirname "$0")/../ran"' > "$R/hooks/h.test.sh"
+printf '%s\n' 'echo "hooks/h.test.sh:ALL" >> "$(dirname "$0")/../ran"' "[ ! -r /proc/self/cgroup ] || cat /proc/self/cgroup > '$T/h.cgroup'" > "$R/hooks/h.test.sh"
 # A shell test file outside conveyor/tests/ that selects its cases as the runner does; it notes the cases it runs.
 mkdir -p "$R/conveyor/lib"
 printf '%s\n' 'ALL="sone stwo"' 'SEL=${CONVEYOR_SHELL_TEST_CASE:-$ALL}; SEL=${SEL//,/ }' \
@@ -76,9 +76,14 @@ cp "$T/s.keep" "$R/conveyor/lib/s.test.sh"
   || no "the one-file mode did not run only the case the engine named of a shell test file: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 
 # A test file outside the engine (the hooks'), which the change does not select: it runs whole, and no case file runs.
-got=$(one hooks hooks/h.test.sh)
+# Issue 348: with the engine's slots library and a pool, it runs in this script's own cgroup (Linux). Bug it catches:
+# each such file was started in a systemd scope of its own with a hard memory cap of the machine's memory over the
+# slots (slot_box), so a test that needed more was killed and counted as a failure.
+got=$(CONVEYOR_TEST_SLOTS=$ROOT/conveyor/lib/slots.sh CONVEYOR_TEST_POOL=2:$T/pool XDG_CONFIG_HOME=$T/cfg one hooks hooks/h.test.sh)
 [ "$got" = "hooks/h.test.sh:ALL" ] && [ "$(cat "$T/rc")" = 0 ] && grep -qxF -- '-- ok hooks/h.test.sh' "$T/hooks/test-changed.log" \
   || no "the one-file mode given a hooks test did not run it alone: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
+[ ! -r /proc/self/cgroup ] || [ "$(cat "$T/h.cgroup")" = "$(cat /proc/self/cgroup)" ] \
+  || no "a test file ran in a cgroup of its own (a capped box), not its runner's: $(cat "$T/h.cgroup" 2>/dev/null)"
 
 # A path that does not exist: it fails at once, running no test, check or selection, and writes no log.
 got=$(one none conveyor/tests/gone.test.sh)

@@ -12,10 +12,7 @@ SRC=$(cd "$(dirname "$0")" && pwd -P); TOP=$(cd "$SRC/../.." && pwd -P)
 . "$SRC/../lib/portable.sh"; p_tools
 . "$SRC/../tests/wait.sh"
 # The machine's test slots: each case that runs beside another, and each unit of install and remove, holds one.
-# Each command run() starts (a unit's test, a closure of remove's) runs in its slot's box (slot_box): one core and the
-# slot's share of the memory, as the loop's test step runs each other test file; it is told it runs in one
-# (CONVEYOR_TEST_BOX, through run()'s clean environment), as it is where this runner runs in a box already.
-. "$SRC/../lib/slots.sh"; slot_pool || exit 1; slot_box; BOXED=${CONVEYOR_TEST_BOX:-${SLOT_BOX[0]:+1}}
+. "$SRC/../lib/slots.sh"; slot_pool || exit 1
 # The install's HOME is a fresh folder, not the user's; it sits under the user's HOME, not under scratch space, which
 # hook tests treat apart (bash-guardrails-search's checkout box).
 T=$(mktemp -d); H=$(mktemp -d "$HOME/.closure-test.XXXXXX"); trap 'rm -rf "$T" "$H"' EXIT
@@ -165,15 +162,11 @@ install() {
   NEST=1
   if [ "$(uname -s)" = Darwin ]; then ( cd "$I" && run sandbox-exec -p '(version 1)(allow default)' true ) >/dev/null 2>&1 || NEST=
   else ! ( cd "$I" && run grep -qs unpriv_bwrap /proc/self/attr/apparmor/current ) || NEST=; fi
-  # A unit's command runs in its slot's box, where one can be made, and knows it does.
-  [ ${#SLOT_BOX[@]} = 0 ] || ( cd "$I" && run bash -c '[ "$CONVEYOR_TEST_BOX" = 1 ] && grep -qx "100000 100000" "/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/cpu.max"' ) \
-    || fail "the install's runs are not in their test slot's box (one core): a unit could take the machine from every other card"
-  export path T H I BW_DECL NEST BOXED; BW_DECL=$(declare -p BW SLOT_BOX)
+  export path T H I BW_DECL NEST; BW_DECL=$(declare -p BW)
   export -f run
 }
-# RUN set (held): the command is started by it, the words before the command's own. The box (SLOT_BOX) is outside
-# the sandbox and its clean environment, which leave systemd-run no user manager to reach.
-run() { "${RUN[@]}" "${SLOT_BOX[@]}" "${BW[@]}" env -i HOME="$H" PATH="$path" TMPDIR="$T/tmp" LANG=C.UTF-8 USER="${USER:-t}" ${BOXED:+CONVEYOR_TEST_BOX=1} ${CONVEYOR_TEST_SLOT:+CONVEYOR_TEST_SLOT=$CONVEYOR_TEST_SLOT} ${U_CASE:+CONVEYOR_SHELL_TEST_CASE=$U_CASE} "$@"; }
+# RUN set (held): the command is started by it, the words before the command's own.
+run() { "${RUN[@]}" "${BW[@]}" env -i HOME="$H" PATH="$path" TMPDIR="$T/tmp" LANG=C.UTF-8 USER="${USER:-t}" ${CONVEYOR_TEST_SLOT:+CONVEYOR_TEST_SLOT=$CONVEYOR_TEST_SLOT} ${U_CASE:+CONVEYOR_SHELL_TEST_CASE=$U_CASE} "$@"; }
 # The holder of a unit: <the descriptors that hold the unit's slot, comma-separated> <the unit's mark> <command...>.
 # It starts the command with those descriptors alone, writes the command's exit status to descriptor 3 once it has
 # ended, then holds the slot, and no other descriptor it was given, until no process the command started is left. What
@@ -309,13 +302,13 @@ t_install() {
   if [ -n "$QUICK" ]; then
     # Quick mode (CONVEYOR_CLOSURE_QUICK=1, a card's test step): every check before and after the units runs, but no
     # unit: the units test the release set, not this tool, and the nightly whole test runs them all. In their place one
-    # stub unit starts as each unit does and writes the folder, the test slot and the box it was started in.
+    # stub unit starts as each unit does and writes the folder and the test slot it was started in.
     echo "quick: $(wc -l < "$T/units") units from the copy left to the whole test"
-    echo 'echo "$(pwd -P) ${CONVEYOR_TEST_SLOT:-} ${CONVEYOR_TEST_BOX:-}" > "$1"' > "$T/stub.sh"
-    bash -c 'eval "$BW_DECL"; slot_take; slot_mine; echo "$(cd "$I" && pwd -P) $CONVEYOR_TEST_SLOT $BOXED" > "$T/stub.want"
+    echo 'echo "$(pwd -P) ${CONVEYOR_TEST_SLOT:-}" > "$1"' > "$T/stub.sh"
+    bash -c 'eval "$BW_DECL"; slot_take; slot_mine; echo "$(cd "$I" && pwd -P) $CONVEYOR_TEST_SLOT" > "$T/stub.want"
       cd "$I" && held bash "$T/stub.sh" "$T/stub.seen"' || fail "the stub unit failed"
     [ "$(cat "$T/stub.seen" 2>/dev/null)" = "$(cat "$T/stub.want")" ] \
-      || fail "the stub unit did not start in the install, on its test slot, in its box: '$(cat "$T/stub.seen" 2>/dev/null)', not '$(cat "$T/stub.want")'"
+      || fail "the stub unit did not start in the install, on its test slot: '$(cat "$T/stub.seen" 2>/dev/null)', not '$(cat "$T/stub.want")'"
     echo "ok stub unit ($(cat "$T/stub.seen"))"
   else
     # The slowest units (closure.slowest, as measured) start first, the rest after, so no long unit starts last.

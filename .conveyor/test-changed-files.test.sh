@@ -55,7 +55,7 @@ run() {
 # pool of the test's own, of 2), side by side; b's run fails, and only b.test.sh fails. Every case the runner was
 # given (the cases of the two areas' case files) runs in some case file, and no other.
 echo conveyor/tests/b.test.sh > "$R/failing"; : > "$R/meet"
-got=$(CONVEYOR_TEST_SLOTS=$ROOT/conveyor/lib/slots.sh CONVEYOR_TEST_POOL=2:$T/pool XDG_CONFIG_HOME=$T/cfg CONVEYOR_TEST_BOX=1 run both)
+got=$(CONVEYOR_TEST_SLOTS=$ROOT/conveyor/lib/slots.sh CONVEYOR_TEST_POOL=2:$T/pool XDG_CONFIG_HOME=$T/cfg run both)
 L=$T/both/test-changed.log
 [ "$got" = "conveyor/tests/a.test.sh:aone atwo:slot|conveyor/tests/b.test.sh:bone:slot" ] && [ "$(cat "$T/rc")" = 1 ] \
   || no "two areas: each case file did not run its own cases alone, side by side on a slot: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"

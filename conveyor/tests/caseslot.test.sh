@@ -15,6 +15,9 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # runner's pool of 1: the first takes a slot of another pool, as a case's loop takes its test step's slot, leaves a
 # process holding that slot that does what that stub did, and exits and passes; the second finds the slot free as it
 # starts. A runner that reported the first case without ending what it left gave the second a slot still held.
+# Issue 348: the second case also runs in its runner's own cgroup (Linux). Bug it catches: the runner started each
+# case in a systemd scope of its own with a hard memory cap of the machine's memory over the slots (slot_box), so a
+# case that needed more was killed and counted as a failure.
 t_caseslot() {
   local d=$T/$CASE
   mkdir -p "$d/config/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$d/slots\"}" > "$d/config/conveyor/host.json"
@@ -27,7 +30,12 @@ t_caseslot() {
     until [ -s "$T/caseslot/left" ]; do sleep 0.05; done
     ! flock -n "$T/caseslot/held" true || fail "the process the case leaves does not hold the slot: the case shows nothing"
   }
-  t_slotnext() { flock -n "$T/caseslot/held" true || fail "the slot the case before this one left held is still held as this one starts"; }
+  t_slotnext() {
+    flock -n "$T/caseslot/held" true || fail "the slot the case before this one left held is still held as this one starts"
+    [ ! -r /proc/self/cgroup ] || [ "$(cat /proc/self/cgroup)" = "$(cat "$T/caseslot/cgroup")" ] \
+      || fail "the case ran in a cgroup of its own (a capped box), not its runner's: $(cat /proc/self/cgroup)"
+  }
+  [ ! -r /proc/self/cgroup ] || cat /proc/self/cgroup > "$d/cgroup"
   slot_pool && slot_take || fail "the runner's slot could not be taken"
   ( CASE=slotheld; run_case ) > "$d/out" 2>&1; slot_free
   grep -qx 'ok slotheld' "$d/out" || fail "the case that left a process holding a slot did not end and pass: $(cat "$d/out")"

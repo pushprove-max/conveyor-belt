@@ -361,9 +361,8 @@ cores. It is 0 when the host file does not set it.
 - A list of core numbers keeps those cores. `"reserveCores": [0, 1]` keeps cores 0 and 1.
 
 No test slot is on a kept core, and the pool of test slots is never larger than the cores that are left. Card build,
-fix and review sessions and card test runs start with `taskset` on the cores that are left. Where Conveyor puts a run
-into a systemd scope, the scope's `AllowedCPUs` is the cores that are left too. Conveyor always leaves one core for
-card work: a setting that keeps every core leaves the lowest of them.
+fix and review sessions and card test runs start with `taskset` on the cores that are left. Conveyor always leaves one
+core for card work: a setting that keeps every core leaves the lowest of them.
 
 `conveyor.sh doctor` and the **Cores kept for you** row on the Board's Rules tab show the kept cores and the number
 of test slots that are left. To change the setting, edit the host file.

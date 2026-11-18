@@ -1365,10 +1365,10 @@ nodecases() { # <node test file>
 o=$(mktemp); trap 'rm -f "$o" "$o".* "${rlist:-}"' EXIT
 # A Claude Code plugin test file (*.test.ts, *.test.tsx: the /units mod's, in hooks/) runs under Claude Code's own
 # runner, `claude plugin test` on the plugin, which runs every such file of the plugin in one run. So it runs once, at
-# the first such file, in that file's box, and a file's result is its own part of that run's output: its `<file>:`
+# the first such file, and a file's result is its own part of that run's output: its `<file>:`
 # heading and the lines under it. A file with a `(fail)` line there, or with no `(pass)` line (it did not run), fails.
 plugintest() { # <test file>
-  [ -s "$o.plugin" ] || "${b[@]}" env "${mk[@]}" claude plugin test . > "$o.plugin" 2>&1
+  [ -s "$o.plugin" ] || env "${mk[@]}" claude plugin test . > "$o.plugin" 2>&1
   awk -v f="$1:" '$0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
   cat "$o.part"
   grep -q '^(pass)' "$o.part" && ! grep -q '^(fail)' "$o.part"
@@ -1416,12 +1416,11 @@ for t in "${!parse[@]}"; do
   case $t in *.sh) out=$(bash -n "$t" 2>&1) ;; *.js) out=$(node --check "$t" 2>&1) ;; *) continue ;; esac \
     || { echo "$t does not parse: $out"; rc=1; }
 done
-# Each Board or shell test file runs in a box of its test slot's share of the machine, one core and the slot's share
-# of the memory (the engine's slot_box, the library the loop names, else this checkout's): with none to be had, as it
-# is. The engine's runner boxes each of its cases so itself, and the closure test each of its units.
-slots=; box=()
+# The machine's test slots (the engine's lib/slots.sh, the library the loop names, else this checkout's): with none to
+# be had, the engine case files run on no slot.
+slots=
 # shellcheck disable=SC1090 # the library the loop names
-! . "${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}" 2>/dev/null || ! declare -F slot_box >/dev/null || ! slot_pool 2>/dev/null || { slots=1; slot_box; box=("${SLOT_BOX[@]}"); }
+! . "${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}" 2>/dev/null || ! slot_pool 2>/dev/null || slots=1
 # The engine case files of the selection (ecases) start side by side before any other file runs, as the runner's cases
 # did: each is a worker of this run on a slot of the machine's pool (slot_take: this run's home slot to one at a time,
 # a slot of the pool to each beside it), pinned to its slot's core (slot_mine), and its runner runs its cases on that
@@ -1492,21 +1491,19 @@ for t in "${order[@]}"; do
   else
     # Its CPU seconds are the shell's children's user and system times (`times`) after it, less those before: the
     # file's process tree, each process counted as it is waited for.
-    # It runs in its test slot's box (box, above), but for the closure test, a runner that takes slots of its own and boxes each unit.
     # The parts of it the coverage map selected (covof), when nothing selected it whole, or the cases the one-file mode
     # runs of it (oparts): CONVEYOR_SHELL_TEST_CASE.
     p=; [ -z "$oparts" ] && [ -n "${twhole[$t]:-}" ] || p=$(grep . <<<"${oparts:-${tparts[$t]:-}}" | LC_ALL=C sort -u | paste -sd, -)
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"
     # The closure test runs in its card mode, quick (issue 583: the pack's test.files cardMode, mk above): its checks,
     # but none of the ~700 units it runs from the copy of the release set; the nightly whole test runs them.
-    b=("${box[@]}"); [ "$t" != conveyor/tools/closure.test.sh ] || b=()
     case $t in
-      *.mjs) nodecases "$t"; "${b[@]}" env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
-      *.py) "${b[@]}" env "${mk[@]}" python3 "$t" ;;
+      *.mjs) nodecases "$t"; env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
+      *.py) env "${mk[@]}" python3 "$t" ;;
       *.ts|*.tsx) plugintest "$t" ;;
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
       # the runner all its cases only when none is set) and in which the runner finds no case.
-      *) "${b[@]}" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
+      *) env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
     esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     times >> "$o.cpu"

@@ -20,7 +20,7 @@ quickrun() { # <src>
 
 # Bug (issue 583): a card that changed the closure test ran its ~700 units from the copy of the release set, 20 to 30
 # minutes, for a check of seconds. In quick mode the install case starts no test file from the copy (no unit line in
-# its log), starts its stub unit in the install, on its test slot and in its box, and passes.
+# its log), starts its stub unit in the install, on its test slot, and passes.
 t_closurequick() {
   local d=$T/$CASE
   slotpool 2; mkdir -p "$d"; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT

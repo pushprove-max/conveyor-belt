@@ -89,7 +89,7 @@ t_reservetestrun() {
   reserve_host '{reserveCores: 2, steer: true}'
   # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), which testonce() runs; names() is not run here
   # SLOT_CPUS emptied: this runner's own slot pool would else stand for the card's (no slot core to pin to, here).
-  out=$( ( LIVE=0.2 STUCK=1200; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot CONVEYOR_TEST_BOX=1; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+  out=$( ( LIVE=0.2 STUCK=1200; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && reportask "$w" && SLOT_CPUS='' \
     && testonce "$w" 'taskset -cp $$ > "$PWD.cpus"; echo "$(ps -o ni= -p $$ | tr -d " ") $( { ionice -p $$ 2>/dev/null || echo none; } | cut -d: -f1)" > "$PWD.prio"' ) 2>&1 ) \
     || fail "the run failed: $out $(cat "$w.test" 2>/dev/null)"

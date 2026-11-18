@@ -37,7 +37,7 @@ slot_cpus() {
 }
 
 # The cores kept for the user (the host file's reserveCores; docs/configuration.md, Cores kept for you), one a line:
-# no test slot is on one (slot_cpus), and no card session or test run may run on one (slot_keepwords, slot_box), so the
+# no test slot is on one (slot_cpus), and no card session or test run may run on one (slot_keepwords), so the
 # user's terminal and apps always have free cores. A number keeps that many of the machine's highest-numbered cores; a
 # list of core numbers keeps those. One core is always left for card work: a number of every core keeps all but
 # core 0, and a list that names every core keeps all but its lowest. None where taskset is not (slot_reserve_why).
@@ -51,8 +51,8 @@ slot_reserved() { # [the machine's cores (nproc --all), when the caller has read
       else empty end | .[]' "${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json" 2>/dev/null
 }
 
-# The cores left for card work, as taskset and systemd's AllowedCPUs take them ("0,1,2"), when the host file keeps
-# cores for the user (slot_reserved); fails when it keeps none.
+# The cores left for card work, as taskset takes them ("0,1,2"), when the host file keeps cores for the user
+# (slot_reserved); fails when it keeps none.
 slot_keep() {
   local k kl c=() i n
   mapfile -t kl < <(slot_reserved); [ ${#kl[@]} -gt 0 ] || return 1
@@ -292,26 +292,6 @@ slot_mine() {
   read -ra c <<<"$SLOT_CPUS"
   [ -n "${c[SLOT_K - 1]:-}" ] && taskset -cp "${c[SLOT_K - 1]}" "$BASHPID" >/dev/null 2>&1 \
     || { echo "conveyor: test slot $SLOT_K has no core this worker can be pinned to: the worker does not start" >&2; exit 1; }
-}
-
-# The box a test file runs in (the owner, 2026-11-14: a test pinned to its slot's core could still move its work onto
-# other cores, and take the machine from every other card): a hard limit of its slot's share of the machine, one core
-# (CPUQuota=100%) and the machine's memory over the pool's slots (MemoryMax), a scope of the user's systemd that the
-# command's own process moves into as it starts (systemd-run --user --scope), so it keeps its process, group,
-# descriptors and environment. Sets SLOT_BOX to the words put before a command to start it so ("${SLOT_BOX[@]}"
-# <command>), each box saying so to all it starts (CONVEYOR_TEST_BOX). None, and no limit (as before boxes), where no
-# such scope can be made: no systemd-run (macOS), no user manager, or a systemd that cannot be told to leave the `$`
-# of the command's words alone (--expand-environment); and inside a box already, as a box made there would be a scope
-# beside it, outside its limit. Called once, after slot_pool: it tries a box (about 10 ms).
-slot_box() {
-  local m s=() k
-  SLOT_BOX=()
-  [ -z "${CONVEYOR_TEST_BOX:-}" ] && command -v systemd-run >/dev/null 2>&1 || return 0
-  m=$(awk -v n="$SLOT_N" '/^MemTotal:/ { printf "%d", $2 / 1024 / n }' /proc/meminfo 2>/dev/null) && [ "${m:-0}" -gt 0 ] || return 0
-  # The cores kept for the user are out of the box too (slot_keep).
-  k=$(slot_keep) && s+=(-p "AllowedCPUs=$k")
-  SLOT_BOX=(systemd-run --user --scope --quiet --collect --expand-environment=no "${s[@]}" -p CPUQuota=100% -p "MemoryMax=${m}M" -- env CONVEYOR_TEST_BOX=1)
-  timeout 10 "${SLOT_BOX[@]}" true >/dev/null 2>&1 </dev/null || SLOT_BOX=()
 }
 
 # Closes every descriptor from 3 up this shell holds, whatever its number, but those named. A shell that inherited

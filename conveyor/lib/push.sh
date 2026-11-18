@@ -45,7 +45,7 @@ depsreason() { # <the folders, from depsmissing>
 # One push of main to origin, for the loop (the reasons are in README.md): the commit main is at, checked out
 # alone in $CARDS/push, pushed from there by its name, so the hook judges exactly the bytes the push carries. The git
 # push, and so the hook, holds a slot of the machine's test pool, taken ahead of every test worker that waits for one
-# (slot_first), on the slot's core (slot_mine) and in its box (slot_box): a machine full of test runs gives the
+# (slot_first), on the slot's core (slot_mine): a machine full of test runs gives the
 # project's pre-push checks a test unit's share, not a sliver of what is left (the owner, 2026-11-15). A loop started
 # on a slot it holds already (CONVEYOR_TEST_SLOT: a loop an engine case runs) pushes on that one, as its tests run. When
 # it works the commit, the remote and the branch are written to $PUSHED; when it fails, a push line under the given card (the last one landed)
@@ -90,8 +90,8 @@ pushone() { # <card> <issue> [<commit>]
       git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt"; git worktree prune
       packget push.env e && mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$e") \
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
-        && slot_pool && slot_box && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
-        && "${SLOT_BOX[@]}" env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push "$REMOTE" "$sha:refs/heads/$to"
+        && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
+        && env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push "$REMOTE" "$sha:refs/heads/$to"
     } 2>&1 < /dev/null 8>&-) && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
     # remote's commits in a merge commit and is pushed again, once, in this same turn. The worktree stays until they

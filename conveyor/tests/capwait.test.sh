@@ -31,8 +31,8 @@ cwcounts() { loop health | jq -r '"\(.building) \(.waitingCount)"'; }
 # The holder goes before the loop is waited for: a card that waits on it ends only once it is gone, so the loop's stop
 # waited out the holder's 300 s, the case's whole limit (its file's `# timeout:` line).
 capwaitend() { loop control stop >/dev/null; cwfree; wait "$lp" 2>/dev/null; }
-# CPU load from other processes: two busy loops beside the loop, in the case's box (one core, where the runner has
-# one, slot_box), so the engine gets about a third of it. Started before any gate, so no loop holds a gate's lock.
+# CPU load from other processes: two busy loops beside the loop, on the case's slot core (slot_mine, where the runner
+# pins it), so the engine gets about a third of it. Started before any gate, so no loop holds a gate's lock.
 cwload() { local i; cwloads=(); for i in 1 2; do ( while :; do :; done ) & cwloads+=("$!"); done; }
 cwunload() { kill "${cwloads[@]}" 2>/dev/null; wait "${cwloads[@]}" 2>/dev/null; cwloads=(); }
 

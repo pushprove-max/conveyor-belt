@@ -294,17 +294,11 @@ starts without a slot of their own share that one core, and one that cannot be p
 controls, it sets `CONVEYOR_TEST_ONESLOT`: `slot_take` then gives each worker the run's own slot, one at a time, so
 the controls and the failing tests use the same core.
 
-A slot is also a hard limit. On Linux, each test file a test step runs, and each case of the engine's
-runner, starts in its slot's box: a scope of the user's systemd (`systemd-run --user --scope`) with `CPUQuota=100%`,
-one core, and `MemoryMax` the machine's memory over the pool's slots, so a test that starts more processes or widens
-its cores gets one core's time and no more. A runner gets the words that start a command so from `slot_box` (after
-`slot_pool`: `"${SLOT_BOX[@]}" <command>`). Where
-no such scope can be made (macOS, no user systemd, a systemd without `--expand-environment`), nothing is boxed; a box is never made inside another. A card with no slot waits before its tests start, and the Board
-says "waiting for a test slot (n of N in use)". The wait does not count against its test timeout. Builds and reviews
-take no slot.
+A card with no slot waits before its tests start, and the Board says "waiting for a test slot (n of N in use)". The
+wait does not count against its test timeout. Builds and reviews take no slot.
 
 Pushes go first. The push step (a landed card's push, and Push landed's) runs `git push`, and so the project's
-pre-push hook, holding a test slot, on the slot's core and in its box, as a test unit runs. A push still waits while every slot is held, but it takes the next free slot before any test unit that
+pre-push hook, holding a test slot, on the slot's core, as a test unit runs. A push still waits while every slot is held, but it takes the next free slot before any test unit that
 waits (`slot_first`): a unit that takes a slot while a push waits gives it back. The push's time limit starts when it
 has its slot.
 

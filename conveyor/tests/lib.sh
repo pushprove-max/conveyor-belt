@@ -16,8 +16,7 @@ T=$(mktemp -d); trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT # u+w: the installs a
 # cases' environment below names a host file of their own. A loop a case runs is told the case's slot
 # (CONVEYOR_TEST_SLOT, run_case) and this pool (CONVEYOR_TEST_POOL, read where the case's host file names no pool of
 # its own), and runs its tests on that slot, taking none: never waiting for one of the machine's slots.
-# Each case runs in its slot's box (slot_box, run_case): one core and its share of the memory, however many it starts.
-. "$SRC/lib/slots.sh"; slot_pool || exit 1; slot_box
+. "$SRC/lib/slots.sh"; slot_pool || exit 1
 export CONVEYOR_TEST_POOL=$SLOT_N:$SLOT_DIR
 # A run kept to one slot (CONVEYOR_TEST_ONESLOT) keeps this runner's cases on its slot (slot_pool read it): the loops
 # the cases run take slots as any other run does.
@@ -266,8 +265,6 @@ landed() { # <issue> [follow-ups json]: the landed line of an earlier card for t
 # case's output, its ok line included, is printed whole under one lock when it ends, so two cases never interleave,
 # and a red case hides no later one. The slot the runner took for the case is held by this process, the case and all
 # the case starts, on the slot's core (slot_mine): it comes back when the last of them has ended, each however it ends.
-# The case's keeper, and all the case starts, runs in the slot's box (slot_box): no more than one core and the slot's
-# share of the memory, though it starts more processes than that or moves them off the slot's core.
 # A process the case leaves that closed the slot's descriptor still keeps the slot: a process started before the case
 # holds it until the case and all it left have ended (slot_watch), so it does whenever and however this process ends.
 # The case runs in a shell of its own, given this one's variables, functions and options down a pipe.
@@ -306,7 +303,7 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
   exec {s}< <(declare -p; declare -f; set +o)
   t0=${EPOCHREALTIME//[!0-9]/}; times > "$T/$CASE.cpu"
   # 2>/dev/null: the variables that are the shell's own, and read-only, refuse to be set again.
-  set -m; ( set +m; echo "$BASHPID" >&"$w"; exec "${SLOT_BOX[@]}" "${sub[@]}" bash -c '. "/dev/fd/$1" 2>/dev/null; eval "exec $1<&-"; case_keep' "$0" "$s" ) > "$T/$CASE.keeper" 2>&1 < /dev/null & k=$!; set +m
+  set -m; ( set +m; echo "$BASHPID" >&"$w"; exec "${sub[@]}" bash -c '. "/dev/fd/$1" 2>/dev/null; eval "exec $1<&-"; case_keep' "$0" "$s" ) > "$T/$CASE.keeper" 2>&1 < /dev/null & k=$!; set +m
   exec {s}<&-
   wait "$k"
   # Its own time in microseconds, its keeper's start to its end, and this worker's children's user and system times
