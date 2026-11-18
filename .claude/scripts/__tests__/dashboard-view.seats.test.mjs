@@ -200,6 +200,21 @@ test('Save with no edit does not clear a saved model that is no longer allowed',
   assert.deepEqual(w.posts.splice(0), [], 'nothing is sent');
 });
 
+// Bug: on that form, choosing another model and then Project's, Save said "Nothing changed." and kept the saved model.
+test('an explicit choice of Project\'s clears a saved model that is no longer allowed', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.cards = { 20: { builder: { model: 'claude-gone-9', effort: 'high' } } };
+  deliver(w, d);
+  act(bcard(w, 20), 'seats').click();
+  const form = () => bcard(w, 20).querySelector('.board-seats-form');
+  setTo(w, act(form(), 'seat-model-builder'), 'claude-fable-5-2');
+  setTo(w, act(form(), 'seat-model-builder'), '');
+  act(form(), 'seats-save').click();
+  await settled();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'card', args: ['20', 'builder', 'clear'], repo: 'sample' }]);
+});
+
 // Bug: a queue card showed the raw "next: 1".
 test('queue cards read Next in the queue, then #2 in the queue', () => {
   const w = boot({ tab: 'control' });

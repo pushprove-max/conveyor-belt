@@ -764,9 +764,10 @@
       const opt = (v, text) => { const o = h('option', null, text); o.value = v; return o; };
       m.append(opt('', `Project's: ${p && p.model ? seatText(p) : 'not set'}`), ...issues(p && p.choices).map((c) => opt(c, S.ctx.modelName(c))));
       m.value = d[k].model;
-      // A saved model no longer in the allowed list matches no option: show the project's. The base follows, so Save
-      // does not read this as an edit and clear the saved setting.
-      if (m.selectedIndex < 0) { m.value = ''; d[k].model = ''; S.seats.base[k].model = ''; }
+      // A saved model no longer in the allowed list matches no option: show the project's. The seat is marked stale
+      // until the model menu changes, so Save does not read this as an edit and clear the saved setting; the base keeps
+      // the saved model, so a later explicit choice of Project's still clears it.
+      if (m.selectedIndex < 0) { m.value = ''; d[k].model = ''; d[k].stale = true; }
       m.title = m.options[m.selectedIndex].textContent;
       const fill = () => {
         e.replaceChildren(opt('', 'Project\'s effort'), ...effortsOf(k, d[k].model).map((x) => opt(x, x)));
@@ -776,7 +777,7 @@
         e.value = d[k].effort;
       };
       fill();
-      m.addEventListener('change', () => { d[k].model = m.value; m.title = m.options[m.selectedIndex].textContent; fill(); });
+      m.addEventListener('change', () => { d[k].model = m.value; d[k].stale = false; m.title = m.options[m.selectedIndex].textContent; fill(); });
       e.addEventListener('change', () => { d[k].effort = e.value; });
       eff.append(h('span', 'board-label', 'Effort'), e);
       row.append(h('span', 'board-label', name), m, eff, same);
@@ -784,7 +785,7 @@
     });
     f.append(button('Save', 'btn-quiet', 'seats-save', `Save the settings of #${n}`, () => {
       const was = S.seats.base;
-      const changes = SEATS.map(([k]) => k).filter((k) => d[k].model !== was[k].model || (d[k].model && d[k].effort !== was[k].effort))
+      const changes = SEATS.map(([k]) => k).filter((k) => !d[k].stale && (d[k].model !== was[k].model ||(d[k].model && d[k].effort !== was[k].effort)))
         .map((k) => (d[k].model ? [String(n), k, d[k].model].concat(d[k].effort ? [d[k].effort] : []) : [String(n), k, 'clear']));
       if (!changes.length) { say('Nothing changed.'); return; }
       sendAll(changes, S.seats.repo).then((ok) => { if (ok) S.seats = null; });
