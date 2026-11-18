@@ -45,8 +45,14 @@ its own, and the Board's Rules tab sets them in its Judge row.
   the test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run
   before each push, and the whole suite runs only in a release
   ([Which tests a card runs](../docs/configuration.md#whole-suite-in-a-card)). On, a card runs its tests as before.
+- `split`: the rule Split large issues, `off`, `shadow` or `on` (`conveyor.sh control rules split=<off|shadow|on>`).
+  Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
+  one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
+  `split` line, and the card builds the issue whole. On files the slices as follow-ups (`Follow-up of #N`) and holds
+  the issue as their umbrella; Conveyor closes it when the last slice lands or is already done on main. Off checks no issue
+  ([Split large issues](../docs/configuration.md#split-large-issues)).
 
-Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off, and `split`, which is `shadow`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule as on.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's

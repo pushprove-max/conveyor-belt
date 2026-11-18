@@ -231,12 +231,13 @@ overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL 
 # One answer from a model with no tools: the builder's CLI on the last model the pack's models.allowed lists for that
 # CLI (none listed, the builder's own), at <effort>, <seconds> at most, run in <folder> (a scratch folder the caller
 # removes), the answer left in <folder>/answer. Returns the CLI's exit (124: the timeout); when no CLI could be
-# started, 1 with why on stdout (nothing else is printed there).
+# started, 1 with why on stdout (nothing else is printed there). With ASKSEAT=judge it runs on the judge's seat, its
+# own CLI and model (the split check, lib/slices.sh).
 askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
   local d=$1 p=$5 s a agent model acct rc
-  s=$(seat builder "$4") && jqget "$s" agent agent model model && modelsallowed a \
-    || { echo "no builder model"; return 1; }
-  model=$(jq -r --arg g "$agent" --arg m "$model" "$OKMODELS"'okmodels("builder")[$g] // [] | last // $m' <<<"$a") || model=''
+  s=$(seat "${ASKSEAT:-builder}" "$4") && jqget "$s" agent agent model model && modelsallowed a \
+    || { echo "no ${ASKSEAT:-builder} model"; return 1; }
+  [ -n "${ASKSEAT:-}" ] || model=$(jq -r --arg g "$agent" --arg m "$model" "$OKMODELS"'okmodels("builder")[$g] // [] | last // $m' <<<"$a") || model=''
   case $agent in
     claude) acct=$(acctenv "$(ctlacct "$4")") || { echo "$acct"; return 1; }
       (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \

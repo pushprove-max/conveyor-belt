@@ -76,7 +76,8 @@
 #   end), earlier (those cards, the first first: card, start, end, sec, reason, track, so the step view shows them)
 #   and totalSec (priorSec and its own pick-up to its end; null while it is open: the view adds the time since
 #   pickedAt). The time an issue sat queued is in none of them. stalls: how many times a build, fix, rebase or review
-#   of it made no progress for STUCK seconds and was ended (watch()); the card detail shows it.
+#   of it made no progress for STUCK seconds and was ended (watch()); the card detail shows it. split: what the rule
+#   Split large issues made of its issue ({result, slices, filed}, rows.jq), null when the rule did not check it.
 # repo: the project's name (REPO), as health names it too; health's room is the card the machine holds back (room()),
 #   and its machine the machine's settings (mhost(): {cap, paused}, {unread: true} for a host file that
 #   does not read, null when it sets none), the same for every project of the machine, and
@@ -700,7 +701,9 @@ snapshot() (
             | (if $why == [] and $e == null and $isfu then [{kind: "parent"}] elif $why == [] and $e == null then [{kind: "other"}] else $why end) as $why
             | select(($i.number | IN($queued[])) | not)
             | {issue: $i.number, title: ($i.title // "")[0:200], priority: level($l; $prio), followup: $isfu,
-               labels: $l, created: $i.createdAt, parent: (($i.body // "") | capture("^Follow-up to #(?<n>[0-9]+)") | .n | tonumber) // null, reasons: $why}] as $hl
+               labels: $l, created: $i.createdAt, parent: (($i.body // "") | capture("^Follow-up to #(?<n>[0-9]+)") | .n | tonumber) // null, reasons: $why,
+               # The slices of a split issue (the rule Split large issues On): it is their umbrella while it is open.
+               umbrella: ([$c[] | select(.issue == $i.number and (.x.split.filed | type) == "array")] | last | .x.split.filed // null)}] as $hl
         | ($hl | map(select((.reasons | map(.kind) | unique) == ["you"])) | length) as $you
         | {count: ($open | length), held: $hl,
            issues: ([$open[] | (.labels | map(.name)) as $l | {issue: .number, title: (.title // "")[0:200], priority: level($l; $prio), labels: $l, created: .createdAt, dependsOn: (needs + farneeds)}] | sort_by(.issue)),
@@ -722,19 +725,19 @@ snapshot() (
     {time: $h.time, day: $day, repo: $h.repo,
        needsYou: {
          waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes)))
-           | {card, issue, title, sentence: ((.x.visible | select(startswith("yes: ")) | .[5:]) // (.reason | ltrimstr($yes))), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, stalls: .x.stalls,
+           | {card, issue, title, sentence: ((.x.visible | select(startswith("yes: ")) | .[5:]) // (.reason | ltrimstr($yes))), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls,
               files: (($allp[0][.card] // .x.paths) as $p | {count: (.x.diff.files // ($p | if . == null then null else length end)), paths: $p})}
              # A follow-up whose change goes beyond the yes up its chain: what goes beyond, as its reviewer said (the ask).
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],
-         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not)) | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, stalls: .x.stalls} + times]
+         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not)) | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls} + times]
            # A push that failed again on its next try needs the owner, until a push works: one item, under the card
            # of the last landing not pushed, naming every card not pushed; its tail is what git and the hook said.
            # One that failed its check needs the owner at once: it is not tried again until main moves (checkheld()).
            + [($h.pushError.kind == "check") as $chk | select($h.pushFails >= 2 or $chk) | $h.unpushed as $u | $c[] | select(.card == $u[-1].card)
               | {card, issue, title, reason: ((if $chk then "push blocked: \($h.pushError.check) failed after \($h.pushError | if .issue == 0 then .card else "#\(.issue)" end). A retry will fail too, so the push waits until a fix lands on main"
                    else "the push of main keeps failing" end) + ". Not pushed: \($u | map(if .issue == 0 then .card else "#\(.issue)" end) | join(", "))"), tail: $h.pushError.reason,
-                 since: $h.pushFailingSince, push: true, check: (if $chk then $h.pushError.check else null end), unpushed: ($u | map({card, issue})), parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen} + times],
+                 since: $h.pushFailingSince, push: true, check: (if $chk then $h.pushError.check else null end), unpushed: ($u | map({card, issue})), parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split} + times],
          before: $h.before,
          engine: $eng,
          testRules: $tr,
@@ -773,7 +776,7 @@ snapshot() (
            elif .proof then {turns: 0, lastOutputAt: null, action: (.proof.action // null), at: (.proof.at // null)} else null end),
          done: {tokens: .x.tokens, usd, reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)},
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
-         parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
+         parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
          beyond: (if $landed then null else .x.beyond end)} + times],
        queue: {next: ($next | if . == null then null else map(. + {parent: parent} + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end), holding: ($q.holding // null), skipped: ($q.skipped // null),
          waiting: ($q.waiting // null | if . == null then null else map(. + {waitsOn: [.waitsFor[] | numbers | {issue: ., state: depstate(.)}]}) end)},
@@ -789,7 +792,7 @@ snapshot() (
        forecast: forecast,
        awaitingDeploy: $built,
        landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd, reviews: .runReviews, followups: .x.followups,
-         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, stalls: .x.stalls, batch: .x.batch} + times],
+         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls, batch: .x.batch} + times],
        branches: ([$c[] | select(.x.branch != null and (.step | IN("landed", "closed")) and .x.blockedAt == null)] | group_by([.issue, .title])
          | map(max_by(.x.endAt) | {card, issue, title, step, time: .x.endAt})),
        pushedCards: [$c[] | (.x.log | map(select(.step == "pushed")) | last) as $p | select($p != null and ($p.time | day) >= $since)

@@ -14,7 +14,8 @@
 // record's landAs or else the pack's; disabled the same way for a record with no landAs), Test before a push (On or Off: the
 // record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
-// way for a record with no rules.wholeSuite), Cores kept for you (shown,
+// way for a record with no rules.wholeSuite), Split large issues (Off, Shadow or On; disabled the same way for a
+// record with no rules.split), Cores kept for you (shown,
 // not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores), one row a standing kind of
 // routine yes the Foreman takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release
@@ -267,7 +268,7 @@
   // A change in words, for the head.
   function words(action, args) {
     const a = list(args);
-    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'wholeSuite' ? 'Whole suite in a card' : k} ${o}`; }).join(', ');
+    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'wholeSuite' ? 'Whole suite in a card' : k === 'split' ? 'Split large issues' : k} ${o}`; }).join(', ');
     if (action === 'cap') return a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`;
     if (action === 'guard') return a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`;
     if (action === 'model' || action === 'reviewer') return `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
@@ -299,11 +300,12 @@
       r.rules = r.rules && typeof r.rules === 'object' ? r.rules : {};
       a.forEach((x) => {
         const [key, o] = String(x).split('=');
+        if (key === 'split') { r.rules.split = o; return; } // Split large issues keeps its word: off, shadow or on
         if (!isArea(key)) { r.rules[key] = o === 'on'; return; }
         const never = list(r.rules.never).filter((y) => y !== key);
         r.rules.never = o === 'off' ? never.concat([key]) : never;
       });
-      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'wholeSuite' ? k : 'build'];
+      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'wholeSuite' || k === 'split' ? k : 'build'];
     }
     if (action === 'cap' || action === 'guard') { r[action] = a[0] === 'off' ? null : Number(a[0]); return [r, action]; }
     if (action === 'judge' && (a[0] === 'on' || a[0] === 'off')) { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
@@ -969,6 +971,19 @@
     wOn.disabled = wOff.disabled = !wholeKnown;
     el.append(row('wholeSuite', 'Whole suite in a card', 'a card may run every test file when it cannot find the tests of its change',
       wOn, wOff, wholeKnown ? offLine(wholeOn, `a card runs only the test files it adds or changes (with none, 5 linked to its change)${checkOn ? ', the test files linked to the landings run before each push,' : ''} and the whole suite runs only in a release`) : newer(wholeKnown)));
+    // Split large issues: Shadow (the default) records what the Judge would split a large issue into, and builds it
+    // whole; On files the slices as follow-ups and holds the issue as their umbrella; Off checks nothing. An engine whose
+    // record has no rules.split is sent none of them. Undo sends the setting it had.
+    const splitAt = ['off', 'shadow', 'on'].includes(r.split) ? r.split : null;
+    const splitTo = (v, label) => {
+      const b = choice(label, `split-${v}`, `Split large issues: ${label.toLowerCase()}`, splitAt === v, () => { if (splitAt !== v) send('rules', [`split=${v}`], null, ['rules', [`split=${splitAt}`]]); });
+      b.disabled = splitAt === null;
+      return b;
+    };
+    el.append(row('split', 'Split large issues', 'the Judge reads a large issue before its build and says whether to build it as 2 or 3 follow-ups',
+      splitTo('off', 'Off'), splitTo('shadow', 'Shadow'), splitTo('on', 'On'),
+      splitAt === null ? newer(false) : splitAt === 'shadow' ? h('span', 'board-from rules-off', 'shadow: the verdict is recorded, and the issue is built whole')
+        : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
     // Cores kept for you: the machine's (the host file's reserveCores), shown here and set in the host file.
     const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';
     el.append(row('cores', 'Cores kept for you', 'card sessions and tests never run on these cores, for every project (the host file\'s reserveCores)',
@@ -1947,7 +1962,7 @@
   // for you) is the build machine's, not the repository's, and the pack's own setup answers stay
   // with /conveyor-belt:setup: neither is asked here.
   const ONBOARD = [
-    ['What to build', ['build', 'never']],
+    ['What to build', ['build', 'never', 'split']],
     ['Landing', ['land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite']],
     ['Models', ['builder', 'reviewer', 'judge', 'account', 'review-account']],
     ['Limits', ['cap', 'guard']],
@@ -1959,6 +1974,7 @@
   function onbHas(k, c) {
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
     if (k === 'push' || k === 'visible' || k === 'wholeSuite') return typeof r[k] === 'boolean';
+    if (k === 'split') return ['off', 'shadow', 'on'].includes(r.split);
     if (k === 'dep-guard') return typeof c.depGuard === 'boolean';
     if (k === 'land-as') return Object.prototype.hasOwnProperty.call(c, 'landAs');
     if (k === 'push-check') return typeof S.d.pushCheck === 'boolean';
@@ -1988,6 +2004,8 @@
       return ['none', steps, at({}, { never: [] })];
     }
     if (k === 'push' || k === 'visible' || k === 'wholeSuite') return ['Off', [['rules', [`${k}=off`]]], at({}, { [k]: false })];
+    // Split large issues: shadow, as control-defaults.json has it.
+    if (k === 'split') return ['Shadow', [['rules', ['split=shadow']]], at({}, { split: 'shadow' })];
     if (k === 'dep-guard') return ['On', [['dep-guard', ['on']]], at({ depGuard: true })];
     // Land as and Test before a push: the pack's value, which a record with no setting takes.
     if (k === 'land-as') { const v = landNow(null); return [v === 'pr' ? 'Pull request' : 'Main', [['land-as', [v]]], at({ landAs: null })]; }

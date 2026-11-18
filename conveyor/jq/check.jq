@@ -7,8 +7,8 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks"];
-def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split"];
+def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
   elif $k == "tokens" then .tokens | type == "object" and keys == ["claude", "codex"] and all(type == "number")
@@ -113,7 +113,18 @@ def ok: . as $r | (keys - known) == need
         and (.testedits // [] | type == "array" and all(type == "object" and keys == ["casesDeleted", "changedExpected", "file", "read", "removedAsserts", "skipsAdded", "timeoutsRaised"]
           and (.file | type == "string") and (.read | type == "boolean") and (.read as $read
           | [.removedAsserts, .changedExpected, .skipsAdded, .timeoutsRaised, .casesDeleted] | all(if $read then type == "number" else . == null end))))
-        and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"));
+        and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"))
+        # A split line (splitcheck(), lib/slices.sh): kept or split, the rule's setting, the issue's text and size,
+        # the verdict and why, the slices of a split, the issues filed for them (On), the answer that broke the rules.
+        and ((.step == "split") == (.split != null))
+        and (.split == null or ((.result | IN("kept", "split")) and (.split | type == "object"
+          and (keys - ["slices", "filed", "answer"]) == ["hash", "mode", "size", "verdict", "why"]
+          and (.mode | IN("shadow", "on")) and ([.hash, .why, .answer // ""] | all(type == "string"))
+          and (.verdict | IN("under", "keep", "split", "invalid", "failed")) and ((.verdict == "split") == ($r.result == "split"))
+          and (.size | type == "object" and keys == ["areas", "chars", "doneWhen", "files"] and all(type == "number"))
+          and (.slices // [] | type == "array" and all(type == "object" and keys == ["covers", "dependsOn", "doneWhen", "title"] and (.title | type == "string")
+            and ([.covers, .dependsOn] | all(type == "array" and all(type == "number"))) and (.doneWhen | type == "array" and all(type == "string"))))
+          and (.filed // [] | type == "array" and all(type == "number")))));
 def good: try ok catch false;
 # The field refused: one the list does not know, then a required one missing, then the first other field whose removal
 # makes the record pass, then the first required one whose own test fails; else the step, whose fields together fail.

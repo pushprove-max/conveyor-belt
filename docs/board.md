@@ -122,7 +122,7 @@ Click the button, then click it again. The text next to the button shows that th
 The first time the Board opens for a repository, a box asks you to set each project rule. Its title is
 **Set up Conveyor for <owner/repo>**. It has five steps, and a bar at the top names each step:
 
-1. **What to build**: Build and Never build.
+1. **What to build**: Build, Never build and Split large issues.
 2. **Landing**: Land as, Push when a card lands, Test before a push, Dependency guard, New issues start in and Whole
    suite in a card.
 3. **Models**: Builder, Reviewer, Judge, Account and Review account.
@@ -224,6 +224,11 @@ landings since the last push, and a file that fails holds the push. Off, a push 
 "off: a push runs no test first". The switch shows the pack's `push.check` (on in a new project) until you change it
 here. Your change goes in the control record and wins over the pack
 ([Which tests a card runs](configuration.md#whole-suite-in-a-card)).
+
+**Split large issues** has three settings per project: Off, Shadow and On. Shadow is the default. Shadow records what
+the Judge would split a large issue into, and builds the issue whole. The tab says "shadow: the verdict is recorded,
+and the issue is built whole". On files the slices as follow-ups and holds the issue as their umbrella until the last
+slice lands or is already done on main. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
 ## Held issues and dependencies
 

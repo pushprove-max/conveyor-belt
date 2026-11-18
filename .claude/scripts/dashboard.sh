@@ -118,7 +118,8 @@
 #           track has it), waiting
 #           and blocked (Needs you; a blocked card with its track and reviews), landed (today: the newest the snapshot
 #           keeps; today is {landed, usd}, every card of the day counted and its usd added up, null when one has none), each card with doneWhen (its last Done-when check, {items, met,
-#           failed}, or null) and stalls (how many times a step of it made no progress and was ended; 0 for none), and open (every open issue, as the snapshot's open: count,
+#           failed}, or null), split (what the rule Split large issues made of its issue, {result, slices, filed}, or
+#           null) and stalls (how many times a step of it made no progress and was ended; 0 for none), and open (every open issue, as the snapshot's open: count,
 #           split {queued, you, labelOrRule, belt}, held, each with its reasons, and issues, every open issue with its
 #           labels and dependsOn, the numbers its Depends on: lines name; null when GitHub did not list them),
 #           unpushed (the landed cards whose commits origin lacks, oldest first, each with since; null from a snapshot
@@ -690,12 +691,12 @@ PANELS_JQ='
        # A card that landed on an earlier day and is still on the belt (its push or the close of its issue has not
        # gone through) is in Building with its Push step: Landed today holds only the cards of this day.
        building: [$s.belt[] | select((.landed != true and .step != "review") or (.landed == true and (.card as $c | $today | index($c) | not)))
-         | {card, issue, name: (.name // null), title, step, waitsOn: (.waitsOn // null), gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, pickedAt: (.pickedAt // null), files: (.track.files // null), tests: (.track.tests // null), usd, reading, reason: (.track.reason // null), stays: stays, doneWhen: (.doneWhen // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
-       review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, name: (.name // null), title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, reading, stays: stays, doneWhen: (.doneWhen // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
-       waiting: [$s.needsYou.waiting[] | {card, issue, name: (.name // null), title, sentence, since, doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
+         | {card, issue, name: (.name // null), title, step, waitsOn: (.waitsOn // null), gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, pickedAt: (.pickedAt // null), files: (.track.files // null), tests: (.track.tests // null), usd, reading, reason: (.track.reason // null), stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
+       review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, name: (.name // null), title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, reading, stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
+       waiting: [$s.needsYou.waiting[] | {card, issue, name: (.name // null), title, sentence, since, doneWhen: (.doneWhen // null), split: (.split // null), stalls: (.stalls // 0)}] | few($r),
        # Its track and reviews too: the card leads with why it failed (the tests that failed, the NO-GO reviews), as in Needs you.
-       blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, reason, tail, since, track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
-       landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), stalls: (.stalls // 0)}] | few($r),
+       blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, reason, tail, since, track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), split: (.split // null), stalls: (.stalls // 0)}] | few($r),
+       landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), split: (.split // null), stalls: (.stalls // 0)}] | few($r),
        today: {landed: $s.landedCount, usd: $s.landedUsd},
        unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, name: (.name // null), since}) | few($r) end), fullTest: ($s.fullTest // null),
        open: openOf($r)};
@@ -830,7 +831,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

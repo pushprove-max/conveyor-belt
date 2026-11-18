@@ -340,6 +340,18 @@
         "wording": { "description": "A file of the project, from its checkout's root, holding the wording /conveyor-belt:review gives Codex, in place of the plugin's conveyor/rules/review.md: a `# adversarial` section and a `# review` section (conveyor.sh wording).", "type": "string", "minLength": 1 }
       }
     },
+    "split": {
+      "description": "The rule Split large issues (the control record's rules.split, shadow or on): the judge is asked whether to split a picked issue only when the issue reaches one of these sizes. An issue under all of them is kept whole with no model call.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "doneWhen": { "description": "The items of the issue's Done when section.", "type": "integer", "minimum": 1, "default": 6 },
+        "files": { "description": "The different file paths the issue names.", "type": "integer", "minimum": 1, "default": 8 },
+        "areas": { "description": "The different area labels the issue has or names (labels.areaPrefix and a name).", "type": "integer", "minimum": 1, "default": 3 },
+        "chars": { "description": "The characters of the issue's title and body.", "type": "integer", "minimum": 1, "default": 6000 }
+      }
+    },
     "auto": {
       "description": "/conveyor-belt:auto, where the Foreman decides the owner's open decisions for them (conveyor.sh auto).",
       "type": "object",

@@ -232,6 +232,43 @@ that, Conveyor stops the run at once, with every process that the run started. T
 a reason of the same kind. When `test.fileCommand` runs the files, the reason names the file that ran the others. The
 check of a bug card on main's code follows the same rule. The full suite of a release has no such limit.
 
+## Split large issues
+
+The rule **Split large issues** on the Rules tab sets what Conveyor does with a large issue before it builds it. It
+has three settings: Off, Shadow and On. Shadow is the default. `conveyor.sh control rules split=off`, `split=shadow`
+or `split=on` also sets it.
+
+Conveyor checks an issue one time, when it picks the issue and before it makes the card's worktree. It checks the
+issue again only after you edit its title or body. It does not check follow-ups, the slices of a split issue, or fix
+cards that have no issue.
+
+First, code measures the issue: the items of its Done when section, the file paths and the area labels that it names,
+and its length. The limits are `split.doneWhen`, `split.files`, `split.areas` and `split.chars` in
+`.conveyor/project.json`. When the issue is under all of them, Conveyor keeps it whole and asks no model.
+
+When the issue reaches one limit, Conveyor asks the judge (Judge on the Rules tab) one time. The judge gets the issue
+and the files that it names, as they are on main. It answers keep, or split into 2 or 3 slices:
+
+- Each slice has a title, Done-when items of its own and the Done-when items of the issue that it covers.
+- Each Done-when item of the issue is in exactly one slice.
+- Each slice is a complete change that works alone, never half a feature.
+- A slice that changes the same code as an earlier slice gets a `Depends on:` line for that slice.
+
+When the answer breaks one of these rules, or the call fails, Conveyor keeps the issue whole. The card's `split` line
+records the verdict, the slices and the reason.
+
+- **Off**: Conveyor checks no issue.
+- **Shadow**: the card's `split` line records the verdict and the slices, and Conveyor builds the issue as one card.
+  The card on the Board shows "Would have split into N".
+- **On**: Conveyor files each slice as a follow-up of the issue: it has the follow-up label, and its body starts with
+  `Follow-up of #N`. The slices of a queued issue go in the queue. The slices of a held issue are held. The issue
+  becomes their umbrella: Conveyor holds it and does not build it, and adds a comment that names the slice for each
+  Done-when item. Held on the Board names its slices. Conveyor closes the issue when the last slice lands, or
+  closes because main already does what it asks.
+
+The Health panel shows the cards that Conveyor checked while the rule was Shadow or On: how many it kept and how many
+would split, and the first-review GO rate and the fix rounds of each group.
+
 ## The project's checks
 
 Set `test.checkCommand` in `.conveyor/project.json` to a command that runs your project's checks, for example a lint
@@ -343,7 +380,8 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - the number of cards at once (`conveyor.sh control cap`, or Cards at once on the Rules tab),
 - the usage at which no new card starts,
 - the builder, reviewer and judge, each a CLI, a model and an effort,
-- the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card and the dependency guard,
+- the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card, split large issues and the
+  dependency guard,
 - where new issues start,
 - Land as: `main` or `pr` (`conveyor.sh control land-as main|pr`, or Land as on the Rules tab; [Land
   as](#land-as)),

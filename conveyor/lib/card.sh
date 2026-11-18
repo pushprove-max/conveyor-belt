@@ -3,6 +3,9 @@
 # ends; nothing waits between a line and the next step, which is how cards() names the step in progress.
 # With a branch and its tip (land-branch) the card skips the build: that commit is merged into the worktree, staged
 # and uncommitted, in place of a session's work. Issue 0 is a branch that names no issue: branchissue() stands in.
+# Before the worktree, the rule Split large issues checks the card's issue (splitcheck(), lib/slices.sh): an issue it
+# splits ends its card there, closed, its slices filed.
+. "$HERE/lib/slices.sh" || exit 1
 began() { rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"; record "$1" "$2" start ok "{\"of\":\"$3\"}"; } # <card> <issue> <what begins>
 # A main-red fix card (issue 0, no branch): a case found failing on its commit while it runs (mainred()) joins its
 # brief. card() calls this right before each session, review, judge, settle() and land, as a case can come at any time
@@ -31,6 +34,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' # kw: keptway()'s answer for a kept patch
+  [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }

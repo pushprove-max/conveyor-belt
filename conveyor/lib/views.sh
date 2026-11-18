@@ -171,7 +171,8 @@ cards() {
 # {since, sha}, while the loop's push job runs, else null; a landing during it waits for the next push); gh (signed in); diskFreeKb (free space
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
-# untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; report: the
+# untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; split (SPLITM,
+# below): the cards the rule Split large issues checked, kept and would split, with their first reviews; report: the
 # pack's test.report ({runner, format, path, env, args, option}: the runner setup found and how its times are read), null with
 # none; routes: each
 # Claude route, subscription and proxy, with its state (routesnow()); quarantined (line, field, time): each line of the
@@ -248,6 +249,17 @@ aways() { # each card that gave way (giveway()): {to: the issue it gave way to, 
 UNTIMED='def untimed: [.[] | select(.step == "test" and (.result | IN("pass", "fail")) and .reused != true and (.refused | type) != "string"
     and .ended != "nothing selected" and (.selected.files // 1) > 0)] | .[-5:]
   | if length > 0 and all(.[]; .times | type != "object") then length else 0 end;'
+# split (on the records and the retried lines): the cards the rule Split large issues checked (a split line, while it
+# was shadow or on), for the Health view: kept (result kept) and wouldSplit (result split, built whole: in shadow, or
+# slices that could not be filed), each {cards, reviewed (with a first review that said GO or NO-GO), go (that first
+# review said GO), fixes (the fix lines of the reviewed ones)}, and split: the issues split into slices and not built
+# (On). null when no card was checked.
+SPLITM='def splitm($all): [$all | group_by(.card)[] | select(any(.step == "split"))
+    | {r: (map(select(.step == "split")) | last | .result), built: any(.step == "worktree"),
+       first: (map(select(.step == "review" and (.result | IN("GO", "NO-GO")))) | first | .result), fixes: (map(select(.step == "fix")) | length)}]
+  | def m: {cards: length, reviewed: (map(select(.first != null)) | length), go: (map(select(.first == "GO")) | length), fixes: (map(select(.first != null) | .fixes) | add // 0)};
+    if . == [] then null else {kept: (map(select(.r == "kept")) | m), wouldSplit: (map(select(.r == "split" and .built)) | m),
+      split: (map(select(.r == "split" and (.built | not))) | length)} end;'
 # What health reads of each line of the records (linesum(), lib/records.sh): every field it reads below, the cycles
 # (DEPS) and the issues before their build (SEE) take of a line, and none other: a line's tail, review and token counts
 # were most of the bytes it read. A test line's times only as whether they are an object (untimed).
@@ -313,7 +325,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
+    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED$SPLITM"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
@@ -379,7 +391,7 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed, report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null)}
+       untimed: untimed, split: splitm([.[], $old[]]), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"
   rc=$?; rm -rf "$hd"; return $rc
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: repoUrl (its repository's https address, else null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
+// record: repoUrl (its repository's https address, else null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -169,6 +169,16 @@ window.DASH_APP.panel({
           `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times${rp ? `; the test command runs ${rp.runner}, and Conveyor cannot read its output` : ''}`).next = rp
           ? `Add the report option ${rp.option} to the test command, then run setup again: Conveyor reads each test file's times from that report. The section "Test file times" in conveyor/README.md tells more.`
           : 'Add them to the test command: the section "Test file times" in conveyor/README.md tells how.';
+      }
+      // The cards the rule Split large issues checked (split: {kept, wouldSplit, split}; conveyor/lib/views.sh SPLITM):
+      // how many it kept and would split, and the first-review GO rate and fix rounds of each, side by side.
+      const sp = r.split && typeof r.split === 'object' ? r.split : null;
+      if (sp) {
+        const grp = (g) => (g && typeof g === 'object' && typeof g.cards === 'number' ? g : { cards: 0, reviewed: 0, go: 0, fixes: 0 });
+        const k = grp(sp.kept), w = grp(sp.wouldSplit), n = typeof sp.split === 'number' ? sp.split : 0;
+        const rate = (g) => (g.reviewed ? `first-review GO ${Math.round((g.go / g.reviewed) * 100)}%, ${(g.fixes / g.reviewed).toFixed(2)} fix rounds` : 'no review yet');
+        check(`Split check${of}`, ctx.chip(`${k.cards + w.cards + n} checked`, 'ok'),
+          `kept ${k.cards} (${rate(k)}); would split ${w.cards} (${rate(w)})${n ? `; split into slices ${n}` : ''}`);
       }
       // The card records' lines the record check set aside (quarantined: [{line, field, time}]; conveyor/lib/views.sh
       // check()): the loop reads on without them, and the owner decides what each was.

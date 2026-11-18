@@ -399,6 +399,8 @@ run() { # [max-cards] [serve]
     [ "$asking" != 1 ] || [ -z "$issues" ] || approved "$issues"
     # So is a card blocked by a session that never began its work, once a check session starts (startagain()).
     [ "$asking" != 1 ] || [ -z "$issues" ] || startagain "$issues"
+    # An umbrella of a split issue whose slices have all landed or are already done on main is closed (umbrellas(), lib/slices.sh).
+    [ "$asking" != 1 ] || [ -z "$issues" ] || umbrellas "$issues"
     # The sample of the minute, and while a card is in progress a weekly limit reading (reading() asks at
     # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks
     # GitHub for the queue, and a job of the loop's would count as a card).

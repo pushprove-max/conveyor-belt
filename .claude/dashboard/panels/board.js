@@ -700,6 +700,9 @@
       if (col === 'queue' && typeof item.room === 'string' && item.room) tags.append(ctx.chip(item.room, 'warn'));
       if (tags.firstChild) el.append(tags);
       if (num(item.next) !== null) el.append(h('p', 'board-from', `next: ${item.next}`));
+      // A split issue (the rule Split large issues On) is held as the umbrella of its slices until each one lands or is already done on main.
+      const um = issues(item.umbrella).filter((x) => num(x) !== null);
+      if (um.length) el.append(h('p', 'board-from board-umbrella', `Umbrella of ${um.map((x) => `#${x}`).join(', ')}: not built itself, and closed when they land or are already done on main`));
       if (S.released.has(item.issue) && waitsOf(item).length && !(ctl() && issues(ctl().held).includes(item.issue))) {
         const n = h('p', 'board-from', `Released from hold. Still waits on ${waitsOf(item).map((x) => `#${x}`).join(', ')}.`);
         n.setAttribute('role', 'status');
@@ -733,9 +736,9 @@
       needs(el, item, item.waiting);
     } else {
       const r = num(item.reviews);
-      el.append(h('p', 'row-meta', item.step === 'closed' ? 'already fixed' : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${ctx.money(item.usd)}`));
+      el.append(h('p', 'row-meta', item.step === 'closed' ? (splitFiled(item).length ? 'split, not built' : 'already fixed') : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${ctx.money(item.usd)}`));
     }
-    if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); }
+    if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); splitNote(el, item); }
     return el;
   }
   // The cards of one batch (batch: the cards that landed together, itself among them) are one landing: its cards are
@@ -774,6 +777,14 @@
   function stalls(el, item) {
     const n = num(item.stalls);
     if (n) el.append(S.ctx.h('p', 'board-from board-stalls', `Stalled ${n === 1 ? 'once' : `${n} times`}: ended for no progress`));
+  }
+  // What the rule Split large issues made of the card's issue (split {result, slices, filed}): with the rule On, the
+  // follow-ups it was split into; in shadow, how many slices the judge would have made. A kept issue shows nothing.
+  function splitFiled(item) { return issues(item.split && item.split.filed).filter((x) => num(x) !== null); }
+  function splitNote(el, item) {
+    const s = item.split, f = splitFiled(item), n = num(s && s.slices);
+    if (!s || s.result !== 'split') return;
+    el.append(S.ctx.h('p', 'board-from board-split', f.length ? `Split into ${f.map((x) => `#${x}`).join(', ')}` : `Would have split into ${n}`));
   }
   // ---- every column filtered by priority, area and label, and sorted, the choice kept in the address ----
   // A card's priority and labels are its own, else its open issue's (open.issues). A card whose issue is closed
