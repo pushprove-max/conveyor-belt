@@ -53,3 +53,30 @@ t_stdbkept() {
   [ -z "$(stdb ask lines cards; stdb ask lines declined; stdb ask issue retried 3; turncards)" ] && [ "$(wc -l < "$s/calls")" = "$n" ] \
     || fail "an empty or missing file's lines were not none, or were asked of the database: $(turncards), $(wc -l < "$s/calls") calls, not $n"
 }
+
+# Bug it catches (issue 354): a reader of the card records that stops early (a jq given a bad --argjson stops before
+# it reads; head) made the writer's printf say "write error: Broken pipe" in the service's log, where SIGPIPE is
+# ignored (systemd's default), many lines a second. Read through both writers: turncards' kept answer and stdb's.
+t_stdbpipe() {
+  # shellcheck disable=SC2034 # HERE is read by stdb(), for the folder state.py is in
+  local s=$T/$CASE/st HERE=$SRC STATE i first
+  STATE=$s/cards.jsonl; mkdir -p "$s"
+  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p; /^turncards() {/p' "$SRC/lib/records.sh")"
+  # More than a pipe's buffer (64 KiB), so the writer is still writing when the reader stops.
+  for i in $(seq 1500); do printf '{"card":"c%s","issue":%s,"step":"picked","reason":"%0100d"}\n' "$i" "$i" 0; done > "$STATE"
+  first=$(head -n 1 "$STATE")
+  (
+    trap '' PIPE
+    # A pipe, as the loop's `< <(...)` readers have, but a pipeline: the shell waits for the writer's last word.
+    stdb ask lines cards | jq -rs --argjson open '' '.' > "$s/jq" 2>/dev/null
+    [ ! -s "$s/jq" ] || echo "jq with a bad --argjson gave: $(cat "$s/jq")"
+    [ "$(stdb ask lines cards | head -n 1)" = "$first" ] || echo "stdb through head did not give the first line"
+    stdb ask lines cards > /dev/null # kept in this shell: turncards gives its kept answer
+    [ -n "${ASKED_K[lines cards ]:-}" ] || echo "the card records were not kept"
+    turncards | jq -rs --argjson open '' '.' > "$s/jq" 2>/dev/null
+    [ ! -s "$s/jq" ] || echo "jq with a bad --argjson gave: $(cat "$s/jq")"
+    [ "$(turncards | head -n 1)" = "$first" ] || echo "turncards through head did not give the first line"
+  ) > "$s/out" 2> "$s/err"
+  [ ! -s "$s/out" ] || fail "an early-closing reader got another result: $(cat "$s/out")"
+  [ ! -s "$s/err" ] || fail "an early-closing reader of the card records left this on stderr: $(head -c 400 "$s/err")"
+}

@@ -56,18 +56,20 @@ stdb() {
       issue:4|tail:4) [[ $4 =~ ^[0-9]+$ ]] && { unset 'ASKED_K[$q]' 'ASKED_V[$q]'; return 0; } ;; esac
   fi
   if [ "$k" != "${ASKED_K[$q]:-}" ]; then
-    v=$(python3 -S "$HERE/state.py" "${STATE%/*}" "$@" && echo .) || { rc=$?; unset 'ASKED_K[$q]' 'ASKED_V[$q]'; printf '%s' "$v"; return "$rc"; }
+    v=$(python3 -S "$HERE/state.py" "${STATE%/*}" "$@" && echo .) || { rc=$?; unset 'ASKED_K[$q]' 'ASKED_V[$q]'; printf '%s' "$v" 2>/dev/null; return "$rc"; }
     ASKED_K[$q]=$k ASKED_V[$q]=${v%.}
   fi
-  printf '%s' "${ASKED_V[$q]}"
+  # A reader may stop before the end (a jq given a bad --argjson stops before it reads its input). The service runs
+  # with SIGPIPE ignored, so printf then says "write error: Broken pipe", and the loop's log fills with it: say nothing.
+  printf '%s' "${ASKED_V[$q]}" 2>/dev/null
 }
 # The answers the loop's turn and the cards it starts read: kept in this shell (stdb, above).
 stdbkeeps() { { stdb ask lines cards; stdb ask lines retried; stdb ask lines declined; stdb ask tail limit 400; } >/dev/null 2>&1; return 0; }
 # The card records as the loop's turn kept them (stdbkeeps, run()): read once a turn and passed on to the turn's own
 # readers (run(), reopened(), approved(), overlap(), checkheld(); only the loop calls them), as one reading for the whole turn. The
 # loop keeps them again after each line it writes in the turn, so those readers see the loop's own lines. Asked anew
-# when none are kept.
-turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_V[lines cards ]}"; else stdb ask lines cards; fi; }
+# when none are kept. A reader that stops early gets no "Broken pipe" line in the log (stdb, above).
+turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_V[lines cards ]}" 2>/dev/null; else stdb ask lines cards; fi; }
 # What the readers read (READ, READ_OLD): the state database's whole lines of the card records and of the retried
 # lines, or the copy a snapshot or another folder gave in their place. A dry pick (DRYPICK, drypick()) reads the
 # files themselves even when its folder is the state folder: the helper would write the database there.
