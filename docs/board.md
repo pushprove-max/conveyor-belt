@@ -300,8 +300,9 @@ issue number, as a link, and the issue title.
 - A card in its Test step shows how many tests have run, "142 of 205 tests", and " · 2 failed" when any failed. A test
   command gives the count when it prints `TESTRUN cases=N`, and names each case as it ends with an empty file in
   `cases/ok` or `cases/failed` of its test log folder (`conveyor/README.md`, The test step). With no case count, the
-  card shows its test files, "3 of 6 test files". When the pack sets `test.list`, the text starts with the list that
-  the run got: "changed: 7 files", or "whole suite" ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
+  card shows its test files, "3 of 6 test files". Each test file counts once. If the run ran more test files than it
+  selected, the card shows the extra files after the count, "86 of 86 test files · 15 more files than selected". When
+  the pack sets `test.list`, the text starts with the list that the run got: "changed: 7 files", or "whole suite" ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
 - A bug card shows "Proof run" on the Build step while its new tests run on main without its fix, with its test files
   run, "297 of 1161 test files". While all the test slots are in use, it shows "waiting for a test slot". No review
   runs then.

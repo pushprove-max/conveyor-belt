@@ -54,16 +54,29 @@ endall() { # <pid>
   done
   kill -KILL -- "-$1" 2>/dev/null; kill -KILL "${ps[@]}" 2>/dev/null; :
 }
-# The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote.
+# The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote;
+# run is never above of: a run that ran more test files than it selected has over too, how many more.
+# Each test file counts once, by its name (a file run again, or named in two logs, is one). A runner that prints both
+# a `-- ok|FAIL <file>` line and vitest's line for each file names it in two ways (web/src/a.test.ts and
+# src/a.test.ts, #360): of a file whose `-- ok|FAIL` lines name its test files, the vitest lines are left out.
 testprogress() { # <output file> [log...]
-  local f=$1; shift
-  cat "$f" "$@" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk -v own="$(wc -l < "$f" 2>/dev/null || echo 0)" -v logs="$#" '
+  local f=$1 x; shift
+  # Each file is read after a line of one \036, so the awk tells the output (n 1) and each log (n 2, ...) apart.
+  for x in "$f" "$@"; do printf '\n\036\n'; sed 's/\x1b\[[0-9;]*m//g' "$x" 2>/dev/null; done | awk -v logs="$#" '
+    $0 == "\036" { n++; next }
     /^test-changed: [0-9]+ web test file\(s\) selected/ { of += $2; seen = 1; next }
-    NR <= own && logs > 0 { next }
-    /^-- (ok|FAIL) / || /^ (✓|❯|×|↓) [^ ]+ \([0-9]+ tests?[ |)]/ { run++ }
+    n == 1 && logs > 0 { next }
+    /^-- (ok|FAIL) / { # the name without the padding and the times a runner may put around it (`-- ok   a.test.ts 0s`)
+      k = $0; sub(/^-- (ok|FAIL) +/, "", k); sub(/[ \r]+$/, "", k); while (sub(/ +[0-9][0-9.]*m?s$/, "", k)) ;
+      if (k != "") { named[n, k] = 1; names[n] = 1 } }
+    /^ (✓|❯|×|↓) [^ ]+ \([0-9]+ tests?[ |)]/ { vitest[n, $2] = 1 }
     /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); of += $1; seen = 1 }
     /^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); cof += $1; cseen = 1 }
-    END { printf "{\"run\":%d,\"of\":%s,\"cases\":%s}\n", run, (seen ? of + 0 : "null"), (cseen ? cof + 0 : "null") }'
+    END {
+      for (i in named) { split(i, p, SUBSEP); if (!(p[2] in ran)) { ran[p[2]] = 1; run++ } }
+      for (i in vitest) { split(i, p, SUBSEP); if (!(p[1] in names) && !(p[2] in ran)) { ran[p[2]] = 1; run++ } }
+      over = seen && run > of ? run - of : 0
+      printf "{\"run\":%d,\"of\":%s,\"cases\":%s%s}\n", (over ? of : run), (seen ? of + 0 : "null"), (cseen ? cof + 0 : "null"), (over ? ",\"over\":" over : "") }'
 }
 
 # Waits for a running step and keeps its live record (README.md) while it runs; returns the step's exit. Only
@@ -71,8 +84,9 @@ testprogress() { # <output file> [log...]
 # time. A session's tokens are those of each answer of the model, counted once (an answer is several events with one
 # id, the same usage on each); its output tokens are reported in full only when the session ends, so the reading
 # runs a little low. A test run is counted whole each time, from its output and the logs it wrote (testlogs): files
-# selected are the `TESTRUN files=N` lines and the web half's `N web test file(s) selected`, files run the
-# `-- ok|FAIL <file>` lines and vitest's line a file. A runner that also prints its log's lines is counted once.
+# selected are the `TESTRUN files=N` lines and the web half's `N web test file(s) selected`, files run the distinct
+# files the `-- ok|FAIL <file>` lines and vitest's line a file name, never more than those selected (over: how many
+# more ran; testprogress()). A runner that also prints its log's lines is counted once.
 # Its cases (tests: {done, of, failed}) are counted only when a line `TESTRUN cases=N` says how many were selected
 # (several add up), else tests is null: done and failed are the cases its runner named as ended (testdone()).
 # A test run's `progress` (which health reads beside `last`, so the Foreman calls no running test step stuck while it
@@ -132,14 +146,14 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       [ "$cs $dn" = "${size#* }" ] || st=$(jq -c '.progress = (now | todate)' <<<"$st")
       size="${now% *} $cs $dn"
       new=$(testprogress "$f" "${logs[@]}" \
-        | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: {run, of},
+        | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: ({run, of} + if .over then {over} else {} end),
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
       # A run given TEST_GIVEN test files (the rule Whole suite in a card off: a card's run and the bug-card check,
       # tests(), bugrun(); never the full test suite) that reports more (the files it says it selected, or those it
       # ran) than those and the TEST_ADDS a test command may pick for the change itself (tests()) is ended at once,
       # every process under it (#350: a card never runs the whole suite): <worktree>.wide holds that count.
-      if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run, .files.of // 0] | max' <<<"$st" 2>/dev/null) \
+      if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run + (.files.over // 0), .files.of // 0] | max' <<<"$st" 2>/dev/null) \
         && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt $((TEST_GIVEN + ${TEST_ADDS:-0})) ]; then
         echo "$wn" > "$wt.wide"; endall "$pid"
       fi

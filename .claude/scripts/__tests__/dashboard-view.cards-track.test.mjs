@@ -137,6 +137,12 @@ test('a card in its Test step shows its tests run of how many and those failed, 
   one.panels.belt.data.cards[0].track.files = { run: 1, of: 1 };
   next(w, one);
   assert.match(live(), /1 of 1 test file(?!s)/, `one file is singular: ${live()}`);
+  // Bug (#360): a run that ran more test files than it selected read "101 of 86". The engine counts it 86 of 86 with
+  // over: the extra files are said apart.
+  const over = clone(files);
+  over.panels.belt.data.cards[0].track.files = { run: 86, of: 86, over: 15 };
+  next(w, over);
+  assert.match(live(), /86 of 86 test files · 15 more files than selected/, `the extra files are their own warning: ${live()}`);
   // A build session's turns are still drawn.
   const build = full();
   build.panels.belt.data.cards[0].live = { turns: 4, lastOutputAt: iso(T0 - 4000), action: null };

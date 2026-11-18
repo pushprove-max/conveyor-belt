@@ -841,13 +841,16 @@ test('a card in its Test step draws its tests, or else its test files, in place 
     { ...BELT, live, track: track(3, { tests: { done: 3, of: 5, failed: 1 } }) },
     { ...BELT, card: 'c4', issue: 3864, live, track: track(3, { files: { run: 3, of: 6 } }) },
     { ...BELT, card: 'c5', issue: 3865, live: { ...live, turns: 4 }, track: track(0, {}) },
+    // #360: a run of more files than it selected shows them apart, not as a count above its total.
+    { ...BELT, card: 'c6', issue: 3866, live, track: track(3, { files: { run: 86, of: 86, over: 15 } }) },
   ]
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt })) })
   await start($, 'main')
   await w.clock.settle()
   const lines = (await units($)).split('\n').filter(l => l.includes('last output'))
   expect(lines.slice(0, 2).join('\n')).not.toMatch(/turn/)
-  expect(lines).toEqual(['    3 of 5 tests · 1 failed · last output 23s ago', '    3 of 6 test files · last output 23s ago', '    4 turns · last output 23s ago'])
+  expect(lines).toEqual(['    3 of 5 tests · 1 failed · last output 23s ago', '    3 of 6 test files · last output 23s ago', '    4 turns · last output 23s ago',
+    '    86 of 86 test files · 15 more files than selected · last output 23s ago'])
 })
 
 // Bug it catches (#147): /units did not say whether a card's test step ran the tests its change touched or the whole

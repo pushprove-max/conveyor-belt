@@ -578,7 +578,11 @@
       : l && l.mode === 'whole' ? `whole suite${typeof l.why === 'string' && l.why ? `: ${l.why}` : ''}` : null;
     let prog = null;
     if (c && num(c.done) && num(c.of)) prog = `${c.done} of ${c.of} tests${num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : ''}`;
-    else if (f && num(f.run)) prog = `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;
+    else if (f && num(f.run)) {
+      prog = `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;
+      // A run that ran more test files than it selected (over) says so apart, never as "N of M" with N above M.
+      if (num(f.over) && f.over > 0) prog += ` · ${f.over} more ${f.over === 1 ? 'file' : 'files'} than selected`;
+    }
     return mode && prog ? `${mode} · ${prog}` : mode || prog;
   }
   // was: the timeline this one replaces, if any: whether it and its set-up were open is kept. A timeline with a step in

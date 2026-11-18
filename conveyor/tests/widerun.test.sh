@@ -158,3 +158,14 @@ t_widehint() {
     || fail "setup did not suggest node as test.fileCommand: $(cat "$T/$CASE/node" "$T/$CASE/run.out")"
   [ ! -s "$T/$CASE/vitest" ] || fail "setup suggested a test.fileCommand for a vitest test file: $(cat "$T/$CASE/vitest")"
 }
+
+# #360. Bug it catches: the count of the files a run ran stops at the count it selected (testprogress(): run, and over
+# for the rest), so a command that said it selected 1 file and ran 12 would read as 1 to widerun(), and the check
+# would not say it ran far more than the 1 file it was given. widerun() reads the 12.
+t_widerunover() {
+  local wt=$T/$CASE/c7 i
+  mkdir -p "$wt.testlog" && : > "$wt.test"
+  { echo 'TESTRUN files=1'; for i in $(seq 1 12); do echo "-- ok t$i.test.sh"; done; } > "$wt.testlog/r"
+  [ "$( . "$SRC/lib/portable.sh"; eval "$(for g in testlogs testprogress; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done; sed -n '/^widerun() {/,/^}/p' "$SRC/lib/testrun.sh")"; widerun "$wt" 1)" = 12 ] \
+    || fail "widerun() does not read the 12 test files a run given 1 ran"
+}

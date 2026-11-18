@@ -12,7 +12,8 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # A card's test run, held open until $STUB/go, after its command <prints> and names cases in the folders of its log:
-# ok/ and failed/ for those that ended, and one still running. Waits until the live record's <field> is <want>.
+# ok/ and failed/ for those that ended, and one still running. Waits until the live record's <field> is <want> (an empty
+# <field>: no wait, for a run that is stopped, whose live record goes with it).
 # The card c7 is at its test step by its records, and the command is run and watched as its test step does it
 # (lib/testrun.sh testonce(): the engine's own watch(), on the output and logs where a card's worktree has them). A
 # whole loop run to that step cost each case about 3 s more; views.test.sh's t_live reads a real run's test step.
@@ -28,10 +29,10 @@ while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done
 EOF
   } > "$STUB/test-cmd"
   # shellcheck disable=SC2034 # LIVE is read by watch(), defined by the eval
-  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch testlogs testcases testdone testprogress; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.2
+  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch testlogs testcases testdone testprogress endall; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.2
     (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash "$STUB/test-cmd" > "$w.test" 2>&1 < /dev/null) &
     watch $! "$w.test" "$w.live" test ) > "$T/$CASE/run.out" 2>&1 & run=$!
-  wait_until "jq -e --argjson w '$3' '.$2 == \$w' '$w.live'" "cat '$w.live'" \
+  [ -z "$2" ] || wait_until "jq -e --argjson w '$3' '.$2 == \$w' '$w.live'" "cat '$w.live'" \
     || { : > "$STUB/go"; wait $run; fail "the live record's $2 is never $3: $(cat "$T/$CASE/run.out")"; }
 }
 
@@ -75,4 +76,58 @@ t_testcountnone() {
   [ "$(loop snapshot | jq -c '.belt[0].track | [has("tests"), .tests, .files]')" = '[true,null,{"run":1,"of":2}]' ] \
     || { : > "$STUB/go"; wait $run; fail "the snapshot's track with no case count: $(loop snapshot | jq -c '.belt[0].track')"; }
   : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#360): "N of M test files" with N above M. A run that selected 1 test file and ran 2 has files 1 of
+# 1 and over 1 in its live record and the snapshot's track, so the Board says the extra file apart.
+t_testcountover() {
+  countrun "$WIDER" files '{"run":1,"of":1,"over":1}'
+  [ "$(loop snapshot | jq -c '.belt[0].track.files')" = '{"run":1,"of":1,"over":1}' ] \
+    || { : > "$STUB/go"; wait $run; fail "the snapshot's track of a run wider than it selected: $(loop snapshot | jq -c '.belt[0].track')"; }
+  : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+WIDER=$'echo "TESTRUN files=1"\necho "-- ok a.test.sh"\necho "-- ok b.test.sh"'
+
+# #360, #350. Bug it catches: once run stops at of, the stop of a run given more test files than TEST_GIVEN (watch())
+# read the run above as 1 file, no more than the 1 it was given, and let it run on. It reads the 2 it ran: the run is
+# ended, and c7.wide names 2.
+t_testcountwide() {
+  TEST_GIVEN=1 countrun "$WIDER" '' ''
+  wait_until "[ -s '$T/$CASE/cards/c7.wide' ]" || { : > "$STUB/go"; wait $run; fail "a run given 1 test file that ran 2 was not stopped"; }
+  [ "$(cat "$T/$CASE/cards/c7.wide")" = 2 ] || fail "the stopped run's count is not the 2 files it ran: $(cat "$T/$CASE/cards/c7.wide")"
+  : > "$STUB/go"; wait $run; : # the stop ends the run, so its exit is that of an ended run
+}
+
+# testprogress() (lib/session.sh) over <output> and <log>... in $T/$CASE: the function itself, with no watch.
+progress() { # <output> [<log>...]
+  ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^testprogress() {/,/^}/p' "$SRC/lib/session.sh")"; cd "$T/$CASE" && testprogress "$@" )
+}
+# A run in the forms of a host project's test command, in $T/$CASE: its output (out) says 75 web test files are
+# selected; a root log of 11 files, `TESTRUN files=11` and a `-- ok   <file> <seconds>s` line each; and a vitest log
+# of 75 files, in color, each with its `== web/<file>`, vitest's ` ✓ <file> (N tests)` and its reporter's
+# `-- ok web/<file>` and `TESTRUN sec` lines.
+hostrun() {
+  local i; mkdir -p "$T/$CASE"
+  echo 'test-changed: 75 web test file(s) selected' > "$T/$CASE/out"
+  { echo 'TESTRUN files=11'; for i in $(seq 1 11); do printf -- '-- ok   test/r%d.test.ts %ds\n' "$i" "$i"; done; } > "$T/$CASE/root.log"
+  { echo 'TESTRUN files=? root=/x'; for i in $(seq 1 75); do
+      printf '== web/src/w%d.test.tsx\n \033[32m✓\033[39m src/w%d.test.tsx \033[2m(3 tests)\033[22m 12ms\n-- ok web/src/w%d.test.tsx\nTESTRUN sec\tweb/src/w%d.test.tsx\t1.20\n' "$i" "$i" "$i" "$i"
+    done; } > "$T/$CASE/web.log"
+}
+
+# Bug it catches (#360): the Test step showed "101 of 86 test files", and it climbed: each vitest file counted twice,
+# by vitest's line and by its reporter's `-- ok web/<file>` line, which names it from the repo root. A run of 11 root
+# and 75 vitest files counts 86 of 86.
+t_testcounthost() {
+  local got; hostrun; got=$(progress out root.log web.log)
+  [ "$got" = '{"run":86,"of":86,"cases":null}' ] || fail "a run of 86 test files of 86 counts: $got"
+}
+
+# Bug it catches (#360): a file named twice counted twice. Root's r1 runs again (a `-- FAIL` line, then a later
+# `-- ok` one with another time) and a second log names r2 too: still 86 of 86.
+t_testcountonce() {
+  local got; hostrun
+  printf -- '-- FAIL test/r1.test.ts 3s\n-- ok   test/r1.test.ts 1s\n' >> "$T/$CASE/root.log"; echo '-- ok test/r2.test.ts' > "$T/$CASE/again.log"
+  got=$(progress out root.log web.log again.log)
+  [ "$got" = '{"run":86,"of":86,"cases":null}' ] || fail "a file named twice counts once: $got"
 }

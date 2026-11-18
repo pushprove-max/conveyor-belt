@@ -1010,12 +1010,12 @@ filecmd() { # <the pack's test.fileCommand> [files]
   if [ "${2:-}" = files ]; then printf '%s\n' 'done <<< "${CONVEYOR_TEST_FILES:-}"'; else printf '%s\n' 'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"'; fi
   printf '%s\n' 'echo "TESTRUN files=$n" >> "$l"; exit $r'
 }
-# The test files a run of the bug-card check in <worktree> ran (testprogress(): its live record's files.run), when that
+# The test files a run of the bug-card check in <worktree> ran (testprogress(): its files.run and over), when that
 # is far more than the <n> test files it was given: over ten for each. Nothing when it ran no more.
 widerun() { # <worktree> <n>
   local logs=() r
   mapfile -t logs < <(testlogs "$1")
-  r=$(testprogress "$1.test" "${logs[@]}" | jq -r .run) && [[ $r =~ ^[0-9]+$ ]] || return 0
+  r=$(testprogress "$1.test" "${logs[@]}" | jq -r '.run + (.over // 0)') && [[ $r =~ ^[0-9]+$ ]] || return 0
   [ "$r" -le $(($2 * 10)) ] || echo "$r"
 }
 # One run of the bug-card check with the pack's command <field>, in <worktree>: given files, it runs them alone, each a
