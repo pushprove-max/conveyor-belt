@@ -439,6 +439,8 @@ EOF
   during ': > flag-x; git add flag-x; git commit -qm "flag-x"'
   out=$(loop run 2>&1)
   c7=$(cardof 7); c8=$(cardof 8)
+  # Bug it catches: #8's pass on the result its batch gave it read `own` unset, so its card process died under set -u.
+  ! grep -q 'unbound variable' <<<"$out" || fail "a card process died on an unset variable: $(grep 'unbound variable' <<<"$out")"
   grep -q "card $c7 tests a batch of 2: $c8 $c7" <<<"$out" || fail "#7 did not test a batch of #8 and itself: $out"
   grep -q "card $c7: a product check failed on its batch's change on main as it is now, a red run, so the batch is run again there: .*eight beside flag-x" <<<"$out" \
     || fail "the check did not judge the batch's change on main as it moved: $out"

@@ -480,8 +480,8 @@ card() { # <card> <issue> [<branch> <tip>]
     while :; do
       if [ -n "$trc" ]; then
         # Its own tests failed while it waited, or it broke the tests of the batch that took it: that run's exit and
-        # output are its own.
-        rc=$trc; trc=''; rm -f "$wt.ready"
+        # output are its own. No run of its own tests is on this pass (own: carriedrec(), slowrec()).
+        rc=$trc; trc=''; own=''; rm -f "$wt.ready"
       else
         # After a merge onto main (settle(), the rebuild, the port), before any check or test runs: every file it
         # changed still parses (parses()). One that does not goes to one fix session, given each such file and its
