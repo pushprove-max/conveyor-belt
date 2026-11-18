@@ -51,7 +51,8 @@
 #   filing, before the command runs, sets every record whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
-#   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record named <name>, unless it was
+#   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record whose main checkout's GitHub
+#   repository is <name>, else the record named <name> (lib.sh record_of), unless it was
 #   released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
 #   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
 #   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below). The
@@ -477,7 +478,7 @@ ends() {
 }
 
 filed() {
-  local in ev recs repo main c rc h r n nums left said=() freed=() bad=()
+  local in ev recs gh repo main c rc h r n nums left said=() freed=() bad=()
   in=$IN
   files "$in" || return 0
   ev=$(jq -r '.hook_event_name // "PostToolUse"' <<<"$in")
@@ -485,11 +486,13 @@ filed() {
   # Every issue linked, as "<name> <n>", each once.
   n=$(jq -r '[.tool_response, .error] | map(select(. != null) | if type == "object" then [.stdout, .stderr] | map(strings) | join("\n") else tostring end) | join("\n")' <<<"$in" 2>/dev/null \
     | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/[1-9][0-9]*' | awk -F/ '{ print $3, $5 }' | sort -u)
-  while read -r repo nums; do
-    [ -n "$repo" ] && [ -n "$recs" ] || continue
-    nums=$(awk -v r="$repo" '$1 == r { print $2 }' <<<"$n" | paste -sd' ' -)
-    main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$recs")
-    if [ -z "$main" ]; then bad+=("${nums// /, } of $repo: no record of the host file is named $repo")
+  while read -r gh nums; do
+    [ -n "$gh" ] && [ -n "$recs" ] || continue
+    nums=$(awk -v r="$gh" '$1 == r { print $2 }' <<<"$n" | paste -sd' ' -)
+    # The record is found by its main checkout's GitHub repository, else by its name: a record (or the folder a host
+    # file with no records names it for) may be named apart from its repository.
+    repo='' main=''; IFS=$'\t' read -r repo main < <(record_of "$gh" "$recs")
+    if [ -z "$main" ]; then bad+=("${nums// /, } of $gh: no record of the host file is for $gh")
     else
       c=$(ask "$repo" "$main" control adopt $nums 2>&1); rc=$?
       # An engine before `control adopt` (a record's pack pins its own) refuses it as a usage error (2): hold them.

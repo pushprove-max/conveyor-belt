@@ -28,15 +28,26 @@ records() {
         and (.main | type == "string" and test("^/[A-Za-z0-9._/-]+$"))) and (map(.repo) | unique | length) == length)
     | .[] | "\(.repo)\t\(.main)"' "$HOSTF" 2>/dev/null || { echo "the records of $HOSTF are not understood" >&2; return 1; }
 }
-# repo_name: this checkout's repository name, from the address of the remote its pack names (.remote, default
-# origin): the last part of git@host:owner/name.git or https://host/owner/name. Empty when there is none.
+# repo_name [<checkout>]: the repository name of that checkout (default this one), from the address of the remote
+# its pack names (.remote, default origin): the last part of git@host:owner/name.git or https://host/owner/name.
+# Empty when there is none.
 repo_name() {
-  local r u
-  r=$(jq -r '.remote // "origin" | strings' "$CONVEYOR_MAIN/.conveyor/project.json" 2>/dev/null) && [ -n "$r" ] || r=origin
-  u=$(git -C "$CONVEYOR_MAIN" remote get-url -- "$r" 2>/dev/null) || return 0
+  local m=${1:-$CONVEYOR_MAIN} r u
+  r=$(jq -r '.remote // "origin" | strings' "$m/.conveyor/project.json" 2>/dev/null) && [ -n "$r" ] || r=origin
+  u=$(git -C "$m" remote get-url -- "$r" 2>/dev/null) || return 0
   u=${u%/}; u=${u%.git}; u=${u##*[/:]}
   [[ $u =~ ^[A-Za-z0-9._-]+$ ]] && printf '%s' "$u"
   return 0
+}
+# record_of <name> <records>: the record, "<repo> TAB <main>" as records prints them, that holds an issue of the
+# GitHub repository <name>: the first whose main checkout's repository (repo_name) is <name>, else the one named
+# <name> (so a record whose main is not on this machine is still found by its name). Empty when none is.
+record_of() {
+  local rec main
+  while IFS=$'\t' read -r rec main; do
+    [ -n "$main" ] && [ -d "$main" ] && [ "$(repo_name "$main")" = "$1" ] && { printf '%s\t%s\n' "$rec" "$main"; return 0; }
+  done <<<"$2"
+  awk -F'\t' -v r="$1" '$1 == r { print; exit }' <<<"$2"
 }
 # ledger <repo> <main>: the checkout whose decision ledger (.claude/metrics/decisions.jsonl) a record's open decisions
 # are read from: its main when that is on this machine; else, for the record mine matched by this checkout's
