@@ -32,6 +32,10 @@ turn() { # <uuid> <reply> [<opening>]: the stop hook on a turn that ends with th
   jq -cn --arg u "$1" --arg r "$2" --arg o "${3:-what now}" '{type: "user", uuid: $u, message: {content: $o}},{type: "assistant", message: {content: [{type: "text", text: $r}]}}' > "$T/t.jsonl"
   jq -cn --arg t "$T/t.jsonl" '{session_id: "s1", transcript_path: $t, stop_hook_active: false}' | bash "$SRC/stop.sh" reply
 }
+again() { # <reply>: the same turn's next stop after a refusal: Claude Code's stop feedback, then that reply, with no tool call
+  jq -cn --arg r "$1" '{type: "user", isMeta: true, message: {content: "Stop hook feedback: refused"}},{type: "assistant", message: {content: [{type: "text", text: $r}]}}' >> "$T/t.jsonl"
+  jq -cn --arg t "$T/t.jsonl" '{session_id: "s1", transcript_path: $t, stop_hook_active: true}' | bash "$SRC/stop.sh" reply
+}
 # start: the Foreman's start-up text (SessionStart; no session is marked yet, so CONVEYOR_FOREMAN makes this one it).
 start() { echo '{}' | bash "$SRC/foreman.sh" start 2>&1; }
 
@@ -39,10 +43,17 @@ start() { echo '{}' | bash "$SRC/foreman.sh" start 2>&1; }
 # the same line with "filed as #<n>" passes, and the note made at the refusal then names the issue (one note).
 t_home() {
   fixture home "git@github.com:${OWN#https://github.com/}.git"
-  out=$(turn u1 "$LINE")
+  out=$(turn u1 "$LINE"$'\nShould I retry #7?')
   jq -e '.decision == "block" and (.reason | contains("plugin'"'"'s own repository") and contains("filed as #<n>") and contains("running cards keep the old engine code"))' <<<"$out" >/dev/null \
     || fail "a plugin problem with no issue number passed in the plugin's repository: $out"
-  out=$(turn u2 "$LINE, filed as #449"); [ -z "$out" ] || fail "a plugin problem filed as an issue was refused: $out"
+  # Bug (#478): the refusal marked turn u1 in reply-mark, so the same unfiled line passed at the turn's next stop.
+  out=$(again "$LINE"); jq -e '.decision == "block"' <<<"$out" >/dev/null \
+    || fail "a plugin problem with no issue number passed at the turn's second stop: $out"
+  # Bug (#478 E1, E2): with no tool call between, the refused replies were read as part of the turn's reply, so the
+  # corrected one was refused for their unfiled line and their question.
+  out=$(again "$LINE, filed as #449"); [ -z "$out" ] || fail "a plugin problem filed as an issue was refused: $out"
+  # Bug (#478 E2): a later stop noted a refused reply's unfiled line again, so the filed problem was listed at start-up.
+  out=$(again 'Filed #449.'); [ -z "$out" ] || fail "a reply after the filed one was refused for a refused reply's line: $out"
   [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] && grep -qE '^- .* · card c20261118T045400-alpha-7 · running cards keep .*, filed as #449 · evidence: ~/cards/c20261118T045400-alpha-7\.err$' "$FD/plugin-bugs.md" \
     || fail "the note does not name the issue it was filed as, once: $(cat "$FD/plugin-bugs.md")"
   # D3: the start-up text names a noted entry with no issue, and leaves out the one that names its issue.

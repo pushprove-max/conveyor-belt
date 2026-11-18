@@ -3,7 +3,8 @@
 # stop.sh state | reply -- the Foreman's Stop hooks (the Foreman session only; every other session passes).
 # state: while the saved state ($FD/state.md) is over its 5000-byte cap, the stop is blocked once with its size; the
 #   second stop (stop_hook_active) passes, so it never loops. A warning at startup alone was ignored.
-# reply: the turn's last reply (every text block after its last tool call) is refused once per turn (the turn is its opening entry: the newest user entry that is
+# reply: the turn's last reply (every text block after its last tool call or user entry, such as a refused stop's
+#   feedback) is refused once per turn (the turn is its opening entry: the newest user entry that is
 #   not a tool result, nor meta unless it holds the wake; a refused turn is marked in reply-mark, so its next stop passes) when it
 #   - asks the owner a question in text: questions to the owner go only by the picker (AskUserQuestion);
 #   - answers a wake (the turn's opening entry holds the first line of last-wake.txt, waiter.sh) with more than what
@@ -19,7 +20,7 @@
 #   unfinished-work checks read the reply without it, and each such line is noted once in $FD/plugin-bugs.md (time,
 #   card, what was seen, evidence path) before any check, so the finding outlives a refused or short reply. In the
 #   plugin's own repository (lib.sh plugin_home) the Foreman files it there itself, so a line that does not end
-#   "filed as #<n>" is refused too.
+#   "filed as #<n>" is refused too, at every stop of the turn (not only once, as the checks above are).
 set -uo pipefail
 INPUT=$(cat)
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
@@ -44,8 +45,10 @@ TURN=$(jq -cs --arg w "$W" 'def txt: .message.content | if type == "string" then
        and ((.message.content | type) != "array" or all(.message.content[]?; .type != "tool_result"))) | rindex(true)) as $i
   | if $i == null then empty else {uuid: (.[$i].uuid // ""), opening: (.[$i] | txt),
       owner: any(.[$i + 1:][]; .type == "attachment" and .attachment.type? == "queued_command" and .attachment.origin.kind? == "human"),
-      reply: ([.[$i + 1:][] | select(.type == "assistant") | .message.content[]?] as $b | ($b | map(.type == "tool_use") | rindex(true)) as $k
-        | [$b[(if $k == null then 0 else $k + 1 end):][] | select(.type == "text") | .text] | join("\n"))} end' "$T" 2>/dev/null)
+      # reply: the text after the last tool call or user entry (a refused stop adds its feedback as a user
+      # entry), so a refused reply is never checked or noted again at the next stop.
+      reply: ([.[$i + 1:][] | if .type == "user" then {cut: true} elif .type == "assistant" then (.message.content[]? | if .type == "tool_use" then {cut: true} else . end) else empty end] as $c
+        | ($c | map(.cut == true) | rindex(true)) as $k | [$c[(if $k == null then 0 else $k + 1 end):][] | select(.type == "text") | .text] | join("\n"))} end' "$T" 2>/dev/null)
 U=$(jq -r '.uuid // empty' <<<"$TURN" 2>/dev/null); REPLY=$(jq -r '.reply // empty' <<<"$TURN" 2>/dev/null)
 [ -n "$U" ] && [ -n "$REPLY" ] || exit 0
 PLUG='^[[:space:]*_>-]*plugin problem \(for the conveyor-belt repo\):[[:space:]*_]*'
@@ -96,15 +99,16 @@ done < <(grep -iE "${PLUG}[^[:space:]]" <<<"$REPLY")
 shopt -u nocasematch
 # The wake and unfinished-work checks below read the reply without its plugin-problem lines.
 REST=$(grep -viE "$PLUG" <<<"$REPLY")
+# In the plugin's own repository (plugin_home) a plugin problem is the Foreman's to file there: a line naming no
+# issue is refused at every stop, not once per turn (reply-mark is not read or set here), so a reply never ends with it
+# unfiled; filing it, or leaving the line out (its note stays listed at start-up), lets the stop pass. In any other
+# project the owner files it, and the line passes as it is.
+if [ ${#UNFILED[@]} != 0 ] && plugin_home; then
+  block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
+fi
 MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0
 refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || exit 0; block "$1"; }
-
-# In the plugin's own repository (plugin_home) a plugin problem is the Foreman's to file there: a line naming no
-# issue is refused. In any other project the owner files it, and the line passes as it is.
-if [ ${#UNFILED[@]} != 0 ] && plugin_home; then
-  refuse "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
-fi
 
 if grep -qE '\?[[:space:]*_)]*($|[[:space:]])' <<<"$REPLY"; then
   refuse "Your reply asks the owner a question in text. Ask the owner only with the picker (AskUserQuestion), with the options you propose; keep the rest of the reply."
