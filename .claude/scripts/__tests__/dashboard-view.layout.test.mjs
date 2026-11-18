@@ -229,14 +229,20 @@ test('a hidden panel stays hidden after a refresh, and Customize brings it back'
 
 test('restore default layout puts everything back and keeps it that way', () => {
   // A layout kept before the tabs was the one page's: it is Overview's now; the Control tab starts at its default.
-  const store = { [STORE]: JSON.stringify({ order: ['cost', 'belt', 'needs', 'board'], sizes: { belt: 'small', board: 'small' }, lengths: { queue: 3 }, collapsed: ['cost'], hidden: ['belt', 'queue'], density: 'compact', theme: 'dark' }) };
+  const store = { [STORE]: JSON.stringify({ order: ['cost', 'belt', 'needs', 'board'], sizes: { belt: 'small', board: 'small' }, lengths: { queue: 3 }, collapsed: ['cost'], hidden: ['belt', 'queue'], density: 'compact', theme: 'dark', time: '24-hour', date: 'dd/mm/yyyy' }) };
   const w = boot({ store });
   const root = w.document.documentElement;
+  const picked = (name) => $(w, `#customize input[name="choice-${name}"]:checked`).value;
   assert.deepEqual(order(w), ['cost', 'needs', 'landed', 'release', 'declined', 'health', 'lanes', 'metrics'], 'a kept order comes first; a panel it does not name follows in the default order');
   assert.equal(root.dataset.density, 'compact');
   assert.equal(root.dataset.theme, 'dark');
+  assert.equal(w.document.getElementById('clock').textContent, '12:00:00', 'the kept 24-hour Time is in use before Restore');
   w.document.getElementById('customize-open').click();
+  assert.deepEqual([picked('time'), picked('date')], ['24-hour', 'dd/mm/yyyy']);
   w.document.getElementById('restore-layout').click();
+  // Bug it catches: Restore that leaves a kept 24-hour Time or dd/mm/yyyy Date in use, on the page or in Customize.
+  assert.equal(w.document.getElementById('clock').textContent, '12:00:00 PM', 'Restore puts Time back to 12-hour');
+  assert.deepEqual([picked('time'), picked('date')], ['12-hour', 'mm/dd/yyyy']);
   assert.deepEqual(order(w), OVERVIEW);
   for (const id of OVERVIEW) {
     assert.equal(panel(w, id).hidden, false);
