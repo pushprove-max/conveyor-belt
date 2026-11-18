@@ -347,7 +347,7 @@ release() { # <version>
   # The pull request is merged only once none of them refuses (prmerge(), below): a refused release merges nothing. With
   # origin's default branch holding a commit LANDING lacks, the merge would hold files no check read: refused.
   if [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ]; then
-    out=$(timeout 60 gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number 2>&1) && pr=$(jq -er '.[0].number // ""' <<<"$out" 2>/dev/null) \
+    out=$(landingprs) && pr=$(jq -er '.[0].number // ""' <<<"$out" 2>/dev/null) \
       || { echo "conveyor: release: refused, nothing tagged or released: the open pull request from $LANDING could not be read: ${out:0:600}" >&2; return 1; }
     if [ -n "$pr" ]; then
       git fetch -q "$REMOTE" "+refs/heads/$LANDING:refs/remotes/$REMOTE/$LANDING" < /dev/null && at=refs/remotes/$REMOTE/$LANDING \

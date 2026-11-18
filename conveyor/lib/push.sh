@@ -290,6 +290,15 @@ pushed() { local s r b; read -r s r b 2>/dev/null < "$PUSHED" && [ "$r" = "$REMO
 LANDING=conveyor/landing
 landas() { local d x; packget push.landAs d && x=$(ctl 2>/dev/null) && x=$(jq -er --arg d "$d" '.landAs // $d' <<<"$x" 2>/dev/null) && echo "$x"; }
 pushto() { local la; la=$(landas) || return 1; if [ "$la" = pr ]; then echo "$LANDING"; else echo "$BRANCH"; fi; }
+# The pull requests GitHub has open from LANDING into the pack's branch, as a JSON array of {number, url}, newest
+# first; or, when GitHub could not be asked, gh's error, and it fails. `gh pr list --head` matches the branch name in
+# any repository, so a fork's pull request from its own conveyor/landing is listed too: it is left out (and any whose
+# isCrossRepository GitHub did not give), as Conveyor would edit or merge it with its own credentials.
+landingprs() { # [seconds to wait for gh, default 60]
+  local out
+  out=$(timeout "${1:-60}" gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number,url,isCrossRepository 2>&1) \
+    && jq -ce 'arrays | map(select(.isCrossRepository == false) | {number, url})' <<<"$out" 2>/dev/null || { echo "$out"; return 1; }
+}
 # The one pull request of Land as pr, from LANDING into the pack's branch: the open one is updated, and with none open
 # (the first push, or the first after it was merged) one is opened. Its body is written whole at each push: every card
 # in it, in landing order (the cards whose pushed line names it, then those this push carries), each with its
@@ -298,7 +307,7 @@ pushto() { local la; la=$(landas) || return 1; if [ "$la" = pr ]; then echo "$LA
 # pull request's number, or why it failed. $LANDPR then names it, with its link, for the Board's Merge (prstate()).
 landpr() { # <"card issue sha" of each card this push carries>...
   local n out text url
-  out=$(timeout 60 gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number,url 2>&1) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
+  out=$(landingprs) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
     || { echo "the open pull request from $LANDING could not be read: ${out:0:600}"; return 1; }
   url=$(jq -r '.[0].url // "" | strings' <<<"$out" 2>/dev/null)
   text=$(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" --arg b "$BRANCH" '. as $all | $ARGS.positional as $new
@@ -360,7 +369,7 @@ prsync() {
   [ "$(landas 2>/dev/null)" = pr ] || jq -e 'objects | .merged == null and .closed == null and (.number | type) == "number"' "$LANDPR" > /dev/null 2>&1 || return 0
   { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null || return 0
   if flock -n "$lk"; then
-    if out=$(timeout 20 gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number,url 2>/dev/null {lk}>&-) \
+    if out=$(landingprs 20 {lk}>&-) \
       && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null); then
       if [ "$n" != 0 ]; then u=$(jq -r '.[0].url // "" | strings' <<<"$out"); prstate "$n" '.closed = null | .url = (if $u == "" then .url else $u end)' --arg u "$u"
       elif n=$(jq -er 'objects | select(.merged == null and .closed == null) | .number | numbers' "$LANDPR" 2>/dev/null); then prstate "$n" '.closed = $t'
@@ -388,7 +397,7 @@ prmerge() { # <who>
 }
 mergeone() { # <who>
   local n out sha m c i st rc=0
-  out=$(timeout 60 gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number,url 2>&1) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
+  out=$(landingprs) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
     || { echo "conveyor: the open pull request from $LANDING could not be read: ${out:0:600}" >&2; return 1; }
   [ "$n" != 0 ] || { echo "conveyor: no pull request from $LANDING into $BRANCH is open; nothing merged" >&2; return 2; }
   sha=$(pushed) || sha=''

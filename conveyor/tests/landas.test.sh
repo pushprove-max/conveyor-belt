@@ -43,7 +43,9 @@ la_land() { # <n> [<fix rounds>]
     record c$1 $1 landed ok '{\"sha\":\"$sha\",\"product\":false}'" \
     || fail "card $1's lines could not be written"
 }
-# gh's pull requests, in front of the shared stub (its issues): each one a file $STUB/pr.<n>, numbered from 7; every
+# gh's pull requests, in front of the shared stub (its issues): each one a file $STUB/pr.<n>, numbered from 7 (one with
+# .cross true is a fork's: listed by its branch name, as GitHub lists it, with isCrossRepository true); a list is
+# newest first (highest number first), as gh lists them; every
 # pr call is logged in $STUB/pr-calls. A merge (gh pr merge <n> --merge) makes GitHub's merge commit on origin's
 # main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives.
 la_prstub() {
@@ -55,7 +57,7 @@ la_prstub() {
 echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] && [ "$c" != merge ] || { n=$3; shift; }; shift 2
 while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; --merge) shift; continue ;; esac; shift 2; done
 case $c in
-  list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN") | {number, url: "https://github.com/o/r/pull/\(.number)"}]' ;;
+  list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN")] | sort_by(-.number) | [.[] | {number, url: "https://github.com/o/r/pull/\(.number)", isCrossRepository: (.cross // false)}]' ;;
   merge) [ ! -e "$STUB/merge-refuse" ] || { cat "$STUB/merge-refuse" >&2; exit 1; }
     o=$(cat "$STUB/origin"); export GIT_AUTHOR_NAME=gh GIT_AUTHOR_EMAIL=gh@example.com GIT_COMMITTER_NAME=gh GIT_COMMITTER_EMAIL=gh@example.com
     hd=$(git -C "$o" rev-parse "refs/heads/$(jq -r .head "$STUB/pr.$n")") && bs=refs/heads/$(jq -r .base "$STUB/pr.$n") \
@@ -146,6 +148,25 @@ t_prbutton() {
   la_land 2; la_eng push c2 2 || fail "the push after the merge failed"
   [ "$(la_prst 8)" = OPEN ] && [ "$(la_prst 7)" = MERGED ] || fail "the push after the merge opened no new pull request: $(cat "$STUB/pr-calls")"
   [ "$(jq -r .body "$STUB/pr.8" | grep -o '^Closes #[0-9]*' | paste -sd ' ')" = 'Closes #2' ] || fail "the new pull request does not hold only the card landed since: $(jq -r .body "$STUB/pr.8")"
+}
+# Issue 462. Bug it catches: a fork's pull request from its own conveyor/landing (gh pr list --head matches the branch
+# name in any repository, newest first) taken for the landing pull request: the push wrote the cards into it (or opened
+# none), health showed it on the Board, and Merge merged it into the default branch with Conveyor's credentials.
+t_prfork() {
+  local out
+  setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  jq -n '{number: 7, head: "conveyor/landing", base: "main", title: "fork", body: "fork", state: "OPEN", cross: true}' > "$STUB/pr.7"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  [ "$(la_prst 8)" = OPEN ] && [ "$(jq -r .body "$STUB/pr.7")" = fork ] || fail "the push did not open its own pull request beside the fork's: $(cat "$STUB/pr-calls")"
+  # A fork's pull request opened after Conveyor's is listed first.
+  jq -n '{number: 9, head: "conveyor/landing", base: "main", title: "fork", body: "fork", state: "OPEN", cross: true}' > "$STUB/pr.9"
+  la_land 2; la_eng push c2 2 || fail "the push of card 2 failed"
+  grep -qx 'Closes #2' <(jq -r .body "$STUB/pr.8") && [ "$(jq -r .body "$STUB/pr.9")" = fork ] || fail "the push did not update its own pull request: $(cat "$STUB/pr-calls")"
+  rm -f "$(la_eng eval 'echo "$LANDPR"')"
+  [ "$(loop health | jq -c .landingPr.number)" = 8 ] || fail "health does not show Conveyor's pull request: $(loop health | jq -c .landingPr)"
+  out=$(loop pr merge 2>&1) || fail "pr merge failed: $out"
+  [ "$(la_prst 8)" = MERGED ] && [ "$(la_prst 7)" = OPEN ] && [ "$(la_prst 9)" = OPEN ] || fail "Merge merged a fork's pull request: $(cat "$STUB/pr-calls")"
 }
 # Issue 464. Bug it catches: when a card landed on main here after the push (main and origin's default branch have
 # diverged), Merge left main without origin's merge commit (prff() did not merge it in with remerge()), so the next
