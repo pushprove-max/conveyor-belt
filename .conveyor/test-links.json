@@ -323,5 +323,20 @@
   ],
   "conveyor/tests/narrow.test.sh": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs"
+  ],
+  "conveyor/foreman/foreman.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/lib.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/plugin-problem.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/stop.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "docs/foreman.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ]
 }

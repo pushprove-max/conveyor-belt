@@ -34,13 +34,13 @@ test('a card\'s start and the head\'s clock follow Customize\'s Time and Date, a
   assert.deepEqual([saved(w).time, saved(w).date], ['24-hour', 'dd/mm/yyyy'], 'kept with the layout');
   pick(w, 'time', '12-hour');
   assert.match(times(), /^started 08\/11\/2026, 3:15 PM · /, 'back to 12-hour with dd/mm/yyyy kept');
-  // Issue 506. Bug it catches: the Time kept in this browser alone, so the /units pane wrote AM and PM with 24-hour set.
+  // Issue 506. Bug it catches: the Time kept in this browser alone, so the plugin's pane wrote AM and PM with 24-hour set.
   assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour' } }, { url: 'time', body: { time: '12-hour' } }],
     'each Time chosen is sent to the server, and the Date is not');
 });
 
 // Issue 506. Bugs it catches: a 24-hour Time this browser kept before the page sent it never reaching the server
-// (only a click sent it), and Restore putting the Board back to 12-hour while the /units pane kept 24-hour.
+// (only a click sent it), and Restore putting the Board back to 12-hour while the plugin's pane kept 24-hour.
 test('a kept Time is sent when the Board opens, and the Time Restore puts back is sent too', () => {
   const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }) } });
   assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour' } }], 'sent on opening, with no click');

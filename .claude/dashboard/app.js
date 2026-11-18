@@ -1152,7 +1152,7 @@
     layouts = Object.fromEntries(TABS.map(([t]) => [t, tidy(t, kept[t])]));
     prefs = prefsOf(s);
   }
-  // The Time goes to the server (time.json) for the /units pane on its machine; a send that fails leaves the pane on
+  // The Time goes to the server (time.json) for the plugin's pane on its machine; a send that fails leaves the pane on
   // its own `time` option or the Time sent before.
   function sendTime() {
     try { window.localStorage.setItem(TIME_SENT_KEY, '1'); } catch (e) { /* then a kept 24-hour is sent again on the next visit */ }
