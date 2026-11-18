@@ -38,7 +38,8 @@
       "conveyor/conveyor.test.sh"
     ],
     "changed": ".conveyor/test-changed.sh",
-    "list": "env",
+    "list": "none",
+    "fileCommand": "bash .conveyor/test-changed.sh --file",
     "map": ".conveyor/engine-areas.json",
     "slowIssues": false,
     "files": {

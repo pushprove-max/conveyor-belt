@@ -92,6 +92,16 @@
 # as a file only to run every engine case file, whole-only or in its card mode.
 set -u
 unset CONVEYOR_SHELL_TEST_CASE
+# One-file mode (issue 379; the pack's test.fileCommand, which Conveyor runs once for each listed test file):
+# `test-changed.sh --file <path>` runs that test file alone and nothing else: an engine case file
+# (conveyor/tests/<area>.test.sh) with the cases the selection chose in it (all its cases when it chose none there),
+# any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
+# run makes (the map check, the test lint, shellcheck) still run. A path that is no file fails at once, before any of it.
+ONE=
+if [ "${1:-}" = --file ]; then
+  ONE=${2:-}; ONE=${ONE#./}
+  [ -n "$ONE" ] && [ -f "$ONE" ] || { echo "test-changed: --file: no such test file: '${ONE}'" >&2; exit 2; }
+fi
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
 # Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list
 # written before that names them under the runner, conveyor/conveyor.test.sh. Both are read as one: the selection
@@ -978,7 +988,8 @@ pick "${changed[@]}"
 for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
 # The tests the engine chose for the change (#150): with the pack's test.list env, a card's run is given them in
 # CONVEYOR_TEST_FILES, one path a line (conveyor/lib/testrun.sh testsel(), reading .conveyor/engine-areas.json through
-# conveyor/lib/testmap.sh mapread(), as a user's card reads its map). Each runs: an engine case file with all its
+# conveyor/lib/testmap.sh mapread(), as a user's card reads its map); so is each one-file run (ONE) of the loop of
+# test.fileCommand (filecmd()). Each runs: an engine case file with all its
 # cases, as a test file of its own (below); another file whole. The selection above adds the tests it finds and the engine does not
 # (TESTS_OF, NAMED, the coverage map's parts), so no case it ran is lost. With no list (a session's run, or a change
 # the engine sends to the whole suite) the selection above is the run's.
@@ -992,6 +1003,18 @@ while IFS= read -r t; do
     *) run[$t]=1; twhole[$t]=1 ;;
   esac
 done <<<"${CONVEYOR_TEST_FILES:-}"
+# One-file mode (ONE, above): the selection is that file alone. An engine case file keeps the chosen cases it holds,
+# or all its cases when none of them is chosen or the runner was chosen whole; any other file runs whole.
+if [ -n "$ONE" ]; then
+  if [[ $ONE == conveyor/tests/*.test.sh && $ONE != conveyor/tests/*/* ]]; then
+    own=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$ONE" | sort -u)
+    [ -n "$own" ] || { echo "test-changed: --file: $ONE holds no t_ case" >&2; exit 1; }
+    c=; [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -z "$cases" ] || c=$(tr ' ' '\n' <<<"$cases" | grep -xF -f <(echo "$own"))
+    cases=$(tr '\n' ' ' <<<"${c:-$own}"); run=([conveyor/conveyor.test.sh]=1)
+  else
+    run=(["$ONE"]=1); twhole[$ONE]=1; cases=
+  fi
+fi
 # The whole selection, before what passed is taken out of it (the cases kept as passed: kept, below).
 declare -A full=()
 for t in "${!run[@]}"; do full[$t]=1; done; fullcases=$cases
@@ -1189,6 +1212,9 @@ if [ -n "${run[conveyor/conveyor.test.sh]:-}" ] && [ -n "$cases" ] && ! enginewh
   done
   unset "run[conveyor/conveyor.test.sh]"
 fi
+# One-file mode: no other file runs, not one a run again's list names (a `fail` line of another file) nor the case
+# files a whole-only runner leaves to run.
+[ -z "$ONE" ] || for t in "${!run[@]}"; do [ "$t" = "$ONE" ] || unset "run[$t]" "ecases[$t]"; done
 # What it selected and out of how many (the step's record, conveyor.sh testrec()): the test files it can run (each
 # engine case file, never the runner, which runs only in the nightly whole test), and the cases: the engine's, and each node test file's
 # test() and it() and each python one's def test_ (the Board's), and each Claude Code plugin test file's test() (the
@@ -1217,7 +1243,14 @@ for t in "${!run[@]}"; do
 done
 [ ${#board[@]} = 0 ] || sc=$((sc + $(filecases "${board[@]}")))
 [ ${#shell[@]} = 0 ] || sc=$((sc + $(shellcases "${shell[@]}")))
-echo "TESTRUN files=${#run[@]} of=$nf" >> "$log"; echo "TESTRUN cases=$sc of=$nc" >> "$log"
+# Run by test.fileCommand (one-file mode, its mark CONVEYOR_TEST_FILE naming the file: conveyor/lib/testrun.sh
+# filecmd()), the engine's own log line counts the file: a second count in a log would read as more files run than
+# given, and the step would stop the run (#350). The run says its count in its output then, which the step does not
+# add up beside the logs (testprogress(), testfails()).
+fmark=${CONVEYOR_TEST_FILE:-}
+if [ -n "$ONE" ] && [ "${fmark#./}" = "$ONE" ]; then echo "TESTRUN files=${#run[@]} of=$nf"
+else echo "TESTRUN files=${#run[@]} of=$nf" >> "$log"; fi
+echo "TESTRUN cases=$sc of=$nc" >> "$log"
 # A run again (the loop's list) also says how many cases of the whole selection passed before and are not run: kept.
 if [ -s "$RERUN" ]; then
   kc=0; board=(); shell=()
