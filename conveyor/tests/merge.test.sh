@@ -285,6 +285,51 @@ EOF
     || fail "#8's failure on the combined code did not go to its fix before it landed: $(cat "$R/lib/rows.sh")"
 }
 
+# #447: card A (#7) passes; card-b lands touching A's test file lib/view.test.sh; A runs that file again and passes;
+# card-c lands touching it again (and, given "conflict", A's line of lib/panel.sh too). card-b and card-c stand for
+# cards that landed: a commit on main and its landed line. Each run of A's tests logs the file, and the n-th lands the
+# n-th of them.
+sharedonce() { # [conflict]
+  setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo case1 > "$R/lib/view.test.sh"
+  git -C "$R" add lib; git -C "$R" commit -qm "a panel and its test"
+  echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^panelC\$/panelC seven/' lib/panel.sh; else sed -i 's/^panel\$/seven/' lib/panel.sh; fi" > "$STUB/build"
+  [ -z "${1:-}" ] || : > "$STUB/conflict"
+  cat >> "$STUB/test-cmd" <<'EOF'
+n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"
+echo "== lib/view.test.sh"; printf "%s\n" "== lib/view.test.sh" "-- ok lib/view.test.sh" "TESTRUN sec	lib/view.test.sh	1	1" >> "$CONVEYOR_TEST_LOG/run.log"
+c=''; case $n in 1) c=card-b ;; 2) c=card-c ;; esac
+[ -z "$c" ] || { echo "$c" >> "$R/lib/view.test.sh"; [ "$c" != card-c ] || [ ! -e "$STUB/conflict" ] || sed -i 's/^panel$/panelC/' "$R/lib/panel.sh"
+  git -C "$R" commit -qam "$c lands"; jq -cn --arg c "$c" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 90, step: "landed", result: "ok", sha: $s}' >> "$ST/cards.jsonl"; }
+EOF
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  grep -q 'card .*-7: cards landed since its tests ran touch its test files too.*lib/view.test.sh' <<<"$out" \
+    || fail "#7 did not run its test file again after card-b landed on it: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+
+# Bug it catches: after its shared run again passed, card-c landed on the file again and A ran it again, on and on:
+# each run let another card land, and A never landed (#447). A lands with no third run, and its log names card-c only.
+t_mergesharedonce() {
+  sharedonce
+  [ "$(cat "$STUB/n")" = 2 ] && [ "$(st 'select(.issue == 7 and .step == "test") | "\(.result) \(.reused // false)"' | tr '\n' ,)" = "pass false,pass false,pass true," ] \
+    && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
+    || fail "#7 ran its shared test file again after card-c landed, or did not land: runs $(cat "$STUB/n"); $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  grep -q 'card .*-7: .*lands with no second run again\. Cards landed since: card-c$' <<<"$out" \
+    || fail "#7's log does not say it lands with no second run, naming card-c alone: $(grep 'card .*-7' <<<"$out" | tail -5)"
+  [ "$(tr '\n' ' ' < "$R/lib/panel.sh")" = "seven " ] || fail "main does not hold #7's change: $(cat "$R/lib/panel.sh")"
+}
+
+# Bug it catches: a card past its one shared run again (#447) landing on that pass when its change no longer applies.
+# card-c changes A's line too: A is fitted onto main as before (its rebuild session), tested again, and lands.
+t_mergesharedonceconflict() {
+  sharedonce conflict
+  st 'select(.issue == 7 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' \
+    || fail "#7 was not fitted onto main after card-c's conflicting change: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(cat "$STUB/n")" = 3 ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
+    && [ "$(tr '\n' ' ' < "$R/lib/panel.sh")" = "panelC seven " ] \
+    || fail "#7's fitted change was not tested again before it landed: runs $(cat "$STUB/n"); $(cat "$R/lib/panel.sh")"
+}
+
 # Bug (#345): unshare() named a shared file that had passed only as failed, so the run again logged "did not pass" for
 # it. Each shared file no `fail` line names gets a `shared` line beside its `fail` line; one that failed a case (c) gets
 # none, as it did fail; so does each file whose passes it drops when the shared files could not be listed.

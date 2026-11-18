@@ -554,7 +554,7 @@ readysince() { # <worktree>
 # passlist()); main's: testsel() narrow of main's change, and the files the test lines of the cards landed in it name
 # (times, clocks, why, ranCases): the project's test command may select tests that testsel() does not. Those tests
 # ran on neither change with the other: two cards that each passed alone can fail together on main (#334), so they run
-# again on the combined code before the card lands (card(), rebatch()). Lists that cannot be made count as shared, the
+# again on the combined code before the card lands (card(), once for its change: #447; rebatch()). Lists that cannot be made count as shared, the
 # message saying so: the tests run again.
 sharedtests() { # <worktree> <the commit its tests ran on>
   local h a b r
@@ -567,6 +567,15 @@ sharedtests() { # <worktree> <the commit its tests ran on>
     || { echo "(the test files of the change or of main's could not be listed)"; return 0; }
   comm -12 <({ sed 1d <<<"$a"; cat "$1.ready" "$1.bpass" 2>/dev/null | jq -r '.units[]? | strings | split("\t")[0]' 2>/dev/null; } | sort -u) \
     <(sed 1d <<<"$b" | grep . | sort -u) | grep .
+}
+# The cards whose landed line names a commit main made from <the commit its tests ran on> to the worktree's HEAD, in
+# the order they landed, space-separated: those a card that lands with no second run again names (card(), #447).
+landedsince() { # <worktree> <the commit its tests ran on>
+  local r
+  r=$(git -C "$1" rev-list "$2..HEAD" 2>/dev/null) && [ -n "$r" ] || return 0
+  stdb ask lines cards 2>/dev/null | jq -rRn --arg r "$r" '($r | split("\n")) as $s
+    | reduce (inputs | fromjson? | objects | select(.step == "landed" and (.sha | IN($s[]))) | .card) as $c ([];
+        if IN(.[]; $c) then . else . + [$c] end) | join(" ")'
 }
 # The run again for <sharedtests() of the card> (card()): the card's list (<worktree>.rerun, which tests() keeps on a
 # main that moved, rerunsince()) loses its `pass` and `ok` lines of the shared files and names each as failed with no

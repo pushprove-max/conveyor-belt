@@ -1429,7 +1429,10 @@ lines around them moved), its product checks run again and it lands on the tests
 session had to rework to fit is reviewed and tested again (not one it changed only in documentation files), and one whose test files were merged keeping both sides is
 tested again. When the cards that landed since its tests ran touch a test file its change touches too, those tests
 run again on main as it is now before it lands: two changes that each passed alone can fail together. A failure there
-goes to the card's fix, and the card does not land.
+goes to the card's fix, and the card does not land. These tests run again once for each change. When they pass and more
+cards land on the same test files before the card lands, the card lands with no second run. Its log line names the
+cards that landed since. If the change no longer applies to main, it is fitted onto main as before. A failure of the
+two changes together then shows on main, as main red.
 
 A card whose issue is in the control record's `order` list does not wait for a card that is not in the list: it claims
 the files and goes on to land while that card holds them. The card it went past waits for it at its own next claim

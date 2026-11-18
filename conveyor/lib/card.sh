@@ -34,6 +34,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' # kw: keptway()'s answer for a kept patch
+  local shared sb # shared: this test step runs its shared test files again (sharedtests()); sb: the commit its last tests ran on
   [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
@@ -454,7 +455,7 @@ card() { # <card> <issue> [<branch> <tip>]
     # both sides; a clean three-way merge onto main is the change that passed, settle(), and so is one a session changed
     # only in documentation files, settle() and the rebuild marking it tested again), and when the cards landed since
     # its last run touch a test file its change touches too (sharedtests(): two changes that passed apart can fail
-    # together, #334). That run keeps the passes of the run before but those of the shared
+    # together, #334), once for the change it holds: after that run passed it lands on it (#447). That run keeps the passes of the run before but those of the shared
     # files, which it runs whole (unshare()), its list naming what main changed (rerunsince()); a failure there goes to
     # the card's fix, as main alone passes it.
     # Batches: after a GO it is ready to land once its own checks and tests pass (tested()), and a batch may take it
@@ -531,10 +532,18 @@ card() { # <card> <issue> [<branch> <tip>]
         # The times its own run took go on its test line (slowtests()); only a test rule files an issue about a test
         # file (testrulespass(), after the test line is recorded).
         testedhere "$wt" || own=1
-        [ -n "$own" ] || ! t=$(sharedtests "$wt" "$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)") \
-          || { own=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; }
+        # Its shared files run again once for the change it holds (<worktree>.sharedran: that change's patch-id, once
+        # that run passed): on a busy main, each run again let another card land on them, and the card never landed
+        # (#447). A failure of the two changes together that this lets onto main is caught there (main red).
+        shared=''; sb=$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)
+        if [ -z "$own" ] && t=$(sharedtests "$wt" "$sb"); then
+          if [ "$(cat "$wt.sharedran" 2>/dev/null)" = "$(cardpatch "$wt")" ]; then
+            echo "conveyor: card $c: cards landed since its shared test files ran again touch them too ($(paste -sd ' ' <<<"$t")); they ran again once, so it lands with no second run again. Cards landed since: $(landedsince "$wt" "$sb")"
+          else own=1; shared=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; fi
+        fi
         [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
         [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
+        [ $rc != 0 ] || [ -z "$shared" ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
         if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
           out=$(locked gather "$c" "$wt" "$me") || out=''
           # A full run its own run refused (tests()) stays on the line its batch's run writes.
