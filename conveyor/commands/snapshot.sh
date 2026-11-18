@@ -53,6 +53,7 @@ snapask() { # <since> [nowait]
     # Whether GitHub answers too (health's ghReached): the build reads SNAPGH as a feed, and a feed with no ghreach
     # reads as GitHub not reached. Health reads it only when signed in, so it is asked only then.
     [ "$g" = false ] || ! ghreach || r=true
+    printf '%s\n' "$GHWHY" > "$SNAPGH/ghwhy.new" && mv -f "$SNAPGH/ghwhy.new" "$SNAPGH/ghwhy"
     echo "$g" > "$SNAPGH/gh.new" && mv -f "$SNAPGH/gh.new" "$SNAPGH/gh"
     echo "$r" > "$SNAPGH/ghreach.new" && mv -f "$SNAPGH/ghreach.new" "$SNAPGH/ghreach"
     hostclis due >/dev/null 2>&1 || :

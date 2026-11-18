@@ -173,4 +173,7 @@ t_snapkeptreach() {
   [ "$(loop snapshot --fresh | jq -c '.health | [.gh, .ghReached]')" = '[true,true]' ] || fail "a signed-in gh that GitHub answers is not reached: $(ls "$ST/snapgh")"
   : > "$STUB/unreached"
   [ "$(loop snapshot --fresh | jq -c '.health | [.gh, .ghReached]')" = '[true,false]' ] || fail "a gh auth status that timed out reads as GitHub reached"
+  # Bug (#490): a snapshot's gh false came with no reason. Its own GitHub folder keeps why (ghwhy): here a timed-out gh auth token.
+  : > "$STUB/token-timeout"
+  [ "$(loop snapshot --fresh | jq -c '.health | [.gh, .ghWhy]')" = '[false,"gh auth token timed out after 20 s"]' ] || fail "the snapshot does not give why gh is signed out: $(cat "$ST/snapgh/ghwhy")"
 }

@@ -273,7 +273,7 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
 # READCHECKED, when set, says READ is a copy that check() has already passed and nothing appends to (the snapshot's):
 # health does not check it again.
 health() {
-  local loop=true gh=false ghr=null free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so co hd rc
+  local loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so co hd rc
   { [ -n "${READCHECKED:-}" ] || check; } && lv=${LIVEJSON:-$(live)} || return 1
   # The records and the retried lines, as health reads them (HEALTHLINE).
   hd=$(mktemp -d) || return 1
@@ -308,7 +308,9 @@ health() {
   if [ "$loop" = true ] && pu=$(jq -ce 'select((.pid | type == "number") and (.since | type == "string")) | {pid, since, sha}' "$PUSHING" 2>/dev/null) \
     && kill -0 "$(jq -r .pid <<<"$pu")" 2>/dev/null; then pu=$(jq -c 'del(.pid)' <<<"$pu"); else pu=null; fi
   # Signed in (ghok, read without the network); only then whether GitHub answers (ghreach): null when signed out.
-  ! ghok || { gh=true; ghreach && ghr=true || ghr=false; }
+  # Not signed in: why (ghok's GHWHY, health ghWhy), so a wake can say it (#490). ghRead names the GitHub read both
+  # answers are from (ghok's GHREAD).
+  if ghok; then gh=true; ghreach && ghr=true || ghr=false; else ghwhy=$GHWHY; fi
   # The card the machine holds back (room()), while the loop runs: {issue, reason, since}.
   rm=null; [ "$loop" != true ] || rm=$(jq -ce 'select((.issue | type == "number") and (.reason | type == "string"))' "$ROOMF" 2>/dev/null) || rm=null
   free=$(df -Pk "$CARDS" 2>/dev/null | awk 'NR == 2 { print $4 }'); [[ $free =~ ^[0-9]+$ ]] || free=null
@@ -328,7 +330,7 @@ health() {
   done
   # The landing pull request as GitHub has it (prsync(), lib/push.sh); under `watch`, its slower timer asks (github()).
   [ -n "$GITHUB" ] || prsync
-  jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" \
+  jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED$SPLITM"'
@@ -395,7 +397,7 @@ health() {
              | select($k != []) | {card, issue, step: "test", since: ($k | map(.since) | min), cases: ($k | map(.name))}])),
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
-       gh: $gh, ghReached: $ghr, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
+       gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
        untimed: untimed, split: splitm([.[], $old[]]), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp

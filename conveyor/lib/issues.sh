@@ -402,9 +402,29 @@ productpaths() { [ "$(testpaths -v | grep -Ec "$PRODUCT")" != 0 ]; }
 # Did this commit change product code (tests aside)?
 product() { git show --name-only --format= "$1" 2>/dev/null | productpaths; }
 
-# gh signed in: gh holds a token for the host. `gh auth token` reads it without the network, so a slow GitHub or a
-# loaded machine never reads as signed out.
-ghok() { if [ -n "$GITHUB" ]; then [ "$(cat "$GITHUB/gh" 2>/dev/null)" = true ]; else [ -n "$(timeout 20 gh auth token 2>/dev/null)" ]; fi; }
+# gh signed in: gh holds a token for the host. `gh auth token` reads it without the network, so a slow GitHub never
+# reads as signed out; a read that takes over 20 s (a loaded machine, a locked keyring) does. With a feed ($GITHUB), its answer (gh, and ghwhy when false); a feed with
+# no answer yet (watch.py's folder until its first GitHub read ends) reads gh itself: an answer not there is not a
+# signed-out gh (#490). When not signed in, GHWHY says why: a timeout, an empty token, or gh's own error text.
+# GHREAD names the read the answer is from: the feed's gh file time (nanoseconds; github() writes it new on each read),
+# else this call's own time. Snapshots built again from one feed read give the same GHREAD (health ghRead), so the
+# Foreman counts that read once (#490).
+GHWHY='' GHREAD=''
+# shellcheck disable=SC2034 # GHREAD is read by health() in lib/views.sh
+ghok() {
+  local o rc; GHWHY=
+  if [ -n "$GITHUB" ] && [ -e "$GITHUB/gh" ]; then
+    GHREAD=$(p_mtimens "$GITHUB/gh")
+    [ "$(cat "$GITHUB/gh" 2>/dev/null)" = true ] && return 0
+    GHWHY=$(head -c 300 "$GITHUB/ghwhy" 2>/dev/null); GHWHY=${GHWHY:-the GitHub folder says signed out, with no reason}; return 1
+  fi
+  GHREAD=${EPOCHREALTIME/[.,]/}; o=$(timeout 20 gh auth token 2>&1); rc=$?
+  [ "$rc" != 0 ] || [ -z "$o" ] || return 0
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then GHWHY='gh auth token timed out after 20 s'
+  elif [ "$rc" = 0 ]; then GHWHY='gh auth token gave an empty token'
+  else o=${o//[$'\n\t\r']/ }; GHWHY="gh auth token failed (exit $rc)${o:+: ${o:0:200}}"; fi
+  return 1
+}
 # GitHub reached: `gh auth status` checks the token over the network. It fails when GitHub is slow, down or refuses the
 # token; health gives that as ghReached false, never as signed out.
 ghreach() { if [ -n "$GITHUB" ]; then [ "$(cat "$GITHUB/ghreach" 2>/dev/null)" = true ]; else timeout 20 gh auth status >/dev/null 2>&1; fi; }
@@ -583,14 +603,16 @@ privmask() {
 }
 # github <folder> -- the GitHub reads of a snapshot, each written whole into the folder for `watch`: issues (the
 # open issues with the snapshot's fields; no file when gh did not list them, so the queue is not read, as it would not
-# be), labelled, gh (signed in: true or false) and ghreach (GitHub reached: true or false). It also keeps the host's report of its CLIs and their models (hostclis()), and
+# be), labelled, gh (signed in: true or false), ghwhy (why not signed in: ghok()'s GHWHY) and ghreach (GitHub reached: true or false). It also keeps the host's report of its CLIs and their models (hostclis()), and
 # the landing pull request's state (prsync(), lib/push.sh, which `conveyor.sh github` loads).
 github() {
   local d=$1 i
   if i=$(openissues "$FIELDS" 2>/dev/null); then printf '%s\n' "$i" > "$d/issues.new" && mv -f "$d/issues.new" "$d/issues"
   else rm -f "$d/issues"; fi
   labelled > "$d/labelled.new" && mv -f "$d/labelled.new" "$d/labelled"
-  { ghok && echo true || echo false; } > "$d/gh.new" && mv -f "$d/gh.new" "$d/gh"
+  # ghwhy first, so a reader that finds gh false finds its reason.
+  { ghok && echo true || echo false; } > "$d/gh.new" && printf '%s\n' "$GHWHY" > "$d/ghwhy.new" && mv -f "$d/ghwhy.new" "$d/ghwhy" \
+    && mv -f "$d/gh.new" "$d/gh"
   { ghreach && echo true || echo false; } > "$d/ghreach.new" && mv -f "$d/ghreach.new" "$d/ghreach"
   prsync # the landing pull request's state, which health reads from $LANDPR (lib/push.sh)
   # On this slower timer too, never in a snapshot the feed builds: the CLIs' models, read again once the host's report

@@ -473,11 +473,32 @@ t_health() {
   [ "$(jq -c '[.blocked, .waiting, .stuck]' <<<"$out")" = '[[{"card":"c1-1","issue":1,"reason":"review 1: no answer","since":"2026-11-01T00:05:00Z"}],[{"card":"c2-2","issue":2,"reason":"visible to customers or staff: needs Dana'"'"'s yes: a new button","since":"2026-11-01T00:06:00Z"}],[{"card":"c3-3","issue":3,"step":"worktree","since":"2026-11-01T00:07:00Z"}]]' ] \
     || fail "blocked, waiting and stuck cards: $out"
   [ "$(jq -c .ghReached <<<"$out")" = null ] || fail "GitHub was said reached or not though gh is signed out: $out"
+  # Bug caught (#490): ghWhy keeps gh's own error text, so a wake says what gh auth token answered.
+  [ "$(jq -c .ghWhy <<<"$out")" = '"gh auth token failed (exit 1): no oauth token found for github.com"' ] || fail "gh's error text is not health's ghWhy: $out"
   rm "$STUB/signed-out"; [ "$(h '[.loop, .gh, .ghReached]')" = '[false,true,true]' ] || fail "a loop that ended, or gh signed in again, is not seen"
   # Bug caught (#410): signed in was read from gh auth status, which checks the token over the network, so a slow
   # GitHub read as signed out. gh holds its token (gh auth token) while gh auth status times out: signed in, GitHub not reached.
   : > "$STUB/unreached"; [ "$(h '[.gh, .ghReached]')" = '[true,false]' ] || fail "a gh auth status that timed out is not signed in, GitHub not reached: $(loop health)"
   rm "$STUB/unreached"
+  # Bug caught (#490): health said gh false with no reason, so a wake could not say why. ghWhy names a timed-out
+  # gh auth token and an empty token, and is null while signed in.
+  [ "$(h .ghWhy)" = null ] || fail "a signed-in gh has a reason to be signed out: $(loop health)"
+  : > "$STUB/token-timeout"; [ "$(h '[.gh, .ghWhy]')" = '[false,"gh auth token timed out after 20 s"]' ] || fail "a timed-out gh auth token is not given as the reason: $(loop health)"
+  rm "$STUB/token-timeout"; : > "$STUB/token-empty"
+  [ "$(h '[.gh, .ghWhy]')" = '[false,"gh auth token gave an empty token"]' ] || fail "an empty token is not given as the reason: $(loop health)"
+  rm "$STUB/token-empty"
+  # Bug caught (#490): with watch.py's GitHub folder (CONVEYOR_GITHUB) before its first GitHub read wrote gh, health
+  # read the answer not there as signed out, and the kept snapshot woke the Foreman with "gh is signed out". With no
+  # answer it reads gh itself; the folder's answer of false, from `conveyor.sh github`, gives its reason.
+  mkdir -p "$T/$CASE/feed"; [ "$(CONVEYOR_GITHUB=$T/$CASE/feed h .gh)" = true ] || fail "a GitHub folder with no answer yet reads as signed out"
+  : > "$STUB/token-empty"; loop github "$T/$CASE/feed" > /dev/null 2>&1; rm "$STUB/token-empty"
+  [ "$(CONVEYOR_GITHUB=$T/$CASE/feed h '[.gh, .ghWhy]')" = '[false,"gh auth token gave an empty token"]' ] || fail "the GitHub folder's reason is not health's: $(cat "$T/$CASE/feed/ghwhy")"
+  # Bug caught (#490): the Foreman told GitHub reads apart by health's time, so a snapshot built again from one
+  # folder read counted as a second read and woke it. ghRead is the same for each build from one read, new for the next.
+  local r1 r2; r1=$(CONVEYOR_GITHUB=$T/$CASE/feed h .ghRead); r2=$(CONVEYOR_GITHUB=$T/$CASE/feed h .ghRead)
+  [[ $r1 =~ ^\"[0-9]+\"$ ]] && [ "$r1" = "$r2" ] || fail "two builds from one GitHub read give different reads: $r1 $r2"
+  : > "$STUB/token-empty"; loop github "$T/$CASE/feed" > /dev/null 2>&1; rm "$STUB/token-empty"
+  [ "$(CONVEYOR_GITHUB=$T/$CASE/feed h .ghRead)" != "$r1" ] || fail "a new GitHub read gives the read before it"
   # Health asks a second on (the clock seam, CONVEYOR_NOW): #4, picked just now, is then a second old.
   [ "$(CONVEYOR_NOW=$(( $(date +%s) + 1 )) tuned '.tunables.stuck = 1' h '.stuck | map(.issue)')" = '[3,4]' ] || fail "the stuck time is not the pack's tunables.stuck"
   git -C "$R" push -q origin main; [ "$(h '[.unpushed, .pushError, .pushFailingSince]')" = '[[],null,null]' ] || fail "a pushed commit is still listed, or its push error is"

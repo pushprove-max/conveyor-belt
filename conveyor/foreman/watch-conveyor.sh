@@ -33,9 +33,9 @@
 #     and any kind added to the list later, under its kind). A held pipeline change's line names it, its parent and
 #     its finding: "pipeline change held: #615 (follow-up of #597): <finding>"
 #   no loop running, a push failing for over 10 minutes or listed under the Board's blocked cards (needsYou.blocked:
-#   it failed twice), gh signed out (no token: `gh auth token`), a control record the loop cannot read, a
-#   dependency cycle among open issues, and, each on two polls in a row, Conveyor idle (nothing on the belt and nothing
-#   to pick) and GitHub not reached (gh signed in, but `gh auth status` failed or timed out)
+#   it failed twice), a control record the loop cannot read, a dependency cycle among open issues, and, each on two
+#   polls in a row, gh signed out (no token: `gh auth token`; the wake gives health's ghWhy), Conveyor idle (nothing on
+#   the belt and nothing to pick) and GitHub not reached (gh signed in, but `gh auth status` failed or timed out)
 # Every wake names every item. Its first line lists every issue number by kind, per project:
 #   Conveyor: shop: needs the owner's yes: #12 #15; blocked: #7 | site: needs the owner's yes: #19
 # then one line per item, each cut alone if it must be; the wake as a whole is never cut.
@@ -131,7 +131,9 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     # A card records line the check set aside (health quarantined, conveyor/lib/views.sh check()).
     (.quarantined | arrays | .[] | objects | ["quarantined:\(.line):\(.time)", "record set aside", "",
       "the card records line \(.line) is set aside in quarantined.jsonl: the record check refused its field \(.field | one)"]),
-    (select(.gh | not) | ["gh", "gh signed out", "", "gh is signed out"]),
+    # Signed out, with why (health ghWhy): a candidate, as ghreach is; record() reports it on its second poll in a row,
+    # as one read can fail while gh holds its token (#490).
+    (select(.gh | not) | ["gh", "gh signed out", "", "gh is signed out\((.ghWhy | strings | select(. != "") | ": " + one) // "")"]),
     # Signed in, but gh auth status did not answer (health ghReached): a candidate here, as idle is; record() reports it on its second poll.
     (select(.gh and .ghReached == false) | ["ghreach", "GitHub not reached", "", "GitHub not reached: gh is signed in, but gh auth status failed or timed out"]),
     (select(.state == "control record unreadable") | ["control", "picks nothing", "", "the loop picks nothing: \(.reason // "the control record does not read" | one)"]),
@@ -260,7 +262,7 @@ while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt"
 # One record's problems now, each line prefixed with its repo: <repo> TAB <key> TAB <kind> TAB <issues> TAB <text>.
 record() { # <repo> <main> <now> <await>
   local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held
-  local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt ghreach=$FD/conveyor-ghreach-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
+  local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt ghreach=$FD/conveyor-ghreach-$repo.txt ghout=$FD/conveyor-ghout-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
   local histf=$FD/conveyor-history-$repo.json
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone; one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
@@ -310,12 +312,20 @@ record() { # <repo> <main> <now> <await>
   printf '%s: %s, read %s\n' "$repo" "$outcome" "$used" >> "$POLLF"
   if [ "$rc" = 0 ]; then
     rm -f "$down"
-    # Idle and GitHub not reached are problems only on the second poll in a row that lists them: $idle and $ghreach
-    # mark the first.
+    # Idle, GitHub not reached and gh signed out are problems only on the second poll in a row that lists them:
+    # $idle, $ghreach and $ghout mark the first. $ghreach and $ghout hold the GitHub read that listed them (health
+    # ghRead, ghok()'s GHREAD): a snapshot given again from the cache, or built again from the same GitHub folder
+    # read, is the same read, so it is still the first poll (#490). Health's own time is not the read's: a snapshot
+    # built again after a card update has a new one.
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi
+    local hread; hread=$(jq -r '.health.ghRead | strings' <<<"$rec" 2>/dev/null)
     if ! grep -q $'^ghreach\t' <<<"$cur"; then rm -f "$ghreach"
-    elif [ ! -e "$ghreach" ]; then touch "$ghreach"; cur=$(grep -v $'^ghreach\t' <<<"$cur"); fi
+    elif [ ! -e "$ghreach" ] || { [ -n "$hread" ] && [ "$(cat "$ghreach")" = "$hread" ]; }; then
+      printf '%s\n' "$hread" > "$ghreach"; cur=$(grep -v $'^ghreach\t' <<<"$cur"); fi
+    if ! grep -q $'^gh\t' <<<"$cur"; then rm -f "$ghout"
+    elif [ ! -e "$ghout" ] || { [ -n "$hread" ] && [ "$(cat "$ghout")" = "$hread" ]; }; then
+      printf '%s\n' "$hread" > "$ghout"; cur=$(grep -v $'^gh\t' <<<"$cur"); fi
     # A stuck card is a problem only when two snapshots in a row, at least a poll apart, list it: one reading can
     # fall between two lines of a step that goes on. $stuckf holds each stuck key of the last snapshot and when a
     # snapshot first listed it ("<key> TAB <epoch>"); a key the snapshot does not list is dropped from it. When that
@@ -325,9 +335,10 @@ record() { # <repo> <main> <now> <await>
       $1 ~ /^stuck:/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
   else
-    # A failed poll breaks a run of idle polls, and of polls that did not reach GitHub.
+    # A failed poll breaks a run of idle polls, of polls that did not reach GitHub, and of polls with gh signed out.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
     grep -qxF "$repo/ghreach" "$SEEN" || rm -f "$ghreach"
+    grep -qxF "$repo/gh" "$SEEN" || rm -f "$ghout"
     echo "$first $now" > "$down"
     # Its reported keys stay reported (no text: a key already reported is never printed again). When health read, its
     # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again

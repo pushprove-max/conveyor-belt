@@ -208,9 +208,10 @@ case $2 in
   # labels were added.
   graphql) case "$*" in *authorAssociation*) issues | jq -c '{data: {repository: {issues: {nodes: map({number, authorAssociation: (.authorAssociation // "OWNER")}), pageInfo: {hasNextPage: false, endCursor: null}}}}}' ;;
       *) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; esac ;;
-  # gh auth token: the token gh holds, read without the network (none with $STUB/signed-out). gh auth status: the
+  # gh auth token: the token gh holds, read without the network (none, with gh's error text, with $STUB/signed-out;
+  # timed out, exit 124 as `timeout` gives, with $STUB/token-timeout; an empty token with $STUB/token-empty). gh auth status: the
   # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.
-  token) [ ! -e "$STUB/signed-out" ] && echo gho_stub ;;
+  token) [ ! -e "$STUB/token-timeout" ] || exit 124; [ ! -e "$STUB/token-empty" ] || exit 0; [ ! -e "$STUB/signed-out" ] || { echo 'no oauth token found for github.com' >&2; exit 1; }; echo gho_stub ;;
   status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/unreached" ] || exit 124; [ ! -e "$STUB/signed-out" ] ;;
   comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
