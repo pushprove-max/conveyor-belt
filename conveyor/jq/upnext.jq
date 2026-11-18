@@ -19,6 +19,7 @@
     | map(. + {forced: (.waits != [] and $ctl.depGuard == false and (.number | IN($ctl.forced[]))),
         hold: ((.number | IN($ctl.held[])) or ((inside | not) and (.number | IN($ctl.startSeen[]) | not))), rule: (([.labels[].name | select(IN($ctl.rules.never[]))] | sort | .[0])
         // (if .later | not then (if $ctl.rules.followups then null else "follow-ups" end) elif $ctl.rules[.p] == false then .p else null end)
-        // (if $loud and (.title // "" | startswith("Test-speed survey, ")) then "the survey hour" else null end))})
+        // (if $loud and (.title // "" | startswith("Test-speed survey, ")) then "the survey hour" else null end)
+        // (if .number | IN($guarded[]) then "the weekly limit guard" else null end))})
     | map(select($all != "" or ((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))))
     | sort_by(.number as $n | ($ctl.order | index($n)) // ($ctl.order | length), .later, .rank, .createdAt)

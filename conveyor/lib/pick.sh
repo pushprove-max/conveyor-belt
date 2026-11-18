@@ -14,7 +14,8 @@
 # upnext() is that order as a list, every qualifying issue with no card: pick takes its first, the snapshot shows its
 # first ten.
 # The control record comes on top of all that. Each such issue gets hold (the record holds it) and rule (the
-# rule that excludes it: an area label never built, "follow-ups", or its priority; null for none); those are left out
+# rule that excludes it: an area label never built, "follow-ups", its priority, or "the weekly limit guard" while an
+# account of the seats the record keeps for it is at the guard (cardheld()); null for none); those are left out
 # of the list unless it is asked for whole (`all`, the snapshot's). The issues of the order list come first, in its
 # order, then the order above. pick takes nothing at all unless the loop is running (state, above): it is handed the
 # reading's percent and the open issues, both asked for before the lock (each may wait on the network, and every
@@ -35,13 +36,17 @@
 # "Test-speed survey, ...") gets the rule "the survey hour" outside the pack's test.surveyHour, local time
 # (CONVEYOR_NOW when set), so it is picked only in that hour, on whichever day the loop has room for it then.
 upnext() { # <open issues json> [retried] [all] [the control record, when the caller has read it]
-  local c=${4:-} sh cards old; [ -n "$c" ] || c=$(ctl) || return 1
+  local c=${4:-} sh cards old gd n; [ -n "$c" ] || c=$(ctl) || return 1
   packget test.surveyHour sh || return 1
+  # The open issues whose own seats' accounts are at the guard: the pick, the same-file check, the dry pick and the
+  # Board's order all leave them out, so none of them names an issue the loop will not start.
+  gd=$(jq -r --argjson i "$1" 'select(.guard != null) | .cards // {} | keys[] | select(tonumber? | IN($i[].number))' <<<"$c" 2>/dev/null \
+    | while read -r n; do ! cardheld "$c" "$n" || echo "$n"; done | jq -cs .) || gd='[]'
   # Read first, one after the other: a read that fails stops the pick (a process substitution's failure is not
   # passed back, and jq would read no cards at all, so every issue with a card would be picked again).
   cards=$(recs) && old=$(olds) || return 1
   jq -c --slurpfile cards <(printf '%s' "$cards") --slurpfile retried <(printf '%s' "$old") --arg mode "${2:-}" --arg built "$BUILT" --argjson only "${ONLY:-null}" --argjson sh "$sh" \
-    --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" \
+    --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" --argjson guarded "$gd" \
     "$DEPS$SEE$LEVEL$INSIDE$(<"$HERE/jq/upnext.jq")" <<<"$1"
 }
 # One Conveyor per machine (docs/setup.md, Run): the machine's settings are the host file's, over every project's loop.
@@ -122,6 +127,15 @@ roomed() { # <machine settings>; under the machine lock: prints why not, else ta
   if [ -n "$why" ]; then slotput "$RUNNING" true; echo "$why"; return 0; fi
   s=$(( $(cat "$MACH/seq" 2>/dev/null || echo 0) + 1 )); echo "$s" > "$MACH/seq"
   slotput "$((RUNNING + 1))" false "$s"
+}
+# Whether the card of issue <n> is held by the guard on the seats the record keeps for that issue (`control card`):
+# an account they use (SEATCARD=<n> guardread, from its newest reading: the loop asked for it before the lock) is at
+# the guard. Only that issue's card waits (upnext()'s rule "the weekly limit guard"); the queue goes on. An issue with
+# no seats of its own is never held here:
+# the loop's guard reads the project's seats.
+cardheld() { # <control record> <issue>
+  jq -e --arg n "$2" '.guard != null and (.cards // {} | has($n))' <<<"${1:-null}" >/dev/null 2>&1 || return 1
+  [ "$(state "$1" "$(SEATCARD=$2 guardread "$1" | jq -r '.pct // empty')")" = "paused by guard" ]
 }
 pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [acctkey of the record the reading was taken for]
   local issues=${3:-} n card l again c u m f

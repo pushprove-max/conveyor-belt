@@ -144,7 +144,10 @@ cards started after it; a card in flight finishes on the account it started with
 Claude while it runs reviews on the account it builds on. Each card session runs with `CLAUDE_CONFIG_DIR` set to the account's folder,
 the card's worktree line names the accounts by name (never by email), and the usage-limit guard reads every account the
 next card will use (its build account and, with a Claude reviewer, its review account; the default login is read at
-its own folder), so an account at its limit holds back only the projects that use it. It does not read the account of
+its own folder), so an account at its limit holds back only the projects that use it. An issue with its own builder or
+reviewer (`conveyor.sh control card`) that runs on Claude has the accounts of those seats read too: when one is at its
+limit, only that issue's card waits, and the next ready issue is picked. The Board shows that issue as skipped by the
+rule `the weekly limit guard` until its accounts are below the limit. It does not read the account of
 a role on an API route, which has no usage limit (see `roles` in [docs/configuration.md](../docs/configuration.md)). The Board's Health panel lists
 every account it can read, on its own machine and on the host, each with its own usage and what it is used for.
 

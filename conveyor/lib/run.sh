@@ -400,6 +400,12 @@ run() { # [max-cards] [serve]
     asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
       if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
     fi
+    # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
+    # pick holds that issue's card alone while one is at the guard (cardheld(), lib/pick.sh); the queue goes on.
+    [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "$guard" ] || [ -z "$issues" ] \
+      || for n in $(jq -r --argjson i "$issues" '.cards // {} | keys[] | select(tonumber | IN($i[].number))' <<<"$ctl" 2>/dev/null); do
+        SEATCARD=$n guardread "$ctl" ask >/dev/null
+      done
     # The machine's count of this project's cards (room()), the waiting ones left out as here, and no card of it
     # waiting for a slot when it asks for none.
     # shellcheck disable=SC2034 # RUNNING is read by room() and slotput, from lib/pick.sh

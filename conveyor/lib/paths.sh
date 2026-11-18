@@ -180,8 +180,9 @@ acctenv() { # <name or "">: the folder a session's CLAUDE_CONFIG_DIR is set to (
 # <folder from acctenv>: sets a session's CLAUDE_CONFIG_DIR to it; with none, the default login (~/.claude), so an
 # inherited CLAUDE_CONFIG_DIR never runs the cards on an account the guard and the Board do not read for them.
 acctrun() { if [ -n "$1" ]; then export CLAUDE_CONFIG_DIR="$1"; else unset CLAUDE_CONFIG_DIR; fi; }
-# What of the control record decides the accounts a card started on it uses: its account, reviewAccount and reviewer.
-acctkey() { jq -c '[.account, .reviewAccount, .reviewer]' <<<"${1:-null}" 2>/dev/null; }
+# What of the control record decides the accounts a card started on it uses: its account, reviewAccount and reviewer,
+# and the seats it keeps for an issue (cards: a card of that issue runs on them).
+acctkey() { jq -c '[.account, .reviewAccount, .reviewer, .cards]' <<<"${1:-null}" 2>/dev/null; }
 # The accounts a card started on the control record uses, one name a line ("" for the default login): its builder's,
 # and with a Claude reviewer its review's (reviewAccount, else the builder's).
 cardaccts() { # <control record>
@@ -194,6 +195,8 @@ cardaccts() { # <control record>
 # Claude's: an OpenCode or Codex builder runs on no Claude account, so its account is not read (with a Codex reviewer,
 # none is, and Claude's limit holds no card back). Nor is the account of a role on an API route (subroles()): it is
 # billed per token and has no usage limit, so with every role on one the loop asks for no reading before a pick.
+# With SEATCARD set to an issue, the accounts of that issue's card, on the seats the record keeps for it (seat()):
+# pick holds that card alone when one of them is at the guard (cardheld(), lib/pick.sh).
 guardread() { # <control record> [ask]
   local a b
   b=$(seat builder "${1:-null}" | jq -r .agent 2>/dev/null)
