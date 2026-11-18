@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# The installs (plan section 7): `install <commit>` clones that commit into VERSIONS/<commit>, read-only. OWN is the
+# The installs (plan section 7): `install <commit>` puts that commit in VERSIONS/<commit>, read-only. OWN is the
 # commit this process runs: its version folder's name when it runs from an install, empty when it runs from a checkout.
 # A loop that runs from an install restarts on the commit the pack pins; a `serve` run from a checkout restarts on the
 # checkout's code once its HEAD moves (stale(), below). RAN is the commit this process runs: OWN, or the checkout's

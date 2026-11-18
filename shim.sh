@@ -51,12 +51,13 @@ if [ -z "$commit" ] && [ -n "$(jq -r '.plugin.follow // empty' "$pack" 2>/dev/nu
   # take, the last 10 kept, and before them the newest that worked when none of them did: {time, by (the commit whose engine ran it, or "plugin copy"), exit, output (its last 2000
   # characters), note}. doctor, the Foreman's start and /units read it (stalenote(), lib/install.sh).
   log=$main/.git/conveyor-engine.log
-  # logged <conveyor.sh> <by> [<note>]: one take by that engine, kept in the log; returns its exit code. Its output
-  # goes to a file, not a pipe: a Board the take starts again keeps the take's streams open after the take ends.
+  # logged <conveyor.sh> <by> [<note>] [wait]: one take by that engine, kept in the log; returns its exit code. With
+  # wait (the plugin copy's take only), it waits for a take that runs now, not ending at once. Its output goes to a
+  # file, not a pipe: a Board the take starts again keeps the take's streams open after the take ends.
   logged() {
     local o rc t
     o=$(mktemp "$log.out.XXXXXX") || return 1
-    CONVEYOR_MAIN=$main bash "$1" take < /dev/null > "$o" 2>&1; rc=$?
+    CONVEYOR_MAIN=$main bash "$1" take ${4:+"$4"} < /dev/null > "$o" 2>&1; rc=$?
     # The newest take that worked is kept even when 10 failures came after it: the stale-engine line names its time.
     t=$(mktemp "$log.XXXXXX") && { { [ ! -f "$log" ] || jq -cnR '[inputs | fromjson? | objects] | ([.[] | select(.exit == 0)] | last) as $ok
         | .[-9:] | (if $ok != null and all(.[]; .exit != 0) then [$ok] + . else . end)[]' "$log"; } || :
@@ -80,7 +81,7 @@ if [ -z "$commit" ] && [ -n "$(jq -r '.plugin.follow // empty' "$pack" 2>/dev/nu
       bgtake "$first" "plugin copy"
     fi
   elif [ -z "$commit" ]; then
-    touch "$look"; CONVEYOR_MAIN=$main bash "$first" take < /dev/null >&2; commit=$(engine)
+    touch "$look"; CONVEYOR_MAIN=$main bash "$first" take wait < /dev/null >&2; commit=$(engine)
   fi
   [ -n "$commit" ] || off "this project follows the plugin's $(jq -r .plugin.follow "$pack") and has taken no commit of it on this machine; run /conveyor-belt:setup"
 fi
@@ -92,7 +93,7 @@ dir=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$commit
 # installs the taken one again, and the command runs on what it took. Once repaired, the next call finds it installed, so this
 # says so once.
 if [ -n "$look" ] && [ ! -e "$dir" ]; then
-  touch "$look"; logged "$first" "plugin copy" "the project's commit $commit was not installed, so the plugin copy's take ran in the foreground"
+  touch "$look"; logged "$first" "plugin copy" "the project's commit $commit was not installed, so the plugin copy's take ran in the foreground" wait
   was=$commit; commit=$(engine)
   [[ $commit =~ ^[0-9a-f]{40}$ ]] && dir=${dir%/*}/$commit && [ -f "$dir/$1" ] \
     && echo "conveyor: the project's Conveyor commit $was was not installed; the plugin's $(jq -r .plugin.follow "$pack") was taken again, and this runs on $commit" >&2

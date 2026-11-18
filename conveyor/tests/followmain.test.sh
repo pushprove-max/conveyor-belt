@@ -169,12 +169,16 @@ t_followhook() {
 # Bug (#186): the install of the project's taken commit was removed (another project's prune), and every hook then ran
 # with the guards off ("the project's Conveyor commit ... is not installed") until a take by hand. The next hook takes
 # again in the foreground, which installs that commit again (main has not moved), runs on it and says so.
+# Bug (#352): the repair's take, started while another take held ENGINE's lock, ended at once as a background take
+# does, and the hook then ran with the guards off. Here another take holds the lock for 2 s: the repair waits for it.
 t_followrepair() {
   setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
   tune '.plugin = {follow: "main"}'
   pushed "cp '$SRC/../shim.sh' shim.sh && printf '#!/bin/sh\necho ran\n' > probe.sh && chmod +x probe.sh"; X1=$NEW
   bash "$D/conveyor/conveyor.sh" install "$X1" >/dev/null && takeby "$X1" >/dev/null || fail "the first commit was not taken"
   chmod -R u+w "$V/$X1" && rm -rf "${V:?}/$X1" || fail "the install was not removed"
+  ( flock 9 && touch "$STUB/held" && sleep 2 ) 9>>"$R/.git/conveyor-engine.json.lock" & # sleep: the other take holds the lock 2 s, for the repair to wait on
+  wait_until '[ -e "$STUB/held" ]' : || fail "the other take's lock was not held"
   out=$(echo '{"session_id": "s1"}' | CONVEYOR_HOOK=1 CLAUDE_PROJECT_DIR=$R bash "$D/shim.sh" probe.sh 2>"$STUB/shim.err")
   [ "$out" = ran ] && [ "$(engine .commit)" = "$X1" ] && [ -f "$V/$X1/probe.sh" ] \
     || fail "the hook did not install the project's commit again and run on it: $out $(cat "$STUB/shim.err")"
@@ -212,7 +216,7 @@ t_followhookfail() {
   [ "$(wc -l < "$R/.git/conveyor-engine.log")" -eq 11 ] || fail "the log does not keep the last 10 takes and the last that worked: $(cat "$R/.git/conveyor-engine.log")"
   out=$(cd "$R" && CONVEYOR_MAIN=$R bash "$V/$X2/conveyor/conveyor.sh" doctor 2>&1)
   line=$(grep '^warning: Conveyor runs an old engine here' <<<"$out")
-  [ "$line" = "warning: Conveyor runs an old engine here: commit ${X2:0:7}, and the plugin's main is at ${X3:0:7} · last take that worked: $ok · last failure: conveyor: Conveyor commit $X3 of the plugin's main could not be installed: conveyor: commit $X3 could not be checked out from $D.git and verified · to take it, run: cd $R && bash $V/$X2/conveyor/conveyor.sh take" ] \
+  [ "$line" = "warning: Conveyor runs an old engine here: commit ${X2:0:7}, and the plugin's main is at ${X3:0:7} · last take that worked: $ok · last failure: conveyor: Conveyor commit $X3 of the plugin's main could not be installed: conveyor: commit $X3 could not be fetched from $D.git, checked out and verified · to take it, run: cd $R && bash $V/$X2/conveyor/conveyor.sh take" ] \
     || fail "doctor does not name the old engine, the newest commit, the last take that worked, the failure and the fix: $out"
   # The Foreman's start and /units print the same line, with no remote read.
   [ "warning: $(CONVEYOR_MAIN=$R bash "$V/$X2/conveyor/conveyor.sh" take stale)" = "$line" ] || fail "take stale does not print doctor's line"
@@ -274,6 +278,39 @@ t_followprune() {
   jq -cn '{card: "c1-5", issue: 5, step: "landed"}' >> "$ST/cards.jsonl"
   takeby "$C2" >/dev/null || fail "take failed"
   [ ! -e "$V/$A" ] && [ -d "$V/$C1" ] && [ -d "$V/$C2" ] || fail "the install of a card that ended was kept: $(ls "$V")"
+}
+
+# Bugs: each take of a new commit clones the plugin's whole repository again (minutes for one with large media), and
+# every other take queues behind it, so the install stays behind and the old-engine line never clears.
+t_followfetch() {
+  prunesetup; trap 'touch "$STUB/go"; kill $tp 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; tp=''
+  # A new commit whose pack check waits for $STUB/go: its take runs until then.
+  pushed "sed -i '2i until [ -e $STUB/go ]; do sleep 0.1; done' conveyor/lib/pack.sh" # sleep: the pause of the pack check's own wait for $STUB/go
+  GIT_TRACE=$STUB/trace takeby "$A" > "$STUB/take.out" 2>&1 & tp=$!
+  for _ in $(seq 300); do [ -d "$V/$NEW" ] && break; sleep 0.1; done
+  [ -d "$V/$NEW" ] || fail "the first take did not install $NEW: $(cat "$STUB/take.out")"
+  # A take started during the first ends at once, and the old-engine line says a take runs.
+  s=$SECONDS; out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards timeout 30 bash "$V/$A/conveyor/conveyor.sh" take 2>&1) || fail "the second take failed: $out"
+  [ $((SECONDS - s)) -lt 10 ] && grep -qx "conveyor: another take of the plugin's Conveyor runs now: this one ends" <<<"$out" \
+    || fail "the second take waited for the first, $((SECONDS - s)) s: $out"
+  out=$(CONVEYOR_MAIN=$R bash "$V/$A/conveyor/conveyor.sh" take stale 2>&1)
+  [ "$out" = "Conveyor takes the plugin's main now: commit ${NEW:0:7}; the project runs commit ${A:0:7} until the take ends" ] \
+    || fail "the old-engine line during a take: $out"
+  touch "$STUB/go"; wait $tp || fail "the first take failed: $(cat "$STUB/take.out")"
+  [ "$(engine .commit)" = "$NEW" ] || fail "$NEW was not taken: $(cat "$STUB/take.out")"
+  # The new commit came by one fetch of the remote into the mirror, with no clone of the remote, of only the objects
+  # main gained since $A (B's and the new commit's: commits, trees, changed files; under fetch.unpackLimit, so kept loose).
+  ! grep -q "built-in: git clone .*$D.git" "$STUB/trace" && [ "$(grep -c "built-in: git fetch .*$D.git" "$STUB/trace")" = 1 ] \
+    || fail "the take did not fetch the remote once, with no clone: $(grep 'built-in' "$STUB/trace")"
+  # Bug: a depth-one install had no history, so olderthan took $A for newer than $NEW and a service would be started
+  # again on the older commit. The install keeps the history, and the plugin's repository as its origin.
+  # shellcheck disable=SC2034 # HERE, OWN and VERSIONS are read by the sourced lib/install.sh
+  (HERE=$V/$NEW/conveyor OWN='' VERSIONS=$V; . "$SRC/lib/install.sh"; ! olderthan "$NEW" "$A" && olderthan "$A" "$NEW") \
+    && [ "$(git -C "$V/$NEW" remote get-url origin)" = "$D.git" ] \
+    || fail "the install of $NEW has no history to tell it is newer than $A, or not the plugin's origin: $(git -C "$V/$NEW" log --oneline | head -3)"
+  n=$(git -C "$D" rev-list --objects "$A..$NEW" | wc -l)
+  [ "$(git -C "$V/mirror.git" count-objects | cut -d' ' -f1)" = $((n)) ] && [ "$n" -lt 20 ] \
+    || fail "the mirror did not fetch only the $n new objects: $(git -C "$V/mirror.git" count-objects -v)"
 }
 # The start of each other prune case (t_followprunelane, t_followpruneother, t_followpruneself, t_followprunelist), which run side by
 # side: a following project that has taken $A, with no card. The host file is the case's own, as two of them write one.

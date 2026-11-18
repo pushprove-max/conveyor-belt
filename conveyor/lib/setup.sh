@@ -170,7 +170,7 @@ setup() { # as SETUP_USAGE
       || { rm -f "$PACK.new"; echo "conveyor: the pack's plugin could not be written" >&2; return 1; }
     echo "conveyor: the project follows the plugin's releases"
   fi
-  if [ -n "$f" ]; then take && enginepin p && [ -n "$p" ] || { echo "conveyor: no commit of the plugin's $f is taken on this machine; conveyor.sh doctor says why" >&2; return 1; }
+  if [ -n "$f" ]; then take wait && enginepin p && [ -n "$p" ] || { echo "conveyor: no commit of the plugin's $f is taken on this machine; conveyor.sh doctor says why" >&2; return 1; }
   else install "$p" || return 1; fi
   # Before hostadd: once the host file names the project, a machine's service already running serves it.
   heldstart || return 1

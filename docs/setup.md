@@ -267,6 +267,13 @@ last background take failed, and the command that takes the newest commit now. R
 fails too, its output says why. `doctor` reads the newest commit from GitHub. The Foreman and `/units` use the newest
 commit that the last take found.
 
+One take runs at a time. A take that starts while another one runs stops at once and does not wait. A later take
+gets any newer commit. While a take runs, the same places show this line in place of the old-engine line:
+
+```text
+Conveyor takes the plugin's main now: commit 9f8e7d6; the project runs commit 0543507 until the take ends
+```
+
 When a new commit or release fails its check, or lacks a hook that the project's `.claude/settings.json` calls through
 `shim.sh`, the project stays on the engine it has. Needs you on the Board names the commit and the reason. The entry
 goes when a later commit or release is taken.

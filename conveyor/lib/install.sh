@@ -29,12 +29,12 @@ installed() { # <commit> [ro] [folder]
     && [ ${#got[@]} = ${#hs[@]} ] && [ "${got[*]}" = "${hs[*]}" ]; } || return 1
   [ "${2:-}" != ro ] || { w=$(find "$d" ! -type l -perm /222 -print -quit) && [ -z "$w" ]; }
 }
-# Clones this repository (the origin of the checkout this script is in, or the repository given) at <commit> into
-# VERSIONS/<commit> and marks it read-only. Only a full commit id names a version folder, and the clone is kept only
+# Puts this repository (the origin of the checkout this script is in, or the repository given) at <commit> into
+# VERSIONS/<commit> and marks it read-only. Only a full commit id names a version folder, and the folder is kept only
 # when it is that commit as installed() verifies it: a hook (a Git template's post-checkout) may change the files the
 # checkout wrote.
 install() { # <commit> [<repository>]
-  local c=$1 d=$VERSIONS/$1 src=${2:-}
+  local c=$1 d=$VERSIONS/$1 src=${2:-} m=$VERSIONS/mirror.git
   [[ $c =~ ^[0-9a-f]{40}$ ]] || { echo "conveyor: $c is not a full commit id: an install cannot be verified against it" >&2; return 1; }
   if [ -e "$d" ]; then
     # A folder already there is taken only when it is that commit with nothing changed or added; it is then made read-only.
@@ -43,11 +43,23 @@ install() { # <commit> [<repository>]
   fi
   [ -n "$src" ] || src=$(git -C "$HERE" remote get-url origin 2>/dev/null) || { echo "conveyor: $HERE is in no git checkout with an origin to clone" >&2; return 1; }
   mkdir -p "$VERSIONS" || return 1
-  # Cloned beside its place and moved in once read-only, so a version folder is never there half made.
-  [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || return 1
-  if ! { git clone -q --no-checkout "$src" "$d.part" && git --no-replace-objects -C "$d.part" -c advice.detachedHead=false checkout -q --detach "$c" \
-      && installed "$c" '' "$d.part"; } 2>/dev/null; then
-    rm -rf "$d.part"; echo "conveyor: commit $c could not be checked out from $src and verified" >&2; return 1
+  # The repository's branches and tags are fetched into one bare mirror kept in VERSIONS (mirror.git, never pruned),
+  # so a new commit costs only the objects the mirror lacks, not a whole download; the version folder is then a local
+  # clone of the mirror, with the whole history (olderthan reads it), and the repository as its origin. file://, so
+  # no file is hard-linked to the mirror's or another install's (prune's chmod of one would change the other). Under
+  # the mirror's own lock, as installs of other projects of this machine use it too.
+  if ! ( flock -w 600 9 || exit 1
+    git init -q --bare "$m" \
+      && { git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" \
+        || timeout 600 git -C "$m" fetch -q --no-tags "$src" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; } \
+      && git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" || exit 1
+    # Made beside its place and moved in once read-only, so a version folder is never there half made.
+    [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 1
+    { git clone -q --no-checkout "file://$m" "$d.part" && git -C "$d.part" remote set-url origin "$src" \
+      && git --no-replace-objects -C "$d.part" -c advice.detachedHead=false checkout -q --detach "$c" && installed "$c" '' "$d.part"; } \
+      || { rm -rf "$d.part"; exit 1; }
+  ) 9>>"$m.lock" 2>/dev/null; then
+    echo "conveyor: commit $c could not be fetched from $src, checked out and verified" >&2; return 1
   fi
   chmod -R a-w "$d.part" && mv "$d.part" "$d" && echo "conveyor: $c is installed in $d, read-only"
 }
@@ -134,8 +146,18 @@ hooksmissing() { # <folder>
 # not taken and not tried again: the project stays on its engine, and ENGINE's refused (Needs you, in the snapshot)
 # names the commit and why until a later commit is taken. One that could not be read or installed is tried again at
 # the next look. Then old installs are pruned (prune). Nothing for a pinned pack. Under ENGINE's lock, so a loop and a
-# hook never take at once.
-take() { ( flock -w 600 9 || { echo "conveyor: another take of the plugin's main did not end" >&2; exit 1; }; taken ) 9>>"$ENGINE.lock"; }
+# hook never take at once: a take that finds another running ends at once, with no error (it does not wait in a
+# queue behind it; a commit pushed after the running take read main is taken at the next look). `take wait`, for a
+# caller that needs a commit taken before it goes on (setup, install-service, board, shim.sh's first take and its
+# repair of a missing install), waits for the running take instead, then takes.
+take() { # [wait]
+  ( if [ "${1:-}" = wait ]; then flock -w 600 9 || { echo "conveyor: another take of the plugin's main did not end" >&2; exit 1; }
+    else flock -n 9 || { echo "conveyor: another take of the plugin's Conveyor runs now: this one ends"; exit 0; }; fi
+    taken ) 9>>"$ENGINE.lock"
+}
+# Whether a take of this project runs now (holds ENGINE's lock). The probe holds the lock for an instant: a take that
+# starts in that instant ends at once, and the next look takes the commit.
+taking() { [ -f "$ENGINE.lock" ] && ! ( flock -n 9 ) 9<"$ENGINE.lock" 2>/dev/null; }
 taken() {
   local f h u n why t c
   packget plugin.follow f || return 1; [ -n "$f" ] || return 0
@@ -269,7 +291,8 @@ behind() { # <commit> <branch>
 # takes shim.sh starts beside a hook, an old engine's among them), the last failure's reason (from ENGINELOG) and the
 # command that takes it now. The newest commit is read from the remote with `live` (headof), else (or when
 # that read fails) the one the last take read (ENGINE's head). Nothing for a pinned pack, one with no commit taken
-# here, or when the newest commit is the one it runs or the one refused (doctor and Needs you name that one).
+# here, or when the newest commit is the one it runs or the one refused (doctor and Needs you name that one). While a
+# take of this project runs (taking), the line says so in place of the old engine.
 stalenote() { # [live]
   local f c h n w ok why
   packget plugin.follow f 2>/dev/null && [ -n "$f" ] || return 0
@@ -277,6 +300,7 @@ stalenote() { # [live]
   { [ "${1:-}" = live ] && IFS=$'\t' read -r _ h n < <(headof "$f") && [ -n "$h" ]; } \
     || IFS=$'\t' read -r h n < <(jq -r '.head | objects | [.commit, .name] | select(all(type == "string")) | @tsv' "$ENGINE" 2>/dev/null) || return 0
   [ -n "$h" ] && [ "$h" != "$c" ] && [ "$h" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ] || return 0
+  ! taking || { echo "Conveyor takes the plugin's $n now: commit ${h:0:7}; the project runs commit ${c:0:7} until the take ends"; return 0; }
   w=$(jq -r '.worked // empty | strings' "$ENGINE" 2>/dev/null)
   IFS=$'\t' read -r ok why < <({ cat "$ENGINELOG" 2>/dev/null || :; } | jq -nRr --arg w "$w" '[inputs | fromjson? | objects] as $l
     | [([$l[] | select(.exit == 0) | .time | strings] + [$w] | map(select(. != "")) | max // "none in the log"),
@@ -328,7 +352,7 @@ installservice() {
     || { echo "conveyor: install-service runs in the checkout of a project to serve" >&2; return 1; }
   pin=$("$HERE/lib/pack.sh" get plugin.commit "$repo/.conveyor/project.json") && f=$("$HERE/lib/pack.sh" get plugin.follow "$repo/.conveyor/project.json") || return 1
   # A pack that follows the plugin's main runs its current engine on this machine, taken first when it has none.
-  [ -z "$f" ] || { [ -s "$repo/.git/conveyor-engine.json" ] || CONVEYOR_MAIN=$repo "$BASH" "$HERE/conveyor.sh" take; pin=$(jq -r '.commit // empty' "$repo/.git/conveyor-engine.json" 2>/dev/null); }
+  [ -z "$f" ] || { [ -s "$repo/.git/conveyor-engine.json" ] || CONVEYOR_MAIN=$repo "$BASH" "$HERE/conveyor.sh" take wait; pin=$(jq -r '.commit // empty' "$repo/.git/conveyor-engine.json" 2>/dev/null); }
   # A pack that pins and follows nothing, its project served by a service of before from its own checkout's code (the
   # plugin's own belt): that code runs the machine's Conveyor, and the project is recorded as run from its checkout.
   [ -n "$pin$f" ] || code=$(services | while IFS=$'\t' read -r _ s; do [ "$(ownckout "$s")" = "$repo" ] && { echo "$s"; break; }; done)
@@ -477,7 +501,7 @@ board() { # [password file]
   repo=$(cd "$CALLED" && cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd -P) \
     || { echo "conveyor: board runs in the checkout of a project" >&2; return 1; }
   pin=$("$HERE/lib/pack.sh" get plugin.commit "$repo/.conveyor/project.json") && f=$("$HERE/lib/pack.sh" get plugin.follow "$repo/.conveyor/project.json") || return 1
-  [ -z "$f" ] || { [ -s "$repo/.git/conveyor-engine.json" ] || CONVEYOR_MAIN=$repo "$BASH" "$HERE/conveyor.sh" take; pin=$(jq -r '.commit // empty' "$repo/.git/conveyor-engine.json" 2>/dev/null); }
+  [ -z "$f" ] || { [ -s "$repo/.git/conveyor-engine.json" ] || CONVEYOR_MAIN=$repo "$BASH" "$HERE/conveyor.sh" take wait; pin=$(jq -r '.commit // empty' "$repo/.git/conveyor-engine.json" 2>/dev/null); }
   s=$VERSIONS/$pin/.claude/scripts
   installed "$pin" ro && [ -f "$s/dashboard.sh" ] \
     || { echo "conveyor: the pack of $repo names Conveyor commit ${pin:-(none)}, which is not installed and verified with a Board: run /conveyor-belt:setup" >&2; return 1; }

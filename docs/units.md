@@ -44,7 +44,8 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   - failed: `Test map: failed: <why>`, when the last run that made the map failed, or stopped before it ended.
 - **An old engine**, in `/units` and the pane, above the test map: when the project runs an older Conveyor commit on
   this machine than the newest one it can take, the line `doctor` prints (`Conveyor runs an old engine here: ...`), in
-  red. A narrow view wraps it between words, so the command at its end stays whole.
+  red. A narrow view wraps it between words, so the command at its end stays whole. While a take of the newer commit
+  runs, the line says so in its place (`Conveyor takes the plugin's main now: ...`).
   [Following releases or main](setup.md#following-releases-or-main-or-pinning-a-commit) tells what it means.
 
   A checkout with no `.conveyor/project.json` shows no test map line
