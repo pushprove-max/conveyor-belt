@@ -60,8 +60,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const b = await read($, band)
     if (e.props.hasSurvey || !b) return next(e)
-    // The band above the prompt is shared: /units draws its band there too (units.tsx), so the next view stays below
-    // this one, not in place of it.
+    // The place above the prompt is shared with other plugins: the next view stays below this one, not in place of it.
     const below = await next(e)
     const { Box, Text } = $.ui.resolve(e)
     const n = b.count

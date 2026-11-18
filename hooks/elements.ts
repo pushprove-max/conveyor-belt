@@ -69,10 +69,10 @@ export const gauge = (pct: number): Seg[] => {
   const k = Math.max(0, Math.min(10, Math.round(pct / 10)))
   return [{ t: '▰'.repeat(k), c: C.cost }, { t: '▱'.repeat(10 - k), c: C.dim }]
 }
-// The time left to a reset: days and hours, or under a day hours and minutes; `short` keeps the larger part only.
-export const resetIn = (t: number, now: number, short = false) => {
+// The time left to a reset: days and hours, or under a day hours and minutes.
+export const resetIn = (t: number, now: number) => {
   const s = Math.round((t - now) / 1000)
   if (s <= 0) return ''
   const d = Math.floor(s / 86400)
-  return d ? (short ? `${d}d` : `${d}d ${Math.floor((s % 86400) / 3600)}h`) : short ? `${Math.max(1, Math.floor(s / 3600))}h` : fmtSec(s)
+  return d ? `${d}d ${Math.floor((s % 86400) / 3600)}h` : fmtSec(s)
 }

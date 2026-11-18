@@ -15,32 +15,10 @@
       "description": "Open the Conveyor Board in the browser when a session starts in a repo with a Conveyor pack, and when a session becomes the Foreman. When the Board is not running, conveyor.sh board starts it first.",
       "default": true
     },
-    "band": {
-      "type": "string",
-      "title": "Band",
-      "description": "The /units rows above the prompt. auto: on in main, where the Foreman runs, off in worker panes.",
-      "options": [
-        "auto",
-        "on",
-        "off"
-      ],
-      "default": "auto"
-    },
     "pane": {
       "type": "string",
-      "title": "Side pane",
-      "description": "The Conveyor pane: every section of /units, one line an item. auto: on in main, where the Foreman runs, off in worker panes.",
-      "options": [
-        "auto",
-        "on",
-        "off"
-      ],
-      "default": "auto"
-    },
-    "status": {
-      "type": "string",
-      "title": "Status line and toasts",
-      "description": "The pinned status line and the toasts for a card that newly needs you or lands. auto: on in main, where the Foreman runs, off in worker panes.",
+      "title": "Side pane and toasts",
+      "description": "The Conveyor pane: every section of /units, one line an item; and the toasts for a card that newly needs you or lands. auto: on in main, where the Foreman runs, off in worker panes.",
       "options": [
         "auto",
         "on",

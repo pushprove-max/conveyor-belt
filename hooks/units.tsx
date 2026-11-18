@@ -2,27 +2,26 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { refresh as refreshAutoBand } from './auto'
-import { bandModel, boardOf, boardOfFeed, foremanOf, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, summaryLine, tableText, toasts } from './sources'
+import { boardOf, boardOfFeed, foremanOf, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, tableText, toasts } from './sources'
 import type { Line } from './elements'
 import type { Research, Seen, State } from './sources'
 
 // Conveyor's board: what needs you, the cards on the belt, the queue, what landed today and the two lanes, as
-// `/units`, a band above the prompt, a side pane and the status line. One fetch a minute reads it all, and the
-// dashboard collector's live feed, when it is fresh, gives the board as it changes; the mod writes nothing:
-// its only state is atoms (what the views draw).
+// `/units` and a side pane; with the pane on, a toast for a card that newly needs you or lands. One fetch a minute
+// reads it all, and the dashboard collector's live feed, when it is fresh, gives the board as it changes; the mod
+// writes nothing: its only state is atoms (what the views draw).
 const state = atom({ plugin: 'conveyor-belt', key: 'state' } as const, null)
-const view = atom({ plugin: 'conveyor-belt', key: 'view' } as const, { band: false, pane: false, status: false })
 // The belt mark's turn: only the motion clock writes it, never the poll, so a poll keeps the turn.
 const frame = atom({ plugin: 'conveyor-belt', key: 'frame' } as const, 0)
 // The time the views count from while the board stands still: the second's clock writes it alone, so a running
-// step's seconds count on with no new state, toast check or status line. A newer state's own `now` wins.
+// step's seconds count on with no new state or toast check. A newer state's own `now` wins.
 const clockNow = atom({ plugin: 'conveyor-belt', key: 'now' } as const, 0)
 const drawnAt = async ($: EngineInterface, s: State): Promise<State> => {
   const n = await read($, clockNow)
   return n > s.now ? { ...s, now: n } : s
 }
 
-type Views = 'band' | 'pane' | 'status'
+type Views = 'pane'
 
 const POLL_MS = 60_000
 // The Board's live feed: its stream.json is looked at once a second and read when it changed. It is rewritten
@@ -82,13 +81,12 @@ let spin: { cancel: () => void } | undefined
 let motion = false
 let seatName: 'main' | 'worker' = 'worker'
 let overrides: Partial<Record<Views, boolean>> = {}
-let lastStatus: string | undefined
 let paneUp = false
 let prevSeen: Seen | null = null
-let option: Record<Views, string> = { band: 'auto', pane: 'auto', status: 'auto' }
+let option: Record<Views, string> = { pane: 'auto' }
 
 const wanted = (v: Views) => overrides[v] ?? (option[v] === 'on' ? true : option[v] === 'off' ? false : seatName !== 'worker')
-const anyWanted = () => wanted('band') || wanted('pane') || wanted('status')
+const anyWanted = () => wanted('pane')
 
 // The Research lane's run: the newest write to a Claude session log of its worktree (Claude Code keeps a worktree's
 // sessions in <CLAUDE_CONFIG_DIR, else ~/.claude>/projects/<its path, every other character a dash, cut past 200
@@ -334,25 +332,16 @@ const publish = async ($: EngineInterface, make: (cur: State | null) => State) =
   await update($, state, cur => (st = make(cur as State | null)))
   if (st.snap) {
     const cur = seenOf(st.snap)
-    if (wanted('status')) for (const text of toasts(prevSeen, cur)) $.ui.toast(text)
+    if (wanted('pane')) for (const text of toasts(prevSeen, cur)) $.ui.toast(text)
     prevSeen = cur
   }
   // The motion clock runs only while `motion` is on and a card is on the belt; stopped, the mark stands still at once.
-  const turning = motion && !!st.snap?.belt.length && (wanted('band') || wanted('pane'))
+  const turning = motion && !!st.snap?.belt.length && wanted('pane')
   if (turning && !spin) spin = $.clock.every(1000, () => void turn($).catch(() => undefined))
   if (!turning && spin) {
     spin.cancel()
     spin = undefined
     await update($, frame, () => 0)
-  }
-  sendStatus($, st)
-}
-
-const sendStatus = ($: EngineInterface, st: State) => {
-  const text = wanted('status') ? summaryLine(st) : undefined
-  if (text !== lastStatus) {
-    lastStatus = text
-    $.ui.status(text)
   }
 }
 
@@ -361,25 +350,20 @@ const turn = async ($: EngineInterface) => update($, frame, f => (f + 1) % 4)
 // `ask` is `/units pane on`: it opens again even when the pane is already up, since the session's own open may have been left unplaced.
 // Returns the open's placement when it opened.
 const setViews = async ($: EngineInterface, ask = false) => {
-  const v = { band: wanted('band'), pane: wanted('pane'), status: wanted('status') }
-  await update($, view, () => v)
+  const pane = wanted('pane')
   let placed: { isPlaced?: boolean; reason?: string } | undefined
-  if (v.pane !== paneUp || (ask && v.pane)) {
-    paneUp = v.pane
-    if (v.pane) placed = await $.ui.open({ id: PANE, title: 'Conveyor' })
+  if (pane !== paneUp || (ask && pane)) {
+    paneUp = pane
+    if (pane) placed = await $.ui.open({ id: PANE, title: 'Conveyor' })
     else await $.ui.close({ id: PANE })
-  }
-  if (!v.status && lastStatus !== undefined) {
-    lastStatus = undefined
-    $.ui.status(undefined)
   }
   return placed
 }
 
-// The session's start: find the checkout, register /units, open the views and start the polls. Registers nothing outside
+// The session's start: find the checkout, register /units, open the pane and start the polls. Registers nothing outside
 // a checkout with a Conveyor pack (.conveyor/project.json): the plugin applies to every project on the profile. A pull that changes the mod's
 // files reloads it in a running session: register runs again with these variables fresh and no session.start may
-// follow, so the first of session.start, a pane, a band or /units in a load begins it, once.
+// follow, so the first of session.start, a redraw or /units in a load begins it, once.
 let begun: Promise<void> | undefined
 const begin = async ($: EngineInterface) => {
   const root = await $.session.root()
@@ -390,10 +374,9 @@ const begin = async ($: EngineInterface) => {
   main = seat.main
   overrides = {}
   prevSeen = null
-  lastStatus = undefined
   paneUp = false
   await update($, state, () => null)
-  await $.command.register({ name: 'units', description: "Conveyor's board (needs you, the belt, the queue, landed today, the lanes): /units, or /units band|pane|status on|off" })
+  await $.command.register({ name: 'units', description: "Conveyor's board (needs you, the belt, the queue, landed today, the lanes): /units, or /units pane on|off" })
   // The open here is unasked, so the host places it only on a wide terminal (a narrower one leaves it undrawn, with
   // the reason): the session is told why and that /units pane on, an asked open, places it at any width.
   const placed = await setViews($)
@@ -402,7 +385,7 @@ const begin = async ($: EngineInterface) => {
   stopPoll?.cancel()
   spin?.cancel()
   spin = undefined
-  // A session with every view off (a card's own worktree) never fetches until /units is typed there. The first fetch
+  // A session with the pane off (a card's own worktree) never fetches until /units is typed there. The first fetch
   // is not waited for: it asks another machine, and the session must not start late for it.
   stopPoll = $.clock.every(POLL_MS, () => { if (anyWanted()) void tick($).catch(() => undefined) })
   feedClock?.cancel()
@@ -436,7 +419,7 @@ const ensureBegun = ($: EngineInterface) => (begun ??= (async () => {
 })().catch(() => failed($)))
 
 export const register: Register = (on, options) => {
-  option = { band: String(options.band ?? 'auto'), pane: String(options.pane ?? 'auto'), status: String(options.status ?? 'auto') }
+  option = { pane: String(options.pane ?? 'auto') }
   // A changed option reloads the plugin and runs register again, so `motion` is read once here.
   motion = options.motion === 'on'
 
@@ -454,34 +437,25 @@ export const register: Register = (on, options) => {
     await ensureBegun($)
     if (!main) return next(e)
     const [which, flip] = e.args.trim().toLowerCase().split(/\s+/)
-    if (which === 'band' || which === 'pane' || which === 'status') {
-      overrides[which] = flip !== 'off'
-      const placed = await setViews($, which === 'pane')
+    if (which === 'pane') {
+      overrides.pane = flip !== 'off'
+      const placed = await setViews($, true)
       void tick($).catch(() => undefined)
       const notDrawn = placed && placed.isPlaced === false ? ` (not drawn: ${placed.reason ?? 'not placed'})` : ''
-      return { text: `units ${which}: ${overrides[which] ? 'on' : 'off'} for this session${notDrawn}` }
+      return { text: `units pane: ${overrides.pane ? 'on' : 'off'} for this session${notDrawn}` }
     }
+    // The pane is the one view: any other word (the old `band` and `status` too) is refused, not taken for /units.
+    if (which) return { text: `units: no view "${which}"; only the pane exists: /units, or /units pane on|off` }
     void tick($).catch(() => undefined)
     const s = (await read($, state)) as State | null
     return { text: s ? tableText(await drawnAt($, s), Math.max(40, Number(e.presentation?.columns) || 56)) : WAITING }
   }).catch(($, e, next) => next(e))
 
+  // /units draws nothing above the prompt. This render only begins the load: it runs on every redraw, so a reload
+  // with no session.start (the pane option turned on in /config) opens a pane that is not open yet.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     void ensureBegun($)
-    if (e.props.hasSurvey) return next(e)
-    const v = await read($, view)
-    const s = (await read($, state)) as State | null
-    if (!v.band || !s) return next(e)
-    // The /conveyor-belt:auto band (auto.tsx) shares this place: the next view stays below this one, not hidden.
-    const below = await next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    const f = await read($, frame)
-    return (
-      <Box flexDirection="column">
-        {bandModel(await drawnAt($, s), Number(e.props.bodyColumns) || 120, f).map((l, i) => <Box key={`b${i}`} flexDirection="row">{draw(Text, l, `b${i}`)}</Box>)}
-        {below}
-      </Box>
-    )
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {

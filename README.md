@@ -74,7 +74,7 @@ slower ([Tests page](docs/board.md#tests-page)).
 ## /units
 
 `/units` shows the belt inside Claude Code: what needs you, the cards on the belt and their steps, the queue and what
-landed today. It also shows the belt in a band above the prompt, a side pane and the status line. It comes with the
+landed today. It also shows the belt in a side pane, and with the pane on, a toast when a card needs you or lands. It comes with the
 plugin, so there is nothing more to install ([/units](docs/units.md)).
 
 ## Foreman

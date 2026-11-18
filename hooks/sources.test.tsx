@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { bandModel, boardOf, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, summaryLine, tableText, toasts } from './sources'
+import { boardOf, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -63,14 +63,9 @@ test('/units gives the cards building against the cap and leaves out those waiti
   // card said `0 of 7`. It counts every card on the belt and names the landed one as not counted.
   const push = board({ belt: [{ ...BELT[0], step: 'push' }], health: { loop: true, state: 'running', building: 0, waitingCount: 0, builderCap: 7 } })
   expect(section(tableText(push, 120), 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (1 of 7, 1 landing not counted)')
-  expect(bandModel(s, 200, 0).map(plain)[0]).toMatch(/ · 2 on the belt · 0 queued · 0 landed · building 1 of the cap 1, 1 waiting not counted /)
-  expect(summaryLine(s)).toBe('conveyor: 2 on the belt · 0 landed · today $0.00 · building 1 of the cap 1, 1 waiting not counted')
   // Bug: the cap text in the head made its right side too wide for /units' 56 columns, so the belt and queue counts
-  // were dropped; and in the band, cut at its end, it pushed the queue and landed counts off.
+  // were dropped.
   expect(tableText(s, 56).split('\n')[1]).toMatch(/ 2 on belt · 0 queued$/)
-  expect(bandModel(s, 100, 0).map(plain)[0]).toMatch(/ · 2 on the belt · 0 queued · 0 landed/)
-  // With no cap (off) or no loop count, only the count on the belt.
-  expect(summaryLine(board({ belt: BELT, health: { loop: true, building: 2, waitingCount: 0, builderCap: null } }))).toBe('conveyor: 2 on the belt · 0 landed · today $0.00')
 })
 
 // Issue 195. Bugs it catches: /units did not say the machine held cards back, and a card the machine held back did not
@@ -246,7 +241,7 @@ test('a card on the belt shows its start and overall time: resumed from a kept p
 
 test('no view prints an estimate of time: no "usual", no "to landing"', () => {
   const s = board({ belt: [{ ...BELT[1], ...TIMES, track: track('++->..', 'tests', { files: { run: 3, of: 12 } }) }], landed: LANDED })
-  for (const text of [tableText(s, 62), tableText(s, 120), paneModel(s, 62, 0).map(plain).join('\n'), bandModel(s, 160, 0).map(plain).join('\n')]) {
+  for (const text of [tableText(s, 62), tableText(s, 120), paneModel(s, 62, 0).map(plain).join('\n')]) {
     expect(text).not.toMatch(/usual|to landing|estimate/)
   }
   expect(tableText(s, 62)).toContain('testing 3m')
@@ -465,7 +460,6 @@ test('QUEUE with nothing to pick says so, and one GitHub did not list says it wa
   expect(section(tableText(board(), 80), 'QUEUE')).toBe('QUEUE\n  the queue is empty')
   const unread = board({ queue: { next: null, held: null } })
   expect(section(tableText(unread, 80), 'QUEUE')).toBe('QUEUE\n  not read: GitHub did not list the issues')
-  expect(plain(bandModel(unread, 160, 0)[0])).toContain('queue not read')
 })
 
 // the per-card measurements the dashboard's detail shows, as two lines under the card; a reading not taken is
@@ -569,21 +563,18 @@ test('the Fast lane line says no worktree, nothing open, or the open change and 
   expect(tableText(lane('fast\tok\tfast-lane\t0\t3\t'), 80)).toMatch(/\nFAST LANE      3 files uncommitted$/)
 })
 
-// A fresh install sets up no lanes, and /units, the pane and the band each said "no worktree on this machine" of both:
+// A fresh install sets up no lanes, and /units and the pane each said "no worktree on this machine" of both:
 // a lane with no worktree is not drawn, and with neither there is no lane line at all.
 test('a lane with no worktree on this machine is drawn nowhere; a lane that has one is drawn alone', () => {
   const none = board()
-  const views = (s: State) => [tableText(s, 100), paneModel(s, 100, 0).map(plain).join('\n'), bandModel(s, 100, 0).map(plain).join('\n')]
+  const views = (s: State) => [tableText(s, 100), paneModel(s, 100, 0).map(plain).join('\n')]
   for (const v of views(none)) expect(v).not.toMatch(/lane/i)
   expect(tableText(none, 100)).toMatch(/\n {2}nothing landed today$/)
   const fast = lane('fast\tok\tfast-lane\t0\t0\t')
-  const [table, pane, band] = views(fast)
-  for (const v of [table, pane]) {
+  for (const v of views(fast)) {
     expect(v).toMatch(/\n\nFAST LANE      nothing open$/)
     expect(v).not.toMatch(/research/i)
   }
-  expect(band.split('\n').at(-1)).toBe('Fast lane: nothing open')
-  expect(band).not.toMatch(/research/i)
 })
 
 // Issue 141: a main-red fix card has no issue (issue 0): /units named it by its title alone, the Foreman's views "#0".
@@ -625,7 +616,7 @@ test('the Research lane line says no worktree, no run, working or idle with its 
   expect(tableText(idle, 80)).toMatch(/\nRESEARCH LANE  idle · last activity 3h 20m ago$/)
 })
 
-test('a snapshot that cannot be read is one plain line saying why, in /units, the band, the pane and the status line', () => {
+test('a snapshot that cannot be read is one plain line saying why, in /units and the pane', () => {
   const cases: [string, string][] = [
     ['', 'the fetch did not run'],
     ['paths\t/r/ws\t/r/home\nfast\tnone\n', 'the fetch did not finish'],
@@ -643,9 +634,7 @@ test('a snapshot that cannot be read is one plain line saying why, in /units, th
     const s = state(text, { limit: { pct: 10, resetsAt: NOW + 1000 } })
     const line = `units: the Conveyor snapshot cannot be read (${why})`
     expect(tableText(s, 80)).toBe(line)
-    expect(bandModel(s, 160, 0).map(plain)).toEqual([line])
     expect(paneModel(s, 72, 0).map(plain)).toEqual([line])
-    expect(summaryLine(s)).toBe(line)
   }
 })
 
@@ -671,8 +660,6 @@ test('a second record\'s cards carry its name, and one record that cannot be rea
   expect(tableText(half, 100)).toMatch(/\n #3864 [^]*\nunits: the widgetshop snapshot cannot be read$/)
   // The unread record's spend is unknown, so dollars today is partial in every view, never the readable record's sum.
   expect(tableText(half, 100)).toMatch(/^CONVEYOR +today partial  ● buildbox\n/)
-  expect(plain(bandModel(half, 160, 0)[0])).toContain(' · today partial · ')
-  expect(summaryLine(half)).toMatch(/ · today partial$/)
   expect(tableText(state(fetched([['bookstore', 'null'], ['widgetshop', other]])), 100)).toMatch(/^CONVEYOR +today partial  ● buildbox\n/)
 })
 
@@ -689,36 +676,6 @@ test('the pane shows every section in short form: one line an item, no line wide
   expect(text).toContain('\nQUEUE  next 5 of 10+\n')
   expect(text).toMatch(/\nLANDED TODAY  7 · \$29\.48\n( \S+ [AP]M ✓ #380\d One snapshot record +2 reviews  \$4\.21\n {9}↳ 2 follow-ups: #3870 #3871\n){5}  \+2 more\n/)
   expect(text).toMatch(/\nFAST LANE      1 commit on fast-lane: A long subject .*…\nRESEARCH LANE  working · last activity 1m ago$/)
-})
-
-test('the band shows the header with each section\'s count, the first thing that needs you, the belt and the lanes', () => {
-  const s = board({ needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, belt: BELT, queue: { next: queued(10), held: {} }, landed: LANDED, cost: { today: 9.5 } },
-    { limit: { pct: 34, resetsAt: NOW + 3600_000 }, research: { state: 'ok', lastAt: NOW - 600_000 } })
-  const rows = bandModel(s, 160, 1).map(plain)
-  expect(rows).toHaveLength(4)
-  expect(rows[0]).toMatch(/^CONVEYOR · 2 need you · 2 on the belt · 10\+ queued · 3 landed +7d ▰▰▰▱▱▱▱▱▱▱ 34% · today \$9\.50 · ● buildbox reachable$/)
-  expect(rows[1]).toMatch(/^◆ #3861 · your yes: Staff land Fast lane changes as a card\. +\+1 more$/)
-  expect(rows[2]).toBe('◓ #3863 build 10m   ◓ #3864 review 2 of 3 3m')
-  expect(rows[3]).toBe('Research lane: idle · last activity 10m ago')
-  for (const r of bandModel(s, 50, 0).map(plain)) expect(cols(r)).toBeLessThanOrEqual(50)
-})
-
-test('a long Fast lane branch or commit subject is cut in the band and the Research lane stays whole', () => {
-  const s = board({}, { research: { state: 'ok', lastAt: NOW - 600_000 }, fast: { state: 'ok', branch: 'fast-lane-' + 'long-name-'.repeat(12), ahead: 2, dirty: 1, subject: 'A long subject '.repeat(20) } })
-  for (const w of [160, 100, 70]) {
-    const row = plain(bandModel(s, w, 0).at(-1)!)
-    expect(cols(row)).toBe(w)
-    expect(row).toMatch(/^Fast lane: 2 commits on.*… · Research lane: idle · last activity 10m ago$/)
-  }
-  for (const r of bandModel(s, 30, 0).map(plain)) expect(cols(r)).toBeLessThanOrEqual(30)
-})
-
-test('an empty board with no lanes set up is a one-row band: the counts', () => {
-  const rows = bandModel(board(), 160, 0).map(plain)
-  expect(rows).toHaveLength(1)
-  expect(rows[0]).toMatch(/^CONVEYOR · 0 on the belt · 0 queued · 0 landed +7d not read · today \$0\.00 · ● buildbox reachable$/)
-  expect(summaryLine(board())).toBe('conveyor: 0 on the belt · 0 landed · today $0.00')
-  expect(summaryLine(board({ needsYou: { waiting: [WAITING], blocked: [] } }))).toBe('conveyor: 1 needs you · 0 on the belt · 0 landed · today $0.00')
 })
 
 test('a toast names each card that newly needs you or newly landed, never what was there at the first poll', () => {

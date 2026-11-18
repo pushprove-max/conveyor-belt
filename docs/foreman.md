@@ -79,7 +79,7 @@ that the Foreman's watchers still use. A later update deletes it, after those wa
 
 ## Is the Foreman listening?
 
-`/units`, its band, its pane and the status line show one Foreman line:
+`/units` and its pane show one Foreman line:
 
 - **Foreman listening**, in the colour for success: this session is the Foreman, its waiter runs from the Conveyor
   version that the project uses now, and its four watchers run.

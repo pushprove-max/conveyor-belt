@@ -587,15 +587,15 @@ const foremanDetail = (detail: string, w: number): Line[] => {
   out.push(cur.trimEnd())
   return out.map(t => fitWidth([{ t, d: true }], w))
 }
-// The indicator, and with `details` the lines under it. None where no Foreman is expected. With `details`, the plugin
-// problems the Foreman noted follow, with a link to their file (a file:// URL, which the terminal opens; uncut, as a
-// cut URL opens nothing): only the owner can fix or file them in the plugin's repository.
-export const foremanModel = (s: State, w: number, details: boolean): Line[] => [
+// The indicator and the lines under it. None where no Foreman is expected. The plugin problems the Foreman noted
+// follow, with a link to their file (a file:// URL, which the terminal opens; uncut, as a cut URL opens nothing): only
+// the owner can fix or file them in the plugin's repository.
+export const foremanModel = (s: State, w: number): Line[] => [
   ...(s.foreman ? [
     [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }],
-    ...(details ? foremanDetail(s.foreman.detail, w) : []),
+    ...foremanDetail(s.foreman.detail, w),
   ] : []),
-  ...(details && s.pluginBugs ? [
+  ...(s.pluginBugs ? [
     fitWidth([{ t: `${s.pluginBugs.n} plugin problem${s.pluginBugs.n === 1 ? '' : 's'} noted`, c: C.you, b: true }], w),
     [{ t: `  file://${encodeURI(s.pluginBugs.path)}`, d: true }],
   ] : []),
@@ -653,26 +653,11 @@ const item = (mark: Seg, name: Seg, details: Seg[], right: Seg[], w: number): Li
 
 const todaySeg = (snap: Snap): Seg => (snap.todayUsd === null ? { t: 'today partial', c: C.cost }
   : { t: `today ${usd(snap.todayUsd)}${snap.todayLeftOut ? ` + ${count(snap.todayLeftOut, 'step')} not priced` : ''}`, c: C.cost, b: true })
-const limitSegs = (s: State, short: boolean): Line => {
-  if (!s.limit) return [{ t: short ? '7d not read' : 'usage limit not read', c: C.dim }]
-  const r = resetIn(s.limit.resetsAt, s.now, short)
-  return [{ t: '7d ', c: C.dim }, ...gauge(s.limit.pct), { t: ` ${Math.round(s.limit.pct)}%` }, ...(r && !short ? [{ t: ` ↻ ${r}`, c: C.dim }] : [])]
-}
-// A board is only drawn from a snapshot the host just gave, so the host named here answered.
-const hostSegs = (s: State): Line => [{ t: '●', c: C.ok }, { t: ` ${s.host} reachable` }]
-
 // A loop that is not picking, as its control record makes it: `shop paused`, `shop: no loop process`.
 // Nothing while every loop runs.
 const loopText = (snap: Snap): string => snap.loops
   .map(l => (l.loop === false ? `${l.repo}: no loop process` : l.state && l.state !== 'running' ? `${l.repo} ${l.state}${l.reason ? `: ${l.reason}` : ''}` : ''))
   .filter(Boolean).join(' · ')
-// Each running loop's cards building against its builder cap, as `foreman status` gives them, for the band and the
-// summary line: `building 1 of the cap 1, 1 waiting not counted` (a card that only waits on another card takes no build
-// slot); with more than one loop, each after its repo. Nothing for a loop that does not say, or that runs with no cap.
-const capText = (snap: Snap): string => {
-  const ls = snap.loops.filter(l => l.building !== null && l.cap !== null)
-  return ls.map(l => `${snap.loops.length > 1 ? `${l.repo} ` : ''}building ${l.building} of the cap ${l.cap}${l.waiting ? `, ${l.waiting} waiting not counted` : ''}`).join(' · ')
-}
 // The cards on the belt against the builder cap, for the head of ON THE BELT: `1 of 7`, and `2 of 1, 1 waiting not
 // counted` for the cards on the belt that take no build slot: one that only waits on another card, and a landed one
 // in Push (`1 landing`). With more than one project, each project's count after its name: `bakery 1 of 3 ·
@@ -712,8 +697,6 @@ const roomParts = (snap: Snap): string[] => {
   return [`machine ${p.state.toLowerCase()}: ${m ? `${m[1]} (limit ${m[2]})` : p.why || 'no figure given'}`,
     busy ? 'fewer new cards' : 'new cards wait']
 }
-// Last on a line that is cut at its end, so the counts before it are kept on a narrow screen.
-const capTail = (snap: Snap): string => (capText(snap) ? ` · ${capText(snap)}` : '')
 const loopSegs = (snap: Snap): Seg[] => (loopText(snap) ? [{ t: ' · ' }, { t: loopText(snap), c: C.you, b: true }] : [])
 
 // The head, two lines: CONVEYOR, today's cost and the host; then the weekly limit with its reset, and
@@ -920,7 +903,7 @@ const noteLine = (s: State): Line => [{ t: s.note, c: C.you }]
 const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   ...headerModel(s, snap, w),
   ...(short ? [] : [[{ t: declinedTodayText(s, snap), d: true }] as Line]),
-  ...foremanModel(s, w, true),
+  ...foremanModel(s, w),
   ...engineModel(s, w),
   ...testMapModel(s, w),
   ...suitesModel(s, snap).map(l => (short ? fitWidth(l, w) : l)), [],
@@ -935,40 +918,10 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
 
 // `/units`: every section in full. A snapshot that cannot be read is one plain line, and the Foreman indicator: the
 // Foreman's state is read from its folder, not from the snapshot.
-export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w, true), ...engineModel(s, w), ...testMapModel(s, w)]).map(plain).join('\n')
+export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)]).map(plain).join('\n')
 
 // The side pane: the same sections, each item one line, the landed list cut to five.
-export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s), ...foremanModel(s, w, true), ...engineModel(s, w), ...testMapModel(s, w)])
-
-// The band: the header with each section's count, the first thing that needs you, the belt, then the lanes set up on this machine.
-export const bandModel = (s: State, w: number, frame: number): Line[] => {
-  const snap = s.snap
-  if (!snap) return [fitWidth(noteLine(s), w), ...foremanModel(s, w, false)]
-  const queued = snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} queued`
-  const out: Line[] = [spread(
-    [{ t: 'CONVEYOR', c: C.head, b: true }, ...loopSegs(snap), ...(snap.needs.length ? [{ t: ' · ' }, { t: `${snap.needs.length} need${snap.needs.length === 1 ? 's' : ''} you`, c: C.you, b: true }] : []),
-      { t: ` · ${snap.belt.length} on the belt · ${queued} · ${snap.landed.length} landed${capTail(snap)}` }],
-    [...limitSegs(s, true), { t: ' · ' }, todaySeg(snap), { t: ' · ' }, ...hostSegs(s)], w)]
-  out.push(...foremanModel(s, w, false))
-  const n = snap.needs[0]
-  if (n) out.push(spread([n.yes ? { t: '◆ ', c: C.you } : { t: '✗ ', c: C.bad }, { t: ref(n), c: C.name, b: true }, { t: ` · ${whatOf(n)}` }], snap.needs.length > 1 ? { t: `+${snap.needs.length - 1} more`, c: C.you } : null, w))
-  if (snap.belt.length) {
-    out.push(fitWidth(snap.belt.flatMap((b, i): Seg[] => {
-      const age = since(b.stepAt, s.now)
-      return [...(i ? [{ t: '   ' }] : []), { t: `${workMark(frame)} `, c: C.work }, { t: ref(b), c: C.name, b: true }, { t: ` ${stepOf(b)}${age ? ` ${age}` : ''}`, c: C.work }]
-    }), w))
-  }
-  // A lane with no worktree is left out, and with neither there is no lane line. The Fast lane's text (a branch name,
-  // a commit subject) is the part cut: the Research lane is always shown in full.
-  const hasFast = s.fast.state !== 'none'
-  const research: Seg[] = s.research.state === 'none' ? [] : [{ t: `${hasFast ? ' · ' : ''}Research lane: ${researchText(s)}`, d: true }]
-  if (hasFast) out.push(fitWidth([...fitWidth([{ t: `Fast lane: ${fastText(s)}`, d: true }], Math.max(12, w - cols(plain(research)))), ...research], w))
-  else if (research.length) out.push(fitWidth(research, w))
-  return out
-}
-
-export const summaryLine = (s: State): string =>
-  s.snap ? `conveyor: ${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${loopText(s.snap) ? `${loopText(s.snap)} · ` : ''}${s.snap.needs.length ? `${s.snap.needs.length} need${s.snap.needs.length === 1 ? 's' : ''} you · ` : ''}${s.snap.belt.length} on the belt · ${s.snap.landed.length} landed · ${plain([todaySeg(s.snap)])}${capTail(s.snap)}` : `${s.foreman ? `${foremanText(s.foreman)} · ` : ''}${s.note}`
+export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)])
 
 // What the toasts compare between two polls: the cards that need you and the cards that landed, by card id.
 export type Seen = { needs: Map<string, string>; landed: Map<string, string> }

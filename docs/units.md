@@ -1,8 +1,8 @@
 # /units: Conveyor's board inside Claude Code
 
 The plugin's `hooks/units.tsx` (registered by `hooks/index.tsx`, the hooks module `hooks/hooks.json` names under `modules`) shows Conveyor's board in
-four places: `/units`, a band above the prompt, a side pane (`Conveyor`) and the pinned status line, plus a toast when
-a card newly needs you or lands. It only reads; it writes no file. It comes with the plugin: there is nothing else to
+two places: `/units` and a side pane (`Conveyor`). With the pane on, a toast also shows when a card newly needs you or
+lands. It only reads; it writes no file. It comes with the plugin: there is nothing else to
 install.
 
 It registers nothing outside a checkout with Conveyor's project settings (`.conveyor/project.json` in the main
@@ -18,8 +18,7 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. While the loop runs with a builder
   cap, the `ON THE BELT` head gives the cards on the belt and the cap, and the cards that take no build slot: those
   that wait on another card, and a landed card in Push (`ON THE BELT (2 of 7, 1 waiting and 1 landing not counted)`). With more than one project, each project's count
-  follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). The band and the status line give the cards building
-  against the cap at their end. In `/units` a third line gives how
+  follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). In `/units` a third line gives how
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).
 - **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
@@ -27,7 +26,7 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   down: <name>`; `docs/foreman.md` says what each one means). In `/units` and the pane a dim
   line under it gives the session that has the role, the waiter's process and version, and the state of each watcher.
   A narrow view wraps that line onto more lines, so no watcher is lost.
-  The band shows the Foreman line alone, and the status line starts with it. A project where no session has the
+  A project where no session has the
   Foreman role and no Foreman is set up shows no Foreman line. [Foreman](foreman.md) tells what each reason means.
 - **The whole suite**, in `/units` and the pane, under the head: while a release suite or a full test run is in
   progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
@@ -94,29 +93,28 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   level, reviews, rebuilds, retries, follow-up depth, follow-ups filed, weekly limit points, tokens, dollars, and why
   it is blocked), then one line a finished step (its seconds, tokens, dollars, model, findings, tests and the
   session's own stats; a step with no price says why, `not priced: no model recorded`). A reading that was not taken
-  reads `missing`, never 0; a snapshot from before the measurements shows none of these lines. Not in the pane or the
-  band. The header's `today` is the priced steps' dollars, with `+ N steps not priced` when some are left out.
+  reads `missing`, never 0; a snapshot from before the measurements shows none of these lines. Not in the pane. The header's `today` is the priced steps' dollars, with `+ N steps not priced` when some are left out.
 - **FAST LANE**: the lane's open change (commits ahead of the default branch, uncommitted files) and its card: on the
   belt with its step, needing you, landed, or not landed.
 - **RESEARCH LANE**: working or idle, with the time of its last activity.
 
-A lane with no worktree on this machine is not shown: not in `/units`, the pane or the band. When neither lane has a
-worktree, the band has no lane line.
+A lane with no worktree on this machine is not shown: not in `/units` and not in the pane.
 
 `/units` prints all of it in full. The pane shows the same with the cards that need you one line each and the landed
-list cut to five; the band shows the header with each section's count, the first thing that needs you, the belt and
-the lanes. A card of the session's own project shows its issue alone; a card of any other project carries its
+list cut to five. A card of the session's own project shows its issue alone; a card of any other project carries its
 project's name (`widgetshop#12`). In a checkout that no record names, every card carries its project's name.
-A loop that is not picking says so after `CONVEYOR` in the header, the band and the status
-line (`shop paused`, `shop stopped`, `shop paused by guard`, `shop: no loop process`), from the snapshot's health, so
+A loop that is not picking says so after `CONVEYOR` in the header (`shop paused`, `shop stopped`, `shop paused by guard`, `shop: no loop process`), from the snapshot's health, so
 `conveyor.sh control pause` or `stop` shows there; a running loop adds nothing. A loop that paused itself, after a
 sign-in failed, shows the reason after the state (`shop paused: build: Claude Code's own sign-in expired; ...`).
 
 ## Settings
 
-Each view has its own option in `/config`, under the plugin: `band`, `pane`, `status` (status line and toasts), each
-`auto`, `on` or `off`. `auto` is on in main, where the Foreman runs, off in every other worktree (a card's, a lane's).
-`/units band|pane|status on|off` flips one for the current session.
+The pane has its option in `/config`, under the plugin: `pane`, `auto`, `on` or `off`. `auto` is on in main, where the
+Foreman runs, off in every other worktree (a card's, a lane's). `/units pane on|off` sets it for the current session.
+`/units` has no other view: any other word after `/units` shows that only the pane exists.
+
+The toasts go with the pane: with the pane on, a toast shows when a card newly needs you (`#3861 needs your yes`,
+`#3850 is blocked`) or lands (`#3860 landed`, `#3858 closed as already fixed`). With the pane off, no toast shows.
 
 With `pane` on, the pane opens when a session starts. Claude Code places a pane that opens by itself only in a wide
 terminal. In a narrower one the pane waits, not drawn, and the session shows one line with the reason Claude Code gives
@@ -125,7 +123,7 @@ of each card on the belt `◐ ◓ ◑ ◒` once a second; off, the mark stands s
 
 ## What it reads
 
-One fetch a minute while a view is on, and one each time `/units` is typed (a session with every view off fetches
+One fetch a minute while the pane is on, and one each time `/units` is typed (a session with the pane off fetches
 nothing until then); a `/units` typed while a fetch is still waiting to start starts none of its own. The fetch is
 `hooks/units-fetch.sh`, run in the main checkout. It reads the machine's host file, `~/.config/conveyor/host.json`
 (under `$XDG_CONFIG_HOME` when that is set; else the checkout's `conveyor/host.json`), as the Board reads it:
@@ -177,7 +175,7 @@ A snapshot that cannot be read is one plain line in every view, and nothing from
 `this machine has no host file at <paths looked at>`, `the host file is not understood`,
 `the fetch did not run` or `the fetch did not finish`, or
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
-The Foreman line still shows under it, and the status line starts with it.
+The Foreman line still shows under it.
 
 Smaller gaps are named where they are: `usage limit not read`, `today partial` and `cost partial` (a step could not be
 priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed

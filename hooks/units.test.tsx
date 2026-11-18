@@ -81,8 +81,8 @@ const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<st
   on('ui.close', (_, e) => (w.opened.splice(w.opened.indexOf(e.id), 1), { value: undefined }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => (w.registered.push(e.name), { value: { command: e.name } }))
-  // The band is one row per plugin that hooks it, the test among them: this stands beneath the units row alone
-  // and draws no row of the test's own, so 'engine' in the band means the units row passed.
+  // The place above the prompt is one row per plugin that hooks it, the test among them: this stands beneath the
+  // plugin's rows and draws no row of the test's own, so 'engine' alone there means the plugin drew nothing above it.
   on('ui.render', { plugin: '*' }, ($, e, next) => (e.component === 'AbovePrompt' && e.plugin !== 'conveyor-belt' ? next(e) : { ...$.ui.resolve(e).Text({ children: 'engine' }) }))
   on('command.run', () => ({ text: 'engine' }))
   return w
@@ -168,15 +168,12 @@ test('an empty board prints every section with its empty line, a missing data fi
   ].join('\n'))
 })
 
-test('a snapshot that cannot be read is one plain line in /units, the band, the pane and the status line', async ($, on) => {
+test('a snapshot that cannot be read is one plain line in /units and the pane', async ($, on) => {
   const w = world(on, 'main', answer(null, 'host\tbuildbox\tssh\t255'), { [DATA]: dataJs(34, '2026-11-12T00:00:00Z') })
   await start($, 'main')
   await w.clock.settle()
   expect(await units($)).toBe(CANNOT)
-  // The band's one line, then the view beneath it (the test's 'engine'), never hidden by it.
-  expect(await draw($, 'AbovePrompt')).toBe(`${CANNOT}engine`)
   expect(await draw($, 'Pane')).toBe(CANNOT)
-  expect(w.status.at(-1)).toBe(CANNOT)
 })
 
 test('a fetch that fails or prints nothing readable is the same one line, never an earlier board', async ($, on) => {
@@ -197,22 +194,27 @@ test('a fetch that fails or prints nothing readable is the same one line, never 
   expect(await draw($, 'Pane')).not.toContain('ON THE BELT')
 })
 
-test('the band and the pane show the board in short form, and the status line its counts', async ($, on) => {
+test('the pane shows the board in short form', async ($, on) => {
   const w = world(on, 'main', answer(FULL))
   await start($, 'main')
   await units($)
-  const band = await draw($, 'AbovePrompt')
-  expect(band).toMatch(/^CONVEYOR · 1 needs you · 1 on the belt · 1 queued · 1 landed +7d not read · today \$7\.00 · ● buildbox reachable/)
-  expect(band).toContain('◆ #3861 · your yes: Staff land a lane change as a card.')
-  expect(band).toContain('◐ #3863 build 10m')
-  // The Research lane has no worktree here, so the band and the pane leave it out.
-  expect(band).toContain('Fast lane: nothing open')
-  expect(band).not.toContain('Research lane')
   const pane = await draw($, 'Pane')
   for (const part of ['NEEDS YOU (1)', '◆ #3861 Fast lane · your yes: Staff land a lane change as a card.', 'ON THE BELT (1)', 'QUEUE  1', 'LANDED TODAY  1 · $7.00', 'FAST LANE      nothing open']) expect(pane).toContain(part)
+  // The Research lane has no worktree here, so the pane leaves it out.
   expect(pane).not.toContain('RESEARCH LANE')
-  expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
   expect(w.opened).toEqual(['units'])
+})
+
+// Bug it catches (#355): /units drew a band above the prompt and a status line; only the pane stays, with any setting.
+test('no setting draws a /units band above the prompt or a status line', { options: { band: 'on', pane: 'on', status: 'on' } }, async ($, on) => {
+  const w = world(on, 'main', answer(FULL))
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  // 'engine' is the test's own row beneath the plugin's: nothing of /units stands above it.
+  expect(await draw($, 'AbovePrompt')).toBe('engine')
+  expect(w.status).toEqual([])
 })
 
 // Bug it catches (#286): the pane drew at 72 columns at most, so a wide pane cut titles and narrowed the track, and a
@@ -295,13 +297,14 @@ const reloaded = (w: World) => {
     ui: {
       open: async (o: { id: string }) => (w.opened.push(o.id), { isPlaced: true }),
       close: async () => undefined,
-      status: async (text: string | undefined) => void w.status.push(text),
       toast: async (text: string) => void w.toasts.push(text),
       resolve: () => ({ Box: 'Box', Text: 'Text' }),
     },
   }
   const hook = (event: string, match: (m: any) => boolean) => hooks.find(h => h.event === event && match(h.match))!.hook
   return {
+    // The board the reloaded load last published: its poll's own state.
+    board: () => (values.get('conveyor-belt/state/')?.value as any)?.snap,
     drawPane: () => hook('ui.render', m => m?.component === 'Pane')($r, { component: 'Pane', surface: 'terminal', props: { title: 'Conveyor', isFocused: false, bodyColumns: 72, placement: 'dock' } }, async () => ({})),
     units: async () => (await hook('command.run', m => m?.command === 'units')($r, { command: 'units', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 100 } }, async () => ({ text: 'engine' }))).text as string,
   }
@@ -322,7 +325,7 @@ test('register, session start, a poll publishes; register again with no session 
   await start($, 'main')
   await w.clock.settle()
   expect(fetches(w).length).toBe(1)
-  expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
+  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
   expect(await units($)).toContain('ON THE BELT (1)')
   await w.clock.settle()
   expect(fetches(w).length).toBe(2)
@@ -335,11 +338,11 @@ test('register, session start, a poll publishes; register again with no session 
   await again.drawPane()
   await w.clock.settle()
   expect(fetches(w).length).toBe(3)
-  expect(w.status.at(-1)).toBe('conveyor: 0 on the belt · 0 landed · today $0.00')
+  expect(again.board()?.belt).toEqual([])
   w.fetch = answer(FULL)
   await w.clock.advance(60_000)
   expect(fetches(w).length).toBe(4)
-  expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
+  expect(again.board()?.belt).toHaveLength(1)
   const board = await again.units()
   expect(board).toContain('ON THE BELT (1)')
   expect(board).not.toContain('reading the Conveyor snapshot')
@@ -386,18 +389,18 @@ test('a load whose first begin fails begins again at the first render a minute l
     w.run = run
     throw new Error('git failed once')
   }
-  expect(await draw($, 'AbovePrompt')).toBe('engine')
+  expect(await draw($, 'Pane')).toBe('units: reading the Conveyor snapshot')
   await w.clock.settle()
   expect(w.registered).toEqual([])
   expect(fetches(w)).toEqual([])
   const gits = w.runs.length
   await w.clock.advance(59_000)
-  await draw($, 'AbovePrompt')
+  await draw($, 'Pane')
   await w.clock.settle()
   expect(w.runs.length).toBe(gits)
   expect(w.registered).toEqual([])
   await w.clock.advance(1000)
-  await draw($, 'AbovePrompt')
+  await draw($, 'Pane')
   expect(await units($)).toContain('ON THE BELT (1)')
   expect(w.registered).toEqual(['units'])
   expect(fetches(w).length).toBeGreaterThan(0)
@@ -456,21 +459,30 @@ test('a card that newly needs you or lands is a toast; what was there at the fir
   expect(w.toasts).toHaveLength(2)
 })
 
-test('/units band, pane and status flip one view for the session, and a pane that is not placed says why', async ($, on) => {
+// Bug it catches (#355): the toasts went with the status line, which is gone; they now go with the pane, so with the
+// pane off a card that newly needs you or lands shows no toast.
+test('with the pane off, a card that newly needs you or lands is no toast', { options: { pane: 'off' } }, async ($, on) => {
+  const w = world(on, 'main', answer(snapshot({ landed: [LANDED] })))
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  w.fetch = answer(snapshot({ needsYou: { waiting: [WAITING], blocked: [] }, landed: [LANDED, { ...LANDED, card: 'c6-3860', issue: 3860 }] }))
+  await units($)
+  await w.clock.settle()
+  expect(fetches(w).length).toBe(2)
+  expect(w.toasts).toEqual([])
+})
+
+// Bug it catches (#355): /units band and /units status turned on views that are gone; only the pane exists.
+test('/units pane flips the pane for the session and a pane that is not placed says why; band and status are refused', async ($, on) => {
   const w = world(on, 'worker', answer(FULL))
   await start($, 'worker')
-  expect(await units($, 'band on')).toBe('units band: on for this session')
-  await w.clock.settle()
-  expect(await draw($, 'AbovePrompt')).toContain('CONVEYOR · 1 needs you')
-  expect(await units($, 'band off')).toBe('units band: off for this session')
-  expect(await draw($, 'AbovePrompt')).toBe('engine')
+  for (const which of ['band', 'status']) expect(await units($, `${which} on`)).toBe(`units: no view "${which}"; only the pane exists: /units, or /units pane on|off`)
   w.placed = false
   expect(await units($, 'pane on')).toBe('units pane: on for this session (not drawn: no room)')
-  expect(await units($, 'status on')).toBe('units status: on for this session')
-  await w.clock.settle()
-  expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
-  await units($, 'status off')
-  expect(w.status.at(-1)).toBe(undefined)
+  expect(w.opened).toEqual(['units'])
+  expect(await units($, 'pane off')).toBe('units pane: off for this session')
+  expect(w.opened).toEqual([])
 })
 
 // The pane option set to on at setup opens the pane at session start, even in a worker checkout, where auto leaves it off.
@@ -481,6 +493,15 @@ test('with the pane option on, the session start opens the Conveyor pane with no
   await start($, 'worker')
   expect(w.opened).toEqual(['units'])
   expect(logs).toEqual([])
+})
+
+// Bug: the pane option turned on in /config reloads the plugin with no session.start, and with the pane not open its
+// render never runs: the redraw above the prompt, which /units draws nothing in, must begin the load and open it.
+test('a load with no session start and the pane option on opens the pane at the first redraw above the prompt', { options: { pane: 'on' } }, async ($, on) => {
+  const w = world(on, 'worker', answer(FULL))
+  expect(await draw($, 'AbovePrompt')).toBe('engine')
+  await w.clock.settle()
+  expect(w.opened).toEqual(['units'])
 })
 
 // Bug (issue 107): the session start's open is unasked, so a terminal under the host's width floor leaves the pane
@@ -495,9 +516,9 @@ test('a pane the host does not place at session start gives the session one line
   expect(logs).toEqual(['units: the Conveyor pane is not drawn (no room); /units pane on tries again'])
 })
 
-// Bug (issue 616): with /conveyor-belt:auto on and /units band on, each band's hook drew its own view in place of the
-// next one's, so one band hid the other. Both bands, and the view beneath them ('engine'), are drawn.
-test('with /conveyor-belt:auto on and /units band on, the place above the prompt shows both bands', async ($, on) => {
+// Bug (issue 616): the /conveyor-belt:auto band drew its view in place of the next one's, so it hid another plugin's
+// view. The band and the view beneath it ('engine') are drawn, and /units draws nothing there.
+test('with /conveyor-belt:auto on, the place above the prompt shows its band and the view beneath it', async ($, on) => {
   const w = world(on, 'main', answer(FULL))
   const fetch = w.run
   w.run = (argv, cwd) => argv.includes('auto') && argv.includes('band')
@@ -508,7 +529,7 @@ test('with /conveyor-belt:auto on and /units band on, the place above the prompt
   await w.clock.settle()
   const band = await draw($, 'AbovePrompt')
   expect(band).toContain('AUTO ON since 04:30')
-  expect(band).toContain('CONVEYOR · 1 needs you')
+  expect(band).not.toContain('CONVEYOR')
   expect(band).toContain('engine')
 })
 
@@ -533,9 +554,9 @@ test('with motion on, the mark of a card on the belt turns once a second, and st
   const w = world(on, 'main', answer(FULL))
   await start($, 'main')
   await w.clock.settle()
-  expect(await draw($, 'AbovePrompt')).toContain('◐ #3863 build')
+  expect(await draw($, 'Pane')).toContain('◐ build')
   await w.clock.advance(1000)
-  expect(await draw($, 'AbovePrompt')).toContain('◓ #3863 build')
+  expect(await draw($, 'Pane')).toContain('◓ build')
   w.fetch = answer(snapshot())
   await units($)
   await w.clock.settle()
@@ -895,7 +916,6 @@ test('a control change in the feed (conveyor.sh control pause, then stop) is dra
   w.files.set(FEED, { text: feed(snapshot({ health: { loop: true, state: 'paused' } })), at: NOW + 500 })
   await w.clock.advance(1000)
   expect(await draw($, 'Pane')).toContain('bookstore paused')
-  expect(w.status.at(-1)).toContain('bookstore paused')
   w.files.set(FEED, { text: feed(snapshot({ health: { loop: true, state: 'stopped' } })), at: NOW + 1500 })
   await w.clock.advance(1000)
   expect(await draw($, 'Pane')).toContain('bookstore stopped')
@@ -943,19 +963,18 @@ test('a feed that comes back while a slow fetch runs is drawn within a second, a
   expect(await draw($, 'Pane')).toContain('#3863')
 })
 
-// a running step wrote a new state each second, so the toast check and the status line (which run on each
-// state written) ran again with nothing changed. The views' clock is its own atom.
-test('a second with a running step and no board change writes no state, so makes no toast check and no status line write; only the views\' clock moves', async ($, on) => {
+// a running step wrote a new state each second, so the toast check (which runs on each state written) ran again
+// with nothing changed. The views' clock is its own atom.
+test('a second with a running step and no board change writes no state, so makes no toast check; only the views\' clock moves', async ($, on) => {
   const live = { ...BELT, live: { action: 'Bash: npm test', turns: 3, lastOutputAt: new Date(NOW - 6000).toISOString() } }
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt: [live] })) })
   await start($, 'main')
   await w.clock.advance(1000)
   const states = () => w.writes.filter(k => k === 'state').length
-  const [before, status] = [states(), w.status.length]
+  const before = states()
   expect(before).toBeGreaterThan(0)
   await w.clock.advance(1000)
   expect(states()).toBe(before)
-  expect(w.status.length).toBe(status)
   expect(await draw($, 'Pane')).toContain('last output 8s ago')
 })
 
@@ -1025,8 +1044,8 @@ const foremanWorld = async ($: any, on: On, fetch: string) => {
   return { w, text: await units($) }
 }
 
-test('D1: this session holds the role and its live waiter runs the current install: Foreman listening, in /units, the pane, the band and the status line', async ($, on) => {
-  const { w, text } = await foremanWorld($, on, withForeman(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP]))
+test('D1: this session holds the role and its live waiter runs the current install: Foreman listening, in /units and the pane', async ($, on) => {
+  const { text } = await foremanWorld($, on, withForeman(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP]))
   expect(text).toContain('\nForeman listening\n  role: me (this one) · waiter 4242 on aaaaaaa · watchers: conveyor up, limit up, alerts up, idle up\n')
   const pane = await draw($, 'Pane')
   expect(pane).toContain('Foreman listening')
@@ -1035,10 +1054,6 @@ test('D1: this session holds the role and its live waiter runs the current insta
   expect(pane).toContain('alerts up, idle up')
   const narrow = (await $.command.run({ command: 'units', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 40 } })).text as string
   expect(narrow).toContain('\nForeman listening\n  role: me (this one) ·\n    waiter 4242 on aaaaaaa ·\n    watchers: conveyor up, limit up,\n    alerts up, idle up\n')
-  const band = await draw($, 'AbovePrompt')
-  expect(band).toContain('Foreman listening')
-  expect(band).not.toContain('role: me')
-  expect(w.status.at(-1)).toBe('conveyor: Foreman listening · 1 needs you · 1 on the belt · 1 landed · today $7.00')
 })
 
 const notListening: [string, string[], string][] = [
@@ -1053,43 +1068,36 @@ const notListening: [string, string[], string][] = [
   ['a watcher has exited and not come back', ['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, 'conveyor:up limit:up alerts:up idle:down'], 'watcher down: idle'],
 ]
 for (const [what, fields, why] of notListening) {
-  test(`${what}: Foreman not listening: ${why}, in /units and the status line`, async ($, on) => {
-    const { w, text } = await foremanWorld($, on, withForeman(fields))
+  test(`${what}: Foreman not listening: ${why}, in /units and the pane`, async ($, on) => {
+    const { text } = await foremanWorld($, on, withForeman(fields))
     expect(text).toContain(`\nForeman not listening: ${why}\n`)
     expect(text).not.toContain('Foreman listening')
-    expect(w.status.at(-1)).toMatch(new RegExp(`^conveyor: Foreman not listening: ${why} · `))
+    expect(await draw($, 'Pane')).toContain(`Foreman not listening: ${why}`)
   })
 }
 
 // Issue 139: a plugin problem the Foreman noted needs the owner, who alone can fix or file it in the plugin's
 // repository. Bug it catches: the note sat in its file and /units never said so. Bug (review): the file was a bare
 // path, which a terminal does not open: it is a file:// link, its space encoded so the link is whole.
-test('plugin problems the Foreman noted: "N plugin problems noted" with a link to the file, in /units and the pane, not in the band', async ($, on) => {
+test('plugin problems the Foreman noted: "N plugin problems noted" with a link to the file, in /units and the pane', async ($, on) => {
   const fetch = withForeman(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP]).replace('\nhost\t', '\npluginbugs\t2\t/r/my main/conveyor/state/foreman/plugin-bugs.md\nhost\t')
   const { text } = await foremanWorld($, on, fetch)
   expect(text).toContain('\n2 plugin problems noted\n  file:///r/my%20main/conveyor/state/foreman/plugin-bugs.md\n')
   expect(await draw($, 'Pane')).toContain('2 plugin problems noted')
-  expect(await draw($, 'AbovePrompt')).not.toContain('plugin problem')
 })
 
 test('D4: no Foreman is expected (the fetch prints no foreman line): no indicator anywhere', async ($, on) => {
-  const { w, text } = await foremanWorld($, on, answer(FULL))
+  const { text } = await foremanWorld($, on, answer(FULL))
   expect(text).not.toContain('Foreman')
   expect(await draw($, 'Pane')).not.toContain('Foreman')
-  expect(await draw($, 'AbovePrompt')).not.toContain('Foreman')
-  expect(w.status.at(-1)).toBe('conveyor: 1 needs you · 1 on the belt · 1 landed · today $7.00')
 })
 
 // Bug: a snapshot that could not be read hid the indicator in every view, though the Foreman's state is read from its
 // own folder on this machine, not from the snapshot.
-test('a snapshot that cannot be read still shows the Foreman indicator in /units, the pane, the band and the status line', async ($, on) => {
+test('a snapshot that cannot be read still shows the Foreman indicator in /units and the pane', async ($, on) => {
   const fetch = answer(null, 'host\tbuildbox\tssh\t255').replace('\nhost\t', `\nforeman\t${['other', '4242', COMMIT_A, 'other', '1', COMMIT_A, UP].join('\t')}\nhost\t`)
-  const { w, text } = await foremanWorld($, on, fetch)
+  const { text } = await foremanWorld($, on, fetch)
   expect(text.startsWith(`${CANNOT}\nForeman not listening: not the Foreman session\n  role: other · waiter 4242 on aaaaaaa for other · watchers: conveyor up`)).toBe(true)
   expect(await draw($, 'Pane')).toContain('Foreman not listening: not the Foreman session')
   expect(await draw($, 'Pane')).toContain('role: other')
-  const band = await draw($, 'AbovePrompt')
-  expect(band).toContain(CANNOT)
-  expect(band).toContain('Foreman not listening: not the Foreman session')
-  expect(w.status.at(-1)).toBe(`Foreman not listening: not the Foreman session · ${CANNOT}`)
 })
