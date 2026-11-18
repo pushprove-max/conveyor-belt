@@ -7,6 +7,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # wait_until: a case waits for a condition, never a set time (wait.sh).
 . "$SRC/tests/wait.sh"
 T=$(mktemp -d); trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT # u+w: the installs are read-only
+# Git reaches only the scratch folder's repos (lib/gitfence.sh): under the GIT_DIR `git bisect run` exports, the
+# fixture's `git -C "$R" init`, `commit -qm init` and `git init --bare .../origin` (fixture(), below) worked on the
+# checkout the run was started in. Each case starts in its own folder, $T/$CASE (case_keep).
+. "$SRC/lib/gitfence.sh"; gitfence "$T"
 # The machine's test slots (lib/slots.sh), which each case takes one of (the runner; run_case): the pool of the
 # runner's own host file (the machine's, or the testSlotsDir it names) and this run's home slot, read before the
 # cases' environment below names a host file of their own. A loop a case runs is told the case's slot
@@ -367,7 +371,10 @@ case_keep() {
   # Each case has a host file folder of its own: a case that wrote its host file into one the cases shared (t_codexbuild:
   # a pool of one slot, testSlotsDir its own) gave every case's loop after it that pool, which held no slot of theirs,
   # and each card's test step waited for that one slot, "1 of 1 in use", for ever (the owner, 2026-11-14).
-  set -m; ( set +m; export "$CASE_MARK" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG; "t_$CASE" ) > "$T/$CASE.out" 2>&1 & p=$!; set +m
+  # It starts in its own folder, never the runner's, which may be a checkout (gitfence, above).
+  set -m; ( set +m; export "${CASE_MARK?}" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG
+    { mkdir -p "$T/$CASE" && cd "$T/$CASE"; } || { echo "FAIL [$CASE]: the case's folder $T/$CASE could not be made" >&2; exit 1; }
+    "t_$CASE" ) > "$T/$CASE.out" 2>&1 & p=$!; set +m
   # Its limit (CASE_LIMIT: its file's `# timeout:` line, run_case): past it, the case's group is told to end and
   # killed 3 s later, and the case fails as timed out ($T/$CASE.late), its exit 124. The others go on.
   [ -z "${CASE_LIMIT:-}" ] || { ( z=''; trap '[ -z "$z" ] || kill "$z" 2>/dev/null; exit 0' TERM
