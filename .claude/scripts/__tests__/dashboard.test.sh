@@ -66,10 +66,13 @@ exit "$(cat "'"$T"'/ssh-rc" 2>/dev/null || echo 0)"'
 
 ago() { date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
 NOWISO=$(ago 0)
+# The snapshots' day, taken once like NOWISO. Bug caught (issue 363): each snapshot and the check of the day it gave
+# read the clock on their own, so a run that went past midnight failed "nothing landed is an empty list for today".
+DAY=$(date +%F)
 # snap [<overrides>] -- one record's snapshot as conveyor.sh prints it: empty and healthy unless overridden.
 snap() {
   local o=${1:-}; [ -n "$o" ] || o='{}'
-  jq -cn --arg day "$(date +%F)" --arg now "$NOWISO" --argjson o "$o" '
+  jq -cn --arg day "$DAY" --arg now "$NOWISO" --argjson o "$o" '
     {time: $now, day: $day, needsYou: {waiting: [], blocked: [], before: []}, belt: [], queue: {next: []}, landed: [], landedCount: 0,
      health: {time: $now, loop: true, newest: $now, blocked: [], waiting: [], stuck: [], unpushed: [], pushError: null, pushFailingSince: null,
               gh: true, diskFreeKb: 500000000, builderCap: 3, models: {claude: "claude-x", codex: "gpt-x"}},
@@ -134,7 +137,7 @@ q '.panels.queue.data == {next: [], held: null, awaitingDeploy: [], waiting: [],
 q '.panels.machine.data | .host == "devbox" and .state == "running" and .cap == 6 and .used == 0 and .todayUsd == 0 and .repos == ["sample", "widgetshop"]
   and (.projects | map([.repo, .cap, .used, .needs, .belt, .landedToday])) == [["sample", 3, 0, [], [], 0], ["widgetshop", 3, 0, [], [], 0]]' \
   "a machine with nothing on it: no card holds a slot (a measured 0), with no machine cap the slots in force are both projects' 6, and each project is there on its own"
-q '.panels.landed.data.cards == [] and .panels.landed.data.day == "'"$(date +%F)"'"' "nothing landed is an empty list for today"
+q '.panels.landed.data.cards == [] and .panels.landed.data.day == "'"$DAY"'"' "nothing landed is an empty list for today"
 q '.panels.cost.data.cards | .todayUsd == 0 and .weekUsd == 0 and .perLandedUsd == null and .perCard == [] and .unpricedSteps == 0' "no spend is a measured 0, and no landed card has no average"
 q '.panels.declined == {error: null, data: {lines: [], rest: []}}' "no declined finding (a snapshot from before it carried the list, too) is an empty list, not a failed part"
 q '.panels.health.data | .host == {name: "devbox", local: false, reachable: true, error: null} and (.records | length) == 2 and (has("cpuCap") | not)' "the host answered: reachable, both records, and no CPU cap (dropped)"
