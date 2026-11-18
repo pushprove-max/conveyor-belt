@@ -42,6 +42,10 @@ t_nogo() {
   [ "$(st 'select(.step == "review" and .result == "NO-GO") | .tail | split("\n") | [(.[0] | length), (any(. == "[P1] a.txt:1 wrong word"))] | tojson' | head -1)" = '[1500,true]' ] \
     || fail "a NO-GO review's line does not keep its findings whole: $(st 'select(.step == "review") | .tail' | head -c 300)"
   [ "$(wc -l < "$STUB/reviews")" = 3 ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] || fail "not a fix session and a new review after each NO-GO"
+  # #307: each review's line keeps the line its finding cites as that review read it, so the Board shows it after the
+  # worktree is gone (the case's last check): the first review read a.txt's first line, "one".
+  [ "$(st 'select(.step == "review") | .excerpts // [] | map([.at, .side, .lines]) | tojson' | head -n 1)" = '[["a.txt:1","new",["one"]]]' ] \
+    || fail "a review's line does not keep the line its finding cites: $(st 'select(.step == "review") | .excerpts | tojson')"
   # Bug: a build or fix session loaded the account's connectors (their instructions and tools), which no card uses.
   [ "$(grep -c -- ' --strict-mcp-config ' "$STUB/sessions")" = 3 ] || fail "a build or fix session started without --strict-mcp-config: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "review") | .result' | tr '\n' ' ')" = "NO-GO NO-GO GO " ] || fail "review results: $(st 'select(.step == "review") | .result' | tr '\n' ' ')"

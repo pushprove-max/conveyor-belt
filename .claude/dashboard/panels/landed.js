@@ -91,7 +91,7 @@ window.DASH_APP.panel({
       }
       // The rows are drawn anew: the card's "Every step" drawn before (still in the panel) keeps it open through a redraw.
       const was = Array.from(el.querySelectorAll('details.track-detail')).find((x) => x.dataset.card === c.card);
-      if (c.track && (Array.isArray(c.track.records) || Array.isArray(c.track.detail))) li.append(ctx.trackDetail(c.track, c.card, was, c.earlier, ctx.text.repoOf(c)));
+      if (c.track && (Array.isArray(c.track.records) || Array.isArray(c.track.detail))) li.append(ctx.trackDetail(c.track, c.card, was, c.earlier, ctx.text.repoOf(c), c.repo));
       return li;
     };
     // The cards of one batch (batch: the cards that landed together, in one repo) are one landing: one row that

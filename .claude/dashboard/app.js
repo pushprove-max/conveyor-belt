@@ -298,9 +298,13 @@
   // in bold on one line, the place (path:line) under it as a link to that line, and the part after "Proof:" folded
   // under a closed "Proof:" toggle. Code spans and file paths in the sentence and proof are drawn as fill draws them,
   // linked in the repository repoUrl (none: no links). A line that is not a finding is a row of its whole text.
-  function findingRows(folded, repoUrl) {
+  // With the card, its repository (repo, the record's name) and the review the findings are from (review, the time of
+  // its record), the place has a closed "Reviewed lines" toggle under it: opened, it shows the lines the place cites as
+  // that review read them (reviewedLines).
+  function findingRows(folded, repoUrl, card, repo, review) {
     const list = h('ol', 'output-findings');
     const known = new Set(folded.flatMap((x) => pathsIn(x.text)));
+    const lines = [card, repo, review].every((s) => typeof s === 'string' && s) ? reviewedLines(repo, card, review) : null;
     folded.forEach((x) => {
       if (!x.text.trim()) return;
       const row = h('li', 'output-finding'), m = FINDING.exec(x.text), times = x.n > 1 ? ` ×${x.n}` : '';
@@ -316,6 +320,7 @@
       head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), said);
       row.append(head);
       if (at) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, at[1], known, 'finding-at-link').el); row.append(p); }
+      if (at && lines) row.append(lines(at[1]));
       if (proof) {
         const fold = h('details', 'finding-proof');
         fold.append(h('summary', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), proof, repoUrl, known, 'finding'));
@@ -325,9 +330,59 @@
     });
     return list;
   }
+  // The "Reviewed lines" toggles of one card's findings (findingRows): a function that makes the toggle of a place
+  // (`path:line` or `path:a-b`, as the finding writes it). The lines are not in the snapshot: each review kept them from
+  // the tree it read (its excerpts), so they stay after the card's worktree is gone, where main may hold other code.
+  // They are read from the page server (GET excerpts: `conveyor.sh history excerpts <card>` on the build machine) when
+  // the first toggle is opened, once for all the toggles of the box; one that did not come is read again at the next
+  // open. A place shows the lines that its own review (review: the time of the review's record, which each excerpt
+  // carries) kept for it, never a later or earlier review's of the same place, each excerpt with its side (the change's,
+  // main's for lines the change deleted, or the one before a fix round for lines that fix deleted) and each line with
+  // its number.
+  function reviewedLines(repo, card, review) {
+    let ask = null;
+    const read = () => {
+      if (!ask) {
+        ask = window.fetch(`excerpts?repo=${encodeURIComponent(repo)}&card=${encodeURIComponent(card)}`)
+          .then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(new Error(String(t).trim() || `the server answered ${r.status}`)))))
+          .then((x) => (x && typeof x === 'object' && Array.isArray(x.excerpts) ? x.excerpts : Promise.reject(new Error('the answer did not read'))));
+        ask.catch(() => { ask = null; });
+      }
+      return ask;
+    };
+    const norm = (s) => s.replace(/^\.\//, '').replace('–', '-');
+    return (place) => {
+      const det = h('details', 'finding-lines'), body = h('div', 'finding-lines-body');
+      det.append(h('summary', 'finding-lines-label', 'Reviewed lines'), body);
+      det.addEventListener('toggle', () => {
+        if (!det.open || body.dataset.state === 'busy' || body.dataset.state === 'read') return;
+        body.dataset.state = 'busy';
+        body.replaceChildren(h('p', 'finding-lines-note', 'Reading the reviewed lines…'));
+        read().then((all) => {
+          const xs = all.filter((e) => e && typeof e === 'object' && e.review === review && typeof e.at === 'string' && norm(e.at) === norm(place) && Array.isArray(e.lines));
+          body.dataset.state = 'read';
+          if (!xs.length) { body.replaceChildren(h('p', 'finding-lines-note', 'The review kept no lines for this place.')); return; }
+          body.replaceChildren(...xs.flatMap((x) => {
+            const from = num(x.from) ? x.from : 1, pre = h('pre', 'finding-lines-text');
+            x.lines.forEach((l, i) => {
+              if (i) pre.append('\n');
+              pre.append(h('span', 'finding-lines-n', `${from + i}`), ` ${typeof l === 'string' ? l : ''}`);
+            });
+            const side = x.side === 'old' ? "Main's side: lines the change deleted" : x.side === 'fix' ? 'Before the fix: lines the fix deleted' : "The change's side";
+            return [h('p', 'finding-lines-note', side), pre];
+          }));
+        }, (e) => {
+          body.dataset.state = 'failed';
+          body.replaceChildren(h('p', 'finding-lines-note', `The reviewed lines did not come: ${e && e.message ? e.message : 'no answer'}`));
+        });
+      });
+      return det;
+    };
+  }
   // repoUrl: the card's repository on GitHub (repoOf), in which a review finding's file paths link to their lines; none,
-  // and they are code with no link.
-  function output(tail, card, label, was, repoUrl) {
+  // and they are code with no link. repo: the card's record (its repo), whose findings' places open the lines the review
+  // read (findingRows) in the review whose record has the time reviewAt; none, and they do not.
+  function output(tail, card, label, was, repoUrl, repo, reviewAt) {
     if (typeof tail !== 'string' || !tail.trim()) return null;
     const same = JSON.stringify([tail, typeof card === 'string' ? card : '', label || '']);
     const keep = (det) => {
@@ -374,7 +429,7 @@
       top.append(h('p', 'output-count', `${fails.length} ${fails.length === 1 ? 'failure' : 'failures'}`), list);
       det.append(top);
     }
-    const pre = review ? findingRows(folded, repoUrl) : h('pre', 'output-text');
+    const pre = review ? findingRows(folded, repoUrl, card, repo, reviewAt) : h('pre', 'output-text');
     if (!review) folded.forEach((x, i) => {
       const line = h('span', FAILLINE.test(x.text) ? 'output-line is-fail' : 'output-line', x.text);
       if (x.n > 1) line.append(h('span', 'output-times', ` ×${x.n}`));
@@ -717,8 +772,9 @@
   // earlier: the earlier cards of the same work (the snapshot's earlier, the first first), each above the steps as one
   // closed line, "Earlier attempt: <start> to <end>, <time>, ended: <reason>", opening to its own steps: the card's
   // overall time counts their seconds, so the steps it is made of are all here.
-  // repoUrl: the card's repository (repoOf), in which its review findings' file paths link to their lines.
-  function trackDetail(t, card, was, earlier, repoUrl) {
+  // repoUrl: the card's repository (repoOf), in which its review findings' file paths link to their lines; repo: its
+  // record, whose findings' places open the lines the review read (output).
+  function trackDetail(t, card, was, earlier, repoUrl, repo) {
     const det = h('details', 'track-detail'), sum = h('summary', null, 'Every step');
     if (typeof card === 'string') det.dataset.card = card;
     const total = h('p', 'tl-total'), ol = h('ol', 'timeline');
@@ -729,7 +785,7 @@
     const before = (Array.isArray(earlier) ? earlier : []).filter((e) => e && typeof e === 'object' && e.track && typeof e.track === 'object').map((e) => {
       const prior = Boolean(was && was.dataset.card === e.card);
       const old = prior ? was : was ? Array.from(was.querySelectorAll(':scope > details.tl-earlier')).find((x) => x.dataset.card === e.card) : null;
-      const d = trackDetail(e.track, e.card, old, null, repoUrl);
+      const d = trackDetail(e.track, e.card, old, null, repoUrl, repo);
       // The earlier card's "Every step" was the whole box, never this line: the line starts closed.
       if (prior) d.open = false;
       d.classList.add('tl-earlier');
@@ -788,7 +844,7 @@
         if (cov) li.append(cov);
         const step = `${all.indexOf(s)}:${s.name}`;
         const old = mine ? Array.from(mine.querySelectorAll('details.output')).find((x) => x.dataset.step === step) : null;
-        const out = output(s.output, card, s.name === 'tests failed' ? 'Show full output' : null, old, repoUrl);
+        const out = output(s.output, card, s.name === 'tests failed' ? 'Show full output' : null, old, repoUrl, repo, /^review \d/.test(s.name) ? s.at : null);
         if (out) { out.dataset.step = step; li.append(out); }
       });
       ol.append(li);

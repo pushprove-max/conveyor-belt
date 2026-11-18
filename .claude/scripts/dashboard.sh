@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older|--donewhen|--shot] -- the collector of the Conveyor dashboard (the
+# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older|--donewhen|--shot|--excerpts] -- the collector of the Conveyor dashboard (the
 # strip-down to Conveyor). It writes one file, data.js in dashboard/ of the state folder (`conveyor.sh state-dir`)
 # (`window.DASH = {...};`), which the static page in .claude/dashboard/ reads, through the page server's /events as it
 # changes, or every 15 s when that stream is not open. No model call, ever.
@@ -1147,6 +1147,23 @@ shot() {
   onhost "$cmd" 2>"$RUN/err-shot" || { echo "dashboard: $host gave no screenshot $3 of card $2: $(tail -n 1 "$RUN/err-shot" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
 }
 
+# --excerpts <repo> <card id>: the lines a card's review findings cite, as each review kept them from the tree it read,
+# which the snapshot leaves out: its `conveyor.sh history excerpts <card id>`, in one command to the host (hostof,
+# onhost), as {card, excerpts: [{review, at, side, from, lines}]}. The page server gives it at GET /excerpts, which the
+# Board asks for when a finding's place is opened; never kept.
+excerpts() {
+  local host main engine target recs why remote cmd
+  hostof || { echo "dashboard: no reviewed lines: $why" >&2; return 1; }
+  cmd=$(jq -er --arg r "$1" --arg c "$2" --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | select(.repo == $r) | .main | @sh)
+      | "CONVEYOR_MAIN=\(.) bash \($e | @sh) history excerpts \($c | @sh)"' <<<"$recs") \
+    || { echo "dashboard: no reviewed lines: the host file names no record $1" >&2; return 1; }
+  RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
+  onhost "$cmd" > "$RUN/excerpts" 2>"$RUN/err-excerpts" \
+    || { echo "dashboard: $host gave no reviewed lines: $(tail -n 1 "$RUN/err-excerpts" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
+  jq -ce 'objects | select(.excerpts | type == "array")' "$RUN/excerpts" 2>"$RUN/err-excerpts" \
+    || { echo "dashboard: $host gave no reviewed lines" >&2; return 1; }
+}
+
 # view_files -- the page's files, relative to .claude/dashboard: the page, its core, its tab icon and one file per panel.
 view_files() { (cd "$VIEW_SRC" && find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.svg' \) | sed 's|^\./||' | LC_ALL=C sort); }
 # copy_view -- copy each page file from the primary checkout into $OUT, skipping one that is already the same. Each
@@ -1386,8 +1403,11 @@ case "${1:-}" in
   --shot) [ $# = 4 ] || { echo "usage: dashboard.sh --shot <repo> <card> <file>" >&2; exit 2; }
           mkdir -p "$OUT" || exit 1
           shot "$2" "$3" "$4" || exit 1 ;;
+  --excerpts) [ $# = 3 ] || { echo "usage: dashboard.sh --excerpts <repo> <card id>" >&2; exit 2; }
+              mkdir -p "$OUT" || exit 1
+              excerpts "$2" "$3" || exit 1 ;;
   --check) check || exit 1 ;;
   "") mkdir -p "$OUT" || exit 1
       render || { echo "dashboard: collection FAILED; data.js keeps the last snapshot" >&2; exit 1; } ;;
-  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--check]" >&2; exit 2 ;;
+  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--check]" >&2; exit 2 ;;
 esac

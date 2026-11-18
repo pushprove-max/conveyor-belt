@@ -373,7 +373,10 @@ issue number, as a link, and the issue title.
   accepted, M declined". Each finding has an id, E1, E2 and so on, that it keeps from one review to the next. A
   finding that came back after its fix says so, for example "E2 came back after 2 fix rounds".
 - **Show output** on a review lists its findings, one row each, in the order the reviewer gave them. A row shows the
-  priority (P0 to P3), the finding, and under it the file and line. Click **Proof** to read the reviewer's proof. Each
+  priority (P0 to P3), the finding, and under it the file and line. Click **Proof** to read the reviewer's proof. Click
+  **Reviewed lines** to read the lines that the finding names, as that review read them. When the finding names lines
+  that the change or a fix round deleted, you also see the deleted lines. These lines stay after the card's worktree is removed. The
+  file link goes to main, which can show different code. Each
   other step's output shows as plain text, with its failures first. **Copy output** copies the output as plain text, for a
   review too. This is the same in On the belt, Landed today and Needs you.
 - A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it** or

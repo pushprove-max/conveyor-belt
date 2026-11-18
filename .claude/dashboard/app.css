@@ -406,6 +406,13 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .finding-proof > summary { cursor: pointer; color: var(--muted); }
 .finding-proof-label { font-weight: 600; }
 .finding-proof-text { margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
+/* The lines a finding's place cites, as the review read them (app.js reviewedLines): each with its number, muted. */
+.finding-lines { margin-top: 2px; font-size: var(--fs-xs); }
+.finding-lines > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.finding-lines-note { margin: var(--sp-1) 0 0; color: var(--muted); }
+.finding-lines-text { margin: var(--sp-1) 0 0; padding: var(--sp-1) var(--sp-2); max-height: 24em; overflow: auto; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-family: var(--mono); white-space: pre; }
+.finding-lines-n { display: inline-block; min-width: 3ch; text-align: right; color: var(--muted); user-select: none; }
 .output-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
 .output-note { color: var(--muted); }
 

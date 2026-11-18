@@ -174,6 +174,13 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       (w.donewhenAsks = w.donewhenAsks || []).push(url);
       return Promise.resolve(w.donewhenReply || { ok: false, status: 502, text: () => Promise.resolve('no Done-when detail') });
     }
+    // The lines a card's review findings cite (GET excerpts?repo=…&card=…): w.excerptsReply is the server's answer; with
+    // none, a 502. w.excerptsAsks lists the addresses asked.
+    if (/^excerpts\?/.test(url)) {
+      assert.equal(opt, undefined, 'the reviewed lines are read with a plain GET');
+      (w.excerptsAsks = w.excerptsAsks || []).push(url);
+      return Promise.resolve(w.excerptsReply || { ok: false, status: 502, text: () => Promise.resolve('no reviewed lines') });
+    }
     assert.ok(['answer', 'restart', 'control', 'machine'].includes(url), `the page writes to nothing but its own answer, restart, control and machine addresses: ${url}`);
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');

@@ -34,6 +34,8 @@ that data.js no longer carries (dashboard.sh --older): the Tests page asks for i
 which data.js does not carry (dashboard.sh --donewhen): the Board asks for it when that card's Done-when line is opened.
 `GET /shot?repo=<repo>&card=<card>&file=<file>`, behind the login too, gives one screenshot that a card waiting for the
 owner's yes kept (dashboard.sh --shot): Needs you shows it beside the card's Approve.
+`GET /excerpts?repo=<repo>&card=<card id>`, behind the login too, gives the lines a card's review findings cite, as each
+review kept them from the tree it read (dashboard.sh --excerpts): the Board asks for it when a finding's place is opened.
 
 The login: users in dashboard-auth.json beside the ruling log (env CONVEYOR_DASHBOARD_AUTH), each with a name, a
 role (admin or member), an scrypt hash, when it was created and last logged in, its MFA state and its trusted
@@ -111,7 +113,7 @@ HISTORY_TTL = 60       # GET /history serves dashboard.sh's copy while it is thi
 HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
 WORK_LIMIT = 90        # GET /work: dashboard.sh --work's one ssh command (its SSH_LIMIT, 60 s) and the merge
 OLDER_LIMIT = 90       # GET /older: dashboard.sh --older's one ssh command (its SSH_LIMIT, 60 s) and the tagging
-DONEWHEN_LIMIT = 90    # GET /donewhen: dashboard.sh --donewhen's one ssh command (its SSH_LIMIT, 60 s) and its check
+DONEWHEN_LIMIT = 90    # GET /donewhen and /excerpts: dashboard.sh --donewhen's or --excerpts's one ssh command (its SSH_LIMIT, 60 s) and its check
 SHOT_LIMIT = 90        # GET /shot: dashboard.sh --shot's one ssh command (its SSH_LIMIT, 60 s)
 # GET /shot: a screenshot a card kept, named by its content (keepshots(), lib/push.sh); the card is a CARD id.
 SHOT = re.compile(r'([0-9a-f]{40,64})\.(png|jpg|gif|webp)')
@@ -1641,6 +1643,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.donewhen()
         if path == '/shot':
             return self.shot()
+        if path == '/excerpts':
+            return self.excerpts()
         if path in ('/me', '/users'):
             return self.users_get(path)
         if path == '/me/qr':
@@ -1892,17 +1896,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def donewhen(self):
         """GET /donewhen?repo=<repo>&card=<card id>: a card's last Done-when check item by item, which data.js does not
         carry: dashboard.sh --donewhen's JSON, read afresh on each ask (the Board asks when a card's Done-when line is
-        opened). 400 for a repo or card of another shape, 502 with the reason when it gives none."""
+        opened)."""
+        return Handler.card_read(self, '--donewhen', 'the Done-when check')
+
+    def excerpts(self):
+        """GET /excerpts?repo=<repo>&card=<card id>: the lines a card's review findings cite, as each review kept them
+        from the tree it read, which data.js does not carry: dashboard.sh --excerpts's JSON, read afresh on each ask (the
+        Board asks when a finding's place is opened)."""
+        return Handler.card_read(self, '--excerpts', 'the reviewed lines')
+
+    def card_read(self, flag, what):
+        """One card's detail from dashboard.sh <flag> <repo> <card>, for GET /donewhen and GET /excerpts. 400 for a repo
+        or card of another shape, 502 with the reason when it gives none."""
         if not self.authed():
-            return self.reply(401, 'log in to see the Done-when check')
+            return self.reply(401, 'log in to see %s' % what)
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         repo, card = (q.get('repo') or [''])[0], (q.get('card') or [''])[0]
         if not REPO.fullmatch(repo) or not CARD.fullmatch(card):
             return self.reply(400, 'no repo or card of the shape the Board names')
         try:
-            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--donewhen', repo, card], DONEWHEN_LIMIT)
+            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), flag, repo, card], DONEWHEN_LIMIT)
         except subprocess.TimeoutExpired:
-            return self.reply(502, 'the Done-when check did not come in %d s' % DONEWHEN_LIMIT)
+            return self.reply(502, '%s did not come in %d s' % (what, DONEWHEN_LIMIT))
         except OSError as e:
             return self.reply(502, 'could not start dashboard.sh: %s' % e)
         if run.returncode != 0:

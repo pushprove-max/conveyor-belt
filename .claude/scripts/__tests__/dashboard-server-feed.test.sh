@@ -208,6 +208,23 @@ ds.Handler.shot(bad)
 check(bad.code == 502 and 'gave no screenshot' in bad.text and bad.out.getvalue() == b'',
       'shot: a failed read is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
 
+# #307. Bugs: data.js would carry every review's cited lines, so the Board reads one card's from the server; GET
+# /excerpts ran dashboard.sh --excerpts for another repo or card than the page asked for, or for one of a shape no card
+# has.
+started.clear()
+ds.run_script = lambda *a, **k: (started.append(a[0]), subprocess.CompletedProcess(a[0], 0, '{"card":"c20260101T000000-sample-7","excerpts":[]}\n', ''))[1]
+ex = Page()
+ex.path = '/excerpts?repo=sample&card=c20260101T000000-sample-7'
+ds.Handler.excerpts(ex)
+check(started == [started[0]] and started[0][-3:] == ['--excerpts', 'sample', 'c20260101T000000-sample-7'] and ex.code == 200
+      and json.loads(ex.out.getvalue())['excerpts'] == [],
+      'excerpts: an ask runs dashboard.sh --excerpts for its repo and card and gives its answer: %r %s' % (started, ex.code))
+started.clear()
+bad = Page()
+bad.path = '/excerpts?repo=sample&card=../x'
+ds.Handler.excerpts(bad)
+check(bad.code == 400 and started == [], 'excerpts: a card of another shape is refused and starts no process: %s %r' % (bad.code, started))
+
 for f in fail:
     print('FAIL: ' + f, file=sys.stderr)
 sys.exit(1 if fail else 0)

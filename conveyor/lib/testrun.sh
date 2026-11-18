@@ -2575,6 +2575,14 @@ dwdetail() { # <card>
         reviewer: (if $r == null then null elif any($r.doneWhenHolds[]?; . == $n) then "holds"
           else [$f[] | select(test("\\bD\($n)\\b"))] | if . == [] then null else join("\n") end end)}]}'
 }
+# A card's excerpts, which the snapshot leaves out: the lines each of its reviews' findings cites, as its review lines
+# keep them (excerpts(), lib/review.sh), oldest review first, each with the time of the review line that kept it (the
+# time the Board's review step has, at), so a review shows its own lines and not a later one's at the same place:
+# {card, excerpts: [{review, at, side, from, lines}]}. The Board reads it when a finding's place is opened (history excerpts).
+exdetail() { # <card>
+  { olds; recs; } 2>/dev/null | jq -cRn --arg c "$1" '{card: $c, excerpts: [inputs | fromjson? | objects
+    | select(.card == $c and .step == "review") | .time as $t | .excerpts | arrays[] | objects | {review: $t} + .]}'
+}
 # The reply's D<n> lines as donewhen() kept them in <worktree>.donewhen, each with its state (met or not met), cut to
 # 300 characters: a JSON array, for the session's line (doneLines; the pull request of Land as pr lists them). With no
 # such file (the issue has no Done-when section) jq 1.8 still prints the slurped value, [], and then fails, so the file

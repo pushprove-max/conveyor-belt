@@ -412,6 +412,23 @@ echo 1 > "$T/ssh-rc"; : > "$T/ssh-out"
 o=''; ! o=$(srun widgetshop c1-12 a.png 2>/dev/null) && [ -z "$o" ] || fail "a host that gave no screenshot was passed off as one: $o"
 ) & started shot
 
+# --- --excerpts (#307): the lines a card's review findings cite, which data.js does not carry: the named record's
+# `conveyor.sh history excerpts <card>` in one host command. Bugs: another record was asked; the card reached the host
+# unquoted; a host that gives no answer is passed off as a card with no reviewed lines ---
+( fresh excerpts
+jq -cn '{card: "c1 x", excerpts: [{review: "2026-01-01T00:01:00Z", at: "a.sh:2", side: "new", from: 2, lines: ["two"]}]}' > "$T/ssh-out"
+: > "$T/ssh-calls"
+xrun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" \
+  CONVEYOR_DASHBOARD_DIR="$OUT" timeout 20 bash "$DASH" --excerpts "$@"; }
+d=$(xrun widgetshop 'c1 x') || fail "--excerpts exited non-zero"
+[ "$(jq -c '.excerpts | map([.at, .lines])' <<<"$d")" = '[["a.sh:2",["two"]]]' ] || fail "--excerpts does not give the card's reviewed lines: $d"
+[ "$(wc -l < "$T/ssh-calls")" = 1 ] && grep -q "CONVEYOR_MAIN='/srv/cd' bash .*conveyor.sh' history excerpts 'c1 x'" "$T/ssh-calls" \
+  || fail "--excerpts does not ask the host once, for the named record and the card quoted: $(cat "$T/ssh-calls")"
+d=''; ! d=$(xrun nosuch c1 2>/dev/null) && [ -z "$d" ] || fail "a record the host file does not name gave reviewed lines: $d"
+: > "$T/ssh-out"
+d=''; ! d=$(xrun widgetshop c1 2>/dev/null) && [ -z "$d" ] || fail "a host that gave no answer was passed off as a card with no reviewed lines: $d"
+) & started excerpts
+
 # --- cards on both records: every row names its repo and links to that repo's issue ---
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
@@ -1344,7 +1361,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 # "seat" is not on the list: it now names a card's builder, reviewer and judge (docs/board.md), not the retired workflow.

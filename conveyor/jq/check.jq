@@ -6,7 +6,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
-  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
+  "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
   "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "rollout"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
@@ -117,6 +117,10 @@ def ok: . as $r | (keys - known) == need
         and (.doneWhenItems // [] | type == "array" and all(type == "object" and keys == ["n", "said", "text"] and (.n | type == "number")
           and (.text | type == "string") and (.said | . == null or type == "string")))
         and (.doneWhenHolds // [] | type == "array" and all(type == "number"))
+        # The lines a review's findings cite, from the tree it read (excerpts(), lib/review.sh).
+        and (.excerpts // [] | type == "array" and all(type == "object" and keys == ["at", "from", "lines", "side"]
+          and (.at | type == "string") and (.from | type == "number") and (.side == "new" or .side == "old" or .side == "fix")
+          and (.lines | type == "array" and all(type == "string"))))
         # What a landed card did to the test files main had (testedits()): counts null on a file it could not read.
         and (.testedits // [] | type == "array" and all(type == "object" and keys == ["casesDeleted", "changedExpected", "file", "read", "removedAsserts", "skipsAdded", "timeoutsRaised"]
           and (.file | type == "string") and (.read | type == "boolean") and (.read as $read

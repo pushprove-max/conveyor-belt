@@ -24,7 +24,8 @@ card() { # <card> <issue> [<branch> <tip>]
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
-  local sv an ids fl # sv, an: a review's survived findings and its answers (repeats(), answers()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
+  local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
+  local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
@@ -365,10 +366,13 @@ card() { # <card> <issue> [<branch> <tip>]
       sv='[]'; [ "$res" != NO-GO ] || sv=$(repeats "$wt" | jq -sc 'map({id, rounds})')
       an=$(answers "$wt")
       # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
-      # Board reads them on demand (history donewhen).
+      # Board reads them on demand (history donewhen). excerpts: the lines its findings cite, from the tree it read
+      # (excerpts(), lib/review.sh), which the Board reads on demand too (history excerpts); after a fix round, also
+      # from the tree before that fix (fixtree), which holds the lines the fix deleted.
+      ex=$(excerpts "$wt" "$fixtree"); fixtree=''
       record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
-        --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" \
-        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end)')"
+        --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
+        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')"
       [ "$res" != none ] || { block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
     fi
     # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
@@ -404,7 +408,7 @@ card() { # <card> <issue> [<branch> <tip>]
       checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
       # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
       mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
-        && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds))
+        && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds)) && fixtree=$old
       continue
     fi
     # This review would let the card land. A change customers or staff would see needs the owner's yes first, when

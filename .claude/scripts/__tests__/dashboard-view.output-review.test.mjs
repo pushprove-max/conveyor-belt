@@ -5,7 +5,7 @@
 // fixture here. A test step's output keeping its mono block and failures list is in dashboard-view.cards-blocked.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, panel, deliver, settle, full, cases } from './dashboard-view.helpers.mjs';
+import { boot, panel, deliver, settle, full, cases, trackOf } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -71,4 +71,59 @@ test('a review output draws one row per finding, in order: chip, bold sentence, 
   out.querySelector('button.output-copy').click();
   await settle();
   assert.deepEqual(copied, [LINES.join('\n')]);
+});
+
+// #307. A landed card's worktree is gone, and the place's link opens main, which may hold other code there. Bugs: a
+// finding's place does not open the lines the review read; they are read before it is opened (or carried in the
+// snapshot) instead of on demand; a place shows another place's lines, or another review's of the same place (a later
+// one's under an earlier review); a citation of a deleted line shows only the staged line at that number, or a line a
+// fix round deleted is labelled as main's; a failed
+// read is shown as a place with no lines.
+test("a landed card's finding opens the lines its own review read, from the server when opened, both sides of a deletion", async () => {
+  const w = boot();
+  const data = full();
+  const T1 = '2026-01-01T00:01:00Z', T2 = '2026-01-01T00:02:00Z';
+  const records = [{ name: 'review 1 (NO-GO)', state: 'done', sec: 60, at: T1, output: '[P2] a.sh:2–3 slow' },
+    { name: 'review 2 (NO-GO)', state: 'done', sec: 60, at: T2, output: '[P1] ./gone.sh:4 still read\n[P2] a.sh:2–3 slow\n[P3] c.sh:9 none kept' }];
+  Object.assign(data.panels.landed.data.cards[0], { track: { ...trackOf('+++++++', ''), at: null, records } });
+  // Needs you's own box shows a blocked card's last output: its places open the card's last review's lines.
+  Object.assign(data.panels.needs.data.cards.blocked[0], { tail: '[P2] a.sh:2–3 slow', track: { ...trackOf('++!...', ''), at: null, records } });
+  deliver(w, data);
+  const rows = () => Array.from(panel(w, 'landed').querySelectorAll('li.output-finding'));
+  const open = (row) => { const d = row.querySelector('details.finding-lines'); d.open = true; d.dispatchEvent(new w.Event('toggle')); return d; };
+  const notes = (d) => Array.from(d.querySelectorAll('.finding-lines-note'), (x) => x.textContent);
+  const texts = (d) => Array.from(d.querySelectorAll('pre.finding-lines-text'), (x) => x.textContent);
+  assert.equal(rows().length, 4);
+  assert.equal(w.excerptsAsks, undefined, 'nothing is read before a place is opened');
+  let d = open(rows()[1]);
+  await settle();
+  assert.deepEqual(w.excerptsAsks, ['excerpts?repo=sample&card=c5-7'], "the card's own lines are asked for");
+  assert.deepEqual(notes(d), ['The reviewed lines did not come: no reviewed lines'], 'a failed read says so');
+  w.excerptsReply = { ok: true, status: 200, json: () => Promise.resolve({ card: 'c5-7', excerpts: [
+    { review: T1, at: 'a.sh:2-3', side: 'new', from: 2, lines: ['old two', 'old three'] },
+    { review: T2, at: 'gone.sh:4', side: 'old', from: 4, lines: ['deleted line'] },
+    { review: T2, at: 'a.sh:2-3', side: 'new', from: 2, lines: ['two', 'three'] },
+    { review: T2, at: 'a.sh:2-3', side: 'old', from: 2, lines: ['deleted two'] },
+    { review: T2, at: 'a.sh:2-3', side: 'fix', from: 2, lines: ['fixed away'] }] }) };
+  d.open = false; d.dispatchEvent(new w.Event('toggle'));
+  d = open(rows()[1]);
+  await settle();
+  assert.equal(w.excerptsAsks.length, 2, 'a failed read is asked again at the next open');
+  assert.deepEqual(notes(d), ["Main's side: lines the change deleted"]);
+  assert.deepEqual(texts(d), ['4 deleted line']);
+  d = open(rows()[2]);
+  await settle();
+  assert.equal(w.excerptsAsks.length, 2, "a review's lines are read once for all its places");
+  assert.deepEqual(notes(d), ["The change's side", "Main's side: lines the change deleted", 'Before the fix: lines the fix deleted'],
+    'a cited deleted line is shown beside the staged one, a line a fix round deleted as the fix\'s, not as main\'s');
+  assert.deepEqual(texts(d), ['2 two\n3 three', '2 deleted two', '2 fixed away']);
+  d = open(rows()[0]);
+  await settle();
+  assert.deepEqual(texts(d), ['2 old two\n3 old three'], "an earlier review shows its own lines, not a later review's of the same place");
+  d = open(rows()[3]);
+  await settle();
+  assert.deepEqual(notes(d), ['The review kept no lines for this place.']);
+  d = open(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"] > details.output li.output-finding'));
+  await settle();
+  assert.deepEqual(texts(d), ['2 two\n3 three', '2 deleted two', '2 fixed away'], "a blocked card's output shows its last review's lines");
 });

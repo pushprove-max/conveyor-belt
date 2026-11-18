@@ -310,6 +310,52 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
              | if any($files[]; . == $p) and (all($h[]; .file != $p) or any($h[]; .file == $p and .from <= $ln and $ln <= .to)) then "inside" else "outside" end end),
            kind: ([$always[] | select(. as $k | $l | gsub("\\s*\\[E[0-9]+\\]"; "") | test("^\\[P[0-3]\\]\\[" + ($k | rx) + "\\]"; "i"))] | first)})'
 }
+# The lines each finding of a review cites, kept on the review's line (excerpts) so that the Board shows the lines the
+# review read after the card's worktree is gone (history excerpts). A finding cites its first file:line or file:a-b,
+# read as judgemarks() reads it (a path under the worktree read as one in it). The lines are read from git's trees only,
+# never from the disk: the staged tree the review read (side "new") when it has the file and the first line; the tree
+# of the worktree's HEAD (side "old"); and, for a review that follows a fix round, the tree before that fix (side
+# "fix", the second argument). An older tree's lines are kept when no tree before it kept any for the citation, or
+# when the cited lines, read as that tree's, take in lines the staged tree no longer has (git diff -U0 of that tree and
+# the staged one): a citation of a line the change, or the fix, deleted keeps that line, beside the staged one when
+# the staged file has a line at that number. A path that is not one in the repository (it starts with /, or has a . or
+# .. part) gives nothing, as does a line that no tree has. Bounded: EXCERPTS excerpts, EXCERPTLINES lines each, each
+# line cut to 300 characters. Prints a JSON array, [{at (the file and line as cited), side, from (the first line),
+# lines}]; which review kept it is its line's (exdetail(), lib/testrun.sh).
+EXCERPTS=20 EXCERPTLINES=20
+excerpts() { # <worktree> [<the tree before the fix round the review follows>]
+  local new old fix=${2:-} p a b at side t got del kept out='[]'
+  new=$(git -C "$1" write-tree 2>/dev/null) || { echo '[]'; return 0; }
+  old=$(git -C "$1" rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null)
+  while IFS=$'\t' read -r p a b; do
+    [ "$(jq length <<<"$out")" -lt "$EXCERPTS" ] || break
+    [[ $p =~ ^([A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$ ]] && [[ /$p/ != */../* && /$p/ != */./* ]] || continue
+    at=$p:$a; [ -z "$b" ] || at+=-$b
+    a=$((10#$a)); [ -n "$b" ] && b=$((10#$b)) && [ "$b" -ge "$a" ] || b=$a # 10#: a line cited as 08 is not octal
+    [ "$a" -ge 1 ] || continue
+    [ $((b - a)) -lt "$EXCERPTLINES" ] || b=$((a + EXCERPTLINES - 1))
+    kept=0
+    for side in new old fix; do
+      case $side in new) t=$new ;; old) t=$old ;; fix) t=$fix ;; esac
+      [ -n "$t" ] && [ "$(git -C "$1" cat-file -t "$t:$p" 2>/dev/null)" = blob ] || continue
+      if [ "$side" != new ] && [ "$kept" = 1 ]; then
+        # del: the cited lines, read as this tree's, take in a line the staged tree no longer has (a hunk's old side,
+        # -<start>[,<count>]).
+        del=$(git -C "$1" diff --no-ext-diff --no-color --no-renames -U0 "$t" "$new" -- "$p" 2>/dev/null | awk -v a="$a" -v b="$b" '
+          /^@@ -/ { split(substr($2, 2), r, ","); n = (2 in r) ? r[2] + 0 : 1; if (n > 0 && r[1] <= b && r[1] + n - 1 >= a) d = 1 }
+          END { print d + 0 }')
+        [ "$del" = 1 ] || continue
+      fi
+      # awk reads to the end: one that stopped early would end git with SIGPIPE, which pipefail reads as a failure.
+      got=$(git -C "$1" cat-file blob "$t:$p" | awk -v a="$a" -v b="$b" 'NR >= a && NR <= b' | jq -Rnc '[inputs | .[0:300]]') || got='[]'
+      [ "$got" = '[]' ] || [ "$(jq length <<<"$out")" -ge "$EXCERPTS" ] \
+        || { kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$a" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
+    done
+  done < <(grep -Ev "$NOTFINDING" "$1.review" 2>/dev/null | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
+    'split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]{1,9})(?:[-–]([0-9]{1,9}))?")] | first // empty
+      | [(.[0] | ltrimstr("./")), .[1], (.[2] // "")] | @tsv' | awk '!seen[$0]++')
+  printf '%s\n' "$out"
+}
 # One judge call, read-only as a review is (claudereview(), codexreview(), opencodereview()): its answer in
 # <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens and
 # usage (an OpenCode judge's holding its cost, usage.cost, when it reports one); one that fails prints them with failed (why) and fails.
