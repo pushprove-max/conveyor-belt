@@ -111,17 +111,19 @@ t_tajudge() {
   # The Board shows the action's text from the snapshot (#521): there, whole, and its end alone when it is too long.
   # Bug it catches (#594): the Tests model offered no model for Claude Code, which lists none on the host; the
   # snapshot gives the pack's models by CLI (the builder's, as modelSettings has them) for the Board to offer.
-  out=$(loop snapshot | jq -c '.modelSettings.builder.allowed as $b | .testActions | [.seat, .limit, [.actions[] | [.id, .state, .verdict, (.text | test("^first words\n(.|\n)*VERDICT: split\n$")), .textCut]],
+  out=$(loop snapshot --fresh | jq -c '.modelSettings.builder.allowed as $b | .testActions | [.seat, .limit, [.actions[] | [.id, .state, .verdict, (.text | test("^first words\n(.|\n)*VERDICT: split\n$")), .textCut]],
     (.allowed == $b and (.allowed.claude | index("m") != null))]')
   [ "$out" = "[{\"cli\":\"claude\",\"model\":\"m-tests\",\"effort\":\"high\"},900,[[\"$id\",\"done\",\"split\",true,false]],true]" ] || fail "the snapshot does not list the seat, the action with its state and text, and the pack's models by CLI: $out"
-  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/snapshot.sh")" && TATEXT_MAX=7 testacts | jq -c '.[0] | [.text, .textCut]')
+  # shellcheck source=/dev/null # the snapshot's libraries, by the list snapshot.sh names (SNAPLIBS)
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^SNAPLIBS=' "$SRC/commands/snapshot.sh")" && for l in $SNAPLIBS; do . "$HERE/lib/$l.sh" || exit 1; done && TATEXT_MAX=7 testacts | jq -c '.[0] | [.text, .textCut]')
   [ "$out" = '["split\n\n",true]' ] || fail "a text over TATEXT_MAX is not its end alone, marked cut: $out"
   # Bug it catches: an action older than the newest TATEXT_SHOWN was listed with text null, so after a reload the
   # Board's View and Copy of that result had no text. Past the newest, only a file's newest judge with a verdict is
   # listed (the issue preview's verdict), with its text; an older explain is left out.
   jq -cn '{id: "0000000000aa", action: "explain", file: "tests/x.test.sh", start: "2020-01-01T00:00:00Z", end: "2020-01-01T00:01:00Z", state: "done"}' > "$ST/testactions/0000000000aa.json"
   echo old > "$ST/testactions/0000000000aa.txt"
-  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/snapshot.sh")" && TATEXT_SHOWN=0 testacts | jq -c '[.[] | [.id, (.text | type)]]')
+  # shellcheck source=/dev/null # the snapshot's libraries, by the list snapshot.sh names (SNAPLIBS)
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^SNAPLIBS=' "$SRC/commands/snapshot.sh")" && for l in $SNAPLIBS; do . "$HERE/lib/$l.sh" || exit 1; done && TATEXT_SHOWN=0 testacts | jq -c '[.[] | [.id, (.text | type)]]')
   [ "$out" = "[[\"$id\",\"string\"]]" ] || fail "past the newest, not the judge alone with its text: $out"
 }
 
@@ -244,6 +246,6 @@ t_tabigtexts() {
     jq -cn --arg id "$id" --arg s "2026-01-01T00:0$i:00Z" '{id: $id, action: "explain", file: "tests/x.test.sh", start: $s, end: $s, state: "done"}' > "$ST/testactions/$id.json"
     head -c 16000 /dev/zero | tr '\0' x > "$ST/testactions/$id.txt"
   done
-  out=$(loop snapshot 2>&1 | jq -c '[.testActions.actions[] | .text | length] | [length, unique]' 2>&1)
+  out=$(loop snapshot --fresh 2>&1 | jq -c '[.testActions.actions[] | .text | length] | [length, unique]' 2>&1)
   [ "$out" = '[10,[16000]]' ] || fail "the snapshot does not list the ten actions with their texts: ${out:0:300}"
 }

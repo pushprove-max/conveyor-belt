@@ -132,7 +132,8 @@ nothing until then); a `/units` typed while a fetch is still waiting to start st
 
 - `conveyor.sh snapshot` of every record the host file names, from the clone its `main` names, in one command. The
   command runs on this machine when the session's checkout is a record of the host file, or that clone; else over ssh
-  to the host file's `ssh` target.
+  to the host file's `ssh` target. Each record's snapshot is the last one Conveyor made; when it is more than a minute
+  old, a line under the board says its age and the time it was made.
 - The lanes of the session's checkout: the folders its record names in `lanes.fast.worktree` and
   `lanes.research.worktree` (`conveyor.sh lane ... create` writes them; `~/` is the home folder). Of the Fast lane,
   with git: its branch, its commits ahead of the project's default branch, its tracked files changed. Its card is found as

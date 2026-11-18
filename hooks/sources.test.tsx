@@ -653,6 +653,15 @@ test('a session in the second project: its cards carry no name, the first\'s car
   expect(fastText(s)).toMatch(/ · card on the belt: review 1 of 3$/)
 })
 
+// Issue 398. Bug it catches: the fetch prints each record's kept snapshot, which can be minutes old, and the view
+// showed it as if it were new. One over a minute old says its age under the board; a newer one says nothing.
+test('a record\'s kept snapshot over a minute old says its age; a newer one adds no note', () => {
+  const made = Date.now() - 5 * 60_000
+  const old = tableText(board({ snapshotAt: new Date(made).toISOString(), belt: [BELT[1]] }), 100)
+  expect(old).toMatch(new RegExp(`\\nunits: the bookstore snapshot is [45]m old \\(made at ${clockOf(made)}\\)$`))
+  expect(tableText(board({ snapshotAt: new Date(Date.now() - 30_000).toISOString(), belt: [BELT[1]] }), 100)).not.toMatch(/snapshot is/)
+})
+
 test('a second record\'s cards carry its name, and one record that cannot be read costs only its own note', () => {
   const other = snapshot({ belt: [{ ...BELT[0], card: 'c1-12', issue: 12, title: 'Other work' }], cost: { today: 1 }, queue: { next: null, held: null } })
   const both = state(fetched([['bookstore', snapshot({ belt: [BELT[1]], cost: { today: 2.5 }, queue: { next: queued(1), held: {} } })], ['widgetshop', other]]))

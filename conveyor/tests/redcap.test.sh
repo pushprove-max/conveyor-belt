@@ -44,8 +44,8 @@ echo two >> a.txt; echo "[ \$(wc -l < a.txt) -ge '"$(($(wc -l < "$R/a.txt") + 1)
     || fail "D1, D2: beside the fix card in the slot beyond the cap, another card started: $(st "$red" | tr '\n' ' ')"
   [ "$(st 'select(.step == "picked") | .beyond' | tr '\n' ' ')" = "null main is red " ] \
     || fail "the fix card's picked line does not say it took a slot beyond the cap: $(st 'select(.step == "picked") | .beyond' | tr '\n' ' ')"
-  [ "$(loop snapshot | jq -c '[.belt[] | [.issue, .beyond]]')" = '[[1,null],[0,"main is red"]]' ] \
-    || fail "the snapshot's belt does not carry the slot beyond the cap: $(loop snapshot | jq -c '[.belt[] | [.issue, .beyond]]')"
+  [ "$(loop snapshot --fresh | jq -c '[.belt[] | [.issue, .beyond]]')" = '[[1,null],[0,"main is red"]]' ] \
+    || fail "the snapshot's belt does not carry the slot beyond the cap: $(loop snapshot --fresh | jq -c '[.belt[] | [.issue, .beyond]]')"
   : > "$STUB/go0"
   wait_until "[ \"\$(st 'select(.step == \"landed\" or .step == \"blocked\") | \"\\(.card[-1:]) \\(.step)\"' | tr '\n' ,)\" = '0 landed,0 blocked,' ]" 'cat "$STUB/run.out"' \
     || fail "the first fix card did not land, then the second take the slot beyond the cap and block: $(st '"\(.card) \(.step) \(.reason)"' | tr '\n' ,)"

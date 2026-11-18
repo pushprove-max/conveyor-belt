@@ -77,7 +77,7 @@ t_control() {
   [ "$(tuned 'del(.tunables.poll) | del(.checks) | del(.rulings)' loop health | jq -c '.homes | [.["tunables.poll"], .["checks"], .["rulings.log"]]')" \
     = '[{"value":30,"home":"schema default"},{"value":[],"home":"schema default"},{"value":null,"home":"none"}]' ] || fail "health does not name a schema default as the home: $(loop health | jq -c .homes)"
   # The Board's model settings: each in force, where it comes from, and the choices the pack allows.
-  settings() { loop snapshot | jq -c '.modelSettings | [(.builder, .reviewer) | [.model, .effort, .modelFrom, .effortFrom, .choices, (.efforts | length)]]'; }
+  settings() { loop snapshot --fresh | jq -c '.modelSettings | [(.builder, .reviewer) | [.model, .effort, .modelFrom, .effortFrom, .choices, (.efforts | length)]]'; }
   [ "$(settings)" = '[["m2","high","control","control",["m","m2"],5],["x2","medium","control","control",["x","x2"],5]]' ] || fail "snapshot model settings set by the record: $(settings)"
   # A seat the record names no model for, or one the pack no longer allows, has the seed's: health and the Board say so.
   jq -c '.model = null' "$C" > "$C.new" && mv "$C.new" "$C"
@@ -95,7 +95,7 @@ t_controlpick() {
   ctl pause >/dev/null; out=$(loop run 2>&1); [ -z "$(picks)" ] && grep -q 'the loop is paused' <<<"$out" || fail "a paused loop picked, or did not say so: $(picks) $out"
   [ "$(loop health | jq -r .state)" = paused ] || fail "health of a paused loop: $(loop health)"
   ctl resume >/dev/null; ctl hold 8 >/dev/null; ctl rules P1=off >/dev/null; ctl order 5 >/dev/null
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[(.queue.order | map(.issue)), (.queue.holding | map(del(.since))), .queue.skipped, .control.held, (.queue.next | map(.issue))]' <<<"$out")" \
     = '[[5,9],[{"issue":8,"title":"title 8","priority":"P2","followup":false,"retried":false,"created":"2026-03-01","waitsFor":[]}],[{"issue":6,"title":"title 6","rule":"P1"}],[8],[5,9]]' ] || fail "snapshot queue and record: $(jq -c '[.queue, .control]' <<<"$out")"
   # Held by you and skipped by a rule are both in Held, each with its reason; the four counts add up.
@@ -107,15 +107,15 @@ t_controlpick() {
   [ "$(picks)" = "9 5 " ] || fail "picks with #9 ordered first, #8 held and P1 off: $(picks)"
   # Area labels never built: #6 is P1 and billing; P1 on again, billing still off.
   ctl rules P1=on area:billing=off >/dev/null; loop run >/dev/null 2>&1; [ "$(picks)" = "9 5 " ] || fail "an issue of an area never built was picked: $(picks)"
-  [ "$(loop snapshot | jq -c '.queue.skipped | map([.issue, .rule])')" = '[[6,"area:billing"]]' ] || fail "the skipped rule of #6: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '.queue.skipped | map([.issue, .rule])')" = '[[6,"area:billing"]]' ] || fail "the skipped rule of #6: $(loop snapshot --fresh | jq -c .queue)"
   # The guard: a reading at or over it pauses; one under it does not; no reading pauses nothing and health says so.
   ctl rules area:billing=on >/dev/null; ctl release 8 >/dev/null; ctl guard 50 >/dev/null
   echo '{"seven_day":{"utilization":50}}' > "$STUB/limit"
   out=$(loop run 2>&1); [ "$(picks)" = "9 5 " ] && grep -q 'paused by guard' <<<"$out" || fail "a reading at the guard did not pause the loop: $(picks) $out"
   [ "$(loop health | jq -c '[.state, .guard.at, .guard.reading, .guard.missing]')" = '["paused by guard",50,50,false]' ] || fail "health under the guard: $(loop health)"
   # Two cards have landed, and the stub's model m has no price: no dollars.
-  [ "$(loop snapshot | jq -c '[.forecast.pausesAt, .forecast.cards, .forecast.usd]')" = '[6,2,null]' ] \
-    || fail "the forecast under the guard: $(loop snapshot | jq -c .forecast)"
+  [ "$(loop snapshot --fresh | jq -c '[.forecast.pausesAt, .forecast.cards, .forecast.usd]')" = '[6,2,null]' ] \
+    || fail "the forecast under the guard: $(loop snapshot --fresh | jq -c .forecast)"
   rm "$S/limit.jsonl"; rm "$STUB/limit"
   [ "$(loop health | jq -c '[.state, .guard.reading, .guard.missing]')" = '["running",null,true]' ] || fail "no reading paused the loop, or health did not say it is missing: $(loop health)"
   echo '{"seven_day":{"utilization":49}}' > "$STUB/limit"; loop run 1 >/dev/null 2>&1; [ "$(picks)" = "9 5 6 " ] || fail "a reading under the guard did not let the loop pick: $(picks)"
@@ -215,7 +215,7 @@ t_controlstop() {
     || fail "the stopped build's spend is not recorded: $(jq -c --arg c "$card" 'select(.card == $c)' "$S/retried.jsonl")"
   loop check || fail "the stopped build line does not check"
   kill -0 $pid 2>/dev/null || fail "serve ended on a stop"
-  [ "$(loop snapshot | jq -c '[.health.state, (.queue.order | map(.issue) | index(40) != null)]')" = '["stopped",true]' ] || fail "the stopped issue is not back in the queue"
+  [ "$(loop snapshot --fresh | jq -c '[.health.state, (.queue.order | map(.issue) | index(40) != null)]')" = '["stopped",true]' ] || fail "the stopped issue is not back in the queue"
   echo 'echo two >> a.txt' > "$STUB/build"; ctl resume >/dev/null
   until [ -n "$(st 'select(.issue == 40 and .step == "landed")')" ] || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done
   [ -n "$(st 'select(.issue == 40 and .step == "landed")')" ] || fail "resume did not pick the stopped issue again: $(cat "$STUB/serve.out")"
@@ -231,7 +231,7 @@ t_heldclose() {
   setup "$(jq -cn '[{number: 41, title: "[P1] a.txt:1 a slow gate", body: "Follow-up to #7 (Conveyor card c1-7).\n\nCost to every card: not assessed",
     milestone: null, createdAt: "2026-01-01", labels: [{name: "P1"}]}]')"
   loop control hold 41 >/dev/null || fail "hold 41 exited non-zero"
-  [ "$(loop snapshot | jq -c '.needsYou.pipeline | map(.issue)')" = '[41]' ] || fail "the held follow-up is not in Needs you: $(loop snapshot | jq -c .needsYou.pipeline)"
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.pipeline | map(.issue)')" = '[41]' ] || fail "the held follow-up is not in Needs you: $(loop snapshot --fresh | jq -c .needsYou.pipeline)"
   touch "$ST/cards.jsonl"; before=$(cat "$ST/cards.jsonl")
   loop gh-write issue close 41 --comment "Closed from the Board's Needs you list." >/dev/null && loop shut 41 >/dev/null || fail "the Board's close of #41, which has no card, exited non-zero"
   [ "$(cat "$STUB/closed")" = 41 ] && [ "$(cat "$STUB/close-comments")" = "--comment Closed from the Board's Needs you list." ] \
@@ -239,8 +239,8 @@ t_heldclose() {
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "the close of #41 changed the card records, though #41 has no card"
   # GitHub lists it closed now: it leaves Needs you, though the control record still holds it.
   echo '[]' > "$STUB/issues.json"
-  [ "$(jq -c .held "$ST/control.json")" = '[41]' ] && [ "$(loop snapshot | jq -c .needsYou.pipeline)" = '[]' ] \
-    || fail "the closed #41 is still in Needs you: $(loop snapshot | jq -c .needsYou.pipeline)"
+  [ "$(jq -c .held "$ST/control.json")" = '[41]' ] && [ "$(loop snapshot --fresh | jq -c .needsYou.pipeline)" = '[]' ] \
+    || fail "the closed #41 is still in Needs you: $(loop snapshot --fresh | jq -c .needsYou.pipeline)"
 }
 # A newer engine adds a key to the control record while a card runs the older copy in its own worktree (#516 added
 # tests). Bugs: the older copy's check refuses the record for a key it does not know, at the top or in rules, and the

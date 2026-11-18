@@ -417,6 +417,11 @@ snapcopy() { # [<open issues json>]
 # leave it to be made anew, and on a long history the snapshot then runs past a reader's wait (the Foreman's 45 s),
 # which has only a killed run that said nothing. The message names those causes only when a summary was kept and no
 # longer fits: with none kept yet (the first snapshot) it says so instead.
+# What the Declined part reads of each line of the records (linesum(), lib/records.sh): every review line, with the
+# judge's accepted and declined findings only (a card's reviews are counted for its round), and the picked line of a
+# main-red fix card. It read every line of the records whole on each snapshot (#398).
+JUDGEDLINE='select(. != "") | fromjson | objects | select(.step == "review" or (.step == "picked" and (.mainRed | type) == "string"))
+  | {card, step} + if .step == "picked" then {mainRed} else {judge: (.judge | if type == "object" then {accepted, declined} else . end)} end'
 snaprows() { # <records file> <kept> <to>
   local k size h1 h2 o s n=-1 src=$1
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
@@ -504,9 +509,14 @@ snapshot() (
       cacheWrite: (.value[3] // (.value[0] * 1.25))})), overrides: $o, names, seen, research: (if $rm == "" then null else $rm end)}' "$d/pricedall"; } > "$d/prices" 2>/dev/null \
     && [ -s "$d/prices" ] || echo null > "$d/prices"
   echo null > "$d/issues"; echo null > "$d/upall"
+  # What health reads of the records (HEALTHLINE), from its kept summary (health brought it up to date): the pick
+  # order and the slow-test list below both read it.
+  linesum "$READ" "$STATE.health" "$d/hrec" "$HEALTHLINE" && hrec=1 || hrec=''
   if [ -n "$issues" ]; then
     printf '%s\n' "$issues" > "$d/issues"
-    upnext "$issues" '' all > "$d/upall" 2>/dev/null && [ -s "$d/upall" ] || echo null > "$d/upall"
+    # The order from what health reads of the records and the retried lines, each from its kept summary (UPREC, UPOLD).
+    [ -n "$hrec" ] && linesum "$READ_OLD" "$RETRIED.health" "$d/hold" "$HEALTHLINE" \
+      && UPREC=$d/hrec UPOLD=$d/hold upnext "$issues" '' all > "$d/upall" 2>/dev/null && [ -s "$d/upall" ] || echo null > "$d/upall"
     queue=$(jq -c --arg area "$AREA" 'map({issue: .number, title: (.title // "")[0:200], priority: .p, followup: (.later | not), retried: .again, created: .createdAt,
           areas: ([.labels[].name | select(startswith($area))] | sort), hold, rule, waits, before, forced})
         | {order: map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not)) | (if .forced then .waitsFor = .waits else del(.forced) end) | del(.hold, .rule, .waits, .before)),
@@ -556,8 +566,8 @@ snapshot() (
   fl=$(jq -ce --slurpfile h "$d/health" --argjson days "$FLAKY_DAYS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$h[0] as $h | '"$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
     | [.entries | arrays | .[] | objects | select((.case | type) == "string" and ((.time | fromdate?) // 0) > $t - $days * 86400)] | group_by(.case)
     | map(.[0].case as $c | {case: $c, count: length, issue: ([$f[] | select(.case == $c) | .issue][-1] // null), files: ($c | caseowners)}) | sort_by(-.count, .case)' "$FLAKY" 2>/dev/null) || fl='[]'
-  # The slow-test list, from the snapshot's copy of the card records (health brought their summary up to date).
-  so=$(linesum "$READ" "$STATE.health" "$d/hrec" "$HEALTHLINE" && slowoffs "$d/hrec" | jq -cs 'sort_by(.file)') || so='[]'
+  # The slow-test list, from what health reads of the snapshot's copy of the card records (hrec, above).
+  so=$([ -n "$hrec" ] && slowoffs "$d/hrec" | jq -cs 'sort_by(.file)') || so='[]'
   # The last pass of the test rules, when its burst guard stopped it (testrulespass()).
   tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
   # The full test suite (fulltest()): the run in progress, only while its lock is held (a run that was killed left its
@@ -864,18 +874,21 @@ snapshot() (
   # record keeps every finding whole, where the review's text in the record is cut short), [{n, finding}] in that
   # order, so the panel can say what an F<n> of its reason means. Both are null when no review of the card's records
   # declined it, or one of that review's findings has no number (the numbering is then unknown).
-  jq -cs --slurpfile rec "$READ" --slurpfile old "$READ_OLD" '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
+  # The review and picked lines it reads come from summaries kept beside the records (JUDGEDLINE, linesum()).
+  linesum "$READ" "$STATE.judged" "$d/jrec" "$JUDGEDLINE" && linesum "$READ_OLD" "$RETRIED.judged" "$d/jold" "$JUDGEDLINE" \
+  && jq -cs --slurpfile rec "$d/jrec" --slurpfile old "$d/jold" '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | def one: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
-    # Each card whose judge declined a finding: its reviews, each with its round and judge.
+    # Each card whose judge declined a finding: its reviews, each with its round, judge and the declined findings in
+    # one line each (seen), made once here: made again for each declined line, this part took five times as long.
     ([$old[], $rec[] | objects | select(.step == "review")] | group_by(.card)
-      | map(select(any(.[]; (.judge.declined // []) | length > 0)) | {key: .[0].card, value: to_entries}) | from_entries) as $rv
+      | map(select(any(.[]; (.judge.declined // []) | length > 0)) | {key: .[0].card, value: (to_entries | map(.seen = [.value.judge.declined[]? | .finding | strings | one]))}) | from_entries) as $rv
     # Each main-red fix card (issue 0) by its name, as rows.jq names it: its declined lines carry it (name), not #0.
     | ([$old[], $rec[] | objects | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}]
       | from_entries) as $mr
     | def numbered: [((.judge.accepted | arrays) // []) + ((.judge.declined | arrays) // []) | .[] | {n: ((.n | numbers) // null), finding}]
         | if any(.[]; .n == null) then null else sort_by(.n) end;
     map(objects | (if (.card | type) == "string" and $mr[.card] then .name = $mr[.card] else . end) | if .by == "judge" then (.finding | one) as $f
-        | ([$rv[.card] // [] | .[] | select(any(.value.judge.declined[]?; (.finding | strings | one) == $f))] | first) as $r
+        | ([$rv[.card] // [] | .[] | select(any(.seen[]; . == $f))] | first) as $r
         | (if $r == null then null else $r.value | numbered end) as $n | . + {round: (if $n == null then null else $r.key + 1 end), findings: $n} else . end)
     | sort_by(.time) | reverse
     | def shown: .dismissed == null and .built == null and ((.time | fromdate?) // 0) >= $now - 7 * 86400;

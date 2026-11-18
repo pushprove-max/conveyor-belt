@@ -26,7 +26,7 @@ EOF
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { printf "USER-VISIBLE: no\nVERDICT: GO\n" > "$out"; sleep 60; }' > "$STUB/review-cmd" # sleep: a review that hangs after it wrote its verdict, ended by the engine
   s=$SECONDS; loop run > "$STUB/log" 2>&1 & run=$!
   for i in $(seq 150); do h=$(loop health 2>/dev/null | jq -c '.stuck'); [[ $h == *'"did":"ended and retried"'* ]] && break; sleep 0.2; done
-  b=$(loop snapshot 2>/dev/null | jq -c '[.belt[] | [.step, .stalls]]')
+  b=$(loop snapshot --fresh 2>/dev/null | jq -c '[.belt[] | [.step, .stalls]]')
   : > "$STUB/go"; wait $run || fail "run exited non-zero: $(cat "$STUB/log")"
   c=$(st 'select(.step == "picked") | .card')
   [ "$(jq -c '[.[] | [.card, .step, .did]]' <<<"$h")" = "[[\"$c\",\"build\",\"ended and retried\"]]" ] \
@@ -39,7 +39,7 @@ EOF
   [ "$(st 'select(.step == "review") | [.result, .stalls, (.firstTry.reason | test("^stalled at review: no progress since 20[0-9-]+T"))] | tostring')" = '["GO",1,true]' ] \
     || fail "the review line does not count its stall and keep the stalled try: $(st 'select(.step == "review")')"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land after its steps ran once more: $(st '"\(.step) \(.reason)"')"
-  [ "$(loop snapshot | jq -c '[.landed[] | .stalls]')" = '[2]' ] || fail "the snapshot does not carry the card's stalls: $(loop snapshot | jq -c '.landed')"
+  [ "$(loop snapshot --fresh | jq -c '[.landed[] | .stalls]')" = '[2]' ] || fail "the snapshot does not carry the card's stalls: $(loop snapshot --fresh | jq -c '.landed')"
 }
 
 # A second stall at the same step blocks the card, with the reason and its kept work. The clock runs from the last

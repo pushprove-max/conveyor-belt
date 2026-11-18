@@ -88,7 +88,7 @@ t_visibleyes() {
 t_visibleapproved() {
   visiblestart 23; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
   loop run >/dev/null; old=$(st 'select(.issue == 23 and .step == "blocked") | .card')
-  [ -n "$old" ] && [ "$(loop snapshot | jq -c '.needsYou.waiting | map(.issue)')" = '[23]' ] || fail "#23 was not under Needs you for Dana's yes: $(steps 23)"
+  [ -n "$old" ] && [ "$(loop snapshot --fresh | jq -c '.needsYou.waiting | map(.issue)')" = '[23]' ] || fail "#23 was not under Needs you for Dana's yes: $(steps 23)"
   # A turn with no approval line added gives nothing back.
   loop run >/dev/null; [ "$(st 'select(.issue == 23 and .step == "picked") | .card')" = "$old" ] && [ ! -s "$ST/retried.jsonl" ] || fail "#23 was given back with no approval line: $(steps 23)"
   issue 23 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"
@@ -96,7 +96,7 @@ t_visibleapproved() {
   grep -q "\"card\":\"$old\"" "$ST/retried.jsonl" || fail "the turn did not give #23 back once its approval line was added"
   [ "$(st 'select(.issue == 23 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
     || fail "the approved #23 did not land from its kept patch with no second review: $(steps 23)"
-  [ "$(loop snapshot | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)')" = '[]' ] || fail "Needs you still lists the approved #23: $(loop snapshot | jq -c .needsYou)"
+  [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)')" = '[]' ] || fail "Needs you still lists the approved #23: $(loop snapshot --fresh | jq -c .needsYou)"
 }
 # Bug: with the rule "visible changes need the owner's yes" turned off after a card stopped for the yes, retry says
 # the next card stops again for the yes, though it lands from the kept patch with no build and no review.
@@ -282,7 +282,7 @@ t_before() {
   [ -z "$(st 'select(.issue == 7)')" ] && [ "$(st 'select(.step == "landed") | .issue')" = 9 ] || fail "an issue waiting for approval before its build was picked: $(steps 7)"
   [ "$(loop health | jq -c '.before | map({issue, section})')" = "[{\"issue\":7,\"section\":\"The Pay page: today a grey Pay button; it will show a green one.\"}]" ] \
     || fail "health does not list #7 as waiting for approval before its build: $(loop health | jq -c .before)"
-  snap=$(loop snapshot) || fail "snapshot exited non-zero"
+  snap=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.needsYou.before | map({issue, title, section})' <<<"$snap")" = '[{"issue":7,"title":"title 7","section":"The Pay page: today a grey Pay button; it will show a green one."}]' ] \
     && [ "$(jq -c '[.open.held[] | select(.issue == 7) | .reasons[].kind]' <<<"$snap")" = '["approve"]' ] && [ "$(jq -c '[.queue.order[].issue]' <<<"$snap")" = '[]' ] \
     || fail "the snapshot does not list #7 in Needs you before its build, or Held does not say why: $(jq -c '[.needsYou.before, .open.held, .queue.order]' <<<"$snap")"
@@ -307,7 +307,7 @@ t_beforelong() {
   jq -cs . <(sec 7 "## What customers or staff will see"$'\n'"$long") <(sec 8 "## What customers or staff will see"$'\n'"$long") \
     <(sec 10 "## What customers or staff will see"$'\n'"$long") > "$STUB/issues.json"
   [ "$(loop health | jq -r '.before | map(.section == $l) | join(",")' --arg l "$long")" = true,true,true ] \
-    && [ "$(loop snapshot | jq -r '.needsYou.before | map("\(.issue) \(.section == $l)") | join(",")' --arg l "$long")" = '7 true,8 true,10 true' ] \
+    && [ "$(loop snapshot --fresh | jq -r '.needsYou.before | map("\(.issue) \(.section == $l)") | join(",")' --arg l "$long")" = '7 true,8 true,10 true' ] \
     || fail "a section of ${#long} characters is cut, or three of them leave Needs you empty: $(loop health 2>&1 | jq -c '.before | map(.section | length)' 2>&1)"
 }
 # A hold of the control record (a No) takes it out of Needs you; released, it is back.
@@ -347,8 +347,8 @@ t_beforediffers() {
     || fail "the fix brief does not carry the approved section and its condition"
   k=$(st 'select(.issue == 11 and .step == "blocked") | "\($ENV.ST)/\(.kept)/\(.card).patch"'); grep -qx '+pay' "$k" || fail "the differing card's patch is not kept: $k"
   grep -q "^11 --body .*the button says Buy, not Pay" "$STUB/comments" || fail "the difference was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
-  [ "$(loop snapshot | jq -r '.needsYou.waiting[] | select(.issue == 11) | .sentence')" = "it differs from the change approved before the build: the button says Buy, not Pay" ] \
-    || fail "Needs you does not ask about the difference: $(loop snapshot | jq -c .needsYou.waiting)"
+  [ "$(loop snapshot --fresh | jq -r '.needsYou.waiting[] | select(.issue == 11) | .sentence')" = "it differs from the change approved before the build: the button says Buy, not Pay" ] \
+    || fail "Needs you does not ask about the difference: $(loop snapshot --fresh | jq -c .needsYou.waiting)"
   # The owner's yes to what it shows (a second line): the section holds it no more. The kept patch is not built again; it
   # is reviewed once, against the condition of the first yes as any conditional yes is, and lands on a plain yes.
   sec 11 "$S"$'\n\n'"$A; condition: staff only"$'\n'"$A" | jq -cs . > "$STUB/issues.json"; sessions=$(wc -l < "$STUB/sessions")
@@ -497,8 +497,8 @@ t_inherit() {
     && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a follow-up whose change goes beyond its parent's yes did not stop, or its ask does not name what: $(steps 100104)"
   grep -qx "$P" "$STUB/asked" || fail "a follow-up of a follow-up was not given the first approval up its chain"
   # Bug: the ask of a follow-up that goes beyond its parent's yes does not name what goes beyond.
-  [ "$(loop snapshot | jq -c '.needsYou.waiting | map({issue, beyond})')" = '[{"issue":100104,"beyond":{"from":7,"what":"guests see the Pay button too"}}]' ] \
-    || fail "the waiting follow-up does not name what goes beyond its parent's yes: $(loop snapshot | jq -c .needsYou.waiting)"
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.waiting | map({issue, beyond})')" = '[{"issue":100104,"beyond":{"from":7,"what":"guests see the Pay button too"}}]' ] \
+    || fail "the waiting follow-up does not name what goes beyond its parent's yes: $(loop snapshot --fresh | jq -c .needsYou.waiting)"
   # Bugs: #100104's kept review said "beyond". Retried (the yes up its chain may have grown since), its
   # kept patch is reviewed again against the approval line as it is now, and it lands on a "part".
   old=$(st 'select(.issue == 100104 and .step == "blocked") | .card')
@@ -519,13 +519,13 @@ t_inheritno() {
   [ "$(st 'select(.issue == 100103 and .step == "blocked") | .reason')" = "${Y}staff see a Pay button" ] || fail "a follow-up of a parent with no yes did not stop: $(steps 100103)"
   ! grep -q 'INHERITED\|# The yes of' "$STUB/asked" "$STUB/brief" || fail "a follow-up of a parent with no yes was told of one"
   # "Needs you" lists the files of a card waiting for a yes.
-  [ "$(loop snapshot | jq -c '.needsYou.waiting[] | select(.issue == 100103) | .files')" = '{"count":2,"paths":["a.txt","web/pay.ts"]}' ] \
-    || fail "the waiting card's files: $(loop snapshot | jq -c .needsYou.waiting)"
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.waiting[] | select(.issue == 100103) | .files')" = '{"count":2,"paths":["a.txt","web/pay.ts"]}' ] \
+    || fail "the waiting card's files: $(loop snapshot --fresh | jq -c .needsYou.waiting)"
   loop check || fail "the record check refuses a blocked line with paths"
   # Bugs: a blocked line holds only the first 200 paths, so a list cut short there is read whole from
   # the kept patch; and a follow-up of a parent with no yes is said to go beyond one.
   jq -c 'if .issue == 100103 and .step == "blocked" then .paths = ["a.txt"] else . end' "$ST/cards.jsonl" > "$STUB/c" && mv "$STUB/c" "$ST/cards.jsonl"
-  w=$(loop snapshot | jq -c .needsYou.waiting) || fail "snapshot exited non-zero"
+  w=$(loop snapshot --fresh | jq -c .needsYou.waiting) || fail "snapshot exited non-zero"
   [ "$(jq -c '.[] | select(.issue == 100103) | .files' <<<"$w")" = '{"count":2,"paths":["a.txt","web/pay.ts"]}' ] \
     || fail "a waiting card's files cut short in its line were not read whole from its kept patch: $w"
   [ "$(jq -c 'map({issue, beyond})' <<<"$w")" = '[{"issue":100103,"beyond":null}]' ] || fail "a waiting follow-up of a parent with no yes is said to go beyond one: $w"

@@ -19,8 +19,10 @@ tf_runs() { # <file> <CPU s>...
 # The engine's functions, as the script of <command> (conveyor/commands/) loads them, in a shell of the case's main
 # ($R): <function> run there, with the 7 days from 2026-11-09. tf_in as the snapshot loads them (testspart), tf_card
 # as the loop does a card's test step (slowtests, slowrec).
+# shellcheck source=/dev/null # the command's libraries, by its . lines or its SNAPLIBS list (commands/snapshot.sh)
 tf_as() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-  && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/$1.sh")" && "${@:2}" ); } # <command> <function>...
+  && eval "$(grep -e '^\. "\$HERE/lib/' -e '^SNAPLIBS=' "$SRC/commands/$1.sh")" \
+  && for l in ${SNAPLIBS-}; do . "$HERE/lib/$l.sh" || exit 1; done && "${@:2}" ); } # <command> <function>...
 tf_in() { tf_as snapshot "$@"; }
 tf_card() { tf_as run "$@"; }
 

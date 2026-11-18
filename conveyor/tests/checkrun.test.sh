@@ -26,7 +26,8 @@ crpack() {
     rm -f "$ST/checkrun.json"  # its last answer, kept for 10 s
   }
   crjson() {
-    ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/snapshot.sh")" || exit 1
+    # shellcheck source=/dev/null # the snapshot's libraries, by the list snapshot.sh names (SNAPLIBS)
+    ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^SNAPLIBS=' "$SRC/commands/snapshot.sh")" && for l in $SNAPLIBS; do . "$HERE/lib/$l.sh" || exit 1; done || exit 1
       d=$(mktemp -d "$T/$CASE/cr.XXXXXX") || exit 1; checkrun "$d"; rc=$?; rm -rf "$d"; exit $rc )
   }
   cr() { crjson | jq -c ".checkRun | $1"; }
@@ -36,7 +37,7 @@ crpack() {
 # two snapshots ask at once; a progress that is not a command refused by the pack check.
 t_checkrun() {
   setup '[]'
-  [ "$(loop snapshot | jq 'has("checkRun")')" = false ] || fail "a pack without checks.progress gives a checkRun field"
+  [ "$(loop snapshot --fresh | jq 'has("checkRun")')" = false ] || fail "a pack without checks.progress gives a checkRun field"
   jq '.checks = {progress: 3}' "$R/.conveyor/project.json" > "$R/.conveyor/bad.json"
   out=$("$SRC/lib/pack.sh" check "$R/.conveyor/bad.json" 2>&1) && fail "a progress that is not a command passed the pack check"
   grep -q '\.checks\.progress: number, not string' <<<"$out" || fail "a progress that is not a command failed the pack check for another reason: $out"
@@ -51,6 +52,9 @@ t_checkrun() {
   # The stream (`conveyor.sh watch`, which stream.json /units reads is made of) carries that block, line for line.
   # This checks the stream's JSON only: /units is the host project's command, not in this repository, so nothing
   # here runs it or reads what it prints; that it prints the lines it reads is for the host's own tests.
+  # The stream prints the kept snapshot, which the case's first call made before the pack named checks.progress (the
+  # pack is no input the writer watches): the case asks for the view after its own change, as the issue says a caller does.
+  loop snapshot --fresh > /dev/null || fail "the snapshot with checks.progress failed"
   W=$T/$CASE/watch.out
   ( export CONVEYOR_WATCH_GITHUB_FIRST=1 CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     exec timeout 60 bash "$SRC/conveyor.sh" watch > "$W" 2> "$W.err" ) & pid=$!
@@ -101,7 +105,7 @@ t_checkrunbad() {
   done
   [ "$(jq -r .checkRun.error <<<"$out")" = "check run: progress unreadable: it took over 5 s" ] || fail "a hanging command: $out"
   tune --arg c "echo gone >&2; exit 3" '.checks.progress = $c'; rm -f "$ST/checkrun.json"
-  out=$(loop snapshot) || fail "the snapshot failed with a failing progress command"
+  out=$(loop snapshot --fresh) || fail "the snapshot failed with a failing progress command"
   jq -e '(.checkRun.error == "check run: progress unreadable: gone") and (.belt | type == "array") and (.health | type == "object")' <<<"$out" >/dev/null \
     || fail "a failing progress command: $(jq -c .checkRun <<<"$out")"
 }

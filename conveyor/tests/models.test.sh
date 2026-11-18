@@ -14,8 +14,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # route lines) pays for that function, not for a whole card around it.
 modelsengine() { # <run|doctor|snapshot> <the engine command>
   mkdir -p "$T/$CASE/cards"
+  # shellcheck source=/dev/null # the command's libraries, by its . lines or its SNAPLIBS list (commands/snapshot.sh)
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/$1.sh")" && names && eval "$2" )
+    && eval "$(grep -e '^\. "\$HERE/lib/' -e '^SNAPLIBS=' "$SRC/commands/$1.sh")" \
+    && for l in ${SNAPLIBS-}; do . "$HERE/lib/$l.sh" || exit 1; done && names && eval "$2" )
 }
 # The snapshot's modelSettings (what the Board's model choices show), as snapshot() makes it: the host's CLI report read
 # when due (hostclis), then modelsettings(), with no whole snapshot around them.
@@ -39,6 +41,7 @@ t_claudereview() {
   tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]'; seatset reviewer gpt-6.1-sol
   ctl() { loop control "$@" 2>&1; }
   rv() { msettings | jq -c '.reviewer | [.choices, .efforts]'; }
+  rv() { loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.choices, .efforts]'; }
   [ "$(rv)" = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"],["minimal","low","medium","high","xhigh"]]' ] \
     || fail "the Reviewer choices are not the five models, or a Codex reviewer's efforts are not Codex's: $(rv)"
   was=$(cat "$ST/control.json")
@@ -192,6 +195,9 @@ t_opencodereview() {
   [ "$(msettings | jq -c '.reviewer | [.choices, .agent, .efforts]')" \
     = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
     || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(msettings | jq -c .reviewer)"
+  [ "$(loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.choices, .agent, .efforts]')" \
+    = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
+    || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(loop snapshot --fresh | jq -c .modelSettings.reviewer)"
   echo 'git status --porcelain > "$STUB/status"; cat a.txt > "$STUB/a"' > "$STUB/test-cmd"
   # #7: a NO-GO, its finding sent to the fix, then a GO.
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
@@ -212,8 +218,8 @@ t_opencodereview() {
   [ "$(st 'select(.issue == 7 and .step == "review") | [.tokens, .usage, .cost, .stats] | tojson' | sort -u)" \
     = '[{"claude":0,"codex":185},{"input":120,"write":50,"read":1500,"output":15,"cost":0.75},null,{"turns":2,"tools":{"read":1}}]' ] \
     || fail "an OpenCode review's line lacks the tokens, usage or cost it reported: $(st 'select(.issue == 7 and .step == "review")')"
-  [ "$(loop snapshot | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "review") | [.usd, .unpriced]]')" = '[[0.75,null],[0.75,null]]' ] \
-    || fail "the Board does not price the OpenCode reviews at the cost OpenCode reported: $(loop snapshot | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline]')"
+  [ "$(loop snapshot --fresh | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "review") | [.usd, .unpriced]]')" = '[[0.75,null],[0.75,null]]' ] \
+    || fail "the Board does not price the OpenCode reviews at the cost OpenCode reported: $(loop snapshot --fresh | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline]')"
   # Run in the worktree, read-only, on the model and the effort set, given the staged change; its write undone.
   wt=$T/$CASE/cards/$(st 'select(.issue == 7 and .step == "review") | .card' | head -n 1)
   [ "$(head -n 1 "$STUB/oc-runs")" = 'run --pure --format json --agent conveyor-readonly -m prov/vendor/m-1 --variant high' ] && [ "$(sed -n 1p "$STUB/oc-env.1")" = "$wt" ] \

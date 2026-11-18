@@ -61,14 +61,14 @@ EOF
   [ ! -e "$STUB/sessions" ] || fail "Claude Code ran for an OpenCode model: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.reason)"')"
   # The Rules panel names no effort for the OpenCode builder (it is given none), not the seed's medium.
-  [ "$(loop snapshot | jq -c '.modelSettings.builder | [.model, .effort, .agent, .efforts]')" = '["opencode:prov/mod-1",null,"opencode",[]]' ] \
-    || fail "the Board's builder settings name an effort OpenCode is not given: $(loop snapshot | jq -c .modelSettings.builder)"
+  [ "$(loop snapshot --fresh | jq -c '.modelSettings.builder | [.model, .effort, .agent, .efforts]')" = '["opencode:prov/mod-1",null,"opencode",[]]' ] \
+    || fail "the Board's builder settings name an effort OpenCode is not given: $(loop snapshot --fresh | jq -c .modelSettings.builder)"
   # The OpenCode builder takes no effort, though an OpenCode reviewer takes one (its --variant, models.test.sh).
   out=$(loop control model opencode prov/mod-1 high 2>&1); [ $? = 2 ] && grep -qF 'opencode takes no effort high (it takes none: name the model alone)' <<<"$out" \
     || fail "the OpenCode builder was given an effort: $out"
   # The Board prices the step at the dollars OpenCode reported.
-  [ "$(loop snapshot | jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | [.metrics.timeline[] | select(.step == "build") | .usd]')" = '[0.025]' ] \
-    || fail "the build is not priced at OpenCode's cost: $(loop snapshot | jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | .metrics.timeline')"
+  [ "$(loop snapshot --fresh | jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | [.metrics.timeline[] | select(.step == "build") | .usd]')" = '[0.025]' ] \
+    || fail "the build is not priced at OpenCode's cost: $(loop snapshot --fresh | jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | .metrics.timeline')"
 }
 
 # Bugs: an OpenCode build that `control stop` ends is read as a Claude stream, so what it used so far (its tokens,

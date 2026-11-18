@@ -27,7 +27,7 @@ t_pricessnap() {
     jq -cn --arg s "$step" --arg r "$res" --arg t "${d}T00:0$((n += 1)):00Z" --argjson x "$x" \
       '{card: "c1", issue: 1, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: "", title: "T1"} * $x' >> "$ST/cards.jsonl"
   done
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   jq -e '.landed[0].metrics.timeline | map(select(.step | IN("build", "fix", "rebase", "review")) | [.step, .usd, .model, .override, .unpriced])
     == [["build", 3, "claude-new-9", true, null], ["fix", 1, "claude-opus-5-5", true, null], ["rebase", 1, "claude-opus-5-5", true, null],
         ["review", null, "m", null, "no price for its model: m"]]' <<<"$out" > /dev/null \
@@ -67,7 +67,7 @@ t_pricesresearch() {
   # A session begun in the main checkout (filed under main's folder) that works in the lane later counts from then on.
   main=$HOME/.claude/projects/$(sed 's/[^a-zA-Z0-9]/-/g' <<<"$T/$CASE/main"); mkdir -p "$main"
   { line mainonly-9 "$T/$CASE/main" s7 "$t"; line moved-9 "$HOME/lane" s7 "$t"; } > "$main/s7.jsonl"
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   jq -e '.prices.seen == [{model: "moved-9", sessions: 1, routes: [], as: null}, {model: "reports-9", sessions: 1, routes: [], as: null},
     {model: "research-9", sessions: 1, routes: [], as: null}]' <<<"$out" > /dev/null \
     || fail "the model IDs seen: $(jq -c .prices.seen <<<"$out")"

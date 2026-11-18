@@ -29,7 +29,7 @@ snaplines_line() {
 # follow-ups and test edits, a failed push, a main-red card, a blocked one, issues that wait on each other (cycles) and
 # a slow file whose issue lands in the appended lines (the slow-test list).
 t_snaplinessame() {
-  local a b h s='a.test.sh' f m='del(.health.diskFreeKb, .health.cores, .testSlots)'
+  local a b h s='a.test.sh' f m='del(.health.diskFreeKb, .health.cores, .testSlots, .snapshotAt, .snapshotAge)'
   export TZ=UTC CONVEYOR_NOW=1794918000
   setup "$(jq -cs . <(issue 2 2026-11-01) <(issue 7 2026-11-01 | jq -c '.body = "Depends on: #8"') <(issue 8 2026-11-01 | jq -c '.body = "Depends on: #7"'))"
   f=$(jq -cn --arg s "$s" '{of: 1, files: [{file: $s, cases: [{line: "", name: "one"}]}], timeout: null}')
@@ -53,7 +53,7 @@ t_snaplinessame() {
   } > "$ST/cards.jsonl"
   { snaplines_line c0 2 picked ok 00 '{"title": "two"}'; snaplines_line c0 2 blocked blocked 01 '{"reason": "brief: failed"}'; } > "$ST/retried.jsonl"
   jq -cn --arg s "$s" '{filed: [{file: $s, issue: 2, cpu: 9}, {file: "b.test.sh", issue: 1, cpu: 9}]}' > "$ST/slow.json"
-  a=$(loop snapshot) || fail "the first snapshot exited non-zero"
+  a=$(loop snapshot --fresh) || fail "the first snapshot exited non-zero"
   [ "$(jq -c '.slowOff | map(.file)' <<<"$a")" = "[\"$s\"]" ] || fail "the slow file of an issue no card has landed is not kept off: $(jq -c .slowOff <<<"$a")"
   [ -s "$ST/cards.jsonl.health" ] && [ -s "$ST/cards.jsonl.tests" ] && [ -s "$ST/retried.jsonl.health" ] && [ -s "$ST/retried.jsonl.tests" ] && [ -s "$ST/cards.jsonl.priced" ] && [ -s "$ST/cards.jsonl.cardruns" ] \
     || fail "the first snapshot kept no summary of the records: $(ls "$ST")"
@@ -65,10 +65,10 @@ t_snaplinessame() {
     snaplines_line c4 4 worktree ok 16 '{"pid": 999999997, "started": "z"}'
     snaplines_line c3 0 review GO 17 '{"reason": "COVERED-BY: a.test.sh: the case", "model": "claude-opus-5-5", "usage": {"input": 1000000, "write": 0, "read": 0, "output": 0}}'
   } >> "$ST/cards.jsonl"
-  a=$(loop snapshot) || fail "the snapshot from the summaries exited non-zero"
+  a=$(loop snapshot --fresh) || fail "the snapshot from the summaries exited non-zero"
   [ "$(head -n 1 "$ST/cards.jsonl.health" | cut -d' ' -f1)" = "$(wc -c < "$ST/cards.jsonl")" ] || fail "the health summary was not brought up to the records' end"
-  rm -f "$ST"/*.jsonl.health "$ST"/*.jsonl.tests "$ST"/*.jsonl.rows "$ST"/*.jsonl.priced "$ST"/*.jsonl.cardruns
-  b=$(loop snapshot) || fail "the snapshot read from scratch exited non-zero"
+  rm -f "$ST"/*.jsonl.health "$ST"/*.jsonl.tests "$ST"/*.jsonl.rows "$ST"/*.jsonl.priced "$ST"/*.jsonl.cardruns "$ST"/*.jsonl.judged
+  b=$(loop snapshot --fresh) || fail "the snapshot read from scratch exited non-zero"
   # What the fields the summaries keep give, as the lines say it (a summary that left one out would give it in both
   # snapshots alike): the dead worktree, the landed commit not pushed and the push that failed, the refused run, the
   # cycle, the main-red card's name and blocked reason, the slow file back on card steps, and of the test file its

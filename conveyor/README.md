@@ -1490,6 +1490,13 @@ pushes. Past those 20, `landed` also keeps a card still on the belt (its push or
 However many cards land, a snapshot stays under 512 KB;
 what is left grows with the cards open or blocked and the open issues, not with the cards that landed.
 
+`conveyor.sh snapshot` prints the last snapshot at once. Its first two fields are `snapshotAt`, when that snapshot
+was made, and `snapshotAge`, its age in seconds. When a record line, the control record, a card's live record or the
+list of issues changes, one process makes a new snapshot in the background and puts it in place whole. A reader does
+not wait for it, and it does not get a part of a snapshot. `conveyor.sh snapshot --fresh` makes a new snapshot now,
+prints it and keeps it. A project with no snapshot yet gets its first one that way. The Board's Health panel and
+/units show the age of a snapshot that is more than a minute old.
+
 Every snapshot also writes those lists whole to `history.json` in the state folder, and `conveyor.sh history` prints
 that file. The Board does not read it with the live feed: its Landed, Metrics, Cost and Declined panels ask the page
 server for it (`GET /history`) when they are drawn, at most once a minute, and show the older entries from it beside

@@ -105,7 +105,7 @@ t_landpr() {
   [ "$(awk '/^## / {p = ($0 == "## #2 T2")} p && NF' <<<"$body")" = "$(grep . <<<"$want")" ] || fail "card 2's part of the body is not its Done-when lines, its fix rounds and the tests it ran: $body"
   # Card 1 has none: with card 2's two, a count fixed at any one value fails one of these checks.
   [ "$(awk '/^## / {p = ($0 == "## #1 T1")} p && /^- Fix rounds:/' <<<"$body")" = '- Fix rounds: 0' ] || fail "card 1's part of the body does not give its zero fix rounds: $body"
-  [ "$(loop snapshot | jq -c '[.belt[] | select(.issue == 1 or .issue == 2) | .issue]')" = '[]' ] || fail "a card pushed into the pull request is on the belt, waiting for its issue: $(loop snapshot | jq -c '.belt | map({issue, state})')"
+  [ "$(loop snapshot --fresh | jq -c '[.belt[] | select(.issue == 1 or .issue == 2) | .issue]')" = '[]' ] || fail "a card pushed into the pull request is on the belt, waiting for its issue: $(loop snapshot --fresh | jq -c '.belt | map({issue, state})')"
   la_eng atorigin "$sha" || fail "the commit pushed to conveyor/landing does not count as pushed: the loop would push it again"
   la_land 3; la_eng push c3 3 || fail "the third push failed"
   [ "$(cat "$STUB"/pr.* | jq -s length)" = 1 ] || fail "a second pull request was opened while one was open"
@@ -122,7 +122,7 @@ t_landmain() {
   tune '.push.landAs = "pr"'
   loop control land-as main > /dev/null || fail "control land-as main was refused"
   # The Board's Rules tab shows the record's value over the pack's: the snapshot gives both.
-  [ "$(loop snapshot | jq -c '[.packLandAs, .control.landAs]')" = '["pr","main"]' ] || fail "the snapshot does not give the pack's and the record's Land as: $(loop snapshot | jq -c '[.packLandAs, .control.landAs]')"
+  [ "$(loop snapshot --fresh | jq -c '[.packLandAs, .control.landAs]')" = '["pr","main"]' ] || fail "the snapshot does not give the pack's and the record's Land as: $(loop snapshot --fresh | jq -c '[.packLandAs, .control.landAs]')"
   la_land 1; la_eng push c1 1 || fail "the push failed"
   sha=$(git -C "$R" rev-parse HEAD)
   [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$sha" ] || fail "the push did not go to origin's default branch"

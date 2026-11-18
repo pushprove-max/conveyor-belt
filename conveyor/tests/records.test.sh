@@ -200,7 +200,7 @@ t_shut() {
   # the loop closes #7's card, picks nothing, and leaves #8's blocked.
   rm -f "$STUB/closed-viewed"; echo "[$(issue 7 2026-01-01)]" > "$STUB/issues.json"; echo "[$(issue 7 2026-01-01)]" > "$STUB/closed-issues.json"; loop run 1 >/dev/null
   [ "$(loop health | jq -c '[(.blocked | map(.card)), (.waiting | map(.card))]')" = "[[\"$c8\"],[]]" ] || fail "health's blocked lists after #7 was closed: $(loop health | jq -c '[.blocked, .waiting]')"
-  snap=$(loop snapshot) || fail "snapshot exited non-zero"
+  snap=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)' <<<"$snap")" = '[8]' ] || fail "Needs you still lists the closed #7: $(jq -c .needsYou <<<"$snap")"
   [ "$(loop cards | jq -r --arg c "$c7" '.cards[] | select(.card == $c) | .step')" = closed ] || fail "#7's card does not end closed: $(loop cards | jq -c .cards)"
   [ "$(loop cards | jq -c '[.landed, .blocked]')" = '[0,1]' ] || fail "the cards summary counts the closed #7, which landed nothing, as landed: $(loop cards | jq -c '[.landed, .blocked]')"
@@ -240,7 +240,7 @@ t_shutboard() {
   before=$(cat "$ST/cards.jsonl"); loop shut 9 >/dev/null || fail "shut of #9, which has no card, exited non-zero"
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut 9 changed the card records, though #9 has no card"
   loop shut 8 >/dev/null || fail "shut 8 exited non-zero"
-  [ "$(loop health | jq -c '.blocked | map(.issue) | index(8)')" = null ] && [ "$(loop snapshot | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue) | index(8)')" = null ] \
+  [ "$(loop health | jq -c '.blocked | map(.issue) | index(8)')" = null ] && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue) | index(8)')" = null ] \
     || fail "#8 is still under Needs you after shut 8: $(loop health | jq -c '[.blocked, .waiting]')"
   [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|the issue was closed by hand while the card was blocked' ] \
     || fail "no closed line says #8 was shut: $(grep "$c8" "$ST/cards.jsonl")"

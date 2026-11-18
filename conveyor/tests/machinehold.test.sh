@@ -167,8 +167,8 @@ t_machinecard() {
     || fail "the card on hold did not test again once the control passed, or went to a fix: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   loop check || fail "the record check refuses a test line with the verdict machine"
-  [ "$(loop snapshot | jq -c '[.landed[0].track.records[] | select(.name | startswith("tests")) | [.name, .state]]')" = '[["tests held: the machine","done"],["tests passed","done"]]' ] \
-    || fail "the card's track shows the machine's hold as a failed test step: $(loop snapshot | jq -c '.landed[0].track.records')"
+  [ "$(loop snapshot --fresh | jq -c '[.landed[0].track.records[] | select(.name | startswith("tests")) | [.name, .state]]')" = '[["tests held: the machine","done"],["tests passed","done"]]' ] \
+    || fail "the card's track shows the machine's hold as a failed test step: $(loop snapshot --fresh | jq -c '.landed[0].track.records')"
 }
 
 # D4: the hold stands; the control passes on main now. Bug it catches: a loop held for good once the machine was

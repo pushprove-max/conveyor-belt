@@ -111,7 +111,7 @@ t_flakyfile() {
   loop flaky add "$k" four "fourth" > /dev/null || fail "flaky add failed"
   [ "$(flakyfiled)" = 1 ] || fail "a fourth entry filed again while the issue was open: $(cat "$STUB/filed")"
   loop flaky add "c.test: other" one "x" > /dev/null || fail "flaky add failed"
-  b=$(loop snapshot | jq -c '.flaky')
+  b=$(loop snapshot --fresh | jq -c '.flaky')
   [ "$b" = '[{"case":"b.test: flaky","count":4,"issue":100101,"files":["b.test"]},{"case":"c.test: other","count":1,"issue":null,"files":["c.test"]}]' ] || fail "the snapshot's flaky cases: $b"
   echo CLOSED > "$STUB/state.100101"
   loop flaky add "$k" five "fifth" > /dev/null || fail "flaky add failed"
@@ -156,7 +156,7 @@ t_flakysnapfiles() {
   printf '# run.test.sh\nt_rone() {\n  :\n}\n' > "$R/cases/r.test.sh"
   git -C "$R" add cases && git -C "$R" commit -qm cases || fail "main's case file"
   loop flaky off "run.test.sh: rone" "Board user" "kept off" > /dev/null || fail "flaky off failed"
-  b=$(loop snapshot | jq -c '[.flaky[] | {case, files}]')
+  b=$(loop snapshot --fresh | jq -c '[.flaky[] | {case, files}]')
   [ "$b" = '[{"case":"run.test.sh: rone","files":["run.test.sh","cases/r.test.sh"]}]' ] || fail "the snapshot's flaky case does not name its case file: $b"
 }
 

@@ -279,12 +279,12 @@ t_pipeline() {
   [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "7 100102 " ] || fail "picks with the pipeline follow-up held: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 " ] || fail "the follow-up on another file did not land: $(st 'select(.step | IN("landed", "blocked"))')"
   jq -cs '[.[0]]' "$STUB/filed" > "$STUB/issues.json"
-  [ "$(loop snapshot | jq -c '.needsYou.pipeline | map([.issue, .title, .cost, .parent])')" = '[[100101,"[P0] a.txt:1 wrong word","not assessed",7]]' ] \
-    || fail "Needs you does not list the held pipeline follow-up with its cost line: $(loop snapshot | jq -c .needsYou.pipeline)"
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.pipeline | map([.issue, .title, .cost, .parent])')" = '[[100101,"[P0] a.txt:1 wrong word","not assessed",7]]' ] \
+    || fail "Needs you does not list the held pipeline follow-up with its cost line: $(loop snapshot --fresh | jq -c .needsYou.pipeline)"
   # The owner releases it: it is built like any follow-up, and leaves Needs you.
   loop control release 100101 >/dev/null; loop run >/dev/null || fail "third run exited non-zero"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 100101 " ] || fail "the released pipeline follow-up was not built: $(st 'select(.step | IN("picked", "landed", "blocked")) | [.step, .issue] | join(":")' | tr '\n' ' ')"
-  [ "$(loop snapshot | jq -c .needsYou.pipeline)" = '[]' ] || fail "a released pipeline follow-up is still in Needs you"
+  [ "$(loop snapshot --fresh | jq -c .needsYou.pipeline)" = '[]' ] || fail "a released pipeline follow-up is still in Needs you"
 }
 
 # A finding that comes back after its fix round stops the loop. Bugs: the same finding comes back round after round,
@@ -346,8 +346,8 @@ t_camebacktold() {
   # review's line and the Board's snapshot name the one that came back.
   grep -qx 'E1 \[P2\] a.txt:1 a nit. Proof: line 3 reads fix2' "$b" && grep -qx 'E2 \[P1\] b.txt:2 a new bug' "$b" || fail "the fix session was not given the findings' ids: $(cat "$b")"
   [ "$(st 'select(.issue == 9 and .step == "review") | .survived | tojson' | tr '\n' ' ')" = 'null [{"id":"E1","rounds":1}] null ' ] \
-    && [ "$(loop snapshot | jq -c '.landed[] | select(.issue == 9) | .rounds | map(.survived)')" = '[[],[{"id":"E1","rounds":1}],[]]' ] \
-    || fail "the review line or the snapshot does not name the finding that came back: $(st 'select(.issue == 9 and .step == "review") | .survived | tojson' | tr '\n' ' ') $(loop snapshot | jq -c '.landed[] | select(.issue == 9) | .rounds')"
+    && [ "$(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 9) | .rounds | map(.survived)')" = '[[],[{"id":"E1","rounds":1}],[]]' ] \
+    || fail "the review line or the snapshot does not name the finding that came back: $(st 'select(.issue == 9 and .step == "review") | .survived | tojson' | tr '\n' ' ') $(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 9) | .rounds')"
   # The GO that ends the loop keeps its `EARLIER: E2 holds` beside E2's first location and proof.
   [ "$(st 'select(.issue == 9 and .step == "review" and .result == "GO") | .answers | tojson')" = '[{"id":"E2","answer":"holds","first":{"round":2,"at":"b.txt:2","line":"[P1] b.txt:2 a new bug"}}]' ] \
     || fail "the GO lost its answer on E2: $(st 'select(.issue == 9 and .step == "review" and .result == "GO") | .answers | tojson')"
@@ -482,8 +482,8 @@ t_declined() {
     = '["2026-03-04T10:00:00Z","c1-7",7,"[P2] a.txt:1 wrong word","code","follow-up of a follow-up"] ["2026-03-04T11:00:00Z","c1-7",7,"[P1] b.txt:2 no mark here","judge","its proof needs a stub built to misbehave"] ' ] \
     || fail "each declined finding is not one line with who declined it and why: $(cat "$ST/declined.jsonl")"
   loop declined add c1-7 7 reviewer 'no' '[P1] c.txt:3 a nit' 2>/dev/null; [ $? = 2 ] && [ "$(wc -l < "$ST/declined.jsonl")" = 2 ] || fail "a decline by neither code, judge nor owner was taken"
-  [ "$(on 2026-03-05T00:00:00Z snapshot | jq -c '.declined | map([.by, .why, .built])')" = '[["judge","its proof needs a stub built to misbehave",null],["code","follow-up of a follow-up",null]]' ] \
-    || fail "the snapshot does not give the declined list newest first: $(on 2026-03-05T00:00:00Z snapshot | jq -c .declined)"
+  [ "$(on 2026-03-05T00:00:00Z snapshot --fresh | jq -c '.declined | map([.by, .why, .built])')" = '[["judge","its proof needs a stub built to misbehave",null],["code","follow-up of a follow-up",null]]' ] \
+    || fail "the snapshot does not give the declined list newest first: $(on 2026-03-05T00:00:00Z snapshot --fresh | jq -c .declined)"
   # "File as issue": one ordinary issue that names the finding; asked again, none.
   id=$(jq -r 'select(.by == "code") | .id' "$ST/declined.jsonl")
   out=$(loop declined build "$id") || fail "build this failed: $out"
@@ -494,8 +494,8 @@ t_declined() {
   loop declined build d000000000000 2>/dev/null; [ $? = 2 ] && [ "$(wc -l < "$STUB/filed")" = 1 ] || fail "a line the list does not have filed an issue"
   jq -cn 'range(200) | {id: "dx\(.)", time: "2026-03-05T00:00:00Z", card: "c2-8", issue: 8, finding: "[P2] f.txt:\(.) a nit", by: "judge", why: "no proof", repo: "sample"}' >> "$ST/declined.jsonl"
   # The built line has left the panel's part for the rest, where "Show every line" reaches it.
-  [ "$(on 2026-03-06T00:00:00Z snapshot | jq -c '[(.declined | length), .declined[-1].finding, (.declinedRest | map([.finding, .built]))]')" = '[201,"[P1] b.txt:2 no mark here",[["[P2] a.txt:1 wrong word",100101]]]' ] \
-    || fail "the snapshot lost the oldest declined findings behind 200 newer ones: $(on 2026-03-06T00:00:00Z snapshot | jq -c '[(.declined | length), .declined[-1].finding, .declinedRest]')"
+  [ "$(on 2026-03-06T00:00:00Z snapshot --fresh | jq -c '[(.declined | length), .declined[-1].finding, (.declinedRest | map([.finding, .built]))]')" = '[201,"[P1] b.txt:2 no mark here",[["[P2] a.txt:1 wrong word",100101]]]' ] \
+    || fail "the snapshot lost the oldest declined findings behind 200 newer ones: $(on 2026-03-06T00:00:00Z snapshot --fresh | jq -c '[(.declined | length), .declined[-1].finding, .declinedRest]')"
 }
 
 # Dismiss on the Board's Declined panel. Bugs: a dismissed line is gone from the declined list, or keeps no record of
@@ -515,9 +515,9 @@ t_dismissed() {
   [ "$(jq -c '[.finding, .dismissed]' "$ST/declined.jsonl" | tr '\n' ' ')" \
     = '["[P2] o.txt:1 an old nit",null] ["[P2] a.txt:1 wrong word",{"time":"2026-03-05T00:00:00Z","by":"Board user owner"}] ["[P1] b.txt:2 no mark here",null] ' ] \
     || fail "the dismissed line is not kept in the list with who dismissed it and when, once: $(cat "$ST/declined.jsonl")"
-  [ "$(on 2026-03-05T02:00:00Z snapshot | jq -c '[(.declined | map(.id)), (.declinedRest | map([.finding, .dismissed.by]))]')" \
+  [ "$(on 2026-03-05T02:00:00Z snapshot --fresh | jq -c '[(.declined | map(.id)), (.declinedRest | map([.finding, .dismissed.by]))]')" \
     = "[[\"$b\"],[[\"[P2] a.txt:1 wrong word\",\"Board user owner\"],[\"[P2] o.txt:1 an old nit\",null]]]" ] \
-    || fail "the panel's part holds a dismissed or 7-day-old line, or the rest lost one: $(on 2026-03-05T02:00:00Z snapshot | jq -c '[.declined, .declinedRest]')"
+    || fail "the panel's part holds a dismissed or 7-day-old line, or the rest lost one: $(on 2026-03-05T02:00:00Z snapshot --fresh | jq -c '[.declined, .declinedRest]')"
   loop declined dismiss "$b" d000000000000 2>/dev/null; [ $? = 2 ] && [ "$(jq -c --arg b "$b" 'select(.id == $b) | .dismissed' "$ST/declined.jsonl")" = null ] \
     || fail "an id the list does not have did not refuse the dismissal, or the other line named was dismissed"
 }

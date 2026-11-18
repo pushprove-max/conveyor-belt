@@ -42,8 +42,8 @@ EOF
 # cases as ended, one failed, and one as running: the live record and the snapshot's track say 3 done of 5, 1 failed.
 t_testcountcases() {
   countrun $'echo "TESTRUN cases=3"\necho "TESTRUN cases=2"' tests '{"done":3,"of":5,"failed":1}'
-  [ "$(loop snapshot | jq -c '.belt[0].track | [.tests, .files]')" = '[{"done":3,"of":5,"failed":1},{"run":0,"of":null}]' ] \
-    || { : > "$STUB/go"; wait $run; fail "the snapshot's track does not count the cases: $(loop snapshot | jq -c '.belt[0].track')"; }
+  [ "$(loop snapshot --fresh | jq -c '.belt[0].track | [.tests, .files]')" = '[{"done":3,"of":5,"failed":1},{"run":0,"of":null}]' ] \
+    || { : > "$STUB/go"; wait $run; fail "the snapshot's track does not count the cases: $(loop snapshot --fresh | jq -c '.belt[0].track')"; }
   : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
@@ -74,8 +74,8 @@ t_testcountnone() {
   countrun $'echo "TESTRUN files=2"\necho "-- ok x.test.sh"' files '{"run":1,"of":2}'
   jq -e 'has("tests") and .tests == null' "$T/$CASE/cards"/*.live >/dev/null \
     || { : > "$STUB/go"; wait $run; fail "a run with no case count does not have tests null: $(cat "$T/$CASE/cards"/*.live)"; }
-  [ "$(loop snapshot | jq -c '.belt[0].track | [has("tests"), .tests, .files]')" = '[true,null,{"run":1,"of":2}]' ] \
-    || { : > "$STUB/go"; wait $run; fail "the snapshot's track with no case count: $(loop snapshot | jq -c '.belt[0].track')"; }
+  [ "$(loop snapshot --fresh | jq -c '.belt[0].track | [has("tests"), .tests, .files]')" = '[true,null,{"run":1,"of":2}]' ] \
+    || { : > "$STUB/go"; wait $run; fail "the snapshot's track with no case count: $(loop snapshot --fresh | jq -c '.belt[0].track')"; }
   : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
@@ -94,8 +94,8 @@ t_testcountcasesnone() {
 # 1 and over 1 in its live record and the snapshot's track, so the Board says the extra file apart.
 t_testcountover() {
   countrun "$WIDER" files '{"run":1,"of":1,"over":1}'
-  [ "$(loop snapshot | jq -c '.belt[0].track.files')" = '{"run":1,"of":1,"over":1}' ] \
-    || { : > "$STUB/go"; wait $run; fail "the snapshot's track of a run wider than it selected: $(loop snapshot | jq -c '.belt[0].track')"; }
+  [ "$(loop snapshot --fresh | jq -c '.belt[0].track.files')" = '{"run":1,"of":1,"over":1}' ] \
+    || { : > "$STUB/go"; wait $run; fail "the snapshot's track of a run wider than it selected: $(loop snapshot --fresh | jq -c '.belt[0].track')"; }
   : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 WIDER=$'echo "TESTRUN files=1"\necho "-- ok a.test.sh"\necho "-- ok b.test.sh"'

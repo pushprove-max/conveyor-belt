@@ -18,8 +18,8 @@ t_accountsflight() {
   for i in $(seq 100); do [ -n "$(st 'select(.step == "worktree") | .card')" ] && break; sleep 0.1; done
   ctl account first >/dev/null
   # The snapshot names the account the card in flight runs on, beside the record's, so the Board never shows it unused.
-  [ "$(loop snapshot | jq -c '[.control.account, .inFlight]')" = '["first",[{"account":"second","reviewAccount":null}]]' ] \
-    || fail "the snapshot does not name the account of the card in flight: $(loop snapshot | jq -c '[.control.account, .inFlight]')"
+  [ "$(loop snapshot --fresh | jq -c '[.control.account, .inFlight]')" = '["first",[{"account":"second","reviewAccount":null}]]' ] \
+    || fail "the snapshot does not name the account of the card in flight: $(loop snapshot --fresh | jq -c '[.control.account, .inFlight]')"
   : > "$STUB/go"; wait $run
   [ "$(tr '\n' , < "$STUB/acct")" = "$T/$CASE/acct2,$T/$CASE/acct2," ] \
     || fail "the build and fix of A's card did not both run on the account it started with: $(cat "$STUB/acct")"

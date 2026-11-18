@@ -1011,6 +1011,7 @@
 {"area": "cmd-snapshot", "test": "snapsize.test.sh"}
 {"area": "cmd-snapshot", "test": "snapsum.test.sh"}
 {"area": "cmd-snapshot", "test": "snapexec.test.sh"}
+{"area": "cmd-snapshot", "test": "snapkept.test.sh"}
 {"area": "cmd-snapshot", "test": "stall.test.sh"}
 {"area": "cmd-snapshot", "test": "testaction.test.sh"}
 {"area": "cmd-snapshot", "test": "testactqueue.test.sh"}

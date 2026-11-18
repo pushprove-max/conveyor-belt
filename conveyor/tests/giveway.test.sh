@@ -27,7 +27,7 @@ if grep -q '^# Landing conflict' "$STUB/brief" && [ "${PWD##*-}" = 8 ]; then { e
 elif grep -q '^# Landing conflict' "$STUB/brief"; then
   . "$STUB/rebase"
   [ -e "$STUB/rebaseclaim" ] || cp ../*-7.claim "$STUB/rebaseclaim"; cp ../*-8.live "$STUB/rebaselive8" 2>/dev/null; cp ../*-8.claim "$STUB/rebaseclaim8" 2>/dev/null
-  [ ! -e "$STUB/snapit" ] || CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot > "$STUB/snap" 2>/dev/null
+  [ ! -e "$STUB/snapit" ] || CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot --fresh > "$STUB/snap" 2>/dev/null
   echo seven >> a.txt
 elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then { echo eight; tail -n +2 a.txt; } > a.new && mv a.new a.txt
 else case $PWD in
@@ -256,7 +256,7 @@ gwfixsetup() { # <issues json>
   { printf 'SRC=%q\n' "$SRC"; cat <<'EOF'; } > "$STUB/build"
 if grep -q '^# The changed tests fail' "$STUB/brief"; then
   . "$STUB/fixing"
-  cp "$PWD.claim" "$STUB/fixclaim"; cp "$PWD.live" "$STUB/fixlive"; CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot > "$STUB/snap" 2>/dev/null
+  cp "$PWD.claim" "$STUB/fixclaim"; cp "$PWD.live" "$STUB/fixlive"; CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot --fresh > "$STUB/snap" 2>/dev/null
   rm -f broken; sed -i 20s/.*/20/ a.txt
 else case $PWD in
   *-7) sed -i '1s/.*/seven/;20s/.*/seven-20/' a.txt; : > broken ;;

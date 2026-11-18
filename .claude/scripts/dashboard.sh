@@ -84,7 +84,8 @@
 #           round and findings (the review the judge declined it in and that review's findings as the judge numbered
 #           them, [{n, finding}], else null), as the snapshot's declined gives them; rest: every other line, so, as its declinedRest gives them.
 #   health  host {name, reachable, error}, records (each record's steered (the host answer's), repoUrl (its repository's https
-#           address, else null), loop, state (running, paused, stopped, as
+#           address, else null), snapshotAt (when the build of its kept snapshot began, null from a snapshot
+#           without it), loop, state (running, paused, stopped, as
 #           its control record says; a loop not meant to run is off, not a fault), newest line, stuck cards, pushes,
 #           cycles: the dependency cycles, flaky: the snapshot's flaky cases {case, count, issue, files, url}, null from a snapshot
 #           without them, slowOff: the snapshot's test files kept off card test steps, each with its issue's url, null
@@ -146,9 +147,9 @@
 #           from a snapshot without them), standing (the snapshot's: the pack's auto.standing, the standing kinds
 #           of routine yes that are on; null from a snapshot without it), pushCheck (the snapshot's: the pack's
 #           push.check, true or false; null from a snapshot without it), open (as the Board's: every held issue
-#           with its labels and reasons, and every open issue) and readAt (when the live feed's snapshot of the record
-#           began, by this machine's clock, older than updatedAt when the snapshot is; null when this cycle read
-#           Conveyor itself, after updatedAt).
+#           with its labels and reasons, and every open issue) and readAt (when the build of the record's snapshot
+#           began: by this machine's clock from the live feed, else the host's snapshotAt; older than updatedAt when
+#           the snapshot is; null from a snapshot that does not say).
 #   tests   the Tests page, of the same record (repo null when none is; repos and others as the Board's): tests (the
 #           snapshot's: each test file's figures, each of its runs with its card's issue and url, each issue the Board
 #           filed for it ($TAFILED) with its url, state (closed for an open one the snapshot's open issues lack), landed commit, fix and the proof's before and after CPU s, the pack's test
@@ -307,7 +308,8 @@ cached() {
 # every record, in order, three lines: `conveyor.sh snapshot`, the checkout's origin address (empty when it names
 # none) and the time its last push that worked was recorded (0 when there is none). Then a marker line, so an answer
 # cut short is no answer. The answer is one object: {host, local (true on one machine), reachable, error, records}; a record is {repo, snap, steered (it is the record on host.json's main: the
-# one the Board steers through POST /control), repoUrl, lastPushAt}. reachable is false when ssh itself did not get through (its exit 255, or
+# one the Board steers through POST /control), repoUrl, lastPushAt, readAt (the snapshot's snapshotAt: when the build
+# of the kept snapshot it printed began; null when it does not say)}. reachable is false when ssh itself did not get through (its exit 255, or
 # the time limit) and true when the host answered, whatever it said; records is null, with the reason in error, unless
 # every record answered with a snapshot: never an earlier answer, and never a part of the records.
 # hostof -- what the one command of a read needs of the host file, as hostfile.sh (its one reader, which says the
@@ -371,7 +373,8 @@ conveyor() {
              and ([.queue, .health, .cost] | all(type == "object")))
          | {repo: $recs[$i].repo, snap: $s, steered: ($recs[$i].main == $m),
             repoUrl: ($l[3 * $i + 1] | (capture("github\\.com[:/](?<p>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(\\.git)?$") | "https://github.com/\(.p)") // null),
-            lastPushAt: ($l[3 * $i + 2] | tonumber? // 0 | if . > 0 then todate else null end)}]}' <<<"$out" 2>/dev/null \
+            lastPushAt: ($l[3 * $i + 2] | tonumber? // 0 | if . > 0 then todate else null end),
+            readAt: (($s.snapshotAt | strings) // null)}]}' <<<"$out" 2>/dev/null \
     || fail true "$host answered, but not with the snapshot of every record"
 }
 
@@ -834,7 +837,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

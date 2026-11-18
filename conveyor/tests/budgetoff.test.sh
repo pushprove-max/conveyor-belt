@@ -33,13 +33,13 @@ EOF
   loop full-test > /dev/null || fail "the full test suite did not start"; ftended 1
   [ "$(grep -c ' s\.test$' "$STUB/timedruns")" = 1 ] || fail "the full test suite did not run s.test: $(cat "$STUB/timedruns")"
   [ ! -s "$STUB/filed" ] || fail "an issue was filed: $(cat "$STUB/filed")"
-  [ "$(loop snapshot | jq -c '.slowOff | map({file, issue, cpu, budget, card, last})')" = '[{"file":"s.test","issue":100101,"cpu":6.5,"budget":5,"card":"c0-8","last":{"cpu":6,"card":"c0-5"}}]' ] \
-    || fail "the snapshot does not list s.test kept off with why: $(loop snapshot | jq -c .slowOff)"
+  [ "$(loop snapshot --fresh | jq -c '.slowOff | map({file, issue, cpu, budget, card, last})')" = '[{"file":"s.test","issue":100101,"cpu":6.5,"budget":5,"card":"c0-8","last":{"cpu":6,"card":"c0-5"}}]' ] \
+    || fail "the snapshot does not list s.test kept off with why: $(loop snapshot --fresh | jq -c .slowOff)"
   # The card of #100101 itself runs s.test (its change is what makes it cheaper): its list keeps nothing off; another's does.
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && slowoff "$T/$CASE/c0-100101" && slowoff "$T/$CASE/c0-9" ) \
     || fail "slowoff failed"
   [ ! -e "$T/$CASE/c0-100101.rerun" ] && [ "$(cat "$T/$CASE/c0-9.rerun" 2>&1)" = $'pass\ts.test\noff\ts.test' ] \
     || fail "the card of s.test's own issue keeps it off, or another card does not: $(cat "$T/$CASE/c0-100101.rerun" "$T/$CASE/c0-9.rerun" 2>&1)"
   landed 100101 >> "$ST/cards.jsonl"
-  [ "$(loop snapshot | jq -c .slowOff)" = '[]' ] || fail "s.test stayed off after its issue's card landed: $(loop snapshot | jq -c .slowOff)"
+  [ "$(loop snapshot --fresh | jq -c .slowOff)" = '[]' ] || fail "s.test stayed off after its issue's card landed: $(loop snapshot --fresh | jq -c .slowOff)"
 }

@@ -222,9 +222,9 @@ EOF
   [ "$(f 2 .reason)" = "exit 124: timed out after 2s in tests/slow.test.sh" ] || fail "the reason of a run that timed out: $(f 2 .reason)"
   loop check || fail "the record check refuses a failed test line with its failures"
   # The Board reads them from the card's steps: each failed run with its failures and its output.
-  [ "$(loop snapshot | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed") | [.why, (.failures.files | length), .failures.timeout.file, (.output | test("ok alpha"))])')" \
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed") | [.why, (.failures.files | length), .failures.timeout.file, (.output | test("ok alpha"))])')" \
     = '[["exit 1",2,null,true],["exit 124: timed out after 2s in tests/slow.test.sh",2,"tests/slow.test.sh",true]]' ] \
-    || fail "the card's steps lack a failed run's failures or output: $(loop snapshot | jq -c '.needsYou.blocked[0].track.records')"
+    || fail "the card's steps lack a failed run's failures or output: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
 }
 
 # Bug: a failing file that printed the `== ` line of a file still to run gave that file its failing case; the file
@@ -555,14 +555,14 @@ t_pack() {
   # with five priorities picks an older last one before a newer fourth one; an area rule must start area:.
   jq '.labels.priorities = ["critical", "high", "medium", "low", "trivial"]' "$P" > "$P.new" && mv "$P.new" "$P"
   jq -cs . <(issue 21 2026-01-01 trivial) <(issue 22 2026-01-02 low) <(issue 23 2026-01-03 awaiting-deploy) > "$STUB/issues.json"
-  [ "$(loop snapshot | jq -c '.queue.next | map(.issue)')" = '[22,21,23]' ] || fail "the pick order is not the pack's priorities, or awaiting-deploy was skipped: $(loop snapshot | jq -c .queue.next)"
+  [ "$(loop snapshot --fresh | jq -c '.queue.next | map(.issue)')" = '[22,21,23]' ] || fail "the pick order is not the pack's priorities, or awaiting-deploy was skipped: $(loop snapshot --fresh | jq -c .queue.next)"
   # Bugs: a pack with one priority: an issue with none is P3, so a P1 rule leaves it alone.
   # Bug (#220): the Foreman's watcher of a belt on another host has no pack to read foreman.waitWake from, so the
   # snapshot, made on the belt's host, gives it; without it such a watcher woke at 10 minutes whatever the pack said.
   jq '.labels.priorities = ["urgent"] | .foreman.waitWake = 5' "$P" > "$P.new" && mv "$P.new" "$P"
   echo "[$(issue 24 2026-01-01)]" > "$STUB/issues.json"; loop control rules P1=off >/dev/null
-  [ "$(loop snapshot | jq -c '[.areaPrefix, (.queue.next | map([.issue, .priority])), .waitWake]')" = '["team/",[[24,"P3"]],5]' ] \
-    || fail "an issue with no priority took a P1 rule, or the snapshot does not give the area prefix or the pack's foreman.waitWake: $(loop snapshot | jq -c '[.areaPrefix, .queue, .waitWake]')"
+  [ "$(loop snapshot --fresh | jq -c '[.areaPrefix, (.queue.next | map([.issue, .priority])), .waitWake]')" = '["team/",[[24,"P3"]],5]' ] \
+    || fail "an issue with no priority took a P1 rule, or the snapshot does not give the area prefix or the pack's foreman.waitWake: $(loop snapshot --fresh | jq -c '[.areaPrefix, .queue, .waitWake]')"
   loop control rules P1=on >/dev/null
   [ "$(loop control rules team/billing=off | jq -c .rules.never)" = '["team/billing"]' ] || fail "an area rule with the pack's area prefix was refused"
   loop control rules area:billing=off 2>/dev/null; [ $? = 2 ] || fail "an area rule without the pack's area prefix was taken"

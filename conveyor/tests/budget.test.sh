@@ -42,8 +42,8 @@ t_budgetover() {
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
   landedone 7 || fail "the card did not land"
   # The Board's Tests bar of the card (jq/rows.jq, jq/track.jq) carries no slow note.
-  [ "$(loop snapshot | jq -c '[.landed[0].track.records[] | select(.name == "tests passed") | has("slow")]')" = '[false]' ] \
-    || fail "the snapshot's track carries a slow note: $(loop snapshot | jq -c '.landed[0].track.records')"
+  [ "$(loop snapshot --fresh | jq -c '[.landed[0].track.records[] | select(.name == "tests passed") | has("slow")]')" = '[false]' ] \
+    || fail "the snapshot's track carries a slow note: $(loop snapshot --fresh | jq -c '.landed[0].track.records')"
 }
 
 # Bug caught: the engine's runner timed no case file, so an engine case file a card added or slowed had no time on

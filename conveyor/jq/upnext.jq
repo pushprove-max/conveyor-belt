@@ -1,6 +1,9 @@
 # upnext() in conveyor.sh, after DEPS, SEE and LEVEL: the open issues with no card, in pick order. Its arguments are named there.
 ($cards | map(.issue)) as $taken
-    | map(.number) as $open | graph($cards) as $g | (if $all == "" then [] else cycles($cards) | add // [] end) as $cyc
+    # The graph, the landed issues and the lines that name follow-ups, each worked out once (DEPS): worked out again
+    # for each open issue, they were most of a snapshot's time.
+    | map(.number) as $open | graph($cards) as $g | (if $all == "" then [] else cyclesof($g) | add // [] end) as $cyc
+    | landed($cards) as $done | ($cards | map(select(.followups))) as $fc
     | ($cards | map(select(.step == "landed") | .followups // [] | .[])) as $ready
     | (if $only == null then null else ups($cards; $only) end) as $only
     | ($retried | map(.issue) | unique) as $again
@@ -12,7 +15,7 @@
       | select($mode != "retried" or (.number | IN($again[])))
       | select(($l | index($fu) | not) or (.number | IN($ready[])) or (.body // "" | test("^Follow-up to #[0-9]+ \\(Conveyor card ") | not))
       | . + {later: ($l | index($fu) | not), p: level($l; $prio), rank: rank($l; $prio), again: (.number | IN($again[])),
-             waits: waits($cards; $open), before: ($ctl.rules.visible != false and before($area; $np)), stuck: ($all != "" and (reach($g; .number) | any(IN($cyc[]))))})
+             waits: waitsof($fc; $open; $done), before: ($ctl.rules.visible != false and before($area; $np)), stuck: ($all != "" and (reach($g; .number) | any(IN($cyc[]))))})
     # forced: `control force` lets it past its open dependencies, only while the dependency guard is off.
     # hold: the control record holds it, or someone outside the project opened it (INSIDE) and the owner has not
     # released it (startSeen): held here too, before adopted() saves the hold, or when it cannot know who opened it.

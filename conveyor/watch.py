@@ -6,10 +6,11 @@ It prints one JSON object a line on stdout, each line whole, until its reader go
 ends). Every line has `type` and `at` (when it was printed):
 
   snapshot  {why: start | record | control | loop | github | refresh, snap (`conveyor.sh snapshot`), took (seconds from
-            when the snapshot began to this line: what it read, the control record too, is that much older than the
-            line), repoUrl (the checkout's GitHub address, null for none), lastPushAt (when the last push that worked
-            was recorded, null for none)}. The first line is one; a new one follows a
-            new record line, a retry, a push, a new guard reading (record), a control change (control), the loop's
+            when the snapshot's build began to this line, the kept snapshot's age included: what it read, the control
+            record too, is that much older than the line), repoUrl (the checkout's GitHub address, null for none),
+            lastPushAt (when the last push that worked was recorded, null for none)}. The first line is one; a new one
+            follows a new kept snapshot put in place by its writer when the last line's was built too early to read
+            the change it was asked for (as that change), a new record line, a retry, a push, a new guard reading (record), a control change (control), the loop's
             process starting or ending (loop), and a new answer from GitHub (github).
             Changes that come while one is built give one more after it, not one each. With no other for REFRESH
             seconds, one is made anyway (refresh): what counts on the clock alone (a card stuck for want of output,
@@ -24,7 +25,7 @@ ends). Every line has `type` and `at` (when it was printed):
   error     {error}: a snapshot failed (the end of what it said); the stream goes on, and the next change tries again.
 
 What it watches, by looking every POLL seconds (one way on every system; each look is a stat of a few files): the state folder (cards.jsonl, retried.jsonl, control.json, pushed, maintest.json,
-limit.jsonl, and loop.json: what the running loop makes of the control record), the cards folder (each *.live) and its own GitHub folder. GitHub is asked by `conveyor.sh github <folder>`
+limit.jsonl, snapshot.json: the kept snapshot, and loop.json: what the running loop makes of the control record), the cards folder (each *.live) and its own GitHub folder. GitHub is asked by `conveyor.sh github <folder>`
 every GITHUB_EVERY seconds, in a thread of its own, and every snapshot runs with CONVEYOR_GITHUB naming that folder:
 the snapshot reads GitHub's last answers and never waits on GitHub. The first snapshot waits for the first answer, at
 most GITHUB_FIRST seconds, and not at all once a record, control or live record change comes: that change is on its way at once,
@@ -65,7 +66,7 @@ PROOF_LIVE = '.unfixed.live'  # mainrun/<card>.unfixed.live: the live record of 
 POLL = 0.5
 SNAPSHOT_LIMIT = 120  # a snapshot that hangs is killed, and the next change tries again
 STATE_FILES = {'cards.jsonl': 'record', 'retried.jsonl': 'record', 'pushed': 'record', 'limit.jsonl': 'record', 'maintest.json': 'record', 'control.json': 'control',
-               'loop.json': 'loop'}
+               'loop.json': 'loop', 'snapshot.json': 'kept'}
 # Asked for while another waits, the one that says more is kept: a refresh is the least, then GitHub's.
 RANK = {None: 0, 'refresh': 1, 'github': 2}
 GITHUB_URL = re.compile(r'github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(\.git)?$')
@@ -147,6 +148,7 @@ class Stream:
         self.cond = threading.Condition()
         self.emit = threading.RLock()  # a snapshot line and the live line after it go out together
         self.pending = None   # the reason of the snapshot asked for and not yet begun
+        self.owed = None      # the reason of the last snapshot, when the kept one it got was built before it was asked
         self.belt = {}        # the last snapshot's belt, by card: what a live line is laid over
         self.models = None  # None until the first snapshot
         self.sent_live = None
@@ -219,7 +221,9 @@ class Stream:
                 why, self.pending = self.pending, None
                 self.snapped = began = time.monotonic()
             try:
-                run = subprocess.run(['bash', SH, 'snapshot'], capture_output=True, text=True, env=self.env, timeout=SNAPSHOT_LIMIT,
+                # The loop's process starting or ending changes no file the kept snapshot is made from, so no writer
+                # would make a new one for it: that one is built fresh.
+                run = subprocess.run(['bash', SH, 'snapshot'] + (['--fresh'] if why == 'loop' else []), capture_output=True, text=True, env=self.env, timeout=SNAPSHOT_LIMIT,
                                      stdin=subprocess.DEVNULL)
                 snap = json.loads(run.stdout) if run.returncode == 0 else None
             except (OSError, subprocess.TimeoutExpired, ValueError) as e:
@@ -239,7 +243,13 @@ class Stream:
                     self.belt = {b.get('card'): b for b in snap.get('belt') or [] if isinstance(b, dict)}
                     self.models = (snap.get('health') or {}).get('models') or {}
                     self.sent_live = None
-                Out.send('snapshot', why=why, took=round(time.monotonic() - began, 3), snap=snap, **extra)
+                # A kept snapshot is as old as its age (conveyor.sh snapshot): one whose build began before this read
+                # did not read the change asked for, so the next kept one owes it.
+                took, age = time.monotonic() - began, snap.get('snapshotAge')
+                if isinstance(age, (int, float)) and not isinstance(age, bool) and age >= 0:
+                    self.owed = why if age > took else None
+                    took = age
+                Out.send('snapshot', why=why, took=round(took, 3), snap=snap, **extra)
                 self.send_live()
 
     # ---- GitHub, on its own timer ----
@@ -385,7 +395,12 @@ class Stream:
                 if kind == 'state':
                     if name == 'loop.json':
                         self.loop = self.loop_runs(True)  # its snapshot follows, as for any state file
-                    if self.started:
+                    if STATE_FILES[name] == 'kept':
+                        # A new kept snapshot reads the change the last one was too old to read: it goes as that
+                        # change. One that owes none (a snapshot built here, its own read) asks for nothing.
+                        if self.started and self.owed:
+                            self.ask(self.owed)
+                    elif self.started:
                         self.ask(STATE_FILES[name])
                     else:
                         self.start()  # the change goes now, in the first snapshot

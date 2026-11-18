@@ -158,11 +158,11 @@ t_swepresets() {
   out=$(loop bench swe 501 2>&1); [ $? = 2 ] || fail "n 501 was not refused as a wrong argument: $out"
   # The Board's part reads the presets, the last run, the results and the versions a run can pick from the snapshot.
   [ "$(jq -c .presets "$SRC/bench/swe.json")" = '[1,5,20,50]' ] \
-    && [ "$(loop snapshot | jq -c '[.bench.presets, .bench.live.state, (.bench.keys | length), (.bench.versions | map(.name))]')" = '[[1,5,20,50],"done",1,["main","v1.0.0"]]' ] \
-    || fail "the snapshot does not carry the Benchmarks part with its presets and versions: $(loop snapshot | jq -c .bench)"
+    && [ "$(loop snapshot --fresh | jq -c '[.bench.presets, .bench.live.state, (.bench.keys | length), (.bench.versions | map(.name))]')" = '[[1,5,20,50],"done",1,["main","v1.0.0"]]' ] \
+    || fail "the snapshot does not carry the Benchmarks part with its presets and versions: $(loop snapshot --fresh | jq -c .bench)"
   # A run whose process was killed with no end written is not shown running for good.
   jq -c '.live.state = "running" | .live.pid = 2147483646' "$B/board.json" > "$B/b.new" && mv "$B/b.new" "$B/board.json"
-  [ "$(loop snapshot | jq -r .bench.live.state)" = stopped ] || fail "a run whose process is gone is shown running"
+  [ "$(loop snapshot --fresh | jq -r .bench.live.state)" = stopped ] || fail "a run whose process is gone is shown running"
 }
 
 # Bug: the dataset's rows an earlier harness kept (raw.<revision>.jsonl, with the reference fixes and hidden tests)
@@ -277,7 +277,7 @@ t_swesolo() {
   # Bug: the Board read the solo key board.json kept from its last run, so after the builder's model changed it
   # counted the old model's results as reused and showed no sessions for a run that builds every task.
   jq -c '.model = {cli: "claude", model: "claude-haiku-5-5"}' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
-  [ "$(loop snapshot | jq -r .bench.soloKey)" = solo-claude-haiku-5-5 ] || fail "the snapshot's solo key is not the builder's model in force: $(loop snapshot | jq -c .bench.soloKey)"
+  [ "$(loop snapshot --fresh | jq -r .bench.soloKey)" = solo-claude-haiku-5-5 ] || fail "the snapshot's solo key is not the builder's model in force: $(loop snapshot --fresh | jq -c .bench.soloKey)"
 }
 
 # Bugs: an arm whose command failed in a trial was skipped as a task not run (the owner's rule: an arm that does not

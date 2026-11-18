@@ -233,7 +233,7 @@ t_serverun() {
   # raised. It is recorded as a check failure naming the check, and health, Needs you and the belt say so at once.
   [ "$(st 'select(.step == "push") | "\(.kind) \(.check)"')" = "check fast-checks" ] || fail "a failed check is not recorded as one: $(st 'select(.step == "push")')"
   [ "$(loop health | jq -c '.pushError | [.kind, .check, .issue]')" = '["check","fast-checks",10]' ] || fail "health does not say the push failed its check: $(loop health | jq -c .pushError)"
-  s=$(loop snapshot 2>/dev/null)
+  s=$(loop snapshot --fresh 2>/dev/null)
   [ "$(jq -c '[(.needsYou.blocked[] | select(.push) | [.check, (.reason | startswith("push blocked: fast-checks failed after #10. A retry will fail too")), (.tail | test("FAILED fast-checks"))]),
       (.belt | map(.track.label))]' <<<"$s")" = '[["fast-checks",true,true],["push failed its check; tried again once main moves"]]' ] \
     || fail "Needs you or the belt does not show the failed check at its first failure: $(jq -c '[.needsYou.blocked, (.belt | map(.track.label))]' <<<"$s")"
@@ -291,8 +291,8 @@ EOF2
     || fail "a push was started beside the one in progress, or the held push ended: $(started)"
   h=$(loop health); [ "$(jq -c '[.pushing.sha, (.pushing.since | fromdate <= now), (.unpushed | length)]' <<<"$h")" = "[\"$first\",true,3]" ] \
     || fail "health does not report the push in progress: $(jq -c '[.pushing, .unpushed]' <<<"$h")"
-  [ "$(loop snapshot 2>/dev/null | jq -c '[.health.pushing.sha, (.belt | map(.track.label) | unique)]')" = "[\"$first\",[\"pushing\"]]" ] \
-    || fail "the snapshot does not report the push in progress: $(loop snapshot 2>/dev/null | jq -c '[.health.pushing, (.belt | map(.track.label))]')"
+  [ "$(loop snapshot --fresh 2>/dev/null | jq -c '[.health.pushing.sha, (.belt | map(.track.label) | unique)]')" = "[\"$first\",[\"pushing\"]]" ] \
+    || fail "the snapshot does not report the push in progress: $(loop snapshot --fresh 2>/dev/null | jq -c '[.health.pushing, (.belt | map(.track.label))]')"
   # It ends: the two landings made during it are carried by one further push, of main's head.
   : > "$STUB/go.1"
   till '[ "$(started | wc -l)" = 2 ]' || fail "no push after the held one ended: $(started)"
@@ -316,7 +316,7 @@ t_pushmerge() {
   setup "$(jq -cs . <(issue 7 2026-01-01))"; O=$T/$CASE/origin; H=$T/$CASE/hand; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
   mainat() { git -C "$R" rev-parse refs/heads/main; }; originat() { git -C "$O" rev-parse refs/heads/main; }
   fails() { st 'select(.step == "push" and .result == "fail") | .card' | wc -l; }
-  pushitem() { loop snapshot 2>/dev/null | jq -c '[.needsYou.blocked[] | select(.push)]'; }
+  pushitem() { loop snapshot --fresh 2>/dev/null | jq -c '[.needsYou.blocked[] | select(.push)]'; }
   # Bug: the fetch of the remote's commits is made without the pack's push.env, so a remote reached only with what
   # it sets (an ssh identity) refuses it. Here the remote's side of every fetch writes down the variable it was given.
   P=$R/.conveyor/project.json; jq '.push.env = {"PUSH_AS": "pusher"}' "$P" > "$P.new" && mv "$P.new" "$P"
@@ -343,7 +343,7 @@ t_pushmerge() {
     || fail "a merge that conflicts moved main or the remote, or its first failure is in Needs you already: $(st 'select(.step == "push")') $(pushitem)"
   # The next try fails the same way: the push is a blocked item of Needs you, and health lists the card not pushed.
   out=$(loop run 2>&1) && fail "the retry of a push that cannot be merged exited zero: $out"
-  snap=$(loop snapshot 2>/dev/null)
+  snap=$(loop snapshot --fresh 2>/dev/null)
   [ "$(fails)" = 2 ] && [ "$(jq -c '[.needsYou.blocked[] | select(.push) | [.card, .issue, .reason, (.tail | test("CONFLICT.*a\\.txt")), .unpushed]]' <<<"$snap")" \
     = "[[\"$c8\",8,\"the push of main keeps failing. Not pushed: #8\",true,[{\"card\":\"$c8\",\"issue\":8}]]]" ] \
     || fail "a push that failed again is not a blocked item with git's error and the card not pushed: $(jq -c '.needsYou.blocked | map({card, reason, tail})' <<<"$snap")"

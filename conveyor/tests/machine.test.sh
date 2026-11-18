@@ -62,8 +62,8 @@ t_machinecap() {
   ! picked alpha 3 "$A" || fail "alpha's 3rd card started past the machine cap of 2 (alpha's own cap is 5): $(out)"
   # The Board's queue rows are the snapshot's queue.order (dashboard.sh's boardOf); board.js draws a row's room
   # (dashboard-view.overview.test.mjs, "a card the machine holds back"). Bug: the held card's row did not say why.
-  loop "$A" snapshot | jq -e '[.queue.order[] | select(.issue == 3)] | length == 1 and (.[0].room | test("^waiting for a machine slot: 2 of the machine cap 2 in use"))' >/dev/null \
-    || fail "the Board's queue row of alpha's #3 does not say why it waits: $(loop "$A" snapshot | jq -c .queue.order)"
+  loop "$A" snapshot --fresh | jq -e '[.queue.order[] | select(.issue == 3)] | length == 1 and (.[0].room | test("^waiting for a machine slot: 2 of the machine cap 2 in use"))' >/dev/null \
+    || fail "the Board's queue row of alpha's #3 does not say why it waits: $(loop "$A" snapshot --fresh | jq -c .queue.order)"
   # beta gets work while alpha holds every slot and still has work: the next slot is beta's.
   echo "[$(issue 21 2026-01-01), $(issue 22 2026-01-02)]" > "$B/../stub/issues.json"
   wait_until 'jq -e .wants "$MS/slots/beta.json" >/dev/null 2>&1' || fail "beta's card never waited for a slot: $(cat "$MS"/slots/*.json) $(out)"
@@ -501,7 +501,7 @@ t_machinemode() {
   [ "$(jq -c '[.mode, .cap, (.records | map(.repo))]' "$H")" = '["pause",4,["alpha","beta"]]' ] || fail "the pause is not the host file's mode, or it lost a setting or a record: $(cat "$H")"
   # Every project says the machine is paused; a project's own record is as it was.
   [ "$(loop "$A" health | jq -c '[.machine.paused, .machine.cap, .state]')" = '[true,4,"running"]' ] || fail "alpha does not say the machine is paused, or its own record changed: $(loop "$A" health | jq -c '{machine, state}')"
-  [ "$(loop "$B" snapshot | jq -c '[.health.machine.paused, .health.state]')" = '[true,"paused"]' ] || fail "beta's snapshot does not say the machine is paused: $(loop "$B" snapshot | jq -c '.health | {machine, state}')"
+  [ "$(loop "$B" snapshot --fresh | jq -c '[.health.machine.paused, .health.state]')" = '[true,"paused"]' ] || fail "beta's snapshot does not say the machine is paused: $(loop "$B" snapshot --fresh | jq -c '.health | {machine, state}')"
   out=$(loop "$B" machine resume) && grep -q "the machine's Conveyor runs again" <<<"$out" || fail "the machine's resume was refused: $out"
   [ "$(jq -c '[has("mode"), .cap, (.records | length)]' "$H")" = '[false,4,2]' ] || fail "the resume did not take the mode away, or it lost a setting or a record: $(cat "$H")"
   [ "$(loop "$A" health | jq -c .machine.paused)" = false ] || fail "the machine still reads as paused after its resume"

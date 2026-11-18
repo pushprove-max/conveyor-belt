@@ -56,7 +56,7 @@ t_accounts() {
   [ "$(ctl account second | jq -r .account)" = second ] && { ctl account default >/dev/null; [ $? = 2 ]; } && [ "$(jq -r .account "$ST/control.json")" = second ] \
     && [ "$(ctl account | jq .account)" = null ] && [ "$(ctl account second | jq -r .account)" = second ] \
     && [ "$(ctl review-account first | jq -r .reviewAccount)" = first ] || fail "the account was not set: $(cat "$ST/control.json")"
-  [ "$(loop snapshot | jq -c '[.accounts, .control.account]')" = '[["first","second"],"second"]' ] || fail "the snapshot does not name the accounts: $(loop snapshot | jq -c .accounts)"
+  [ "$(loop snapshot --fresh | jq -c '[.accounts, .control.account]')" = '[["first","second"],"second"]' ] || fail "the snapshot does not name the accounts: $(loop snapshot --fresh | jq -c .accounts)"
   # A guards at 90 and its account is at 95: A picks nothing (t_accountsother: B's card starts all the same).
   # A Claude reviewer, so the review runs on the first account and the guard reads it too.
   ctl guard 90 >/dev/null; ctl reviewer claude claude-opus-5-5 >/dev/null || fail "the reviewer was not set to Claude"
@@ -64,9 +64,9 @@ t_accounts() {
   [ "$(loop health | jq -c '[.state, .guard.reading]')" = '["paused by guard",95]' ] || fail "A's health does not read its own account: $(loop health | jq -c .guard)"
   # #623: the snapshot gives the Board each account's own reading and its login on this machine, so the Board's limit
   # panel shows the accounts the cards run on, not the Board machine's login.
-  [ "$(loop snapshot | jq -c '.limits | map(.readAt |= type)')" = "$(jq -cn --arg e "$mail" '[{account: "first", uses: ["review"], pct: 10, readAt: "string", email: null},
+  [ "$(loop snapshot --fresh | jq -c '.limits | map(.readAt |= type)')" = "$(jq -cn --arg e "$mail" '[{account: "first", uses: ["review"], pct: 10, readAt: "string", email: null},
       {account: "second", uses: ["build"], pct: 95, readAt: "string", email: $e}]')" ] \
-    || fail "the snapshot does not give each account's reading: $(loop snapshot | jq -c .limits)"
+    || fail "the snapshot does not give each account's reading: $(loop snapshot --fresh | jq -c .limits)"
   acctnomail
 }
 # The next card after that change (here, the record moved from the second account to the first before it starts) runs

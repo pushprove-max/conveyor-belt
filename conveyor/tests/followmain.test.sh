@@ -98,7 +98,7 @@ t_followrefuse() {
   grep -q "did not take Conveyor commit $E of the plugin's main, as its check of the pack failed" <<<"$out" || fail "the refusal was not said: $out"
   # Bug: a refused commit, installed to be checked and never taken, stays installed for good.
   [ ! -e "$V/$E" ] && [ -d "$V/$A" ] || fail "the refused commit's install was kept, or the project's own removed: $(ls "$V")"
-  s=$(loop snapshot) || fail "snapshot exited non-zero"
+  s=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   jq -e --arg e "$E" '.needsYou.engine | .commit == $e and (.reason | test("its check of the pack failed: .*zzz: missing"))' <<<"$s" >/dev/null \
     || fail "Needs you does not name the refused commit and why: $(jq -c .needsYou.engine <<<"$s")"
   # doctor says which engine the project is on, how far behind the plugin's main ($B, then $E) that is, and why $E was not taken.
@@ -110,8 +110,8 @@ t_followrefuse() {
   pushed "git checkout -q $A -- conveyor/schema/pack.schema.json && rm conveyor/foreman/stop.sh"; F=$NEW
   out=$(takeby "$A" 2>&1)
   [ "$(engine .commit)" = "$A" ] && [ "$(engine .refused.commit)" = "$F" ] || fail "a commit lacking a hook was taken: $out $(cat "$R/.git/conveyor-engine.json")"
-  [ "$(loop snapshot | jq -c --arg f "$F" '.needsYou.engine | [.commit == $f, .reason]')" = '[true,"it lacks hooks .claude/settings.json runs through shim.sh: conveyor/foreman/stop.sh"]' ] \
-    || fail "Needs you does not name the commit lacking a hook and the hook: $(loop snapshot | jq -c .needsYou.engine)"
+  [ "$(loop snapshot --fresh | jq -c --arg f "$F" '.needsYou.engine | [.commit == $f, .reason]')" = '[true,"it lacks hooks .claude/settings.json runs through shim.sh: conveyor/foreman/stop.sh"]' ] \
+    || fail "Needs you does not name the commit lacking a hook and the hook: $(loop snapshot --fresh | jq -c .needsYou.engine)"
   [ ! -e "$V/$F" ] || fail "the install of a commit refused for a missing hook was kept"
   # A refused commit is not tried again: it would be installed and checked once a minute for nothing.
   out=$(takeby "$A" 2>&1); [ -z "$out" ] || fail "a refused commit was tried again: $out"
@@ -119,7 +119,7 @@ t_followrefuse() {
   pushed "git checkout -q $A -- conveyor/foreman/stop.sh"; G=$NEW
   takeby "$A" >/dev/null || fail "a commit that passes was not taken"
   [ "$(engine .commit)" = "$G" ] && [ "$(engine .refused)" = null ] || fail "the passing commit was not taken, or the refusal stays: $(cat "$R/.git/conveyor-engine.json")"
-  [ "$(loop snapshot | jq -c .needsYou.engine)" = null ] || fail "Needs you still names a refused commit after a later one was taken"
+  [ "$(loop snapshot --fresh | jq -c .needsYou.engine)" = null ] || fail "Needs you still names a refused commit after a later one was taken"
 }
 
 # Bugs: shim.sh runs a following project's hooks from the commit it took first for good, or from the plugin copy, even

@@ -28,7 +28,7 @@ t_landonly() {
   [ "$(ftorigin)" != "$(ftmain)" ] && [ -z "$(st 'select(.issue == 7 and (.step == "pushed" or .step == "push"))')" ] \
     || fail "with the push rule off by default, the landing was pushed: $(st 'select(.issue == 7)')"
   # The Board's count and cards of what landed and is not pushed come from the snapshot.
-  [ "$(loop snapshot | jq -c '[.health.unpushed[] | .issue]')" = '[7]' ] || fail "the snapshot does not name the unpushed card: $(loop snapshot | jq -c .health.unpushed)"
+  [ "$(loop snapshot --fresh | jq -c '[.health.unpushed[] | .issue]')" = '[7]' ] || fail "the snapshot does not name the unpushed card: $(loop snapshot --fresh | jq -c .health.unpushed)"
   # Push landed (the Board's `full-test push`): its green run pushes the landed commit to the remote. The fixture's
   # pack is not setup's, so it is given the test.full setup writes into a new pack (t_setup checks that it does).
   tune '.test.full = "true"'; loop full-test push > /dev/null || fail "push landed did not start"; ftended 1
@@ -44,8 +44,8 @@ t_fullpush() {
   # No test.full: both are refused with the reason, and the snapshot says it.
   out=$(loop full-test 2>&1); [ $? = 2 ] && grep -q 'names no full test suite' <<<"$out" || fail "a full test with no test.full was not refused: $out"
   out=$(loop full-test push 2>&1); [ $? = 2 ] || fail "a push landed with no test.full was not refused: $out"
-  [ "$(loop snapshot | jq -c '.fullTest | [.command, .why, .running, .last]')" = '[false,"the pack names no full test suite (test.full)",null,null]' ] \
-    || fail "the snapshot does not say why there is no full test: $(loop snapshot | jq -c .fullTest)"
+  [ "$(loop snapshot --fresh | jq -c '.fullTest | [.command, .why, .running, .last]')" = '[false,"the pack names no full test suite (test.full)",null,null]' ] \
+    || fail "the snapshot does not say why there is no full test: $(loop snapshot --fresh | jq -c .fullTest)"
   out=$(loop full-test now 2>&1); [ $? = 2 ] && grep -q usage <<<"$out" || fail "a bad full-test argument was not refused: $out"
   tune '.test.full = ". \"$STUB/full-cmd\""'
   echo 'git rev-parse HEAD >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
@@ -56,7 +56,7 @@ t_fullpush() {
   out=$(loop full-test 2>&1) || fail "full-test did not start: $out"
   wait_until '[ -s "$STUB/full-at" ]' || fail "the full test suite did not start"
   out=$(loop full-test push 2>&1); [ $? = 2 ] && grep -q 'already running' <<<"$out" || fail "a second press during a run was not refused: $out"
-  s=$(loop snapshot)
+  s=$(loop snapshot --fresh)
   [ "$(jq -c '.fullTest.running | [.how, .sha]' <<<"$s")" = "[\"run\",\"$A\"]" ] || fail "the snapshot does not show the run: $(jq -c .fullTest <<<"$s")"
   # Bug: the run is not shown as a release's suite is (/units, the Release panel), so the two kinds look different.
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .ended]]' <<<"$s")" = "[[\"running\",\"$A\",null]]" ] || fail "the snapshot's suites do not show the run: $(jq -c .suites <<<"$s")"
@@ -130,7 +130,7 @@ t_fullred() {
   [ "$(jq -c '[.entries[] | [.case, .source]]' "$ST/flaky.json")" = "[[\"flaky.test: flips\",\"full test ${A:0:12}\"]]" ] || fail "the flaky case is not on the flaky record: $(cat "$ST/flaky.json" 2>&1)"
   jq -se 'length == 1 and (.[0] | (.finding | startswith("net.test: fetch")) and (.why | contains("ECONNREFUSED")) and .by == "code")' "$ST/declined.jsonl" > /dev/null \
     || fail "the network's failure is not declined with its reason: $(cat "$ST/declined.jsonl" 2>&1)"
-  s=$(loop snapshot)
+  s=$(loop snapshot --fresh)
   [ "$(jq -c '.fullTest.last | [.state, (.cases | map(.verdict))]' <<<"$s")" = '["failed",["fix","flaky","declined","fix"]]' ] || fail "the snapshot does not carry the red run: $(jq -c .fullTest <<<"$s")"
   # Bug: the red run's result is not shown as a release's suite is, with its failed cases by name.
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .failed, .cases, (.ended != null)]]' <<<"$s")" \
@@ -173,7 +173,7 @@ if [ -n "${CONVEYOR_TEST_RERUN:-}" ]; then : > "$STUB/alone"; until [ -e "$STUB/
 EOF
   loop full-test > /dev/null || fail "the full test did not start"
   wait_until '[ -e "$STUB/alone" ]' 'cat "$ST/fulltest.jsonl.log"' || fail "the failed case was not run alone"
-  s=$(loop snapshot)
+  s=$(loop snapshot --fresh)
   : > "$STUB/go"; ftended 1
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .done, .failed, .cases]]' <<<"$s")" = '[["running",3,1,["three"]]]' ] \
     || fail "while a failed case ran alone, the suite's counts were lost: $(jq -c .suites <<<"$s")"
@@ -245,7 +245,7 @@ t_fulldead() {
   pid=$(jq .pid "$ST/fulltest.jsonl.running"); A=$(jq -r .sha "$ST/fulltest.jsonl.running")
   kill -9 "$pid"; : > "$STUB/go"
   wait_until '( flock -n 9 ) 9>>"$ST/fulltest.jsonl.lock"' 'ps -ef' || fail "the killed run's lock was not let go"
-  s=$(loop snapshot)
+  s=$(loop snapshot --fresh)
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, (.ended != null), (.reasons[0] | test("ended without a result: its process \\('"$pid"'\\) is gone"))]]' <<<"$s")" = "[[\"error\",\"$A\",true,true]]" ] \
     || fail "the killed run is not shown as ended with no result: $(jq -c .suites <<<"$s")"
   echo 'exit 0' > "$STUB/full-cmd"
@@ -253,7 +253,7 @@ t_fulldead() {
   ftended 2
   [ "$(ftl '[.kind, .state, .sha, (.reason // "" | test("ended without a result"))]' | paste -sd' ' -)" = "[\"run\",\"error\",\"$A\",true] [\"run\",\"passed\",\"$A\",false]" ] \
     || fail "the killed run was not recorded as an error before the next run: $(cat "$ST/fulltest.jsonl")"
-  [ "$(jq -c '[.suites[] | select(.kind == "full test") | .state]' <<<"$(loop snapshot)")" = '["passed"]' ] || fail "the snapshot still shows the killed run"
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | .state]' <<<"$(loop snapshot --fresh)")" = '["passed"]' ] || fail "the snapshot still shows the killed run"
 }
 
 # Bug this guards: Push now pushed while a full test run was under way (its push would race the run's own).

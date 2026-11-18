@@ -222,13 +222,13 @@ t_benchdriftsnap() {
   recok "$ST/cards.jsonl" "the drift fixture"
   out=$(loop bench drift) || fail "bench drift failed: $out"
   [ "$out" = "$("$SRC/bench/drift.sh" <(driftrecs))" ] || fail "bench drift did not compare the records and the retried file: $out"
-  [ "$(loop snapshot | jq -c '.drift | [.before.cards, .after.cards, .after.engine]')" = "[5,2,\"$DRIFTB\"]" ] || fail "the snapshot has no drift watch of the records: $(loop snapshot | jq -c .drift)"
+  [ "$(loop snapshot --fresh | jq -c '.drift | [.before.cards, .after.cards, .after.engine]')" = "[5,2,\"$DRIFTB\"]" ] || fail "the snapshot has no drift watch of the records: $(loop snapshot --fresh | jq -c .drift)"
   jq -c '.card = "b4" | .issue = 2' <(grep '"card":"b1"' "$ST/cards.jsonl") >> "$ST/cards.jsonl"
-  [ "$(loop snapshot | jq -c .drift.after.cards)" = 3 ] || fail "the snapshot kept the drift watch of the records before the change: $(loop snapshot | jq -c .drift)"
+  [ "$(loop snapshot --fresh | jq -c .drift.after.cards)" = 3 ] || fail "the snapshot kept the drift watch of the records before the change: $(loop snapshot --fresh | jq -c .drift)"
   # A card starts on a new engine commit (only its worktree line): the snapshot's drift is that commit against B.
   jq -c '.card = "c1" | .issue = 3 | .engine = "cccccccc33333333333333333333333333333333" | .time = "2026-11-17T00:00:00Z"' <(grep '"card":"b1","issue":1,"step":"worktree"' "$ST/cards.jsonl") >> "$ST/cards.jsonl"
-  [ "$(loop snapshot | jq -c '.drift | [.before.engine[:8], .after.engine[:8], .after.cards]')" = '["bbbbbbbb","cccccccc",0]' ] \
-    || fail "the snapshot kept the drift watch from before a card started on a new engine commit: $(loop snapshot | jq -c .drift)"
+  [ "$(loop snapshot --fresh | jq -c '.drift | [.before.engine[:8], .after.engine[:8], .after.cards]')" = '["bbbbbbbb","cccccccc",0]' ] \
+    || fail "the snapshot kept the drift watch from before a card started on a new engine commit: $(loop snapshot --fresh | jq -c .drift)"
 }
 # Bugs: a blocked line had no waitSec, so the drift watch had no wait for a blocked card; block() outside card() (the
 # loop blocking a card whose process ended) wrote a wait it did not know. In card(), waitsec and mainsec are its waits.

@@ -530,7 +530,7 @@ t_sameoffstuck() {
     jq -cn --arg on "${c#*:}" --arg at "$ago" --arg t "$now" '{step: "land", at: $at, last: $t, turns: 0, waits: {on: $on, paths: ["a.txt"]},
       action: "waiting on card \($on), which changes the same files: a.txt"}' > "$T/$CASE/cards/$k.live"
   done
-  s=$(loop snapshot) || fail "snapshot failed"
+  s=$(loop snapshot --fresh) || fail "snapshot failed"
   [ "$(jq -c '[.belt[] | select(.card | IN("c2-9", "c3-10")) | [.card, .step, .waitsOn.issue, .waitsOn.state]]' <<<"$s")" = '[["c2-9","waiting",7,"queued"],["c3-10","waiting",9,"brief"]]' ] \
     || fail "a waiting card's step is not waiting, or does not say what it waits on: $(jq -c '[.belt[] | {card, step, waitsOn}]' <<<"$s")"
   [ "$(loop health | jq -c '[.stuck[] | [.card, .step, .waitsOn]]')" = '[["c2-9","waiting",{"card":"c1-7","issue":7,"state":"queued"}]]' ] \
@@ -572,7 +572,7 @@ t_waitclaim() {
     || fail "a card waiting at its claim on a live holder is stuck, or a silent card is not: $(jq -c .stuck <<<"$h")"
   [ "$(jq -c --arg a "$ago25" '.waitingOnCard == [{card: "c2-8", issue: 8, since: $a, waitsOn: {card: "c1-7", issue: 7, state: "review"}}]' <<<"$h")" = true ] \
     || fail "health does not show the card waiting on its holder: $(jq -c .waitingOnCard <<<"$h")"
-  s=$(loop snapshot) || fail "snapshot failed"
+  s=$(loop snapshot --fresh) || fail "snapshot failed"
   [ "$(jq -c '[.belt[] | select(.card == "c2-8") | [.step, .waitsOn.card, .waitsOn.issue]]' <<<"$s")" = '[["waiting","c1-7",7]]' ] \
     || fail "the Board does not show the card waiting on its holder: $(jq -c '[.belt[] | {card, step, waitsOn}]' <<<"$s")"
   # The holder's process is gone: the wait never ends, so the waiter is stuck, as waiting since its wait began.

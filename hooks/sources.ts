@@ -204,7 +204,7 @@ const parentOf = (x: any) => { const n = num(x.parent); return n !== null && n >
 
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[] }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; snapshotAt: number | null }
 // One record's snapshot. null: it is not the object `conveyor.sh snapshot` prints, so nothing of it is shown.
 export const parseRecord = (repo: string, json: unknown): Rec | null => {
   let j: any = json
@@ -250,6 +250,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     // A snapshot from an older engine has no suites.
     suites: (Array.isArray(j.suites) ? j.suites : []).filter((x: unknown) => x && typeof x === 'object')
       .map((x: any): Suite => ({ repo, kind: one(x.kind), version: one(x.version), sha: one(x.sha), since: time(x.since), ended: time(x.ended), state: one(x.state), done: num(x.done), failed: num(x.failed) })),
+    // When the kept snapshot was made (null from a snapshot that does not say).
+    snapshotAt: time(j.snapshotAt),
   }
 }
 
@@ -299,6 +301,11 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
   if (!recs.length) return none(`${name} gave no snapshot`)
   const notes = read.filter(r => !r.rec).map(r => `units: the ${r.repo} snapshot cannot be read`)
   for (const r of read) if (r.rec && !r.rec.queue) notes.push(`units: the ${r.repo} queue was not read (GitHub did not list the issues)`)
+  // A record's kept snapshot (snapshotAt: when it was made) over a minute old says its age.
+  for (const r of read) {
+    const at = r.rec?.snapshotAt ?? null
+    if (at !== null && Date.now() - at > 60_000) notes.push(`units: the ${r.repo} snapshot is ${since(at, Date.now())} old (made at ${clockOf(at)})`)
+  }
   const queues = recs.map(r => r.queue).filter((q): q is Queued[] => !!q)
   const held = new Map<string, number>()
   for (const r of recs) for (const [k, n] of Object.entries(r.held)) held.set(k, (held.get(k) ?? 0) + n)

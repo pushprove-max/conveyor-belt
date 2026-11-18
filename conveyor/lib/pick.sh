@@ -35,6 +35,9 @@
 # The monthly test-speed survey's card (lib/survey.sh) measures while the machine is quiet: its issue (titled
 # "Test-speed survey, ...") gets the rule "the survey hour" outside the pack's test.surveyHour, local time
 # (CONVEYOR_NOW when set), so it is picked only in that hour, on whichever day the loop has room for it then.
+# UPREC and UPOLD, when set (the snapshot's), name files of what health reads of the card records and of the retried
+# lines (HEALTHLINE, lib/views.sh: every field the order below reads), from their kept summaries: the snapshot then
+# reads only the lines past them, not every line of the records each time (#398).
 upnext() { # <open issues json> [retried] [all] [the control record, when the caller has read it]
   local c=${4:-} sh cards old gd n; [ -n "$c" ] || c=$(ctl) || return 1
   packget test.surveyHour sh || return 1
@@ -44,7 +47,8 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
     | while read -r n; do ! cardheld "$c" "$n" || echo "$n"; done | jq -cs .) || gd='[]'
   # Read first, one after the other: a read that fails stops the pick (a process substitution's failure is not
   # passed back, and jq would read no cards at all, so every issue with a card would be picked again).
-  cards=$(recs) && old=$(olds) || return 1
+  if [ -n "${UPREC:-}" ]; then cards=$(<"$UPREC") && old=$(<"$UPOLD") || return 1
+  else cards=$(recs) && old=$(olds) || return 1; fi
   jq -c --slurpfile cards <(printf '%s' "$cards") --slurpfile retried <(printf '%s' "$old") --arg mode "${2:-}" --arg built "$BUILT" --argjson only "${ONLY:-null}" --argjson sh "$sh" \
     --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" --argjson guarded "$gd" \
     "$DEPS$SEE$LEVEL$INSIDE$(<"$HERE/jq/upnext.jq")" <<<"$1"

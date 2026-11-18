@@ -61,9 +61,9 @@ t_empty() {
   [ ! -s "$ST/cards.jsonl" ] || fail "recorded a card for an excluded issue"
   # The Board finds the last push's marker in the folder `state-dir` names, never a path of its own.
   [ "$(find "$T/$CASE" -name cards.jsonl)" = "$(loop state-dir)/cards.jsonl" ] || fail "state-dir named $(loop state-dir), not the folder the records are in"
-  [ "$(loop snapshot | jq -c '.open.held | map([.issue, (.reasons | map(.label // .kind) | join(","))])')" \
+  [ "$(loop snapshot --fresh | jq -c '.open.held | map([.issue, (.reasons | map(.label // .kind) | join(","))])')" \
     = '[[1,"you"],[2,"you"],[3,"you"],[4,"awaiting-deploy"],[5,"awaiting-deploy"]]' ] \
-    || fail "a held labelled issue is not shown as held by you: $(loop snapshot | jq -c .open.held)"
+    || fail "a held labelled issue is not shown as held by you: $(loop snapshot --fresh | jq -c .open.held)"
 }
 # Released (t_empty holds them), a case of its own so its three cards run beside t_empty: there is no skip list,
 # CONVEYOR_SKIP naming the labels keeps none of the released issues off the belt, and the awaiting-deploy ones stay off.
@@ -95,7 +95,7 @@ t_prism() {
   loop control hold 8 >/dev/null || fail "control hold failed"
   tune '.worktree.setup = "exit 1"'; loop run >/dev/null
   [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "6 7 " ] || fail "the unheld prism issues were not both picked, or the held one was: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
-  [ "$(loop snapshot | jq -c '[.open.held[] | select(.issue == 8) | .reasons[].kind]')" = '["you"]' ] || fail "the held prism issue is not held by the control record alone: $(loop snapshot | jq -c .open.held)"
+  [ "$(loop snapshot --fresh | jq -c '[.open.held[] | select(.issue == 8) | .reasons[].kind]')" = '["you"]' ] || fail "the held prism issue is not held by the control record alone: $(loop snapshot --fresh | jq -c .open.held)"
 }
 
 # Bugs: P3 cannot be turned off like P0-P2, so the owner cannot stop the loop building the lowest level; off, an
@@ -110,8 +110,8 @@ t_p3rule() {
   jq -e '.rules | has("P3") | not' "$ST/control.json" >/dev/null || fail "the seeded record already has a P3 key"
   [ "$(loop control | jq -c .rules.P3)" = true ] || fail "a record with no P3 key does not read as P3 on: $(loop control)"
   [ "$(loop control rules P3=off | jq -c .rules.P3)" = false ] || fail "rules P3=off did not turn P3 off: $(cat "$ST/control.json")"
-  [ "$(loop snapshot | jq -c '[(.queue.skipped | map([.issue, .rule]) | sort), (.queue.next | map(.issue))]')" = '[[[5,"P3"],[6,"P3"]],[7]]' ] \
-    || fail "P3 off: the P3 and unprioritised issues are not skipped by the rule P3: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '[(.queue.skipped | map([.issue, .rule]) | sort), (.queue.next | map(.issue))]')" = '[[[5,"P3"],[6,"P3"]],[7]]' ] \
+    || fail "P3 off: the P3 and unprioritised issues are not skipped by the rule P3: $(loop snapshot --fresh | jq -c .queue)"
   loop run >/dev/null 2>&1; [ "$(picks)" = "7 " ] || fail "P3 off picked a P3 or unprioritised issue: $(picks)"
 }
 # On again (t_p3rule turns it off), a case of its own so the two runs go side by side: the P3 and unprioritised
@@ -197,4 +197,20 @@ t_pickjson() {
   [ "${out#* }" = '6 false' ] && [ "$(st 'select(.step == "picked") | .issue')" = 6 ] || fail "the other ready issue was not picked by the same pick: out=$out $(st .)"
   grep -qF 'conveyor: the pick step could not read the title and created time of #5x as JSON; #5x is skipped, and the next ready issue is picked' <<<"$err" \
     || fail "the issue skipped is not named with the step in the log: $err"
+}
+
+# Bug: the snapshot's pick order ran jq on every line of the card records (32 s of a minute's build, #398). Given the
+# kept summary's lines (UPREC, UPOLD), upnext() reads those, not the records: the records give #6 a card and the summary
+# gives #5 one, so only #6 is in the order. Reading the records instead lists #5 alone.
+t_pickkept() {
+  setup "$(jq -cs . <(issue 5 2026-01-01) <(issue 6 2026-02-01))"
+  mkdir -p "$ST" && jq -cn '{card:"c1-6",issue:6,step:"picked",time:"2026-11-01T00:00:00Z",result:"ok"}' > "$ST/cards.jsonl" \
+    && jq -cn '{card:"c1-5",issue:5,step:"picked",time:"2026-11-01T00:00:00Z",result:"ok"}' > "$T/$CASE/hrec" && : > "$T/$CASE/hold" \
+    || fail "the fixture could not be written"
+  local out
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
+    && UPREC=$T/$CASE/hrec UPOLD=$T/$CASE/hold upnext "$(cat "$STUB/issues.json")" '' all ) 2> "$T/$CASE/err") \
+    || fail "upnext failed: $(cat "$T/$CASE/err")"
+  [ "$(jq -c 'map(.number)' <<<"$out")" = '[6]' ] || fail "the order did not come from the kept summary's lines: $(head -c 400 <<<"$out")"
 }

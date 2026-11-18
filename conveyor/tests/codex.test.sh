@@ -84,8 +84,8 @@ EOF
   [ ! -e "$STUB/sessions" ] || fail "Claude Code ran for a Codex model: $(cat "$STUB/sessions")"
   [ -z "$(find "$CODEX_HOME/sessions" -name 'rollout-*')" ] || fail "the session file Codex kept was left behind"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.reason)"')"
-  [ "$(loop snapshot | jq -c '.modelSettings.builder | [.model, .effort, .agent, (.efforts | length)]')" = '["cx-1","medium","codex",5]' ] \
-    || fail "the Board's builder settings are not Codex's: $(loop snapshot | jq -c .modelSettings.builder)"
+  [ "$(loop snapshot --fresh | jq -c '.modelSettings.builder | [.model, .effort, .agent, (.efforts | length)]')" = '["cx-1","medium","codex",5]' ] \
+    || fail "the Board's builder settings are not Codex's: $(loop snapshot --fresh | jq -c .modelSettings.builder)"
 }
 
 # Bugs: a Codex build that `control stop` ends before its turn completed loses what it used so far (its running total,

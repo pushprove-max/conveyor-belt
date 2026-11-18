@@ -449,3 +449,20 @@ test('Health: no Machine room row, even from a snapshot that still carries the p
   assert.equal(panel(w, 'health').querySelector('dt[data-check="Machine room"]'), null);
   assert.doesNotMatch(panel(w, 'health').textContent, /Machine room|Strained|wake delay/);
 });
+// Issue 398. Bug it catches: readers print the kept snapshot, which can be older than what the page shows it as; a
+// snapshot over a minute old says so (its age) with what to do, and a newer one adds no row. One shown at 30 s that
+// grows over a minute old with no new data (an equal part draws nothing) turns into the warning on a tick.
+test('Health: a kept snapshot turns into a warning with its age on the tick it is over a minute old, with no new data', () => {
+  const w = boot();
+  const data = full();
+  data.panels.health.data.records[0].snapshotAt = iso(T0 - 30000);
+  deliver(w, data);
+  assert.equal(panel(w, 'health').querySelector('dt[data-check="Snapshot"]'), null, 'no row for a snapshot 30 s old');
+  tick(w, 25000);
+  assert.equal(panel(w, 'health').querySelector('dt[data-check="Snapshot"]'), null, 'still no row at 55 s');
+  tick(w, 35000);
+  assert.ok(failingRows(w).includes('Snapshot'), 'the snapshot now 90 s old is a failing row');
+  const row = dd(w, 'Snapshot');
+  assert.match(row.textContent, /^Old.*made.*1 min.*ago/);
+  assert.match(row.querySelector('.check-next').textContent, /^Next: .*conveyor\.sh snapshot --fresh/);
+});

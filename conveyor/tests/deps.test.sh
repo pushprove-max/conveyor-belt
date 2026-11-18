@@ -61,7 +61,7 @@ t_startheld() {
   [ "$(ctl start held | jq -c '[.start, .startHeld]')" = '["held",[{"from":5,"to":null}]]' ] && [ "$(loop health | jq -r .start)" = held ] || fail "start held: $(cat "$C")"
   ctl release 10 >/dev/null
   add "$(issue 6 "$t" P0),$(issue 7 "$t" P2 conveyor-followup),$(issue 10 "$t" P2)"
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.control.start, .control.held, (.queue.holding | map(.issue)), (.queue.order | map(.issue) | sort), (.open.held | map(select(.issue != 4)) | map([.issue, (.reasons | map(.kind) | join(","))]))]' <<<"$out")" \
     = '["held",[6],[6],[5,7,10],[[6,"you"]]]' ] || fail "a new issue under Held is not shown held: $(jq -c '[.control, .queue, .open.held]' <<<"$out")"
   loop run >/dev/null 2>&1; [ "$(picks)" = "5 7 10 " ] || fail "picks under Held: $(picks)"
@@ -73,7 +73,7 @@ t_startqueue() {
   for n in 4 5 7 10; do landed "$n"; done > "$ST/cards.jsonl"
   t=$(date -u +%FT%TZ); add "$(issue 5 "$t" P2)"; ctl start held >/dev/null; ctl release 10 >/dev/null
   add "$(issue 6 "$t" P0),$(issue 7 "$t" P2 conveyor-followup),$(issue 10 "$t" P2)"
-  loop snapshot >/dev/null; [ "$(jq -c '[.start, .held, .startHeld]' "$C")" = '["held",[6],[{"from":5,"to":null}]]' ] || fail "the record under Held: $(cat "$C")"
+  loop snapshot --fresh >/dev/null; [ "$(jq -c '[.start, .held, .startHeld]' "$C")" = '["held",[6],[{"from":5,"to":null}]]' ] || fail "the record under Held: $(cat "$C")"
   # Back to Queue, all in one second: #6 stays held; #12 (opened while it was Held, first seen after the switch) is
   # held; #13 (opened after) is picked.
   t=$(date -u +%FT%TZ); add "$(issue 12 "$t" P0)"
@@ -81,11 +81,11 @@ t_startqueue() {
   add "$(issue 13 "$t" P2)"
   loop run >/dev/null 2>&1; [ "$(picks)" = "13 " ] && [ "$(jq -c '[.held, .startSeen]' "$C")" = '[[6,12],[6,10,12]]' ] || fail "after Queue again: $(picks) $(cat "$C")"
   # Released, #6 is picked, and is not held again however often the open issues are read.
-  ctl release 6 >/dev/null; loop run >/dev/null 2>&1; loop snapshot >/dev/null
+  ctl release 6 >/dev/null; loop run >/dev/null 2>&1; loop snapshot --fresh >/dev/null
   [ "$(picks)" = "6 13 " ] && [ "$(jq -c .held "$C")" = '[12]' ] || fail "a released issue: $(picks) $(cat "$C")"
   # A hold that cannot be saved: #14 is not shown in the queue.
   ctl start held >/dev/null; add "$(issue 14 "$t" P2)"; mkdir "$C.new"
-  out=$(loop snapshot 2>/dev/null); rmdir "$C.new"
+  out=$(loop snapshot --fresh 2>/dev/null); rmdir "$C.new"
   [ "$(jq -c '[.queue.order // [] | .[].issue | select(. == 14)]' <<<"$out")" = '[]' ] || fail "an unsaved hold shown queued: $(jq -c .queue <<<"$out")"
 }
 # Issue 330: the filing hook's hold (`control adopt`, foreman.sh filed) comes after the command that filed the issues.
@@ -140,7 +140,7 @@ t_depends() {
   deps_setup "$(jq -cs . <(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2') <(issue 2 2026-01-01 backlog) <(dep "$(issue 7 2026-01-01 backlog)" 'Depends on: #2'))"
   loop control hold 2 7 >/dev/null
   loop run | grep -q 'no issue qualifies' && [ ! -s "$ST/cards.jsonl" ] || fail "an issue whose dependency is open was picked"
-  out=$(loop snapshot)
+  out=$(loop snapshot --fresh)
   [ "$(jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.queue.holding | map([.issue, .waitsFor])), .queue.order, .queue.next, .health.cycles]' <<<"$out")" \
     = '[[[1,[2]]],[[2,[]],[7,[2]]],[],[],[]]' ] \
     || fail "queue.waiting is not the unheld waiting issue alone, or a held entry does not say what it waits on: $(jq -c '[.queue, .health.cycles]' <<<"$out")"
@@ -199,8 +199,8 @@ t_fardeps() {
   setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600 landing')]"; echo : > "$STUB/build"
   echo OPEN > "$STUB/repo.other_repo.600"
   loop run >/dev/null 2>&1; [ ! -s "$ST/cards.jsonl" ] || fail "#1 was picked while other/repo#600 is open (this repository has no open #600)"
-  [ "$(loop snapshot | jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.open.issues | map(.dependsOn))]')" = '[[[1,["other/repo#600"]]],[["other/repo#600"]]]' ] \
-    || fail "the snapshot does not say #1 waits on other/repo#600: $(loop snapshot | jq -c '[.queue, .open.issues]')"
+  [ "$(loop snapshot --fresh | jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.open.issues | map(.dependsOn))]')" = '[[[1,["other/repo#600"]]],[["other/repo#600"]]]' ] \
+    || fail "the snapshot does not say #1 waits on other/repo#600: $(loop snapshot --fresh | jq -c '[.queue, .open.issues]')"
   echo CLOSED > "$STUB/repo.other_repo.600"
   loop run >/dev/null 2>&1; [ "$(st 'select(.step == "picked") | .issue')" = 1 ] || fail "#1 was not picked once other/repo#600 closed: $(st .step)"
 }
@@ -209,7 +209,7 @@ t_fardeps() {
 t_fardepsboth() {
   setup "$(jq -cs . <(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #5, other/repo#7') <(issue 5 2026-01-01 backlog))"
   loop control hold 5 >/dev/null; echo OPEN > "$STUB/repo.other_repo.7"
-  waits() { loop snapshot | jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.queue.order | map(.issue))]'; }
+  waits() { loop snapshot --fresh | jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.queue.order | map(.issue))]'; }
   [ "$(waits)" = '[[[1,[5,"other/repo#7"]]],[]]' ] || fail "#1 does not wait on both #5 and other/repo#7: $(waits)"
   jq -c 'map(select(.number != 5))' "$STUB/issues.json" > "$STUB/i" && mv "$STUB/i" "$STUB/issues.json"
   [ "$(waits)" = '[[[1,["other/repo#7"]]],[]]' ] || fail "#5 closed: #1 does not still wait on other/repo#7: $(waits)"
@@ -223,7 +223,7 @@ t_fardepsfail() {
   setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600')]"; echo : > "$STUB/build"
   touch "$STUB/repo-fail.other_repo"
   loop run >/dev/null 2>&1; [ ! -s "$ST/cards.jsonl" ] || fail "#1 was picked though other/repo cannot be read"
-  out=$(loop snapshot)
+  out=$(loop snapshot --fresh)
   [ "$(jq -c '.queue.waiting | map([.issue, .waitsFor])' <<<"$out")" = '[[1,["other/repo#600"]]]' ] || fail "#1 does not wait on other/repo#600: $(jq -c .queue <<<"$out")"
   jq -e '.needsYou.farDeps == [{issue: 1, title: "title 1", ref: "other/repo#600", line: "Depends on: other/repo#600",
       reason: "GraphQL: Could not resolve to a Repository with the name '"'other/repo'"'. (repository)"}]' <<<"$out" >/dev/null \
@@ -238,7 +238,7 @@ t_dependsedit() {
   is() { b=$(body 12); [ "${b%.}" = "$1" ] || fail "$2: the body of #12 is $(jq -c '.[] | select(.number == 12) | .body' "$STUB/issues.json")"; }
   out=$(loop control depends 12 add 7 2>&1) && grep -q '#12 now waits on #7' <<<"$out" || fail "depends 12 add 7: $out"
   is "${orig}Depends on: #7"$'\n' "add 7 did not append the line"
-  loop snapshot | jq -e '.queue.waiting | any(.issue == 12 and .waitsFor == [7])' >/dev/null || fail "the line added is not the one pick reads: #12 does not wait on #7"
+  loop snapshot --fresh | jq -e '.queue.waiting | any(.issue == 12 and .waitsFor == [7])' >/dev/null || fail "the line added is not the one pick reads: #12 does not wait on #7"
   loop control depends 12 add 9 >/dev/null 2>&1; is "${orig}Depends on: #7, #9"$'\n' "a second dependency did not extend the same line"
   loop control depends 12 remove 7 >/dev/null 2>&1; is "${orig}Depends on: #9"$'\n' "remove 7 left the line wrong"
   out=$(loop control depends 12 remove 9 2>&1) && grep -q '#12 no longer depends on #9' <<<"$out" || fail "depends 12 remove 9: $out"
@@ -277,17 +277,18 @@ t_depguard() {
   loop run | grep -q 'no issue qualifies' && [ ! -s "$ST/cards.jsonl" ] || fail "with the guard on, an issue whose dependency is open was picked: $(order)"
   # Off: #3 forced is picked; #4 and #5, not forced, still wait.
   [ "$(ctl dep-guard off | jq .depGuard)" = false ] && [ "$(ctl force 3 | jq -c .forced)" = '[3]' ] || fail "the guard off and #3 forced: $(cat "$C")"
-  [ "$(loop snapshot | jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .forced]))]')" = '[[3],[[3,true],[4,false],[5,false]]]' ] \
-    || fail "the snapshot does not queue the forced issue, or does not say it is forced: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .forced]))]')" = '[[3],[[3,true],[4,false],[5,false]]]' ] \
+    || fail "the snapshot does not queue the forced issue, or does not say it is forced: $(loop snapshot --fresh | jq -c .queue)"
   # Queued, the forced issue keeps what it waits on (Next up and Control tag it by them), in order and in next alike.
-  [ "$(loop snapshot | jq -c '[.queue.order, .queue.next] | map(map([.issue, .forced, .waitsFor]))')" = '[[[3,true,[2]]],[[3,true,[2]]]]' ] \
-    || fail "the queued forced issue lost what it waits on: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '[.queue.order, .queue.next] | map(map([.issue, .forced, .waitsFor]))')" = '[[[3,true,[2]]],[[3,true,[2]]]]' ] \
+    || fail "the queued forced issue lost what it waits on: $(loop snapshot --fresh | jq -c .queue)"
   loop run >/dev/null; [ "$(order)" = "picked:3 landed:3 " ] || fail "with the guard off, the forced issue was not picked, or one not forced was: $(order)"
   [ "$(jq -c .forced "$C")" = '[]' ] || fail "the forced issue that landed and closed is still forced: $(cat "$C")"
   # #4's card landed with its issue still open; #5 closed without a card: each leaves forced at the next snapshot.
   ctl force 4 >/dev/null; ctl force 5 >/dev/null; landed 4 >> "$ST/cards.jsonl"
   jq -c 'map(select(.number != 5))' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
-  [ "$(jq -c .forced "$C")" = '[4,5]' ] && loop snapshot >/dev/null && [ "$(jq -c .forced "$C")" = '[]' ] \
+  # shellcheck disable=SC2333 # the snapshot between the two reads of the control record rewrites it
+  [ "$(jq -c .forced "$C")" = '[4,5]' ] && loop snapshot --fresh >/dev/null && [ "$(jq -c .forced "$C")" = '[]' ] \
     || fail "a forced issue that landed, or whose issue closed, is still forced: $(cat "$C")"
 }
 # Bugs: an issue that depends on #50 is picked while a follow-up filed from #50, or one filed from that
@@ -300,20 +301,20 @@ t_followdeps() {
   deps_setup "$(jq -cs . <(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50') <(depfu 100101 50) <(depfu 100102 50) <(issue 70 2026-01-02 P2))"
   mkdir -p "$ST"; landed 50 '[100101,100102]' > "$ST/cards.jsonl"; echo : > "$STUB/build"
   loop control hold 100101 100102 >/dev/null
-  [ "$(loop snapshot | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[60,[100101,100102]]]' ] \
-    || fail "waitsFor does not name the open follow-ups of the dependency: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[60,[100101,100102]]]' ] \
+    || fail "waitsFor does not name the open follow-ups of the dependency: $(loop snapshot --fresh | jq -c .queue)"
   # The Board's × (control depends remove) takes what the issue's own line names (open.issues dependsOn), #50, which
   # waitsFor leaves out; a × built from waitsFor sends removals the host refuses.
-  [ "$(loop snapshot | jq -c '.open.issues | map(select(.issue == 60 or .issue == 70) | [.issue, .dependsOn])')" = '[[60,[50]],[70,[]]]' ] \
-    || fail "open.issues does not carry the numbers each issue's Depends on: line names: $(loop snapshot | jq -c .open.issues)"
+  [ "$(loop snapshot --fresh | jq -c '.open.issues | map(select(.issue == 60 or .issue == 70) | [.issue, .dependsOn])')" = '[[60,[50]],[70,[]]]' ] \
+    || fail "open.issues does not carry the numbers each issue's Depends on: line names: $(loop snapshot --fresh | jq -c .open.issues)"
   loop run >/dev/null; [ "$(order)" = "landed:50 picked:70 " ] || fail "#60 picked while #50's follow-ups are open, or #70 not picked: $(order)"
   # #100101 closes: #100102 still holds #60. #100102 has landed with a follow-up of its own, #100103: it holds #60 too.
   jq -cs . <(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50') <(depfu 100102 50) <(depfu 100103 100102) > "$STUB/issues.json"
   loop run | grep -q 'no issue qualifies' && [ "$(order)" = "landed:50 picked:70 " ] || fail "#60 picked while #100102 is open: $(order)"
   jq -c '.card = "c1-100102"' <(landed 100102 '[100103]') >> "$ST/cards.jsonl"; loop control hold 100103 >/dev/null
   jq -c 'map(select(.number != 100102))' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
-  [ "$(loop snapshot | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[60,[100103]]]' ] \
-    || fail "waitsFor does not name the follow-up of a follow-up: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[60,[100103]]]' ] \
+    || fail "waitsFor does not name the follow-up of a follow-up: $(loop snapshot --fresh | jq -c .queue)"
   loop run | grep -q 'no issue qualifies' && [ "$(order)" = "landed:50 picked:70 landed:100102 " ] || fail "#60 picked while #100102's follow-up #100103 is open: $(order)"
   # #100103 is withdrawn (closed as not planned): nothing holds #60 now, and it is picked.
   echo "[$(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50')]" > "$STUB/issues.json"
@@ -326,7 +327,7 @@ landdeps() { # <#80's card lines after its picked line, as jq -c objects>
   deps_setup "$(jq -cs . <(issue 80 2026-01-01 P2) <(dep "$(issue 81 2026-01-02 P2)" 'Depends on: #80'))"
   mkdir -p "$ST"; jq -cn --arg c c0-80 '{card: $c, issue: 80, step: "picked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}' > "$ST/cards.jsonl"
   printf '%s\n' "$@" >> "$ST/cards.jsonl"
-  pick=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST" 2>&1); snap=$(loop snapshot); waits=$(jq -c '[.queue.order, .queue.waiting] | map(map([.issue, (.waitsFor // [])]))' <<<"$snap")
+  pick=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST" 2>&1); snap=$(loop snapshot --fresh); waits=$(jq -c '[.queue.order, .queue.waiting] | map(map([.issue, (.waitsFor // [])]))' <<<"$snap")
 }
 t_depslanded() {
   # #80's card has its landed line and no pushed line: #81 is picked, and the queue shows it next, waiting on nothing.
@@ -400,7 +401,7 @@ t_declineddeps() {
   loop control hold 7 >/dev/null; jq -c 'select(.number == 100101)' "$STUB/filed" | jq -cs '$i + .' --argjson i "$(cat "$STUB/issues.json")" > "$STUB/issues.new" \
     && mv "$STUB/issues.new" "$STUB/issues.json"
   loop run | grep -q 'no issue qualifies' && [ ! -s "$ST/cards.jsonl" ] || fail "the issue filed from the open #7's finding was picked: $(order)"
-  [ "$(loop snapshot | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[100101,[7]]]' ] || fail "the filed issue is not shown waiting on #7: $(loop snapshot | jq -c .queue)"
+  [ "$(loop snapshot --fresh | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[100101,[7]]]' ] || fail "the filed issue is not shown waiting on #7: $(loop snapshot --fresh | jq -c .queue)"
 }
 t_only() {
   deps_setup "$(jq -cs . <(issue 21 2026-01-01 P2) <(issue 22 2026-01-02 P2) <(issue 23 2026-01-03 P2) <(dep "$(issue 26 2026-01-06 P0)" 'Depends on: #21'))"

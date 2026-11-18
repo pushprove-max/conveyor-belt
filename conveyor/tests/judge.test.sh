@@ -217,7 +217,7 @@ t_judgeoff() {
   [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" \
     || fail "with the judge off, a NO-GO did not go to its fix and a second review as before: $(rev 7 .result | tr '\n' ' ')"
   ! grep -q 'always accepts' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the reviewer was asked to tag kinds with the judge off, or the card did not land"
-  [ "$(loop snapshot | jq -c '.landed[0].rounds | map(.judge)')" = '[{"ran":false,"why":"the judge is off"},{"ran":false,"why":"the review had no finding"}]' ] \
+  [ "$(loop snapshot --fresh | jq -c '.landed[0].rounds | map(.judge)')" = '[{"ran":false,"why":"the judge is off"},{"ran":false,"why":"the review had no finding"}]' ] \
     || fail "the snapshot does not say the judge did not run on the reviews, with why (it is off; no finding)"
 }
 
@@ -320,17 +320,17 @@ t_judgemodel() {
   loop control judge j >/dev/null 2>&1 && fail "control judge took a model with no CLI"
   # What the Board is given: the judge's model and effort, the model it runs on at default (the first of another
   # family than the reviewer's), and for its choices every model the pack allows the review, the reviewer's too.
-  [ "$(loop snapshot | jq -c '.modelSettings.judge | [.model, .effort, .modelFrom, .effortFrom, .default, .agent, (.choices | index("x") != null), .choices[-1]]')" \
+  [ "$(loop snapshot --fresh | jq -c '.modelSettings.judge | [.model, .effort, .modelFrom, .effortFrom, .default, .agent, (.choices | index("x") != null), .choices[-1]]')" \
     = '["j","high","control","control","claude-opus-5-5","claude",true,"claude-fable-5-2"]' ] \
-    || fail "the snapshot does not give the Board the judge's settings, its default and every model of the review: $(loop snapshot | jq -c .modelSettings.judge)"
+    || fail "the snapshot does not give the Board the judge's settings, its default and every model of the review: $(loop snapshot --fresh | jq -c .modelSettings.judge)"
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   grep -q -- '--model j --effort high ' "$STUB/judges" && [ "$(rev 7 .judge.model)" = j ] || fail "the judge did not run on the model the control record names: $(cat "$STUB/judges")"
   # Codex runs the reviewer too, and a Codex judge is the judge: its call is Codex's third (#8's review is its
   # second), so its answer is review.3, and it is asked the finding.
   echo 'F1 DECLINE: no' > "$STUB/review.3"
   loop control judge codex x >/dev/null || fail "control judge refused a Codex model"
-  [ "$(loop snapshot | jq -c '.modelSettings.judge | [.model, .effort, .modelFrom, .agent]')" = '["x","medium","control","codex"]' ] \
-    || fail "the snapshot does not show the judge on the reviewer's CLI as the one in force: $(loop snapshot | jq -c .modelSettings.judge)"
+  [ "$(loop snapshot --fresh | jq -c '.modelSettings.judge | [.model, .effort, .modelFrom, .agent]')" = '["x","medium","control","codex"]' ] \
+    || fail "the snapshot does not show the judge on the reviewer's CLI as the one in force: $(loop snapshot --fresh | jq -c .modelSettings.judge)"
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
   [ "$(rev 8 '[.result, .judge.model] | join(" ")')" = "GO x" ] && [ "$(wc -l < "$STUB/judges")" = 1 ] && grep -qx 'F1 \[[a-z ]*\] \[P1\] a.txt:2 wrong word' "$STUB/asked" \
     || fail "the judge on the reviewer's CLI did not read the review, or another judge ran: $(rev 8 '.judge | tojson') $(wc -l < "$STUB/judges")"
@@ -390,7 +390,7 @@ t_judgeref() {
   loop run >/dev/null || fail "run exited non-zero"
   grep -qF "quotes that finding's file and line beside it" "$STUB/judge-asked" || fail "the judge is not asked to quote the file and line of a finding it names by its number"
   loop declined add c9-9 9 judge 'this is F1 again' '[P2] z.txt:1 of no review' || fail "a declined line was not taken"
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(rev 7 'select(.judge.declined | length > 0) | .reason | length')" -le 1500 ] && ! rev 7 'select(.judge.declined | length > 0) | .reason' | grep -qF 'the same nit' \
     || fail "the review's text in the record was not cut short before its last finding, so the case does not show a long review"
   want=$(jq -cn --arg b "$bug" '[2, [{n: 1, finding: "[P2] a.txt:2 a nit. Proof: it reads oddly"}, {n: 2, finding: $b}, {n: 3, finding: "[P2] a.txt:2 the same nit. Proof: it reads oddly"}]]')
@@ -400,7 +400,7 @@ t_judgeref() {
     || fail "a declined line with no review in the card's records was given one: $(jq -c '.declined' <<<"$out")"
   # The card's lines moved to the retried file, as `retry` moves a blocked card's: its findings are still found.
   jq -c 'select(.issue == 7)' "$ST/cards.jsonl" >> "$ST/retried.jsonl" && jq -c 'select(.issue != 7)' "$ST/cards.jsonl" > "$ST/cards.new" && mv -f "$ST/cards.new" "$ST/cards.jsonl"
-  out=$(loop snapshot) || fail "snapshot exited non-zero after the retry"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero after the retry"
   [ "$(jq -c '.declined[] | select(.finding | startswith("[P2] a.txt:2 the same nit")) | [.round, .findings]' <<<"$out")" = "$want" ] \
     || fail "a retried card's declined line lost its review round and findings: $(jq -c '.declined' <<<"$out")"
 }
@@ -416,7 +416,7 @@ t_judgesnapshot() {
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   echo 'exit 1' > "$STUB/judge-cmd"
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[] | select(.issue == 7) | .rounds | map(.judge)' <<<"$out")" = '[{"ran":true,"accepted":1,"declined":2,"go":false},{"ran":true,"accepted":0,"declined":1,"go":true}]' ] \
     || fail "#7's reviews do not give one accepted and two declined, then a GO the judge made: $(jq -c '.landed[] | select(.issue == 7) | .rounds' <<<"$out")"
   [ "$(jq -c '.landed[] | select(.issue == 8) | .rounds | map(.judge | [.ran, (.why | test("^the judge call failed")), .why])' <<<"$out")" = '[[false,true,"'"$(rev 8 '.judge.failed // empty')"'"],[false,false,"the review had no finding"]]' ] \
@@ -431,7 +431,7 @@ t_judgesnapshot() {
     jq -cn --arg s "${s%%:*}" --arg r "$([ "$s" = review:GO ] && echo GO || echo ok)" --arg t "$now" \
       '{card: "c9", issue: 9, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: (if $s == "landed" then "abc" else "" end), reason: "", title: "T9", product: false}' >> "$ST/cards.jsonl"
   done
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.landed[] | select(.issue | IN(7, 8, 9)) | [.issue, .fixes]] | sort' <<<"$out")" = '[[7,1],[8,1],[9,1]]' ] \
     || fail "a landed card's fixes are not its fix rounds: $(jq -c '[.landed[] | [.issue, .fixes, (.rounds | map(.fixed))]]' <<<"$out")"
 }

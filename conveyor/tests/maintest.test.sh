@@ -72,13 +72,13 @@ t_maintestneeds() {
   maintest_failed
   # The Board's Needs you reads it from the snapshot, while its issue is open (the filed issues are listed open).
   touch "$STUB/list-filed"
-  [ "$(loop snapshot | jq -c '.mainTest | [.issue, .cases, .to, .since]')" = "[100101,[\"alpha\",\"beta\"],\"$B\",\"$(jq -rn --argjson t $((T0 + 3600)) '$t | todate')\"]" ] \
-    || fail "the snapshot does not carry the failure: $(loop snapshot | jq -c .mainTest)"
+  [ "$(loop snapshot --fresh | jq -c '.mainTest | [.issue, .cases, .to, .since]')" = "[100101,[\"alpha\",\"beta\"],\"$B\",\"$(jq -rn --argjson t $((T0 + 3600)) '$t | todate')\"]" ] \
+    || fail "the snapshot does not carry the failure: $(loop snapshot --fresh | jq -c .mainTest)"
   # Its issue closed with no pass since, or a pack that no longer names a whole test (nothing runs to clear it):
   # Needs you no longer asks the owner about it.
-  rm "$STUB/list-filed"; [ "$(loop snapshot | jq -c .mainTest)" = null ] || fail "the snapshot names a failure whose issue is closed: $(loop snapshot | jq -c .mainTest)"
+  rm "$STUB/list-filed"; [ "$(loop snapshot --fresh | jq -c .mainTest)" = null ] || fail "the snapshot names a failure whose issue is closed: $(loop snapshot --fresh | jq -c .mainTest)"
   touch "$STUB/list-filed"; tune 'del(.test.main)'
-  [ "$(loop snapshot | jq -c .mainTest)" = null ] || fail "the snapshot names a failure with no test.main in the pack: $(loop snapshot | jq -c .mainTest)"
+  [ "$(loop snapshot --fresh | jq -c .mainTest)" = null ] || fail "the snapshot names a failure with no test.main in the pack: $(loop snapshot --fresh | jq -c .mainTest)"
 }
 # From the failure t_maintest ends on: the same cases fail again, then other cases, then the first again
 # (t_maintestagain); a pass clears it (t_maintestclear).
@@ -110,7 +110,7 @@ t_maintestclear() {
   # A pass clears it: Needs you no longer lists it, and the next failure's commits are counted from here.
   echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"' > "$STUB/main-cmd"
   E=$(move "move e"); mt $((T0 + 7200))
-  [ "$(rec '[.pass, .fail]')" = "[\"$E\",null]" ] && [ "$(loop snapshot | jq -c .mainTest)" = null ] || fail "a pass did not clear the failure: $(rec .)"
+  [ "$(rec '[.pass, .fail]')" = "[\"$E\",null]" ] && [ "$(loop snapshot --fresh | jq -c .mainTest)" = null ] || fail "a pass did not clear the failure: $(rec .)"
 }
 # A try that tested nothing, or whose failure reached no one, is tried again: from a pass at A.
 t_maintestretry() {

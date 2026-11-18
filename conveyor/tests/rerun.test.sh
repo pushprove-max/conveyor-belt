@@ -115,14 +115,14 @@ t_rerunpass() {
   st 'select(.step == "landed") | .step' | grep -q landed || fail "the card did not land"
   loop check || fail "the record check refuses a test line with its first run"
   # The Board draws the card's Test step and its tests bar from these: each says it passed on re-run.
-  [ "$(loop snapshot | jq -c '.landed[0].track | [.steps[3].rerun, [.records[] | select(.name == "tests passed") | .rerun]]')" = '[true,[true]]' ] \
-    || fail "the card's track does not say its tests passed on re-run: $(loop snapshot | jq -c '.landed[0].track | [.steps, .records]')"
+  [ "$(loop snapshot --fresh | jq -c '.landed[0].track | [.steps[3].rerun, [.records[] | select(.name == "tests passed") | .rerun]]')" = '[true,[true]]' ] \
+    || fail "the card's track does not say its tests passed on re-run: $(loop snapshot --fresh | jq -c '.landed[0].track | [.steps, .records]')"
   # Bug: a later line that reused that pass (card(): reused, as after giving way) drew the Test step as a plain pass.
   jq -c 'if .step == "test" then ., (del(.rerun, .reason) + {reason: "", reused: true}) else . end' "$ST/cards.jsonl" > "$STUB/cards.new" \
     && mv "$STUB/cards.new" "$ST/cards.jsonl"
   [ "$(st 'select(.step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] || fail "the reused pass line was not added: $(st 'select(.step == "test")')"
-  [ "$(loop snapshot | jq -c '.landed[0].track.steps[3].rerun')" = true ] \
-    || fail "a pass reused after a pass on re-run erased it from the card's Test step: $(loop snapshot | jq -c '.landed[0].track.steps[3]')"
+  [ "$(loop snapshot --fresh | jq -c '.landed[0].track.steps[3].rerun')" = true ] \
+    || fail "a pass reused after a pass on re-run erased it from the card's Test step: $(loop snapshot --fresh | jq -c '.landed[0].track.steps[3]')"
 }
 
 # A case that fails again on its run again goes to its fix session, as before. The fix edits only the file under test,
@@ -155,8 +155,8 @@ t_rerunfail() {
   # Its test line says how many cases ran (3) and how many passes were kept from the run before (c.test's three).
   [ "$(tline 2 '.selected | [.cases, .kept] | tojson')" = '[3,1]' ] || fail "the test line after the fix does not say what ran and what was kept: $(tline 2 .selected)"
   [ "$(tline 2 '.rerun // "none"')" = none ] || fail "a run that passed first time says it was run again: $(tline 2 tojson)"
-  [ "$(loop snapshot | jq -c '.landed[0].track | [.steps[3].rerun, [.records[] | select(.name == "tests passed") | .rerun]]')" = '[null,[null]]' ] \
-    || fail "a card whose last run passed first time is drawn as passed on re-run: $(loop snapshot | jq -c '.landed[0].track.steps')"
+  [ "$(loop snapshot --fresh | jq -c '.landed[0].track | [.steps[3].rerun, [.records[] | select(.name == "tests passed") | .rerun]]')" = '[null,[null]]' ] \
+    || fail "a card whose last run passed first time is drawn as passed on re-run: $(loop snapshot --fresh | jq -c '.landed[0].track.steps')"
 }
 
 # A run killed part-way (its time ran out in b.test) runs again only what had not passed: the file it was in and the

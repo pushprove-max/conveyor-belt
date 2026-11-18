@@ -21,16 +21,16 @@ t_modelcache() {
     > "$CODEX_HOME/models_cache.json"
   # The seeded record's reviewer, x, is named alone and listed by no CLI here: the reviewer runs on its default.
   tune 'del(.models.allowed)'
-  out=$(loop snapshot | jq -c '.modelSettings.reviewer | [.clis.codex.models, .allowed.codex, .choices, .model]')
+  out=$(loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.clis.codex.models, .allowed.codex, .choices, .model]')
   [ "$out" = '[["gpt-9-new","gpt-6.1-sol"],["gpt-9-new","gpt-6.1-sol"],["gpt-9-new","gpt-6.1-sol","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"],"gpt-9-new"]' ] \
     || fail "a pack with no models.allowed does not offer the reviewer the models Codex's cache lists, with the first as its default: $out"
   # Codex not installed: it reports no model, so none is offered and the reviewer's default is Claude's. Bug: the
   # owner had to take the Codex models out of the pack by hand.
   local d np=''; for d in ${PATH//:/ }; do [ -x "$d/codex" ] || np+=$d:; done
-  out=$(PATH=${np%:} loop snapshot | jq -c '.modelSettings.reviewer | [.allowed.codex, .model, .agent]')
+  out=$(PATH=${np%:} loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.allowed.codex, .model, .agent]')
   [ "$out" = '[[],"claude-opus-5-5","claude"]' ] || fail "with no Codex installed, a pack with no models.allowed still offers Codex models: $out"
   tune '.models.allowed = {claude: ["m"], codex: ["x"], "claude-reviewer": []}'
-  out=$(loop snapshot | jq -c '.modelSettings.reviewer | [.clis.codex.models, .allowed.codex, .model]')
+  out=$(loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.clis.codex.models, .allowed.codex, .model]')
   [ "$out" = '[["gpt-9-new","gpt-6.1-sol"],["x"],"x"]' ] || fail "a pack's own models.allowed is not the list in force: $out"
 }
 

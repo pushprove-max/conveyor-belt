@@ -52,7 +52,7 @@ t_dwland() {
   grep -q "^# The card's Done-when lines$" "$STUB/asked" && grep -qx 'D1 met: lib/t.test.sh case one passes' "$STUB/asked" \
     && grep -qx 'D2 met: a.txt:2 holds the second thing' "$STUB/asked" || fail "the reviewer was not given the D<n> lines: $(cat "$STUB/asked")"
   # The Board's card detail reads the last check from the snapshot: Landed today carries it.
-  snap=$(loop snapshot) || fail "snapshot exited non-zero"
+  snap=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[] | select(.issue == 7) | .doneWhen' <<<"$snap")" = '{"items":2,"met":2,"failed":[]}' ] \
     || fail "the snapshot does not carry the landed card's Done-when check: $(jq -c '.landed | map({issue, doneWhen})' <<<"$snap")"
   # #305. Bugs: the Board's Done-when detail (each item's text, the build's D<n> line, the review's answer) is not kept,
@@ -122,7 +122,7 @@ t_dwblock() {
     && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^the Done-when check failed again after its one fix session: D2: no `D2 met:`' \
     || fail "a second failure did not block #9 with the item named, before any review: $(st 'select(.issue == 9)')"
   # The Board's card detail reads the last check from the snapshot: Needs you carries it.
-  snap=$(loop snapshot) || fail "snapshot exited non-zero"
+  snap=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.needsYou.blocked[] | select(.issue == 9) | .doneWhen | [.items, .met, (.failed | length)]' <<<"$snap")" = '[2,1,1]' ] \
     || fail "the snapshot does not carry the blocked card's Done-when check: $(jq -c '.needsYou.blocked | map({issue, doneWhen})' <<<"$snap")"
 }

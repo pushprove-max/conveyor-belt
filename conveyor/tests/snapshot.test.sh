@@ -16,12 +16,12 @@ t_snapslots() {
   export XDG_CONFIG_HOME=$T/$CASE/config
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 2, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
   setup "[]"
-  [ "$(loop snapshot | jq -c .testSlots)" = '{"used":0,"of":2}' ] || fail "with no slot held: $(loop snapshot | jq -c .testSlots)"
+  [ "$(loop snapshot --fresh | jq -c .testSlots)" = '{"used":0,"of":2}' ] || fail "with no slot held: $(loop snapshot --fresh | jq -c .testSlots)"
   # A test run holds slot 1, as slot_try takes it: a lock on its file.
   exec {f}>>"$T/$CASE/slots/1"; flock -n "$f" || fail "slot 1 could not be taken"
-  [ "$(loop snapshot | jq -c .testSlots)" = '{"used":1,"of":2}' ] || fail "with slot 1 held: $(loop snapshot | jq -c .testSlots)"
+  [ "$(loop snapshot --fresh | jq -c .testSlots)" = '{"used":1,"of":2}' ] || fail "with slot 1 held: $(loop snapshot --fresh | jq -c .testSlots)"
   exec {f}>&-
-  [ "$(loop snapshot | jq -c .testSlots)" = '{"used":0,"of":2}' ] || fail "once slot 1 was given back: $(loop snapshot | jq -c .testSlots)"
+  [ "$(loop snapshot --fresh | jq -c .testSlots)" = '{"used":0,"of":2}' ] || fail "once slot 1 was given back: $(loop snapshot --fresh | jq -c .testSlots)"
 }
 
 # Bug (#359): `foreman status` failed with "FileNotFoundError: .../T/tmp.XXXXXXXXXX/cardruns.jq" while the loop worked.
@@ -87,15 +87,15 @@ t_snapproof() {
   mkdir -p "$T/$CASE/cards/mainrun"
   echo '{"step": "test", "at": "2026-11-17T10:06:00Z", "last": null, "turns": 0, "files": {"run": 297, "of": 1161}, "tests": null}' \
     > "$T/$CASE/cards/mainrun/$c.unfixed.live"
-  s=$(loop snapshot | jq -c '.belt[0] | [.step, .review, .model, .track.label, .track.at, .track.detailAt, .track.files, .track.since]')
+  s=$(loop snapshot --fresh | jq -c '.belt[0] | [.step, .review, .model, .track.label, .track.at, .track.detailAt, .track.files, .track.since]')
   [ "$s" = '["proof",null,null,"proof run",0,5,{"run":297,"of":1161},"2026-11-17T10:06:00Z"]' ] || fail "a card in its proof run: $s"
   # While it waits for a test slot (testrun.sh writes that action, no file run), the belt says so, not that tests run.
   echo '{"step": "test", "at": "2026-11-17T10:06:00Z", "last": null, "turns": 0, "files": {"run": 0, "of": null}, "tests": null, "action": "waiting for a test slot (2 of 2 in use)"}' \
     > "$T/$CASE/cards/mainrun/$c.unfixed.live"
-  s=$(loop snapshot | jq -c '.belt[0] | [.step, .live.action]')
+  s=$(loop snapshot --fresh | jq -c '.belt[0] | [.step, .live.action]')
   [ "$s" = '["proof","waiting for a test slot (2 of 2 in use)"]' ] || fail "a proof run waiting for a test slot: $s"
   snapproof_line start ok 30 '{"of": "review"}' >> "$ST/cards.jsonl"
-  s=$(loop snapshot | jq -c '.belt[0] | [.step, .review, .track.label, .track.files]')
+  s=$(loop snapshot --fresh | jq -c '.belt[0] | [.step, .review, .track.label, .track.files]')
   [ "$s" = '["review",1,"review 1 of 3",null]' ] || fail "a proof record left behind is shown over the review: $s"
 }
 
@@ -117,14 +117,14 @@ t_snapfixlive() {
   { snapfixlive_go "$a"; snapfixlive_line "$a" start ok 10:30 '{"of": "test"}'; } > "$ST/cards.jsonl"
   mkdir -p "$T/$CASE/cards"
   echo '{"step": "test", "at": "2026-11-17T10:30:07Z", "last": null, "turns": 0, "files": {"run": 4, "of": 6}, "tests": null}' > "$T/$CASE/cards/$a.live"
-  s=$(loop snapshot | jq -c --arg a "$a" '.belt[] | select(.card == $a) | [.step, .stepAt, .track.since, .track.files]')
+  s=$(loop snapshot --fresh | jq -c --arg a "$a" '.belt[] | select(.card == $a) | [.step, .stepAt, .track.since, .track.files]')
   [ "$s" = '["tests","2026-11-17T10:30:07Z","2026-11-17T10:30:07Z",{"run":4,"of":6}]' ] || fail "a test run after a GO: $s"
   # Its test run failed and its fix runs; card b's session fits it onto main after its GO, with no test run.
   { snapfixlive_line "$a" test fail 11:13; snapfixlive_line "$a" start ok 11:14 '{"of": "fix"}'
     snapfixlive_go "$b"; snapfixlive_line "$b" start ok 10:41 '{"of": "fix"}'; } >> "$ST/cards.jsonl"
   echo '{"step": "fix", "at": "2026-11-17T11:14:11Z", "last": null, "turns": 2, "model": "claude-x"}' > "$T/$CASE/cards/$a.live"
   echo '{"step": "fix", "at": "2026-11-17T10:41:05Z", "last": null, "turns": 1, "model": "claude-x"}' > "$T/$CASE/cards/$b.live"
-  s=$(loop snapshot | jq -c '[.belt[] | [.card[-1:], .step, .stepAt, .track.since, .review]]')
+  s=$(loop snapshot --fresh | jq -c '[.belt[] | [.card[-1:], .step, .stepAt, .track.since, .review]]')
   [ "$s" = '[["8","fix","2026-11-17T11:14:11Z","2026-11-17T11:14:11Z",null],["9","fix","2026-11-17T10:41:05Z","2026-11-17T10:41:05Z",null]]' ] \
     || fail "a fix after failed tests, and one that fits a card onto main after its GO: $s"
 }

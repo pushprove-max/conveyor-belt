@@ -685,6 +685,9 @@ still be raised, at any level. Do not review the rest of the change again: it pa
 # another repository (as "owner/repo#N"; nothing reaches past them, so no cycle goes through one); graph each open issue's
 # open ones (through the follow-ups too), reach every open issue it waits on, through the chain, and cycles($cards)
 # every set of open issues that wait on each other, through the follow-ups as well (an issue that depends on itself is one).
+# waitsof($fc; $open; $done) is waits with what it reads of the lines worked out once for every issue: $fc the lines
+# that name follow-ups, $done landed($cards); graph reads it so, and cyclesof($g) is cycles of a graph made already.
+# Worked out again for each open issue, they were most of a snapshot's time on a long history.
 # shellcheck disable=SC2034 # used in lib/issues.sh, lib/pick.sh, lib/run.sh, lib/snapshot.sh, lib/views.sh and lib/control.sh
 DEPS='def deprefs: [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("(?:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))?#([0-9]+)")];
   def needs: [deprefs[] | select((.[0] // "") == "") | .[1] | tonumber] | unique;
@@ -696,12 +699,15 @@ DEPS='def deprefs: [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on
         elif .[$k].seen // [] | any(. == $l.card) then .
         else .[$k] = {card: $l.card, done: $d, seen: ((.[$k].seen // []) + [$l.card])} end)
     | [to_entries[] | select(.value.done) | .key | tonumber];
-  def waits($cards; $open): landed($cards) as $done | [ups($cards; needs)[] | select(IN($open[]) and (IN($done[]) | not))] + [farneeds[] as $r | select(.far[$r].open != false) | $r];
-  def graph($cards): map(.number) as $open | map({key: (.number | tostring), value: waits($cards; $open)}) | from_entries;
+  def waitsof($fc; $open; $done): [ups($fc; needs)[] | select(IN($open[]) and (IN($done[]) | not))] + [farneeds[] as $r | select(.far[$r].open != false) | $r];
+  def waits($cards; $open): waitsof($cards; $open; landed($cards));
+  def graph($cards): map(.number) as $open | landed($cards) as $done | ($cards | map(select(.followups))) as $fc
+    | map({key: (.number | tostring), value: waitsof($fc; $open; $done)}) | from_entries;
   def reach($g; $n): {seen: [], todo: ($g[$n | tostring] // [])}
     | until(.todo == []; .todo[0] as $x | .todo |= .[1:] | if .seen | any(. == $x) then . else .seen += [$x] | .todo += ($g[$x | tostring] // []) end) | .seen;
-  def cycles($cards): graph($cards) as $g | ($g | keys | map({key: ., value: reach($g; tonumber)}) | from_entries) as $r
+  def cyclesof($g): ($g | keys | map({key: ., value: reach($g; tonumber)}) | from_entries) as $r
     | [$r | to_entries[] | (.key | tonumber) as $n | select(.value | any(. == $n))
-       | [.value[] | select(. as $m | $r[$m | tostring] // [] | any(. == $n))] | sort] | unique;'
+       | [.value[] | select(. as $m | $r[$m | tostring] // [] | any(. == $n))] | sort] | unique;
+  def cycles($cards): cyclesof(graph($cards));'
 # YES (names(), above) is how the reason of a card blocked for the owner's yes to a visible change begins; the
 # reviewer's sentence follows it.

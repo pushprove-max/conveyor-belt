@@ -25,7 +25,7 @@ t_snapexec() {
     | {card: "c\($i)", issue: $i, step: .value, time: (1767225600 + $i * 100 + .key | todate), tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}
       + {picked: {title: "card \($i)", branch: "b\($i)"}, review: {result: "GO"}, test: {result: "pass", sec: 60}, landed: {sha: "abc\($i)", product: false}}[.value] // {}' > "$ST/cards.jsonl"
   # The first snapshot makes the kept summaries; the one counted is a Board's next.
-  loop snapshot > /dev/null || fail "the first snapshot exited non-zero"
+  loop snapshot --fresh > /dev/null || fail "the first snapshot exited non-zero"
   mkdir -p "$shim"; local IFS=:
   for d in $PATH; do
     for f in "$d"/*; do
@@ -47,7 +47,7 @@ t_snapexec() {
     done
   fi
   find "$root" -type f -exec chmod +x {} +
-  out=$(PATH=$shim loop snapshot) || fail "the snapshot under the shim exited non-zero"
+  out=$(PATH=$shim loop snapshot --fresh) || fail "the snapshot under the shim exited non-zero"
   [ "$(jq -c '[.belt[].card]' <<<"$out")" = '["c3"]' ] || fail "the snapshot under the shim is not the fixture's: $(jq -c .belt <<<"$out")"
   n=$(wc -l < "$log")
   [ "$n" -lt "$SNAPEXEC_WAS" ] || fail "one snapshot started $n programs, not fewer than the $SNAPEXEC_WAS before issue 2: $(sort "$log" | uniq -c | sort -rn | head -n 12 | tr -s ' \n' ' ')"

@@ -40,7 +40,7 @@ t_fail() {
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] || fail "main moved after a failed step"
   # Bug: these cards are off the belt, and nothing showed the step each failed in or how long it ran. From
   # the lines the loop itself wrote: the build that hung ran its second, and a failed review is the review's step.
-  out=$(loop snapshot) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.needsYou.blocked[] | [.issue, (.track.detail | map(select(.state == "failed") | .name) | join(","))]] | sort' <<<"$out")" = '[[7,"building"],[8,"building"],[9,"review 1"],[10,"review 1"]]' ] \
     && [ "$(jq -c '[.needsYou.blocked[] | select(.issue == 8 or .issue == 10) | .track.detail[] | select(.state == "failed") | .sec >= 1] | all' <<<"$out")" = true ] \
     && [ "$(jq -c '[.needsYou.blocked[] | [.issue, (.track.steps | map(select(.state == "failed") | .name) | join(","))]] | sort' <<<"$out")" = '[[7,"Build"],[8,"Build"],[9,"Review"],[10,"Review"]]' ] \
@@ -67,7 +67,7 @@ t_reviewretry() {
     && [ "$(st 'select(.issue == 8 and .step == "blocked") | .tail | split("\n") | last')" = 70 ] \
     || fail "two failed reviews did not block with both reasons and the second's output: $(st 'select(.issue == 8)')"
   [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] && loop check \
-    && [ "$(loop snapshot | jq -c '[.needsYou.blocked[] | select(.issue == 8) | .track.detail[] | select(.state == "failed") | .name]')" = '["review 1"]' ] \
+    && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[] | select(.issue == 8) | .track.detail[] | select(.state == "failed") | .name]')" = '["review 1"]' ] \
     || fail "a card that failed its review twice is not shown failed at review 1 with both attempts: $(st 'select(.issue == 8 and .step == "blocked")')"
   # An answer with no verdict, the reviewer's exit clean, is no verdict too: it runs once more.
   echo "[$(issue 11 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; rm "$STUB/review-cmd"; echo 'Review interrupted' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"

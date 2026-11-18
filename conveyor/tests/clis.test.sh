@@ -53,19 +53,19 @@ t_clislist() {
   clisetup "[$(issue 7 2026-01-01)]"
   export PATH; PATH=$(on claude codex opencode)
   [ ! -e "$ST/clis.json" ] || fail "the case did not start with no host's report"
-  out=$(loop snapshot | jq -c --slurpfile p "$R/.conveyor/project.json" '.modelSettings | [.builder.clis, .reviewer.clis.opencode, .judge.clis],
+  out=$(loop snapshot --fresh | jq -c --slurpfile p "$R/.conveyor/project.json" '.modelSettings | [.builder.clis, .reviewer.clis.opencode, .judge.clis],
     [.builder.allowed.claude == $p[0].models.allowed.claude, (.builder.allowed.claude | length > 0), (.judge.allowed | has("codex"))]') || fail "snapshot exited non-zero"
   [ "$(sed -n 1p <<<"$out")" = '[{"claude":{"models":null,"efforts":["low","medium","high","xhigh","max"]},"codex":{"models":["gpt-a","gpt-b"],"efforts":["minimal","low","medium","high","xhigh"]},"opencode":{"models":["prov/m-1","other/vendor/m-2"],"efforts":[]}},{"models":["prov/m-1","other/vendor/m-2"],"efforts":["minimal","low","medium","high","xhigh","max"]},{"claude":{"models":null,"efforts":["low","medium","high","xhigh","max"]},"codex":{"models":["gpt-a","gpt-b"],"efforts":["minimal","low","medium","high","xhigh"]},"opencode":{"models":["prov/m-1","other/vendor/m-2"],"efforts":["minimal","low","medium","high","xhigh","max"]}}]' ] \
     || fail "a snapshot on a host with no report does not offer each seat the installed CLIs and the models they list (the judge the reviewer's Codex too): $out"
   [ "$(sed -n 2p <<<"$out")" = '[true,true,true]' ] || fail "the seats are not given the pack's models by CLI, or the judge is not offered the reviewer's: $out"
   [ "$(jq -c .clis.codex "$ST/clis.json" 2>/dev/null)" = '["gpt-a","gpt-b"]' ] || fail "the snapshot did not keep the host's report: $(cat "$ST/clis.json" 2>&1)"
   rm "$STUB/codex-models"
-  out=$(PATH=$(on claude codex) loop snapshot | jq -c '[.modelSettings.builder.clis | keys, .codex.models] + [.modelSettings.judge.clis | keys]')
+  out=$(PATH=$(on claude codex) loop snapshot --fresh | jq -c '[.modelSettings.builder.clis | keys, .codex.models] + [.modelSettings.judge.clis | keys]')
   [ "$out" = '[["claude","codex"],["gpt-a","gpt-b"],["claude","codex"]]' ] \
     || fail "OpenCode, no longer on PATH, is still offered, or a snapshot with a young report ran Codex: $out"
   echo '{"models":[{"slug":"gpt-c","visibility":"list"}]}' > "$STUB/codex-models"
   jq -c '.at = 0' "$ST/clis.json" > "$ST/clis.old" && mv "$ST/clis.old" "$ST/clis.json" || fail "the host's report was not aged"
-  out=$(loop snapshot | jq -c .modelSettings.reviewer.clis.codex.models) || fail "snapshot exited non-zero"
+  out=$(loop snapshot --fresh | jq -c .modelSettings.reviewer.clis.codex.models) || fail "snapshot exited non-zero"
   [ "$out" = '["gpt-c"]' ] || fail "a snapshot with a report CLI_TTL old did not read Codex's models again: $out"
   echo '{"models":[{"slug":"gpt-a","visibility":"list"},{"slug":"gpt-hidden","visibility":"hide"}]}' > "$STUB/codex-models"
   [ "$(loop clis)" = '{"claude":null,"codex":["gpt-a"],"opencode":["prov/m-1","other/vendor/m-2"]}' ] \
@@ -97,14 +97,14 @@ t_clisseat() {
   out=$(PATH=$(on claude codex) loop run --only 8 2>&1) && fail "a run with the reviewer's CLI gone exited zero"
   grep -q 'the reviewer is set to opencode prov/m-1, and opencode is not installed on this host (not on PATH): the reviewer does not start' <<<"$out" \
     && [ -z "$(st 'select(.issue == 8)')" ] && [ ! -e "$STUB/opencode-ran" ] || fail "a reviewer whose CLI is gone started, or the loop did not say why: $out"
-  [ "$(PATH=$(on claude codex) loop snapshot | jq -r .modelSettings.reviewer.missing)" = 'opencode is not installed on this host (not on PATH)' ] \
-    || fail "the Board is not told the reviewer's CLI is gone: $(PATH=$(on claude codex) loop snapshot | jq -c .modelSettings.reviewer)"
+  [ "$(PATH=$(on claude codex) loop snapshot --fresh | jq -r .modelSettings.reviewer.missing)" = 'opencode is not installed on this host (not on PATH)' ] \
+    || fail "the Board is not told the reviewer's CLI is gone: $(PATH=$(on claude codex) loop snapshot --fresh | jq -c .modelSettings.reviewer)"
   # A model Codex does not list, once the report is read again: no reason the seat cannot start (#441: a typed name is
   # given to the CLI, and fails in the card when the CLI cannot run it). Bug: the Board marked it as one that cannot
   # start, and the loop started no card on it, so a model typed under Other… could never run.
   loop control model codex gpt-a medium >/dev/null && loop control reviewer claude claude-opus-5-5 >/dev/null || fail "the seats were not set"
   echo '{"models":[{"slug":"gpt-b","visibility":"list"}]}' > "$STUB/codex-models"
   jq -c '.at = 0' "$ST/clis.json" > "$ST/clis.old" && mv "$ST/clis.old" "$ST/clis.json" || fail "the host's report was not aged"
-  out=$(loop snapshot | jq -c '[.modelSettings.builder.clis.codex.models, .modelSettings.builder.missing]')
+  out=$(loop snapshot --fresh | jq -c '[.modelSettings.builder.clis.codex.models, .modelSettings.builder.missing]')
   [ "$out" = '[["gpt-b"],null]' ] || fail "a builder set to a model Codex does not list is marked as one that cannot start: $out"
 }

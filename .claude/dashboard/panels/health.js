@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: repoUrl (its repository's https address, else null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
+// record: repoUrl (its repository's https address, else null), snapshotAt (when its kept snapshot was made, or null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -29,6 +29,9 @@ window.DASH_APP.panel({
   error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read Health', message)); },
   render(el, d, ctx) {
     const h = ctx.h, rows = [];
+    // When the first kept snapshot shown as new turns a minute old: tick draws the panel again then (an equal part
+    // that comes again draws nothing).
+    let snapOldAt = Infinity;
     // A row: its label, its chip and what it says; next is what to do when it is failing (a row that is fine says none).
     // A row's output ({ tail } in its detail) is drawn here, given the row's "Show output" of the draw before (known by
     // its label), so that one keeps its place: the same node with the same output, else its scroll (ctx.output).
@@ -106,6 +109,12 @@ window.DASH_APP.panel({
       const loop = check(`Conveyor${of}`, r.loop ? ctx.chip('Running', 'ok') : off ? ctx.chip('Off', 'quiet') : ctx.chip('Stopped', 'bad'), off ? 'not meant to run' : null,
         r.newest ? 'last step recorded' : 'no step recorded', r.newest ? ctx.since(r.newest, ' ago') : null);
       if (!r.loop && !off) loop.next = `Start Conveyor again on ${ctx.machine}: its machine command starts every project.`;
+      // The kept snapshot this view is read from (conveyor.sh snapshot), shown only when it is over a minute old.
+      const snapAt = typeof r.snapshotAt === 'string' ? Date.parse(r.snapshotAt) : NaN;
+      if (!Number.isNaN(snapAt) && Date.now() - snapAt > 60000) {
+        check(`Snapshot${of}`, ctx.chip('Old', 'warn'), 'made', ctx.since(r.snapshotAt, ' ago')).next =
+          `Conveyor makes a new snapshot after each change. If it stays old, run conveyor.sh snapshot --fresh in the project's checkout on ${ctx.machine}: it says why the snapshot cannot be made.`;
+      } else if (!Number.isNaN(snapAt)) snapOldAt = Math.min(snapOldAt, snapAt + 60000);
       // The machine's Conveyor runs an older commit, whose check refuses this project's pack: it does not run the project.
       const so = r.serviceOld;
       if (so && typeof so === 'object' && typeof so.commit === 'string') {
@@ -386,6 +395,8 @@ window.DASH_APP.panel({
     }
     out.push(healthWorkView(ctx));
     el.replaceChildren(...out);
+    if (Number.isFinite(snapOldAt)) el.dataset.snapOldAt = String(snapOldAt);
+    else delete el.dataset.snapOldAt;
   },
   tick(el, ctx) {
     // A Live whose stream has not been written to in time turns into its age, with no new data to say so; a row that
@@ -397,6 +408,8 @@ window.DASH_APP.panel({
         if (dd.closest('.checks-fine') && healthRank(dd) < 2) moved = true;
       }
     });
+    // A kept snapshot shown as new that is now over a minute old: the panel is drawn again, with its Snapshot row.
+    if (el.dataset.snapOldAt && Date.now() > Number(el.dataset.snapOldAt)) moved = true;
     if (moved) { ctx.redraw(); return; }
     el.querySelectorAll('[data-age-from]').forEach((n) => {
       const text = healthAge(n.dataset.ageFrom, ctx);

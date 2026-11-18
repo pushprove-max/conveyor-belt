@@ -34,8 +34,8 @@ t_mainred() {
   wait_until "[ -e '$T/$CASE/cards/$c.idle' ]" || fail "the card waiting for main did not mark itself waiting: the loop would count it against the cap"
   # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher
   # times its wake from; without it the wait never wakes the Foreman.
-  [ "$(loop snapshot 2>/dev/null | jq -r --arg c "$c" '.belt[] | select(.card == $c) | .live.at')" = "$(jq -r .at "$T/$CASE/cards/$c.live")" ] \
-    || fail "the snapshot does not give when the wait for main began: $(loop snapshot 2>/dev/null | jq -c --arg c "$c" '.belt[] | select(.card == $c) | .live')"
+  [ "$(loop snapshot --fresh 2>/dev/null | jq -r --arg c "$c" '.belt[] | select(.card == $c) | .live.at')" = "$(jq -r .at "$T/$CASE/cards/$c.live")" ] \
+    || fail "the snapshot does not give when the wait for main began: $(loop snapshot --fresh 2>/dev/null | jq -c --arg c "$c" '.belt[] | select(.card == $c) | .live')"
   [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:c.test|fail:b.test:flaky|" ] && [ "$(ran main)" = "flaky three" ] \
     || fail "main's run was not told to run the failing case alone and the file that failed naming no case whole: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
   [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "[\"fail\",[{\"case\":\"c.test\",\"verdict\":\"main\"},{\"case\":\"b.test: flaky\",\"verdict\":\"main\"}],\"$(git -C "$R" rev-parse HEAD)\"]" ] \
@@ -68,8 +68,8 @@ t_mainred() {
   # stub's runs take under a second, so the lines are given those).
   jq -cn '[inputs] | (map(.step == "test" and .mainRun != null) | indices(true)) as $i | .[$i[0]].mainRun.sec = 7 | .[$i[1]].mainRun.sec = 5 | .[]' \
     "$ST/cards.jsonl" > "$STUB/cards.new" && mv "$STUB/cards.new" "$ST/cards.jsonl"
-  [ "$(loop snapshot | jq -c '.metrics.today.testFailures')" = '{"card":0,"main":4,"flaky":0,"mainSec":12}' ] \
-    || fail "the snapshot's metrics do not count the failures by verdict, with main's seconds: $(loop snapshot | jq -c '.metrics.today.testFailures')"
+  [ "$(loop snapshot --fresh | jq -c '.metrics.today.testFailures')" = '{"card":0,"main":4,"flaky":0,"mainSec":12}' ] \
+    || fail "the snapshot's metrics do not count the failures by verdict, with main's seconds: $(loop snapshot --fresh | jq -c '.metrics.today.testFailures')"
 }
 
 # Issue 582 (#530 tested three times on its old commit, through a fix round that changed nothing, and blocked): main
@@ -311,13 +311,13 @@ t_mainredretry() {
   # A case found on that commit while the card runs is in its title on the Board, not only in its record (its picked
   # line's title names the cases it was picked with).
   eng 'mainred c2 "b.test: flaky" b.test '"$s" || fail "the third case was not taken"
-  [ "$(loop snapshot | jq -c --arg c "$c" '.belt[] | select(.card == $c) | [.issue, .name, .title]')" = '[0,"Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
-    || fail "the snapshot does not show the fix card on the belt with no issue number, its name and every case: $(loop snapshot | jq -c .belt)"
+  [ "$(loop snapshot --fresh | jq -c --arg c "$c" '.belt[] | select(.card == $c) | [.issue, .name, .title]')" = '[0,"Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
+    || fail "the snapshot does not show the fix card on the belt with no issue number, its name and every case: $(loop snapshot --fresh | jq -c .belt)"
   [ "$(loop cards | jq -c --arg c "$c" '.cards[] | select(.card == $c) | [.name, .title]')" = '["Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
     || fail "\`cards\` does not name and title the fix card with every case: $(loop cards | jq -c .cards)"
   eng 'append "$(line '"$c"' 0 blocked ok "{\"reason\":\"build: it failed\"}")"' || fail "the blocked line was not written"
   eng 'declined '"$c"' 0 judge "out of scope" "[P2] a.txt:1 a nit"' || fail "the declined line was not written"
-  out=$(loop snapshot) || fail "no snapshot"
+  out=$(loop snapshot --fresh) || fail "no snapshot"
   [ "$(jq -c --arg c "$c" '.needsYou.blocked[] | select(.card == $c) | [.issue, .name, .title]' <<<"$out")" = '[0,"Main is red ('"${s:0:12}"')","Main is red: a.test: one, c.test, b.test: flaky"]' ] \
     || fail "Needs you does not show the blocked fix card by its name: $(jq -c .needsYou <<<"$out")"
   # Issue 141: its declined line (issue 0) carries its name too, or the Board's Declined panel calls it "#0".

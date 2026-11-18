@@ -9,10 +9,11 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# relcall <command...>: runs the command in main ($R) with the snapshot's engine functions loaded, as `loop snapshot`
+# relcall <command...>: runs the command in main ($R) with the snapshot's engine functions loaded, as `loop snapshot --fresh`
 # has them, so a case calls the one function it proves (suites(), releasemain()) and not the whole snapshot.
 relcall() {
-  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/snapshot.sh")" && names || exit 1
+  # shellcheck source=/dev/null # the snapshot's libraries, by the list snapshot.sh names (SNAPLIBS)
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^SNAPLIBS=' "$SRC/commands/snapshot.sh")" && for l in $SNAPLIBS; do . "$HERE/lib/$l.sh" || exit 1; done && names || exit 1
     cd "$R" && "$@" )
 }
 # relsnap <what> <jq arguments, the test last>: the test holds of the release's entry of the snapshot's suites
@@ -41,7 +42,7 @@ until [ -e "$STUB/go2" ]; do sleep 0.1; done'
   relsnap "the snapshot's cases done do not rise as the suite runs" '.state == "running" and .done == 2'
   : > "$STUB/go2"; wait "$pid" || fail "release-prep failed: $(cat "$T/$CASE.prep")"
   # One whole snapshot, so its suites and release are those suites() and releasemain() give.
-  s=$(loop snapshot) || fail "the snapshot failed: $s"
+  s=$(loop snapshot --fresh) || fail "the snapshot failed: $s"
   jq -e --arg o "$O" '.suites[] | select(.kind == "release") | .state == "passed" and .sha == $o and .done == 2 and .failed == 0 and .ended != null' <<<"$s" > /dev/null \
     || fail "the snapshot does not show the passed run on $O once it ended: $(jq -c .suites <<<"$s")"
   # Bug (issue 34): a release's suite kept no file's result, so the Tests page never showed a whole-suite run.

@@ -83,9 +83,11 @@ olds() { if [ "$READ_OLD" = "$RETRIED" ] && [ -z "${DRYPICK:-}" ]; then stdb ask
 # the whole file when it is missing, has another key, or its bytes are no longer the file's first bytes: `retry`
 # rewrote the file, shorter, or grown past the offset again since. Health, the Tests part and the slow-test list read
 # every line of the records whole on each snapshot, and grew with the history. A file not grown since costs two
-# programs (cksum and cat): the snapshot is read again and again (t_snapexec counts its programs).
+# programs (cksum and cat), and an empty file none (its output is empty; the summary is left as it is): the snapshot
+# is read again and again (t_snapexec counts its programs).
 linesum() { # <records file> <kept> <to> <filter>
   local k r cs size h o s n=0
+  if [ -f "$1" ] && [ ! -s "$1" ]; then : > "$3"; return; fi
   printf -v k '%q' "$4"
   r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
   # One open of the summary, its line and the rest read from it: a reader running beside this one may put a newer
