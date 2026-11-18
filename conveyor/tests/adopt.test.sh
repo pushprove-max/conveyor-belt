@@ -20,9 +20,9 @@ adoptsetup() {
   bash "$D/conveyor/conveyor.sh" install "$A" >/dev/null && bash "$D/conveyor/conveyor.sh" install "$B" >/dev/null || fail "the installs failed"
   tune --arg c "$A" '.plugin.commit = $c'; tune '.tunables += {idle: 1, poll: 1, pushRetry: 600, live: 1}'; loop control cap 4 >/dev/null
   add() { jq -c ". + [$(issue "$1" "$2")]" "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"; } # <issue> <date>
+  watchturns # here, not in adoptserve, so a case can add to the loop's sleep before the loop starts
 }
 adoptserve() {
-  watchturns
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     exec bash "$V/$A/conveyor/conveyor.sh" serve > "$STUB/serve.out" 2>&1 ) & pid=$!
   till() { until eval "$1"; do kill -0 $pid 2>/dev/null || return 1; sleep 0.25; done; } # <condition>: until it holds; 1 if the loop ($pid) ended first
@@ -164,13 +164,16 @@ EOF2
 # picking; after the restart, a ready issue with a free slot waits more than one turn to be picked.
 t_adoptidle() {
   local k
-  adoptsetup '[]'; adoptserve; turns 1; tune --arg c "$B" '.plugin.commit = $c'
+  adoptsetup '[]'
+  # The loop's waits (TURNS) when #11 is made ready, and when it is picked: the turn running then may be past its
+  # pick, so the next one picks it, with one wait between. The pick is counted by the loop's first wait after its
+  # picked record, in the loop's own process: its build starts later, after its worktree and brief, while the loop
+  # takes more turns, and those turns are not the pick's.
+  sleep() { case ${FUNCNAME[1]:-} in run) [ "$1" = 0.1 ] || { [ -e "$STUB/pickedat" ] || ! jq -e 'select(.issue == 11 and .step == "picked")' "$ST/cards.jsonl" >/dev/null 2>&1 || wc -l < "$TURNS" > "$STUB/pickedat"; echo "${CONVEYOR_MAIN:-}" >> "$TURNS"; } ;; esac; command sleep "$@"; } # sleep: the engine's own, passed on as called
+  export -f sleep; adoptserve; turns 1; tune --arg c "$B" '.plugin.commit = $c'
   till 'grep -q "restarting on the new code; 0 cards in flight carry on on $A" "$STUB/serve.out"' || fail "the idle loop did not restart: $(cat "$STUB/serve.out")"
-  # The loop's waits (TURNS) when #11 is made ready, and when its build starts: the turn running then may be past its
-  # pick, so the next one picks it, with one wait between.
-  echo 'wc -l < "$TURNS" > "$STUB/builtat"; echo two >> a.txt' > "$STUB/build"
   k=$(wc -l < "$TURNS"); add 11 2026-01-06; till '[ "$(ends 11)" = landed ]' || fail "the loop restarted with no card in flight did not pick: $(cat "$STUB/serve.out")"
-  [ "$(cat "$STUB/builtat")" -le $((k + 1)) ] || fail "#11 was picked $(( $(cat "$STUB/builtat") - k )) waits after it was ready, past one turn: $(cat "$STUB/serve.out")"
+  [ "$(cat "$STUB/pickedat")" -le $((k + 1)) ] || fail "#11 was picked $(( $(cat "$STUB/pickedat") - k )) waits after it was ready, past one turn: $(cat "$STUB/serve.out")"
   kill -0 $pid 2>/dev/null && ps -o args= -p $pid | grep -qF "$V/$B/conveyor/conveyor.sh serve" || fail "the idle restart is not on $B in its own process"
   out=$(loop serve 2>&1) && fail "a second serve ran beside the loop restarted idle"
   kill $pid; wait $pid 2>/dev/null; return 0
