@@ -3,7 +3,7 @@
 // Auto-file (the switch, the preview, the log, a rule's field). The first part is dashboard-view.tests-actions.test.mjs.
 // Shared setup: dashboard-view.helpers.mjs (TESTS: three files; TA: the snapshot with the actions).
 import assert from 'node:assert/strict';
-import { boot, deliver, settle, act, cases, iso, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, iso, TA, T0 } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { MERGE, X, NO_RULES, rec, snap, opened, open, type, said, auto, reply } = TA;
@@ -94,4 +94,27 @@ test('Tests actions: a rule field shows Unsaved when changed, and Save posts the
   act(rule(), 'rule-limit-save').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testrules', args: ['set', 'over usual', 'limit', '1.5'], repo: 'sample' } }]);
+});
+
+// Bug it guards: a value saved here stood until a snapshot named it, so when another Board saved 4 just after this
+// one's 2, every snapshot said 4 and the field said 2 for good. A snapshot begun before the Save was answered did not
+// read it, and one the live feed republishes with a new time still names the value replaced: neither undoes the Save; one begun
+// after the answer that names another value shows that value.
+test('Tests actions: a saved guard stands against a snapshot begun before the answer or republished, and gives way to one changed elsewhere since', async () => {
+  const w = boot({ tab: 'tests' });
+  const at = (perDay, t) => snap({ rules: { ...TA.RULES, perDay }, at: t });
+  const field = () => act(auto(w), 'guard-perDay-field');
+  deliver(w, at(3, T0));
+  type(field(), '2');
+  w.reply = { ok: true, status: 200, headers: { get: (k) => (k === 'X-Answered-At' ? String(T0 / 1000) : null) }, text: () => Promise.resolve('conveyor: perDay is 2') };
+  act(auto(w), 'guard-perDay-save').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testrules', args: ['guard', 'perDay', '2'], repo: 'sample' } }]);
+  // Begun before the answer (updatedAt T0 - 10 s) and naming 5, not the replaced 3: only the time keeps the Save.
+  next(w, at(5, T0 + 10000));
+  assert.equal(field().value, '2', 'a snapshot begun before the answer did not read the change, whatever value it names');
+  next(w, at(3, T0 + 30000));
+  assert.equal(field().value, '2', 'a republished snapshot still naming the value replaced does not undo the Save');
+  next(w, at(4, T0 + 40000));
+  assert.equal(field().value, '4', 'one begun after it shows the value saved elsewhere since');
 });

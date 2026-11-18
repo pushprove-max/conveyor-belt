@@ -11,7 +11,7 @@ things and nothing else: answer one open decision through `POST /answer`, restar
 `POST /restart`, and steer the Conveyor loop from the Board through `POST /control`: one action of
 `conveyor.sh control`, or the yes, the no or the retry of a card, run on the host conveyor/host.json names (here on one
 machine: conveyor_host()), on the
-record of it the request names (`POST /machine` pauses or resumes the whole machine, or sets its load limit or its
+record of it the request names (`POST /machine` pauses or resumes the whole machine, or sets its
 steer, instead,
 and names no record); and manage
 users (below). Every write is taken from the page's own address only (own_page), and each names the user who made it
@@ -480,18 +480,12 @@ def test_settings_ok(v):
     return False
 
 
-LOAD = re.compile(r'off|[0-9]{1,6}(\.[0-9]{1,3})?')  # a load limit as `conveyor.sh machine load` takes it (it refuses one below 1)
-
-
 def machine_ok(body):
     """Whether the page's body is one machine action POST /machine takes: {action: pause | resume} and nothing else,
-    or {action: load, value: a load limit or off} (the Tests page's Load limit), or {action: steer, value: on | off}
-    (the Rules tab's Card work yields to you), and nothing else. It names no project:
-    an action for a project goes to /control, which refuses one without its repo."""
+    or {action: steer, value: on | off} (the Rules tab's Card work yields to you), and nothing else. It names no
+    project: an action for a project goes to /control, which refuses one without its repo."""
     if not isinstance(body, dict):
         return False
-    if body.get('action') == 'load':
-        return set(body) == {'action', 'value'} and isinstance(body['value'], str) and LOAD.fullmatch(body['value']) is not None
     if body.get('action') == 'steer':  # the Rules tab's Card work yields to you, as `conveyor.sh machine steer` takes it
         return set(body) == {'action', 'value'} and body['value'] in ('on', 'off')
     return set(body) == {'action'} and body['action'] in ('pause', 'resume')

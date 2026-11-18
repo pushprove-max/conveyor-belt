@@ -78,7 +78,6 @@ conveyor.sh lane fast create
 conveyor.sh lane fast review
 conveyor.sh lane research create
 conveyor.sh machine
-conveyor.sh machine load <number | off>
 conveyor.sh machine pause
 conveyor.sh release-prep <version>
 conveyor.sh retry

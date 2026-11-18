@@ -475,9 +475,18 @@ doctortests() { # <jq object>...
 t_doctoruntimed() {
   local X out; doctordone
   doctortests '{}' '{result: "fail"}' '{reused: true, times: null}' '{ended: "nothing selected"}'
-  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times: $out"
+  # Issue 346. Bug caught: a host file that still sets the removed machine room's settings (maxLoad, minFreeMemMB,
+  # pressure) got no word that they no longer do anything, so its owner still thinks they hold cards back. Doctor
+  # says so once, in one line naming each, and still passes. (In this case: doctor's warnings that do not fail it;
+  # the one doctor run checks both warnings.)
+  local H=$XDG_CONFIG_HOME/conveyor/host.json
+  jq '.maxLoad = 2 | .minFreeMemMB = 1000 | .pressure = {strained: {cpu: 1}}' "$H" > "$T/$CASE/h" && mv "$T/$CASE/h" "$H" || fail "the host file was not rewritten"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times or the old machine-room settings: $out"
   grep -qxF 'warning: the last 2 card test runs recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, Test file times, says how to add them' <<<"$out" \
     || fail "doctor did not warn that the last card test runs recorded no test times: $out"
+  [ "$(grep -c 'no longer do anything' <<<"$out")" = 1 ] \
+    && grep -qxF "warning: the host file $H sets maxLoad, minFreeMemMB, pressure, which no longer do anything: no card or test waits for the machine's load, pressure or free memory; remove them" <<<"$out" \
+    || fail "doctor did not say once that the old machine-room settings do nothing: $out"
 }
 # #152. Bug: doctor's warning did not say which runner setup found or which report option gives the times.
 t_doctorreport() {

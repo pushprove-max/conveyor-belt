@@ -104,8 +104,8 @@ t_snapshot() { snapshotstart
     = '"c10 10 T10 landed 10 9 3 [100101,100102] true false, c9 9 T9 landed 06 3 1 [] false true, c13 13 T13 closed 05 3 1 [] false null"' ] || fail "landed: $(q .landed)"
   [ "$(q '.health | [.builderCap, .models, (.waiting | map(.issue)), (.blocked | map(.issue)), (.unpushed | map(.issue)), .loop, .gh, (.diskFreeKb > 0)]')" \
     = '[5,{"claude":"claude-sonnet-5-5","codex":"gpt-6.1-sol"},[7],[8],[10],false,true,true]' ] || fail "health: $(q .health)"
-  # The time, free disk and machine load are read again by each call, and the load moves between them on a busy machine.
-  [ "$(q '.health | del(.time, .diskFreeKb, .machineNow.load)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb, .machineNow.load)')" ] || fail "health is not the health record"
+  # The time and free disk are read again by each call.
+  [ "$(q '.health | del(.time, .diskFreeKb)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb)')" ] || fail "health is not the health record"
   [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[]}' ] || fail "cost: $(q .cost)"
   # Per card, the 7 days: a card landed on an earlier day (11) and the blocked ones (7, 8) are rows; one with no step
   # ended (1, 2) or last worked on before the 7 days (12) is not. The rows add up to the totals.

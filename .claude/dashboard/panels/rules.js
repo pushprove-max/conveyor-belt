@@ -3,7 +3,7 @@
 // area). It is a tab of its own, after Overview and Control, and carries the count
 // of a paused loop, since the pause setting is here. Its one part is drawn as five panels (PANELS): Rules, What these
 // rules produce, Model prices, the held issues and Open issues.
-// Rules: first, one line, where the Machine section was: "Test limits are on the Tests page." (Load limit moved there, #520).
+// Rules: first, one line, where the Machine section was: "Test limits are on the Tests page." (#520).
 // Then one row a rule, each with what it does and its control: Build (P0, P1, P2, P3, Follow-ups), Never build (the
 // labels, each removable, and a field to add one, with the area labels of the open issues to pick from), At once, Pause
 // at (Off, 90%, 95%, 98%, beside the weekly limit's
@@ -1458,7 +1458,7 @@
     return el;
   }
 
-  // Where the Machine section was (#462): one line. Load limit and the other test limits are on the Tests page (#520).
+  // Where the Machine section was (#462): one line. The test limits are on the Tests page (#520).
   function limitsLine() {
     const p = S.ctx.h('p', 'rules-limits', 'Test limits are on the ');
     const a = S.ctx.h('a', null, 'Tests page');

@@ -29,7 +29,7 @@ snaplines_line() {
 # follow-ups and test edits, a failed push, a main-red card, a blocked one, issues that wait on each other (cycles) and
 # a slow file whose issue lands in the appended lines (the slow-test list).
 t_snaplinessame() {
-  local a b h s='a.test.sh' f m='del(.health.diskFreeKb, .health.machineNow, .health.pressure, .health.cores, .testSlots)'
+  local a b h s='a.test.sh' f m='del(.health.diskFreeKb, .health.cores, .testSlots)'
   export TZ=UTC CONVEYOR_NOW=1794918000
   setup "$(jq -cs . <(issue 2 2026-11-01) <(issue 7 2026-11-01 | jq -c '.body = "Depends on: #8"') <(issue 8 2026-11-01 | jq -c '.body = "Depends on: #7"'))"
   f=$(jq -cn --arg s "$s" '{of: 1, files: [{file: $s, cases: [{line: "", name: "one"}]}], timeout: null}')
@@ -81,7 +81,7 @@ t_snaplinessame() {
       and (.tests.edits | map(.file)) == [$s]' <<<"$a" > /dev/null \
     || fail "the snapshot does not show what the records say: $(jq -c --arg s "$s" '{stuck: .health.stuck, unpushed: .health.unpushed, pushError: .health.pushError, refused: .health.refused,
       cycles: .health.cycles, blocked: .health.blocked, slowOff, file: (.tests.files[] | select(.file == $s) | {cpu, caught, failures}), edits: .tests.edits}' <<<"$a")"
-  # The machine's own readings (free disk, load, pressure, cores, test slots) are read anew by each snapshot.
+  # The machine's own readings (free disk, cores, test slots) are read anew by each snapshot.
   [ "$(jq -c "$m" <<<"$a")" = "$(jq -c "$m" <<<"$b")" ] || fail "the snapshot from the summaries differs from the one read from scratch: $(diff <(jq -S "$m" <<<"$a") <(jq -S "$m" <<<"$b") | head -n 20)"
 }
 

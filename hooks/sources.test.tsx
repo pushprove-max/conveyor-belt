@@ -68,65 +68,37 @@ test('/units gives the cards building against the cap and leaves out those waiti
   expect(tableText(s, 56).split('\n')[1]).toMatch(/ 2 on belt · 0 queued$/)
 })
 
-// Issue 195. Bugs it catches: /units did not say the machine held cards back, and a card the machine held back did not
-// say which figure held it. Issue 287: the line is one figure over its limit, not every raw figure, and the held figure
-// was given twice.
-test('/units says what holds new cards on a Strained machine, with the figure over its limit, and the held card says which figure held it', () => {
-  const room = 'waiting for machine room: Strained (memory pressure 25.5% is at or above 20%)'
+// Issue 195. Bug it catches: a card the machine held back did not say why. Issue 346: the machine room is removed, so
+// a snapshot that still names the machine's pressure draws no machine line in ON THE BELT.
+test('/units says why the machine holds a queued card back, and draws no machine room line', () => {
+  const room = 'waiting for a machine slot: 2 of the machine cap 2 in use'
   const s = board({ queue: { next: [{ ...queued(1)[0], room }], held: {} },
     health: { pressure: { state: 'Strained', cpu: 12.5, memory: 25.5, wakeMs: 0.2, freeMB: null, why: 'memory pressure 25.5% is at or above 20%', gates: true } } })
   const text = tableText(s, 200)
-  expect(section(text, 'ON THE BELT').split('\n').slice(1, 3).map(l => l.trimEnd()))
-    .toEqual(['  machine strained: memory pressure 25.5% (limit 20%) · new cards wait', '  the belt is empty'])
+  expect(section(text, 'ON THE BELT').split('\n')[1].trimEnd()).toBe('  the belt is empty')
+  expect(section(text, 'ON THE BELT')).not.toMatch(/machine|pressure|new cards wait/)
   expect(section(text, 'QUEUE').split('\n')[2].trimEnd()).toBe(`    ${room}`)
-  // Issue 233. Bug it catches: /units' pane is 72 columns at most and 56 by default, and both lines were cut at the
-  // width, so the figure that held cards fell off. Each wraps now, every figure kept.
+  // Issue 233. Bug it catches: /units' pane is 72 columns at most and 56 by default, and the line was cut at the
+  // width, so why the card waits fell off. It wraps now, every word kept.
   for (const w of [72, 56]) {
-    const narrow = tableText(s, w)
-    const belt = section(narrow, 'ON THE BELT').split('\n').slice(1), queue = section(narrow, 'QUEUE').split('\n').slice(2)
-    for (const l of [...belt, ...queue]) expect(cols(l.trimEnd())).toBeLessThanOrEqual(w)
-    expect(belt.map(l => l.trim()).join(' · ')).toContain('memory pressure 25.5% (limit 20%) · new cards wait')
+    const queue = section(tableText(s, w), 'QUEUE').split('\n').slice(2)
+    for (const l of queue) expect(cols(l.trimEnd())).toBeLessThanOrEqual(w)
     expect(queue.join(' ').replace(/\s+/g, ' ')).toContain(room)
   }
-  // No pressure said, no line; a queued card the machine does not hold has no line under it.
+  // A queued card the machine does not hold has no line under it.
   const none = tableText(board({ queue: { next: queued(1), held: {} } }), 200)
-  expect(section(none, 'ON THE BELT')).not.toMatch(/machine/)
   expect(section(none, 'QUEUE').split('\n').length).toBe(2)
-  // Bug: with the host file's maxLoad set, the state holds no card (gates false), yet the line said new cards wait.
-  const ungated = board({ health: { pressure: { state: 'Strained', memory: 25.5, why: 'memory pressure 25.5% is at or above 20%', gates: false } } })
-  expect(section(tableText(ungated, 200), 'ON THE BELT')).not.toMatch(/machine/)
 })
 
-// Issue 287. Bugs it catches: a Steady machine showed a line of raw figures (wake delay, MB free) that need no action,
-// and a Busy one gave the figure that set it twice ("wake delay 17.1 ms" and "the wake delay 17.1 ms is at or above 5 ms").
-test('ON THE BELT has no machine line when Steady, and one line naming the figure over its limit when Busy', () => {
-  const room = (state: string, why: string | null, cap: number | null = 4) => section(tableText(board({ belt: [BELT[0]],
-    health: { loop: true, state: 'running', building: 1, waitingCount: 0, builderCap: 7, machine: { cap },
-      pressure: { state, cpu: null, memory: null, wakeMs: 17.1, freeMB: 19330, why, gates: true } } }), 72), 'ON THE BELT').split('\n')
-  const steady = room('Steady', null)
-  expect(steady[0]).toBe('ON THE BELT (1 of 7)')
-  expect(steady.join('\n')).not.toMatch(/machine|wake delay|MB free/)
-  const busy = room('Busy', 'the wake delay 17.1 ms is at or above 5 ms')
-  // At /units' 72 columns the whole warning is one line (its tail once wrapped onto a second line).
-  expect(busy.slice(0, 2).map(l => l.trimEnd())).toEqual(['ON THE BELT (1 of 7)', '  machine busy: wake delay 17.1 ms (limit 5 ms) · fewer new cards'])
-  expect(busy.join('\n').match(/17\.1/g)).toHaveLength(1)
-  // Bug: Busy with no machine cap holds no card (pick.sh starts it), yet the line said new cards wait.
-  expect(room('Busy', 'the wake delay 17.1 ms is at or above 5 ms', null).join('\n')).not.toMatch(/machine/)
-  // A room that could not be read also holds new cards (pick.sh), so it has its line too.
-  expect(room('', 'the machine room could not be read')[1].trimEnd()).toBe('  machine room not read · new cards wait')
-})
-
-// Issue 287. Bug it catches: with two projects neither the cap nor the machine line was shown, so the view differed by
-// machine. Each project's count is after its name, and the machine line follows the same rule as with one project.
-test('with more than one project, the head gives each project\'s count after its name, and the machine line is the same', () => {
-  const busy = { state: 'Busy', cpu: 45.5, memory: null, wakeMs: 0.2, freeMB: 6000, why: 'CPU pressure 45.5% is at or above 40%', gates: true }
+// Issue 287. Bug it catches: with two projects the cap was not shown, so the view differed by machine. Each project's
+// count is after its name.
+test('with more than one project, the head gives each project\'s count after its name', () => {
   const two = state(fetched([
-    ['bookstore', snapshot({ belt: [BELT[0]], health: { loop: true, state: 'running', building: 1, waitingCount: 1, builderCap: 3, machine: { cap: 4 }, pressure: busy } })],
-    ['gadgetlab', snapshot({ belt: [{ ...BELT[1], card: 'c5-7', issue: 7 }], health: { loop: true, state: 'running', machine: { cap: 4 }, pressure: busy } })],
+    ['bookstore', snapshot({ belt: [BELT[0]], health: { loop: true, state: 'running', building: 1, waitingCount: 1, builderCap: 3, machine: { cap: 4 } } })],
+    ['gadgetlab', snapshot({ belt: [{ ...BELT[1], card: 'c5-7', issue: 7 }], health: { loop: true, state: 'running', machine: { cap: 4 } } })],
   ]))
   const lines = section(tableText(two, 72), 'ON THE BELT').split('\n')
-  expect(lines.slice(0, 2).map(l => l.trimEnd())).toEqual(['ON THE BELT (bookstore 1 of 3, 1 waiting not counted · gadgetlab 1)',
-    '  machine busy: CPU pressure 45.5% (limit 40%) · fewer new cards'])
+  expect(lines[0].trimEnd()).toBe('ON THE BELT (bookstore 1 of 3, 1 waiting not counted · gadgetlab 1)')
   // At /units' 56 columns the head wraps at a project, never cutting one off.
   const narrow = section(tableText(two, 56), 'ON THE BELT').split('\n')
   expect(narrow.slice(0, 2).map(l => l.trimEnd())).toEqual(['ON THE BELT (bookstore 1 of 3, 1 waiting not counted', '  gadgetlab 1)'])

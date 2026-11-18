@@ -92,8 +92,7 @@
 #           likewise, routes: each Claude route, subscription and proxy, with its state, null likewise, quarantined:
 #           the lines of the card records set aside as not whole records {line, field, time}, null likewise,
 #           serviceOld: the machine's Conveyor on another commit that refuses the pack {commit, refused, project}, null
-#           when it reads it, or likewise, pressure: the machine's pressure {state (Steady, Busy, Strained), cpu,
-#           memory, wakeMs, freeMB, why, gates: whether it holds cards and tests back}, null likewise), limit (this machine's usage-limit reading: its cost, Codex and API spend figures), limits (the
+#           when it reads it, or likewise), limit (this machine's usage-limit reading: its cost, Codex and API spend figures), limits (the
 #           weekly limit reading of each account the cards run on, as each record's guard reads it: limitsOf), accounts (every Claude account read here
 #           and on the host, each with its own usage and what it is used for: accountsOf), stream
 #           ({live, heardAt, since, error, writtenAt}: whether Conveyor's part is the live feed's, when the host was last
@@ -146,8 +145,7 @@
 #   tests   the Tests page, of the same record (repo null when none is; repos and others as the Board's): tests (the
 #           snapshot's: each test file's figures, each of its runs with its card's issue and url, each issue the Board
 #           filed for it ($TAFILED) with its url, state (closed for an open one the snapshot's open issues lack), landed commit, fix and the proof's before and after CPU s, the pack's test
-#           settings and the test steps' totals; null from a snapshot without it), machine (the machine's, the same in every project's: maxLoad, unread, cores,
-#           load; mload), for Load limit, and, for the page's actions, testActions (the snapshot's limit,
+#           settings and the test steps' totals; null from a snapshot without it), and, for the page's actions, testActions (the snapshot's limit,
 #           actions, each with its text, and allowed, the pack's models by CLI), control (the snapshot's control record: its tests is the Tests model), clis
 #           (the CLIs installed on the host, as the judge's role offers them), flaky (the snapshot's flaky cases) and
 #           testMap (the snapshot's: the Test map part, conveyor/lib/testmap.sh mapboard()), drift (the snapshot's:
@@ -621,11 +619,6 @@ PANELS_JQ='
   # The cards of the records (the record list) that hold no slot as they only wait on another card: the count each
   # running loop leaves out of its own against its cap (health.waitingCount), together; 0 when none says.
   def idle: [.[].snap.health.waitingCount | numbers] | add // 0;
-  # The machine of the records (the record list) for the Tests page: its load limit (the host file maxLoad, as health
-  # names it; null for none), unread (the host file does not read), and its cores and 1-minute load now (health
-  # machineNow; null when not read, or from a snapshot from before it said).
-  def mload: ([.[].snap.health.machine | objects][0] // null) as $m | ([.[].snap.health.machineNow | objects][0] // {}) as $n
-    | {maxLoad: (($m.maxLoad | numbers) // null), unread: ($m.unread == true), cores: (($n.cores | numbers) // null), load: (($n.load | numbers) // null)};
   # The issues of a snapshot that wait on an open issue but that something else keeps from the pick as well (held,
   # skipped by a rule, waiting for the owner'"'"'s yes), so its queue.waiting leaves them out: each open.held entry with a
   # waits reason that queue.waiting does not list, as {issue, title, waitsFor}.
@@ -833,7 +826,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null), pressure: (.pressure | objects // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads
@@ -887,24 +880,23 @@ PANELS_JQ='
              cores: ([$R[].snap.health.cores | objects][0] // null), others: ([$R[] | select(.steered | not) | {key: .repo, value: rulesOf(.)}] | from_entries)})} end),
    # The Tests page, of the same records (repo null when none is steered; repos and others as the Board'"'"'s): each
    # record'"'"'s tests (its snapshot'"'"'s, testspart() of conveyor/lib/testfiles.sh; null from a snapshot without it or
-   # whose pack does not read) and the machine'"'"'s Load limit (mload), the same in every record'"'"'s. Each run of a
+   # whose pack does not read). Each run of a
    # file is tagged with its card'"'"'s issue (the number that ends the card id) and that issue'"'"'s url, for its link (older runs: --older),
    # and so is each of its Optimize issues (optimize: the Board'"'"'s filings, their state and proof numbers) and each of
    # its failures (failures: its failed test steps, each with its issue) with its issue'"'"'s url.
-   tests: (if $R == null then {error: $cerr, data: null} else ($R | mload) as $ml
-      | def runsOf($r): if type == "array" then map(. + {issue: ([.card | strings | capture("-(?<n>[1-9][0-9]{0,8})$").n | tonumber][0] // null)} | tag($r)) else . end;
+   tests: (if $R == null then {error: $cerr, data: null} else def runsOf($r): if type == "array" then map(. + {issue: ([.card | strings | capture("-(?<n>[1-9][0-9]{0,8})$").n | tonumber][0] // null)} | tag($r)) else . end;
       # An Optimize issue no card took (open) that is not among the snapshot'"'"'s open issues was closed on GitHub (the
       # Board'"'"'s Close its issue as done, or by hand): it is closed. With no list of open issues it stays as it is.
       def shut($o): if $o != null and .state == "open" and (.issue | IN($o[]) | not) then .state = "closed" else . end;
       def testsOf: . as $r | (.snap.open.issues | if type == "array" then [.[].issue] else null end) as $oi
-        | {repo, machine: $ml, tests: (.snap.tests | if type != "object" then null
+        | {repo, tests: (.snap.tests | if type != "object" then null
         elif (.files | type) == "array" then .files |= map(if type == "object" then (.runs |= runsOf($r))
           | if (.failures | type) == "array" then .failures |= map(if type == "object" then tag($r) else . end) else . end
           | if (.optimize | type) == "array" then .optimize |= map(if type == "object" then tag($r) | shut($oi) else . end) else . end else . end) else . end),
         testActions: ((.snap.testActions | objects | {limit, actions, allowed}) // null), control: (.snap.control | objects // null), clis: ((.snap.modelSettings | objects | (.judge.clis // .reviewer.clis) | objects) // null),
         flaky: (.snap.flaky | arrays // null), testMap: (.snap.testMap | objects // null), drift: (.snap.drift | objects // null),
         bench: (.snap.bench | objects // null)};
-      {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null, machine: $ml} else testsOf end)
+      {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null} else testsOf end)
           + {repos: [$R[].repo], others: ([$R[] | select(.steered | not) | {key: .repo, value: testsOf}] | from_entries)})} end),
    # What Conveyor measured: the totals of each record for today, the 7 days and the 7 before them, each of the 7
    # days and the slots of today by hour, and every card of the 7 days with its own measurements; cards null when the

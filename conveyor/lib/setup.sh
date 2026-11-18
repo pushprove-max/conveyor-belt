@@ -787,6 +787,9 @@ doctor() {
     elif t=$(CONVEYOR_MAIN=$MAIN bash "$f" --check 2>&1); then ok "the Board reads the project ${t##*$'\n'}"
     else no "the Board reading the project (${t//$'\n'/; })" \
       "correct the host file $HOST as that says; on one machine it needs no host, main or ssh, only its records"; fi
+    # The settings of the machine room, which is removed (issue 346): read with them ignored, and said once, in one line.
+    t=$(jq -r '[keys[] | select(IN("pressure", "maxLoad", "minFreeMemMB"))] | join(", ")' "$HOST" 2>/dev/null)
+    [ -z "$t" ] || echo "warning: the host file $HOST sets $t, which no longer do anything: no card or test waits for the machine's load, pressure or free memory; remove them"
   fi
   # One Conveyor per machine: the machine's loop (`machine`), and no loop of a project beside it that it did not start
   # (a per-project service left from before, or a `serve` started by hand). Each loop alive names its pid.

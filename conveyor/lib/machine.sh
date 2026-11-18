@@ -130,20 +130,13 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$(sed -n 's/^SigIgn:[[:space:]]*//p' "/pr
 # machine's lock, as hostput, and under the host file's own ($HOST.lock, which a lane's note holds while it reads and
 # replaces the file: lanenote), so neither writes its older reading over the other's change: the host file read and
 # written whole (made, as {}, when there is none); one that does not read as an object is left as it is.
-# conveyor.sh machine load <number | off>: the machine room's load limit, the host file's maxLoad (mhost()): no new card
-# starts while the 1-minute load is above it; off removes it. A limit is a number of 1 or more (the Board's Rules tab
-# sends it); anything else is refused and nothing is written. Written the same way as the pause.
 # conveyor.sh machine steer <on | off>: whether card work yields to the user, the host file's steer (lib/slots.sh
 # steer_words): on (the default) removes it, off writes false. Written the same way as the pause.
-machinemode() { # <pause | resume | load <number | off> | steer <on | off>>
+machinemode() { # <pause | resume | steer <on | off>>
   local f='if $a == "pause" then .mode = "pause" else del(.mode) end' v=${2:-}
   if [ "$1" = steer ]; then
     [[ $v =~ ^(on|off)$ ]] || { echo "conveyor: steer is on or off, not \"$v\": nothing changed" >&2; return 2; }
     f='if $v == "off" then .steer = false else del(.steer) end'
-  elif [ "$1" = load ]; then
-    [ "$v" = off ] || { [[ $v =~ ^[0-9]{1,6}(\.[0-9]{1,3})?$ ]] && jq -en --arg v "$v" '$v | tonumber >= 1' >/dev/null; } \
-      || { echo "conveyor: the load limit is a number of 1 or more, or off, not \"$v\": nothing changed" >&2; return 2; }
-    f='if $v == "off" then del(.maxLoad) else .maxLoad = ($v | tonumber) end'
   fi
   mkdir -p "${HOST%/*}" || return 1
   ( flock -w 30 9 || exit 1
@@ -155,8 +148,6 @@ machinemode() { # <pause | resume | load <number | off> | steer <on | off>>
   ) 9>>"$HOST.lock" || return 1
   if [ "$1" = steer ] && [ "$v" = off ]; then echo "conveyor: card work no longer yields to you: card sessions and test runs start at normal priority"
   elif [ "$1" = steer ]; then echo "conveyor: card work yields to you: card sessions start at lowered priority, and card test runs at idle priority"
-  elif [ "$1" = load ] && [ "$v" = off ]; then echo "conveyor: the machine's load limit is off: the load holds back no new card"
-  elif [ "$1" = load ]; then echo "conveyor: the machine's load limit is $(jq -n --arg v "$v" '$v | tonumber'): no new card starts while the 1-minute load is above it (cards running finish)"
   elif [ "$1" = pause ]; then echo "conveyor: the machine's Conveyor is paused: no project starts a new card (cards running finish)"
   else echo "conveyor: the machine's Conveyor runs again: each project picks as its own record says"; fi
 }

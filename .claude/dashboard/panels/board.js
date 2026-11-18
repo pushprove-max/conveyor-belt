@@ -34,7 +34,7 @@
 // waits on #12".
 // The head says how the open issues split: queued, held by you, held by a label or skipped by a rule, on the belt.
 // Its part (dashboard.sh, board): {repo (null: no record is on the host's main), state, reason (why it picks nothing | null), loop, control, cap, guard,
-// modelSettings, limit, held, queue (room on the one the machine holds back: why, as "waiting for machine room: ..."), skipped, waits (issues waiting on another, with waitsFor), issuesError,
+// modelSettings, limit, held, queue (room on the one the machine holds back: why, as "waiting for a machine slot: ..."), skipped, waits (issues waiting on another, with waitsFor), issuesError,
 // building, review, waiting, blocked, landed (the day's newest; each with batch: the cards it landed with, itself among them | null),
 // today ({landed, usd}: every card of the day, counted and its usd added up, null when one has none), open ({count, split, held: each with its reasons} | null),
 // unpushed (the landed cards origin lacks | null), fullTest (command, why, running, last | null), and checkRuns

@@ -280,9 +280,7 @@ one core, and `MemoryMax` the machine's memory over the pool's slots, so a test 
 its cores gets one core's time and no more. A runner gets the words that start a command so from `slot_box` (after
 `slot_pool`: `"${SLOT_BOX[@]}" <command>`). Where
 no such scope can be made (macOS, no user systemd, a systemd without `--expand-environment`), nothing is boxed; a box is never made inside another. A card with no slot waits before its tests start, and the Board
-says "waiting for a test slot (n of N in use)". When the machine is Strained, the Board names the figure that holds the
-card, for example "waiting for a test slot: the machine is Strained (memory pressure 25.5% is at or above 20%), 0 of
-2 in use". The wait does not count against its test timeout. Builds and reviews
+says "waiting for a test slot (n of N in use)". The wait does not count against its test timeout. Builds and reviews
 take no slot.
 
 Pushes go first. The push step (a landed card's push, and Push landed's) runs `git push`, and so the project's
@@ -430,8 +428,8 @@ failure gets a verdict:
   Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
   and its test step runs again (the same change keeps its passes, so the cases that failed run again). Those cards
   hold no build slot while they wait (Control, above), but the waiting cards past the cap still hold theirs, so the
-  loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap,
-  `maxLoad` and `minFreeMemMB` apply as to any card. The Board shows that card as "beyond the cap: main is red".
+  loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap
+  and pause apply as to any card. The Board shows that card as "beyond the cap: main is red".
 - **machine**: the same case failed on main too, but the machine is at fault, not main. This is so when the case's
   file passed before with the same inputs (the test results cache holds a pass of it with main's content), or when
   every control failed beside it. The controls are the test files of the pack's `test.control` that have a recorded
@@ -1282,8 +1280,7 @@ check:
   did not run).
 
 A mutant starts only when no card of the project is in its build or test step, no test run of any project on the
-machine asks for a test slot or holds one, and the machine's 1-minute load is below its Load limit (the host file's
-`maxLoad`, set by `conveyor.sh machine load`). When a card of any project goes into its test step, which asks for a
+machine asks for a test slot or holds one. When a card of any project goes into its test step, which asks for a
 test slot, the mutant that runs is stopped at once, with every process it started, and its slot is free for the
 card. The check then stops. It resumes later from its next mutant, on the same commit and with
 the same mutants.

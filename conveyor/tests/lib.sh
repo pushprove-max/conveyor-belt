@@ -57,11 +57,6 @@ export CONVEYOR_CLAUDE_SETTINGS=$T/no-claude-settings.json
 # The host file (the state folder, the terms file) is never this machine's own; a case writes its own, in a folder of
 # its own (case_keep).
 export XDG_CONFIG_HOME=$T/config
-# The machine's pressure (lib/pressure.sh) is Steady for every case, whatever the machine that runs the tests does: a
-# case's loop that read the machine's own pressure held its card back, and its test slot, while the machine was busy.
-# A case about the pressure names its own. The runner's own slots keep the machine's pressure, read with the pool above.
-mkdir -p "$T/psi" && echo 'some avg10=0.00 avg60=0.00 avg300=0.00 total=0' | tee "$T/psi/cpu" > "$T/psi/memory"
-export CONVEYOR_PSI_DIR=$T/psi CONVEYOR_WAKE_CMD='echo 0.1'
 # An address is put together with AT, so this file holds none itself (the privacy check runs over it).
 AT=@
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t${AT}example.com

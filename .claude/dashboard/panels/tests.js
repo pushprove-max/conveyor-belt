@@ -74,12 +74,11 @@
 // (`conveyor.sh mutate ask`: the front of the idle queue; no check starts while a card needs a test slot, and the bar
 // says so). Optimize's preview lists the survivors; a landed Optimize shows the mutants caught before and after.
 // Its More menu holds Explain the slowdown, Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose (it asks for the reason).
-// Settings, Test limits. Each row names where it saves: Load limit in the host file (this machine, all
-// projects; moved from the Rules tab's Machine section, #462, with the same behaviour), and in the pack file (this
-// project): the files slow on purpose (a list), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
+// Settings, Test limits. Each row names where it saves, the pack file (this project): the files slow on purpose (a
+// list), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
 // file off card runs" (settings.slowIssues, #457).
 // Every value is typed or picked first: the row says Unsaved, with Save and Cancel, as on the Rules tab, and only Save
-// sends it: POST machine {action: load, value} for the Load limit, POST control {action: test-settings, args, repo}
+// sends it: POST control {action: test-settings, args, repo}
 // (`conveyor.sh test-settings`) for a pack setting. A value saved shows until a snapshot names it, or one begun after
 // the answer names a value other than the one it replaced. A refused one keeps the value in force, with the refusal
 // in its row.
@@ -117,7 +116,7 @@
 // `conveyor.sh testrules guard|set`), and the log of what the rules filed and stopped.
 // Its part (dashboard.sh, tests): {repo (null: none is steered), tests (the snapshot's: settings, rules, files (each
 // with its optimize issues, each with its url, and removed), slower, edits, totals; null from a snapshot without it),
-// machine ({maxLoad, unread, cores, load}), testActions ({limit, actions, allowed:
+// testActions ({limit, actions, allowed:
 // the pack's models by CLI, offered for a CLI that lists none}), control (the control record: its tests, the Tests model),
 // clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), testMap
 // (conveyor/lib/testmap.sh mapboard(): state, as the map page shows it, with made, seconds and notMapped; tool or toolWhy; suiteSec; build,
@@ -130,12 +129,10 @@
 // all) and Stop (testmap stop); at its end, its result in place.
 (function () {
   'use strict';
-  const LOAD = /^[0-9]{1,6}(\.[0-9]{1,3})?$/;  // a load limit, as dashboard_server.py's LOAD and `conveyor.sh machine load` take it (1 or more)
   const REASON_MAX = 300;  // a reason, as dashboard_server.py's said_ok takes it
   const WAITS = 2;         // a file waits more than it works when its last run took more than this times its CPU time
   const FAILS = 2;         // a file fails often when this many test steps or more failed in it, not counting those a card's own change made fail (failsOf())
   const NEVER = 20;        // a file with this many runs on record or more and no catch shows "Never caught anything"
-  const HOST = 'Host file: this machine, all projects';
   const PACK = 'Pack file: this project';
   // The status chips, in the order of the filters: key, words, tone, whether a row with it needs a look.
   const MARKS = [
@@ -187,12 +184,11 @@
   const settings = () => obj(tests() && tests().settings) || {};
   const own = (file) => obj(obj(settings().files) && settings().files[file]) || {};
   const rules = () => obj(tests() && tests().rules) || {};
-  // A setting's key: load (the machine's), slowIssues, mark:<file> (the project's); dk is
-  // the key with the project, so a value typed for one project is never sent for another.
-  const dk = (key) => (key === 'load' ? key : `${S.d.repo}|${key}`);
+  // A setting's key: slowIssues, mark:<file> (the project's); dk is the key with the project, so a value typed for
+  // one project is never sent for another.
+  const dk = (key) => `${S.d.repo}|${key}`;
   function inForce(key) {
-    const m = obj(S.d.machine) || {}, s = settings();
-    if (key === 'load') return num(m.maxLoad) === null ? '' : String(m.maxLoad);
+    const s = settings();
     if (key === 'slowIssues') return s.slowIssues === true ? 'true' : 'false';
     // Auto-file: rules-on (the switch), guard:<guard>, rule:<setting>:<rule name>.
     const said = (v) => (v === undefined || v === null ? '' : String(v));
@@ -1870,19 +1866,8 @@
 
   // ---- Test limits ----
   function limits() {
-    const h = S.ctx.h, el = h('section', 'tests-limits'), m = obj(S.d.machine), t = tests(), s = settings();
+    const h = S.ctx.h, el = h('section', 'tests-limits'), t = tests(), s = settings();
     el.append(h('h3', 'board-head', 'Test limits'));
-    if (m && m.unread === true) {
-      el.append(row('load', 'Load limit', 'machine-wide', HOST, h('p', 'warn-note', 'Conveyor could not read the build machine\'s host file, so the Board does not know its load limit. Fix the host file there.')));
-    } else if (m) {
-      const set = shown('load');
-      const now = h('span', 'board-from', `In force: ${set === '' ? 'Off' : set} · ${num(m.cores) === null ? 'cores not read' : `${m.cores} ${m.cores === 1 ? 'core' : 'cores'}`}`
-        + ` · load now ${num(m.load) === null ? 'not read' : m.load}`);
-      el.append(row('load', 'Load limit', 'No new card starts while the load is above this. Conveyor never stops the cards that already run.', HOST,
-        ...setting('load', { act: 'load', label: 'Load limit', type: 'number', placeholder: 'Off', clear: 'Off',
-          check: (v) => (v !== '' && !(LOAD.test(v) && Number(v) >= 1) ? 'A load limit is a number of 1 or more, as 20, or Off.' : null),
-          send: (v) => ['machine', { action: 'load', value: v === '' ? 'off' : v }], said: (v) => `load limit now ${v === '' ? 'Off' : v}` }), now));
-    }
     if (!t) return el;
     const files = Object.entries(obj(s.files) || {}).filter(([, v]) => obj(v));
     const items = (pick, words) => {

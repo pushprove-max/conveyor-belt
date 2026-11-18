@@ -77,12 +77,8 @@
 #   pickedAt). The time an issue sat queued is in none of them. stalls: how many times a build, fix, rebase or review
 #   of it made no progress for STUCK seconds and was ended (watch()); the card detail shows it.
 # repo: the project's name (REPO), as health names it too; health's room is the card the machine holds back (room()),
-#   and its machine the machine's settings (mhost(): {cap, maxLoad, minFreeMemMB, paused}, {unread: true} for a host
-#   file that does not read, null when it sets none), the same for every project of the machine, and its machineNow the
-#   machine's readings now ({cores, load: the 1-minute load}, each null when not read) for the Board's Load limit, its
-#   pressure the machine's pressure now (lib/pressure.sh: {state, cpu, memory, wakeMs, freeMB, why,
-#   gates: whether it holds cards and tests back}), and
-#   its steer whether card work yields to the user (the host file's steer, steer_on), for the Board's Rules tab, and
+#   and its machine the machine's settings (mhost(): {cap, paused}, {unread: true} for a host file that
+#   does not read, null when it sets none), the same for every project of the machine, and its steer whether card work yields to the user (the host file's steer, steer_on), for the Board's Rules tab, and
 #   its cores the cores kept for the user (lib/slots.sh slot_reserved) for the Rules tab too: {reserved: the core
 #   numbers, slots: the test-slot pool's size on the cores left (null when not read), unavailable: why this machine
 #   cannot keep cores (slot_reserve_why), else null}.

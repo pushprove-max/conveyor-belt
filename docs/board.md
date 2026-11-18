@@ -539,7 +539,7 @@ its own answer. At most 3 test actions run at once. The others wait as queued an
 takes a queued one off before it starts.
 
 Settings is closed until you open it. It holds "Model for Tests actions" (Judge and Explain the slowdown need it),
-Test limits (the Load limit, `maxLoad` in the host file, and the files slow on purpose in the pack), and Auto-file,
+Test limits (the files slow on purpose in the pack), and Auto-file,
 which shows the test rules (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test
 actions).
 

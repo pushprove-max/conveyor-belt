@@ -47,12 +47,12 @@ test('Tests actions: a snapshot that comes while a row\'s name or an action is p
   const w = boot({ tab: 'tests' });
   deliver(w, snap());
   w.reply = reply(ID1);
-  // Each snapshot reads the build machine's load anew.
-  const loaded = (load) => { const d = snap(); d.panels.tests.data.machine.load = load; return d; };
-  const press = (b, load) => {
+  // Each snapshot carries a new count of test steps, which the page's figures show.
+  const stepped = (n) => { const d = snap(); d.panels.tests.data.tests.totals.steps.count = n; return d; };
+  const press = (b, n) => {
     const renders = tp(w).dataset.renders;
     b.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true }));
-    next(w, loaded(load));
+    next(w, stepped(n));
     assert.notEqual(tp(w).dataset.renders, renders, 'the snapshot came while it was pressed');
     assert.ok(b.isConnected, 'the button pressed is still on the page');
     b.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true }));
@@ -65,10 +65,10 @@ test('Tests actions: a snapshot that comes while a row\'s name or an action is p
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testaction', args: ['judge', MERGE], repo: 'sample' } }]);
   // The snapshot held is drawn after the release; then each draws at once again.
   later(w);
-  assert.match(tp(w).textContent, /load now 21/);
+  assert.match(tp(w).textContent, /Slot wait, 21 test steps in 7 days/);
   const row = rowOf(w, MERGE);
-  next(w, loaded(22));
-  assert.match(tp(w).textContent, /load now 22/);
+  next(w, stepped(22));
+  assert.match(tp(w).textContent, /Slot wait, 22 test steps in 7 days/);
   assert.ok(!row.isConnected && opened(w, MERGE), 'drawn anew, the row still open');
 });
 

@@ -69,7 +69,7 @@ export type Track = { steps: Step[]; at: number | null; label: string; since: nu
 // live: the running step as it streams: what it is doing now, its turns so far and when it last printed.
 export type Live = { action: string; turns: number | null; lastOutputAt: number | null }
 export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null }
-// room: why the machine holds it back ("waiting for machine room: Strained (...)"), "" when it does not.
+// room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not.
 export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; room: string }
 // An open issue that depends on one still open: not picked until each of waitsFor has closed.
 export type Waiting = Ref & { waitsFor: number[] }
@@ -89,12 +89,9 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // declined, from every record's declined list, each line once. suites: each record's whole-suite runs (the snapshot's
 // suites: a release's suite, the full test), under way (ended null) or ended. building and waiting: the running
 // loop's cards counted against its builder cap (cap; null with no cap) at its last turn, and its cards left out of that
-// count as they only wait on another card; null when no loop runs or the snapshot does not say. pressure: the
-// machine's pressure (Steady, Busy or Strained, why: the figure that set it, gates: whether it holds new cards back,
-// and machineCap: the host file's machine cap, null with none), null when not said. onBelt: the record's
+// count as they only wait on another card; null when no loop runs or the snapshot does not say. onBelt: the record's
 // cards on the belt; landing: those of them landed, in Push (the loop's building leaves them out).
-export type Pressure = { state: string; why: string; gates: boolean; machineCap: number | null }
-export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; pressure: Pressure | null; onBelt: number; landing: number }
+export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
 export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
@@ -203,9 +200,6 @@ const trackOf = (v: any): Track | null => {
 const timesOf = (x: any): Times => ({ start: time(x.start) ?? time(x.pickedAt), pickedAt: time(x.pickedAt), priorSec: num(x.priorSec) ?? 0, totalSec: num(x.totalSec) })
 const parentOf = (x: any) => { const n = num(x.parent); return n !== null && n > 0 ? n : null }
 
-// state "" when no figure could be read.
-const pressureOf = (v: any, machine: any): Pressure | null => (v && typeof v === 'object'
-  ? { state: one(v.state), why: one(v.why), gates: v.gates === true, machineCap: num(machine?.cap) } : null)
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
 type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[] }
@@ -218,7 +212,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
-    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waitingCount), cap: num(j.health?.builderCap), pressure: pressureOf(j.health?.pressure, j.health?.machine),
+    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), waiting: num(j.health?.waitingCount), cap: num(j.health?.builderCap),
       onBelt: j.belt.length, landing: j.belt.filter((x: any) => x?.step === 'push' || x?.step === 'issue').length },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
@@ -681,22 +675,6 @@ const beltHead = (snap: Snap, w: number): Line[] => {
   if (cols(`ON THE BELT${t}`) <= w) return [[{ t: 'ON THE BELT', c: C.head, b: true }, { t, c: C.head }]]
   return wrapParts(p.map((x, i) => `${i ? '' : 'ON THE BELT ('}${x}${i === p.length - 1 ? ')' : ''}`), w, '', ' · ', { c: C.head })
 }
-// The machine room, only while it holds new cards back, as one line: what holds them and the figure over its limit,
-// from the first record that says: `machine strained: memory pressure 25.5% (limit 20%) · new cards wait`. The state
-// holds cards as pick.sh's roomed() reads it: only when it gates (no host file maxLoad or minFreeMemMB); not read or
-// Strained, no new card starts; Busy, a new card starts only below half the machine cap, and with no machine cap it
-// holds nothing (Busy says `fewer new cards`). None when Steady, when the state holds nothing, or when no record says.
-// Kept short to stay one line at /units' 72 columns.
-const roomParts = (snap: Snap): string[] => {
-  const p = snap.loops.map(l => l.pressure).find(x => x)
-  if (!p || !p.gates || p.state === 'Steady') return []
-  if (!p.state) return ['machine room not read', 'new cards wait']
-  const busy = p.state === 'Busy'
-  if (busy && p.machineCap === null) return []
-  const m = /^(?:the )?(.+?) is (?:at or above|below) (.+)$/.exec(p.why)
-  return [`machine ${p.state.toLowerCase()}: ${m ? `${m[1]} (limit ${m[2]})` : p.why || 'no figure given'}`,
-    busy ? 'fewer new cards' : 'new cards wait']
-}
 const loopSegs = (snap: Snap): Seg[] => (loopText(snap) ? [{ t: ' · ' }, { t: loopText(snap), c: C.you, b: true }] : [])
 
 // The head, two lines: CONVEYOR, today's cost and the host; then the weekly limit with its reset, and
@@ -778,8 +756,6 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
 // While a step streams, its live fields follow on a dim line of their own.
 export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame: number): Line[] => [
   ...beltHead(snap, w),
-  // Wrapped, not cut: the figure that holds cards must not fall off /units' narrow pane.
-  ...wrapParts(roomParts(snap), w, '  '),
   ...(snap.belt.length ? [] : [empty('the belt is empty')]),
   ...snap.belt.flatMap((b, i): Line[] => {
     const all = overallOf(b, s.now)

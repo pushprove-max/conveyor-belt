@@ -9,8 +9,7 @@
 # not run). The file is first run with no mutant: a file that fails so says nothing of its mutants, and the check
 # ends failed. A source of a kind the rules do not read (not shell, JavaScript or TypeScript) is not mutated.
 # A mutant starts only when no card of this project is in its build or test step, no test run of any project on the
-# machine asks for a test slot or holds one, and the machine's 1-minute load is below its Load limit (the host file's
-# maxLoad), mutheld(); a mutant that runs is stopped at once when a card of any project asks for a test slot. The check then stops, and resumes from its next mutant later, on the
+# machine asks for a test slot or holds one (mutheld()); a mutant that runs is stopped at once when a card of any project asks for a test slot. The check then stops, and resumes from its next mutant later, on the
 # commit it began on. One check runs at a time ($MUTS/lock).
 # Each check's record, in $MUTS/<id>.json: {id, action: "mutate", file, project, at (its start), sha (main's commit it
 # checks), seed, state (running, stopped, done or failed), pid (while it runs), reason (stopped or failed: why), base
@@ -64,11 +63,10 @@ mutsample() { # <worktree> <seed> <source>...
     | .a[:$n]')
 }
 # Why no mutant may start now, printed, and 0; 1 when one may. [steps]: the steps of a card that hold it back (build
-# and test); with test alone, the load is not looked at (a mutant that runs is stopped only by a card that asks for a
-# slot). A card's step is its live record's ($CARDS/<card>.live). A test run of any project on the machine, which
+# and test; with test alone, a mutant that runs is stopped only by a card that asks for a slot). A card's step is its live record's ($CARDS/<card>.live). A test run of any project on the machine, which
 # shares the test slots, holds it back too while it asks for a slot or holds one (slot_ask(), lib/slots.sh).
 mutheld() { # [steps, as an extended pattern: build|test]
-  local f s m l
+  local f s
   for f in "$CARDS"/*.live; do
     [ -e "$f" ] && s=$(jq -r '.step | strings' "$f" 2>/dev/null) || continue
     [[ $s =~ ^(${1:-build|test})$ ]] || continue
@@ -76,10 +74,7 @@ mutheld() { # [steps, as an extended pattern: build|test]
   done
   [ -n "${SLOT_DIR:-}" ] || slot_pool > /dev/null 2>&1 || :
   if [ -n "${SLOT_DIR:-}" ] && s=$(slot_asked); then echo "$s test run(s) on this machine ask for a test slot or hold one"; return 0; fi
-  [ -z "${1:-}" ] && m=$(jq -er '.maxLoad | numbers' "$HOST" 2>/dev/null) || return 1
-  l=$(p_load)
-  jq -en --arg l "$l" --argjson m "$m" '($l | tonumber? // null) as $l | $l != null and $l < $m' > /dev/null && return 1
-  echo "the load ${l:-(not read)} is not below the Load limit $m"
+  return 1
 }
 # The test file <file> run alone in <worktree> as it is now, on a test slot, as `testaction run` runs one (tests());
 # MUT_RES is killed, survived, noresult or stopped: a card asked for a slot while it ran (MUT_WHY says which), and it

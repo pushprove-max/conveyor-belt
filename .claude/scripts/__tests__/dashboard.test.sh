@@ -446,8 +446,9 @@ q '.panels.queue.data.awaitingDeploy | map([.repo, .issue, .title, .since, .url]
 q '.panels.queue.data.waiting | map([.repo, .issue, .waitsFor, .url]) == [["sample", 32, [20], "'"$PU"'/32"]]' "the queue lists each record's waiting issues with what each waits for"
 q '.panels.board.data.waits | map([.issue, .waitsFor]) == [[32, [20]]]' "the Board has the waiting issues with what each waits for"
 q '[.panels.health.data.records[] | .cycles] == [[[40, 41]], null]' "a dependency cycle reaches the health part; a record without the key has none"
-q '[.panels.health.data.records[] | .pressure | if . == null then null else [.state, .cpu, .wakeMs, .why] end] == [["Busy", 45.5, 0.2, "CPU pressure 45.5% is at or above 40%"], null]' \
-  "the machine's pressure reaches the health part; a record without the key has none"
+# Issue 346: the machine room is removed; a snapshot of an older engine that still names the pressure (the first
+# record's) does not bring it into the health part.
+q '[.panels.health.data.records[] | has("pressure")] == [false, false]' "the machine's pressure no longer reaches the health part"
 # The Claude routes' states (the health record's routes): without them Health cannot show an expired login or the proxy.
 q '[.panels.health.data.records[] | .routes | if . == null then null else [.subscription.state, .proxy.state, .proxy.baseUrl] end] == [["expired", "works", "http://127.0.0.1:4141"], null]' "each record's Claude routes reach the health part; a record without the key has none"
 # The flaky cases of each record (the snapshot's flaky): without them the Health panel has no Flaky tests line.
@@ -567,11 +568,11 @@ q '.panels.machine.data | .foremenError == null and (.foremen | map([.projects, 
 # The machine's settings, as every record's health names them: the cap, and the slots both projects hold of it. A card
 # that landed and waits for its push holds no slot. One project paused by its own record leaves the other, and the
 # machine, running.
-MC='{"cap": 10, "maxLoad": null, "minFreeMemMB": null, "paused": false}'
+MC='{"cap": 10, "paused": false}'
 C3=$(jq -c '.belt += [.belt[0] + {card: "c4-6", issue: 6}, .belt[0] + {card: "c4-8", issue: 8}] | .health.state = "running" | .health.loop = true | .control = {mode: "run", order: [9]}' <<<"$C")
 with_machine() { jq -c --argjson m "$1" '.health.machine = $m' <<<"$2"; } # <machine> <snapshot>
 PUSHING='[{"card": "c0-98", "issue": 98, "title": "Landed, being pushed", "step": "push", "stepAt": "'"$(ago 60)"'", "landed": true, "usd": 1, "reading": true}]'
-# The machine's load limit is 20 here, and its 16 cores are at a load of 31.5 (#462).
+# A snapshot of an engine from before issue 346 still names the machine's load limit (20) and its cores and load.
 ML=$(jq -c '.maxLoad = 20' <<<"$MC")
 answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .health.machineNow = {cores: 16, load: 31.5} | .health.steer = false | .health.cores = {reserved: [14, 15], slots: 14, unavailable: null} | .tests = {files: [{file: "a.test.sh", cpu: 3, runs: [{cpu: 3, card: "c5-12"}, {cpu: 2, card: "odd"}],
     failures: [{card: "c6-13", issue: 13, verdict: "card", cases: ["one"]}],
@@ -582,14 +583,14 @@ answer "$(with_machine "$ML" "$(jq -c --argjson l "$PUSHING" '.belt += $l | .hea
   | .bench = {presets: [1, 5, 20, 50], live: null}
   | .modelSettings = {judge: {clis: {claude: {models: ["m1"], efforts: ["high"]}}}}' <<<"$P")")" "$P_URL" 1794000000 "$(with_machine "$ML" "$C3")" "$C_URL" 0
 run
-# Bug (#462): the Board could not show the machine's load limit, nor its cores and load beside it. They are the
-# machine's: the same in every project's Tests part (Load limit is on the Tests page, #520), read from whichever
-# record's health names them. Each project's Tests part holds its own snapshot's test files, never another's; each run
-# links to its card's issue (the number that ends the card id), and a card id with no number links nowhere.
-q '.panels.tests.data | .machine == {maxLoad: 20, unread: false, cores: 16, load: 31.5} and .others.widgetshop.machine == .machine
+# Issue 346: the machine room (and its Load limit) is removed, so no project's Tests part carries the machine's load
+# limit, cores or load, even from a snapshot that still names them. Each project's Tests part holds its own snapshot's
+# test files, never another's; each run links to its card's issue (the number that ends the card id), and a card id
+# with no number links nowhere.
+q '.panels.tests.data | (has("machine") | not) and (.others.widgetshop | has("machine") | not)
   and (.tests.files | map([.file, .cpu])) == [["a.test.sh", 3]] and .others.widgetshop.tests == null
   and (.tests.files[0].runs | map([.card, .issue, .url])) == [["c5-12", 12, "'"$PU"'/12"], ["odd", null, null]]' \
-  "the Tests part names the machine's load limit, cores and load, the same for every project, and each project's own test files, each run with its card's link"
+  "the Tests part names no machine load limit, and each project's own test files, each run with its card's link"
 # Issue 194: the Rules tab sets whether card work yields to the user, a setting of the machine (the host file's steer).
 # One record's health says it is off, the other's (an older snapshot) says nothing: the Rules part shows it off, never
 # on for the record that did not say.
@@ -656,7 +657,6 @@ q '.panels.belt3d.data.deck | {host, state} == {host: "devbox", state: "paused"}
 answer "$(with_machine '{"unread": true}' "$P")" "$P_URL" 1794000000 "$(with_machine '{"unread": true}' "$C3")" "$C_URL" 0
 run
 q '.panels.machine.data | .state == "not read" and .cap == 5' "a host file the host cannot read: the machine's state is not read, never running; the projects' own caps still hold"
-q '.panels.tests.data.machine == {maxLoad: null, unread: true, cores: null, load: null}' "a host file the host cannot read: its load limit is not read, never shown as Off"
 q '.panels.belt3d.data.deck | {host, state} == {host: "devbox", state: "not read"}' "Belt 3D's deck: the state not read"
 answer "$(jq -c '.health.loop = false' <<<"$P")" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run

@@ -292,17 +292,17 @@ test('an issue waiting on another is "Waits on #N" in the queue and on the Board
   assert.ok(!panel(w, 'queue').textContent.includes('Waiting on') && !/Waiting on #\d/.test(panel(c, 'board').textContent), 'a part without the list draws none');
 });
 
-// A card the machine holds back (its cap, its load or its free memory) says so on its Board row, with the reading,
-// so the owner sees why the next card has not started; a row the machine does not hold says nothing of it.
+// A card the machine holds back (its cap or its pause) says so on its Board row, with the count, so the owner sees
+// why the next card has not started; a row the machine does not hold says nothing of it.
 test('a card the machine holds back says why on its Board row', () => {
   const data = full();
-  const why = 'waiting for machine room: load 5.5 is above maxLoad 2';
+  const why = 'waiting for a machine slot: 2 of the machine cap 2 in use';
   data.panels.board.data.queue[0].room = why;
   const c = boot({ tab: 'control' });
   deliver(c, data);
   const cards = Array.from(panel(c, 'board').querySelectorAll('[data-col="queue"] .bcard'));
   assert.ok(cards[0].textContent.includes(why), `the held-back row says why: ${cards[0].textContent}`);
-  assert.ok(cards.slice(1).every((x) => !x.textContent.includes('machine room')), 'no other row says it');
+  assert.ok(cards.slice(1).every((x) => !x.textContent.includes('machine slot')), 'no other row says it');
 });
 
 test('a part read only in part says which piece is missing, and is never shown as empty', () => {

@@ -738,19 +738,11 @@ for a in pause resume; do
 done
 grep -q "dashboard: control machine resume by max from 127.0.0.1" "$M/server.err" || fail "machine_control_is_logged: no line for the machine control in the log"
 tail -n 1 "$M/rulings.jsonl" | jq -e '.question == "Board control: machine resume" and .user == "max"' >/dev/null || fail "machine_control_names_its_user: the ruling row is $(tail -n 1 "$M/rulings.jsonl")"
-# Bug (#462): the load limit could be set only by hand in the host file. The Rules tab's Save sends it here, and it
-# reaches `conveyor.sh machine load` with its value, a number or off, as one quoted word.
-for v in 20 12.5 off; do
-  fresh_control
-  got=$(mctl "{\"action\":\"load\",\"value\":\"$v\"}")
-  [ "$got" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM machine load $v" ] || fail "machine_load_reaches_its_command: '$v' answered $got '$(cat "$M/ctl.out")', ran '$(calls)'"
-  pass=$((pass + 1))
-done
 # Anything but the one action alone is refused and runs nothing: a project named with it, arguments, another action,
-# a load with no value, one that is no number or off (a shell word included), one that is not a string, or a pause with a value.
+# or a pause with a value. A load limit (issue 346: the machine room, and `conveyor.sh machine load`, are removed) is
+# refused too, a valid one included.
 for body in '{"action":"pause","repo":"sample"}' '{"action":"pause","args":[]}' '{"action":"stop"}' '{"action":"cap"}' '{}' '["pause"]' \
-  '{"action":"load"}' '{"action":"load","value":"abc"}' '{"action":"load","value":"20; rm -rf ~"}' '{"action":"load","value":20}' \
-  '{"action":"load","value":"20","repo":"sample"}' '{"action":"pause","value":"20"}'; do
+  '{"action":"load","value":"20"}' '{"action":"load","value":"off"}' '{"action":"pause","value":"20"}'; do
   fresh_control
   [ "$(mctl "$body")" = 400 ] && [ -z "$(calls)" ] && [ ! -e "$F/ssh-calls" ] || fail "machine_takes_pause_or_resume_alone: '$body' answered '$(cat "$M/ctl.out")', ran '$(calls)'"
 done

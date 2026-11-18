@@ -53,7 +53,7 @@ mu_in() { ( unset SLOT_DIR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/card
   && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && "$@" ); }
 
 # D2. Bugs this guards: a mutant started while a card is in its test step, a test run of another project (which shares
-# the test slots) asks for a slot, or the load is not below the Load limit; a mutant that went on, or kept the test
+# the test slots) asks for a slot; a mutant that went on, or kept the test
 # slot, when another project's card asked for one; a check that began again from its first mutant, or drew new ones,
 # when it resumed.
 t_mutyield() {
@@ -62,11 +62,7 @@ t_mutyield() {
   out=$(loop mutate k.test.sh 2>&1) || fail "the check failed: $out"
   [ "$(muone '[.state, .reason, .base, .tried]')" = '["stopped","card c-1 is in its test step",null,0]' ] && [ ! -e "$STUB/mut-runs" ] \
     || fail "a run started with a card in its test step: $(muone .), $(cat "$STUB/mut-runs" 2>&1)"
-  rm "$T/$CASE/cards/c-1.live"; jq '.maxLoad = 0' "$XDG_CONFIG_HOME/conveyor/host.json" > "$STUB/h" && mv "$STUB/h" "$XDG_CONFIG_HOME/conveyor/host.json"
-  out=$(loop mutate k.test.sh 2>&1) || fail "the check failed: $out"
-  [ "$(muone '[.state, (.reason | startswith("the load ")), .tried]')" = '["stopped",true,0]' ] && [ ! -e "$STUB/mut-runs" ] \
-    || fail "a run started with the load not below the Load limit: $(muone .)"
-  jq 'del(.maxLoad)' "$XDG_CONFIG_HOME/conveyor/host.json" > "$STUB/h" && mv "$STUB/h" "$XDG_CONFIG_HOME/conveyor/host.json"
+  rm "$T/$CASE/cards/c-1.live"
   # A test run of another project, which this project's cards folder does not show, holds an ask in the shared pool.
   mkdir -p "$T/$CASE/slots/asks" && { ( exec 7>> "$T/$CASE/slots/asks/99"; flock 7; exec tail -f /dev/null ) & ap=$!; }
   wait_until "! flock -n '$T/$CASE/slots/asks/99' true" || fail "the other project's ask was not held"

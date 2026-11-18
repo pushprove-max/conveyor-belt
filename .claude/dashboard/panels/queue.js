@@ -4,8 +4,8 @@
 // never shown as an empty queue. awaitingDeploy is the issues built and merged that stay open until the owner deploys them to
 // PROD: the loop never picks them, and they are listed on their own under the queue. waiting is the issues
 // that depend on one still open, each shown as "Waiting on #N"; a next row forced past its wait is "Forced past #N".
-// A next row with room is held back by the machine (the machine cap, or its room: "waiting for machine room: load
-// 5.5 is above maxLoad 2"), shown as said.
+// A next row with room is held back by the machine (its cap or its pause: "waiting for a machine slot: 2 of the
+// machine cap 2 in use"), shown as said.
 // How many open issues are held (held: the Board's Held column's count, by you, a label, a rule or a wait); null
 // when the open issues were not listed.
 const queueHeld = (d) => (d && typeof d.held === 'number' && d.held >= 0 ? d.held : null);

@@ -594,3 +594,6 @@ t_slotwholechosen() {
   ! grep -q 'whole-suite' "$d/run.out" || fail "a run of a chosen case took a whole-suite turn: $(cat "$d/run.out")"
   : > "$d/A.go"; : > "$d/B.go"; wait
 }
+# Issue 346. Bug: a free slot was refused while the removed machine room read Strained (its old host file thresholds).
+t_slotnoroom() { slotpool 1; local h=$XDG_CONFIG_HOME/conveyor/host.json; jq '.pressure = {strained: {wakeMs: 0, freeMB: 999999999}}' "$h" > "$h.n" && mv "$h.n" "$h"
+  ( . "$SRC/lib/slots.sh" && slot_pool && slot_try ) || fail "a free test slot was refused under the old machine-room settings: $(cat "$h")"; }

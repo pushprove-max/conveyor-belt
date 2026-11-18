@@ -178,7 +178,6 @@ export function createTimeline(wallStart = Date.now()) {
         rules: { on: true, perDay: 3, maxOpen: 5, quietDays: 14, burst: true, list: [{ name: 'slower than usual', on: true, measure: 'usual', limit: 1.5, runs: 3, minRuns: 5 }], last: null, log: [] },
         files, slower: TEST_FILES.filter((f) => f.slower).map((f) => f.file),
         totals: { files: files.length, slower: files.filter((f) => f.slower).length, steps: { count: 41, waitSec: 95, runSec: 2460 } } },
-      machine: { maxLoad: 24, unread: false, cores: 16, load: 6.2 },
       testActions: { limit: 900, allowed: { claude: ['claude-opus-5-5', 'claude-sonnet-5-5'] }, actions },
       control: JSON.parse(JSON.stringify(control)), clis: { claude: { models: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] } }, flaky: [] };
   }
