@@ -326,7 +326,14 @@ off() {
 }
 
 context() {
-  local err s=$FD/state.md n repo main
+  local err s=$FD/state.md n repo main plug home=
+  # A plugin problem: in the plugin's own repository (plugin_home) the Foreman files it there itself, as any issue it
+  # files, and its line names the issue (stop.sh refuses one that does not); elsewhere the owner files it.
+  plug="# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>\"; it is noted in $FD/plugin-bugs.md."
+  if plugin_home; then
+    home=1
+    plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once, as any issue you file (it starts held until the owner says yes), and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>, filed as #<n>\"; it is noted in $FD/plugin-bugs.md."
+  fi
   cat <<EOF
 # Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner, and you build no code yourself: the cards do.
 # You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only: every other project has its own Foreman. Never read or change another project's Foreman folder, saved state or memory.
@@ -335,13 +342,21 @@ context() {
 # The pack not committed (git status --porcelain -- .conveyor/project.json prints a line in a project's main checkout): there, run conveyor.sh setup pack-commit, and when it prints an ask: line, ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?" (yes / no), with the change it printed; on yes run conveyor.sh setup pack-commit yes, on no conveyor.sh setup pack-commit no, and say what it printed. Never list a git command for the owner to run.
 # A wake (a watcher's message) gets a reply that says only what needs the owner; when nothing does, reply with the one word Idle.
 # A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits: read the waited-on card's log (<card>.out, .err and .test beside its worktree in the cards folder), the main-red record (mainred.json in the folder conveyor.sh state-dir prints) and the test log (<card>.testlog). Then fix the cause: a hand fix when the belt is blocked and the owner's rules allow it, otherwise file the issue.
-# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, "Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>"; it is noted in $FD/plugin-bugs.md.
+$plug
 # Check status with conveyor.sh foreman status, not your own snapshot reads. A wake already names what changed: a landed card's commit, a blocked card's reason, a suite run's result and failed cases.
 # Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.
 # Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.
 # To be woken when an issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it).
 # Your saved state is $s: keep it current, under $CAP bytes; mark a finished item "- DONE" and it is archived at the next start.
 EOF
+  # There, each noted plugin problem that names no issue (no "filed as #<n>"), so an older one is not lost, with the
+  # line that marks it filed: its own text (between its card and its evidence), which stop.sh matches exactly.
+  if [ -n "$home" ] && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE ' filed as #[0-9]+[[:space:]]*\.? · evidence: ') && [ -n "$n" ]; then
+    echo "# WARNING: plugin problems noted in $FD/plugin-bugs.md and not filed yet: file each one now, and then say the line under it with the issue's number, word for word, so the entry is marked filed."
+    while IFS= read -r l; do
+      printf '%s\n  Plugin problem (for the conveyor-belt repo): %s, filed as #<n>\n' "$l" "$(sed 's/^- [^ ]* · card [^ ]* · //; s/\(.*\) · evidence: .*$/\1/' <<<"$l")"
+    done <<<"$n"
+  fi
   # An empty state.md still runs archive: only archive reports a late write kept beside it.
   [ ! -e "$s" ] || err=$(python3 -I "$FHERE/archive.py" "$s" 2>&1) \
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"

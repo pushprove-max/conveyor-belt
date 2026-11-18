@@ -68,10 +68,19 @@ rules allow it, it makes a fix by hand. If not, it files an issue.
 A card that moves from one step to the next, as from build to review, gives no wake.
 
 The Foreman's reply to a wake says only what needs you. If nothing needs you, the reply is the one word Idle. A
-problem that the Foreman finds in Conveyor itself always needs you, because only you can fix it or file it. The
-Foreman says it on a line of its own:
+problem that the Foreman finds in Conveyor itself always needs you. Who files it depends on the project:
 
-`Plugin problem (for the conveyor-belt repo): <what it saw>, card <card>, evidence <path>`
+- In any other project, you file it in the plugin's repository. The Foreman says it on a line of its own:
+
+  `Plugin problem (for the conveyor-belt repo): <what it saw>, card <card>, evidence <path>`
+
+- In the plugin's own repository, the Foreman files it there at once, as it files any other issue. The issue is held
+  until you say yes. The line ends with the issue number:
+
+  `Plugin problem (for the conveyor-belt repo): <what it saw>, card <card>, evidence <path>, filed as #<n>`
+
+  If the line has no issue number, the Foreman cannot end its reply. It gets the reason and files the issue. When the
+  Foreman starts, it gets a list of each entry in `plugin-bugs.md` that has no issue number, and it files them.
 
 Each such problem also goes into `plugin-bugs.md` in the Foreman's folder, one line each: the time, the card, what the
 Foreman saw and the evidence path. The Board's Health panel and `/units` then show "N plugin problems noted", with

@@ -39,6 +39,24 @@ repo_name() {
   [[ $u =~ ^[A-Za-z0-9._-]+$ ]] && printf '%s' "$u"
   return 0
 }
+# plugin_home: 0 when one of the Foreman's projects (mine) is the plugin's own repository: a main checkout on this
+# machine whose remote (the pack's .remote, default origin) is the repository this plugin's plugin.json names, owner
+# and name alike (case aside). There the Foreman files a plugin problem itself (stop.sh, context).
+plugin_home() {
+  local want main r u
+  # slug_ <address>: "owner/name" of git@host:owner/name.git or https://host/owner/name, lower case.
+  slug_() { local s=${1%/} n; s=${s%.git}; s=${s//:/\/}; [[ $s == */*/* ]] || return 1; n=${s##*/}; s=${s%/*}; s="${s##*/}/$n"
+    [[ ${s,,} =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] && printf '%s' "${s,,}"; }
+  want=$(slug_ "$(jq -r '.repository | if type == "object" then .url else . end | strings' "$FHERE/../../.claude-plugin/plugin.json" 2>/dev/null)") \
+    && [ -n "$want" ] || return 1
+  while IFS=$'\t' read -r _ main; do
+    [ -n "$main" ] && [ -d "$main" ] || continue
+    r=$(jq -r '.remote // "origin" | strings' "$main/.conveyor/project.json" 2>/dev/null) && [ -n "$r" ] || r=origin
+    u=$(git -C "$main" remote get-url -- "$r" 2>/dev/null) || continue
+    [ "$(slug_ "$u")" = "$want" ] && return 0
+  done < <(mine 2>/dev/null)
+  return 1
+}
 # record_of <name> <records>: the record, "<repo> TAB <main>" as records prints them, that holds an issue of the
 # GitHub repository <name>: the first whose main checkout's repository (repo_name) is <name>, else the one named
 # <name> (so a record whose main is not on this machine is still found by its name). Empty when none is.
