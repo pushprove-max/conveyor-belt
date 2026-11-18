@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -66,6 +66,8 @@ def ok: . as $r | (keys - known) == need
         and (.times // {} | type == "object" and all(type == "number"))
         # The clock seconds of the same files (slowtests()), {file: sec}: the snapshot's tests part.
         and (.clocks // {} | type == "object" and all(type == "number"))
+        # The files an earlier step timed and this one kept as passed, not run (carriedrec()).
+        and (.carried // [] | type == "array" and all(type == "string"))
         # Why each test file ran (testrec()), {file: [reasons]}; wholeSuite: the run ran every engine case file.
         and (.why // {} | type == "object" and all(type == "array" and all(type == "string")))
         and (.wholeSuite // true | . == true)

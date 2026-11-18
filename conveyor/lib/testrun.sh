@@ -182,12 +182,14 @@ slowtests() { # <worktree>
     else . end)' <<<"$f" > "$1.slow"
 }
 # The files a run in <worktree> timed, {file: {sec, cpu}} (cpu null when the line gives none): its runners'
-# `TESTRUN sec` lines, those of the run before a run again (<worktree>.times, tests()) first, then those read from the
-# runner's own report (<worktree>.reported, reported()), the last line of a file counting: a runner's own line wins.
-timed() { # <worktree>
+# `TESTRUN sec` lines, those of the runs before a run after a fix session (<worktree>.oldtimes, tests()) first, then
+# those of the run before a run again (<worktree>.times), then those read from the runner's own report
+# (<worktree>.reported, reported()), the last line of a file counting: a runner's own line wins. With own, the runs
+# before a run after a fix session are left out: the files this step ran.
+timed() { # <worktree> [own]
   local l logs=()
   mapfile -t logs < <(testlogs "$1")
-  { cat "$1.times" "$1.reported" 2>/dev/null; for l in "${logs[@]}"; do printf '\n'; cat "$l" 2>/dev/null; done; } \
+  { [ "${2:-}" = own ] || cat "$1.oldtimes" 2>/dev/null; cat "$1.times" "$1.reported" 2>/dev/null; for l in "${logs[@]}"; do printf '\n'; cat "$l" 2>/dev/null; done; } \
     | jq -cRn '[inputs | capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
       | {key: .f, value: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}] | from_entries'
 }
@@ -230,10 +232,16 @@ beforetimes() { # <worktree>
 }
 # Its test line's part: {timed: <worktree>.timed} when the run timed a test file the change adds or modifies,
 # {times: <worktree>.cpus, clocks: <worktree>.clocks} when it timed any file (times is {} when each was timed by the
-# clock only), and {slow: <worktree>.slow} when a file is over, else {}.
+# clock only), {slow: <worktree>.slow} when a file is over, and carriedrec()'s part, else {}.
 slowrec() { # <worktree>
-  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile s "$1.slow" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
-    + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end) + if $s[0] | length > 0 then {slow: $s[0]} else {} end' 2>/dev/null || echo '{}'
+  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile s "$1.slow" --argjson o "$(carriedrec "$1")" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
+    + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end) + (if $s[0] | length > 0 then {slow: $s[0]} else {} end)
+    + $o' 2>/dev/null || echo '{}'
+}
+# A card's test line's part for the files its run kept as passed and did not run, though a run before timed them
+# (<worktree>.oldfiles, tests()): {carried: [file]}, else {}. Their times on the line are the earlier run's.
+carriedrec() { # <worktree>
+  jq -c 'if type == "array" and length > 0 then {carried: .} else {} end' "$1.oldfiles" 2>/dev/null || echo '{}'
 }
 # The slow-test record: {filed: [{file, issue, ...why}]}, the "Slow test" issue last filed for each file, by the filing
 # that the test rules replaced (lib/testrules.sh). Nothing writes it now; a file it names whose issue no card has landed
@@ -365,8 +373,8 @@ cacheoff() { # <worktree>
 # <worktree>.whole). A run that passed keeps what it
 # passed in the list too, for such a run and for a retried card (block() keeps it). The first run's exit and failures (testfails())
 # are in <worktree>.first, {exit, failures, tail: the end of its output, left out when it gave none}, when the run went again, and the files it timed in <worktree>.times
-# (its `TESTRUN sec` lines, slowtests()), after those the runs before it timed when this run keeps their passes (a run
-# after a fix session does not run again a file that passed); the output is the last run's. A run that passed
+# (its `TESTRUN sec` lines, slowtests()), and those the runs before it timed in <worktree>.oldtimes when this run keeps
+# their passes (a run after a fix session does not run again a file that passed); the output is the last run's. A run that passed
 # on re-run adds its cases to the flaky-test record (flakyrun()) as it ends, a batch's run (batch()) too; a run again
 # that failed adds the cases that passed in it. A card's run that passed leaves what it passed in <worktree>.passed
 # (passlist()). A card's run is told to keep the cases the flaky-test record keeps off card runs as passed (flakyoff()),
@@ -394,14 +402,14 @@ cacheoff() { # <worktree>
 # test files for each it was given (TEST_GIVEN: watch() stops it, <worktree>.wide) does not run again and fails the
 # same way. card() blocks a card whose run left <worktree>.stop. The release's runs (test.full, test.main) are as before.
 tests() { # <worktree> [the pack's field of the command: test.command] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off cw='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-}
+  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS ob mw off kp ko ka cw='' LISTNONE='' CAPNOTE='' TEST_GIVEN=${TEST_GIVEN:-}
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
   # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
-  mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
+  mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
   # either goes.
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
-  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
+  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then
     listcmd "$1" "$cmd" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
@@ -428,7 +436,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
       if [ -s "$1.rerun" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; } > "$1.rerun.new" \
         && mv -f "$1.rerun.new" "$1.rerun"; then r=0; fi
     fi
-    if [ $r = 0 ]; then [ -z "$o" ] || printf '%s\n' "$o" > "$1.times"; else rm -f "$1.rerun"; fi
+    # Those times are in <worktree>.oldtimes, apart from this run's own (<worktree>.times).
+    if [ $r = 0 ]; then [ -z "$o" ] || printf '%s\n' "$o" > "$1.oldtimes"; else rm -f "$1.rerun"; fi
     # A card's run keeps the flaky cases and the slow files off (flakyoff(), slowoff()): the full suite and the whole
     # test on main run them.
     [ -n "${2:-}" ] || { flakyoff "$1"; slowoff "$1"; }
@@ -450,6 +459,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # The `off` lines (flakyoff(), slowoff()), which rerunlist() does not keep: given to the run again too, so it runs no
   # case or file kept off that its list would otherwise select (a case of the runner that did not finish).
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
+  # The files its list keeps whole as passed (`pass` lines): not run. A file it runs only some cases of is run.
+  kp=$(awk -F'\t' '$1 == "pass" {print $2}' "$1.rerun" 2>/dev/null)
   testonce "$1" "$cmd"; rc=$?; cachekeep "$1"
   if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t" \
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
@@ -465,6 +476,10 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
   TEST_RUN=$((SECONDS - w))
+  # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not: carried (carriedrec()).
+  [ -z "$kp" ] || [ ! -s "$1.oldtimes" ] || { ko=$(timed "$1" own) && ka=$(timed "$1") \
+    && jq -cn --argjson o "$ko" --argjson a "$ka" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null)] | unique' > "$1.oldfiles"; } \
+    || rm -f "$1.oldfiles"
   # Given TEST_GIVEN files, a run reported far more (watch() stopped it, <worktree>.wide): it does not run again, and
   # <worktree>.stop says why. A run alone with no TEST_CMD was given no list (bugproof()): its reason says so (NARROWALONE).
   if [ -s "$1.wide" ]; then
@@ -1585,7 +1600,7 @@ steadyproof() { # <card> <worktree> <test file> [<the most clock seconds a run m
     ls=$(git -C "$mwt" -c core.quotePath=false ls-files 2>/dev/null | testpaths | grep -vxF -- "$f" | awk '{ print "pass\t" $0 }')
     while [ -z "$bad" ] && [ "$i" -lt "$n" ]; do
       i=$((i + 1))
-      { [ -z "$ls" ] || printf '%s\n' "$ls"; printf 'fail\t%s\n' "$f"; } > "$mwt.rerun"; rm -f "$mwt.times"; tests "$mwt" test.command alone; rc=$?
+      { [ -z "$ls" ] || printf '%s\n' "$ls"; printf 'fail\t%s\n' "$f"; } > "$mwt.rerun"; rm -f "$mwt.oldtimes" "$mwt.times"; tests "$mwt" test.command alone; rc=$?
       if [ "$rc" != 0 ]; then bad=$i
       elif [ -n "$lim" ]; then
         t=$(timed "$mwt" 2>/dev/null | jq -r --arg f "$f" '.[$f] // {} | "\(.sec // "")\t\(.cpu // "")"' 2>/dev/null); s=${t%%$'\t'*} c=${t#*$'\t'}

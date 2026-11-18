@@ -159,7 +159,7 @@ tastart() { # <id>
     if [ "$how" = judge ]; then p=$TAJUDGE; else p=$TAEXPLAIN; fi
     p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts newest run, from the card test steps, the whole-suite runs (the release suite'"'"'s too) and its runs on its own: "
       + (if .newest == null then "none recorded" else "\(.newest.run), \(.newest.time): \(.newest.result). When you say how its newest run ended, say it of this run and name it" end)
-      + ".\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
+      + ".\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget; carried: true, that card step kept it as passed and did not run it, its times are those of an earlier step of that card; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
       + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
       + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
       + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)
@@ -180,14 +180,16 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 }
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), timed and slow parts for
-# the file, and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}; cards: the
+# the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
+# same card (carriedrec(); a failed step saves none, so they may be the only ones of that run), and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}; cards: the
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
 # them (FAILURE and failedrun, lib/testfiles.sh):
 # {card, issue, time, verdict, cases, tail}; newest: its newest run of every record that holds one, a card's test step
-# (a file that passed on its run again while another file failed again: failed, then passed, unless the run again timed
+# that ran it (a file that passed on its run again while another file failed again: failed, then passed, unless the run again timed
 # out, which may have ended before the file ran; a `held` step, its failures the machine's, read as a failed one and
-# named held), a whole-suite run (the
+# named held; a step that ran it, its line with no time of it as a failed step saves none, passed it when the card's
+# next step carried it), a whole-suite run (the
 # release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
 # result}, null with none.}
 TAFAILS=5
@@ -200,10 +202,14 @@ testfacts() { # <file>
     --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
     | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first),
-         slow: ([.slow | arrays | .[] | objects | select(.file == $f)] | first)} | select(.times != null or .clocks != null or .timed != null or .slow != null) | del(.[] | nulls)] as $c
+         slow: ([.slow | arrays | .[] | objects | select(.file == $f)] | first), carried: (if any(.carried | arrays | .[]; . == $f) then true else null end)}
+         | select(.times != null or .clocks != null or .timed != null or .slow != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
-    | ([$ls[] | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
-        | select($x != [] or ((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed, .slow | arrays | .[] | objects | select(.file == $f)] | first)) != null)
+    | [[$ls | to_entries[] | select(.value.reused != true)] | group_by(.value.card)[] | . as $g
+        | range(0; length - 1) | select(any($g[. + 1].value.carried | arrays | .[]; . == $f)) | $g[.].key] as $ranat
+    | ([$ls | to_entries[] | .key as $i | .value | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
+        | select($x != [] or ((any(.carried | arrays | .[]; . == $f) | not)
+            and (((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed, .slow | arrays | .[] | objects | select(.file == $f)] | first)) != null or any($ranat[]; . == $i))))
         | {time, run: "the test step of card \(.card) (#\(.issue))", result: ((if $x == [] then "passed"
             elif $x[0].result == "pass" then "failed, then passed when run again"
             elif ($x[0].again | type) == "array" and (any($x[0].again[]; . == $f) | not) then

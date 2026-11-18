@@ -51,6 +51,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
+  local cr # cr: a failed test line's carried part (carriedrec())
   local mainsec=0 mw # mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
@@ -593,10 +594,12 @@ card() { # <card> <issue> [<branch> <tip>]
         # loop that adopted the card) proves nothing: nothing of it runs on main, goes to the main-red record, a wait
         # for main or a fix session. Its test line says so, and the test step runs again; the third such run in a row
         # blocks the card (a run with a result, a pass too, starts the count again: above).
+        # Its own run's files kept as passed and not run (carriedrec()): the step that ran them is an earlier one.
+        cr='{}'; [ -z "$own" ] || cr=$(carriedrec "$wt")
         if t=$(voidrun "$wt" "$rc"); then
           voids=$((voids + 1))
-          record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --arg r "no result: $t" \
-            'sub("\n+$"; "") as $t | $x + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
+          record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson o "$cr" --arg r "no result: $t" \
+            'sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
           [ "$voids" -lt 3 ] || { block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
           echo "conveyor: card $c: its test run gave no result ($t): the test step runs again"
           continue
@@ -607,8 +610,8 @@ card() { # <card> <issue> [<branch> <tip>]
         # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: its test line is `held`,
         # not `fail` (the card's test step is not counted as failed), and it waits for the machine hold (below).
         held=''; jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$t" >/dev/null && held=machine
-        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson f "${out:-null}" --arg rc "$rc" --argjson r "$(firstrun "$wt")" --argjson v "$t" \
-          'sub("\n+$"; "") as $t | $x + {
+        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson f "${out:-null}" --arg rc "$rc" --argjson r "$(firstrun "$wt")" --argjson v "$t" --argjson o "$cr" \
+          'sub("\n+$"; "") as $t | $x + $o + {
              reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
            + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v')"
         testrulespass > /dev/null

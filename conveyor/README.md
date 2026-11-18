@@ -599,7 +599,9 @@ holds each test file its change adds or modifies with both times (`timed`). A fi
 quiet machine, with its worker threads) is on the card's test line (`slow`). A file with a budget of its own
 (`test.files`, below, The test files in the snapshot) is held to that budget in place of `test.fileBudget`, and a file
 marked slow on purpose is held to no budget: it is never on the `slow` line and no CPU test rule files it. The test
-line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`).
+line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`). A run after a fix session lists
+the files it kept as passed and did not run (`carried`): their times are from an earlier run, and the test judge
+does not count them as a run of that file.
 
 **How a split is checked.** A split does not lower the CPU seconds summed: each new file has its own start-up. It
 gives files that each fit the budget and run side by side. So the check of an Optimize card (Bug cards: the new tests

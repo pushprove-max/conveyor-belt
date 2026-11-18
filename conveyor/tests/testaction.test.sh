@@ -154,6 +154,22 @@ t_tanewest() {
   [ "$out" = '{"time":"2026-11-11T00:00:00Z","run":"the test step of card c9-14 (#14)","result":"failed, and its run again timed out in tests/other.test.sh before it was known to pass"}' ] \
     || fail "a run again that timed out before the file ran is told as the file passing on it: $out"
 }
+# Bugs it catches (#341): a card's step that kept the file as passed and did not run it, its time of the file carried
+# from the card's earlier step (carried, carriedrec()), was told to the judge as a pass at its own time and as a run of
+# it, not marked carried; once it was not, the earlier step that ran it, failed in another file (a failed step saves no times), was not
+# told at all, leaving an older release-suite failure as the newest run; and dropping the carrying line lost the only
+# times of that run and its card from the card list.
+t_tacarried() {
+  tasetup; local out
+  jq -cn '{time: "2026-11-08T00:00:00Z", how: "release", sha: "0123456789abcdef", files: {"tests/x.test.sh": {result: "fail", sec: 1, cpu: 1}}}' >> "$ST/suiteruns.jsonl"
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-09T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "tests/y.test.sh", cases: [{name: "b"}]}], timeout: null}}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-10T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1, "tests/y.test.sh": 2},
+    clocks: {"tests/x.test.sh": 1, "tests/y.test.sh": 2}, carried: ["tests/x.test.sh"]}' >> "$ST/cards.jsonl"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && testfacts tests/x.test.sh | jq -c '[.newest, (.runs | map([.card // "suite", .carried // false, .times // .sec])), .cards]')
+  [ "$out" = '[{"time":"2026-11-09T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},[["suite",false,1],["c7-12",true,1]],[{"card":"c7-12","issue":12}]]' ] \
+    || fail "the newest run is not the failed step that passed the file, or the carried times are lost or not marked as carried: $out"
+}
 
 # The Board's File an issue (`testissue`) files the issue with the pack's type and last priority and keeps it for the
 # file, and refuses a file main lacks. Bug it catches: an issue the Board filed was kept nowhere, so its file's row had

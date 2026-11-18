@@ -26,25 +26,46 @@ t_budgetunder() {
 # Bug caught: a run after a fix session, which does not run again the files that passed, lost the time the runs before
 # it took of them (tests() deleted <worktree>.times), so a 9 CPU s file the card added that passed while f.test failed
 # landed with no note of it. f.test fails twice (the run and its run again) until the fix session; s.test passes in the
-# first run, and the runs after it keep its pass and do not run it again.
+# first run, and the runs after it keep its pass and do not run it again. The run after the fix runs f.test but times it
+# not, as the runner does a file it is given some cases of (case_times(), lib.sh).
 t_budgetfix() {
+  budgetfixsetup; echo 'echo two >> a.txt; echo 5 9 > s.test; [ ! -e "$STUB/built" ] || touch "$STUB/fixed"; touch "$STUB/built"' > "$STUB/build"
+  loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
+  # Runs 1 and 2 are the first and its run again, 3 the run after the fix of f.test, which keeps s.test's pass.
+  [ "$(tr '\n' ' ' < "$STUB/ran")" = "1 " ] || fail "s.test did not run in the first run alone: $(tr '\n' ' ' < "$STUB/ran")"
+  [ "$(st 'select(.step == "test") | .slow | tojson' | sed -n 2p)" = '[{"file":"s.test","sec":5,"cpu":9,"budget":8,"changed":true}]' ] \
+    || fail "the run after the fix of f.test does not record s.test's time: $(st 'select(.step == "test") | .slow | tojson' | tr '\n' ' ')"
+  # Bug caught (#341): that line did not say s.test's time was the first run's, kept, so the test judge read it as a
+  # new pass of s.test, newer than a release-suite failure of it. The first run's own line, which ran it, says none.
+  # Bug caught too: f.test, which that run ran with no time of it, was named, so the judge did not count that run.
+  [ "$(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ' ] \
+    || fail "the run after the fix does not name s.test as carried, not run: $(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
+    || fail "f.test did not fail and pass after a fix, or the slow file sent the card round again: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(reviews 7)" = "GO GO " ] || fail "the slow file went to a review: $(reviews 7)"
+  landedone 7 || fail "the card did not land after its fix"
+}
+# Bug caught (#341): a run after a fix session that failed again said nothing of s.test, which it kept as passed and
+# did not run, so the test judge could not tell that the step before it was the one that ran s.test.
+t_budgetfixfail() {
+  budgetfixsetup; echo 'echo two >> a.txt; echo 5 9 > s.test' > "$STUB/build"
+  loop run --only 7 1 > /dev/null 2>&1
+  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test fail," ] \
+    || fail "f.test did not fail before and after the fix: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ' ] \
+    || fail "the failed run after the fix does not name s.test as carried, not run: $(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')"
+  [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
+}
+# Card 7 and its test command (budgetfix, budgetfixfail): s.test, which the build writes, passes and is timed unless
+# the run's list keeps it as passed; f.test fails, and is timed, until the build touches $STUB/fixed.
+budgetfixsetup() {
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
-  echo 'echo two >> a.txt; echo 5 9 > s.test; [ ! -e "$STUB/built" ] || touch "$STUB/fixed"; touch "$STUB/built"' > "$STUB/build"
   cat > "$STUB/test-cmd" <<'EOF'
 L=$CONVEYOR_TEST_LOG/r.log; echo x >> "$STUB/runs"
 if [ -f s.test ] && ! grep -qxF "pass	s.test" "${CONVEYOR_TEST_RERUN:-/dev/null}"; then
   wc -l < "$STUB/runs" >> "$STUB/ran"; printf '== s.test\n-- ok s.test\nTESTRUN sec\ts.test\t%s\t%s\n' $(tail -n 1 s.test) >> "$L"
 fi
 echo '== f.test' >> "$L"
-if [ -e "$STUB/fixed" ]; then echo 'ok c'; echo '-- ok f.test' >> "$L"; else echo 'FAIL [c]: wrong'; echo '-- FAIL f.test' >> "$L"; exit 1; fi
+if [ -e "$STUB/fixed" ]; then echo 'ok c'; echo '-- ok f.test' >> "$L"; else printf 'TESTRUN sec\tf.test\t1\t1\n' >> "$L"; echo 'FAIL [c]: wrong'; echo '-- FAIL f.test' >> "$L"; exit 1; fi
 EOF
-  loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
-  # Runs 1 and 2 are the first and its run again, 3 the run after the fix of f.test, which keeps s.test's pass.
-  [ "$(tr '\n' ' ' < "$STUB/ran")" = "1 " ] || fail "s.test did not run in the first run alone: $(tr '\n' ' ' < "$STUB/ran")"
-  [ "$(st 'select(.step == "test") | .slow | tojson' | sed -n 2p)" = '[{"file":"s.test","sec":5,"cpu":9,"budget":8,"changed":true}]' ] \
-    || fail "the run after the fix of f.test does not record s.test's time: $(st 'select(.step == "test") | .slow | tojson' | tr '\n' ' ')"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
-    || fail "f.test did not fail and pass after a fix, or the slow file sent the card round again: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(reviews 7)" = "GO GO " ] || fail "the slow file went to a review: $(reviews 7)"
-  landedone 7 || fail "the card did not land after its fix"
 }
