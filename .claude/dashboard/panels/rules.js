@@ -899,14 +899,15 @@
     yOn.disabled = yOff.disabled = !yesKnown;
     el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
       yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
-    // Whole suite in a card: Off (the default; a record without it reads as Off) runs only the test files of a card's
-    // change, and the whole suite only in a release; On lets a card run the whole suite when its tests cannot be found.
+    // Whole suite in a card: Off (the default; a record without it reads as Off) runs only the test files a card's
+    // change adds or changes (with none, 5 linked to it), the linked files before each push, and the whole suite only
+    // in a release; On lets a card run the whole suite when its tests cannot be found.
     const wholeOn = r.wholeSuite === true, wholeKnown = typeof r.wholeSuite === 'boolean';
     const wOn = choice('On', 'whole-suite-on', 'Whole suite in a card: on', wholeOn, () => { if (!wholeOn) send('rules', ['wholeSuite=on'], null, ['rules', ['wholeSuite=off']]); });
     const wOff = choice('Off', 'whole-suite-off', 'Whole suite in a card: off', !wholeOn, () => { if (wholeOn) send('rules', ['wholeSuite=off'], null, ['rules', ['wholeSuite=on']]); });
     wOn.disabled = wOff.disabled = !wholeKnown;
     el.append(row('wholeSuite', 'Whole suite in a card', 'a card may run every test file when it cannot find the tests of its change',
-      wOn, wOff, wholeKnown ? offLine(wholeOn, 'a card runs only the test files linked to its change, and the whole suite runs only in a release') : newer(wholeKnown)));
+      wOn, wOff, wholeKnown ? offLine(wholeOn, 'a card runs only the test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run before each push, and the whole suite runs only in a release') : newer(wholeKnown)));
     // Card work yields to you: the machine's (the host file's steer, every project's alike), sent as POST /machine.
     // On (the default) runs card sessions at lowered priority and card test runs at idle priority; Off runs them at
     // normal priority. Undo sends the other value.

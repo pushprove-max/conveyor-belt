@@ -24,7 +24,7 @@ test('Rules: Whole suite in a card, off by default, says what off means and is t
   deliver(w, data(false));
   assert.ok(row(w), 'the rule has a row on the Rules tab');
   assert.deepEqual(pressed(w), ['false', 'true'], 'off: a card runs only its own tests');
-  assert.match(row(w).textContent, /off: a card runs only the test files linked to its change, and the whole suite runs only in a release/);
+  assert.match(row(w).textContent, /off: a card runs only the test files it adds or changes \(with none, 5 linked to its change\), the test files linked to the landings run before each push, and the whole suite runs only in a release/);
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'whole-suite-off').click()), [], 'the choice in force sends nothing');
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'whole-suite-on').click()), [{ action: 'rules', args: ['wholeSuite=on'], repo: 'sample' }]);
   // The record the engine keeps after that change: the row shows On, and nothing says it is off.

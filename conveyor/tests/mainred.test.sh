@@ -153,7 +153,7 @@ t_mainredlinks() {
   land ca 2 lib/a.sh lib/a.test.sh; a=$(git -C "$r" rev-parse HEAD)
   land cc 3 lib/c.sh lib/c.test.sh; h=$(git -C "$r" rev-parse HEAD)
   git -C "$r" worktree add -q --detach "$w/fix" "$h"
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^testlinks() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     export MAINRED=$w/mainred.json
     # The loop's redpick() names the fix card in the entry; here the record is given it.
@@ -220,7 +220,7 @@ t_mainredpartial() {
   printf 't_one() { :; }\nt_two() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
   land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD)
   land cc 3 lib/c.sh two; h=$(git -C "$r" rev-parse HEAD)
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     export MAINRED=$w/mainred.json
     mainred c9 "r.test.sh: one" r.test.sh "$h" && echo ok ) || fail "mainred failed: $got"
@@ -245,7 +245,7 @@ t_mainredold() {
   printf '# run alone: bash ../r.test.sh\nt_one() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
   land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD); h=$a
   jq -cn '{reds: [{sha: "0ld", cases: [{case: "r.test.sh: one", file: "r.test.sh", files: ["tests/b.test.sh"]}], card: null}]}' > "$w/mainred.json"
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     tests() { :; }; testlogs() { echo log; }; testfails() { echo '{"files": [{"file": "tests/b.test.sh", "cases": [{"name": "one"}]}]}'; }
     export MAINRED=$w/mainred.json

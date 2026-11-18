@@ -180,9 +180,11 @@ with the project. Each change has Undo.
 will see stops until its issue has a `Visible change approved:` line. Off, the tab says "off: visible changes land
 without your yes".
 
-**Whole suite in a card** is a switch per project, Off by default. Off, a card runs only the test files linked to its
-change, and the whole suite runs only in a release. The tab says "off: a card runs only the test files linked to its
-change, and the whole suite runs only in a release". On, a card runs the whole suite when it cannot find the tests of
+**Whole suite in a card** is a switch per project, Off by default. Off, a card runs only the test files that it adds
+or changes. A card that changes no test file runs 5 of the test files linked to its change. The test files linked to
+the landings run before each push, and the whole suite runs only in a release. The tab says "off: a card runs only the
+test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run before
+each push, and the whole suite runs only in a release". On, a card runs the whole suite when it cannot find the tests of
 its change ([Whole suite in a card](configuration.md#whole-suite-in-a-card)).
 
 ## Held issues and dependencies

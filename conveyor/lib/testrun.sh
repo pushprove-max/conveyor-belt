@@ -478,8 +478,8 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # A pass on re-run goes to the flaky-test record now, before a later run (a batch's) clears <worktree>.first; so do
   # the cases of a run again that failed which passed in it (f: its failures).
   if [ -e "$1.first" ]; then if [ $rc = 0 ]; then flakyrun "$1"; else flakyrun "$1" "${f:-}"; fi; fi
-  # Linked test files over test.cardFiles were left out (listcmd(), testcap()): its output says how many, and that the
-  # release's run covers them.
+  # A change with no test file of its own ran linked test files (listcmd(), testcap()): its output says how many, and
+  # that the run before the push runs them all.
   [ -z "$CAPNOTE" ] || printf 'conveyor: %s\n' "$CAPNOTE" >> "$1.test"
   # A card's run that passed maps the test files its change adds or changes that the test map does not hold yet.
   [ $rc != 0 ] || [ -n "${2:-}" ] || [ "${3:-}" = alone ] || mapnew "$1" >> "$1.test"
@@ -496,9 +496,10 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
 # says which: {mode: "changed", files: <count>, by: "map" or "name", age: the commits the made test map is behind
 # (only with one)} or {mode: "whole", why}. With no test.list, the command is as it is and no file is written.
 # All of that holds while the control record's rule "Whole suite in a card" (rules.wholeSuite, wholerule()) is on.
-# Off (the default), a card never runs the whole suite: the list is testsel()'s narrow one, every test file the test
-# map and the links give the changed files, test.list set or not, up to the pack's test.cardFiles of them (testcap();
-# the list, {mode: "changed", files, by, left, why}, says how many were left out; notTests, [{file, why}], names each
+# Off (the default), a card never runs the whole suite: the list, test.list set or not, is the test files its own
+# change adds or changes (by: "own"); with none, testsel()'s narrow one, the test files the test map and the links
+# give the changed files, up to CARDLINKED of them (testcap(); the output says so, LINKED, and the list, {mode:
+# "changed", files, by, left, why}, says how many were left out); notTests, [{file, why}], names each
 # test runner the change touches, RUNNERFIX, which is on no list: #350). A list of none runs nothing (LISTNONE
 # set; the list, {mode: "changed", files: 0, by, why}, says so). A command that can take the list (listwhy() names no
 # reason) is given it as above; else, with test.fileCommand set, that command runs each file alone (filecmd() files);
@@ -511,10 +512,22 @@ listcmd() { # <worktree> <command>
   if ! wholerule; then
     # The list that could not be made says why (the error of the command that failed); the settings are named only
     # while test.fileCommand is not set.
-    s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
-      narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
-    by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
-    testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
+    # The test files the card's own change adds or changes (the pack's test patterns: testpaths(), so no runner and no
+    # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
+    # none, the CARDLINKED test files the test map and the links give the change (testsel() narrow), those that failed
+    # most recently first (testcap()), and its output says so (LINKED). The run before the push runs the files the map
+    # links to every landing (pushtests(), lib/push.sh).
+    mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
+      | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
+    CAPLEFT=0; CAPNOTE=''
+    if [ ${#fs[@]} != 0 ]; then by='{"by":"own","age":null}'
+    else
+      s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
+        narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
+      by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
+      CAPMAX=$CARDLINKED testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
+      [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/${#fs[@]}}; CAPNOTE=${CAPNOTE//'<all>'/$((${#fs[@]} + CAPLEFT))}; }
+    fi
     # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
     names > /dev/null 2>&1 || :
     [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
@@ -542,13 +555,13 @@ listcmd() { # <worktree> <command>
 }
 # Of the test files <file>... linked to a card's change (testsel() narrow: listcmd(); and those of the bug-card check,
 # bugproof()), while the rule Whole suite in a card is off, the ones a card runs, in CAPFILES: all of them up to the
-# pack's test.cardFiles; of more, that many: first those that failed most recently in a test step on record (the card
+# pack's test.cardFiles (CAPMAX when set: listcmd()'s CARDLINKED); of more, that many: first those that failed most recently in a test step on record (the card
 # records' test lines: FAILURE and failedrun, lib/testfiles.sh), newest first, then the rest in the order given (the
 # test map's). CAPLEFT is how many it left out, CAPNOTE says so (CAPPED), empty when none: the release's run covers them.
 testcap() { # <file>...
-  local n fl ks=() defs refs
+  local n=${CAPMAX:-} fl ks=() defs refs
   CAPFILES=("$@"); CAPLEFT=0; CAPNOTE=''
-  packget test.cardFiles n 2>/dev/null && [[ $n =~ ^[1-9][0-9]*$ ]] || n=50
+  [ -n "$n" ] || { packget test.cardFiles n 2>/dev/null && [[ $n =~ ^[1-9][0-9]*$ ]] || n=50; }
   [ $# -gt "$n" ] || return 0
   testowners
   fl=$({ olds; recs; } 2>/dev/null | jq -cRn --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") "$OWNERS$FAILURE"'
@@ -643,7 +656,15 @@ runnercmd() { # <command> <worktree> <file>...
 # is read as no map (the links and the names still give tests), a change to a test map of the project's own (the
 # pack's test.map path) selects, with its links' tests, the tests of each source the map changes, those it gave the
 # source before and those it gives now (as the project's selector of the changed tests runs them, whose count the stop
-# on a card's run allows: watch(), lib/session.sh), and a change that selects none prints the first line alone. Given two commits, the change between them stands in for the staged change (sharedtests(), lib/claim.sh).
+# on a card's run allows: watch(), lib/session.sh), and a change that selects none prints the first line alone. Given two commits, the change between them stands in for the staged change (sharedtests(), lib/claim.sh; a landing's own change, pushtests(), lib/push.sh).
+# A helper, setup, fixture or mock file (or one in a folder of such a name), that many tests may read (shared): no
+# test of its own (testsel(), listcmd()). A file named as a test (<name>.test.<ext>, <name>_spec.<ext>) is a test by
+# its file name, though the name starts with or holds setup or helper (tests/setup.test.sh, setupservice.test.sh).
+# base: a path's file name.
+SHAREDJQ='def base: split("/")[-1];
+  def shared: test("(^|/)(__mocks__|__fixtures__|fixtures?|helpers?|support|testdata|mocks?)/"; "i")
+    or (base | test("[._](test|spec)\\.[^.]+$"; "i") | not) and (base | test("^setup"; "i") or (sub("\\.[^.]*$"; "") | ascii_downcase | split("[._-]"; null)
+      | any(IN("helper", "helpers", "setup", "fixture", "fixtures", "mock", "mocks", "conftest", "globals"))));'
 testsel() { # <worktree> [narrow] [<from commit> <to commit>]
   local out tm d=(--cached HEAD) rn='' rt='{}' f mp='' om=null
   [ -z "${3:-}" ] || d=("$3" "$4")
@@ -663,15 +684,11 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
            git -C "$1" -c core.quotePath=false grep -lF -e "${f##*/}" 2>/dev/null | testpaths | jq -cRn --arg f "$f" '{($f): [inputs]}'
          done <<<"$rn" | jq -cs 'add // {}') || rt='{}'
   fi
-  out=$(jq -rn '$tm[0] as $tm | $om[0] as $om | '"$RX"'def ls: split("\n") | map(select(. != ""));
-      def base: split("/")[-1]; def dir: split("/")[:-1];
+  out=$(jq -rn '$tm[0] as $tm | $om[0] as $om | '"$RX$SHAREDJQ"'def ls: split("\n") | map(select(. != ""));
+      def dir: split("/")[:-1];
       def stem: base | sub("\\.[^.]*$"; "");
       # A document (.md, .txt, .rst): no test to run, though a test folder holds it (tests/speed/<page>.md, #367).
       def doc: test("\\.(md|txt|rst)$"; "i");
-      # A helper, setup, fixture or mock file (or one in a folder of such a name), that many tests may read.
-      def shared: test("(^|/)(__mocks__|__fixtures__|fixtures?|helpers?|support|testdata|mocks?)/"; "i")
-        or (base | test("^setup"; "i") or (sub("\\.[^.]*$"; "") | ascii_downcase | split("[._-]"; null)
-          | any(IN("helper", "helpers", "setup", "fixture", "fixtures", "mock", "mocks", "conftest", "globals"))));
       def config: test("\\.(json|ya?ml|toml|ini|cfg|conf|lock)$"; "i") or (base | test("(^|[._-])config([._-]|$)"; "i"));
       def common($a; $b): [range([$a, $b] | map(length) | min) | select($a[.] != $b[.])] | first // ([$a, $b] | map(length) | min);
       # The test files whose name holds the file'"'"'s name (no extension) as a word, the nearest by folder.
@@ -1854,14 +1871,14 @@ voidrun() { # <worktree> <exit>
 # commit that has an entry is added to it, while its card runs too (its brief and commit are made from the entry as
 # they are made: redissue()); one an open fix card of an earlier commit holds (redopen()) starts nothing; else the
 # commit gets an entry of its own, which the loop picks ahead of the queue. When the case's file is one file and the
-# landing that broke it is known (brokeby()), the case's entry keeps it (landing: {sha, card, issue}), the brief names
+# landing that broke it is known (given, as the push's run finds it: pushtests(), lib/push.sh; else brokeby()), the case's entry keeps it (landing: {sha, card, issue}), the brief names
 # it, and the entry keeps the links its fix card commits (links: testlinks()). A case is the one an entry holds when
 # their names are the same, or when the entry's name is of a runner of the case's file (`<runner>: <case>`, its files
 # holding <its file>): an entry made when the engine's runner named its case files' cases as its own (before issue 214)
 # is the case its case file names now.
 MAINRED=${STATE%/*}/mainred.json
-mainred() { # <card> <case> <its file> <main's commit>
-  local lock rec c t k re f fs by cmd='' same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
+mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke it: "<sha> <card> <issue>">]
+  local lock rec c t k re f fs by s lc li cmd='' same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
   [ -n "$4" ] || return 1
   # The test command itself (what testfails() names a run that wrote no log) is no case: it names no test to fix.
   ! { packget test.command cmd 2>/dev/null && [ "$2" = "$cmd" ]; } \
@@ -1891,7 +1908,9 @@ mainred() { # <card> <case> <its file> <main's commit>
   fi
   [ ${#fs[@]} -gt 0 ] || [ -z "$3" ] || fs=("$3")
   t=''; [ ${#fs[@]} = 0 ] || t=$(git log -1 --format='%h %s' "$4" -- "${fs[@]}" 2>/dev/null)
-  by=null; [ ${#fs[@]} != 1 ] || by=$(brokeby "${fs[0]}" "$4" "$3" "$k" | jq -ce objects 2>/dev/null) || by=null
+  by=null
+  if [ -n "${5:-}" ]; then read -r s lc li <<<"$5"; by=$(landingof "$s" "$lc" "$li" "${fs[0]:-$3}" | jq -ce objects 2>/dev/null) || by=null
+  elif [ ${#fs[@]} = 1 ]; then by=$(brokeby "${fs[0]}" "$4" "$3" "$k" | jq -ce objects 2>/dev/null) || by=null; fi
   jq -c --arg s "$4" --arg c "$2" --arg f "$3" --arg by "$1" --arg t "$t" --argjson b "$by" --args '({case: $c, file: $f, by: $by, files: $ARGS.positional, last: $t}
       + if $b == null then {} else {landing: ($b | {sha, card, issue}), links: $b.links} end) as $x
     | {reds: (if any(.[]; .sha == $s) then map(if .sha == $s then .cases += [$x] else . end) else . + [{sha: $s, cases: [$x], card: null}] end | .[-100:])}' \
@@ -1923,8 +1942,13 @@ brokeby() { # <test file> <main's commit> [<the file its run named the case unde
   done < <(git rev-list -n "$TESTLINK_DEPTH" "$2" 2>/dev/null)
   [ -n "$ran" ] && [ -n "$by" ] || return 1
   read -r s card iss _ <<<"$by"
-  git diff-tree --no-commit-id --name-only --no-renames -r -z --root "$s" 2>/dev/null | tr '\0' '\n' \
-    | jq -cRn --arg s "$s" --arg c "$card" --arg n "$iss" --arg f "$1" '{sha: $s, card: $c, issue: ($n | tonumber? // $n),
+  landingof "$s" "$card" "$iss" "$1"
+}
+# The landing <sha> of <card> as mainred() keeps it (brokeby(), pushtests() in lib/push.sh): {sha, card, issue,
+# links: {<each file it changed but the test file>: [<test file>]}}.
+landingof() { # <sha> <card> <issue> <test file>
+  git diff-tree --no-commit-id --name-only --no-renames -r -z --root "$1" 2>/dev/null | tr '\0' '\n' \
+    | jq -cRn --arg s "$1" --arg c "$2" --arg n "$3" --arg f "$4" '{sha: $s, card: $c, issue: ($n | tonumber? // $n),
       links: ([inputs | select(. != "" and . != $f) | {key: ., value: [$f]}] | from_entries)}'
 }
 # A main-red fix card (card()) stages the links its entry's cases found (mainred(): links) into

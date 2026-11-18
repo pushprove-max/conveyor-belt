@@ -143,31 +143,54 @@ t_narrowdoctor() {
   [ ! -s "$T/$CASE/fc" ] && [ ! -s "$T/$CASE/on" ] || fail "doctor warned with test.fileCommand set, or the rule on: $(cat "$T/$CASE/fc" "$T/$CASE/on")"
 }
 
-# #311. Main holds <n> test files, t001.test.js to t<n>.test.js, which the card's change, an edit of lib/cartsum.js,
-# links to it (.conveyor/test-links.json, the worktree's); its test step runs as narrowrun() runs it. The records hold
-# the test lines <line>... first.
-caprun() { # <n> [<line>...]
-  local i f fs=()
-  narrowsetup args
-  [ $# -lt 2 ] || printf '%s\n' "${@:2}" >> "$ST/cards.jsonl"
+# #311, #384. Main holds <n> test files, t001.test.js to t<n>.test.js, which the card's change, an edit of <source>
+# (and <more>, a shell edit, when given), links to it (.conveyor/test-links.json, the worktree's); the pack runs each
+# test file alone (test.fileCommand, which adds `one:<file>` to $STUB/got); its test step runs as narrowrun() runs it.
+# The records hold the test lines <line>... first.
+caprun() { # <n> <source> [<more>] [<line>...]
+  local i f fs=() s=$2 m=${3:-}
+  narrowsetup none
+  printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"; tune '.test.fileCommand = "bash \"$STUB/one\""'
+  [ $# -lt 4 ] || printf '%s\n' "${@:4}" >> "$ST/cards.jsonl"
+  mkdir -p "$R/${s%/*}" && echo x > "$R/$s"
   for ((i = 1; i <= $1; i++)); do printf -v f 't%03d.test.js' "$i"; fs+=("$f"); echo x > "$R/$f"; done
   git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
-  narrowrun "mkdir -p .conveyor && jq -cn '{\"lib/cartsum.js\": \$ARGS.positional}' --args ${fs[*]} > .conveyor/test-links.json && echo y >> lib/cartsum.js"
+  narrowrun "mkdir -p .conveyor && jq -cn --arg s $s '{(\$s): \$ARGS.positional}' --args ${fs[*]} > .conveyor/test-links.json && echo y >> $s${m:+ && $m}"
 }
 
-# D1, D2, D4. Bug it catches: a change linked to nearly every test file (a shared helper) ran all of them, about 45
-# minutes a card. 120 linked files run 50 (test.cardFiles' default): the two that failed most recently in a test step
-# on record, newest first, then the rest in order; the test line and output say 70 were left out and that the
-# release's run covers them, and the Board's step shows that note.
+# D1 (#384). Bug it catches: a card ran every test file the map links to its change (65 to 173 a card), holding test
+# slots for hours, though it changed a test file of its own. A change to lib/card.sh, which the links tie to 40 test
+# files, and to tests/samefile.test.sh runs only samefile.test.sh, and says nothing of linked files (the fixture's
+# main ignores conveyor/, so the issue's conveyor/lib/card.sh and conveyor/tests/samefile.test.sh are without it).
+t_narrowown() {
+  caprun 40 lib/card.sh 'mkdir -p tests && echo y >> tests/samefile.test.sh'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'one:tests/samefile.test.sh' ] \
+    || fail "the card did not run only its own test file (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c .list "$T/$CASE/cards/c7.rec")" = '{"mode":"changed","files":1,"by":"own"}' ] && ! grep -q 'linked to it' "$T/$CASE/cards/c7.test" \
+    || fail "the test line's list, or the output: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+}
+
+# D1 (#384). Bug it catches: a test file whose name starts with setup (tests/setup.test.sh, tests/setupservice.test.sh)
+# was read as a shared setup file, so the card ran 5 linked files in place of its own two.
+t_narrowownsetup() {
+  caprun 40 lib/card.sh 'mkdir -p tests && echo y >> tests/setup.test.sh && echo y >> tests/setupservice.test.sh'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/setup.test.sh\none:tests/setupservice.test.sh' ] \
+    && [ "$(jq -c .list "$T/$CASE/cards/c7.rec")" = '{"mode":"changed","files":2,"by":"own"}' ] \
+    || fail "the card did not run only its own setup test files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.rec" 2>&1)"
+}
+
+# D2 (#384). Bug it catches: a change with no test file of its own, linked to nearly every test file (a shared
+# helper), ran all of them, about 45 minutes a card. Of 120 linked files it runs 5, each alone: the two that failed
+# most recently in a test step on record, newest first, then the rest in order; the test line and output say so and
+# that the run before the push runs them all, and the Board's step shows that note.
 t_narrowcap() {
-  caprun 120 '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t100.test.js","cases":[]}],"timeout":null}}' \
+  caprun 120 lib/cartsum.js '' '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t100.test.js","cases":[]}],"timeout":null}}' \
     '{"card":"c2","issue":2,"step":"test","time":"2026-11-12T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t090.test.js","cases":[]}],"timeout":null}}'
-  local want note='70 of the 120 test files linked to the change did not run, as a card runs at most 50 (test.cardFiles), those that failed most recently first. The release'"'"'s whole-suite run covers them.'
-  want="args:t090.test.js t100.test.js $(printf 't%03d.test.js ' $(seq 1 48))"
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "${want% }|env:" ] \
-    || fail "the card did not run 50 files, the recently failed first (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-  [ "$(jq -r '.list | "\(.files) \(.left) \(.why)"' "$T/$CASE/cards/c7.rec")" = "50 70 $note" ] && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" \
-    || fail "the test step does not say what it left out: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+  local note='the change adds or changes no test file, so the card ran 5 of the 120 test files linked to it, those that failed most recently first. The run before the push runs all of them.'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "$(printf 'one:%s\n' t090.test.js t100.test.js t001.test.js t002.test.js t003.test.js)" ] \
+    || fail "the card did not run 5 files alone, the recently failed first (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -r '.list | "\(.files) \(.left) \(.why)"' "$T/$CASE/cards/c7.rec")" = "5 115 $note" ] && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" \
+    || fail "the test step does not say what it ran: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
   # The Board's card track gives the passed step that note, which it shows: the test line goes through the card's row
   # (jq/rows.jq, its log) and then its track (jq/track.jq), as the snapshot draws it.
   [ "$(jq -c '{card: "c7", issue: 7, step: "picked", time: "2026-11-17T11:00:00Z"}, ({card: "c7", issue: 7, step: "test", result: "pass", time: "2026-11-17T12:00:00Z"} + .)' "$T/$CASE/cards/c7.rec" \
@@ -176,13 +199,13 @@ t_narrowcap() {
     || fail "the Board's test step does not show the note: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
-# D4. Bug it catches: the cap left files out, or said so, under the limit. 30 linked files all run, with no note.
+# Bug it catches: the cap left files out under the limit. 3 linked files all run, and the list names none left out.
 t_narrowcapunder() {
-  caprun 30
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "args:$(printf 't%03d.test.js ' $(seq 1 30) | sed 's/ $//')|env:" ] \
-    || fail "the card did not run its 30 linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-  [ "$(jq -c '.list | [.files, .left, .why]' "$T/$CASE/cards/c7.rec")" = '[30,null,null]' ] && ! grep -q 'did not run' "$T/$CASE/cards/c7.test" \
-    || fail "a run under the limit has a note: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+  caprun 3 lib/cartsum.js
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3)" ] \
+    || fail "the card did not run its 3 linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .left, .why]' "$T/$CASE/cards/c7.rec")" = '[3,null,null]' ] \
+    || fail "a run under the limit names files left out: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
 # D3. Bug it catches: the bug card's proof run on main gave the command every test file of the change, past the

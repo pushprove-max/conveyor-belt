@@ -180,9 +180,10 @@ t_bugnotalone() {
 
 # #137. Bug it catches: a pack whose test command cannot run one file alone has no way to run a change's test files.
 # With test.fileCommand set, the check runs it once for each test file, given the file, in place of test.command:
-# the file fails on main without the fix, and the card lands.
+# the file fails on main without the fix, and the card lands. Only the check's runs (in its worktree on main) are
+# counted: the run before the push (pushtests()) runs the landing's test file too.
 t_bugfilecommand() {
-  TUNE='.test.fileCommand = "echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\"; bash"' bugcard 'grep -qx two a.txt' bug
+  TUNE='.test.fileCommand = "case $PWD in */mainrun/*) echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\" ;; esac; bash"' bugcard 'grep -qx two a.txt' bug
   [ "$(cat "$STUB/fileran" 2>&1)" = a.test.sh ] && [ ! -e "$STUB/mainran" ] \
     || fail "the check did not run the test file alone with test.fileCommand: $(cat "$STUB/fileran" "$STUB/mainran" 2>&1)"
   grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \

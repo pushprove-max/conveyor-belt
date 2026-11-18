@@ -332,6 +332,7 @@
 {"area": "claim", "file": "conveyor/lib/fastfit.py"}
 {"area": "push", "test": "serve.test.sh"}
 {"area": "push", "test": "pushslot.test.sh"}
+{"area": "push", "test": "pushtests.test.sh"}
 {"area": "push", "test": "adopt.test.sh"}
 {"area": "push", "test": "deps.test.sh"}
 {"area": "push", "test": "port.test.sh"}

@@ -113,10 +113,19 @@ line that names the other card's issue waits.
 
 By default, Conveyor lands each card and pushes when you press
 [Push landed](board.md#push-landed-and-run-full-test-suite). Turn on the Rules tab's **Push when a card lands** rule,
-and the loop pushes main on its own after each landing. Each push goes through the project's own pre-push hook. A push
-that fails is one of two kinds:
+and the loop pushes main on its own after each landing. Each push goes through the project's own pre-push hook.
 
-- `check`: the pre-push hook failed (typecheck, tests, lint). A retry fails the same way, so the loop wakes the
+Before the loop pushes main, and before Push now, Conveyor runs the test files that the test map and
+`.conveyor/test-links.json` link to the landings since the last push. Each file runs alone, once for each commit of
+main. This run never runs a test runner or the whole suite. If a file fails, Conveyor runs that file on each landing
+in turn to find the landing that broke it. Then it files a main-fix card that names that landing, and it holds the
+push until main changes. Push landed pushes the commit that its full test run tested, so it skips this run. The run
+needs `test.fileCommand`, or a `test.list` form that can give the test command one file. Without them, the push goes
+on without the run.
+
+A push that fails is one of two kinds:
+
+- `check`: the pre-push hook failed (typecheck, tests, lint), or a test file failed in the run before the push. A retry fails the same way, so the loop wakes the
   Foreman and shows the hook's last lines on Needs you. It does not run the checks again until main's commit changes.
 - `transport`: git, the network or the remote failed. The loop tries again every `tunables.pushRetry` seconds. Needs
   you shows it once a retry fails too.

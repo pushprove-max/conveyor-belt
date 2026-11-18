@@ -191,20 +191,20 @@ The rule **Whole suite in a card** on the Rules tab sets if a card can run the w
 as this section says above.
 
 With the rule Off, a card never runs the whole suite. The whole suite runs only in a release. The rule does not
-change the runs of a release or of the full test suite. A card runs these test files:
+change the runs of a release or of the full test suite. A card runs only the test files that its change adds or
+changes, as `tests.patterns` finds them. A shared helper or a test runner is not a test file here.
 
-- the test files of the list above;
-- for a change that would run the whole suite, the test files that the test map and `.conveyor/test-links.json` link
-  to the changed files;
-- for a changed document, the test files that the test map and `.conveyor/test-links.json` link to it.
+If the change adds or changes no test file, the card runs 5 of the test files that the test map and
+`.conveyor/test-links.json` link to the changed files. The files that failed most recently in a test step run first,
+then the others in the order of the test map. The card's test step says this, and the Board shows the note with the
+step. If no test file is linked to the change, the card runs no test. The card's test line says so.
 
-A card runs at most `test.cardFiles` of these test files (in `.conveyor/project.json`). If more are linked, the files
-that failed most recently in a test step run first, then the others in the order of the test map. The card's test
-step says how many files it left out, and that the release's whole-suite run covers them. The Board shows this note
-with the step. The check of a bug card on main's code uses the same limit.
+Before each push, Conveyor runs the test files that the test map and `.conveyor/test-links.json` link to the
+landings since the last push. Each file runs alone. If a file fails, Conveyor finds the landing that broke it, files
+a main-fix card, and holds the push ([Push](cards.md#push)).
 
-If no test file is linked to the change, the card runs no test. The card's test line says so, and the release's run
-covers the change.
+The check of a bug card on main's code runs at most `test.cardFiles` test files (in `.conveyor/project.json`). If
+more are linked, the files that failed most recently in a test step run first.
 
 A card can give its test files to your command only through `test.list`. If the pack has no `test.list`, has `none`,
 or has a list form that the command cannot take, the card runs each test file alone with `test.fileCommand`. If the

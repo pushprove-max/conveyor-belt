@@ -72,13 +72,19 @@ push() { # <card> <issue> [<commit>]
   pushone "$@" {lk}>&-; rc=$?; exec {lk}>&-; return $rc
 }
 pushone() { # <card> <issue> [<commit>]
-  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-}; local -A said=()
+  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at; local -A said=()
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
     [ -z "$a" ] || ! a=$(git rev-parse -q --verify "$a^{commit}" 2>/dev/null) || before+=("$a")
   done
+  # Main as it is now runs the test files linked to its landings first (pushtests()), and that commit is pushed: one
+  # that lands meanwhile waits for the next push. A given commit had the full test run.
+  at=${want:-refs/heads/$BRANCH}
+  if [ -z "$want" ] && sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null); then
+    pushing "$sha"; pushtests "$1" "$2" "$sha" "${before[@]}" || return 1; at=$sha
+  fi
   for try in 1 2; do
     rm -f "$wt.trace"
-    rc=0; sha=$(git rev-parse "${want:-refs/heads/$BRANCH}" 2>&1) && pushing "$sha" && out=$({
+    rc=0; sha=$(git rev-parse "$at" 2>&1) && pushing "$sha" && out=$({
       git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt"; git worktree prune
       packget push.env e && mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$e") \
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
@@ -93,6 +99,8 @@ pushone() { # <card> <issue> [<commit>]
     [ $a != 0 ] || m=$(theirs "$sha" "$wt") || { out+=$'\n'"the remote's commits were not merged into main: ${m:0:600}"; a=1; }
     git worktree remove --force "$wt" 2>/dev/null
     [ $a = 0 ] || break
+    # Main is the merge with the remote's commits now (remerge()).
+    at=refs/heads/$BRANCH
   done
   took=$((SECONDS - took))
   # Why it failed (docs/cards.md, Push): check, the pre-push hook exited non-zero (it fails the same way on the same
@@ -124,6 +132,77 @@ pushone() { # <card> <issue> [<commit>]
     read -r c n s <<<"$a"
     record "$c" "$n" issue fail "$(jq -cn --arg r "$([ -n "${said[$c]:-}" ] && echo "GitHub still shows the issue open" || echo "GitHub gave no answer about the issue in the") $((SECONDS - t)) s after the push of $s" '{reason:$r}')"
   done
+}
+# The run before a push of main (pushone(); the owner, 2026-11-18: a card runs only its own test files, listcmd() in
+# lib/testrun.sh, and the files the test map links to its change run here): the test files the test map and the
+# links give each landing since the last push (testsel() narrow, of the landing's own change: the union, in order),
+# each run alone, once: a commit whose run passed ($PUSHED.tested) is not run again. Never a test runner or the whole
+# suite: testsel() narrow selects neither, and each file runs through a command that runs one file (mapone(),
+# lib/testmap.sh: test.fileCommand, else test.command given it as test.list says); a pack with neither runs none and
+# says so (PUSHNOFILE). The files run in a worktree of the commit ($CARDS/pushtest) on one test slot. The landing
+# that broke a file that fails is found by running the file on the landings in turn, oldest first (one that lacks the
+# file passes it): the first that fails it, else the pushed commit when it is a landing, else none (mainred() looks
+# for it then: brokeby()). Each such file goes to the main-fix card of the commit (mainred(), naming that landing),
+# and the push is held: a push line, result fail, kind check, its check the first file, so the loop pushes again only
+# once main moves (checkheld()). It fails then, and when its worktree or the test slots cannot be had (kind
+# transport, tried again later).
+PUSHNOFILE='the test files linked to the landings did not run before the push: the test command cannot be given one test file; set test.fileCommand in .conveyor/project.json'
+pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
+  local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s tc fc lm by why='' took=$SECONDS
+  shift 3
+  [ "$(cat "$PUSHED.tested" 2>/dev/null)" != "$sha" ] || return 0
+  rm -f "$wt.log" "$wt.at.log"
+  packget test.command tc test.fileCommand fc test.list lm 2>/dev/null || return 0
+  if [ -z "$fc" ] && { [ -z "$lm" ] || [ "$lm" = runner ] || [ -n "$(listwhy "$MAIN" "$tc" "$lm")" ]; }; then echo "conveyor: $PUSHNOFILE" >&2; return 0; fi
+  # The landings since the last push, oldest first: "<sha> <card> <issue>".
+  mapfile -t lands < <(stdb ask lines cards 2>/dev/null | jq -rs --rawfile in <(git rev-list --reverse "$sha" --not "$@" 2>/dev/null) '
+    (map(select(.step == "landed" and (.sha | type) == "string" and .sha != "")) | INDEX(.sha)) as $l
+    | $in | split("\n")[] | $l[.] // empty | "\(.sha) \(.card) \(.issue)"')
+  [ ${#lands[@]} != 0 ] || { echo "$sha" > "$PUSHED.tested"; return 0; }
+  pushwt "$wt" "$sha" && slot_pool \
+    || { pushwt "$wt"; record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) '{sha: $s, reason: "the worktree or the test slots of the run before the push could not be had", sec: $t, kind: "transport"}')"; return 1; }
+  names > /dev/null 2>&1 || :
+  mapfile -t fs < <(for l in "${lands[@]}"; do
+      s=$(testsel "$wt" narrow "${l%% *}^" "${l%% *}" 2>/dev/null) && [[ $s == *$'\n'* ]] && printf '%s\n' "${s#*$'\n'}"
+    done | awk 'NF && !seen[$0]++')
+  if [ ${#fs[@]} != 0 ]; then
+    echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) linked to the ${#lands[@]} landing(s) since the last push run, each alone" >&2
+    [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
+    for f in "${fs[@]}"; do pushfile "$wt" "$f" || bad+=("$f"); done
+    for f in "${bad[@]}"; do
+      by=''
+      for l in "${lands[@]}"; do
+        s=${l%% *}
+        [ "$s" != "$sha" ] || { by=$l; break; }
+        git cat-file -e "$s:$f" 2>/dev/null || continue
+        if pushwt "$wt.at" "$s" && ! pushfile "$wt.at" "$f"; then by=$l; break; fi
+      done
+      mainred "$c" "$f" "$f" "$sha" "$by" || :
+      read -r s l _ <<<"$by"
+      if [ -n "$s" ]; then why+="${why:+, }$f (broken by the landing ${s:0:12} of $l)"; else why+="${why:+, }$f (the landing that broke it is not known)"; fi
+    done
+    [ -n "$SLOT_HOME" ] || slot_free
+  fi
+  pushwt "$wt"; pushwt "$wt.at"
+  [ ${#bad[@]} != 0 ] || { echo "$sha" > "$PUSHED.tested"; return 0; }
+  record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) --arg f "${bad[0]}" \
+    --arg r "the run before the push failed ${#bad[@]} test file(s) linked to the landings since the last push: $why. Each goes to the main-fix card of ${sha:0:12}, and main is pushed again once it moves" \
+    '{sha: $s, reason: $r, sec: $t, kind: "check", check: ($f | .[0:100])}')"
+  return 1
+}
+# A worktree of the run before the push (pushtests()), with main's dependency links, made anew at <commit>; with no
+# commit, removed.
+pushwt() { # <worktree> [<commit>]
+  git worktree remove --force "$1" 2>/dev/null; rm -rf "$1" "$1.testlog"; git worktree prune 2>/dev/null
+  [ -n "${2:-}" ] || return 0
+  git worktree add -q --detach "$1" "$2" > /dev/null 2>&1 && deps "$1" > /dev/null && mkdir -p "$1.testlog"
+}
+# One test file run alone in <worktree> (pushtests()), on the slot it holds, its output added to <worktree>.log.
+pushfile() { # <worktree> <test file>
+  local cmd
+  cmd=$(mapone "$1" "$2" '') || return 1
+  { echo "== $2"; ( cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog \
+      exec timeout --kill-after=30 "${TEST_TIMEOUT:-3600}" bash -c "$cmd" < /dev/null 8>&- ); } >> "$1.log" 2>&1
 }
 # The remote's commits a refused push lacks, merged into main (remerge()). They are fetched as the push was made:
 # with the pack's push.env (what lets the push reach the remote lets the fetch too), from the push worktree (a

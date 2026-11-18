@@ -42,7 +42,8 @@ its own, and the Board's Rules tab sets them in its Judge row.
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
 - `wholeSuite`: whether a card's test step may run the whole suite (Whole suite in a card). Off, a card runs only
-  the test files linked to its change, and the whole suite runs only in a release
+  the test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run
+  before each push, and the whole suite runs only in a release
   ([Which tests a card runs](../docs/configuration.md#whole-suite-in-a-card)). On, a card runs its tests as before.
 
 Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
@@ -521,12 +522,15 @@ record and the test line hold `list`: `{"mode": "changed", "files": <count>, "by
 (`age`, the commits the made test map is behind, only with one) or `{"mode": "whole", "why": "..."}`. The Board shows
 it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed: 7 files (by name)`,
 `whole suite: <why>`); `/units` shows `changed: 7 files` or `whole suite`.
-All of this holds while the rule `wholeSuite` is on. Off (the default), a card's run never gets `mode: "whole"`: a
-change that would run the whole suite runs the test files the test map and the links give its files; one with none
-runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why": "..."}`. If more test files are
-linked than the pack's `test.cardFiles`, only that many run, and those that failed most recently run first. The list
-then has `left` (how many did not run) and a `why` that says the release's run covers them. The Board shows this note
-with the step. A list the command cannot be given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
+All of this holds while the rule `wholeSuite` is on. Off (the default), a card's run never gets `mode: "whole"`: it
+runs the test files its change adds or changes (`"by": "own"`; a shared helper is none). A change with none runs at
+most 5 of the test files the test map and the links give its files, those that failed most recently first, and its
+output says so; one with none of those runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why":
+"..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that says the run
+before the push runs them all. The Board shows this note with the step. Before each push, the loop runs the test
+files the test map and the links give each landing since the last push, each alone, once a commit; a file that fails
+is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that broke it, and holds
+the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)). A list the command cannot be given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
 test step with a reason that names `test.list` and `test.fileCommand`. A run that reports more than ten test files for
 each it is given is stopped, and the card is blocked the same way; so is the bug-card check's run of `test.command`
 ([Whole suite in a card](../docs/configuration.md#whole-suite-in-a-card)).
