@@ -162,6 +162,8 @@ PUSHNOFILE='the test files linked to the landings did not run before the push: t
 pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
   local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s tc fc lm by why='' took=$SECONDS
   shift 3
+  # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order).
+  [ ! -f "$ST/push.check.off" ] || return 0
   [ "$(cat "$PUSHED.tested" 2>/dev/null)" != "$sha" ] || return 0
   rm -f "$wt.log" "$wt.at.log"
   packget test.command tc test.fileCommand fc test.list lm 2>/dev/null || return 0
