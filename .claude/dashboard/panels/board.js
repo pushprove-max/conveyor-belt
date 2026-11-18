@@ -683,8 +683,8 @@
       card.append(p);
     }
   }
-  // A card in the Needs you column leads with why it stopped (a blocked card's reason in one sentence, the whole reason
-  // on a tap; a visible change's sentence), and links into Overview's Needs you panel, the one place it is answered.
+  // A card in the Needs you column leads with why it stopped (a blocked card's reason in one sentence, its explanation
+  // under it, shown; a visible change's sentence), and links into Overview's Needs you panel, the one place it is answered.
   function needs(card, item, waitingYes) {
     const h = S.ctx.h;
     card.append(waitingYes ? h('p', 'board-why', `Visible change: ${item.sentence || 'the reviewer gave no sentence'}`) : S.ctx.failureLine(item));

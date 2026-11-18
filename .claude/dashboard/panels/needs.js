@@ -2,7 +2,7 @@
 // Needs you: what waits on the owner, and the one place it is answered (the Control tab's Needs you column links here).
 // Blocked cards with the reason, visible changes waiting for their yes, and the open decisions, each with its project
 // (repo) and answered here (POST answer, to the page's own host). A blocked card leads with why it failed, in one plain
-// sentence (ctx.failureLine: the reason as recorded opens on a tap), then what Retry does, then its output on demand.
+// sentence (ctx.failureLine: its explanation is shown under it), then what Retry does, then its output on demand.
 // It has Retry and Close, each sent as POST /control retry or close on a second click (Retry costs a new build; Close
 // cannot be undone, and says so), and Hold (POST /control unblock: one click with Undo, a release). A card whose reason
 // has a fix Conveyor runs itself (FIXES) also has Fix, which says what it does. Its last line names the step its kind

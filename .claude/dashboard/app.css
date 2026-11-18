@@ -199,8 +199,7 @@ h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
 /* An action the host took, waiting for the loop: greyed in place, its buttons gone, until it leaves or is refused. */
 .is-pending { opacity: .62; }
 .is-pending .answer-note, .is-pending .board-sent { opacity: 1; font-weight: 650; color: var(--text); }
-/* A blocked card leads with why it failed; the reason as recorded opens on a tap. */
-details.why > summary { cursor: pointer; font-weight: 650; }
+/* A blocked card leads with why it failed; its explanation is shown under it. */
 .why-full { color: var(--muted); white-space: pre-wrap; }
 /* Its sentences run on as written (line breaks kept), code spans and paths set apart as in a declined reason. */
 .why-said-line, .why-full .why-line { display: inline; margin-top: 0; }

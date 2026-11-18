@@ -963,7 +963,7 @@
   }
 
   // Why a blocked card stopped, as one plain sentence first ("2 tests failed: a, b", "Review said NO-GO three times",
-  // "Push refused: the check typecheck failed"), and the reason as recorded, whole, under it on a tap (a <details>, so
+  // "Push refused: the check typecheck failed"), and its explanation under it, shown without a tap (no <details>, so
   // a phone, with no hover, reads it too). c: the card as Needs you has it (reason, track, reviews, push, check).
   const TIMES = ['', 'once', 'twice', 'three times'];
   function failure(c) {
@@ -971,13 +971,14 @@
     const steps = sixOf(c.track) ? c.track.steps : [];
     const at = steps.map((s) => s.state).lastIndexOf('failed');
     const names = [], recs = stepsOf(c.track);
-    let timeout = null;
+    let timeout = null, fails = null;
     // The failed tests are the cause only when the card stopped for them ("the changed tests failed again…"): a card
     // whose fix of those tests then failed ("fix: …") stopped for its fix, and an earlier run's names are not why.
     const byTests = /\btests failed\b/i.test(full) && !/^fix\b/i.test(full);
     if (byTests) recs.filter((s) => s.state === 'failed' && s.failures && typeof s.failures === 'object').slice(-1).forEach((s) => {
       (Array.isArray(s.failures.files) ? s.failures.files : []).forEach((f) => (f && Array.isArray(f.cases) ? f.cases : []).forEach((x) => { if (x && typeof x.name === 'string') names.push(x.name); }));
       if (s.failures.timeout && typeof s.failures.timeout === 'object') timeout = s.failures.timeout;
+      fails = s.failures;
     });
     const nogo = (Array.isArray(c.reviews) ? c.reviews : []).filter((r) => r && r.verdict === 'NO-GO').length;
     const failedPush = /\bFAILED:?\s+([A-Za-z0-9_.:/-]+)/.exec(full);
@@ -990,7 +991,7 @@
     else if (timeout) said = `The tests timed out${typeof timeout.file === 'string' && timeout.file ? ` in ${timeout.file}` : ''}`;
     else if (nogo && !reviewBroke && (at === 1 || /NO-GO/.test(full))) said = `Review asked for changes ${TIMES[nogo] || `${nogo} times`}`;
     else said = first(full);
-    return { said, full };
+    return { said, full, fails };
   }
   // The first sentence of a text, cut at a word to 140 characters at most.
   function first(s) {
@@ -999,18 +1000,53 @@
     const cut = one.slice(0, 140), sp = cut.lastIndexOf(' ');
     return `${(sp > 60 ? cut.slice(0, sp) : cut).replace(/[\s,:;]+$/, '')}…`;
   }
-  // The sentence a blocked card leads with, and the whole reason on a tap when it says more, in a block labelled "Why it
-  // blocked" (app.css .why-block). Code spans and file paths in both are drawn as fill draws them, linked in the
-  // card's repository (repoOf).
+  // The sentence a blocked card leads with, then its explanation, shown without a tap in a block labelled "Why it
+  // blocked" (app.css .why-block), by the kind of block: a review block ("the fix for [P1] ... did not hold after 1
+  // round") draws its finding as the Declined panel does (level, linked place, claim, proof); a test block its failing
+  // files and cases with their first failure lines (testFails); any other the reason as recorded, in full. A sentence
+  // that already says the whole reason has no block. Code spans and file paths are drawn as fill draws them, linked in
+  // the card's repository (repoOf).
+  const SHOWN_LINES = 12;
+  function reviewWhy(full, repoUrl, known) {
+    const m = /^the fix for (\[P[0-3]\][\s\S]*?)\s+did not hold after \d+ rounds?$/.exec(full);
+    if (!m) return null;
+    const rows = h('ol', 'output-findings');
+    m[1].split(/\n(?=\[P[0-3]\])/).forEach((t) => {
+      const f = /^\[(P[0-3])\]\s*(?:\[E\d+\]\s*)?(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
+      if (!f) return;
+      const { at: cut, label } = proofAt(f[3]), claim = (cut < 0 ? f[3] : f[3].slice(0, cut)).trim(), proof = cut < 0 ? '' : f[3].slice(cut + label.length).trim();
+      const row = h('li', 'output-finding'), head = h('div', 'finding-head'), said = h('p', 'finding-text');
+      said.append(fill(h('strong', 'finding-claim'), claim, repoUrl, known, 'finding'));
+      head.append(chip(f[1], f[1] === 'P0' || f[1] === 'P1' ? 'warn' : 'quiet'), said);
+      row.append(head);
+      if (f[2]) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, f[2], known, 'finding-at-link').el); row.append(p); }
+      if (proof) row.append(h('p', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), proof, repoUrl, known, 'finding'));
+      rows.append(row);
+    });
+    return rows.children.length ? rows : null;
+  }
+  // The reason whole, or its first SHOWN_LINES lines and a "Show all" button that shows the rest.
+  function clipped(full, repoUrl, known) {
+    const lines = full.split('\n'), draw = (t) => fill(h('div', 'why-text why-full'), t, repoUrl, known, 'why');
+    if (lines.length <= SHOWN_LINES) return draw(full);
+    const box = h('div', 'why-clip'), btn = h('button', 'btn btn-quiet show-all', 'Show all');
+    btn.type = 'button';
+    let part = draw(lines.slice(0, SHOWN_LINES).join('\n'));
+    btn.addEventListener('click', () => { const all = draw(full); part.replaceWith(all); part = all; btn.remove(); });
+    box.append(part, btn);
+    return box;
+  }
   function failureLine(c) {
-    const { said, full } = failure(c);
+    const { said, full, fails } = failure(c);
     const repoUrl = repoOf(c), known = new Set(pathsIn(full));
-    const lead = (el) => fill(el, said, repoUrl, known, 'why-said');
-    if (said === full) return lead(h('p', 'reason why-said'));
-    const det = h('details', 'why'), box = h('div', 'reason why-block');
-    box.append(h('strong', 'why-label', 'Why it blocked'), fill(h('div', 'why-text why-full'), full, repoUrl, known, 'why'));
-    det.append(lead(h('summary', 'reason why-said')), box);
-    return det;
+    const out = doc.createDocumentFragment();
+    out.append(fill(h('p', 'reason why-said'), said, repoUrl, known, 'why-said'));
+    const body = reviewWhy(full, repoUrl, known) || (fails && testFails(fails)) || (said !== full && clipped(full, repoUrl, known));
+    if (!body) return out;
+    const box = h('div', 'reason why-block');
+    box.append(h('strong', 'why-label', 'Why it blocked'), body);
+    out.append(box);
+    return out;
   }
 
   // ---- one guard rule for every button that changes real work ----

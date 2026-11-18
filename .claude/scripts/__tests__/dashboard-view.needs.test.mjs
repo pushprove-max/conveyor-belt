@@ -14,11 +14,11 @@ const lines = (li) => Array.from(li.children).slice(1).map((x) => (x.tagName ===
 // Bug: a blocked card's headline was where it stopped ("Failed at Test (step 3 of 6)"); the cause was in hover text,
 // in "Every step" or behind "Show output", or raw tool output cut off after about 90 letters before the part that says
 // what broke; and the advice was a command ("conveyor.sh retry 12") beside the Retry button.
-test('Needs you: a blocked card leads with why it failed in one sentence, then what Retry does; the whole reason opens on a tap', () => {
+test('Needs you: a blocked card leads with why it failed in one sentence, then what Retry does; the explanation is shown without a tap', () => {
   const w = boot();
   const d = full();
   const tests = trackOf('+++!..', '', {
-    records: [{ name: 'tests failed', state: 'failed', sec: 90, failures: { of: 41, files: [{ file: 'web/pay.test.ts', cases: [{ name: 'pays once', line: 'FAIL [pays once]: expected 1, got 2' }, { name: 'refunds', line: '' }] }], timeout: null } }],
+    records: [{ name: 'tests failed', state: 'failed', sec: 90, failures: { of: 41, files: [{ file: 'web/pay.test.ts', cases: [{ name: 'pays once', line: 'FAIL [pays once]: expected 1, got 2' }, { name: 'refunds', line: 'FAIL [refunds]: expected 0, got 1' }] }], timeout: null } }],
   });
   Object.assign(d.panels.needs.data.cards.blocked[0], { reason: 'tests: the changed tests failed again after their one fix round (exit 1); nothing landed.\nFAIL web/pay.test.ts', track: tests, tail: 'FAIL web/pay.test.ts' });
   const review = trackOf('+!....', '');
@@ -28,27 +28,46 @@ test('Needs you: a blocked card leads with why it failed in one sentence, then w
     reason: 'build: `make pay` failed at web/pay.ts:12. Nothing landed.' });
   deliver(w, d);
   const t = blockedRow(w);
-  assert.deepEqual(lines(t).slice(0, 3), ['2 tests failed: pays once, refunds', 'Retry puts #13 back in the queue, and a new card builds it in its turn.', 'Show output'],
-    'the reason first, what Retry does second, the output one click below');
-  const why = t.querySelector('details.why');
-  assert.equal(why.open, false);
-  assert.match(why.querySelector('.why-full').textContent, /^tests: the changed tests failed again after their one fix round \(exit 1\); nothing landed\.\nFAIL web\/pay\.test\.ts$/, 'the reason as recorded, whole, on a tap');
+  assert.deepEqual([0, 2, 3].map((i) => lines(t)[i]), ['2 tests failed: pays once, refunds', 'Retry puts #13 back in the queue, and a new card builds it in its turn.', 'Show output'],
+    'the reason first, what it says second, what Retry does third, the output one click below');
+  assert.equal(t.querySelector('details.why'), null, 'the explanation is not folded');
+  // Bug #472: the failing cases and their first failure lines were behind a tap; now they are shown.
+  assert.deepEqual(Array.from(t.querySelectorAll('.why-block .test-case'), (x) => x.textContent), ['pays onceexpected 1, got 2', 'refundsexpected 0, got 1'], 'both failing cases, each with its first failure line, without a click');
   assert.equal(t.querySelector('.stopped').textContent, 'Failed at Test (step 4 of 6)', 'where it stopped comes after');
   assert.doesNotMatch(panel(w, 'needs').textContent, /conveyor\.sh/, 'no command where a button does it');
   assert.equal(lines(blockedRow(w, 'c3-14'))[0], 'Review asked for changes three times');
   // Bug #437: a blocked card's reason showed its raw backticks and its file paths as plain text, unlike a declined
   // finding's reason: its code span and path are set apart, the path links to its line, and the whole reason is in a
   // block labelled "Why it blocked".
-  const f = blockedRow(w, 'c4-15').querySelector('details.why'), href = `https://github.com/example/sample-project/blob/HEAD/web/pay.ts#L12`;
+  const f = blockedRow(w, 'c4-15'), href = `https://github.com/example/sample-project/blob/HEAD/web/pay.ts#L12`;
   const code = (el) => Array.from(el.querySelectorAll('code.why-code'), (c) => c.textContent);
-  assert.deepEqual(code(f.querySelector('summary.why-said')), ['make pay', 'web/pay.ts:12'], 'the lead sentence sets its code and path apart');
-  assert.equal(f.querySelector('summary.why-said a').getAttribute('href'), href, "the lead sentence's path links to its line");
+  assert.deepEqual(code(f.querySelector('.why-said')), ['make pay', 'web/pay.ts:12'], 'the lead sentence sets its code and path apart');
+  assert.equal(f.querySelector('.why-said a').getAttribute('href'), href, "the lead sentence's path links to its line");
   const box = f.querySelector('.why-block');
   assert.equal(box.querySelector('.why-label').textContent, 'Why it blocked');
   assert.deepEqual(code(box.querySelector('.why-full')), ['make pay', 'web/pay.ts:12'], 'the whole reason sets its code and path apart');
   assert.equal(box.querySelector('.why-full a').getAttribute('href'), href, "the whole reason's path links to its line");
   assert.equal(box.querySelector('.why-full').textContent, 'build: make pay failed at web/pay.ts:12. Nothing landed.', 'the reason as written, without its backticks');
-  assert.equal(why.querySelector('.why-full code'), null, 'a reason with no code span or path draws as plain text');
+});
+
+// Bug #472: a blocked card showed "Review asked for changes twice" and kept the unresolved finding behind a tap. The
+// finding is shown with its level, linked place, claim and proof; a reason over 12 lines shows 12 and "Show all".
+test('Needs you: a review block shows its unresolved finding, and a long reason shows 12 lines and Show all', () => {
+  const w = boot();
+  const d = full(), b = d.panels.needs.data.cards.blocked, since = b[0].since;
+  b[0].reason = 'the fix for [P1] [E1] conveyor/lib/card.sh:52 The loop never stops. Proof: it spins on `x` did not hold after 1 round';
+  b.push({ repo: 'sample', card: 'c5-16', issue: 16, title: 'T16', url: `${P}/16`, since, reason: Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') });
+  deliver(w, d);
+  const f = blockedRow(w).querySelector('.why-block .output-finding');
+  assert.equal(f.querySelector('.chip').textContent, 'P1', 'the level badge');
+  assert.equal(f.querySelector('.finding-at a').getAttribute('href'), 'https://github.com/example/sample-project/blob/HEAD/conveyor/lib/card.sh#L52', 'the place links to its line');
+  assert.equal(f.querySelector('.finding-claim').textContent, 'The loop never stops.');
+  assert.equal(f.querySelector('.finding-proof-text').textContent, 'it spins on x', 'the proof, without a click');
+  const long = blockedRow(w, 'c5-16'), shown = () => long.querySelector('.why-full').textContent.split('\n').length;
+  assert.equal(shown(), 12, 'the first 12 lines');
+  long.querySelector('.show-all').click();
+  assert.equal(shown(), 30, 'Show all shows the rest');
+  assert.equal(long.querySelector('.show-all'), null);
 });
 
 // Bug #456: every block ended "Fix the cause. Then press Retry.", though for a review, test or no-result block Retry is
@@ -143,7 +162,7 @@ test('Needs you and Control: a review session that failed after an earlier NO-GO
 
 // Bug: raw tool output was the headline, cut at the card's edge ("Push failed: exit 1 (124 is t…" on a phone) before
 // the part that says what broke. A reason with no known shape leads with its first sentence, cut at a word.
-test('Needs you: a long reason with no known shape leads with its first sentence, cut at a word, and keeps the rest on a tap', () => {
+test('Needs you: a long reason with no known shape leads with its first sentence, cut at a word, and shows the rest without a tap', () => {
   const w = boot();
   const d = full();
   const long = `build: the session ended with no commit ${'and it said nothing more about the files it read '.repeat(4)}before it stopped. It ran 41 minutes.`;
@@ -151,7 +170,7 @@ test('Needs you: a long reason with no known shape leads with its first sentence
   deliver(w, d);
   const said = blockedRow(w).querySelector('.why-said').textContent;
   assert.ok(said.length <= 141 && said.endsWith('…') && long.startsWith(said.slice(0, -1)), `cut at a word: ${said}`);
-  assert.equal(blockedRow(w).querySelector('.why-full').textContent, long);
+  assert.equal(blockedRow(w).querySelector('.why-full').textContent, long, 'the whole reason, shown without a tap');
 });
 
 // Bug: with a push failing and being retried, Health said "Failing" while Needs you showed a green tick and "Nothing

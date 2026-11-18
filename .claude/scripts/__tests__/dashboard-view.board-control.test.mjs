@@ -362,9 +362,9 @@ test('the Board: a Needs you card leads with why it stopped and links into the N
   Object.assign(data.panels.board.data.blocked[0], { push: true, reason: 'Push failed: exit 1 (124 is the 900s timeout): push-checks: ok typecheck-backend push-checks: FAILED typecheck-web web/pay.ts(3,7): error TS2322' });
   deliver(w, data);
   assert.equal(bcard(w, 12).querySelector('.board-why').textContent, 'Visible change: Staff see a new button.');
-  const why = bcard(w, 13).querySelector('details.why');
-  assert.equal(why.querySelector('summary').textContent, 'Push refused: the check typecheck-web failed', 'the reason in one plain sentence first');
-  assert.match(why.querySelector('.why-full').textContent, /^Push failed: exit 1 .*error TS2322$/, 'the whole reason on a tap');
+  const why = bcard(w, 13).querySelector('.why-said');
+  assert.equal(why.textContent, 'Push refused: the check typecheck-web failed', 'the reason in one plain sentence first');
+  assert.match(bcard(w, 13).querySelector('.why-block .why-full').textContent, /^Push failed: exit 1 .*error TS2322$/, 'the whole reason, without a tap');
   assert.equal(bcard(w, 13).firstElementChild.nextElementSibling.nextElementSibling.nextElementSibling, why, 'right under the issue, the title and the chip');
   act(bcard(w, 13), 'needs-open').click();
   await settle();

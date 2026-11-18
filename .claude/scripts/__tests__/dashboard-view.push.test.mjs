@@ -180,10 +180,10 @@ test('Needs you: a push that failed its check names the check, shows its failing
     tail: "exit 1 (124 is the 600s timeout): web/pay.ts(3,7): error TS2322: Type 'string' is not assignable to type 'number'.\npush-checks: FAILED typecheck-web\nerror: failed to push some refs to 'origin'" });
   deliver(w, d);
   const item = panel(w, 'needs').querySelector('li[data-key="blocked:c9-15"]');
-  // Issue 407: it leads with one plain sentence; the reason as recorded opens on a tap (no hover on a phone).
+  // Issue 407: it leads with one plain sentence; the reason as recorded is shown whole, with no tap (no hover on a phone).
   assert.equal(item.querySelector('.why-said').textContent, 'Push refused: the check typecheck-web failed');
-  assert.equal(item.querySelector('.why-said').tagName, 'SUMMARY', 'a tap opens the whole reason');
-  assert.match(item.querySelector('details.why .why-full').textContent, /^push blocked: typecheck-web failed after #15; a retry fails the same way/);
+  assert.equal(item.querySelector('.why-block details'), null, 'the whole reason is shown, not folded');
+  assert.match(item.querySelector('.why-block .why-full').textContent, /^push blocked: typecheck-web failed after #15; a retry fails the same way/);
   assert.deepEqual(Array.from(item.querySelectorAll('.output-fails li'), (x) => x.textContent), [
     "exit 1 (124 is the 600s timeout): web/pay.ts(3,7): error TS2322: Type 'string' is not assignable to type 'number'.", 'push-checks: FAILED typecheck-web', "error: failed to push some refs to 'origin'"]);
   assert.equal(item.querySelector('.hint').textContent, 'Land a fix for typecheck-web on main. Conveyor then pushes again by itself. It does not retry until main moves.');
