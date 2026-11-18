@@ -26,8 +26,9 @@
 # else those the logs name (null when none). timeout is null unless the run ran out of time (exit 124): then the
 # seconds it had and the last file begun and not ended (null when there is none). passed is the files the logs say
 # ended ok (tests() runs them no more on the same change); okcases, of each other file, the cases a line `ok <case>`
-# under it says passed (a runner killed part-way runs them no more); passcases, the same of each file that passed
-# (what a batch that takes the card need not run again: passlist()). A run whose command wrote no such
+# (or node's `✔ <name> (<n>ms)`, or TAP's `ok <n> - <name>`) under it says passed (a runner killed part-way runs
+# them no more); passcases, the same of each file that passed (what a batch that takes the card need not run again:
+# passlist()). A run whose command wrote no such
 # log is one file, named by the command (test.command): its cases are that file's, and a timeout is in it. An output
 # that is no run's (norun(): no log folder) names no file.
 testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}]}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}]}
@@ -80,8 +81,13 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
     # seen: the last line so far with a `== ` line of each file of each log.
     | reduce range(0; $ls | length) as $k ({cur: "", at: ($ns | map(-1)), seen: {}, oks: {}, files: ([$only // $log.failed[]] | map({file: ., cases: []}))};
       $ls[$k] as $l
-      | ([$l | capture("^ok (?<c>\\S+)$")][0].c) as $o
+      # A passed case: `ok <case>`, `✔ <name> (<n>ms)` of node or `ok <n> - <name>` of TAP (not a skipped or to-do
+      # one), named as its failure lines name it. Node also prints a file it ran as one of these lines (as when its
+      # name filter ran no case): a name that is the file itself, or a path of it, is no case.
       | (if .cur == "" then $only else .cur end) as $of
+      | ([$l | capture("^ok (?<c>\\S+)$"), capture("^\\s*✔ (?<c>.+) \\([0-9.]+ms\\)$"),
+          (select(test("^\\s*ok .*# *(TODO|SKIP)"; "i") | not) | capture("^\\s*ok [0-9]+ (- )?(?<c>.*\\S)"))][0].c
+         | . as $n | if $n and $of and ($n == $of or ($n | endswith("/" + $of)) or ($of | endswith("/" + $n))) then null else $n end) as $o
       | (if $o and $of then .oks[$of] += [$o] else . end)
       | ([$l | capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") , capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c) as $c
       | (if $c and ($l | test("^\\s*not ok .*# *(TODO|SKIP)"; "i") | not) then
@@ -1481,8 +1487,9 @@ rednames() { # <verdict> <redrun() output>
 # (CONVEYOR_TEST_RERUN), as verdicts() runs them on main. A case's result is under its file or, as a run names an
 # engine case file's case under that file where an entry made before issue 214 named the runner, under one of its
 # files. Prints the cases, each with its verdict: fail when the run's logs (testfails()) name it failed (or its file failed,
-# for a file alone, or ran out of time); pass when they name it passed (a line `ok <case>` under its file; a file alone,
-# when its file passed: a passing file whose named case did not run, as when the change renames it, is no proof of
+# for a file alone, or ran out of time); pass when they name it passed (a passed case's line under its file, as
+# testfails() reads it; a file alone, when its file passed: a passing file whose named case did not run, as when the
+# change renames it, is no proof of
 # that case); none when they name neither. A command that writes no logs says only its exit, of every case.
 redrun() { # <worktree> <cases json>
   local rc t=null

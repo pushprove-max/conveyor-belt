@@ -16,11 +16,37 @@
 # worktree <w> has them (<w>.test, <w>.testlog), then read with the given exit and the step's timeout. A whole loop run
 # to read them cost each case about 2 s more; rules.test.sh's t_testfails proves a card's test line holds them.
 logfails() { # <exit> [<testTimeout>]
+  allfails "$@" | jq -c 'del(.passed, .okcases, .passcases)'
+}
+# logfails() with the files and cases the run passed.
+allfails() { # <exit> [<testTimeout>]
   local w=$T/$CASE/wt; mkdir -p "$w.testlog"
   (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog bash cmd > "$w.test" 2>&1 < /dev/null)
   ( eval "$(sed -n '/^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
     packget() { return 1; } # the pack's test.command: the logs name the run's files, so it names none
-    TEST_TIMEOUT=${2:-600} testfails "$w.test" "$1" ) | jq -c 'del(.passed, .okcases, .passcases)'
+    TEST_TIMEOUT=${2:-600} testfails "$w.test" "$1" )
+}
+# Issue 442: a passed node case (`✔ <name> (<n>ms)`) or TAP case (`ok <n> - <name>`) was not read as passed, only a
+# line `ok <case>` with no space in its case was: a main-red fix card for a named node case always blocked with "gave
+# no result". Each is a passed case under its file, named as its failure line names it; a skipped TAP case is not,
+# nor node's line for the file itself (a run with a name filter that ran no case, as splitstart() makes, prints it).
+t_testfailspassed() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+echo "== f.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' '✔ a b, c (12.3ms)' 'ok 2 - d e' 'ok 3 - g # SKIP no db' '✔ f.test.mjs (43.1ms)' 'ok 4 - ./f.test.mjs'
+echo "-- ok f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+EOF
+  f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
+  [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
+}
+# Issue 442: redproof() with a stub runner (mainred.test.sh's redrunner) that prints node's `✔ <case> (<n>ms)` for a
+# passed case: a fix whose case fails without the change and passes with it was blocked with "gave no result".
+t_redproofnode() {
+  redrunner ''; sed -i 's/echo "ok \$c"/echo "✔ $c (12.3ms)"/' "$STUB/mainrun-cmd"
+  grep -qF '✔' "$STUB/mainrun-cmd" || fail "the stub runner does not print node's passed line"
+  eng 'mainred c1 "a.test: one two, three" a.test '"$(git -C "$R" rev-parse HEAD)" || fail "the case was not recorded"
+  local got; got=$(redcheck 'one two, three')
+  [ "$(head -n 1 <<<"$got")" = "exit 0" ] || fail "a fix of a named node case that passes with the change did not hold: $got"
 }
 t_testforged() {
   mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
