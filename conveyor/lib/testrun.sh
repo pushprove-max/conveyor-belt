@@ -616,7 +616,8 @@ runnercmd() { # <command> <worktree> <file>...
 }
 # The tests a card's change touches (its staged change against HEAD), one path a line after a first line that says how
 # they were found, {by: "map" or "name", age} (age: the commits the made test map is behind, lib/testmap.sh mapread(),
-# with one; else null): of each changed file, a document (.md, .txt, .rst) selects none; a test runner (TESTRUNNERS,
+# with one; else null): a document (.md, .txt, .rst) is never a test file here, whatever folder holds it (#367); of
+# each changed file, a document selects none; a test runner (TESTRUNNERS,
 # no test file: #350) selects its own tests, never itself and never the whole suite: those the map and its links give
 # it, the test files whose text names its file name (those that import or run it) and those named after it (as
 # below), the whole suite only with the rule Whole suite in a card on and none found; a test file (testpaths())
@@ -657,6 +658,8 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
   out=$(jq -rn '$tm[0] as $tm | $om[0] as $om | '"$RX"'def ls: split("\n") | map(select(. != ""));
       def base: split("/")[-1]; def dir: split("/")[:-1];
       def stem: base | sub("\\.[^.]*$"; "");
+      # A document (.md, .txt, .rst): no test to run, though a test folder holds it (tests/speed/<page>.md, #367).
+      def doc: test("\\.(md|txt|rst)$"; "i");
       # A helper, setup, fixture or mock file (or one in a folder of such a name), that many tests may read.
       def shared: test("(^|/)(__mocks__|__fixtures__|fixtures?|helpers?|support|testdata|mocks?)/"; "i")
         or (base | test("^setup"; "i") or (sub("\\.[^.]*$"; "") | ascii_downcase | split("[._-]"; null)
@@ -676,7 +679,7 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
          | ([$tm.sources[$p] // [] | .[] | select($have[.])]) as $c
          | if $p == $mp then ($tm.sources // {}) as $n | ($om.sources // {}) as $o
              | {map: ($m + $c + [$o + $n | keys[] | select($o[.] != $n[.]) as $k | ($o[$k] // [])[], ($n[$k] // [])[] | select($have[.])] | unique)}
-           elif test("\\.(md|txt|rst)$"; "i") then (if ($nw | not) then [] elif $c != [] then {map: ($m + $c)} else $m end)
+           elif doc then (if ($nw | not) then [] elif $c != [] then {map: ($m + $c)} else $m end)
            elif $rn[$p] then ($m + $c + [$rt[$p] // [] | .[] | select($have[.])] + named($all) | unique)
              | if . == [] then (if $nw then [] else {whole: "\($p): the test runner, and no test of it found"} end) elif $c != [] then {map: .} else . end
            elif $ct[$p] and $have[$p] and (shared | not) then [$p] + $m
@@ -731,14 +734,16 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 #   machine from main, and a failure whose inputs changed is main's, as before issue 221.
 # - card: it passed on main, or main's run did not run it (its worktree could not be made, the command did not
 #   select it, or its file is one the card's own change adds, which main does not have: issue 323): the card's to
-#   fix, as before. A file the change edits runs on main in main's version: failing there too, it is main's.
+#   fix, as before. A file the change edits runs on main in main's version: failing there too, it is main's. A
+#   document (#367) is no test file and does not run on main: its failure is the card's, with why "no test file: a
+#   selection error".
 # - flaky: it failed on the first run and passed on the run again (PASSEDAGAIN; flakyrun() records it).
-# Prints the test line's part: {verdicts: [{case, verdict}]} and, when the cases ran on main, mainRun: {sha, sec (the
+# Prints the test line's part: {verdicts: [{case, verdict, why (a document's alone)}]} and, when the cases ran on main, mainRun: {sha, sec (the
 # seconds main's run took, its wait for a slot included), exit}. Each case whose verdict is main goes to the fix card of main's commit (mainred());
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local mwt=$CARDS/mainrun/${2##*/} sha='' u um m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg
+  local mwt=$CARDS/mainrun/${2##*/} sha='' u um nt m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
@@ -748,7 +753,13 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   # unit is the card's (card) and does not run on main. When the change cannot be read, no unit runs on main: each is
   # the card's.
   chg=$(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null) && chg=$(jq -cRn '[inputs | select(. != "")]' <<<"$chg") || chg=null
-  um=$(jq -c --slurpfile c <(printf '%s' "$chg") '$c[0] as $c | if $c == null then [] else map(select(.file | IN($c[]) | not)) end' <<<"$u") || um='[]'
+  # A document (.md, .txt, .rst: #367) is no test file, and was on the run by a selection error. Its failure is the
+  # card's (card, its why saying so), never main's: it does not run on main and goes to no main-red entry. (A file
+  # the test command names is not held to tests.patterns here: a pack whose patterns miss its test files keeps its
+  # main-red record.)
+  nt=$(jq -c '[.[].file | select(test("\\.(md|txt|rst)$"; "i"))] | unique' <<<"$u") || nt='[]'
+  jq -r '.[]' <<<"$nt" | while IFS= read -r f; do echo "conveyor: card $1: $f is no test file: its failure is a selection error of the card's run, not main's" >&2; done
+  um=$(jq -c --slurpfile c <(printf '%s' "$chg") --argjson nt "$nt" '$c[0] as $c | if $c == null then [] else map(select(.file | IN($c[], $nt[]) | not)) end' <<<"$u") || um='[]'
   if [ "$um" != '[]' ]; then
     if sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
       && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -773,19 +784,20 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   TEST_WAIT=$w; TEST_RUN=$r; TEST_FREE=$fr
   fst=$(jq -ce objects "$2.first" 2>/dev/null) || fst=null
   v=$(jq -cn --slurpfile u <(printf '%s' "$u") --slurpfile um <(printf '%s' "$um") --slurpfile m <(printf '%s' "${mf:-null}") --slurpfile l <(printf '%s' "${3:-null}") \
-    --slurpfile fst <(printf '%s' "$fst") --slurpfile h <(printf '%s' "$hits") --slurpfile ctl <(printf '%s' "${ctl:-[]}") --slurpfile cf <(printf '%s' "$cf") \
+    --slurpfile fst <(printf '%s' "$fst") --slurpfile h <(printf '%s' "$hits") --slurpfile ctl <(printf '%s' "${ctl:-[]}") --slurpfile cf <(printf '%s' "$cf") --argjson nt "$nt" \
     '$u[0] as $u | $um[0] as $um | $m[0] as $m | $l[0] as $l | $fst[0] as $fst | $h[0] as $h | $ctl[0] as $ctl | $cf[0] as $cf | '"$NOTPASSED$PASSEDAGAIN"'
     [($fst | select(. != null) | passedagain($l)[] | {case: ., verdict: "flaky"}),
      ($u[] | . as $x | {case: (if .case == null then .file else "\(.file): \(.case)" end), file,
        verdict: (if $m != null and ($x | IN($um[])) and any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] else any(.cases[]; .name == $x.case) end))
-         then (if ($x.file | IN($h[]) | not) and ($ctl == [] or $ctl - $cf != []) then "main" else "machine" end) else "card" end)})]') || v='[]'
+         then (if ($x.file | IN($h[]) | not) and ($ctl == [] or $ctl - $cf != []) then "main" else "machine" end) else "card" end)}
+       + if $x.file | IN($nt[]) then {why: "no test file: a selection error"} else {} end)]') || v='[]'
   while IFS=$'\t' read -r c f; do mainred "$1" "$c" "$f" "$sha" || :; done < <(jq -r '.[] | select(.verdict == "main") | [.case, .file] | @tsv' <<<"$v")
   # A machine verdict holds the loop (machinehold()) until the controls that failed, and the files that failed with
   # the inputs they last passed with, pass on main again (a file whose inputs changed may fail there for good).
   jq -e 'any(.[]; .verdict == "machine")' <<<"$v" >/dev/null \
     && { machinehold "$1" "$sha" "$(jq -c --slurpfile cf <(printf '%s' "$cf") --slurpfile h <(printf '%s' "$hits") '$cf[0] as $cf | $h[0] as $h | $cf + [.[] | select(.verdict == "machine") | .file | select(IN($h[]))] | unique' <<<"$v")" \
       "$(jq -c '[.[] | select(.verdict == "machine") | .case]' <<<"$v")" || :; }
-  jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict}]} + if $m then {mainRun: $m} else {} end'
+  jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict} + if .why then {why} else {} end]} + if $m then {mainRun: $m} else {} end'
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
 # last passed (cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
@@ -1846,6 +1858,8 @@ mainred() { # <card> <case> <its file> <main's commit>
   # The test command itself (what testfails() names a run that wrote no log) is no case: it names no test to fix.
   ! { packget test.command cmd 2>/dev/null && [ "$2" = "$cmd" ]; } \
     || { echo "conveyor: main is red: the test command itself is no case, so it goes to no fix card" >&2; return 1; }
+  # Nor is a document (.md, .txt, .rst; #367): no test file (testpaths()), so no fix card could make it pass.
+  [[ ! $3 =~ \.([Mm][Dd]|[Tt][Xx][Tt]|[Rr][Ss][Tt])$ ]] || { echo "conveyor: main is red: $3 is no test file, so it goes to no fix card" >&2; return 1; }
   k=${2#"$3: "}; [ "$k" != "$2" ] || k=''
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null || { echo "conveyor: the main-is-red record could not be locked; $2 goes to no fix card" >&2; return 1; }
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be locked; $2 goes to no fix card" >&2; return 1; }
@@ -1947,6 +1961,11 @@ redpick() {
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null || { echo "conveyor: the main-is-red record could not be locked; its fix card waits" >&2; return 1; }
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be locked; its fix card waits" >&2; return 1; }
   rec=$(jq -ce '.reds | arrays' "$MAINRED" 2>/dev/null) || rec='[]'
+  # A document's case (.md, .txt, .rst), which an engine before #367 took for main red, goes, with an entry it leaves
+  # with no case: no fix card could make it pass, and the cards that wait on it (mainwait()) run again.
+  s=$(jq -c 'map(.cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != []))' <<<"$rec") || s=$rec
+  [ "$s" = "$rec" ] || { jq -cn --argjson r "$s" '{reds: $r}' > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" && rec=$s; } \
+    || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }
   while IFS=$'\t' read -r s c; do
     if [ -n "$c" ]; then l=$(stdb ask card "$c") && [ -z "$l" ] || continue; fi
     # The machine's yes (room()), as for any card: held back, the loop asks again at its next turn.

@@ -167,7 +167,9 @@ The list holds:
 - if neither gives a test, the test files whose name holds the name of that file, from the nearest folders. For example, a change to
   `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
 
-A change to a document (`.md`, `.txt`, `.rst`) adds no test. When the change touches one of the files below, the
+A change to a document (`.md`, `.txt`, `.rst`) adds only the test files that `.conveyor/test-links.json` links to it
+or that the test map says cover it. With the rule [Whole suite in a card](#whole-suite-in-a-card) on, it adds no
+test. A document is never on the list, even when it is in a test folder. When the change touches one of the files below, the
 command gets no list and runs the whole suite:
 
 - a file that the test map marks as shared: more than half of the mapped tests read it;

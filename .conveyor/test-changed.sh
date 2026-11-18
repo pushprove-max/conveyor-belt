@@ -1126,6 +1126,12 @@ if [ -s "$RERUN" ]; then
     if [ -n "$left" ]; then cases=$left; else unset "run[conveyor/conveyor.test.sh]"; fi
   fi
 fi
+# A file of no test kind this script runs (*.test.sh, .mjs, .py, .ts, .tsx), as a document in a test folder
+# (conveyor/tests/speed/<page>.md) or a helper, is no test file: whatever put it on the selection (the engine's list,
+# a link, a `fail` line of the loop's list), it does not run, and so never fails (#367), nor counts as kept.
+for t in "${!run[@]}" "${!full[@]}"; do
+  case $t in *.test.sh|*.test.mjs|*.test.py|*.test.ts|*.test.tsx) ;; *) [ -z "${run[$t]:-}" ] || echo "== $t: not run: no test file"; unset "run[$t]" "full[$t]" ;; esac
+done
 # The list of the selection (issue 43: release-prep, which reruns only what changed since an earlier whole-suite run,
 # conveyor/commands/release-prep.sh): with CONVEYOR_TEST_LIST, it writes the test files it selected to that file, one
 # a line, and runs none: each file it selected whole or in parts (a whole-only one too), and of the engine's runner the

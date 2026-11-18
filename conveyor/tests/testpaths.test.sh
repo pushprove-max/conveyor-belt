@@ -27,8 +27,13 @@ tpfiles() { # <file>...: named for this file alone, as the runner sources every 
 t_testpathsdefault() {
   setup '[]'
   local tests='test_x.py pkg/x_test.go spec/x_spec.rb src/FooTest.java a/__tests__/b.js x.test.ts y.spec.js py/a_test.py tests/x.sh test/y.sh src/test-a.mjs t/a.sh lib/a.t A/BarTests.cs' out
-  out=$(tpeng "printf '%s\n' $tests src/x.py latest.go contest.py src/spec.rb Test.javax src/t.sh retest/a.sh | testpaths") || fail "testpaths failed: $out"
-  [ "$(tr '\n' ' ' <<<"$out")" = "$tests " ] || fail "the default patterns did not find exactly the test files: $out"
+  # #367: a page in a test folder (tests/speed/page.md) is no test file, so the bug-card check does not run it as one.
+  out=$(tpeng "printf '%s\n' $tests src/x.py latest.go contest.py src/spec.rb Test.javax src/t.sh retest/a.sh tests/speed/page.md | testpaths
+    printf '%s\n' tests/x.sh tests/speed/Page.MD | testpaths -v
+    printf '%s\0' tests/x.sh tests/speed/page.md | testpaths -z | tr '\0' '\n'
+    printf '%s\0' tests/x.sh tests/speed/page.txt | testpaths -vz | tr '\0' '\n'") || fail "testpaths failed: $out"
+  # The -z forms are the bug-card check's (testrun.sh), NUL-delimited: a document is left out of one, kept by the other.
+  [ "$(tr '\n' ' ' <<<"$out")" = "$tests tests/speed/Page.MD tests/x.sh tests/speed/page.txt " ] || fail "the default patterns did not find exactly the test files: $out"
 }
 
 # Bug it catches: a pack could not name its project's test files, and productpaths() (a change's product code) and a

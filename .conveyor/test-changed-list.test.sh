@@ -49,5 +49,15 @@ printf '%s\n' '#!/usr/bin/env bash' 'echo e >> "$(dirname "$0")/../ran"' > "$R/l
 got=$(CONVEYOR_TEST_FILES=$'conveyor/tests/b.test.sh\nlib/e.test.sh' listed lib/s.sh)
 [ "$got" = "conveyor/tests/b.test.sh lib/e.test.sh lib/s.test.sh " ] || no "the engine's list was not run beside the script's own selection: '$got'"
 rm -f "$R/lib/e.test.sh"
+# #367. Bug it catches: a document in a test folder (conveyor/tests/speed/<page>.md) that the engine's list named, or
+# that a run again's list named as not passed (a `fail` line, "did not pass"), ran as a shell script and failed, and
+# main was marked red for it. Neither selects it; the script's own selection still runs.
+mkdir -p "$R/conveyor/tests/speed" && echo '# A page' > "$R/conveyor/tests/speed/lib-notes.md"
+got=$(CONVEYOR_TEST_FILES=conveyor/tests/speed/lib-notes.md listed lib/s.sh)
+[ "$got" = "lib/s.test.sh " ] || no "a document the engine's list named was selected: '$got'"
+printf 'fail\tconveyor/tests/speed/lib-notes.md\t\n' > "$T/rerun"
+got=$(CONVEYOR_TEST_RERUN=$T/rerun listed lib/s.sh)
+[ "$got" = "lib/s.test.sh " ] || no "a document a run again's list named as not passed was selected: '$got'"
+rm -rf "$R/conveyor/tests/speed"
 
 [ $fails = 0 ] && echo "ok - test-changed list" || exit 1

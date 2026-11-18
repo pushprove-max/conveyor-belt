@@ -50,6 +50,17 @@ t_testlistargs() {
   listrec '{"mode":"changed","files":2,"by":"name"}'
 }
 
+# #367. Bug it catches: a page in a test folder (lib/tests/speed/cartsum-notes.md, a test file by the default tests/
+# pattern, as conveyor/tests/speed/<page>.md is) was taken by name for a test of lib/cartsum.js, run as a script and
+# failed, and main was marked red for it. The change edits the page beside the source: only lib/cartsum.test.js runs.
+t_testlistdoc() {
+  listsetup args
+  mkdir -p "$R/lib/tests/speed" && echo '# Notes' > "$R/lib/tests/speed/cartsum-notes.md" && git -C "$R" add -A && git -C "$R" commit -qm notes \
+    || fail "the page could not be committed"
+  listrun 'echo y >> lib/cartsum.js; echo more >> lib/tests/speed/cartsum-notes.md'
+  listgot 'args:lib/cartsum.test.js|env:' 'the test of the changed file, not the page'
+}
+
 # The same change with test.list env: no argument, and CONVEYOR_TEST_FILES holds the two paths, one a line.
 t_testlistenv() {
   listsetup env

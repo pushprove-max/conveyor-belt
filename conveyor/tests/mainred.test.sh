@@ -472,6 +472,26 @@ t_mainredowncard() {
     || fail "the main-red record does not hold only the case that fails on main: $(cat "$ST/mainred.json" 2>&1)"
 }
 
+# #367. Bug it catches: a document on a card's run (tests/speed/page.md, on main too) "failed" there and on main, so
+# main was marked red for it and the main-fix card could never make it pass. Its failure is the card's, a selection
+# error, it does not run on main, and the main-red record is not written.
+t_mainreddoc() {
+  redrunner ''
+  local w=$T/$CASE/cards/c7 out
+  mkdir -p "$R/tests/speed" && echo '# A page' > "$R/tests/speed/page.md" && git -C "$R" add tests && git -C "$R" commit -qm page \
+    && git -C "$R" worktree add -q --detach "$w" || fail "the card's worktree could not be made"
+  out=$(eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[{"file":"tests/speed/page.md","cases":[]}]}'"'"' | jq -c .verdicts') \
+    || fail "verdicts failed: $out"
+  [ "$out" = '[{"case":"tests/speed/page.md","verdict":"card","why":"no test file: a selection error"}]' ] \
+    || fail "the document's failure is not the card's selection error: $out"
+  [ ! -e "$STUB/redlist" ] && [ ! -e "$ST/mainred.json" ] || fail "the document ran on main or went to the main-red record: $(cat "$STUB/redlist" "$ST/mainred.json" 2>&1)"
+  # mainred() takes no document either; an entry an older engine made for a document alone goes at the next pick, so
+  # the cards that wait on it run again and no fix card starts for it.
+  jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", cases: [{case: "tests/speed/page.md", file: "tests/speed/page.md", by: "c1", files: [], last: ""}], card: null}]}' > "$ST/mainred.json"
+  out=$(eng '! mainred c7 tests/speed/page.md tests/speed/page.md 2222222222222222222222222222222222222222 2>/dev/null && locked redpick') || fail "mainred took a document, or redpick failed: $out"
+  [ -z "$out" ] && [ "$(jq -c . "$ST/mainred.json")" = '{"reds":[]}' ] || fail "the document's entry was kept or picked: $out $(cat "$ST/mainred.json")"
+}
+
 # Bug it catches (#344): verdicts() gave the failed cases and their verdicts to jq as arguments, which Linux refuses
 # over 128 KiB ("Argument list too long"): with many failures, they did not run on main and the card lost every
 # verdict. Card c7's last run fails 300 cases of a.test, each with a long name (about 150 KB); all pass on main, so
