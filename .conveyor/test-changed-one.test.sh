@@ -129,4 +129,21 @@ echo three >> "$R/conveyor/x.sh"
 PATH=$T/bin:$PATH one tree hooks/h.test.sh > /dev/null
 [ "$(calls)" = 2 ] && [ "$(cat "$T/rc")" = 1 ] || no "a changed tree's one-file run did not run the checks again: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"): $(cat "$T/out")"
 
+# Issue 436: `--checks` is the pack's test.checkCommand: the loop runs it through its own treecheck()
+# (conveyor/lib/testrun.sh) and puts the result in a test step's log folder (checkskept()). Bugs: `--checks` runs a
+# test file too, or passes on a warning; the loop's key of a tree is not this script's, so each one-file run of the
+# step ran the checks again. The loop's own functions run it here on a new tree (x.sh changed again): shellcheck runs
+# once, the run fails with the warning and runs no test file, and a one-file run given that folder reuses the result.
+echo four >> "$R/conveyor/x.sh"; rm -f "$R/ran"
+# shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh
+got=$( (STATE=$T/cards.jsonl; . "$ROOT/conveyor/lib/testrun.sh" || exit 3
+  packget() { printf -v "$2" '%s' 'bash .conveyor/test-changed.sh --checks'; }
+  PATH=$T/bin:$PATH treecheck "$R"; echo "exit $?"; mkdir -p "$R.testlog" && checkskept "$R") 2>&1)
+[ "$(calls)" = 3 ] && [ "${got##*$'\n'}" = "exit 1" ] && grep -q '^conveyor/x.sh:2:1: warning: stub' <<<"$got" && [ ! -e "$R/ran" ] \
+  || no "the loop's run of --checks did not run the checks alone once and fail with the warning: shellcheck ran $(calls) time(s), ran '$(cat "$R/ran" 2>/dev/null)': $got"
+rm -rf "$T/kept"; mv "$R.testlog" "$T/kept"
+PATH=$T/bin:$PATH one kept hooks/h.test.sh > /dev/null
+[ "$(calls)" = 3 ] && [ "$(cat "$T/rc")" = 1 ] && grep -q 'their result is kept' "$T/out" && grep -q '^conveyor/x.sh:2:1: warning: stub' "$T/out" \
+  || no "a one-file run of the tree the loop checked ran the checks again, or lost their failure: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"): $(cat "$T/out")"
+
 [ $fails = 0 ] && echo "ok - test-changed runs one given test file alone" || exit 1

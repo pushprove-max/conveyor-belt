@@ -510,6 +510,22 @@ card() { # <card> <issue> [<branch> <tip>]
         fi
         # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
         began "$c" "$n" test
+        # The project's checks first (treecheck(): kept for the tree the last session's check ran on, so not run again
+        # there). When they fail, the step ends before any test file runs, its line holding one failure that names
+        # the check and its output. That is not its tests failing: the one test-fix round (tfix) is kept and the card
+        # is not blocked for it; one fix session is told the output, and checked() runs the checks again on its change.
+        # The line is marked checks: no test ran, so the card's first run of its tests is still its first (testedbefore()).
+        out=$(treecheck "$wt"); t=$?
+        [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine could not run the project's checks: $out"; return; }
+        if [ $t = 1 ]; then
+          packget test.checkCommand t || t=test.checkCommand
+          record "$c" "$n" test fail "$(jq -cn --arg k "$t" --arg o "$out" '{reason: "the project'"'"'s checks failed (test.checkCommand: \($k)); no test file ran",
+            checks: true, failures: {of: 0, files: [{file: $k, cases: []}], timeout: null}, tail: ($o | .[-4000:])}')"
+          rm -f "$wt.ready"; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
+          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$CHECKFIX"$'\n'"$out" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
+          checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c '. + {reason: "the project'"'"'s checks failed (test.checkCommand)"}' <<<"$t")" || return
+          continue 2
+        fi
         [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
         sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
         # The times its own run took go on its test line (slowtests()); only a test rule files an issue about a test

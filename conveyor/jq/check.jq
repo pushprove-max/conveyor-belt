@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -45,6 +45,8 @@ def ok: . as $r | (keys - known) == need
         and (.waitSec // 0 | type == "number")
         # doneLines: the reply's D<n> lines on a session's line with a Done-when check (checked(), lib/testrun.sh).
         and (.doneLines // [] | type == "array" and all(type == "string"))
+        # checks: a test line of a Test step the project's checks ended before any test ran (card(), treecheck()).
+        and (.checks // true | . == true)
         # pr: the pull request a pushed line's push went into, with the rule Land as pr (pushone(), lib/push.sh).
         and (.pr // 0 | type == "number")
         # cost: the dollars an OpenCode review's own usage report gave (OCREVIEWREAD).

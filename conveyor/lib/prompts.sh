@@ -505,6 +505,12 @@ DWFIX='# The Done-when check failed: fix these items, and end your reply with th
 Each line of the issue'"'"'s `## Done when` needs a line `D<n> met: <evidence>` or `D<n> not met: <why>`, in order. Evidence
 names something checkable: a test (file and case name), a file and line, or a command and its result. Every TODO
 or [VERIFY] marker the change adds is named in the reply, on a line with its file.'
+# The project's checks (treecheck(), checked() and the Test step): what the one fix session after they fail is told,
+# after the brief; their output follows it.
+# shellcheck disable=SC2034 # used in lib/testrun.sh and lib/card.sh
+CHECKFIX='# The project'"'"'s checks failed: fix what they name and nothing else
+These checks run after each session and before any review or test. Their output names each file and line. Fix each
+one in the code: do not turn a check off. The checks run again on your change.'
 DONEWHENREVIEW='# The card'"'"'s Done-when lines
 The build session ended its reply with these lines, one for each line of the issue'"'"'s `## Done when`. For each, check
 whether its evidence holds: write `DONE-WHEN: D<n> holds` when it does; a claim that is false (the evidence is not

@@ -378,7 +378,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
   # either goes.
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
-  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
+  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && checkskept "$1" && packget "${2:-test.command}" cmd && slot_pool; } 2>"$1.test" || return 1
   [ "${2:-}" != test.fileCommand ] || cmd=$(filecmd "$cmd")
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then
     listcmd "$1" "$cmd" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
@@ -457,7 +457,7 @@ tests() { # <worktree> [the pack's field of the command: test.command] [alone]
     # The first run's coverage report, which the run again may write over: kept for uncovered() (covkeep()).
     covkeep "$1"
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
-      [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
+      checkskept "$1"; [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
     else rc=1; fi
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
@@ -2390,6 +2390,35 @@ checks() { # <worktree>; prints the lines of every check that fails, and fails w
   done
   return $rc
 }
+# The project's checks (the pack's test.checkCommand: a lint, shellcheck and the like), run in the worktree after each
+# build, fix and rebase session (checked()) and at the start of a card's Test step (card()). Their result is kept for
+# the tree they ran on, in <worktree>.checks/<key>.out and .rc, the key being HEAD and the tree of the worktree's
+# tracked and untracked files (git add -A in a copy of its index, so the card's own index is not touched): a later
+# call on the same tree prints the kept output and gives the kept result, and does not run the command again. Exit 0
+# when they pass or the pack sets no command (nothing printed); 1 when they fail, with the command and its output
+# (the first 20000 characters); 2 when the key cannot be read or the result cannot be kept, saying why.
+treecheck() { # <worktree>
+  local cc k h t ix r out d=$1.checks
+  packget test.checkCommand cc || { echo "the project pack's test.checkCommand could not be read"; return 2; }
+  [ -n "$cc" ] || return 0
+  h=$(git -C "$1" rev-parse HEAD 2>/dev/null) && ix=$(mktemp) || { echo "the worktree's commit could not be read for the checks"; return 2; }
+  cp "$(git -C "$1" rev-parse --path-format=absolute --git-path index)" "$ix" 2>/dev/null || rm -f "$ix"
+  t=$(GIT_INDEX_FILE=$ix git -C "$1" add -A 2>/dev/null && GIT_INDEX_FILE=$ix git -C "$1" write-tree 2>/dev/null); r=$?
+  rm -f "$ix"; [ $r = 0 ] && [ -n "$t" ] || { echo "the worktree's tree could not be read for the checks"; return 2; }
+  k=$d/$h-$t
+  if [ -s "$k.rc" ] && [ -f "$k.out" ]; then r=$(<"$k.rc")
+  else
+    out=$(cd "$1" && bash -c "$cc" 2>&1 < /dev/null 8>&-); r=$?; [ $r = 0 ] || r=1
+    mkdir -p "$d" && printf '%s\n' "$out" | head -c 20000 > "$k.out" && echo $r > "$k.rc" || { echo "the result of the checks could not be kept in $d"; return 2; }
+  fi
+  [ "$r" = 0 ] && return 0
+  printf 'The checks failed (test.checkCommand: %s):\n%s\n' "$cc" "$(<"$k.out")"; return 1
+}
+# The kept results of the checks, put in a run's test log folder (CONVEYOR_TEST_LOG) as checks/<commit>-<tree>.out
+# and .rc (tests()): a test command that runs the same checks can reuse the result for its tree, as this project's
+# one-file runs do (.conveyor/test-changed.sh). A copy that fails leaves the run without them; it never fails.
+checkskept() { [ ! -d "$1.checks" ] || cp -R "$1.checks" "$1.testlog/checks" 2>/dev/null || :; } # <worktree>
+
 
 # Commit trailers. Conveyor writes every commit message, so a line a host's commit-msg hook requires (such as
 # `Mutation-verified:`) is the card's to give: its sessions write such lines in <worktree>.trailers, and each kept line
@@ -2519,8 +2548,23 @@ dwfields() { # <card> <worktree> <step> <the Done-when check, or ""> <jq filter>
 }
 # A build, fix or rebase session's line, with the Done-when check of its reply on it (doneWhen, and the reply's D<n>
 # lines: doneLines). A failed check is not a block: one fix session is told the failed items, as a NO-GO's findings
-# are, and the check runs again on its reply, its line carrying that result; a second failure blocks the card with the items listed. Fails when the card blocked.
+# are, and the check runs again on its reply, its line carrying that result; a second failure blocks the card with the items listed.
+# Then the project's checks (treecheck()), before any review or test: a failure goes to one fix session told their
+# output, and they run again on its change; a second failure blocks the card with that output. Fails when the card blocked.
 checked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <step> <the session's fields>
+  dwchecked "$@" || return 1
+  local out t r
+  out=$(treecheck "$3"); r=$?
+  [ $r != 2 ] || { block "$1" "$2" "$3" "the engine could not run the project's checks: $out"; return 1; }
+  [ $r != 0 ] || return 0
+  began "$1" "$2" fix
+  t=$(session "$3" "$5"$'\n\n'"$CHECKFIX"$'\n'"$out" fix) || { block "$1" "$2" "$3" "fix: $t"; return 1; }
+  record "$1" "$2" fix ok "$(jq -c --arg r "the project's checks failed (test.checkCommand)" '. + {reason: $r}' <<<"$t")"
+  out=$(treecheck "$3"); r=$?
+  [ $r != 2 ] || { block "$1" "$2" "$3" "the engine could not run the project's checks: $out"; return 1; }
+  [ $r = 0 ] || { block "$1" "$2" "$3" "the project's checks failed again after their one fix session; nothing landed."$'\n'"$out"; return 1; }
+}
+dwchecked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <step> <the session's fields>: the Done-when part of checked()
   local k t f
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
   record "$1" "$2" "$6" ok "$(dwfields "$1" "$3" "$6" "$k" 'if $k == null then . else . + {doneWhen: $k, doneLines: $d} end' <<<"$7")"

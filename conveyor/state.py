@@ -33,7 +33,8 @@ Questions (cards is the card records, retried the lines `retry` took out of them
   last <card>               the card's last line in the card records
   lastreview <card>         the card's last review line in the card records
   ended <card>              true when the card records hold a landed, closed or blocked line of the card, else false
-  tested <card>             true when the card records hold a test line of the card, else false
+  tested <card>             true when the card records hold a test line of the card, else false; a line of a Test
+                            step that the project's checks ended before any test ran ("checks":true) does not count
   pushes                    {step, time, sec[, head]} of each push and pushed line, of the card records then retried
   yes <reason start> <st>   card<TAB><st>/<kept> of each blocked line of the card records whose reason starts so and
                             that names a kept folder
@@ -272,7 +273,8 @@ def answer(db, q, a):
         return [str(bool(one("SELECT 1 FROM cards WHERE card = ? AND step IN ('landed', 'closed', 'blocked') LIMIT 1",
                             a[0]))).lower()]
     if q == "tested":
-        return [str(bool(one("SELECT 1 FROM cards WHERE card = ? AND step = 'test' LIMIT 1", a[0]))).lower()]
+        return [str(bool(one("SELECT 1 FROM cards WHERE card = ? AND step = 'test' AND instr(line, '\"checks\":true') = 0 LIMIT 1",
+                             a[0]))).lower()]
     if q == "pushes":
         out = []
         for t in ("cards", "retried"):

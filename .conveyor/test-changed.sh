@@ -327,10 +327,14 @@ treekey() {
 # run once a tree: the first run keeps their output and exit in checks/<treekey>.out and .rc of the step's log folder
 # (a folder: the files at its top are the step's logs), and a later run of the same tree prints them again, saying so,
 # and fails as they did. A changed tree, or a key git cannot give, runs them.
+# `--checks` (issue 436: the pack's test.checkCommand) runs the checks alone and exits as they do. The loop runs it
+# after each session and at the start of a test step, and puts its result for the tree in the step's log folder as
+# checks/<treekey>.out and .rc (conveyor/lib/testrun.sh checkskept()): a one-file run of that tree reuses it, as below.
+[ "${1:-}" != --checks ] || { checks; exit; }
 rc=0; ck=
 if [ -n "$ONE" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ] && tk=$(treekey); then ck=$CONVEYOR_TEST_LOG/checks/$tk; fi
 if [ -n "$ck" ] && [ -s "$ck.rc" ] && [ -f "$ck.out" ]; then
-  cat "$ck.out"; echo "test-changed: the checks of this tree ran in an earlier one-file run of this step: its result is kept"
+  cat "$ck.out"; echo "test-changed: the checks of this tree ran before this one-file run of this step (an earlier one, or the loop's test.checkCommand): their result is kept"
   [ "$(cat "$ck.rc")" = 0 ] || rc=1
 elif [ -n "$ck" ] && mkdir -p "${ck%/*}" && co=$(mktemp "$ck.XXXXXX"); then
   checks > "$co" 2>&1 || rc=1

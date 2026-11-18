@@ -232,6 +232,24 @@ that, Conveyor stops the run at once, with every process that the run started. T
 a reason of the same kind. When `test.fileCommand` runs the files, the reason names the file that ran the others. The
 check of a bug card on main's code follows the same rule. The full suite of a release has no such limit.
 
+## The project's checks
+
+Set `test.checkCommand` in `.conveyor/project.json` to a command that runs your project's checks, for example a lint
+or shellcheck. Conveyor runs it in the card's worktree after each build, fix and rebase session, and at the start of
+the card's Test step. Exit 0 means that the checks pass.
+
+When the checks fail after a session, the card goes to a fix session before any review or test. The fix session
+gets the output of the checks. When the checks fail again after that fix session, the card is blocked.
+
+When the checks fail at the start of a Test step, no test file runs. The test line shows one failure that names the
+command. The card goes to a fix session with the output. This does not use the card's one test-fix round.
+
+Conveyor keeps the result of the checks for each tree. On a tree that the checks ran on, the Test step does not run
+them again. Your test command can read that result in its test log folder: the exit is in
+`checks/<commit>-<tree>.rc` and the output is in `checks/<commit>-<tree>.out`.
+
+Without `test.checkCommand`, Conveyor runs no such checks.
+
 ## The test map
 
 The test map tells which test files cover which source files. With it, a card runs the tests that cover its change,
