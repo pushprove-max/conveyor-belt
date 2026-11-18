@@ -342,6 +342,7 @@ declare -A run=() area=() ccase=() allby=()
 # The parts of a test file the coverage map selects (covof): npart, of the pick under way; tparts, of every pick; and
 # twhole, each file a pick also selected whole, which then runs whole.
 declare -A npart=() tparts=() twhole=()
+oparts=
 COVTESTS=
 all=
 # A source file's test files that are not named after it (pick), space-separated: Rules' Undo is tested in
@@ -1058,11 +1059,12 @@ if [ -n "$ONE" ]; then
   else
     # Any other shell test file that selects its cases as the runner does (`SEL=${CONVEYOR_SHELL_TEST_CASE...`) runs
     # the cases TCASES names of it, as its parts, and only them: the loop lists the file (CONVEYOR_TEST_FILES, above)
-    # and a pick may select it, each of which marks it whole. Else, or with none named, it runs whole.
+    # and a pick may select it, each of which marks it whole. Else, or with none named, it runs whole. They are kept
+    # in oparts, not twhole and tparts: freshen() picks again below, which marks the file whole again (issue 423).
     run=(["$ONE"]=1); cases=
     k=$(awk -F'\t' -v f="$ONE" '$1 == f {print $2}' <<<"$TCASES")
     if [ -n "$k" ] && [[ $ONE == *.sh ]] && grep -q '^SEL=\${CONVEYOR_SHELL_TEST_CASE' "$ONE"; then
-      twhole=(); tparts=(["$ONE"]=$k)
+      oparts=$k
     else twhole[$ONE]=1; fi
   fi
 fi
@@ -1487,8 +1489,9 @@ for t in "${order[@]}"; do
     # Its CPU seconds are the shell's children's user and system times (`times`) after it, less those before: the
     # file's process tree, each process counted as it is waited for.
     # It runs in its test slot's box (box, above), but for the closure test, a runner that takes slots of its own and boxes each unit.
-    # The parts of it the coverage map selected (covof), when nothing selected it whole: CONVEYOR_SHELL_TEST_CASE.
-    p=; [ -n "${twhole[$t]:-}" ] || p=$(grep . <<<"${tparts[$t]:-}" | LC_ALL=C sort -u | paste -sd, -)
+    # The parts of it the coverage map selected (covof), when nothing selected it whole, or the cases the one-file mode
+    # runs of it (oparts): CONVEYOR_SHELL_TEST_CASE.
+    p=; [ -z "$oparts" ] && [ -n "${twhole[$t]:-}" ] || p=$(grep . <<<"${oparts:-${tparts[$t]:-}}" | LC_ALL=C sort -u | paste -sd, -)
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"
     # The closure test runs in its card mode, quick (issue 583: the pack's test.files cardMode, mk above): its checks,
     # but none of the ~700 units it runs from the copy of the release set; the nightly whole test runs them.

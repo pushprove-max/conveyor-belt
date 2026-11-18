@@ -67,8 +67,11 @@ got=$(one cases conveyor/tests/a.test.sh $'conveyor/tests/a.test.sh\tatwo\nconve
 
 # Issue 414 (E2). Bug it catches: a shell test file outside conveyor/tests/ ran all its cases while the test line
 # named only the changed one, also when the engine's list names the file (which marks it whole). The case the engine
-# names of it runs alone (stwo, not sone).
+# names of it runs alone (stwo, not sone). Issue 423: also when the card's change touches the file itself, so the
+# first run's reasons (freshen(), which picks the change again) select it whole.
+cp "$R/conveyor/lib/s.test.sh" "$T/s.keep"; echo true >> "$R/conveyor/lib/s.test.sh"
 got=$(one shell conveyor/lib/s.test.sh $'conveyor/lib/s.test.sh\tstwo')
+cp "$T/s.keep" "$R/conveyor/lib/s.test.sh"
 [ "$got" = "conveyor/lib/s.test.sh:stwo" ] && [ "$(cat "$T/rc")" = 0 ] \
   || no "the one-file mode did not run only the case the engine named of a shell test file: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 
