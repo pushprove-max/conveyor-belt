@@ -157,6 +157,8 @@ PERCARD='def cardset($c; $n): ($c // {} | .cards // {} | .[$n] // {});
 # Read without a record given, the control record is read in the calling shell (ctlread), so it is kept there too.
 # Within a card (SEATCARD: its issue, set by card()), the seats the record keeps for that issue (cards, `control card`)
 # stand in for the project's (percard), each read when its step starts, so a step already running keeps its seat.
+# A card with no judge of its own has the project's: the default judge follows the project's reviewer ($rj), not the
+# card's, as the Board shows it.
 declare -gA SEAT_V=(); SEAT_K=''
 seat() { # <builder|reviewer|judge> [the control record, when the caller has read it]
   local a c=${2:-} x CTL_V n=${SEATCARD:-}; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
@@ -167,7 +169,8 @@ seat() { # <builder|reviewer|judge> [the control record, when the caller has rea
     # Each seat on its own (try): one that fails to work out is none, as it was read alone.
     mapfile -d '' -t x < <(jq -j --argjson c0 "$c" --arg n "$n" --argjson e "$EFFORTS" "$SEATNOW$JUDGENOW$PERCARD"'percard($c0; $n) as $c
         | ([try seatnow("builder"; $c)] | first | cardfit($c0; $n; $e; "builder")) as $b | ([try seatnow("reviewer"; $c)] | first | cardfit($c0; $n; $e; "reviewer")) as $r
-        | ($b, $r, (if $r == null then null else [try judgenow($c; $r)] | first | cardfit($c0; $n; $e; "judge") end)) | (if . == null then "" else tojson end) + "\u0000"' <<<"$a" 2>/dev/null) \
+        | ([try seatnow("reviewer"; $c0)] | first) as $rj
+        | ($b, $r, (if $rj == null then null else [try judgenow($c; $rj)] | first | cardfit($c0; $n; $e; "judge") end)) | (if . == null then "" else tojson end) + "\u0000"' <<<"$a" 2>/dev/null) \
       && [ "${#x[@]}" = 3 ] || return 1
     SEAT_V=([builder]=${x[0]} [reviewer]=${x[1]} [judge]=${x[2]}); SEAT_K=$n$'\037'$c$'\037'$a
   fi

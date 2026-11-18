@@ -57,6 +57,17 @@ t_cardseatrun() {
   [ "$(st 'select(.step == "landed") | .issue' | sort | tr '\n' ' ')" = "7 8 " ] || fail "the cards did not both land"
 }
 
+# Bug: a card given only its own reviewer, of another family than the project's (here j2, a Claude one, for the
+# project's Codex x), was judged by a default worked out from its reviewer (x, a Codex one), while the Board shows it
+# the project's judge (j). A card with no judge of its own has the project's.
+t_cardseatjudge() {
+  seatsetup '[]'
+  loop control card 7 reviewer j2 >/dev/null || fail "control card did not take #7's reviewer"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && SEATCARD=7 seat reviewer | jq -r .model && SEATCARD=7 seat judge | jq -r '"\(.model) \(.agent)"' && SEATCARD='' seat judge | jq -r .model 2>&1)
+  [ "$out" = $'j2\nj claude\nj' ] || fail "#7's reviewer or judge is not its own reviewer and the project's judge (j2, j claude, j): $out"
+}
+
 # Bug: a per-card seat took a model the pack does not allow that seat (a session would start on a model nobody
 # chose), or an effort its CLI does not take, without saying which models are allowed; clear left the seat set.
 t_cardseatset() {
