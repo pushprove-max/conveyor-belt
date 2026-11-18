@@ -194,7 +194,7 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
         # The card'"'"'s worktree path reads worktree before the cut, so a long path does not push the end of a command
         # out of its 80 characters (a path that only starts with it, the card'"'"'s <worktree>.wide, is kept).
         def tree: if $wt == "" or . == "" then . else split($wt) as $p | reduce $p[1:][] as $x ($p[0];
-          . + (if $x | test("^($|[/\\s;&|)\"])") then "worktree" else $wt end) + $x) end;
+          . + (if $x | test("^($|[/\\s;&|)\"'"'"'])") then "worktree" else $wt end) + $x) end;
         def short: tostring | gsub("\\s+"; " ") | tree | .[0:80];
         # What the step is doing now: the tool a session called last, with what it names, or that it writes or
         # thinks; the item a review started last (a command with its text).
