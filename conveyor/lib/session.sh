@@ -54,7 +54,8 @@ endall() { # <pid>
   done
   kill -KILL -- "-$1" 2>/dev/null; kill -KILL "${ps[@]}" 2>/dev/null; :
 }
-# The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote;
+# The files of a test run so far, as watch() counts them below: {run, of, cases}, from its output and the logs it wrote
+# (cases null when its `TESTRUN cases=` lines add up to 0);
 # run is never above of: a run that ran more test files than it selected has over too, how many more.
 # Each test file counts once, by its name (a file run again, or named in two logs, is one). A runner that prints both
 # a `-- ok|FAIL <file>` line and vitest's line for each file names it in two ways (web/src/a.test.ts and
@@ -71,12 +72,12 @@ testprogress() { # <output file> [log...]
       if (k != "") { named[n, k] = 1; names[n] = 1 } }
     /^ (✓|❯|×|↓) [^ ]+ \([0-9]+ tests?[ |)]/ { vitest[n, $2] = 1 }
     /^TESTRUN files=[0-9]+/ { sub(/^TESTRUN files=/, ""); of += $1; seen = 1 }
-    /^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); cof += $1; cseen = 1 }
+    /^TESTRUN cases=[0-9]+/ { sub(/^TESTRUN cases=/, ""); cof += $1 }
     END {
       for (i in named) { split(i, p, SUBSEP); if (!(p[2] in ran)) { ran[p[2]] = 1; run++ } }
       for (i in vitest) { split(i, p, SUBSEP); if (!(p[1] in names) && !(p[2] in ran)) { ran[p[2]] = 1; run++ } }
       over = seen && run > of ? run - of : 0
-      printf "{\"run\":%d,\"of\":%s,\"cases\":%s%s}\n", (over ? of : run), (seen ? of + 0 : "null"), (cseen ? cof + 0 : "null"), (over ? ",\"over\":" over : "") }'
+      printf "{\"run\":%d,\"of\":%s,\"cases\":%s%s}\n", (over ? of : run), (seen ? of + 0 : "null"), (cof > 0 ? cof + 0 : "null"), (over ? ",\"over\":" over : "") }'
 }
 
 # Waits for a running step and keeps its live record (README.md) while it runs; returns the step's exit. Only
@@ -86,9 +87,11 @@ testprogress() { # <output file> [log...]
 # runs a little low. A test run is counted whole each time, from its output and the logs it wrote (testlogs): files
 # selected are the `TESTRUN files=N` lines and the web half's `N web test file(s) selected`, files run the distinct
 # files the `-- ok|FAIL <file>` lines and vitest's line a file name, never more than those selected (over: how many
-# more ran; testprogress()). A runner that also prints its log's lines is counted once.
-# Its cases (tests: {done, of, failed}) are counted only when a line `TESTRUN cases=N` says how many were selected
-# (several add up), else tests is null: done and failed are the cases its runner named as ended (testdone()).
+# more ran; testprogress()). A runner that also prints its log's lines is counted once. A run that names no files
+# selected has of from the size of the card's test list (list.files) when that has one (#385).
+# Its cases (tests: {done, of, failed}) are counted only when `TESTRUN cases=N` lines say how many were selected
+# (several add up) and that is above 0, else tests is null (#385: a run of whole files prints cases=0): done and
+# failed are the cases its runner named as ended (testdone()).
 # A test run's `progress` (which health reads beside `last`, so the Foreman calls no running test step stuck while it
 # moves) is when the run began, then when a case of its runner last began or ended (testcases(), testdone()); its
 # `list` is the list of tests the command was given (<worktree>.testlist, tests()).
@@ -146,7 +149,7 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       [ "$cs $dn" = "${size#* }" ] || st=$(jq -c '.progress = (now | todate)' <<<"$st")
       size="${now% *} $cs $dn"
       new=$(testprogress "$f" "${logs[@]}" \
-        | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: ({run, of} + if .over then {over} else {} end),
+        | jq -c --argjson st "$st" --argjson t "${now##* }" --argjson cs "$cs" --argjson dn "$dn" '$st + {files: ({run, of: (.of // $st.list.files)} + if .over then {over} else {} end),
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
       # A run given TEST_GIVEN test files (the rule Whole suite in a card off: a card's run and the bug-card check,

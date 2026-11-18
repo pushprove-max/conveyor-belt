@@ -17,9 +17,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The card c7 is at its test step by its records, and the command is run and watched as its test step does it
 # (lib/testrun.sh testonce(): the engine's own watch(), on the output and logs where a card's worktree has them). A
 # whole loop run to that step cost each case about 3 s more; views.test.sh's t_live reads a real run's test step.
-countrun() { # <prints> <field> <want>
+countrun() { # <prints> <field> <want> [the card's test list, <worktree>.testlist]
   local w=$T/$CASE/cards/c7 now
   setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST" "$w.testlog"; now=$(date -u +%FT%TZ)
+  [ -z "${4:-}" ] || printf '%s\n' "$4" > "$w.testlist"
   printf '%s\n' picked worktree deps brief start:build build start:review review:GO start:test | jq -cR --arg t "$now" 'split(":") as [$s, $x]
     | {card:"c7",issue:7,step:$s,time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
       + if $s == "start" then {of: $x} elif $x then {result: $x} else {} end' > "$ST/cards.jsonl"
@@ -75,6 +76,17 @@ t_testcountnone() {
     || { : > "$STUB/go"; wait $run; fail "a run with no case count does not have tests null: $(cat "$T/$CASE/cards"/*.live)"; }
   [ "$(loop snapshot | jq -c '.belt[0].track | [has("tests"), .tests, .files]')" = '[true,null,{"run":1,"of":2}]' ] \
     || { : > "$STUB/go"; wait $run; fail "the snapshot's track with no case count: $(loop snapshot | jq -c '.belt[0].track')"; }
+  : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#385): a run of whole area files printed `TESTRUN cases=0 of=3491` and no files total, and the
+# Test step showed "0 of 0 tests" while 19 files ran. With a card's list of 37 files, its files are 19 of 37 (of from
+# the list) and tests stays null.
+t_testcountcasesnone() {
+  countrun "echo 'TESTRUN cases=0 of=3491'; for i in \$(seq 1 19); do echo \"-- ok f\$i.test.sh\"; done" \
+    files '{"run":19,"of":37}' '{"mode":"changed","files":37,"by":"area"}'
+  jq -e 'has("tests") and .tests == null' "$T/$CASE/cards/c7.live" >/dev/null \
+    || { : > "$STUB/go"; wait $run; fail "a run that says cases=0 has a case count: $(cat "$T/$CASE/cards/c7.live")"; }
   : > "$STUB/go"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
