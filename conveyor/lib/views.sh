@@ -15,7 +15,8 @@
 # prices the step at nothing instead of leaving the card unpriced.
 # A review line of a card's change adds visible: the review's USER-VISIBLE answer ("no", or "yes: <what a customer or
 # staff member would see>"), or "" when the review gave no single answer. A card blocked right after a review line
-# whose visible starts "yes" is waiting on the owner's yes.
+# whose visible starts "yes" is waiting on the owner's yes. A review line whose review named rollout actions (ROLLOUT
+# lines, lib/prompts.sh) adds rollout: [{action, fails, place}]; a landed line adds the card's own (card()).
 # The picked line of a card made by land-branch adds branch: the branch whose change the card lands.
 # The picked line of a card of the loop adds created: when its issue was opened (the time it waited is the track's
 # first step). A review line adds counts: its findings at each level (counts(), below). A start line adds of.
@@ -118,7 +119,7 @@ whole() {
 # rows() is every card as such a row, whenever it ended; cards() and snapshot() both read it, so they cannot name a
 # card's step differently. A row's x holds what only the snapshot shows: at (the step in progress as the snapshot
 # names it), review (the number of the review in progress, else null), the card's fresh tokens so far, when it ended
-# (endAt, null while open), the follow-ups its landed line names, its last review's USER-VISIBLE answer and the
+# (endAt, null while open), the follow-ups and rollout actions its landed line names, its last review's USER-VISIBLE answer and the
 # branch a land-branch card lands (null for a card of the loop), and log: every line of the card in order, marks
 # included, cut to what the reviews list and the track are built from (step, of, result, time, counts, created, n: how
 # many follow-ups a filed line names, reason: why an issue line failed, stop: on a blocked line, what its reason says of where the card stopped (worktree,

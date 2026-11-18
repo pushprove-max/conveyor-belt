@@ -329,7 +329,10 @@ Four checks hold on every review:
   the issue does not ask for) is a P1 finding.
 - a smaller change that fully solves the issue is a finding that names it and why it fully solves the issue; it is
   never a reason to cut scope the issue needs.
-A problem outside the issue is one line `NEW CARD: what` and never holds the verdict. Write no other line: any other
+A problem outside the issue is one line `NEW CARD: what` and never holds the verdict. A step an operator must take,
+in order, for the change to work once deployed (a migration before the deploy, a new environment value, a flag) is
+no defect: write it as one line `ROLLOUT: <the action> | <what fails without it> | <file:line>`. It never holds the
+verdict, and a defect is always a finding, never a ROLLOUT line. Write no other line: any other
 line is read as a finding, except the two that end the review. Second to last line, exactly: `USER-VISIBLE: no`, or
 `USER-VISIBLE: yes: <one sentence: what a customer or staff member would see or do differently>`. Answer it from
 the change itself, whatever the issue says.<yes>
@@ -484,7 +487,20 @@ the change itself, whatever it touches.'
 # holds (DONEWHENREVIEW); one that does not hold is a finding, so no other DONE-WHEN line is let through.
 # An `EARLIER: E<n> holds` line is the reviewer's word that the fix of an earlier finding holds (REREVIEW).
 # A `COVERED-BY: <test file>: <case>` line names the test that covers a case of a file an Optimize deletes (optproof()).
-NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^[[:space:]]*$'
+# A `ROLLOUT: <the action> | <what fails without it> | <file:line>` line is a step an operator must take, in order, to
+# deploy the change (a migration before the deploy, a new environment value, a flag): no defect, so it holds no
+# verdict, causes no fix round, is never filed or counted, and goes to the judge as no finding. It is kept on its own
+# (rollouts()). Only a line of exactly that shape is one (ROLLOUT, after the prefix): any other line that starts so is a finding.
+ROLLOUT='[^|]*[^|[:space:]][^|]* \| [^|]*[^|[:space:]][^|]* \| [^|[:space:]]+:[0-9]+[[:space:]]*$'
+NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^ROLLOUT: '"$ROLLOUT"'|^[[:space:]]*$'
+# The rollout actions a file names, as a JSON array of {action, fails, place} ([] when none): a review's ROLLOUT lines
+# (prefix ROLLOUT) or a card's `Rollout:` commit trailers (prefix Rollout, trailerbrief()), each of the shape above.
+# They are steps in order: each is kept once, where it is first named, and never sorted (ROLLOUTONCE).
+ROLLOUTONCE='reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)'
+rollouts() { # <file> <prefix>
+  { grep -E "^$2: $ROLLOUT" "$1" 2>/dev/null || :; } | jq -cRn --arg k "$2: " '[inputs | ltrimstr($k) | split(" | ") | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+    | {action: .[0], fails: .[1], place: .[2]}] | '"$ROLLOUTONCE"
+}
 # A `DECLINED:` line is a finding the judge declined (judged()), with the judge's reason: it holds no verdict, causes
 # no fix round and is never filed. A `MINOR:` line is an accepted P3 finding while the control record's rule P3 is
 # off (minor()): it is listed only, holds no verdict, causes no fix round and is never filed, but it is counted

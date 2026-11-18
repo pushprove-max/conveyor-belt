@@ -39,7 +39,8 @@ t_visible() {
 t_visibleyes() {
   visiblestart 8
   cp "$STUB/build" "$STUB/build.0"; echo 'echo "Mutation-verified: broke X, test went red" > "$PWD.trailers"' >> "$STUB/build"
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"; head=$(git -C "$R" rev-parse HEAD); runs=$(wc -l < "$STUB/tests")
+  local ro='Run migration 0004 before the deploy | the new column is missing | a.txt:2'
+  printf '%s\n' "ROLLOUT: $ro" "$YES" 'VERDICT: GO' > "$STUB/review.1"; head=$(git -C "$R" rev-parse HEAD); runs=$(wc -l < "$STUB/tests")
   loop run >/dev/null || fail "second run exited non-zero"
   [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] || fail "a visible GO was not blocked for Dana's yes: $(steps 8)"
   [ "$(st 'select(.issue == 8 and .step == "review") | [.result, .visible] | join("|")')" = "GO|yes: guests see a new Pay button" ] || fail "review line of a visible GO: $(st 'select(.issue == 8 and .step == "review")')"
@@ -75,6 +76,10 @@ t_visibleyes() {
   st 'select(.issue == 8 and .step == "worktree") | .reason' | grep -q "^landing from the kept patch of card $old" && [ "$(tail -n 1 "$R/a.txt")" = two ] && [ -z "$(git -C "$R" status --porcelain)" ] \
     || fail "the worktree line does not say the card lands from the kept patch, or main lacks the change: $(steps 8)"
   git -C "$R" log -1 --format=%B | grep -qx 'Mutation-verified: broke X, test went red' || fail "the approved card landed without the trailer its build wrote: $(git -C "$R" log -1 --format=%B)"
+  # Bug: the card that lands from the kept patch has no review line of its own, so its kept review's rollout action
+  # is lost from its landed line and its commit message.
+  [ "$(st 'select(.issue == 8 and .step == "landed") | .rollout[] | "\(.action) | \(.fails) | \(.place)"')" = "$ro" ] \
+    && git -C "$R" log -1 --format=%B | grep -qxF "Rollout: $ro" || fail "the card landed from its kept patch lost its review's rollout action: $(st 'select(.issue == 8 and .step == "landed")')"
   loop check || fail "the record check refuses the lines of a card that landed from a kept patch"
   [ "$(loop cards | jq -c --arg c "$(st 'select(.issue == 8 and .step == "landed") | .card')" '.cards[] | select(.card == $c) | [.step, .stage, .reviews]')" = '["landed",5,0]' ] || fail "dashboard row of a card landed from a kept patch: $(loop cards)"
 }
@@ -157,7 +162,8 @@ t_unclearnogo() {
 # Bug: a review with no USER-VISIBLE line, two, or one not written as asked is read as a clear answer, so its card
 # lands. Each has a verdict, so only the missing answer can block it (the reason t_unclearnogo checks).
 visibleof() { # <the review's lines...>: "<verdict>|<visible answer>"
-  local NOTFINDING; eval "$(grep '^NOTFINDING=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p; /^visible() {/,/^}/p' "$SRC/lib/followups.sh")"
+  # shellcheck disable=SC2034 # ROLLOUT is read by the eval'd NOTFINDING line of prompts.sh
+  local ROLLOUT NOTFINDING; eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p; /^visible() {/,/^}/p' "$SRC/lib/followups.sh")"
   [ -n "$NOTFINDING" ] && declare -F verdict visible >/dev/null || fail "the engine no longer defines verdict(), visible() or NOTFINDING where this case reads them"
   mkdir -p "$T/$CASE"; printf '%s\n' "$@" > "$T/$CASE/review"; echo "$(verdict "$T/$CASE/review")|$(visible "$T/$CASE/review")"
 }

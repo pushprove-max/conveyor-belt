@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Landed today: the cards that landed, or closed their issue as already fixed. Its part: {day, cards}; a card is
-// {repo, card, issue, title, url, parent, step, time, start, tookSec, earlier, usd, reviews, followups, pushed, rounds, fixes, track, batch}:
+// {repo, card, issue, title, url, parent, step, time, start, tookSec, earlier, usd, reviews, followups, pushed, rounds, fixes, track, batch, rollout}:
+// rollout is its rollout actions ({action, fails, place} each: a step an operator takes to deploy it, no finding);
 // rounds is its reviews in order (round, verdict, counts by level), fixes its fix rounds, track its six steps, start when its
 // work was first picked up and tookSec its overall time from then to the landing (a card resumed from a kept patch
 // counts the earlier card's time); batch the cards it landed with in one landing, itself among them (null: alone).
@@ -69,6 +70,10 @@ window.DASH_APP.panel({
         h('span', null, `landed ${ctx.clock(c.time)}`), h('span', null, `${c.reviews} ${c.reviews === 1 ? 'review' : 'reviews'}`), h('span', 'num', ctx.money(c.usd)));
       if (Array.isArray(c.followups) && c.followups.length) meta.append(h('span', null, `follow-ups ${c.followups.map((n) => `#${n}`).join(' ')}`));
       li.append(head, meta);
+      // Its rollout actions, beside its push state: what an operator must do, in order, to deploy it. No finding.
+      (Array.isArray(c.rollout) ? c.rollout : []).forEach((r) => {
+        if (r && typeof r.action === 'string') li.append(h('p', 'row-meta', `Before deploy: ${r.action}. Without it: ${r.fails}. At ${r.place}`));
+      });
       // Its reviews in order (a review recorded with no counts shows its verdict alone); a card that landed on a NO-GO
       // says how many findings became follow-ups.
       const rounds = Array.isArray(c.rounds) ? c.rounds : [];

@@ -56,6 +56,13 @@ earlier finding whether the fix holds. It raises a declined finding again only w
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
 its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge).
 
+A change can need a step when you deploy it: a migration before the deploy, a new environment value or a flag. The
+reviewer writes this step as a `ROLLOUT:` line: the action, what fails without it, and its file and line. The builder
+writes one as a `Rollout:` line of the card's commit trailers. A rollout action is not a finding. It does not stop the
+card, and the judge does not read it. The card's commit message has each one as a `Rollout:` line, so the push carries
+it, and the Landed today panel shows it under the card. The reviewer's steps come first, then the builder's, each in
+the order it was written.
+
 A project lists what it knowingly lives with under the heading `## Accepted limits` in its own `README.md`. Every
 card's reviewer reads that section and does not raise what it lists.
 

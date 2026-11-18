@@ -43,9 +43,13 @@ t_reviewprompt() {
   ! grep -qF 'as its own finding' "$a.flat" || fail "the review prompt still asks for each place of one mistake as its own finding"
   # The card rules the reviewer is handed come after that introduction.
   grep -qx '# Rules' "$a" || fail "the reviewer was not handed the card rules"
-  # The user-visible and approved-scope lines, word for word as they were (owner and product paths filled in).
+  # The user-visible and approved-scope lines, word for word as they were (owner and product paths filled in), with
+  # the ROLLOUT line between NEW CARD and them.
   cat > "$a.want" <<'EOF'
-A problem outside the issue is one line `NEW CARD: what` and never holds the verdict. Write no other line: any other
+A problem outside the issue is one line `NEW CARD: what` and never holds the verdict. A step an operator must take,
+in order, for the change to work once deployed (a migration before the deploy, a new environment value, a flag) is
+no defect: write it as one line `ROLLOUT: <the action> | <what fails without it> | <file:line>`. It never holds the
+verdict, and a defect is always a finding, never a ROLLOUT line. Write no other line: any other
 line is read as a finding, except the two that end the review. Second to last line, exactly: `USER-VISIBLE: no`, or
 `USER-VISIBLE: yes: <one sentence: what a customer or staff member would see or do differently>`. Answer it from
 the change itself, whatever the issue says. A line in the issue starting `Visible change approved:` is the

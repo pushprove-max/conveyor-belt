@@ -35,7 +35,7 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
              endAt: ($end.time // null), retriedAt: ($end.retriedAt // null),
              # When a card whose issue was closed while it was blocked (shut()) was blocked, else null: from then to
              # its end it waited on the owner, and none of that time is a landing's.
-             blockedAt: (if $end.step == "closed" and $end.reason == $shut then $all | map(select(.step == "blocked")) | last | .time else null end), followups: ($end.followups // []), branch: (.[0].branch // null),
+             blockedAt: (if $end.step == "closed" and $end.reason == $shut then $all | map(select(.step == "blocked")) | last | .time else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: (.[0].branch // null),
              diff: ($end.diff // null), paths: ($end.paths // null), batch: ($end.batch // null), depth: (map(select(.step == "brief")) | last | .depth // null),
              # The blocked card whose kept patch this card resumes (named by its worktree line), else null.
              from: (map(select(.step == "worktree")) | first | .reason // "" | select(test("built from nothing") | not)

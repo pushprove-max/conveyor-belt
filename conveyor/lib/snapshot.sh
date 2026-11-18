@@ -128,7 +128,8 @@
 # landed: the cards that landed today, or closed their issue as already fixed (step says which), newest first: usd, reviews, the
 #   follow-up issues filed, rounds (the reviews list above; reviews is their number), fixes (its fix rounds: every fix line,
 #   a fix after a failed Done-when check or failed tests too), track, and pushed (false while health lists its commit as unpushed; null for a closed card,
-#   which has no commit), batch (the cards it landed with in one batch, itself among them, in order; null when it landed alone).
+#   which has no commit), batch (the cards it landed with in one batch, itself among them, in order; null when it landed alone),
+#   rollout (the rollout actions its landed line carries, {action, fails, place} each, rollouts(); [] when none).
 #   Its usd, reviews and fixes, and a belt card's usd and tokens, are of every run of its issue (a card `retry` or a
 #   new pick restarted: the runs below, at metrics); rounds and track are of its own run.
 #   landedCount: how many there are, and landedUsd their usd added up (null when one has none); landed holds the
@@ -799,7 +800,7 @@ snapshot() (
        forecast: forecast,
        awaitingDeploy: $built,
        landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd, reviews: .runReviews, followups: .x.followups,
-         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls, batch: .x.batch} + times],
+         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls, batch: .x.batch, rollout: .x.rollout} + times],
        branches: ([$c[] | select(.x.branch != null and (.step | IN("landed", "closed")) and .x.blockedAt == null)] | group_by([.issue, .title])
          | map(max_by(.x.endAt) | {card, issue, title, step, time: .x.endAt})),
        pushedCards: [$c[] | (.x.log | map(select(.step == "pushed")) | last) as $p | select($p != null and ($p.time | day) >= $since)

@@ -102,7 +102,8 @@ t_reviewretry() {
 # its card (visible.test.sh t_unclearnogo), and a NO-GO goes to a fix round (port.test.sh t_autoport), so no card run is
 # needed for the answers.
 verdictof() { # <the review's lines...>
-  local NOTFINDING; eval "$(grep '^NOTFINDING=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p' "$SRC/lib/followups.sh")"
+  # shellcheck disable=SC2034 # ROLLOUT is read by the eval'd NOTFINDING line of prompts.sh
+  local ROLLOUT NOTFINDING; eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; eval "$(sed -n '/^verdict() {/,/^}/p' "$SRC/lib/followups.sh")"
   [ -n "$NOTFINDING" ] && declare -F verdict >/dev/null || fail "the engine no longer defines verdict() or NOTFINDING where this case reads them"
   mkdir -p "$T/$CASE"; printf '%s\n' "$@" > "$T/$CASE/review"; verdict "$T/$CASE/review"
 }

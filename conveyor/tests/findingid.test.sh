@@ -13,13 +13,13 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # the defect, or other words, made it look new after a fix that did not hold, and a finding whose lines the fix
 # replaced was joined to whatever code now sat at that line. Each case calls the engine's own functions, as card.sh
 # calls them around one fix round, on a worktree whose fix is a real git diff; no card runs.
-# fid_eng runs engine functions in a subshell with lib/testrun.sh and the engine's NOTFINDING. fid_round makes the
+# fid_eng runs engine functions in a subshell with lib/testrun.sh and the engine's NOTFINDING (and ROLLOUT, which it reads). fid_round makes the
 # worktree $W, a.txt holding "line 1" to "line 20", and gives the first review's findings their ids (IDS) and the
 # lines its fix session is told (FL); the edit is fix round 1, its git diff recorded with those ids; then the second
 # review is written beside $W.
 fid_eng() { # <commands>
   # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...)
-  ( STATE=$T/$CASE/cards.jsonl; eval "$(grep '^NOTFINDING=' "$SRC/lib/prompts.sh")"; . "$SRC/lib/testrun.sh"
+  ( STATE=$T/$CASE/cards.jsonl; eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; . "$SRC/lib/testrun.sh"
     stdb() { :; }; REREVIEW='' REREVIEWALL=''; eval "$1" )
 }
 fid_round() { # <first review> <fix edit (a command run in the worktree)> <second review> [more files (a command run in the worktree)]

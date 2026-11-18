@@ -434,8 +434,10 @@ export function full(now = T0) {
         { repo: 'sample', issue: 76, title: 'Stack split', since: iso(now - 2 * 86400000), url: `${P}/76` },
         { repo: 'sample', issue: 35, title: 'No label time', since: null, url: `${P}/35` },
       ], issuesError: null } },
+      // The landed card has a rollout action: a row that does not show it beside its push hides the step a deploy needs.
       landed: { error: null, data: { day: '2026-11-09', cards: [
-        { repo: 'sample', card: 'c5-7', issue: 7, title: 'Landed one', url: `${P}/7`, step: 'landed', time: iso(now - 3600000), start: iso(now - 5400000), tookSec: 1800, usd: 2.5, reviews: 2, followups: [31], sha: 'abc', pushed: true },
+        { repo: 'sample', card: 'c5-7', issue: 7, title: 'Landed one', url: `${P}/7`, step: 'landed', time: iso(now - 3600000), start: iso(now - 5400000), tookSec: 1800, usd: 2.5, reviews: 2, followups: [31], sha: 'abc', pushed: true,
+          rollout: [{ action: 'Run migration 0004', fails: 'the new column is missing', place: 'db/0004.sql:1' }] },
         { repo: 'sample', card: 'c6-8', issue: 8, title: 'Fixed before', url: `${P}/8`, step: 'closed', time: iso(now - 7200000), start: iso(now - 7800000), tookSec: 600, usd: 0.5, reviews: 1, followups: [], sha: '', pushed: null },
       ] } },
       // Release: a project that releases with Conveyor, main two commits past v1.2.0, the next version's notes not on
@@ -530,7 +532,7 @@ export const SAYS = {
   tests: { title: 'Tests', count: '', data: ['Timed files', 'conveyor/tests/merge.test.sh', 'Slower than usual', 'Test limits', 'Files slow on purpose'],
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
   queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2):', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
-  landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
+  landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Before deploy: Run migration 0004. Without it: the new column is missing. At db/0004.sql:1', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
   release: { title: 'Release', count: '', data: ['sample', 'Newest release v1.2.0', '2 changes since', 'Notes missing', 'docs/releases/1.3.0.md on main: missing: Draft notes writes them',
     'Draft notes', 'Show 2 changes'], empty: 'No project releases with Conveyor.', failed: 'The Board could not read the release state' },
   declined: { title: 'Declined', count: '1', data: ['#63', '[P1] b.txt:2 no mark here', 'declined by the judge', '30 min ago', 'Why the judge declined it', 'its proof needs a stub built to misbehave', 'File as issue',

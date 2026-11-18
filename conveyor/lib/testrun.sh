@@ -2444,6 +2444,7 @@ checkskept() { [ ! -d "$1.checks" ] || cp -R "$1.checks" "$1.testlog/checks" 2>/
 # goes into the commit message after its `Closes` line. Kept: lines `<Token>: <text>` (a token of letters and hyphens),
 # each under 300 characters, the first 10; never Co-Authored-By or a token the pack's commit.forbid names. The pack's
 # commit.trailers names the ones a change owes: a rule's token when a path the change adds matches its when (an ERE).
+# A kept `Rollout:` line is also a rollout action of the card (rollouts(), lib/prompts.sh; card() puts it on the landed line).
 trailers() { # <worktree>: the kept lines, one a line
   local f
   packget commit.forbid f || return 1
@@ -2459,7 +2460,10 @@ trailerbrief() { # <worktree>
   printf '%s' "# Commit trailers
 Conveyor writes this card's commit message. A line the commit must carry goes in the file $1.trailers, one a line,
 as \`<Token>: <text>\` with a token of letters and hyphens: each is added to the commit message after its \`Closes\`
-line. Only lines of that shape are kept, the first 10, each under 300 characters; Co-Authored-By$f lines are dropped."
+line. Only lines of that shape are kept, the first 10, each under 300 characters; Co-Authored-By$f lines are dropped.
+A step an operator must take, in order, for your change to work once deployed (a migration before the deploy, a new
+environment value, a flag) goes there as one line \`Rollout: <the action> | <what fails without it> | <file:line>\`:
+the card shows it apart from the review's findings."
   jq -r '.[] | "\n- When your change adds a file whose path matches the extended regular expression `\(.when)`: \(.ask) Write it as a `\(.token): <text>` line in that file."' <<<"$r"
 }
 # The pack's trailers the staged change owes and the card has not written: one {token, ask, paths} a line. The
@@ -2711,10 +2715,10 @@ rounded() { # <worktree> <round> <numbered() lines>
     ($h | group_by(.id)[] | last | select(.moved != null and (.id | IN($ids[]) | not))
       | {round: $r, id, words, tracked: true} + follow(.moved; .words))' <<<"$3" >> "$1.rounds/findings.jsonl"
 }
-# The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED and MINOR ones,
-# each finding led by its id (<numbered() lines>).
+# The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED, MINOR and ROLLOUT
+# ones (a rollout action is no defect, rollouts()), each finding led by its id (<numbered() lines>).
 fixlines() { # <worktree> <numbered() lines>
-  grep -Ev '^(DECLINED|MINOR):' "$1.review" | jq -Rr --slurpfile n <(printf '%s\n' "$2") '($n | map({key: .line, value: .id}) | from_entries) as $m
+  grep -Ev "^(DECLINED|MINOR):|^ROLLOUT: $ROLLOUT" "$1.review" | jq -Rr --slurpfile n <(printf '%s\n' "$2") '($n | map({key: .line, value: .id}) | from_entries) as $m
     | (sub("^\\s+"; "") | sub("\\s+$"; "")) as $t | if $t != "" and $m[$t] then "\($m[$t]) \(.)" else . end'
 }
 # The findings of the review beside the worktree that a fix round was already told to fix (numbered(): the same id),

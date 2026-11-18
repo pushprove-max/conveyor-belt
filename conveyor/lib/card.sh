@@ -22,7 +22,7 @@ redbrief() { # <card> <issue> <branch>
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
-  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
+  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ids fl # sv, an: a review's survived findings and its answers (repeats(), answers()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
@@ -134,6 +134,19 @@ card() { # <card> <issue> [<branch> <tip>]
   [ "$n" = 0 ] || [ -z "$issue" ] || [ "$vrule" = off ] || inh=$(inherit "$issue")
   [ "$mode" != land ] || [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ] \
     || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
+  # pro: the rollout actions the reviews of the retried cards whose kept patch this card carries named, in order: the
+  # card it resumes ($from), the card whose kept patch that one resumed (its worktree line names it), and so on back
+  # to one built from nothing. `retry` moved those review lines out of its card records, and a new review replaces the
+  # kept one, so its landing reads them here (ro, below). Bug: every retried card of the issue was read, so a patch
+  # `retry --fresh` discarded brought its rollout action back into the commit.
+  if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
+    pro=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
+      | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
+          | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
+      [limit(100; $f | recurse(up; . != null))] as $chain
+      | [$l[] | select(.step == "review" and (.card | IN($chain[]))) | .rollout // [] | .[]]') \
+      || { block "$c" "$n" "$wt" "worktree: the engine could not read the rollout actions of the retried cards of the issue"; return; }
+  fi
   # A card that takes up the kept patch of a loop that did not finish carries that loop's review rounds: the round
   # limit counts every review of the issue's retried cards, not just this card's. So does a kept patch reviewed again
   # with no build: a NO-GO there is fixed and goes round the loop. Not the port of a finished loop: its loop ended,
@@ -352,8 +365,8 @@ card() { # <card> <issue> [<branch> <tip>]
       # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
       # Board reads them on demand (history donewhen).
       record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
-        --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" \
-        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end)')"
+        --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" \
+        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end)')"
       [ "$res" != none ] || { block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
     fi
     # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
@@ -382,8 +395,8 @@ card() { # <card> <issue> [<branch> <tip>]
       [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
       locked giveway "$c" "$wt" fix; began "$c" "$n" fix
       old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
-      # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), or a P3 listed only
-      # (a MINOR line, minor()), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
+      # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only
+      # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
       ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
       redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$FIX"$'\n'"$fl$more" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
       checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
@@ -438,6 +451,16 @@ card() { # <card> <issue> [<branch> <tip>]
     # The trailers the commit carries are these, read here where they were reviewed and checked: nothing after (the
     # tests) changes them.
     cmsg=$(trailers "$wt") || { block "$c" "$n" "$wt" "the engine could not read the commit trailers of the card, so nothing landed"; return; }
+    # Its rollout actions (rollouts()): those its reviews named (its retried cards' review lines' (pro), its own lines', then its kept review's, as a card
+    # that lands from a kept patch has no review line of its own), then its Rollout trailers, each once and in the order
+    # named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
+    # Rollout lines in place of its Rollout trailers, so the push carries each one. They are no findings: nothing here
+    # holds the card.
+    rtr=$(rollouts <(printf '%s\n' "$cmsg") Rollout) && rrev=$(rollouts "$wt.review" ROLLOUT) \
+      && ro=$(stdb ask card "$c" | jq -cs --argjson p "$pro" --argjson k "$rrev" --argjson t "$rtr" '[$p[], (.[] | select(.step == "review") | .rollout // [] | .[]), $k[], $t[]] | '"$ROLLOUTONCE") \
+      && rmsg=$(jq -r '.[] | "Rollout: \(.action) | \(.fails) | \(.place)"' <<<"$ro") \
+      || { block "$c" "$n" "$wt" "the engine could not read the rollout actions of the card, so nothing landed"; return; }
+    cmsg=$(grep -Ev "^Rollout: $ROLLOUT" <<<"$cmsg" || :); cmsg=$cmsg${cmsg:+${rmsg:+$'\n'}}$rmsg
     # A main-red fix card names its cases and main's commit, as its entry holds them now (a case added during its
     # build or a review too).
     [ "$n" != 0 ] || [ -n "$br" ] || msg=$(t=$(redissue "$c") || t=$issue; jq -r --arg c "$c" --arg s "$(stdb ask card "$c" | jq -rs 'map(.mainRed // empty)[0] // ""')" \
@@ -467,8 +490,8 @@ card() { # <card> <issue> [<branch> <tip>]
     # passed while it waited on what its worktree still holds are not run again (testedhere()). A card that files a
     # last NO-GO's follow-ups keeps its pass there too, marked alone: no batch takes it or is taken by it.
     # Its extra's waitSec is what it has waited so far; settle() keeps it up to date while it waits (a batch lands it).
-    rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$([ -n "$last" ] && echo true || echo false)" --argjson w "$((waitsec + mainsec))" \
-      '{issue: $i, msg: $m, extra: ({waitSec: $w} + if $y then {yesFrom: $y} else {} end)} + (if $a then {alone: true} else {} end)' > "$wt.ready"
+    rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$([ -n "$last" ] && echo true || echo false)" --argjson w "$((waitsec + mainsec))" --argjson ro "$ro" \
+      '{issue: $i, msg: $m, extra: ({waitSec: $w} + (if $y then {yesFrom: $y} else {} end) + if $ro != [] then {rollout: $ro} else {} end)} + (if $a then {alone: true} else {} end)' > "$wt.ready"
     # Back from the landing rebuild with its change outside documentation the one that passed its tests (docpass): it
     # lands on that run, with only its product checks run again.
     [ -z "$docpass" ] || { [ "$docpass" != "$(cardpatch "$wt" ':(exclude)*.md')" ] || tested "$wt"; docpass=''; }
@@ -736,6 +759,8 @@ card() { # <card> <issue> [<branch> <tip>]
         # watch (bench/drift.sh).
         extra=$(jq -c --argjson w "$((waitsec + mainsec))" '. + {waitSec: $w}' <<<"${left:-"{}"}") || extra=$left
         [ -z "$yesfrom" ] || extra=$(jq -c --argjson f "$yesfrom" '. + {yesFrom: $f}' <<<"${extra:-"{}"}")
+        # rollout: its rollout actions, as its ready file holds them too (above).
+        [ "$ro" = '[]' ] || extra=$(jq -c --argjson r "$ro" '. + {rollout: $r}' <<<"${extra:-"{}"}")
         if [ ${#mates[@]} != 0 ]; then mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" "$extra"); else t5=("$c" "$n" "$wt" "$cmsg" "$extra"); fi
         # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
         t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "follow-up of a follow-up" <<<"$dec" \
