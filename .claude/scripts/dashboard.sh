@@ -682,9 +682,10 @@ PANELS_JQ='
   def openOf($r): $r.snap.open | if type == "object" then {count, split, held: (.held | few($r)), issues: (.issues | if . == null then null else few($r) end)} else null end;
   # The Board of one record: the loop as its control record steers it, in six columns.
   # stays: Stop now leaves the card running (halt() in conveyor/lib/run.sh): it has landed, is filing its follow-ups
-  # or landing, or has filed them.
+  # or landing, or has filed them, or has filed the slices of a split (split.filed, or track.grown).
   def stays: .landed == true or (.done.step | IN("file", "land"))
-    or any(.track.detail[]?; .name == "follow-ups filed" and .state == "done");
+    or any(.track.detail[]?; .name == "follow-ups filed" and .state == "done")
+    or (.split.filed | type == "array" and length > 0) or .track.grown != null;
   def boardOf($r): $r.snap as $s | ([$s.landed[].card]) as $today
     | {repo: $r.repo, state: $s.health.state, reason: ($s.health.reason // null), loop: $s.health.loop, commit: ($s.health.commit // null), control: $s.control, cap: $s.health.builderCap,
        guard: $s.health.guard, modelSettings: ($s.modelSettings // null), areaPrefix: ($s.areaPrefix // null), limit: limitOf($s),

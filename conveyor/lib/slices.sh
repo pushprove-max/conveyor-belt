@@ -130,6 +130,7 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   split=$(jq -c --arg m "$rule" --arg h "$h" --argjson s "$size" '{mode: $m, hash: $h, size: ($s | .doneWhen |= length | .files |= length)} + .' <<<"$v") || return 0
   # On, a split is filed; one that cannot be filed is recorded as a split not filed, and the issue is built whole.
   if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$split")" = split ]; then
+    began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
     if nums=$(splitfile "$1" "$issue" "$(jq -c .slices <<<"$split")" "$c"); then split=$(jq -c --argjson f "$nums" '. + {filed: $f}' <<<"$split")
     else split=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the issue is built whole: \($r)"' <<<"$split"); fi
   fi
@@ -267,6 +268,7 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
     [ -n "$v" ] || v=$(jq -cn --arg a "${ans:0:2000}" '{verdict: "invalid", why: "the answer held no JSON object", answer: $a}'); fi
   g=$(jq -c --arg m "$rule" --argjson k "$k" --argjson l "$lim" '{mode: $m, files: $k, limit: $l} + .' <<<"$v") || return 0
   if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$g")" = split ]; then
+    began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
     if nums=$(splitfile "$1" "$4" "$(jq -c .slices <<<"$g")" "$c"); then
       # Each file a slice takes goes back to what HEAD has; one the change added is removed.
       while IFS= read -r f; do

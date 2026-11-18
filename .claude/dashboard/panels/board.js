@@ -265,7 +265,7 @@
     el.append(state);
     // Each control names the project it acts on, and Stop now its cost: how many cards in progress it sends back to
     // the queue (Building and Review). A card the engine's stop leaves running (stays, from the server: landed, filing
-    // its follow-ups or landing, or filed them) is not counted.
+    // its follow-ups, the slices of a split or landing, or filed them) is not counted.
     const acts = h('div', 'board-acts'), repo = d.repo;
     const ends = (x) => x.stays !== true;
     const live = issues(d.building).filter(ends).length + issues(d.review).filter(ends).length;

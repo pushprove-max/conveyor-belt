@@ -936,11 +936,16 @@ L='[{"card": "c0-11", "issue": 11, "title": "Filing", "step": "tests", "done": {
   {"card": "c0-12", "issue": 12, "title": "Landing", "step": "landing", "done": {"step": "land"}, "stepAt": "'"$(ago 60)"'", "landed": false, "usd": 1, "reading": true},
   {"card": "c0-13", "issue": 13, "title": "Filed", "step": "review", "review": 1, "of": 3, "done": {"step": "test"}, "track": {"detail": ['"$F"']}, "stepAt": "'"$(ago 60)"'", "landed": false, "usd": 1, "reading": true},
   {"card": "c0-14", "issue": 14, "title": "Testing", "step": "tests", "done": {"step": "test"}, "track": {"detail": [{"name": "follow-ups filed", "state": "todo", "sec": null}]}, "stepAt": "'"$(ago 60)"'", "landed": false, "usd": 1, "reading": true},
-  {"card": "c0-99", "issue": 99, "title": "Landed yesterday", "step": "push", "stepAt": "'"$(ago 90000)"'", "landed": true, "usd": 1, "reading": true}]'
+  {"card": "c0-99", "issue": 99, "title": "Landed yesterday", "step": "push", "stepAt": "'"$(ago 90000)"'", "landed": true, "usd": 1, "reading": true},
+  {"card": "c0-15", "issue": 15, "title": "Split filed", "step": "build", "done": {"step": null}, "split": {"result": "split", "slices": 2, "filed": [100101, 100102]}, "stepAt": "'"$(ago 60)"'", "landed": false, "usd": 1, "reading": true},
+  {"card": "c0-16", "issue": 16, "title": "Grown filed", "step": "fix", "done": {"step": "fix"}, "track": {"grown": {"before": 5, "after": 3}}, "stepAt": "'"$(ago 60)"'", "landed": false, "usd": 1, "reading": true},
+  {"card": "c0-17", "issue": 17, "title": "Split kept", "step": "build", "done": {"step": "build"}, "split": {"result": "kept", "slices": 0, "filed": null}, "stepAt": "'"$(ago 60)"'", "landed": false, "usd": 1, "reading": true}]'
 answer "$(jq -c --argjson l "$L" '.belt += $l' <<<"$P")" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
-q '.panels.board.data | ([.building[], .review[]] | map(select(.issue | IN(11, 12, 13, 14, 99)) | [.issue, .stays]) | sort) == [[11, true], [12, true], [13, true], [14, false], [99, true]]
-  and ([.building[], .review[]] | map(select(.issue | IN(11, 12, 13, 14, 99) | not) | .stays) | all(. == false))' "a card Stop now leaves running (filing, landing, filed its follow-ups, landed) is marked stays; one it ends is not"
+# Bug: halt() leaves running a card that has filed the slices of a split, at its pick (c0-15) or for its size (c0-16,
+# in its fix session), yet the Board counted it as one Stop now requeues.
+q '.panels.board.data | ([.building[], .review[]] | map(select(.issue | IN(11, 12, 13, 14, 15, 16, 17, 99)) | [.issue, .stays]) | sort) == [[11, true], [12, true], [13, true], [14, false], [15, true], [16, true], [17, false], [99, true]]
+  and ([.building[], .review[]] | map(select(.issue | IN(11, 12, 13, 14, 15, 16, 17, 99) | not) | .stays) | all(. == false))' "a card Stop now leaves running (filing, landing, filed its follow-ups or slices, landed) is marked stays; one it ends is not"
 # A long check run (the pack's checks.progress) shows on the Board as the snapshot gives it, or the Board looks idle
 # while the run holds the loop paused.
 CR='{"name":"nightly","sha":"0123456789ab","started":"'"$(ago 600)"'","ended":null,"result":null,"counts":{"passed":3,"failed":1,"running":2,"queued":4,"reused":0},"done":4,"all":10,"leftSec":225,

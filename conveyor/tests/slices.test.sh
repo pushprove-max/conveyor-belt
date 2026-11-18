@@ -84,8 +84,9 @@ t_sliceson() {
     || fail "a slice's body does not name its parent, the items it covers, its own Done-when items or the slice it depends on: $(jq -r .body "$STUB/filed")"
   [ "$(jq -c .held "$ST/control.json")" = '[7]' ] || fail "the umbrella was not held, or its released parent's slices were held: $(jq -c .held "$ST/control.json")"
   grep -q 'D1 (first): #100101' "$STUB/comments" && grep -q 'D3 (third): #100102' "$STUB/comments" || fail "the umbrella's comment does not name the slice of each Done-when item: $(cat "$STUB/comments")"
-  [ "$(st '[.step, .result] | @json' | tr '\n' ' ')" = '["split","split"] ["closed","ok"] ' ] && [ "$(st 'select(.step == "split") | .split.filed | @json')" = '[100101,100102]' ] \
-    || fail "the parent's card is not a split line with the slices filed, then closed: $(cat "$ST/cards.jsonl")"
+  # The start line of file comes before the slices are filed: stop (halt()) leaves the card to finish from there.
+  [ "$(st '[.step, .result, .of // empty] | @json' | tr '\n' ' ')" = '["start","ok","file"] ["split","split"] ["closed","ok"] ' ] && [ "$(st 'select(.step == "split") | .split.filed | @json')" = '[100101,100102]' ] \
+    || fail "the parent's card is not a start of filing, a split line with the slices filed, then closed: $(cat "$ST/cards.jsonl")"
   recok "$ST/cards.jsonl" "a split card"
   # While it is open, the snapshot's Held names the umbrella's slices (the Board: "Umbrella of #100101, #100102").
   [ "$(loop snapshot | jq -c '.open.held | map(select(.issue == 7)) | .[0].umbrella')" = '[100101,100102]' ] \
@@ -132,6 +133,27 @@ t_slicesclose() {
   fx_in "umbrellas '[{\"number\":7}]'"
   [ "$(cat "$STUB/closed" 2>/dev/null)" = 7 ] && [ "$(jq -c .held "$ST/control.json")" = '[]' ] \
     || fail "the umbrella was not closed and released once its last slice was done: $(cat "$STUB/closed" 2>/dev/null) $(jq -c .held "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
+# Stop (halt(), lib/run.sh) leaves to finish a card whose slices are filed: one split for its size, now in its fix
+# session (c1-7), and one split at its pick, before its closed line (c3-9); it stops a card whose grown change was kept
+# (c2-8). Bug caught: stop in the fix session after a split for its size put the issue back in the queue with its
+# slice open, so it was built whole beside the slice.
+t_slicesstop() {
+  local c id n s r f p1 p2 p3 a1 a2 a3
+  setup "[$(big 7)]"
+  { for c in 'c1-7 7 start build' 'c1-7 7 grown split [100101]' 'c1-7 7 start fix' 'c2-8 8 start build' 'c2-8 8 grown kept null' 'c2-8 8 start fix' 'c3-9 9 split split [100102]'; do
+      read -r id n s r f <<<"$c"
+      landed "$n" | jq -c --arg c "$id" --arg s "$s" --arg r "$r" --argjson f "${f:-null}" '.card = $c | .step = $s | .result = (if $s == "start" then "ok" else $r end)
+        | if $s == "start" then .of = $r elif $s == "grown" then .grown = {verdict: (if $f then "split" else "keep" end)} + (if $f then {filed: $f} else {} end)
+          else .split = {verdict: "split", filed: $f} end'
+    done; } > "$ST/cards.jsonl"
+  sleep 60 & p1=$!; sleep 60 & p2=$!; sleep 60 & p3=$! # sleep: stand-ins for the cards' processes, until they are killed
+  fx_in "printf '%s\n' '$p1 c1-7' '$p2 c2-8' '$p3 c3-9' | halt"
+  # halt() has sent its TERMs when it returns: a stand-in it ended exits 143; one it left is killed here, 137.
+  kill -KILL "$p1" "$p3" 2>/dev/null; wait "$p1" 2>/dev/null; a1=$?; wait "$p2" 2>/dev/null; a2=$?; wait "$p3" 2>/dev/null; a3=$?
+  [ "$(cat "$T/$CASE/run.out")" = "$p2 c2-8" ] && [ "$a1" = 137 ] && [ "$a2" = 143 ] && [ "$a3" = 137 ] \
+    || fail "stop did not leave the cards with filed slices to finish and stop the other (exit: c1-7 $a1, c2-8 $a2, c3-9 $a3): $(cat "$T/$CASE/run.out")"
 }
 
 # An answer that leaves D2 uncovered breaks the rules: it is recorded (invalid, the answer kept) and the issue is kept
@@ -220,6 +242,9 @@ t_slicesgrown() {
   [ "$(st 'select(.step == "grown") | [.result, .grown.mode, .grown.files, .grown.after, .grown.filed] | @json')" = '["split","on",5,3,[100101]]' ] \
     && [ "$(st 'select(.step == "fix") | .reason')" = 'split for its size: 5 files, 3 after; its slices are #100101' ] \
     || fail "the card's lines do not record the split for its size: $(cat "$ST/cards.jsonl")"
+  # Bug caught: stop (halt()) while the slices were being filed ended the card, as no line said it had begun filing.
+  [[ " $(st 'select(.step == "start" or .step == "grown") | .of // .step' | tr '\n' ' ')" == *' file grown fix '* ]] \
+    || fail "the card has no start of filing before its slices are filed: $(st 'select(.step == "start" or .step == "grown") | .of // .step' | tr '\n' ' ')"
   recok "$ST/cards.jsonl" "a card split for its size"
   # The track (the Board and /units) says it, with the count before and after.
   [ "$(loop snapshot | jq -c '.landed[] | select(.issue == 7) | .track | [.grown, any(.records[]; .name == "split for its size: 5 files, 3 after")]')" = '[{"before":5,"after":3},true]' ] \
