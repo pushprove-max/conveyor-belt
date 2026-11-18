@@ -296,6 +296,7 @@ EOF
 # flag-a and #9 flag-b, each passing the check alone; together they fail it, a red run that splits the batch as failing
 # tests do. #8 and #7 land, and #9 goes to its fix with the check named.
 t_batchcheck() {
+  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; rm -f flag-b
@@ -318,6 +319,7 @@ EOF
 # A batch that does not land (main's commit-msg hook refuses #8's commit) leaves the card that took it untested on its
 # own on main as it is: its batch's green run had #8's change in it. #7 is tested again alone and lands alone.
 t_batchalone() {
+  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt ;; esac' > "$STUB/build"
   printf '%s\n' '! grep -q "(#8)" "$1" || { echo "no #8 here"; exit 1; }' > "$R/.git/hooks/commit-msg"; chmod +x "$R/.git/hooks/commit-msg"
@@ -363,6 +365,7 @@ EOF
 # commit, edits b.txt in main's checkout, so #7's change no longer applies there after #8's would have. #8's change
 # is not left staged in main's checkout with no commit and no landed line.
 t_batchapply() {
+  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt; sed -i 1s/.*/seven/ b.txt ;; *) echo eight >> a.txt ;; esac' > "$STUB/build"
@@ -429,6 +432,7 @@ EOF
 # #7 lands alone, and #8, the card that breaks it, goes to its fix with the check named (not blocked by its own check
 # once released). No commit on main ever holds eight beside flag-x.
 t_batchmovedcheck() {
+  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; sed -i 's/^eight$/eight-fixed/' a.txt

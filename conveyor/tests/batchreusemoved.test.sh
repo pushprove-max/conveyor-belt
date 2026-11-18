@@ -40,6 +40,7 @@ t_batchreusemoved() {
 # before (a batch formed again of the same cards would else reuse them, batchkeep(), and run no case): its case m1 runs
 # again after main moved.
 t_batchsharedmoved() {
+  local -x FILEMODE=1
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test' \
     'lib/mine.sh lib/mine-other.test.sh' 'lib/other.sh lib/mine-other.test.sh' 'lib/mine-other.test.sh lib/mine-other.test.sh'
   echo 'lib/mine-other.test.sh m1' >> "$STUB/cases"
