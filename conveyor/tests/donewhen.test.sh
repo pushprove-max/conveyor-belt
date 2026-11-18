@@ -12,10 +12,17 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The Done-when check: a card that says it is done without showing each line of the issue's `## Done when` holds
 # leaves the review to find the missing item. Its cases (dw*) each run one issue's card, side by side.
 # A Done-when case's main and stubs: its one issue (a JSON object), the review prompt kept in $STUB/asked, and each
-# session's reply read from $STUB/reply.<its number>.
+# session's reply read from $STUB/reply.<its number>. No case here checks a push or a card's test step, so two rules of
+# the control record that setup turns on are off, as they are by default: "Push when a card lands" (a card still lands
+# on main, its landed line keeping its sha) and "Whole suite in a card" (a card's test step then runs no test, as its
+# change links none). The push and the stub suite's run were about a fifth of the processes a landing case starts. A
+# case whose card needs the stub suite run passes `tests` to keep the second rule on: dwland (its change adds a test
+# file, which the stub test command cannot be given alone) and dwrebase (the run moves main, $STUB/move).
 DW=$'## Done when\n- the first thing\n- the second thing'
-dwsetup() { # <issue json>
+dwsetup() { # <issue json> [tests]
   setup "[$1]"
+  jq -c --arg t "${2:-}" '.rules.push = false | .rules.wholeSuite = ($t == "tests")' "$ST/control.json" > "$STUB/c.new" \
+    && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
@@ -28,7 +35,7 @@ EOF
 # Bugs: a reply with every item met and real evidence fails; its D<n> lines not kept on the build line; the reviewer
 # is not given the D<n> lines, or its `DONE-WHEN: D<n> holds` line is read as a finding; the snapshot (the Board's card detail) lacks a landed card's check.
 t_dwland() {
-  dwsetup "$(issue 7 2026-01-01 | jq -c --arg b "body of 7"$'\n\n'"$DW" '.body = $b')"
+  dwsetup "$(issue 7 2026-01-01 | jq -c --arg b "body of 7"$'\n\n'"$DW" '.body = $b')" tests
   # #7: every item met, with evidence that holds (a test file the change adds, a root file and its line): one
   # session, review, landed.
   echo 'mkdir -p lib && echo x > lib/t.test.sh && echo two >> a.txt' > "$STUB/build"
@@ -93,7 +100,7 @@ t_dwblock() {
 t_dwrebase() {
   # #11: the landing conflicts and the rebuild's reply has no D<n> line: the rebase line carries the failed check, one
   # fix session is told the items, and the review after it gets that session's D<n> lines, not the build's.
-  dwsetup "$(issue 11 2026-01-05 | jq -c --arg b "$DW" '.body = $b')"
+  dwsetup "$(issue 11 2026-01-05 | jq -c --arg b "$DW" '.body = $b')" tests
   echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
   echo 'if grep -q "^# Landing conflict" "$STUB/brief"; then printf "ONE\nfive\n" > a.txt; else echo five >> a.txt; fi' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   printf '## Done when\nD1 met: a.txt holds five\nD2 met: a.txt:1 is the build\n' > "$STUB/reply.1"; echo 'Rebuilt.' > "$STUB/reply.2"
