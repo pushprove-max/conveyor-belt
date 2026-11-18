@@ -127,7 +127,7 @@ t_startoutrel() {
   startsetup
   landed 4 > "$ST/cards.jsonl"; add "$(out "$(issue 5 2000-01-01T00:00:00Z P2)" NONE)"
   loop snapshot >/dev/null; [ "$(jq -c .held "$C")" = '[5]' ] || fail "an issue from outside the project was not held: $(cat "$C")"
-  ctl release 5 >/dev/null; s=$(loop snapshot) || fail "snapshot exited non-zero"
+  ctl release 5 >/dev/null; s=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.control.held, (.queue.order | map(.issue))]' <<<"$s")" = '[[],[5]]' ] || fail "released, it is not in the queue: $(jq -c '[.control, .queue]' <<<"$s")"
   loop run >/dev/null 2>&1; [ "$(picks)" = "5 " ] || fail "released, it was not picked: $(picks)"
 }

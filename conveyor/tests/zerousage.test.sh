@@ -41,7 +41,7 @@ print(json.dumps([l["reading"], l["atEnd"]]))' "$SRC" "$w.live")
   # The result line arrives: its usage is the reading, priced, while the session still runs.
   : > "$STUB/go"
   wait_until "jq -e '.usage.input == 1000000' '$w.live' > /dev/null" "cat '$w.live'" || fail "the result line's usage is not the live usage"
-  b=$(loop snapshot | jq -c '.belt[] | select(.card == "c7-7") | [.reading, .atEnd, (.usd | type == "number" and . > 0)]')
+  b=$(loop snapshot --fresh | jq -c '.belt[] | select(.card == "c7-7") | [.reading, .atEnd, (.usd | type == "number" and . > 0)]')
   [ "$b" = '[true,false,true]' ] || fail "the card does not show its cost once the result line arrived: $b $(cat "$w.live")"
   : > "$STUB/end"; wait $run || fail "the watch exited non-zero: $(cat "$T/$CASE/run.out")"
 }
