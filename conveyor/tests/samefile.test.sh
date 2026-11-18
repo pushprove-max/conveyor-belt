@@ -240,7 +240,9 @@ esac; fi
 EOF
   # #7's review ends once #8 holds a.txt; #8's first tests fail once #7 waits on it; #7's first tests end once #8 has
   # landed ($STUB/during then). Each wait gives up once the card it waits on is gone (a card that holds a.txt lands or is
-  # blocked, its worktree removed), so a change in who waits fails the case below rather than hanging it. A failed run
+  # blocked, its worktree removed); #7's tests end too once #8 writes a wait at its claim after they began (its live
+  # record's `last`; the bug: #8 waits on #7, which waits in its tests on #8), so a change in who waits fails the case
+  # below rather than hanging it. A failed run
   # writes the runner's log naming its file: one that names only the test command is no result (voidrun()).
   cat > "$STUB/review-cmd" <<'EOF'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
@@ -253,7 +255,8 @@ EOF
 case $PWD in *-8) echo x >> "$STUB/failed.8"; [ "$(wc -l < "$STUB/failed.8")" -gt 2 ] || { # its first run and its run again (tests()) fail
   while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
   echo "FAIL a.test"; printf "%s\n" "== a.test" "-- FAIL a.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;;
-  *-7) [ -e "$STUB/during" ] || while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
+  *-7) [ -e "$STUB/during" ] || { s=$(date +%s); while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }
+    ls -d ../*-8 >/dev/null 2>&1 || break; jq -e --argjson s "$s" '.waits.on and (.last | fromdate) > $s + 1' ../*-8.live >/dev/null 2>&1 && break; sleep 0.1; done; } ;;
 esac
 EOF
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
@@ -289,7 +292,8 @@ else case $PWD in
 esac; fi
 EOF2
   # #7's first review ends once #8 holds a.txt, with a NO-GO: its fix adds a.txt. #8's first tests fail once #7 waits
-  # on it; #7's first tests end once #8 has landed, or is gone. A failed run writes the runner's log, as above.
+  # on it; #7's first tests end once #8 has landed, is gone or waits at its claim, as above. A failed run writes the
+  # runner's log, as above.
   cat > "$STUB/review-cmd" <<'EOF2'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
 case $PWD in
@@ -304,7 +308,8 @@ EOF2
 case $PWD in *-8) echo x >> "$STUB/failed.8"; [ "$(wc -l < "$STUB/failed.8")" -gt 2 ] || { # its first run and its run again (tests()) fail
   while [ -d "$STUB" ]; do grep -q waiting ../*-7.live 2>/dev/null && { cp ../*-7.live "$STUB/waitlive"; break; }; sleep 0.1; done
   echo "FAIL a.test"; printf "%s\n" "== a.test" "-- FAIL a.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;;
-  *-7) [ -e "$STUB/during" ] || while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done ;;
+  *-7) [ -e "$STUB/during" ] || { s=$(date +%s); while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }
+    ls -d ../*-8 >/dev/null 2>&1 || break; jq -e --argjson s "$s" '.waits.on and (.last | fromdate) > $s + 1' ../*-8.live >/dev/null 2>&1 && break; sleep 0.1; done; } ;;
 esac
 EOF2
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"

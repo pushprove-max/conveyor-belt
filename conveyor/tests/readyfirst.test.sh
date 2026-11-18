@@ -66,15 +66,18 @@ t_readyclaim() {
 # a file each, x.txt and y.txt; a.txt selects s.test, x.txt x.test, y.txt y.test. #7 holds a.txt first, and a product
 # check holds it before its tests until #8, its tests passed, waits at its claim. Here each run's log times each file
 # it ran (`TESTRUN sec`), as a project's runner does, so a card's test line names its test files (sharedtests()), and
-# #7's first tests end only once #8 has landed ($STUB/during then) or is gone. No card is in the order list.
+# #7's first tests end only once #8 has landed ($STUB/during then), is gone, or writes a wait at its claim after they
+# began (its live record's `last`; the bug: #8 waits on #7, which waits in its tests on #8), so a change in who waits
+# fails the cases rather than hanging them. No card is in the order list.
 rfsetup() {
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'a.txt s.test' 'x.txt x.test' 'y.txt y.test'
   jq -c '.order = []' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   cat >> "$STUB/test-cmd" <<'EOF'
 sed -n 's/^== //p' "$L" | sort -u | while read -r f; do printf 'TESTRUN sec\t%s\t1\t1\n' "$f"; done >> "$L"
-case $PWD in *-7) [ -e "$STUB/ran7" ] || { : > "$STUB/ran7"; while [ -d "$STUB" ]; do
+case $PWD in *-7) [ -e "$STUB/ran7" ] || { : > "$STUB/ran7"; s=$(date +%s); while [ -d "$STUB" ]; do
   jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }
-  ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; } ;; esac
+  ls -d ../*-8 >/dev/null 2>&1 || break
+  jq -e --argjson s "$s" '.waits.on and (.last | fromdate) > $s + 1' ../*-8.live >/dev/null 2>&1 && break; sleep 0.1; done; } ;; esac
 EOF
 }
 
