@@ -1402,7 +1402,16 @@
       cuts.forEach(({ p, c }) => clipMeasure(p, c));
       cuts.forEach(({ p, c }) => clipApply(p, c));
       const items = cuts.map(({ p, w }) => {
-        const natural = p.el.getBoundingClientRect().height || 0;
+        // The height the panel is drawn at: its own box, or lower where its head, body or foot is drawn past that box
+        // (a body that does not scroll draws all of its content, scrollHeight). Its box alone gave a panel too few
+        // grid rows when its body reached past it, and the body was drawn over the panels under it.
+        const box = p.el.getBoundingClientRect();
+        const reach = Array.from(p.el.children).reduce((m, c) => {
+          if (c.hidden) return m;
+          const r = c.getBoundingClientRect(), all = c === p.body && !c.classList.contains('scrolls') ? c.scrollHeight || 0 : 0;
+          return Math.max(m, Math.max(r.bottom, r.top + all) - box.top);
+        }, 0);
+        const natural = Math.max(box.height || 0, reach);
         p.natural = natural;
         return { id: p.mod.id, w, h:Math.max(1, Math.ceil((natural + gap) / ROW_PX)) };
       });
