@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Release panel on Overview (#27, Small by default since #97): one card for each project that releases with Conveyor, its status chip,
-// three steps, the version and one button whose label follows the state (each on a second click), and the changes
+// three steps, the version and two buttons, a run button whose label follows the state and Release, disabled with
+// what it waits for (each on a second click), and the changes
 // since the tag, closed until opened. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { boot, deliver, next, full, panel, act, settle, cases, css } from './dashboard-view.helpers.mjs';
@@ -26,6 +27,8 @@ const rel = (w) => panel(w, 'release');
 const card = (w) => rel(w).querySelector('[data-project="plugin"]');
 const chip = (w) => card(w).querySelector('[data-figure="status"]').textContent;
 const stepOf = (w, name) => card(w).querySelector(`[data-step="${name}"]`);
+// Shown: neither the element nor a parent of it is hidden or drawn with display: none.
+const shown = (w, el) => { for (let e = el; e; e = e.parentElement) if (e.hidden || w.getComputedStyle(e).display === 'none') return false; return true; };
 const sent = async (w, fn) => { fn(); await settle(); await settle(); return w.posts.splice(0).map((p) => p.body); };
 
 // Bugs this guards: the panel shows a project that does not release with Conveyor; the
@@ -41,11 +44,20 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.equal(stepOf(w, 'full-suite').dataset.state, 'todo');
   assert.equal(chip(w), 'Suite not run');
   assert.equal(card(w).querySelector('[data-field="version"]').value, '1.0.0');
-  assert.equal(act(card(w), 'release').textContent, 'Run suite');
+  assert.equal(act(card(w), 'release-prep').textContent, 'Run suite');
   assert.equal(act(card(w), 'release-stop'), null, 'Stop shows only while a run is under way');
-  assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [], 'one press sends nothing');
+  // Bug (#413): with no suite run the panel showed Run suite alone, and Release was hidden, so the owner could not see
+  // how to release or what it waits for.
+  assert.deepEqual(Array.from(card(w).querySelectorAll('.release-go button'), (b) => b.dataset.act), ['release-prep', 'release']);
+  assert.ok(shown(w, act(card(w), 'release-prep')) && shown(w, act(card(w), 'release')), 'both buttons show');
+  const release = act(card(w), 'release');
+  assert.equal(release.disabled, true);
+  assert.equal(release.textContent, 'Release 1.0.0: needs the whole suite to pass on main\'s head (bbbbbbbbbbbb)');
+  assert.deepEqual(await sent(w, () => { release.click(); release.click(); }), [], 'a disabled Release sends nothing');
+  assert.equal(card(w).querySelector('[data-figure="version-notes"]'), null, 'no line under the box for a version with notes');
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [], 'one press sends nothing');
   // Bug: Run suite also made the tag and the GitHub release once the suite passed: it sends prep, release-prep alone.
-  assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
   // Bug: a version typed in place of 1.0.0 kept 1.0.0's notes step and button, then sent the typed one, whose missing
   // notes made release-prep draft them in place of the suite the button named.
   const field = card(w).querySelector('[data-field="version"]');
@@ -59,15 +71,27 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.equal(stepOf(w, 'release-notes').dataset.state, 'todo');
   assert.match(stepOf(w, 'release-notes').textContent, /docs\/releases\/1\.1\.0\.md on main: missing/);
   assert.equal(chip(w), 'Notes missing');
-  assert.equal(act(card(w), 'release').textContent, 'Draft notes');
+  assert.equal(act(card(w), 'release-prep').textContent, 'Draft notes');
   assert.equal(w.document.activeElement, card(w).querySelector('[data-field="version"]'), 'the field keeps the focus as the card is drawn again');
-  act(card(w), 'release').click();
-  assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [{ action: 'release-run', args: ['prep', '1.1.0'], repo: 'plugin' }]);
+  act(card(w), 'release-prep').click();
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.1.0'], repo: 'plugin' }]);
   // With no project that releases with Conveyor, one line says so.
   const none = boot(), d = data(null);
   d.panels.release.data.records.splice(0, 1);
   deliver(none, d);
   assert.equal(rel(none).querySelector('.state-title').textContent, 'No project releases with Conveyor.');
+});
+
+// Bug this guards (#413): a version typed with no notes on main gave no word under the box or on Release of the notes
+// it lacks.
+test('#413: a version typed with no notes: Release names the missing notes file, and a line under the box says so', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', failed: 0, cases: [] }));
+  const field = card(w).querySelector('[data-field="version"]');
+  field.value = '1.2.0'; field.dispatchEvent(new w.Event('input'));
+  assert.equal(act(card(w), 'release').disabled, true);
+  assert.equal(act(card(w), 'release').textContent, 'Release 1.2.0: needs release notes docs/releases/1.2.0.md');
+  assert.equal(card(w).querySelector('[data-figure="version-notes"]').textContent, '1.2.0 has no release notes: docs/releases/1.2.0.md is not on main.');
 });
 
 // Bug this guards (#97): Release offered Wide and Full only, and started Wide; the owner wants it Small by default, and
@@ -80,8 +104,8 @@ test('D2: Release offers Small, Wide and Full, starts Small, and at Small shows 
   assert.equal(rel(w).dataset.size, 'small', 'a new layout starts Small');
   assert.equal(size.value, 'small');
   assert.deepEqual(Array.from(card(w).querySelectorAll('.release-steps > [data-step]'), (s) => s.dataset.step), ['release-notes', 'full-suite', 'release']);
-  assert.equal(act(card(w), 'release').textContent, 'Run suite');
-  assert.deepEqual(await sent(w, () => { act(card(w), 'release').click(); act(card(w), 'release').click(); }),
+  assert.equal(act(card(w), 'release-prep').textContent, 'Run suite');
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click(); }),
     [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }], 'the button works at Small');
   // jsdom lays nothing out: the rule that puts each step's chip above its line, and the field above its button, is read.
   assert.match(css, /\.panel\[data-panel="release"\]\[data-size="small"\] \.release-steps \.row-main,\s*\.panel\[data-panel="release"\]\[data-size="small"\] \.release-go \{ flex-direction: column;/);
@@ -104,7 +128,12 @@ test('D2: a run under way shows a progress bar of files done of all, the failed 
   const going = stepOf(w, 'full-suite').querySelector('.release-line');
   assert.match(going.textContent, /^Running on bbbbbbbbbbbb · .+ so far$/);
   assert.ok(going.querySelector('time.since'), 'the time is a live time element');
-  assert.equal(act(card(w), 'release').hidden, true, 'no second run beside the one under way');
+  assert.equal(act(card(w), 'release-prep').disabled, true, 'no second run beside the one under way');
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click(); }), []);
+  // Bug (#413): Release was hidden while the suite ran; it shows, disabled, with the run's progress in its text.
+  assert.equal(act(card(w), 'release').textContent, 'Release 1.0.0: the suite is running (12 of 140 files)');
+  assert.equal(act(card(w), 'release').disabled, true);
+  assert.ok(shown(w, act(card(w), 'release')) && shown(w, act(card(w), 'release-prep')), 'both buttons show while the suite runs');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
 });
@@ -126,6 +155,7 @@ test('#274: release-prep\'s red run on main\'s head offers Release anyway, on a 
   const red = { ...RUN, ended: '2026-11-14T08:15:00Z', state: 'failed', done: 140, of: 140, failed: 1, cases: ['capwaittests'], files: { done: 140, of: 140, failed: ['conveyor/conveyor.test.sh'] } };
   deliver(w, data(red));
   assert.equal(chip(w), 'Suite failed');
+  assert.deepEqual([act(card(w), 'release').textContent, act(card(w), 'release').disabled], ['Release 1.0.0: the suite failed: 1 failure', true]);
   assert.ok(stepOf(w, 'full-suite').contains(act(card(w), 'release-anyway')), 'Release anyway is beside the red result');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-anyway').click()), [], 'one press sends nothing');
   assert.equal(act(card(w), 'release-anyway').textContent,
@@ -146,15 +176,19 @@ test('D3: passed on main\'s head, Release 1.0.0; a card lands, Main moved and Ru
   // #31: the result, commit and time showed as "[object HTMLSpanElement]".
   assert.match(stepOf(w, 'full-suite').querySelector('.release-line').textContent, /^Passed on bbbbbbbbbbbb · .+ ago$/);
   assert.equal(act(card(w), 'release').textContent, 'Release 1.0.0');
+  // #413: once the suite passed on main's head with the notes written, Release is enabled and the run button says again.
+  assert.equal(act(card(w), 'release').disabled, false);
+  assert.equal(act(card(w), 'release-prep').textContent, 'Run suite again');
   // Release alone sends release-run <version>, the one that makes the tag and the GitHub release.
   act(card(w), 'release').click();
   assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [{ action: 'release-run', args: ['1.0.0'], repo: 'plugin' }]);
   next(w, data(passed, { head: NEW, count: 27 }));
   assert.equal(chip(w), 'Main moved since the suite');
   assert.match(stepOf(w, 'full-suite').querySelector('.release-line').textContent, /^Passed on bbbbbbbbbbbb · .+ ago · main has moved since$/);
-  assert.equal(act(card(w), 'release').textContent, 'Run again on the new main');
-  assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), []);
-  assert.deepEqual(await sent(w, () => act(card(w), 'release').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
+  assert.equal(act(card(w), 'release-prep').textContent, 'Run again on the new main');
+  assert.equal(act(card(w), 'release').disabled, true, 'no release of a main the suite never tested');
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), []);
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
   next(w, data({ ...passed, step: 'release', state: 'released' }, { tag: 'v1.0.0', count: 2, head: NEW, next: '1.1.0', notes: false }));
   assert.equal(chip(w), 'Released');
   assert.equal(stepOf(w, 'release').dataset.state, 'done');

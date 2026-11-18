@@ -335,8 +335,8 @@ suites() {
 # 100, {sha, subject}), the version to release next, whether main holds its notes (docs/releases/<next>.md), written
 # (every X.Y.Z of a docs/releases/<X.Y.Z>.md on main, for a version the owner types instead), main's head, and
 # releases: whether the project releases with Conveyor (main holds docs/releases/, where release-prep's notes go).
-# The next version is the first of: the newest docs/releases/<X.Y.Z>.md higher than the tag, plugin.json's version
-# (.claude-plugin/plugin.json) when higher than the tag, else the tag's next minor.
+# The next version is the newest docs/releases/<X.Y.Z>.md higher than the tag, else the tag's next minor (the next
+# version after the newest release). plugin.json's version is not read: it can name a version with no notes.
 relhigher() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; } # <X.Y.Z> <X.Y.Z>
 releasemain() {
   local h tag base next v w rel=false re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -347,7 +347,6 @@ releasemain() {
   w=$(git ls-tree --name-only "$h" docs/releases/ 2>/dev/null | sed -n 's|^docs/releases/\(.*\)\.md$|\1|p' | grep -E "$re" | sort -V)
   v=$(tail -n 1 <<<"$w")
   if [ -n "$v" ] && relhigher "$v" "$base"; then next=$v
-  elif v=$(git show "$h:.claude-plugin/plugin.json" 2>/dev/null | jq -r '.version // empty' 2>/dev/null) && [[ $v =~ $re ]] && relhigher "$v" "$base"; then next=$v
   else next=$(awk -F. '{ print $1 "." $2 + 1 ".0" }' <<<"$base"); fi
   git log -n 100 --format='%H%x09%s' "${tag:+$tag..}$h" 2>/dev/null | jq -Rcs --arg h "$h" --arg t "$tag" --arg n "$next" --argjson rel "$rel" --arg w "$w" \
     --argjson c "$(git rev-list --count "${tag:+$tag..}$h" 2>/dev/null || echo null)" --argjson nt "$(git cat-file -e "$h:docs/releases/$next.md" 2>/dev/null && echo true || echo false)" \

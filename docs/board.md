@@ -286,21 +286,36 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
 1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
-   that failed. A test case that ran out of time shows as "<case>: timed out". A full test run in progress shows here too. When the button is **Release**, the step also says what
-   the button does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
+   that failed. A test case that ran out of time shows as "<case>: timed out". A full test run in progress shows here too. When **Release** is enabled, the step also says what
+   it does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
 3. **Release**: the tag and the GitHub release.
 
 When a run stops, each reason that it gave shows under its step: a notes reason under step 1, a suite reason under
 step 2, other reasons under step 3.
 
 The version field has the version to release. This is the newest `docs/releases/<version>.md` on `main` that is higher
-than the newest tag. If there is none, it is the version in `.claude-plugin/plugin.json` when that is higher. Else it
-is the next minor version. When you type another version, the card shows the steps and the button for that version.
+than the newest tag. If there is none, it is the next minor version after the newest tag. When you type another
+version, the card shows the steps and the buttons for that version. When `main` has no notes for the version, a line
+under the field says so.
 
-The card has one button. Its label follows the state: **Draft notes**, **Run suite**, **Release** with the version (for
-example **Release 1.0.0**) or **Run again on the new main**. Click it, then click again.
+The card has two buttons, in this order. The first writes the notes draft or runs the suite. Its label follows the state: **Draft notes**,
+**Run suite**, **Run suite again** or **Run again on the new main**. The second is **Release** with the version (for
+example **Release 1.0.0**). Click a button, then click again.
 
-- **Draft notes**, **Run suite** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
+To release from the panel:
+
+1. Make sure that the field has the version to release.
+2. If **Release** says "needs release notes docs/releases/<version>.md", click **Draft notes**. Read the draft, then
+   commit it to `main`.
+3. If **Release** says "needs the whole suite to pass on main's head (<commit>)", click **Run suite**.
+4. Wait for the suite. While it runs, **Release** says "the suite is running (N of M files)". If it fails, **Release**
+   says "the suite failed: <count> failures". Fix the failures, then run the suite again.
+5. When the notes are on `main` and the suite passed on the head of `main`, **Release** is enabled. Click it, then
+   click again.
+
+**Release** is disabled until it can run. Its text says what it waits for.
+
+- **Draft notes**, **Run suite**, **Run suite again** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
   of them and stops. Else it runs the suite on the head of `main`: the whole suite, or only the files that failed or
   changed since an earlier suite run ([Releases](releases.md)). An earlier suite run is a release's, a Run full test
@@ -321,7 +336,7 @@ example **Release 1.0.0**) or **Run again on the new main**. Click it, then clic
 itself continues.
 
 When a card lands while the suite runs, the status stays Suite running, and the suite step says that `main` moved. The
-button stays hidden until the suite ends. Then the status is Main moved since the suite, and the button is **Run again
+two buttons stay disabled until the suite ends. Then the status is Main moved since the suite, and the button is **Run again
 on the new main**. The run does not start again by itself.
 
 **Show N changes** opens the changes on `main` since the tag, newest first, 10 at a time. Each change is one line: the

@@ -98,9 +98,10 @@ can use `--allow-commit` together with `--anyway`, with one `--by`.
 ## A release from the Board
 
 The Release panel on the Board's Overview tab does steps 4 to 6 ([The Board](board.md#release)). Type the version and
-click the card's button two times. Its label follows the state: **Draft notes**, **Run suite**, **Release** with the
-version, or **Run again on the new main**. Draft notes, Run suite and Run again run `conveyor.sh release-run prep
-<version>`: `release-prep` alone, which releases nothing. For **Release**, the second click is the owner's yes. Conveyor
+click a button two times. The card has two buttons. The first writes the notes draft or runs the suite: **Draft notes**, **Run suite**, **Run
+suite again** or **Run again on the new main**. The second is **Release** with the version. It is disabled, and says
+what it waits for, until `main` has the notes and the suite passed on the head of `main`. The first button runs
+`conveyor.sh release-run prep <version>`: `release-prep` alone, which releases nothing. For **Release**, the second click is the owner's yes. Conveyor
 runs `conveyor.sh release-run <version>`: `release` alone when the suite of that version passed on the head of `main`
 and `main` did not move after it, else `release-prep`, then `release` when the suite passes. The output of the two
 is in `release/run.log` in the cards folder. When a step stops, the panel shows each reason, and nothing more runs. `/units` shows the run while it is in

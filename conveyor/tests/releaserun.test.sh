@@ -55,7 +55,7 @@ until [ -e "$STUB/go2" ]; do sleep 0.1; done'
 }
 # Bugs (#27): the Release panel shows a project that does not release with Conveyor (no docs/releases/ on main), and
 # fills in the tag's next minor (0.1.0 with no tag) where main already holds the notes of the release being prepared
-# (docs/releases/1.0.0.md), or plugin.json names a higher version. The engine's own releasemain() (lib/snapshot.sh),
+# (docs/releases/1.0.0.md). The engine's own releasemain() (lib/snapshot.sh),
 # called on one main as it moves.
 t_relnext() {
   setup '[]'
@@ -64,10 +64,12 @@ t_relnext() {
   [ "$(relmain)" = '[null,"0.1.0",false,false]' ] || fail "a main with no docs/releases/ and no tag: $(relmain)"
   relput docs/releases/1.0.0.md '# 1.0.0'
   [ "$(relmain)" = '[null,"1.0.0",true,true]' ] || fail "no tag and docs/releases/1.0.0.md: not 1.0.0, or not a project that releases with Conveyor: $(relmain)"
+  # Bug (#413): the version box took plugin.json's version, one with no notes that is not the next after the newest
+  # release.
   git -C "$R" tag v1.0.0 && relput .claude-plugin/plugin.json '{"version": "1.1.5"}'
-  [ "$(relmain)" = '["v1.0.0","1.1.5",false,true]' ] || fail "plugin.json's 1.1.5 over v1.0.0 is not the next version: $(relmain)"
+  [ "$(relmain)" = '["v1.0.0","1.1.0",false,true]' ] || fail "with no notes over v1.0.0, not its next minor (plugin.json's 1.1.5 has no notes): $(relmain)"
   relput docs/releases/1.3.0.md '# 1.3.0'; relput docs/releases/1.10.0-rc.md 'not a version'
-  [ "$(relmain)" = '["v1.0.0","1.3.0",true,true]' ] || fail "the notes of 1.3.0 do not come before plugin.json's version: $(relmain)"
+  [ "$(relmain)" = '["v1.0.0","1.3.0",true,true]' ] || fail "the notes of 1.3.0 over v1.0.0 are not the next version: $(relmain)"
   # Bug: the panel marks the notes written for a version the owner types in place of next: written names each version
   # with notes on main, so the panel checks the one typed.
   [ "$(relmain .written)" = '["1.0.0","1.3.0"]' ] || fail "written does not name the versions with notes on main: $(relmain .written)"

@@ -5,8 +5,10 @@
 // the changes since it, one status chip), three numbered steps (the notes on main, the whole suite on main's head,
 // which says whether its run reran some files and reused the files that passed in an earlier run, or ran the whole
 // suite, the release), the version (the snapshot's next filled in; a version typed is drawn at once, its notes as
-// main's written says) with one button whose label follows the state, and the changes since the tag, closed until opened. Each button
-// acts on a second click. Draft notes, Run suite and Run again on the new main send `conveyor.sh release-run prep
+// main's written says; a version with no notes says so under it) with two buttons, always both: a run button whose
+// label follows the state, and Release <version>, disabled with what it waits for in its text until the notes are on
+// main and the suite passed on main's head; and the changes since the tag, closed until opened. Each button acts on a
+// second click. Draft notes, Run suite, Run suite again and Run again on the new main send `conveyor.sh release-run prep
 // <version>`: release-prep alone, which writes a notes draft and stops when main has no notes, else runs the whole
 // suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite of that
 // version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
@@ -250,21 +252,31 @@
     }
     const steps = h('ol', 'rows numbered compact release-steps');
     steps.append(s1, s2, s3);
-    // The version and the one button: its label follows the state. Release sends release-run <version> (the green
-    // suite run, or the suite first, then the tag and the GitHub release); the others send release-run prep <version>, which
-    // releases nothing.
+    // The version and two buttons, always both: the run button (its label follows the state) sends release-run prep
+    // <version>, which releases nothing; Release <version> sends release-run <version> (the green suite run, or the
+    // suite first, then the tag and the GitHub release). Release is disabled until the notes are on main and the suite
+    // passed on main's head, and its text says what it waits for.
     const go = h('div', 'release-go'), input = h('input', 'release-version');
     input.type = 'text'; input.setAttribute('aria-label', 'Version to release'); input.dataset.field = 'version';
     input.value = typed.has(rec.repo) ? typed.get(rec.repo) : String(m.next || '');
-    const [label, ask, title, what, prep] = s.moved ? ['Run again on the new main', 'Click again to run the suite on the new main',
-      `Run the whole suite on main's head. It releases nothing: Release ${v} shows when it has no failures.`, 'The suite runs again on the new main.', true]
-      : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md for you to read and commit. It runs nothing else.`, 'The notes draft is being written.', true]
-      : !s.passed ? ['Run suite', 'Click again to run the suite', `Run the whole suite on main's head. It releases nothing: Release ${v} shows when it has no failures.`, 'The suite is running.', true]
-      : [`Release ${v}`, `Click again to release ${v}. ${suiteSaid}.`, `${suiteSaid}, then make the tag v${v} and the GitHub release.`, `Release ${v} started.`, false];
+    const [label, ask, title, what] = s.moved ? ['Run again on the new main', 'Click again to run the suite on the new main',
+      'Run the whole suite on main\'s head. It releases nothing.', 'The suite runs again on the new main.']
+      : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md for you to read and commit. It runs nothing else.`, 'The notes draft is being written.']
+      : [s.passed ? 'Run suite again' : 'Run suite', 'Click again to run the suite', 'Run the whole suite on main\'s head. It releases nothing.', 'The suite is running.'];
     const btn = h('button', 'btn', label);
-    btn.type = 'button'; btn.dataset.act = 'release'; btn.title = title;
-    btn.hidden = s.going;
+    btn.type = 'button'; btn.dataset.act = 'release-prep'; btn.title = title;
     btn.disabled = s.going || !VERSION.test(v);
+    // What Release waits for, the first that applies; none: it can run.
+    const prog = run && run.files && typeof run.files === 'object' ? run.files : {};
+    const bad = s.failed ? (num(s.cur.failed) ? s.cur.failed : list(s.cur.cases).length) : 0;
+    const waits = !VERSION.test(v) ? 'needs a version such as 1.2.0'
+      : !notes ? `needs release notes docs/releases/${v}.md`
+        : s.going ? `the suite is running${num(prog.done) && num(prog.of) && prog.of > 0 ? ` (${prog.done} of ${prog.of} files)` : ''}`
+          : s.failed ? `the suite failed: ${bad} ${bad === 1 ? 'failure' : 'failures'}`
+            : !s.passed ? `needs the whole suite to pass on main's head (${short(m.head)})` : '';
+    const rel = h('button', 'btn', waits ? `Release ${v}: ${waits}` : `Release ${v}`);
+    rel.type = 'button'; rel.dataset.act = 'release'; rel.disabled = !!waits;
+    rel.title = waits ? `Release ${v} waits: ${waits}.` : `${suiteSaid}, then make the tag v${v} and the GitHub release.`;
     // A version typed is drawn at once: its notes step, chip and button are of that version, never of the one before.
     input.addEventListener('input', () => {
       const at = input.selectionStart;
@@ -275,11 +287,20 @@
       if (at !== null) field.setSelectionRange(at, at);
     });
     ctx.twice(btn, 'spend', ask, () => {
-      if (VERSION.test(v)) send(ctx, rec.repo, prep ? ['prep', v] : [v], what);
+      if (VERSION.test(v)) send(ctx, rec.repo, ['prep', v], what);
     });
-    go.append(input, btn);
+    ctx.twice(rel, 'spend', `Click again to release ${v}. ${suiteSaid}.`, () => {
+      if (!waits) send(ctx, rec.repo, [v], `Release ${v} started.`);
+    });
+    go.append(input, btn, rel);
     if (said.has(rec.repo)) { const t = h('span', 'undo-line', said.get(rec.repo)); t.setAttribute('role', 'status'); go.append(t); }
     card.append(head, steps, go);
+    // A version with no notes on main says so under the box.
+    if (VERSION.test(v) && !notes) {
+      const p = h('p', 'row-meta', `${v} has no release notes: docs/releases/${v}.md is not on main.`);
+      p.dataset.figure = 'version-notes';
+      card.append(p);
+    }
     const ch = changes(h, ctx, rec, m);
     if (ch) card.append(ch);
     return card;
