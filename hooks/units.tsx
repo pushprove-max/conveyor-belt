@@ -3,6 +3,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { refresh as refreshAutoBand } from './auto'
 import { boardOf, boardOfFeed, foremanOf, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, tableText, toasts } from './sources'
+import { setClock } from './elements'
 import type { Line } from './elements'
 import type { Research, Seen, State } from './sources'
 
@@ -13,6 +14,8 @@ import type { Research, Seen, State } from './sources'
 const state = atom({ plugin: 'conveyor-belt', key: 'state' } as const, null)
 // The belt mark's turn: only the motion clock writes it, never the poll, so a poll keeps the turn.
 const frame = atom({ plugin: 'conveyor-belt', key: 'frame' } as const, 0)
+// The pane's Machine details: opened and closed by its Button (a click, or `m` while the pane has the focus).
+const details = atom({ plugin: 'conveyor-belt', key: 'details' } as const, false)
 // The time the views count from while the board stands still: the second's clock writes it alone, so a running
 // step's seconds count on with no new state or toast check. A newer state's own `now` wins.
 const clockNow = atom({ plugin: 'conveyor-belt', key: 'now' } as const, 0)
@@ -441,6 +444,7 @@ export const register: Register = (on, options) => {
   option = { pane: String(options.pane ?? 'auto') }
   // A changed option reloads the plugin and runs register again, so `motion` is read once here.
   motion = options.motion === 'on'
+  setClock(options.time)
 
   // The plugin's one session.start hook (Claude Code refuses a second with no matcher, and session.start takes none):
   // the /units begin, which never rejects, then the /conveyor-belt:auto band's (auto.tsx).
@@ -480,19 +484,24 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     void ensureBegun($)
     const s = (await read($, state)) as State | null
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     if (!s) return <Text dimColor>{WAITING}</Text>
     // The pane's own width, with no upper limit: the terminal gives it as `bodyColumns`; a surface that leaves that
     // out gives the pane's size as `viewport`. 56 only when neither is given.
     const w = Math.max(40, Number(e.props.bodyColumns) || Number(e.viewport?.columns) || 56)
     const f = await read($, frame)
+    const open = (await read($, details)) === true
+    const flip = () => { void update($, details, v => !v).catch(() => undefined) }
     return (
       <Box flexDirection="column">
-        {paneModel(await drawnAt($, s), w, f).map((l, i) => <Box key={`p${i}`} flexDirection="row">{l.length ? draw(Text, l, `p${i}`) : <Text> </Text>}</Box>)}
+        {paneModel(await drawnAt($, s), w, f, open).map((l, i) => <Box key={`p${i}`} flexDirection="row">{l.length ? draw(Text, l, `p${i}`, Button, flip) : <Text> </Text>}</Box>)}
       </Box>
     )
   }).catch(($, e, next) => next(e))
 }
 
-// Each styled run is its own Text, so one line carries several colours.
-const draw = (Text: any, line: Line, key: string) => line.map((x, i) => <Text key={`${key}-${i}`} color={x.c} bold={x.b} dimColor={x.d}>{x.t}</Text>)
+// Each styled run is its own Text, so one line carries several colours. A run with an address (k) is a Button: the
+// terminal draws its label as `[ label ]`, the run's own text.
+const draw = (Text: any, line: Line, key: string, Button?: any, press?: () => void) => line.map((x, i) => (x.k && Button
+  ? <Button key={x.k} label={x.t.replace(/^\[ | \]$/g, '')} hotkey="m" onPress={press} />
+  : <Text key={`${key}-${i}`} color={x.c} bold={x.b} dimColor={x.d} inverse={x.i}>{x.t}</Text>))

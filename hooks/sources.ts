@@ -96,7 +96,8 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // cards on the belt; landing: those of them landed, in Push (the loop's building leaves them out).
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
-export type Snap = { loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
+// own: the session's own project, whose cards carry no project name ('' or absent: none is).
+export type Snap = { own?: string; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -226,7 +227,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live) })),
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), room: one(x.room) })),
     // A record whose loop does not give the list (from an older engine, or GitHub did not list the issues) has none.
-    waits: (Array.isArray(j.queue.waiting) ? j.queue.waiting : []).filter((x: unknown) => x && typeof x === 'object')
+    // A forced issue is listed here too, marked forced, though it is in the pick order (queue.order): it waits on nothing.
+    waits: (Array.isArray(j.queue.waiting) ? j.queue.waiting : []).filter((x: any) => x && typeof x === 'object' && x.forced !== true)
       .map((x: any): Waiting => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), waitsFor: Array.isArray(x.waitsFor) ? x.waitsFor.filter((n: unknown): n is number => num(n) !== null) : [],
         states: Object.fromEntries((Array.isArray(x.waitsOn) ? x.waitsOn : []).filter((w: any) => w && num(w.issue) !== null && one(w.state)).map((w: any) => [w.issue, one(w.state)])) }))
       .filter((x: Waiting) => x.waitsFor.length > 0),
@@ -316,6 +318,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
   return {
     note: '', notes, host: name,
     snap: {
+      own: own && read.some(r => r.rec && r.repo === own) ? own : '',
       loops: read.flatMap(r => (r.rec ? [{ ...r.rec.loop, repo: r.repo }] : [])),
       // Your yes first, then the blocked cards; in each, the one waiting longest first.
       needs: recs.flatMap(r => r.needs).sort((a, b) => Number(b.yes) - Number(a.yes) || at(a.since) - at(b.since)),
@@ -700,10 +703,13 @@ const loopSegs = (snap: Snap): Seg[] => (loopText(snap) ? [{ t: ' · ' }, { t: l
 // The head, two lines: CONVEYOR, today's cost and the host; then the weekly limit with its reset, and
 // the counts on the belt and queued.
 const queuedText = (snap: Snap) => (snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} queued`)
-export const headerModel = (s: State, snap: Snap, w: number): Line[] => {
+const limitLine = (s: State): Line => {
   const r = s.limit ? resetIn(s.limit.resetsAt, s.now) : ''
-  const limit: Line = s.limit ? [{ t: 'weekly limit ', d: true }, { t: `${Math.round(s.limit.pct)}%`, c: s.limit.pct >= 90 ? C.you : C.cost }, ...(r ? [{ t: ` · resets ${r}`, d: true }] : [])]
+  return s.limit ? [{ t: 'weekly limit ', d: true }, { t: `${Math.round(s.limit.pct)}%`, c: s.limit.pct >= 90 ? C.you : C.cost }, ...(r ? [{ t: ` · resets ${r}`, d: true }] : [])]
     : [{ t: 'weekly limit not read', d: true }]
+}
+export const headerModel = (s: State, snap: Snap, w: number): Line[] => {
+  const limit = limitLine(s)
   return [
     // A board is only drawn from a snapshot the host just gave: the host named here answered.
     spread([{ t: 'CONVEYOR', c: C.head, b: true }, ...loopSegs(snap)], [todaySeg(snap), { t: '  ' }, { t: '●', c: C.ok }, { t: ` ${s.host}` }], w),
@@ -938,8 +944,165 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
 // Foreman's state is read from its folder, not from the snapshot.
 export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)]).map(plain).join('\n')
 
-// The side pane: the same sections, each item one line, the landed list cut to five.
-export const paneModel = (s: State, w: number, frame: number): Line[] => (s.snap ? board(s, s.snap, w, true, frame) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)])
+// The side pane, the Build matrix layout (#497): the head, the count band, the Foreman's state, Machine details (one
+// toggle line until it is opened), then BUILD MATRIX, WORKER ACTIVITY, PICK ORDER and LANDED TODAY, each a table that
+// scans. A line that would wrap is cut at the width.
+const padR = (t: string, n: number) => `${t}${' '.repeat(Math.max(0, n - cols(t)))}`
+const padL = (t: string, n: number) => `${' '.repeat(Math.max(0, n - cols(t)))}${t}`
+const rule = (w: number): Line => [{ t: '─'.repeat(w), d: true }]
+const section = (title: string, right: string, w: number): Line => spread([{ t: title, c: C.head, b: true }], right ? { t: right, d: true } : null, w)
+const idOf = (c: Ref) => (c.issue ? `#${c.issue}` : named(c) || 'branch')
+
+// The step marks of the matrix, as its legend reads: a step the card did not reach, skipped (Fix after a GO) or still
+// to come, is the dim `·`.
+const MARK: Record<Step['state'], Seg> = { done: { t: '✓', c: C.ok }, now: { t: '▶', c: C.work, b: true }, failed: { t: '✗', c: C.you, b: true }, skipped: { t: '·', d: true }, todo: { t: '·', d: true } }
+// A card with no track (an older engine) has only its step: the steps before it done, the ones after not reached.
+const STEP_AT: Record<string, number> = { build: 0, review: 1, fix: 2, tests: 3, landing: 4, push: 5, issue: 5 }
+const statesOf = (b: Belt): Step['state'][] => (b.track ? b.track.steps.map(st => st.state)
+  : STEP_NAMES.map((_, i) => { const at = STEP_AT[b.step]; return at === undefined || i > at ? 'todo' : i < at ? 'done' : 'now' }))
+const slotsOf = (l: Loop) => (l.cap !== null ? `${l.building ?? l.onBelt}/${l.cap} slots` : `${l.building ?? l.onBelt} building`)
+
+// One project's matrix: ID, title, a column a step (headed by its first letter), Age and Cost. Under 70 columns the
+// title goes first, then Age when the row still does not fit.
+const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
+  const rows = cards.map(b => {
+    const all = overallOf(b, s.now)
+    return { b, id: idOf(b), age: all === null ? '–' : fmtSec(all), cost: !b.reading ? '–' : b.usd === null ? 'partial' : usd(b.usd) }
+  })
+  const idW = Math.max(2, ...rows.map(r => cols(r.id))), ageW = Math.max(3, ...rows.map(r => cols(r.age))), costW = Math.max(4, ...rows.map(r => cols(r.cost)))
+  const stepsW = STEP_NAMES.length * 2 - 1
+  const noAge = idW + 2 + stepsW + 2 + costW
+  const age = noAge + 2 + ageW <= w
+  const fixed = noAge + (age ? 2 + ageW : 0)
+  const titleW = w >= 70 && w - fixed - 2 >= 6 ? w - fixed - 2 : 0
+  const head = `${padR('ID', idW)}  ${titleW ? `${padR('Title', titleW)}  ` : ''}${STEP_NAMES.map(n => n[0]).join(' ')}  ${age ? `${padL('Age', ageW)}  ` : ''}${padL('Cost', costW)}`
+  const title = (b: Belt): Line => {
+    const t = fitWidth([{ t: shortTitle(b.title) || (b.issue ? '' : 'a branch with no issue'), c: C.name }], titleW)
+    return [...t, { t: ' '.repeat(titleW - cols(plain(t)) + 2) }]
+  }
+  return [
+    fitWidth([{ t: head, d: true }], w),
+    ...rows.map((r): Line => fitWidth([
+      { t: padR(r.id, idW), c: C.name, b: true }, { t: '  ' },
+      ...(titleW ? title(r.b) : []),
+      ...statesOf(r.b).flatMap((st, i) => [...(i ? [{ t: ' ' }] : []), MARK[st]]), { t: '  ' },
+      ...(age ? [{ t: `${padL(r.age, ageW)}  `, d: true }] : []),
+      { t: padL(r.cost, costW), c: C.cost },
+    ], w)),
+    fitWidth([{ t: '▶ running · pending ✓ done ✗ failed', d: true }], w),
+  ]
+}
+// BUILD MATRIX: a matrix for each project with cards on the belt, its name and slots on the right; every other project
+// one dim line. With no card on the belt, the first project's head and one dim line.
+export const matrixModel = (s: State, snap: Snap, w: number): Line[] => {
+  const own = snap.own ?? ''
+  const groups = [...snap.loops].sort((a, b) => Number(b.repo === own) - Number(a.repo === own))
+    .map(l => ({ l, cards: snap.belt.filter(b => (b.repo || own) === l.repo) }))
+  const full = groups.filter(g => g.cards.length), idle = groups.filter(g => !g.cards.length)
+  const right = (l: Loop) => `${l.repo} · ${slotsOf(l)}`
+  return [
+    ...(full.length ? full.flatMap((g, i) => [...(i ? [[] as Line] : []), section('BUILD MATRIX', right(g.l), w), ...matrixTable(s, g.cards, w)])
+      : [section('BUILD MATRIX', idle[0] ? right(idle[0].l) : '', w), empty('nothing on the belt')]),
+    ...(full.length ? idle : idle.slice(1)).map(g => fitWidth([{ t: `  ${g.l.repo} ${slotsOf(g.l)}`, d: true }], w)),
+  ]
+}
+
+// A live command made short: a path in the card's own worktree (its folder is named by the card id) reads
+// `worktree`, any other absolute or home path its last part, so no machine path is shown.
+const PATH_END = `[^\\s'"\`;|&)]`
+export const shortCommand = (cmd: string, card: string): string => {
+  const esc = card.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const inTree = card ? cmd.replace(new RegExp(`~?/${PATH_END}*?/${esc}(?=/|[\\s'"\`;|&)]|$)`, 'g'), 'worktree') : cmd
+  return inTree.replace(new RegExp(`(^|[\\s'"=(])(~?/${PATH_END}+)`, 'g'), (_, pre: string, p: string) => `${pre}${p.replace(/\/+$/, '').split('/').pop() || p}`)
+}
+// WORKER ACTIVITY: a line a card, its mark (it turns with `motion`), its ID and its live command made short; on the
+// right the tool and when the step started. A card that streams no command shows its step.
+export const activityModel = (s: State, snap: Snap, w: number, frame: number): Line[] => [
+  section('WORKER ACTIVITY', '', w),
+  ...(snap.belt.length ? [] : [empty('nothing on the belt')]),
+  ...snap.belt.map((b): Line => {
+    const m = /^([A-Za-z][\w.-]*): ([\s\S]*)$/.exec(b.live?.action ?? '')
+    const what = m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b)
+    const at = b.track?.since ?? b.stepAt
+    const right = [m?.[1] ?? '', at === null ? '' : clockOf(at)].filter(Boolean).join(' · ')
+    return spread([{ t: `${workMark(frame)} `, c: C.work }, { t: `${idOf(b)}  `, c: C.name, b: true }, { t: what }], right ? { t: right, d: true } : null, w)
+  }),
+]
+
+// PICK ORDER: the issues that wait on another, in the order the engine will pick them, each with the issues it waits
+// for; the count the engine can pick now on the right.
+export const pickModel = (snap: Snap, w: number): Line[] => {
+  const ready = snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} ready`
+  const ids = snap.waits.map(x => (x.repo ? `${x.repo}#${x.issue}` : `#${x.issue}`))
+  const idW = Math.max(7, ...ids.map(cols))
+  return [
+    section('PICK ORDER', ready, w),
+    ...(snap.waits.length ? [fitWidth([{ t: `${padR('Waiting', idW)}  Requires`, d: true }], w)] : [empty('nothing waiting')]),
+    ...snap.waits.map((x, i): Line => fitWidth([{ t: `${padR(ids[i], idW)}  `, c: C.name, b: true }, { t: x.waitsFor.map(n => waitRef(x, n)).join('  ') }], w)),
+  ]
+}
+
+// LANDED TODAY: the five most recent, a row each: the clock time it landed, the issue, the last verdict and its round,
+// its overall time and its cost (or what it still waits for), right-aligned.
+export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
+  const shown = snap.landed.slice(0, NEXT)
+  const rows = shown.map(l => {
+    const last = l.rounds.at(-1)
+    const verdict: Seg = l.closed ? { t: 'already fixed', d: true } : last ? { t: `✓ ${last.verdict || 'no verdict'} r${last.round}`, c: last.verdict === 'GO' ? C.ok : C.you }
+      : { t: count(l.reviews, 'review'), d: true }
+    const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : l.waits ? { t: l.waits, c: C.you }
+      : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : cost(l.usd)
+    const all = overallOf(l, s.now)
+    return { at: l.at ? clockOf(l.at) : 'time?', id: ref(l), verdict, total: all === null ? '–' : fmtSec(all), state }
+  })
+  const W = (h: string, f: (r: (typeof rows)[number]) => string) => Math.max(cols(h), ...rows.map(r => cols(f(r))))
+  const aW = W('Landed', r => r.at), iW = W('Issue', r => r.id), vW = W('Verdict', r => r.verdict.t), tW = W('Total', r => r.total), cW = W('Cost', r => r.state.t)
+  return [
+    section(`LANDED TODAY · ${snap.landed.length}`, snap.landed.length ? `${shown.length} most recent of ${snap.landed.length}` : '', w),
+    ...(rows.length ? [fitWidth([{ t: `${padR('Landed', aW)}  ${padR('Issue', iW)}  ${padR('Verdict', vW)}  ${padL('Total', tW)}  ${padL('Cost', cW)}`, d: true }], w)] : [empty('nothing landed today')]),
+    ...rows.map((r): Line => fitWidth([{ t: `${padR(r.at, aW)}  `, d: true }, { t: `${padR(r.id, iW)}  `, c: C.name, b: true }, { ...r.verdict, t: `${padR(r.verdict.t, vW)}  ` },
+      { t: `${padL(r.total, tW)}  `, d: true }, { ...r.state, t: padL(r.state.t, cW) }], w)),
+  ]
+}
+
+const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean): Line[] => {
+  const sep: Seg = { t: ' · ', d: true }
+  const ready = snap.queue === null ? '?' : `${snap.queue.length}${snap.queueMore ? '+' : ''}`
+  const status: Seg[] = [...(s.foreman ? [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }] : []), ...loopSegs(snap)]
+  if (!s.foreman && status.length) status.shift()
+  const bugs: Seg | null = s.pluginBugs ? { t: `! ${count(s.pluginBugs.n, 'plugin problem')}`, c: C.you, b: true } : null
+  const spend: Seg = snap.todayUsd === null ? { t: 'partial', c: C.cost, b: true }
+    : { t: `${usd(snap.todayUsd)}${snap.todayLeftOut ? ` + ${count(snap.todayLeftOut, 'step')} not priced` : ''}`, c: C.cost, b: true }
+  const lanes = lanesModel(s)
+  return [
+    spread([{ t: ' /units ', c: C.head, b: true, i: true }, { t: ' ' }, { t: s.host, b: true }], [{ t: 'DAY SPEND ', d: true }, spend], w),
+    rule(w),
+    fitWidth([{ t: `${snap.belt.length} ON BELT`, b: true }, sep, { t: `${ready} READY`, b: true }, sep, { t: `${snap.waits.length} WAITING`, b: true }, sep,
+      { t: `${snap.needs.length} NEEDS YOU`, b: true, ...(snap.needs.length ? { c: C.you } : {}) }], w),
+    rule(w),
+    ...(status.length || bugs ? [spread(status, bugs, w)] : []),
+    // Machine details: the waiter, the watchers, the plugin problems' file, the test map and the weekly limit.
+    [{ t: '[ Machine details ]', k: 'details' }],
+    ...(open ? [
+      ...(s.foreman ? foremanDetail(s.foreman.detail, w) : []),
+      ...(s.pluginBugs ? [[{ t: `  file://${encodeURI(s.pluginBugs.path)}`, d: true }] as Line] : []),
+      ...testMapModel(s, w), fitWidth(limitLine(s), w),
+    ] : []),
+    ...engineModel(s, w),
+    ...suitesModel(s, snap).map(l => fitWidth(l, w)),
+    ...(snap.needs.length ? [[], ...needsModel(s, snap, w, true)] : []), [],
+    ...matrixModel(s, snap, w), [],
+    ...activityModel(s, snap, w, frame), [],
+    ...pickModel(snap, w),
+    ...(snap.held.length ? [fitWidth([{ t: `held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
+    ...(snap.deploy.length ? [[], ...deployModel(s, snap, w)] : []), [],
+    ...landedTable(s, snap, w),
+    ...(lanes.length ? [[], ...lanes.map(l => fitWidth(l, w))] : []),
+    ...(s.notes.length ? [[], ...s.notes.map((n): Line => [{ t: n, c: C.you }])] : []),
+  ]
+}
+// open: Machine details is opened.
+export const paneModel = (s: State, w: number, frame: number, open = false): Line[] => (s.snap ? paneBoard(s, s.snap, w, frame, open) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)])
 
 // What the toasts compare between two polls: the cards that need you and the cards that landed, by card id.
 export type Seen = { needs: Map<string, string>; landed: Map<string, string> }

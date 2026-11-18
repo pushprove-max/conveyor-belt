@@ -187,11 +187,15 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
     fi
     if now=$(p_stat "$f") && [ "${now% *}" != "$size" ]; then
       size=${now% *}; n=$(wc -l < "$f"); [ "$n" -le "$lines" ] || { lines=$n; seen=$EPOCHSECONDS; }
-      new=$(tail -n +$((have + 1)) "$f" | head -n $((n - have)) | jq -cRn --argjson st "$st" --argjson t "${now#* }" --argjson cx "$cx" '
+      new=$(tail -n +$((have + 1)) "$f" | head -n $((n - have)) | jq -cRn --argjson st "$st" --argjson t "${now#* }" --argjson cx "$cx" --arg wt "$wt" '
         def use: (.cache_creation.ephemeral_1h_input_tokens // 0) as $h | {input: (.input_tokens // 0), write: ((.cache_creation_input_tokens // 0) - $h),
           write1h: $h, read: (.cache_read_input_tokens // 0), output: (.output_tokens // 0)};
         def plus($b): with_entries(.value += ($b[.key] // 0));
-        def short: tostring | gsub("\\s+"; " ") | .[0:80];
+        # The card'"'"'s worktree path reads worktree before the cut, so a long path does not push the end of a command
+        # out of its 80 characters (a path that only starts with it, the card'"'"'s <worktree>.wide, is kept).
+        def tree: if $wt == "" or . == "" then . else split($wt) as $p | reduce $p[1:][] as $x ($p[0];
+          . + (if $x | test("^($|[/\\s;&|)\"])") then "worktree" else $wt end) + $x) end;
+        def short: tostring | gsub("\\s+"; " ") | tree | .[0:80];
         # What the step is doing now: the tool a session called last, with what it names, or that it writes or
         # thinks; the item a review started last (a command with its text).
         def act: [.content | arrays | .[] | objects

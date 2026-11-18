@@ -98,6 +98,12 @@ const draw = async ($: any, component: 'AbovePrompt' | 'Pane', props?: Record<st
   await ui.unmount()
   return texts.join('')
 }
+// Presses the pane's Machine details Button, which opens the details, or closes them when open.
+const pressDetails = async ($: any) => {
+  const ui = await $.ui.mount({ plugin: 'conveyor-belt', surface: 'terminal', component: 'Pane', requestId: 'units', props: { title: 'Conveyor', isFocused: false, bodyColumns: 72, placement: 'dock' } })
+  await ui.press({ key: 'details' })
+  await ui.unmount()
+}
 const fetches = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1].endsWith('/hooks/units-fetch.sh'))
 const CANNOT = 'units: the Conveyor snapshot cannot be read (buildbox is unreachable)'
 
@@ -199,7 +205,8 @@ test('the pane shows the board in short form', async ($, on) => {
   await start($, 'main')
   await units($)
   const pane = await draw($, 'Pane')
-  for (const part of ['NEEDS YOU (1)', '◆ #3861 Fast lane · your yes: Staff land a lane change as a card.', 'ON THE BELT (1)', 'QUEUE  1', 'LANDED TODAY  1 · $7.00', 'FAST LANE      nothing open']) expect(pane).toContain(part)
+  for (const part of ['1 ON BELT · 1 READY · 0 WAITING · 1 NEEDS YOU', 'NEEDS YOU (1)', '◆ #3861 Fast lane · your yes: Staff land a lane change as a card.', 'BUILD MATRIX', 'WORKER ACTIVITY',
+    'PICK ORDER', '1 ready', 'LANDED TODAY · 1', '1 most recent of 1', 'FAST LANE      nothing open']) expect(pane).toContain(part)
   // The Research lane has no worktree here, so the pane leaves it out.
   expect(pane).not.toContain('RESEARCH LANE')
   expect(w.opened).toEqual(['units'])
@@ -211,7 +218,7 @@ test('no setting draws a /units band above the prompt or a status line', { optio
   await start($, 'main')
   await units($)
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   // 'engine' is the test's own row beneath the plugin's: nothing of /units stands above it.
   expect(await draw($, 'AbovePrompt')).toBe('engine')
   expect(w.status).toEqual([])
@@ -229,14 +236,15 @@ test('the pane draws at the width it is given, over 72 too, from bodyColumns or 
   const at = (size: object) => draw($, 'Pane', { title: 'Conveyor', isFocused: false, placement: 'dock', ...size })
   for (const wide of [await at({ bodyColumns: 120 }), await at({ viewport: { columns: 120, rows: 40 } })]) {
     expect(wide).toContain(title)
-    expect(wide).toContain('✓ Build 1m ━━ ✓ Review 1m ━━ ▶ Fix')
-    // The head row is padded to the pane width and ends at the host: its length is the width the pane drew at.
-    expect(wide.match(/^.*?● buildbox/)?.[0]).toHaveLength(120)
+    expect(wide).toContain('✓ ✓ ▶ · · ·')
+    // The head row is padded to the pane width and ends at the day's spend: its length is the width the pane drew at.
+    expect(wide.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(120)
   }
+  // Under 70 columns the matrix has no title column.
   const narrow = await at({})
-  expect(narrow).not.toContain(title)
-  expect(narrow).toContain('✓ Build 1m━✓ Review 1m━▶ Fix')
-  expect(narrow.match(/^.*?● buildbox/)?.[0]).toHaveLength(56)
+  expect(narrow).not.toContain('Benchmark')
+  expect(narrow).toContain('✓ ✓ ▶ · · ·')
+  expect(narrow.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(56)
 })
 
 test('main fetches at the start and once a minute', async ($, on) => {
@@ -325,7 +333,7 @@ test('register, session start, a poll publishes; register again with no session 
   await start($, 'main')
   await w.clock.settle()
   expect(fetches(w).length).toBe(1)
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   expect(await units($)).toContain('ON THE BELT (1)')
   await w.clock.settle()
   expect(fetches(w).length).toBe(2)
@@ -359,11 +367,11 @@ test('a load with no session start finds its checkout itself: the waiting line u
   w.hold = undefined
   release()
   await w.clock.advance(1000)
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   w.fetch = answer(snapshot())
   await w.clock.advance(60_000)
   expect(fetches(w).length).toBe(2)
-  expect(await draw($, 'Pane')).toContain('the belt is empty')
+  expect(await draw($, 'Pane')).toContain('nothing on the belt')
   expect(await units($)).toContain('the belt is empty')
   await w.clock.settle()
   expect(fetches(w).length).toBe(3)
@@ -371,11 +379,11 @@ test('a load with no session start finds its checkout itself: the waiting line u
 
 test('a session start after a pane began the load starts nothing again: the board stays and no second fetch is made', async ($, on) => {
   const w = world(on, 'main', answer(FULL))
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   await start($, 'main')
   expect(fetches(w).length).toBe(1)
   expect(w.registered).toEqual(['units'])
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   await w.clock.advance(60_000)
   expect(fetches(w).length).toBe(2)
 })
@@ -418,7 +426,7 @@ test('a load whose first look at the checkout throws tries again at the pane a m
   await w.clock.settle()
   expect(w.registered).toEqual([])
   await w.clock.advance(60_000)
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   expect(w.registered).toEqual(['units'])
   expect(fetches(w).length).toBe(1)
 })
@@ -546,7 +554,7 @@ test('with a fetch that does not answer, /units and /units pane on answer at onc
   w.hold = undefined
   release()
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toContain('ON THE BELT (1)')
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
   expect(await units($)).toContain('ON THE BELT (1)')
 })
 
@@ -554,14 +562,26 @@ test('with motion on, the mark of a card on the belt turns once a second, and st
   const w = world(on, 'main', answer(FULL))
   await start($, 'main')
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toContain('◐ build')
+  expect(await draw($, 'Pane')).toContain('◐ #3863')
   await w.clock.advance(1000)
-  expect(await draw($, 'Pane')).toContain('◓ build')
+  expect(await draw($, 'Pane')).toContain('◓ #3863')
   w.fetch = answer(snapshot())
   await units($)
   await w.clock.settle()
   await w.clock.advance(1000)
-  expect(await draw($, 'Pane')).toContain('the belt is empty')
+  expect(await draw($, 'Pane')).toContain('nothing on the belt')
+})
+
+// Issue 497. Bug it catches: Worker activity and Landed today always wrote AM or PM, with the Time set to 24-hour.
+test('with the time option 24-hour, Worker activity and Landed today write 24-hour times, with no AM or PM', { options: { time: '24-hour' } }, async ($, on) => {
+  const w = world(on, 'main', answer(FULL))
+  await start($, 'main')
+  await w.clock.settle()
+  const hm = (min: number) => { const d = new Date(NOW - min * 60_000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+  const pane = await draw($, 'Pane')
+  expect(pane).toMatch(new RegExp(`WORKER ACTIVITY. #3863  build +${hm(10)} PICK ORDER`))
+  expect(pane).toMatch(new RegExp(`Cost${hm(13)} +#3862 `))
+  expect(pane).not.toMatch(/\d [AP]M\b/)
 })
 
 test('outside a checkout with a Conveyor pack the mod registers nothing and fetches nothing', async ($, on) => {
@@ -807,14 +827,14 @@ test('a feed that stops changing while its board is drawn is said to be old at o
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()) })
   await start($, 'main')
   await units($)
-  expect(await draw($, 'Pane')).toContain('the belt is empty')
+  expect(await draw($, 'Pane')).toContain('nothing on the belt')
   // The collector stops: the feed file stays as it was. Its fetch of the host is held, so the warning is seen first.
   let release = () => {}
   w.hold = new Promise<void>(r => { release = r })
   await w.clock.advance(30_000)
   const pane = await draw($, 'Pane')
   expect(pane).toMatch(/units: the live feed has stopped \(its file is \d+ s old\)/)
-  expect(pane).toContain('the belt is empty')
+  expect(pane).toContain('nothing on the belt')
   w.hold = undefined
   release()
   await w.clock.advance(1000)
@@ -896,9 +916,11 @@ test('a quiet running step\'s seconds since its last output count on each second
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt: [live] })) })
   await start($, 'main')
   await units($)
-  expect(await draw($, 'Pane')).toContain('last output 6s ago')
+  await w.clock.settle()
+  // The pane's activity line gives no seconds since the last output; /units does.
+  expect(await units($)).toContain('last output 6s ago')
   await w.clock.advance(3000)
-  expect(await draw($, 'Pane')).toContain('last output 9s ago')
+  expect(await units($)).toContain('last output 9s ago')
 })
 
 test('a fresh session draws the live feed within a second while its first fetch is still waiting on a slow read', async ($, on) => {
@@ -916,7 +938,7 @@ test('a feed change a poll read before its fetch stalled is drawn within a secon
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()) })
   await start($, 'main')
   await units($)
-  expect(await draw($, 'Pane')).toContain('the belt is empty')
+  expect(await draw($, 'Pane')).toContain('nothing on the belt')
   // A card goes on the belt; a poll reads the feed at once, then its fetch (the Fast lane read) stalls.
   w.files.set(FEED, { text: feed(snapshot({ belt: [BELT] })), at: NOW + 500 })
   let release = () => {}
@@ -997,7 +1019,7 @@ test('a second with a running step and no board change writes no state, so makes
   expect(before).toBeGreaterThan(0)
   await w.clock.advance(1000)
   expect(states()).toBe(before)
-  expect(await draw($, 'Pane')).toContain('last output 8s ago')
+  expect(await units($)).toContain('last output 8s ago')
 })
 
 // the session start waited up to 5 s for the script that names the feed folder.
@@ -1071,9 +1093,16 @@ test('D1: this session holds the role and its live waiter runs the current insta
   expect(text).toContain('\nForeman listening\n  role: me (this one) · waiter 4242 on aaaaaaa · watchers: conveyor up, limit up, alerts up, idle up\n')
   const pane = await draw($, 'Pane')
   expect(pane).toContain('Foreman listening')
-  expect(pane).toContain('role: me (this one) · waiter 4242 on aaaaaaa')
+  // Issue 497: in the pane the details are under Machine details, closed until its Button is pressed. Bug it
+  // catches: the waiter and watchers took four lines at the top of the pane, or the Button opened nothing.
+  expect(pane).not.toContain('role: me')
+  await pressDetails($)
+  const open = await draw($, 'Pane')
+  expect(open).toContain('role: me (this one) · waiter 4242 on aaaaaaa')
   // Bug: the details were cut at the pane's 72 columns and at a narrow /units, so the last watchers' states were lost.
-  expect(pane).toContain('alerts up, idle up')
+  expect(open).toContain('alerts up, idle up')
+  await pressDetails($)
+  expect(await draw($, 'Pane')).not.toContain('role: me')
   const narrow = (await $.command.run({ command: 'units', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 40 } })).text as string
   expect(narrow).toContain('\nForeman listening\n  role: me (this one) ·\n    waiter 4242 on aaaaaaa ·\n    watchers: conveyor up, limit up,\n    alerts up, idle up\n')
 })
@@ -1105,7 +1134,8 @@ test('plugin problems the Foreman noted: "N plugin problems noted" with a link t
   const fetch = withForeman(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP]).replace('\nhost\t', '\npluginbugs\t2\t/r/my main/conveyor/state/foreman/plugin-bugs.md\nhost\t')
   const { text } = await foremanWorld($, on, fetch)
   expect(text).toContain('\n2 plugin problems noted\n  file:///r/my%20main/conveyor/state/foreman/plugin-bugs.md\n')
-  expect(await draw($, 'Pane')).toContain('2 plugin problems noted')
+  // The pane says it on its status line, in the warning colour's `!` form.
+  expect(await draw($, 'Pane')).toContain('! 2 plugin problems')
 })
 
 // Issue 383: /units ran the plugin copy's fetch, an older one than the engine that wrote waiter.pid with four fields;

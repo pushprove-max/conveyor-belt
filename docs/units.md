@@ -11,8 +11,9 @@ host file (its settings file), whether or not the session's project is the plugi
 
 ## What it shows
 
-`/units` and the pane are drawn at the pane's 62 columns. No time is estimated from past cards: only what was measured
-is shown. A figure is never cut: figures are right-aligned and the title is what gives way.
+This list is what `/units` prints. The pane shows the same board in a different layout: [The pane](#the-pane) tells
+how. No time is estimated from past cards: only what was measured is shown. A figure is never cut: figures are
+right-aligned and the title is what gives way.
 
 - A head, two lines: `CONVEYOR`, dollars today and the Conveyor host (`● buildbox`); then the weekly limit with its
   reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. While the loop runs with a builder
@@ -23,7 +24,7 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).
 - **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
   session`, `waiter starting again`, `waiter down: <why>`, `no waiter running`, `waiter on an old install`, `watcher
-  down: <name>`; `docs/foreman.md` says what each one means). In `/units` and the pane a dim
+  down: <name>`; `docs/foreman.md` says what each one means). In `/units` (in the pane, under Machine details) a dim
   line under it gives the session that has the role, the waiter's process and version, and the state of each watcher.
   A narrow view wraps that line onto more lines, so no watcher is lost.
   A project where no session has the
@@ -32,7 +33,7 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
   progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
   done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). When the run
   ends, the line shows the result (`passed 3m ago`) for 10 minutes, then it goes away.
-- **The test map**, in `/units` and the pane, under the head: one line. While setup or a whole run on main makes the
+- **The test map**, in `/units` under the head and in the pane under Machine details: one line. While setup or a whole run on main makes the
   map, the line shows the test files run so far, the time so far and a bar
   (`Test map: 12 of 40 test files · 3m ▰▰▰▱▱▱▱▱▱▱`). A narrow view cuts the text and keeps the bar. After the run, the
   line shows the state of the map:
@@ -102,14 +103,52 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
 
 A lane with no worktree on this machine is not shown: not in `/units` and not in the pane.
 
-`/units` prints all of it in full. The pane shows the same with the cards that need you one line each and the landed
-list cut to five. A card of the session's own project shows its issue alone; a card of any other project carries its
-project's name (`widgetshop#12`). In a checkout that no record names, every card carries its project's name.
+`/units` prints all of it in full. A card of the session's own project shows its issue alone; a card of any other
+project carries its project's name (`widgetshop#12`). In a checkout that no record names, every card carries its
+project's name.
 A loop that is not picking says so after `CONVEYOR` in the header (`shop paused`, `shop stopped`, `shop paused by guard`, `shop: no loop process`), from the snapshot's health, so
 `conveyor.sh control pause` or `stop` shows there; a running loop adds nothing. A loop that paused itself, after a
 sign-in failed, shows the reason after the state (`shop paused: build: Claude Code's own sign-in expired; ...`).
 
+## The pane
+
+The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut. It does not wrap.
+
+- **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
+  today.
+- **The count band**, between two rules: `4 ON BELT · 0 READY · 5 WAITING · 0 NEEDS YOU`. `READY` counts the issues
+  that the loop can pick now. `WAITING` counts the issues that wait on another card.
+- **The status line**: the Foreman's state (`Foreman listening`, or `Foreman not listening` with the reason), a loop
+  that is not picking (`shop paused`), and on the right `! 2 plugin problems` when the Foreman noted some.
+- **`[ Machine details ]`**: closed at first. Click it, or press `m` while the pane has the focus, to open or close it.
+  It shows the session that has the Foreman role, the waiter and the watchers, the link to the plugin problems file,
+  the test map line and the weekly limit.
+- The old-engine line and the whole-suite line, when there is one, and the cards that need you, one line each.
+- **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
+  slots`). One row for each card on the belt: the issue (`#486`), its short title, one column for each step (`B R F T
+  L P`: Build, Review, Fix, Test, Land, Push), its overall time (`Age`) and its cost. A step shows `▶` while it runs,
+  `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
+  legend is under the table. Each project with cards on the belt has its own matrix. Each other project of the
+  machine has one dim line with its name and slots. When the pane is narrower than 70 columns, the title column is
+  not shown. When the row still does not fit, the `Age` column is not shown.
+- **WORKER ACTIVITY**: one line for each card: its mark, its issue and the command that runs now, made short. A path
+  in the card's worktree shows as `worktree` (`cd worktree/x && git add -A`), and any other path shows only its last
+  part. On the right: the tool (`Bash`) and the time the step started. A card that runs no command shows its step.
+- **PICK ORDER**: on the right, how many issues the loop can pick now (`2 ready`). Then two columns, `Waiting` and
+  `Requires`: each issue that waits on other issues and is not forced, and the issues it waits for (`#489  #485  #486  #487  #488`), in
+  the order that the loop picks them. The held-back line follows.
+- **LANDED TODAY · 20**: on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
+  it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
+  `issue open` or `not pushed`).
+- The Fast and Research lanes, and the lines about what could not be read.
+
+A section with nothing to show has one dim line: `nothing on the belt`, `nothing waiting`, `nothing landed today`.
+The pane and `/units` write times of day in the form that the `time` setting gives ([Settings](#settings)).
+
 ## Settings
+
+`time`, in `/config` under the plugin: `12-hour` (`3:04 PM`, the default) or `24-hour` (`15:04`). The Board keeps its
+own **Time** setting in the browser, so set `time` to the same value.
 
 The pane has its option in `/config`, under the plugin: `pane`, `auto`, `on` or `off`. `auto` is on in main, where the
 Foreman runs, off in every other worktree (a card's, a lane's). `/units pane on|off` sets it for the current session.
@@ -121,7 +160,7 @@ The toasts go with the pane: with the pane on, a toast shows when a card newly n
 With `pane` on, the pane opens when a session starts. Claude Code places a pane that opens by itself only in a wide
 terminal. In a narrower one the pane waits, not drawn, and the session shows one line with the reason Claude Code gives
 and says that `/units pane on` tries again. `/units pane on` places the pane at any width. `motion` (`off` by default, or `on`) turns the mark
-of each card on the belt `◐ ◓ ◑ ◒` once a second; off, the mark stands still.
+of each card in the pane's WORKER ACTIVITY `◐ ◓ ◑ ◒` once a second; off, the mark stands still.
 
 ## What it reads
 

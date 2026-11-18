@@ -240,6 +240,21 @@ EOF
   : > "$STUB/go"; wait $run || fail "the watch of the session exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug (#497): the live record cut a command at 80 characters with the card's worktree path in it, so /units showed
+# `cd worktree/...` with the end of the command lost. The path reads `worktree` before the cut. Card c7-7's session,
+# watched as its build does it (c7watch), runs `cd <its worktree>/<a 40-character folder>/x && git add -A`.
+t_livetree() {
+  local c=c7-7 cmd; setup "[$(issue 7 2026-01-01)]"; c7at "$(date +%s)" picked worktree deps brief start:build
+  cmd="cd $T/$CASE/cards/$c/a-folder-name-forty-characters-long-xyz/x && git add -A"
+  [ ${#cmd} -gt 80 ] || fail "the case's command is not over 80 characters: $cmd"
+  jq -cn --arg c "$cmd" '{type: "assistant", message: {content: [{type: "tool_use", name: "Bash", input: {command: $c}}]}}' > "$STUB/event"
+  printf '%s\n' 'cat "$STUB/event"; while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/session"
+  c7watch build "$STUB/session"
+  wait_until "jq -e '.action == \"Bash: cd worktree/a-folder-name-forty-characters-long-xyz/x && git add -A\"' '$T/$CASE/cards/$c.live'" "cat '$T/$CASE/cards/$c.live'" \
+    || fail "the live action kept the worktree path, or lost the end of the command"
+  : > "$STUB/go"; wait $run || fail "the watch of the session exited non-zero: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug caught (#632): a card landing normally was listed stuck, and woke the Foreman, as its session process had ended:
 # the loop lands it. With the loop running, a card in its land step whose process is gone is stuck only after STUCK
 # seconds with no new line; a card in its build whose process is gone is stuck at once, as is the landing card once no

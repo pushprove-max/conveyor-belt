@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // What every /units view is drawn with: styled text runs, theme colours, widths in terminal cells and the few formats
 // (dollars, ages, clock times, model names) the sections share. Nothing here knows the snapshot.
-export type Seg = { t: string; c?: string; b?: boolean; d?: boolean }
+// i: drawn inverse (a filled label). k: the run is a Button with that address (the pane's Machine details toggle).
+export type Seg = { t: string; c?: string; b?: boolean; d?: boolean; i?: boolean; k?: string }
 export type Line = Seg[]
 
 // Claude Code theme keys, never raw colours, so a light or colour-blind theme recolours every view. `you`: what needs
@@ -61,8 +62,14 @@ export const fmtSec = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Ma
 // A step of a card's track is often seconds long, so under a minute its seconds are given.
 export const fmtStep = (s: number) => (s < 60 ? `${Math.max(0, Math.round(s))}s` : fmtSec(s))
 export const since = (t: number | null, now: number) => (t ? fmtSec(Math.max(0, Math.round((now - t) / 1000))) : '')
-// 12-hour with AM/PM, as the Board's page prints a time.
-export const clockOf = (t: number) => { const d = new Date(t); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}` }
+// A time of day as the Board's Time setting writes it: 12-hour ("3:04 PM", the default) or 24-hour ("15:04"). The
+// Board keeps its setting in the browser, so the mod has its own `time` option with the same two values, set by register.
+let hour24 = false
+export const setClock = (time: unknown) => { hour24 = time === '24-hour' }
+export const clockOf = (t: number) => {
+  const d = new Date(t), mm = String(d.getMinutes()).padStart(2, '0')
+  return hour24 ? `${String(d.getHours()).padStart(2, '0')}:${mm}` : `${d.getHours() % 12 || 12}:${mm} ${d.getHours() < 12 ? 'AM' : 'PM'}`
+}
 export const modelName = (id: string) => id.replace(/^claude-([a-z]+)-(\d+)-(\d+)$/, (_, f: string, a, b) => `${f[0].toUpperCase()}${f.slice(1)} ${a}.${b}`)
 
 export const gauge = (pct: number): Seg[] => {

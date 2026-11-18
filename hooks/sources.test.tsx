@@ -685,19 +685,78 @@ test('a second record\'s cards carry its name, and one record that cannot be rea
   expect(tableText(state(fetched([['bookstore', 'null'], ['widgetshop', other]])), 100)).toMatch(/^CONVEYOR +today partial  ● buildbox\n/)
 })
 
-test('the pane shows every section in short form: one line an item, no line wider than the pane', () => {
+// Issue 497, the pane's Build matrix layout. Bug it catches: at 60 columns a pane line wrapped (a title, a lane), or
+// the matrix kept its title column and pushed the step marks off the edge.
+test('the pane at 60 columns: no line wider than the pane, and the matrix drops its title column', () => {
   const landed = Array.from({ length: 7 }, (_, i) => ({ ...LANDED[0], card: `c-${i}`, issue: 3800 + i, time: ago(i) }))
   const s = board({ needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, belt: BELT, queue: { next: queued(10), held: { dormant: 3 } }, landed, cost: { today: 29.48 } },
     { limit: { pct: 50, resetsAt: NOW + 3600_000 }, research: { state: 'ok', lastAt: NOW - 60_000 }, fast: { state: 'ok', branch: 'fast-lane', ahead: 1, dirty: 0, subject: 'A long subject '.repeat(8) } })
   const lines = paneModel(s, 60, 0).map(plain)
   for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(60)
   const text = lines.join('\n')
+  expect(text).toMatch(/\nID +B R F T L P +Age +Cost\n#3863 +▶ · · · · · /)
+  expect(text).not.toMatch(/Title|Rebuild/)
+  // At 72 columns the title column is there.
+  expect(paneModel(s, 72, 0).map(plain).join('\n')).toMatch(/\nID +Title +B R F T L P +Age +Cost\n#3863 +Rebuild the workflow dashboard/)
   expect(text).toMatch(/\n◆ #3861 Fast lane lands thro… · your yes: Staff land F… +12m\n✗ #3850 Logo upload · blocked: review 3 was NO-GO: … +1h 30m\n/)
-  expect(plain(paneModel(s, 60, 0)[4])).toHaveLength(60)
-  expect(text).toMatch(/\n #3864 Rebuild \/units for Conveyor +\$1\.25\n ◐ review 2 of 3\n/)
-  expect(text).toContain('\nQUEUE  next 5 of 10+\n')
-  expect(text).toMatch(/\nLANDED TODAY  7 · \$29\.48\n( \S+ [AP]M ✓ #380\d One snapshot record +2 reviews  \$4\.21\n {9}↳ 2 follow-ups: #3870 #3871\n){5}  \+2 more\n/)
+  expect(text).toMatch(/\nPICK ORDER +10\+ ready\n  nothing waiting\nheld back: 3 dormant\n/)
+  expect(text).toMatch(/\nLANDED TODAY · 7 +5 most recent of 7\nLanded +Issue +Verdict +Total +Cost\n(\S+ [AP]M +#380\d +2 reviews +– +\$4\.21\n){5}/)
   expect(text).toMatch(/\nFAST LANE      1 commit on fast-lane: A long subject .*…\nRESEARCH LANE  working · last activity 1m ago$/)
+})
+
+// Issue 497. Bugs it catches: the pane said "0 queued" and "the queue is empty" while issues waited on other cards,
+// and each card took four lines.
+test('the pane from two projects with 4 cards building, 5 waiting and 20 landed: the count band, a matrix row a card, the pick order', () => {
+  const card = (repo: string, n: number) => ({ ...BELT[0], card: `c-${repo}-${n}`, issue: n, title: `Card ${n}` })
+  const waits = [489, 490, 491, 492, 493].map(n => ({ issue: n, title: `Waits ${n}`, waitsFor: n === 489 ? [485, 486, 487, 488] : [n - 1] }))
+  const landed = Array.from({ length: 20 }, (_, i) => ({ ...LANDED[0], card: `c-l${i}`, issue: 400 + i, time: ago(i), rounds: [{ round: 2, verdict: 'GO', counts: null, sec: 60, fixed: false }] }))
+  const health = (building: number) => ({ loop: true, state: 'running', building, waitingCount: 0, builderCap: 4 })
+  const s = state(fetched([
+    ['bookstore', snapshot({ belt: [485, 486, 487].map(n => card('bookstore', n)), queue: { next: [], held: {}, waiting: waits }, landed, health: health(3) })],
+    ['gadgetlab', snapshot({ belt: [card('gadgetlab', 7)], health: health(1) })],
+  ]))
+  const lines = paneModel(s, 72, 0).map(plain)
+  const text = lines.join('\n')
+  expect(text).toContain('\n4 ON BELT · 0 READY · 5 WAITING · 0 NEEDS YOU\n')
+  expect(text).toMatch(/\nBUILD MATRIX +bookstore · 3\/4 slots\n/)
+  expect(text).toMatch(/\nBUILD MATRIX +gadgetlab · 1\/4 slots\n/)
+  // One row a card, ▶ in the Build column (the first of the six marks).
+  const rows = lines.filter(l => /^#\d+ /.test(l) && l.includes('Card '))
+  expect(rows.map(l => l.split(/ +/)[0])).toEqual(['#485', '#486', '#487', '#7'])
+  for (const l of rows) expect(l).toMatch(/ ▶ · · · · · /)
+  expect(text).toMatch(/\nPICK ORDER +0 ready\nWaiting +Requires\n#489 +#485 +#486 +#487 +#488\n#490 +#489\n/)
+  expect(text).toMatch(/\nLANDED TODAY · 20 +5 most recent of 20\n[^]*\n\S+ [AP]M +#400 +✓ GO r2 +\S+ +\$4\.21\n/)
+})
+
+// Issue 497. Bug it catches: a forced issue, which the snapshot lists both in the pick order and (marked forced) among
+// the waiting, was counted READY and WAITING at once, and listed in Pick order as waiting.
+test('a forced issue counts as ready only, and is not in Pick order', () => {
+  const waiting = [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }, { issue: 4, title: 'Waits', waitsFor: [2], forced: false }]
+  const text = paneModel(board({ queue: { next: [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }], held: {}, waiting } }), 72, 0).map(plain).join('\n')
+  expect(text).toContain('\n0 ON BELT · 1 READY · 1 WAITING · 0 NEEDS YOU\n')
+  expect(text).toMatch(/\nPICK ORDER +1 ready\nWaiting +Requires\n#4 +#2\n\n/)
+})
+
+// Issue 497. Bug it catches: a card's step marks did not follow its track: a done step, a skipped one and the one running.
+// The engine's track gives Fix as skipped once Test runs after a GO (conveyor/jq/track.jq), and the matrix showed a dash.
+test('a card with Build and Review done and Test running shows ✓ ✓ · ▶ in Build, Review, Fix and Test', () => {
+  const s = board({ belt: [{ ...BELT[0], ...TIMES, track: track('++->..', 'testing') }] })
+  expect(paneModel(s, 72, 0).map(plain).find(l => l.startsWith('#3863'))).toMatch(/ ✓ ✓ · ▶ · · /)
+})
+
+// Issue 497. Bug it catches: the live command showed the whole machine path of the card's worktree ("now Bash: cd
+// /mnt/...") and wrapped the pane.
+test('a live command in the card\'s worktree reads "worktree", a home path its last part, and no absolute path is in the pane', () => {
+  const tree = '/r/home/cards/c3-3863'
+  const live = (action: string) => board({ belt: [{ ...BELT[0], live: { action, turns: 2, lastOutputAt: ago(0) } }] })
+  const text = (action: string) => paneModel(live(action), 72, 0).map(plain).join('\n')
+  expect(text(`Bash: cd ${tree}/x && git add -A`)).toMatch(/\n◐ #3863  cd worktree\/x && git add -A +Bash · \S+ [AP]M\n/)
+  // No path of two parts or more from the root or home (the head's `/units` label is one part).
+  expect(text(`Bash: cd ${tree}/x && git add -A`)).not.toMatch(/(^|[\s'"=(])~?\/\w+\//m)
+  expect(text(`Bash: cd ${tree}/x && git add -A`)).not.toContain('/r/')
+  expect(text(`Read: /r/home/.config/conveyor/host.json`)).toMatch(/\n◐ #3863  host\.json +Read · /)
+  // Another card's id in a path is not this card's worktree.
+  expect(text(`Bash: ls /r/home/cards/c3-38630/y`)).toMatch(/\n◐ #3863  ls y +Bash/)
 })
 
 test('a toast names each card that newly needs you or newly landed, never what was there at the first poll', () => {
@@ -737,14 +796,15 @@ test('while the map is made, a bar with the test files run of how many and the t
   const line = mapLine(tableText(s, 62).split('\n'))
   expect(line).toMatch(/^Test map: 12 of 40 test files · 3m +▰▰▰▱▱▱▱▱▱▱$/)
   expect(cols(line)).toBe(62)
-  expect(mapLine(paneModel(s, 62, 0).map(plain))).toBe(line)
-  const narrow = mapLine(paneModel(s, 30, 0).map(plain))
+  // In the pane the line is under Machine details, so it is drawn with that opened.
+  expect(mapLine(paneModel(s, 62, 0, true).map(plain))).toBe(line)
+  const narrow = mapLine(paneModel(s, 30, 0, true).map(plain))
   expect(narrow).toMatch(/^Test map: .*… +▰▰▰▱▱▱▱▱▱▱$/)
   expect(cols(narrow)).toBe(30)
 })
 
 test('with no run, one line with the map\'s state: made, not made yet, off, or failed with its reason; it fits a narrow pane', () => {
-  const lines = (json: object, w = 62) => mapLine(paneModel(mapped(json), w, 0).map(plain))
+  const lines = (json: object, w = 62) => mapLine(paneModel(mapped(json), w, 0, true).map(plain))
   expect(lines({ state: 'made', sources: 120, tests: 40, age: 3 })).toBe('Test map: 120 source, 40 test files · 3 commits behind main')
   expect(lines({ state: 'made', sources: 1, tests: 1, age: 0 })).toBe('Test map: 1 source, 1 test file · up to date with main')
   expect(lines({ state: 'made', sources: 7, tests: 2, age: null })).toBe('Test map: 7 source, 2 test files')

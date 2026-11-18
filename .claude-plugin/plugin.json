@@ -35,6 +35,16 @@
         "on"
       ],
       "default": "off"
+    },
+    "time": {
+      "type": "string",
+      "title": "Time",
+      "description": "How the pane writes a time of day: 12-hour (3:04 PM) or 24-hour (15:04). Set it as the Board's Time setting in Customize.",
+      "options": [
+        "12-hour",
+        "24-hour"
+      ],
+      "default": "12-hour"
     }
   },
   "engines": {
