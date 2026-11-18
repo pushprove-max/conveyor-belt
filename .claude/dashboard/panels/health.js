@@ -214,6 +214,8 @@ window.DASH_APP.panel({
         if (pxRow) pxRow.next = `Start the proxy on ${ctx.machine}, or set the host file's claudeProxy to a proxy that runs. The blocked card shows its error.`;
       }
       if (!r.gh) check(`GitHub${of}`, ctx.chip('Not signed in', 'bad'), 'gh cannot read or close issues').next = `Run gh auth login on ${ctx.machine}.`;
+      else if (r.ghReached === false) check(`GitHub${of}`, ctx.chip('Not reached', 'warn'), 'gh is signed in, but its check with GitHub failed').next =
+        `Check the network on ${ctx.machine}, or run gh auth status there.`;
       if (typeof r.diskFreeKb === 'number' && r.diskFreeKb < 10485760) check(`Disk${of}`, ctx.chip('Low', 'warn'), `${(r.diskFreeKb / 1048576).toFixed(1)} GB free for cards`).next =
         'Free space on the disk that holds the cards folder.';
     });

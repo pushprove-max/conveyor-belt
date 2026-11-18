@@ -401,6 +401,18 @@ test('Metrics: a step that ran through the API proxy says so in the card timelin
   assert.match(lines[1], / · on the subscription login( · |$)/);
   assert.doesNotMatch(lines[2], /API proxy|subscription/, 'a step with no route names none');
 });
+// Issue 410. Bug it catches: gh signed in while its check with GitHub failed (ghReached false) showed no GitHub row,
+// so the Board gave no sign of it; signed out is still the "Not signed in" fault.
+test('Health: gh signed in but GitHub not reached is a warning row, never "Not signed in"', () => {
+  const data = full();
+  Object.assign(data.panels.health.data.records[0], { gh: true, ghReached: false });
+  const w = boot();
+  deliver(w, data);
+  const dt = Array.from(panel(w, 'health').querySelectorAll('dt[data-check]')).find((d) => d.dataset.check.startsWith('GitHub'));
+  assert.ok(dt, 'a GitHub row');
+  assert.equal(dt.nextElementSibling.querySelector(':scope > .chip.chip-warn').textContent, 'Not reached');
+  assert.doesNotMatch(panel(w, 'health').textContent, /Not signed in/);
+});
 test('Health: a proxy that fails is a fault with a next step', () => {
   const w = routes({ subscription: { state: 'expired' }, proxy: { state: 'fails', baseUrl: 'http://127.0.0.1:4141', route: 'fallback' } });
   assert.equal(dd(w, 'Claude route: subscription login').querySelector(':scope > .chip.chip-bad').textContent, 'Expired');

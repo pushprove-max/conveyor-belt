@@ -205,7 +205,10 @@ case $2 in
     *'--json state'*) echo "{\"state\":\"$(cat "$STUB/state.$3" 2>/dev/null || cat "$STUB/state" 2>/dev/null || echo CLOSED)\",\"closedAt\":\"$(cat "$STUB/closedAt.$3" 2>/dev/null)\"}" ;;
     *) issues | jq --argjson n "$3" '.[] | select(.number == $n)' ;; esac ;;
   graphql) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; # gh api graphql: when the awaiting-deploy labels were added
-  status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/signed-out" ] ;;
+  # gh auth token: the token gh holds, read without the network (none with $STUB/signed-out). gh auth status: the
+  # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.
+  token) [ ! -e "$STUB/signed-out" ] && echo gho_stub ;;
+  status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/unreached" ] || exit 124; [ ! -e "$STUB/signed-out" ] ;;
   comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
   create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=

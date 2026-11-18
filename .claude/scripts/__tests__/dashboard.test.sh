@@ -87,7 +87,7 @@ snap() {
   jq -cn --arg day "$DAY" --arg now "$NOWISO" --argjson o "$o" '
     {time: $now, day: $day, needsYou: {waiting: [], blocked: [], before: []}, belt: [], queue: {next: []}, landed: [], landedCount: 0,
      health: {time: $now, loop: true, newest: $now, blocked: [], waiting: [], stuck: [], unpushed: [], pushError: null, pushFailingSince: null,
-              gh: true, diskFreeKb: 500000000, builderCap: 3, models: {claude: "claude-x", codex: "gpt-x"}},
+              gh: true, ghReached: false, diskFreeKb: 500000000, builderCap: 3, models: {claude: "claude-x", codex: "gpt-x"}},
      cost: {today: 0, week: 0, perLanded: null, landedAfter: {"1": 0, "2": 0, "3": 0, more: 0}, unpricedSteps: 0, cards: []}} * $o'
 }
 # answer <snapshot 1> <origin 1> <pushed epoch 1> <snapshot 2> <origin 2> <pushed epoch 2> -- what the
@@ -154,6 +154,9 @@ q '.panels.cost.data.cards | .todayUsd == 0 and .weekUsd == 0 and .perLandedUsd 
 q '.panels.declined == {error: null, data: {lines: [], rest: []}}' "no declined finding (a snapshot from before it carried the list, too) is an empty list, not a failed part"
 q '.panels.health.data | .host == {name: "devbox", local: false, reachable: true, error: null} and (.records | length) == 2 and (has("cpuCap") | not)' "the host answered: reachable, both records, and no CPU cap (dropped)"
 q '.panels.health.data.records | .[0].lastPushAt == (1794000000 | todate) and .[1].lastPushAt == null and all(.[]; .loop == true and .gh == true)' "each record carries its last push; none recorded is null"
+# Issue 410. Bug it catches: the collector dropped ghReached, so the Board showed no warning when gh was signed in and
+# GitHub was not reached.
+q '.panels.health.data.records | all(.[]; .ghReached == false)' "a record's GitHub not reached (ghReached false) reaches the Board"
 # Issue 151: Health gives today's cost (the Board's own project's sessions alone) on the row of the record on the
 # host's main only; without steered on each record it could not tell that record from the others.
 q '[.panels.health.data.records[] | .steered] == [true, false]' "each record says whether it is the one on the host's main"

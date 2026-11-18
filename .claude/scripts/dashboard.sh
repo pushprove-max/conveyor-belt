@@ -831,7 +831,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

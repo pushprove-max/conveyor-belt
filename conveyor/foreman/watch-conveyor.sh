@@ -32,8 +32,9 @@
 #     and any kind added to the list later, under its kind). A held pipeline change's line names it, its parent and
 #     its finding: "pipeline change held: #615 (follow-up of #597): <finding>"
 #   no loop running, a push failing for over 10 minutes or listed under the Board's blocked cards (needsYou.blocked:
-#   it failed twice), gh signed out, a control record the loop cannot read, a
-#   dependency cycle among open issues, and Conveyor idle (nothing on the belt and nothing to pick) on two polls in a row
+#   it failed twice), gh signed out (no token: `gh auth token`), a control record the loop cannot read, a
+#   dependency cycle among open issues, and, each on two polls in a row, Conveyor idle (nothing on the belt and nothing
+#   to pick) and GitHub not reached (gh signed in, but `gh auth status` failed or timed out)
 # Every wake names every item. Its first line lists every issue number by kind, per project:
 #   Conveyor: shop: needs the owner's yes: #12 #15; blocked: #7 | site: needs the owner's yes: #19
 # then one line per item, each cut alone if it must be; the wake as a whole is never cut.
@@ -127,6 +128,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (.quarantined | arrays | .[] | objects | ["quarantined:\(.line):\(.time)", "record set aside", "",
       "the card records line \(.line) is set aside in quarantined.jsonl: the record check refused its field \(.field | one)"]),
     (select(.gh | not) | ["gh", "gh signed out", "", "gh is signed out"]),
+    # Signed in, but gh auth status did not answer (health ghReached): a candidate here, as idle is; record() reports it on its second poll.
+    (select(.gh and .ghReached == false) | ["ghreach", "GitHub not reached", "", "GitHub not reached: gh is signed in, but gh auth status failed or timed out"]),
     (select(.state == "control record unreadable") | ["control", "picks nothing", "", "the loop picks nothing: \(.reason // "the control record does not read" | one)"]),
     (.cycles | arrays | .[] | arrays | map(tostring) | ["cycle:\(join("-"))", "dependency cycle", (map("#" + .) | join(" ")),
       "issues \(map("#" + .) | join(", ")) depend on each other: none of them will be picked"]),
@@ -253,7 +256,7 @@ while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt"
 # One record's problems now, each line prefixed with its repo: <repo> TAB <key> TAB <kind> TAB <issues> TAB <text>.
 record() { # <repo> <main> <now> <await>
   local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held
-  local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
+  local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt ghreach=$FD/conveyor-ghreach-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
   local histf=$FD/conveyor-history-$repo.json
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone; one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
@@ -303,8 +306,12 @@ record() { # <repo> <main> <now> <await>
   printf '%s: %s, read %s\n' "$repo" "$outcome" "$used" >> "$POLLF"
   if [ "$rc" = 0 ]; then
     rm -f "$down"
+    # Idle and GitHub not reached are problems only on the second poll in a row that lists them: $idle and $ghreach
+    # mark the first.
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi
+    if ! grep -q $'^ghreach\t' <<<"$cur"; then rm -f "$ghreach"
+    elif [ ! -e "$ghreach" ]; then touch "$ghreach"; cur=$(grep -v $'^ghreach\t' <<<"$cur"); fi
     # A stuck card is a problem only when two snapshots in a row, at least a poll apart, list it: one reading can
     # fall between two lines of a step that goes on. $stuckf holds each stuck key of the last snapshot and when a
     # snapshot first listed it ("<key> TAB <epoch>"); a key the snapshot does not list is dropped from it. When that
@@ -314,8 +321,9 @@ record() { # <repo> <main> <now> <await>
       $1 ~ /^stuck:/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
   else
-    # A failed poll breaks a run of idle polls.
+    # A failed poll breaks a run of idle polls, and of polls that did not reach GitHub.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
+    grep -qxF "$repo/ghreach" "$SEEN" || rm -f "$ghreach"
     echo "$first $now" > "$down"
     # Its reported keys stay reported (no text: a key already reported is never printed again). When health read, its
     # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again

@@ -468,7 +468,12 @@ t_health() {
     || fail "loop, gh, newest line or the push error: $out"
   [ "$(jq -c '[.blocked, .waiting, .stuck]' <<<"$out")" = '[[{"card":"c1-1","issue":1,"reason":"review 1: no answer","since":"2026-11-01T00:05:00Z"}],[{"card":"c2-2","issue":2,"reason":"visible to customers or staff: needs Dana'"'"'s yes: a new button","since":"2026-11-01T00:06:00Z"}],[{"card":"c3-3","issue":3,"step":"worktree","since":"2026-11-01T00:07:00Z"}]]' ] \
     || fail "blocked, waiting and stuck cards: $out"
-  rm "$STUB/signed-out"; [ "$(h '[.loop, .gh]')" = '[false,true]' ] || fail "a loop that ended, or gh signed in again, is not seen"
+  [ "$(jq -c .ghReached <<<"$out")" = null ] || fail "GitHub was said reached or not though gh is signed out: $out"
+  rm "$STUB/signed-out"; [ "$(h '[.loop, .gh, .ghReached]')" = '[false,true,true]' ] || fail "a loop that ended, or gh signed in again, is not seen"
+  # Bug caught (#410): signed in was read from gh auth status, which checks the token over the network, so a slow
+  # GitHub read as signed out. gh holds its token (gh auth token) while gh auth status times out: signed in, GitHub not reached.
+  : > "$STUB/unreached"; [ "$(h '[.gh, .ghReached]')" = '[true,false]' ] || fail "a gh auth status that timed out is not signed in, GitHub not reached: $(loop health)"
+  rm "$STUB/unreached"
   # Health asks a second on (the clock seam, CONVEYOR_NOW): #4, picked just now, is then a second old.
   [ "$(CONVEYOR_NOW=$(( $(date +%s) + 1 )) tuned '.tunables.stuck = 1' h '.stuck | map(.issue)')" = '[3,4]' ] || fail "the stuck time is not the pack's tunables.stuck"
   git -C "$R" push -q origin main; [ "$(h '[.unpushed, .pushError, .pushFailingSince]')" = '[[],null,null]' ] || fail "a pushed commit is still listed, or its push error is"

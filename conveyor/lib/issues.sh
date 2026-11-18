@@ -402,7 +402,12 @@ productpaths() { [ "$(testpaths -v | grep -Ec "$PRODUCT")" != 0 ]; }
 # Did this commit change product code (tests aside)?
 product() { git show --name-only --format= "$1" 2>/dev/null | productpaths; }
 
-ghok() { if [ -n "$GITHUB" ]; then [ "$(cat "$GITHUB/gh" 2>/dev/null)" = true ]; else timeout 20 gh auth status >/dev/null 2>&1; fi; }
+# gh signed in: gh holds a token for the host. `gh auth token` reads it without the network, so a slow GitHub or a
+# loaded machine never reads as signed out.
+ghok() { if [ -n "$GITHUB" ]; then [ "$(cat "$GITHUB/gh" 2>/dev/null)" = true ]; else [ -n "$(timeout 20 gh auth token 2>/dev/null)" ]; fi; }
+# GitHub reached: `gh auth status` checks the token over the network. It fails when GitHub is slow, down or refuses the
+# token; health gives that as ghReached false, never as signed out.
+ghreach() { if [ -n "$GITHUB" ]; then [ "$(cat "$GITHUB/ghreach" 2>/dev/null)" = true ]; else timeout 20 gh auth status >/dev/null 2>&1; fi; }
 # Every JSON and GraphQL string escape (\uXXXX, \u{X...}, \n, \/ ...) decoded, again on each result until nothing is
 # left to decode; one line per decoding that changed the text. A high and low surrogate \uXXXX pair decodes as the one
 # character it names, as JSON parsers read it; any other code point that is not a character decodes as U+FFFD.
@@ -578,13 +583,14 @@ privmask() {
 }
 # github <folder> -- the GitHub reads of a snapshot, each written whole into the folder for `watch`: issues (the
 # open issues with the snapshot's fields; no file when gh did not list them, so the queue is not read, as it would not
-# be), labelled, and gh (true or false). It also keeps the host's report of its CLIs and their models (hostclis()).
+# be), labelled, gh (signed in: true or false) and ghreach (GitHub reached: true or false). It also keeps the host's report of its CLIs and their models (hostclis()).
 github() {
   local d=$1 i
   if i=$(openissues "$FIELDS" 2>/dev/null); then printf '%s\n' "$i" > "$d/issues.new" && mv -f "$d/issues.new" "$d/issues"
   else rm -f "$d/issues"; fi
   labelled > "$d/labelled.new" && mv -f "$d/labelled.new" "$d/labelled"
   { ghok && echo true || echo false; } > "$d/gh.new" && mv -f "$d/gh.new" "$d/gh"
+  { ghreach && echo true || echo false; } > "$d/ghreach.new" && mv -f "$d/ghreach.new" "$d/ghreach"
   # On this slower timer too, never in a snapshot the feed builds: the CLIs' models, read again once the host's report
   # is CLI_TTL old (a snapshot with no feed reads them itself, as it reads GitHub).
   hostclis due >/dev/null 2>&1 || :
