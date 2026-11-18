@@ -158,6 +158,9 @@ test('Declined: a finding draws a level badge, a file link, a bold claim, a Proo
   assert.deepEqual(codes, ['componentInnerBoxes: 2', 'shared/taxonomy/verification-pipeline-capture-fields.ts:239'], 'backticked text and the bare path are code, without backticks');
   assert.deepEqual(Array.from(proof.querySelectorAll('a.declined-at'), (a) => a.href), [`${REPO}/blob/HEAD/shared/taxonomy/verification-pipeline-capture-fields.ts#L239`],
     'the bare manifest path links to its line');
+  // Bug (#435): a finding's code spans also took a declined-code class that no stylesheet, script or test used.
+  assert.deepEqual(Array.from(f.querySelectorAll('code'), (c) => c.className), Array(f.querySelectorAll('code').length).fill('why-code'),
+    'each code span takes only the shared why-code style');
   // Bug: the Declined styles took the class names of the review rows in Show output and Health (.finding-head,
   // .finding-at, .finding-proof), so each one's rules changed the other's layout.
   assert.equal(f.querySelector('.finding-head, .finding-at, .finding-proof'), null, "the review rows' class names are not used");

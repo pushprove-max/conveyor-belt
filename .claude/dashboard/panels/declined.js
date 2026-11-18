@@ -102,7 +102,7 @@
   // A span of code: monospace, italic and in the accent colour (app.css .why-code); a file and line in it is a link to
   // that line on GitHub (lineUrl), with the link returned so a caller can say more of it on hover.
   const codeEl = (h, x, s, known, cls) => {
-    const c = h('code', cls === 'why' ? 'why-code' : `why-code ${cls}-code`, s), to = lineUrl(x, s, known);
+    const c = h('code', 'why-code', s), to = lineUrl(x, s, known);
     if (!to) return { el: c, to: null };
     const a = h('a', `${cls}-at`);
     a.href = to.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
