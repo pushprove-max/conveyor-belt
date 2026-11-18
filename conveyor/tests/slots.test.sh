@@ -8,6 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# t_slots, t_slotclock and t_slotwholeclock keep the old fixture, not FILEMODE's: they test the test command itself.
 
 # A pool of the case's own, of <n> slots: the host file's testSlots, in a folder no other case shares (testSlotsDir).
 slotpool() { # <n>
@@ -247,7 +248,7 @@ t_slotcasehost() {
 }
 t_slotcaseprobe() {
   [ -n "${CONVEYOR_SLOTCASE_PROBE:-}" ] || return 0
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  local -x FILEMODE=1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
   printf '%s\n' "if [ \"/dev/fd/\${CONVEYOR_TEST_SLOT%%.*}\" -ef '$SLOT_DIR/1' ]; then echo case; else echo \"\$CONVEYOR_TEST_SLOT\"; fi >> \"\$STUB/slot\"" > "$STUB/test-cmd"
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(cat "$STUB/slot" 2>/dev/null)" = case ] || fail "the card's tests did not run on the case's slot ($SLOT_DIR/1), but on: $(cat "$STUB/slot" 2>&1)"
@@ -284,7 +285,7 @@ t_slotcores() {
 # lives until the case kills it, and push is off: a push takes a slot (push.sh), so the loop's push waited for the
 # process, and the case found it ended (one of 60 s) or never ended (one that lives on).
 t_slotleft() {
-  local i
+  local i; local -x FILEMODE=1
   slotpool 1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; loop control rules push=off > /dev/null
   cat > "$STUB/test-cmd" <<'EOF2'
 echo x >> "$STUB/tests"

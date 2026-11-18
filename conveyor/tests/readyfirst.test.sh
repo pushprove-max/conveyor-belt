@@ -10,6 +10,8 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# t_readyclaim has the per-file fixture (lib.sh, filemode()). The cases of rfsetup keep the old one: #7 lands on a main
+# where #8 changed a.txt too, and they read which test files the whole run names (s.test, x.test, y.test).
 
 # Bug: a card that passed its review and its tests waited at its claim on a card that held the same files and was
 # still in its tests (#326 waited over 2 hours so), because that card was picked first. claim() as the engine has it:
@@ -18,6 +20,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # #8 does not go past an ordered #7, nor before #7 when #7's tests passed first; tested on a stack's base, #8 is not
 # ready. Of two waiting ready cards, the one ready first goes first, though picked second.
 t_readyclaim() {
+  local -x FILEMODE=1
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
   for n in 7 8; do

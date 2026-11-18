@@ -11,6 +11,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Each case that runs cards sets a live record every second (the pack's default), not the test pack's 0.2 s: a card
 # waiting at its claim looks again each `live` seconds, and these cards wait a lot. The cases wait on what the cards
 # do (a stub's wait lasts until what it waits for is there), not on those seconds. t_sameoffretry sets its own.
+# A case with `local -x FILEMODE=1` has the per-file fixture (lib.sh, filemode()). The others keep the old one: their
+# card lands on a main where the other card changed a.txt too, so its linked a.test.sh runs there again; t_apart's
+# check that nothing is left fails on the <card>.testlist a landed card leaves in the cards folder (tidy() does not
+# remove it).
 
 # Bug: two cards in flight that change the same file both go to review, and the second meets "rebase onto
 # main conflicts" at landing. Then (the owner's order): seven cards sharing conveyor.sh queued behind one holder for
@@ -207,6 +211,7 @@ EOF
 # main, and met "rebase onto main conflicts" at landing. At its landing claim it must be brought onto main, then
 # reviewed again there.
 t_samelate() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
@@ -467,6 +472,7 @@ EOF
 # waiting on it goes on to review at once, and the retried issue is picked; a waiting card's step reads waiting, and
 # one that has waited STUCK seconds on a card not on the belt is reported stuck.
 t_sameoff() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   echo 'case $PWD in *-7) echo seven > b.txt ;; *) echo two >> a.txt ;; esac' > "$STUB/build"
   # Card c1-7 blocked holding a.txt, its claim not yet gone and its process alive; then #7 is given back.
@@ -492,6 +498,7 @@ t_sameoff() {
 # sameoffonly, sameoffcap, sameoffstuck), so they run side by side. sameoffsetup <issue> <issue>: those two issues,
 # every review a GO, the belt's cap 1.
 sameoffsetup() {
+  local -x FILEMODE=1
   setup "[$(issue "$1" 2026-01-03),$(issue "$2" 2026-01-04)]"; for i in $(seq 1 12); do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   mkdir -p "$T/$CASE/cards"; loop control cap 1 >/dev/null || fail "cap 1 was refused"
 }
@@ -518,6 +525,7 @@ t_sameoffonly() {
 # A card waiting on a card `retry` gave back (not on the belt) for 25 minutes (past STUCK, within waitLimitMin), and
 # one waiting as long on a card on the belt. Card c1-7 blocked and was given back, as in t_sameoff.
 t_sameoffstuck() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01)]"; mkdir -p "$T/$CASE/cards"
   landed 7 | jq -c '.card = "c1-7" | .step = "picked"' >> "$ST/cards.jsonl"
   landed 7 | jq -c '.card = "c1-7" | .step = "blocked" | .result = "blocked" | .reason = "review 1: review failed (exit 124)"' >> "$ST/cards.jsonl"
@@ -549,6 +557,7 @@ t_sameoffstuck() {
 # fresh wait record is from another step; and once the holder's process is gone the wait never ends, so the waiter is
 # stuck too.
 t_waitclaim() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]"; mkdir -p "$T/$CASE/cards"
   sleep 300 & holder=$!; sleep 300 & waiter=$! # sleep: stand-ins for two cards' processes, alive
   now=$(jq -rn 'now | todate'); ago25=$(jq -rn 'now - 1500 | todate'); ago20=$(jq -rn 'now - 1200 | todate')
