@@ -67,8 +67,9 @@
 # record is a passed release-prep of that version on main's head, main not moved since, it starts release alone, told
 # that commit: the suite that passed is used, not run again. `conveyor.sh release-run
 # stop` ends the run under way: the processes of that run alone (the tree of the record's pid, and each process that
-# carries the run's mark, in whatever process group), never a whole process group, and its record says stopped. A
-# run that ends in any other way (a KILL too) ends the processes left of it too, so none holds the release lock. Exit 2: refused (a run is already under way; none to stop).
+# carries the run's mark, in whatever process group), never a whole process group, and its record says stopped; it
+# returns once the release lock is free (exit 1 when it is not). A run that ends in any other way (a KILL too) ends the
+# processes left of it too, so none holds the release lock. Exit 2: refused (a run is already under way; none to stop).
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
@@ -454,14 +455,28 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
   else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
 # The run under way ended: its record's pid and every process of the run (relreap()). Only a pid that runs
-# conveyor.sh is taken, so a record left by a run that died names no other process.
+# conveyor.sh is taken, so a record left by a run that died names no other process. A process of the run relreap cannot
+# see still holds the release lock as it ends: the run's release-prep, whose bash carries no mark ps can read (export
+# changes no process's own environment) and which leaves the tree of the record's pid once that pid has ended, ends
+# on the TERM through its EXIT trap. The stop waits for the lock, so a release-prep started next is not refused. It
+# writes the record only holding the lock (the run's own end and the next run write it holding it too), and only while
+# the record is still the stopped run's (its pid and start): a run started once the lock was free has its own record,
+# which is never marked stopped.
+# 1: the lock is still held 10 s on (relreap's time for a TERM; with the stop's own reap, within the Board's 30 s); the
+# record is left as it is, and the snapshot shows the run stopped once the lock is free.
 releasestop() {
-  local p
+  local p s v lk rc=1
   p=$(jq -er 'select(.ended == null) | .pid | numbers' "$RELRUN" 2>/dev/null) && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' \
     || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
+  s=$(jq -r '.since' "$RELRUN") && v=$(jq -r '.version' "$RELRUN") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
   relreap "$p" "$p"
-  relrec --arg t "$(clock)" '.state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"]'
-  echo "conveyor: release-run: the release run of $(jq -r .version "$RELRUN") is stopped"
+  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
+  [ $rc != 0 ] || relrec --argjson p "$p" --arg s "$s" --arg t "$(clock)" 'if .pid == $p and .since == $s then .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end'
+  [ -z "$lk" ] || exec {lk}>&-
+  # Not the lock, but another run's record: that run took the lock once this one's processes had let it go.
+  [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 \
+    || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends" >&2; return 1; }
+  echo "conveyor: release-run: the release run of $v is stopped"
 }
 shift
 if [ "$CMD_ARG" = release ]; then
