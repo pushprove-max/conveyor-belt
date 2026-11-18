@@ -499,9 +499,11 @@ Merge PR sets who merges the pull request of Land as `pr`.
 - `release`: the release merges it. `release-prep` runs the whole suite on `conveyor/landing`. `release` checks
   that head first. When all checks pass, it merges the pull request, then makes the release on top of the merge. A release
   that a check stops merges nothing.
-- `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. First, Conveyor runs the test
-  files linked to every card in the pull request, each one alone, on the head of `conveyor/landing`. Conveyor merges
-  only when they all pass. A file that fails goes to a main-fix card, as in the run before a push.
+- `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push is on,
+  Conveyor first runs the test files linked to every card in the pull request, each one alone, on the head of
+  `conveyor/landing`. Conveyor merges only when they all pass. A file that fails goes to a main-fix card, as in the run
+  before a push. When Test before a push is off, Conveyor merges with no test run first
+  ([Which tests a card runs](#which-tests-a-card-runs)).
 
 With every rule, **Merge** shows on the Control tab while a pull request is open. Conveyor merges with a merge
 commit. Then your local default branch moves to the remote's default branch, Conveyor closes the issues of the cards

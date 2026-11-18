@@ -239,6 +239,17 @@ t_pridle() {
   la_eng idlemerge
   [ "$(la_prst 7)" = MERGED ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$sha" main || fail "the pull request did not merge once the belt was empty and its run passed"
 }
+# Bug it catches (#463): the pages said Merge PR idle always runs the linked test files before it merges, but
+# pushtests() runs none with the push check off (push.check), so a reader took an untested merge for a tested one.
+# A text check: the claim is in the docs, with no behaviour of its own to run (t_pridle runs the merge itself).
+t_pridledocs() {
+  local p s
+  for p in "docs/configuration.md:^- \`idle\`:" "docs/board.md:^Idle merges it"; do
+    s=$(awk -v re="${p#*:}" '$0 ~ re {on = 1} on && (/^$/ || (/^- / && $0 !~ re)) {exit} on' "$SRC/../${p%%:*}")
+    [ -n "$s" ] || fail "${p%%:*}: the Merge PR idle text is not found"
+    [[ $(tr '\n' ' ' <<< "$s") == *"Test before a push"* ]] || fail "${p%%:*}: the Merge PR idle text does not say its test run depends on Test before a push: $s"
+  done
+}
 # Bugs it catches: with Merge PR release, release-prep ran the suite on origin's default branch, which lacks the cards
 # waiting in the pull request, in place of conveyor/landing; `release` tagged the default branch without them (it did
 # not merge the pull request first), or merged it only after the tag; a release a check refused (here a tag that

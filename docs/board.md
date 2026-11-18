@@ -226,8 +226,8 @@ cards; merge it to close their issues" ([Land as](configuration.md#land-as)).
 
 **Merge PR** is **Button**, **Release** or **Idle**. Until you set it, it shows the pack's `push.prMerge`. Button
 leaves the merge to you, with **Merge** on the Control tab. Release merges the pull request when you make a release.
-Idle merges it when no card is on the belt and no issue can be picked, after the test files linked to its cards pass
-([Merge PR](configuration.md#merge-pr)).
+Idle merges it when no card is on the belt and no issue can be picked. When **Test before a push** is on, the test files
+linked to its cards must pass first ([Merge PR](configuration.md#merge-pr)).
 
 **Test before a push** is a switch per project. On, before each push Conveyor runs the test files linked to the
 landings since the last push, and a file that fails holds the push. Off, a push runs no test first, and the tab says
