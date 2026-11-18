@@ -133,6 +133,16 @@ t_slicesbad() {
   recok "$ST/cards.jsonl" "a kept split check"
 }
 
+# A slice with no Done-when items of its own breaks the rules: SPLIT2 with slice 1's doneWhen empty, missing, a blank
+# item or a number is read as invalid. Bug caught: the check read the length of the slice, not of its doneWhen, and
+# filed a slice with an empty Done-when section.
+t_slicesnodone() {
+  setup '[]'
+  fx_in 'for d in "[]" null "[\" \"]" "[1]"; do jq -c --argjson d "$d" ".slices[0].doneWhen = \$d" <<<"$SPLIT2" | jq -Rsc --argjson n 3 "$SPLITREAD" | jq -r .why; done'
+  [ "$(sort -u "$T/$CASE/run.out")" = 'a slice has no Done-when items of its own' ] && [ "$(wc -l < "$T/$CASE/run.out" | tr -d ' ')" = 4 ] \
+    || fail "a slice with no Done-when items passed the split check: $(cat "$T/$CASE/run.out")"
+}
+
 # The measure health gives the Health view (SPLITM, lib/views.sh): of the checked cards, the kept ones and the "would
 # split" ones built whole, each with how many had a first review, how many of those said GO and their fix rounds, and
 # the issues split into slices and not built; a card the rule did not check counts in none. Bug caught: the trial had

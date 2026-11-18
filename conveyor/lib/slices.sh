@@ -70,7 +70,7 @@ SPLITREAD='def nums: type == "array" and all(.[]; type == "number" and . == floo
      elif (.slices | type) != "array" then "a split with no list of slices"
      elif (.slices | length) < 2 or (.slices | length) > 3 then "\(.slices | length) slices, not 2 or 3"
      elif any(.slices[]; (.title | type) != "string" or (.title | test("\\S") | not)) then "a slice has no title"
-     elif any(.slices[]; (.doneWhen | type) != "array" or length == 0 or any(.[]; type != "string" or test("\\S") | not)) then "a slice has no Done-when items of its own"
+     elif any(.slices[]; .doneWhen | type != "array" or length == 0 or any(.[]; type != "string" or (test("\\S") | not))) then "a slice has no Done-when items of its own"
      elif any(.slices[]; (.covers | nums | not) or (.covers | length) == 0) then "a slice covers none of the Done-when items of the issue"
      elif any(.slices | to_entries[]; .key as $k | .value.dependsOn // [] | (nums | not) or any(.[]; . < 1 or . > $k)) then "a slice depends on a slice that is not before it"
      else [.slices[].covers[]] as $c | ([range(1; $n + 1)] - $c) as $miss | ($c - [range(1; $n + 1)]) as $out
