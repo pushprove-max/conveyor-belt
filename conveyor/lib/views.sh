@@ -258,7 +258,7 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
 # READCHECKED, when set, says READ is a copy that check() has already passed and nothing appends to (the snapshot's):
 # health does not check it again.
 health() {
-  local loop=true gh=false free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so sr co hd rc
+  local loop=true gh=false free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so co hd rc
   { [ -n "${READCHECKED:-}" ] || check; } && lv=${LIVEJSON:-$(live)} || return 1
   # The records and the retried lines, as health reads them (HEALTHLINE).
   hd=$(mktemp -d) || return 1
@@ -297,8 +297,6 @@ health() {
   rm=null; [ "$loop" != true ] || rm=$(jq -ce 'select((.issue | type == "number") and (.reason | type == "string"))' "$ROOMF" 2>/dev/null) || rm=null
   free=$(df -Pk "$CARDS" 2>/dev/null | awk 'NR == 2 { print $4 }'); [[ $free =~ ^[0-9]+$ ]] || free=null
   mc=$(mhost); mc=${mc:-null}
-  # Whether card work yields to the user (the host file's steer, steer_on), for the Board's Rules tab.
-  sr=false; ! steer_on || sr=true
   # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved) and the test-slot pool's
   # size on the cores left (null when the pool cannot be read), or why this machine cannot keep cores, for the Rules tab.
   co=$( { slot_pool && n=$SLOT_N; } >/dev/null 2>&1 || n=null
@@ -314,7 +312,7 @@ health() {
   done
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
-    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson steer "$sr" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
+    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
@@ -348,7 +346,7 @@ health() {
       def alive($h): ($h | IN($open[])) and ($h | IN($gone[]) | not);
       # A stuck list with more entries: one for a card the list holds already adds what it says to the entry of that card.
       def also($more): reduce $more[] as $m (.; (map(.card) | index($m.card)) as $i | if $i == null then . + [$m] else .[$i] += $m end);
-    {time: ($now | todate), repo: $repo, loop: $loop, room: $room, machine: $machine, steer: $steer, cores: $cores, commit: $commit, state: $state, reason: (if $why == "" then null else $why end),
+    {time: ($now | todate), repo: $repo, loop: $loop, room: $room, machine: $machine, cores: $cores, commit: $commit, state: $state, reason: (if $why == "" then null else $why end),
        guard: {at: $ctl.guard, reading: $r.pct, readAt: $r.time, missing: ($ctl.guard != null and $r == null)}, start: $ctl.start, newest: (last.time // null),
        blocked: ($b | map(select(.reason | startswith($yes) | not))), waiting: ($b | map(select(.reason | startswith($yes)))),
        stuck: ($c | map(select(.end == null) | . + {since: ([.last.time, .out // ""] | max)}

@@ -310,31 +310,9 @@ and the tests that it gives the file now.
 ## The host file
 
 The host file, `~/.config/conveyor/host.json`, holds this machine's settings: the terms file, the projects (`records`),
-the machine's `cap` and pause, `testSlots`, `steer`, `reserveCores`, the Claude accounts and the Foreman's
+the machine's `cap` and pause, `testSlots`, `reserveCores`, the Claude accounts and the Foreman's
 groups. Setup writes it. [Setup](setup.md#the-host-file) lists its keys, and [Run](setup.md#run) says what each
 machine setting does.
-
-## Card work yields to you
-
-Conveyor often runs on the machine that you type on. With the host file's `steer` on, card work runs at a lower
-priority than your own work:
-
-- Card build, fix and review sessions run at a lowered CPU priority.
-- Card test runs, mutation checks and the sessions of a test-speed survey card run at idle CPU and disk priority.
-
-On Linux, a session runs at a higher `nice` value. Each card test run goes into a systemd slice of its own, with a low
-`CPUWeight` and `IOWeight`. Without a user systemd, a test run gets the `ionice` idle class, and `nice` and
-`SCHED_IDLE` only where your user can raise the priority again. On macOS, a test run starts with `taskpolicy -b` and a
-session with `taskpolicy -c utility`.
-
-Conveyor never lowers the Board's server, the Foreman's session or a process that you start.
-
-When a test run waits for the CPU and gets almost none for a few seconds, Conveyor gives it its normal priority back
-for a short time. Thus a test file does not time out because Conveyor lowered it.
-
-`steer` is on when the host file does not set it. To turn it off, set **Card work yields to you** to Off on the Board's
-Rules tab, or run `conveyor.sh machine steer off`. Card work then runs at normal priority, as your own work does.
-`conveyor.sh doctor` shows the setting and what Conveyor lowers on this machine.
 
 ## Cores kept for you
 

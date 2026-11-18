@@ -344,9 +344,6 @@ The host file holds the machine's settings. Each is unset by default:
 - `"mode": "pause"` pauses every project. `conveyor.sh machine pause` and `machine resume` write it, and so does the
   Board's machine head.
 - `testSlots`: the size of the machine's pool of test slots, one core each (`conveyor/README.md`, Test slots).
-- `steer`: on when unset. Card sessions and test runs run at a low priority, so that the machine stays quick for you.
-  `"steer": false` turns it off. The Board's Rules tab sets it as **Card work yields to you**
-  (`conveyor.sh machine steer <on | off>`; [Card work yields to you](configuration.md#card-work-yields-to-you)).
 - `reserveCores`: 0 when unset. The cores that card work never uses, so that you always have free cores. A number
   keeps that many of the highest-numbered cores, and a list of core numbers keeps those cores
   ([Cores kept for you](configuration.md#cores-kept-for-you)).

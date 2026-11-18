@@ -61,14 +61,11 @@ The loop:
   `max-cards` is how many build at once.
 - `serve` runs the same loop with no end, for one project.
 - `machine` runs the machine's one Conveyor, a loop for every record of the host file. `machine pause` and
-  `machine resume` pause and resume every project. `machine steer on` and `machine steer off` turn
-  [Card work yields to you](configuration.md#card-work-yields-to-you) on and off.
+  `machine resume` pause and resume every project.
 - `why <pid | name>` names a process, its parents, and the card, step and project it belongs to, or says that no card
   owns it. `work` lists the busy processes by card and step, the heaviest first, then the busy work that no card
   owns. A closed card's processes show as left over, with the command that stops them. Both take `--json`
   (`conveyor/README.md`, Why the machine is busy).
-- `bench responsiveness` times a short command start and a 10 ms CPU task beside card work, with Card work yields to
-  you on and off by turns, and prints the median and p90 of each.
 - `bench drift [<engine commit>]` compares the cards that ran on an engine commit with the cards that ran on the
   commit before it: tokens, minutes, reviews to land, fix rounds, blocks and waits (the [drift watch](benchmarks.md#drift-watch)).
 - `bench swe <n>` runs the first n tasks of SWE-bench Verified through Conveyor, n from 1 to 500, and the official

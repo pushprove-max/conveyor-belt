@@ -414,7 +414,7 @@ function healthWorkView(ctx) {
   const pct = (n) => `${Number(n) || 0}% of a core`;
   const procs = (list) => {
     const ul = h('ul', 'work-procs');
-    (Array.isArray(list) ? list : []).forEach((x) => ul.append(h('li', null, `${pct(x.cpu)}  ${x.pid}  ${String(x.command || '')}${x.test ? '  (in a card test run\'s slice)' : ''}`)));
+    (Array.isArray(list) ? list : []).forEach((x) => ul.append(h('li', null, `${pct(x.cpu)}  ${x.pid}  ${String(x.command || '')}`)));
     return ul;
   };
   if (w.busy) det.append(h('p', 'work-state', 'Reading what keeps the machine busy…'));

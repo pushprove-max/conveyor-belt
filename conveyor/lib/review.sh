@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # One review, read-only, never running tests: of the staged diff, or as the third argument asks instead. It runs on
 # Codex, on Claude when the reviewer in force is a Claude model (claudereview, below), or on OpenCode when it is an
-# OpenCode one (opencodereview). A review and its judge run at a session's lowered priority, as a build does
-# (steer_words session, lib/slots.sh).
+# OpenCode one (opencodereview). A review and its judge run on the cores left for card work, as a build does
+# (slot_keepwords, lib/slots.sh).
 # Not --ephemeral: the session file Codex keeps is where a running review's tokens are read (rollout); it is
 # removed when the review ends, however it ends.
 # Answer in <worktree>.review; prints its record fields. A review that fails (a timeout, no answer) leaves the review
@@ -92,7 +92,7 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
   local model=$4 effort=$5 rc roll s sec f run='' no=''
   rm -f "$1.review.new"; sec=$SECONDS
-  (cd "$1" && codexargs && steer_words session && exec "${STEER[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
+  (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
     -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$model"; rc=$?; sec=$((SECONDS - sec))
   # The running total its session file holds: the tokens of a review that ended before its turn did.
@@ -159,7 +159,7 @@ ocrun() { # <worktree> <opencode:provider/model> <effort>
   p=$(jq -cn --arg rv "$1.rv/**" '{"*": "deny", read: "allow", glob: "allow", grep: "allow", list: "allow", external_directory: {"*": "deny", ($rv): "allow"}}') || return 1
   OPENCODE_CONFIG_CONTENT=$(jq -cn --argjson p "$p" '{permission: $p, default_agent: "conveyor-readonly", agent: {"conveyor-readonly": {mode: "primary", permission: $p}}}') || return 1
   export OPENCODE_CONFIG_CONTENT OPENCODE_DISABLE_PROJECT_CONFIG=1
-  cd "$1" && steer_words session && exec "${STEER[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" opencode run --pure --format json --agent conveyor-readonly -m "${2#opencode:}" --variant "$3"
+  cd "$1" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" opencode run --pure --format json --agent conveyor-readonly -m "${2#opencode:}" --variant "$3"
 }
 # One OpenCode review, called by review() and ending as it does, run as claudereview() runs one: the same prompt,
 # with no shell (noshell()), and the same answer file, record fields (OCREVIEWREAD's) and spent file. Its answer is the
@@ -205,7 +205,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   d=$(acctenv "${RACCT:-$ACCT}") || { echo "$d"; return 1; }
   p=$(noshell "$1" "$2" "$3") || { echo "$p"; return 1; }
   sec=$SECONDS
-  (cd "$1" && proxyenv && acctrun "$d" && steer_words session && exec "${STEER[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" --permission-mode default --tools Read,Grep,Glob \
+  (cd "$1" && proxyenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" --permission-mode default --tools Read,Grep,Glob \
     --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
     <<<"$p"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$4"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
@@ -329,7 +329,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     d=$(acctenv "${RACCT:-$ACCT}") || { jq -cn --arg r "$d" '{failed: $r}'; return 1; }
     rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" && cp "$STE80" "$1.rv/ste80.md" || { jq -cn '{failed: "the staged change or the writing method could not be written for the judge"}'; return 1; }
     p=$2$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large. The file $STE80 is the file $1.rv/ste80.md: read it there."
-    (cd "$1" && proxyenv && acctrun "$d" && steer_words session && exec "${STEER[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default --tools Read,Grep,Glob \
+    (cd "$1" && proxyenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default --tools Read,Grep,Glob \
       --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
       <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$SESSIONREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage, ok} | del(.[] | nulls)' 2>/dev/null)
@@ -349,7 +349,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$OCREVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage} | del(.[] | nulls)' 2>/dev/null)
   else
     model=$(codexmodel "$model") || { jq -cn --arg r "$model" '{failed: $r}'; return 1; }
-    (cd "$1" && codexargs && steer_words session && exec "${STEER[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
+    (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" -o "$1.judge" - <<<"$2"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec))
     roll=$(rollout "$1.judge.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage}' 2>/dev/null)

@@ -8,7 +8,7 @@ const test = cases(import.meta.url);
 const WORK = { host: 'devbox', groups: [
   { card: 'c20261117T000001-sample-5', issue: 5, project: 'sample', step: 'test', closed: false, cpu: 90, stop: null, processes: [{ pid: 300, cpu: 90, command: 'node --test a.test.js' }] },
   { card: 'c20261117T000002-sample-6', issue: 6, project: 'sample', step: null, closed: true, cpu: 80, stop: 'kill 400 401', processes: [{ pid: 400, cpu: 80, command: 'node leftover.js' }] }],
-  other: [{ pid: 500, cpu: 60, command: 'firefox', test: false }, { pid: 501, cpu: 20, command: 'node stray.js', test: true }] };
+  other: [{ pid: 500, cpu: 60, command: 'firefox' }, { pid: 501, cpu: 20, command: 'node stray.js' }] };
 const view = (w) => panel(w, 'health').querySelector('details.work-now');
 const opened = async (w) => { view(w).open = true; view(w).dispatchEvent(new w.Event('toggle')); await settle(); await settle(); };
 
@@ -28,7 +28,7 @@ test('Health: Work now reads the host when opened, lists busy work by card and s
   const left = view(w).querySelector('.work-left');
   assert.equal(left.querySelector('.work-stop code').textContent, 'kill 400 401', 'the leftovers name the command that stops them');
   assert.deepEqual(Array.from(view(w).querySelectorAll('.work-other li'), (li) => li.textContent),
-    ['60% of a core  500  firefox', '20% of a core  501  node stray.js  (in a card test run\'s slice)']);
+    ['60% of a core  500  firefox', '20% of a core  501  node stray.js']);
   const moved = full();
   moved.panels.health.data.host.error = 'ssh: connection timed out';
   const before = panel(w, 'health').dataset.renders;

@@ -73,10 +73,6 @@ card() { # <card> <issue> [<branch> <tip>]
   testlinks "$c" "$wt" || { block "$c" "$n" "$wt" "the test links of the main-red record could not be staged in .conveyor/test-links.json"; return; }
   # A card of issue 0 with no branch is a main-red fix card (redpick()): its entry in the main-is-red record stands in.
   issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
-  # A test-speed survey card's sessions run its test files themselves (lib/survey.sh): at a test run's idle priority,
-  # not a session's (session1, lib/slots.sh steer_words).
-  # shellcheck disable=SC2034 # read by session1 (lib/session.sh), which card() calls
-  { local STEER_KIND=session; [[ $(jq -r '.title // ""' <<<"$issue" 2>/dev/null) != 'Test-speed survey, '* ]] || STEER_KIND='test'; }
   # The control record's rule "visible changes need the owner's yes" (yesrule()), as the card starts. Off, nothing below
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
   # brief and the review leave the approval out, and a visible change lands as any change does.

@@ -522,6 +522,8 @@ t_machinemode() {
   echo '{"cap": 4' > "$H"
   ! loop "$A" machine pause >/dev/null 2>&1 && [ "$(cat "$H")" = '{"cap": 4' ] || fail "a host file that does not read was written over"
   jq -n '{}' > "$H"; out=$(loop "$A" machine stop 2>&1); [ $? = 2 ] && grep -q 'usage: conveyor.sh machine \[pause | resume\]' <<<"$out" || fail "machine stop is not a usage error: $out"
+  # Issue 347: steer is removed, so `machine steer off` is a usage error and writes no steer to the host file.
+  out=$(loop "$A" machine steer off 2>&1); [ $? = 2 ] && [ "$(jq -c . "$H")" = '{}' ] || fail "machine steer is still taken: $out $(cat "$H")"
   # No machine setting: the record's machine is null, as a host file that sets none caps and pauses nothing.
   jq -n --arg a "$A" '{records: [{repo: "alpha", main: $a}]}' > "$H"
   [ "$(loop "$A" health | jq -c .machine)" = null ] || fail "a host file that sets nothing reads as a machine setting: $(loop "$A" health | jq -c .machine)"

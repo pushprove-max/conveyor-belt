@@ -37,7 +37,7 @@ slot_cpus() {
 }
 
 # The cores kept for the user (the host file's reserveCores; docs/configuration.md, Cores kept for you), one a line:
-# no test slot is on one (slot_cpus), and no card session or test run may run on one (steer_words, slot_box), so the
+# no test slot is on one (slot_cpus), and no card session or test run may run on one (slot_keepwords, slot_box), so the
 # user's terminal and apps always have free cores. A number keeps that many of the machine's highest-numbered cores; a
 # list of core numbers keeps those. One core is always left for card work: a number of every core keeps all but
 # core 0, and a list that names every core keeps all but its lowest. None where taskset is not (slot_reserve_why).
@@ -302,14 +302,12 @@ slot_mine() {
 # <command>), each box saying so to all it starts (CONVEYOR_TEST_BOX). None, and no limit (as before boxes), where no
 # such scope can be made: no systemd-run (macOS), no user manager, or a systemd that cannot be told to leave the `$`
 # of the command's words alone (--expand-environment); and inside a box already, as a box made there would be a scope
-# beside it, outside its limit. Called once, after slot_pool: it tries a box (about 10 ms). Inside a steered card test
-# run (steer_words: CONVEYOR_STEER_SLICE) each box goes in the run's slice, so it stays lowered with the run.
+# beside it, outside its limit. Called once, after slot_pool: it tries a box (about 10 ms).
 slot_box() {
   local m s=() k
   SLOT_BOX=()
   [ -z "${CONVEYOR_TEST_BOX:-}" ] && command -v systemd-run >/dev/null 2>&1 || return 0
   m=$(awk -v n="$SLOT_N" '/^MemTotal:/ { printf "%d", $2 / 1024 / n }' /proc/meminfo 2>/dev/null) && [ "${m:-0}" -gt 0 ] || return 0
-  [[ ! ${CONVEYOR_STEER_SLICE:-} =~ ^conveyor_steer_[0-9]+\.slice$ ]] || s=(--slice="$CONVEYOR_STEER_SLICE")
   # The cores kept for the user are out of the box too (slot_keep).
   k=$(slot_keep) && s+=(-p "AllowedCPUs=$k")
   SLOT_BOX=(systemd-run --user --scope --quiet --collect --expand-environment=no "${s[@]}" -p CPUQuota=100% -p "MemoryMax=${m}M" -- env CONVEYOR_TEST_BOX=1)
@@ -369,148 +367,13 @@ slot_used() {
   echo "$n"
 }
 
-# Card work yields to the user (the host file's steer; docs/configuration.md, Card work yields to you): the machine a
-# card runs on is often the one its user types on. Card build, fix and review sessions run at lowered CPU priority;
-# card test runs (a mutation check's runs are test runs too) and a test-speed survey card's sessions at idle CPU and
-# disk priority. Only the command started so is lowered, with all it starts: never the loop itself, the Board's server,
-# the Foreman's session or a process the user starts. A steer of false in the host file lowers nothing (as before it;
-# steer_on, lib/paths.sh).
-
-# Sets STEER to the words put before a command of <kind> (session or test) to start it lowered ("${STEER[@]}"
-# <command>), STEER_HOW to what they lower, in words (doctor names it; steer_set reads it), and STEER_SLICE to the
-# systemd slice a test run is put in, else empty. All empty with steer off, but where the host file keeps cores for the
-# user (slot_keep): STEER then also starts the command on the cores left (taskset -c), steer on or off, and a test run's slice
-# scope has them as its AllowedCPUs: a session or test run never runs on a kept core. STEER_HOW names only the lowering.
-# macOS (taskpolicy): a session at the utility clamp (-c utility), a test run in the background (-b: idle CPU and
-# disk). Linux: a session at nice 10. A test run: in a slice of the user's systemd of its own, conveyor_steer_<pid>,
-# whose CPUWeight and IOWeight are 1 (of the default 100), set before the run starts; a test slot's box made inside
-# the run goes in the same slice (slot_box). Where no such slice can be made (no user systemd, or inside a box, where
-# a scope would leave the box's limit), each of ionice's idle class, nice 19 and SCHED_IDLE that this user can undo
-# again (steer_set up; a move back from nice 19 or SCHED_IDLE needs a privilege most users lack): a lowering that
-# could not be undone could starve a test file until its timeout.
-steer_words() { # <session | test>
+# The words put before a card session, review or test run ("${KEEP[@]}" <command>) to start it on the cores left for
+# card work (slot_keep, taskset -c), so it never runs on a core the host file keeps for the user; none when it keeps
+# none. Sets KEEP.
+slot_keepwords() {
   local k
-  k=$(slot_keep) || k=''
-  steer_prio "$1" "$k"
-  [ -z "$k" ] || STEER=(taskset -c "$k" "${STEER[@]}")
-}
-steer_prio() { # <session | test> <the cores left, else empty>
-  local u b
-  STEER=(); STEER_HOW=''; STEER_SLICE=''
-  steer_on || return 0
-  if command -v taskpolicy >/dev/null 2>&1; then
-    if [ "$1" = session ]; then STEER=(taskpolicy -c utility); else STEER=(taskpolicy -b); fi
-    STEER_HOW=${STEER[*]}; return 0
-  fi
-  if [ "$1" = session ]; then STEER=(nice -n 10) STEER_HOW='nice 10'; return 0; fi
-  if [ -z "${CONVEYOR_TEST_BOX:-}" ] && command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
-    STEER_SLICE=conveyor_steer_$BASHPID.slice
-    # Bound to the unit the caller runs in (the machine's service), so a stop of the loop's service stops the run too,
-    # as when it ran in the service's own group. Only a unit of the user's systemd: a login's scope is the system's.
-    u=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null); b=()
-    [[ $u != */user@*.service/* || ! ${u##*/} =~ ^[A-Za-z0-9:_.@-]+\.(service|scope)$ ]] || b=(-p "BindsTo=${u##*/}" -p "After=${u##*/}")
-    [ -z "$2" ] || b+=(-p "AllowedCPUs=$2")
-    STEER=(systemd-run --user --scope --quiet --collect --expand-environment=no --slice="$STEER_SLICE" "${b[@]}" -- env CONVEYOR_STEER_SLICE="$STEER_SLICE")
-    if timeout 10 systemctl --user set-property --runtime "$STEER_SLICE" CPUWeight=1 IOWeight=1 >/dev/null 2>&1 </dev/null \
-      && timeout 10 "${STEER[@]}" true >/dev/null 2>&1 </dev/null; then STEER_HOW='systemd CPUWeight=1 IOWeight=1'; return 0; fi
-    steer_end; STEER=()
-  fi
-  ! command -v ionice >/dev/null 2>&1 || ! ionice -c 3 sh -c 'ionice -c 2 -p $$' >/dev/null 2>&1 || { STEER+=(ionice -c 3); STEER_HOW+=' ionice idle'; }
-  ! nice -n 19 sh -c 'renice -n 0 -p $$' >/dev/null 2>&1 || { STEER+=(nice -n 19); STEER_HOW+=' nice 19'; }
-  ! command -v chrt >/dev/null 2>&1 || ! chrt -i 0 sh -c 'chrt -o -p 0 $$' >/dev/null 2>&1 || { STEER+=(chrt -i 0); STEER_HOW+=' SCHED_IDLE'; }
-  STEER_HOW=${STEER_HOW# }
-}
-
-# Drops the slice steer_words made (its runtime settings with it), once the run in it has ended.
-steer_end() { [ -z "${STEER_SLICE:-}" ] || steer_drop "$STEER_SLICE"; STEER_SLICE=''; }
-
-# Drops steer slice <slice>: its runtime settings, and the slice itself when no process is left in it (a slice stays
-# active once made, so one left was never removed). A slice with a process still in it keeps it; steer_sweep removes
-# it once it is empty.
-steer_drop() { # <slice>
-  local g
-  timeout 10 systemctl --user revert "$1" >/dev/null 2>&1 </dev/null
-  g=$(timeout 10 systemctl --user show -p ControlGroup --value "$1" 2>/dev/null </dev/null)
-  [ -z "$g" ] || ! grep -qx 'populated 1' "/sys/fs/cgroup$g/cgroup.events" 2>/dev/null || return 0
-  timeout 10 systemctl --user stop "$1" >/dev/null 2>&1 </dev/null
-}
-
-# At the loop's start: drops each steer slice (conveyor_steer_<pid>.slice) whose process is gone, one a run that was
-# killed, or whose machine stopped, left behind (steer_end never ran for it).
-steer_sweep() {
-  local s p
-  command -v systemctl >/dev/null 2>&1 || return 0
-  while read -r s _; do
-    [[ $s =~ ^conveyor_steer_([0-9]+)\.slice$ ]] || continue
-    p=${BASH_REMATCH[1]}
-    ps -p "$p" >/dev/null 2>&1 || steer_drop "$s"
-  done < <(timeout 10 systemctl --user list-units --all --plain --no-legend 'conveyor_steer_*.slice' 2>/dev/null </dev/null)
-}
-
-# The processes of the steered run <process group>: those of the group, and every process under its leader, as a test
-# runner's workers can each be a process group of their own (the engine's own cases are: tests/lib.sh run_case).
-steer_pids() { # <process group>
-  { pgrep -g "$1"
-    ps -A -o pid= -o ppid= | awk -v r="$1" '{ k[$2] = k[$2] " " $1; e[$1] = 1 }
-      END { q[1] = r; n = 1; for (i = 1; i <= n; i++) { if (e[q[i]]) print q[i]; m = split(k[q[i]], c, " "); for (j = 1; j <= m; j++) q[++n] = c[j] } }'
-  } 2>/dev/null | sort -un
-}
-
-# Gives the steered run <process group> its normal priority (up), or lowers it again as steer_words did (down): its
-# slice's weights, else each of its processes (steer_pids).
-steer_set() { # <up | down> <process group>
-  local p w=1 c=3 n=19 i=-i
-  [ "$1" = down ] || { w=100 c=2 n=0 i=-o; }
-  if [ -n "$STEER_SLICE" ]; then
-    timeout 10 systemctl --user set-property --runtime "$STEER_SLICE" "CPUWeight=$w" "IOWeight=$w" >/dev/null 2>&1 </dev/null; return 0
-  fi
-  for p in $(steer_pids "$2"); do
-    case $STEER_HOW in
-      taskpolicy*) if [ "$1" = up ]; then taskpolicy -B -p "$p"; else taskpolicy -b -p "$p"; fi ;;
-      *) [[ $STEER_HOW != *ionice* ]] || ionice -c "$c" -p "$p"
-         [[ $STEER_HOW != *'nice 19'* ]] || renice -n "$n" -p "$p"
-         [[ $STEER_HOW != *SCHED_IDLE* ]] || chrt "$i" -p 0 "$p" ;;
-    esac
-  done >/dev/null 2>&1
-}
-
-# The CPU time of <process group>'s processes (steer_pids), in hundredths of a second, and how many of them are
-# runnable now: "<cpu> <runnable>". Linux reads /proc (each process's own times and its waited-for children's); elsewhere ps.
-steer_use() { # <process group>
-  local p l a c=0 n=0 hz
-  if [ -r /proc/self/stat ]; then
-    hz=$(getconf CLK_TCK 2>/dev/null) && [ "${hz:-0}" -gt 0 ] || hz=100
-    for p in $(steer_pids "$1"); do
-      read -r l < "/proc/$p/stat" 2>/dev/null || continue
-      read -ra a <<<"${l##*) }"
-      [ "${a[0]}" != R ] || n=$((n + 1)); c=$((c + a[11] + a[12] + a[13] + a[14]))
-    done
-    echo "$((c * 100 / hz)) $n"; return 0
-  fi
-  l=$(steer_pids "$1" | paste -sd, -)
-  [ -n "$l" ] || { echo '0 0'; return 0; }
-  ps -o stat= -o time= -p "$l" 2>/dev/null | awk '{ k = split($2, t, ":"); s = 0; for (i = 1; i <= k; i++) s = s * 60 + t[i]; c += int(s * 100 + 0.5); if ($1 ~ /^R/) n++ }
-    END { printf "%d %d\n", c, n }'
-}
-
-# No starvation, beside a steered run <process group>: a run with a process waiting to run (runnable) whose CPU time
-# grows by less than a tenth of a second in 3 looks (a look each STEER_TICK seconds, 1 by default) gets its normal
-# priority back for 2 looks, then is lowered again. A test file then never times out only because it was lowered.
-# It looks while the run's leader <process group> lives, not its group: the watch starts before timeout makes the
-# group (testonce), and a survey session (session.sh) is never a group of its own; steer_pids finds its processes.
-# Started in the background, it first closes every descriptor it was given, whatever its number (closefds), as
-# testclock does: a lock its caller holds (the whole test's on main, maintest()) would else stay held by it, and by
-# the sleep it leaves when killed.
-steer_watch() { # <process group>
-  local c n base=-1 k=0 up=0
-  [ -n "$STEER_HOW" ] || return 0
-  closefds
-  exec </dev/null >/dev/null 2>&1
-  while kill -0 "$1" 2>/dev/null; do
-    sleep "${STEER_TICK:-1}"
-    read -r c n < <(steer_use "$1") || break
-    if [ "$up" -gt 0 ]; then up=$((up - 1)); [ "$up" -gt 0 ] || steer_set down "$1"; base=$c k=0; continue; fi
-    if [ "$n" -gt 0 ] && [ "$base" -ge 0 ] && [ $((c - base)) -lt 10 ]; then k=$((k + 1)); else base=$c k=0; fi
-    [ "$k" -lt 3 ] || { steer_set up "$1"; up=2; }
-  done
+  KEEP=()
+  # shellcheck disable=SC2034 # KEEP is read in lib/session.sh, lib/review.sh and lib/testrun.sh
+  k=$(slot_keep) && KEEP=(taskset -c "$k")
+  return 0
 }

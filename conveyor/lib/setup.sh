@@ -790,6 +790,9 @@ doctor() {
     # The settings of the machine room, which is removed (issue 346): read with them ignored, and said once, in one line.
     t=$(jq -r '[keys[] | select(IN("pressure", "maxLoad", "minFreeMemMB"))] | join(", ")' "$HOST" 2>/dev/null)
     [ -z "$t" ] || echo "warning: the host file $HOST sets $t, which no longer do anything: no card or test waits for the machine's load, pressure or free memory; remove them"
+    # The host file's steer, which is removed (issue 347): read as if not there, and said once, in one line.
+    [ "$(jq 'has("steer")' "$HOST" 2>/dev/null)" != true ] \
+      || echo "warning: the host file $HOST sets steer, which no longer does anything: card sessions, reviews and test runs run at normal priority; remove it"
   fi
   # One Conveyor per machine: the machine's loop (`machine`), and no loop of a project beside it that it did not start
   # (a per-project service left from before, or a `serve` started by hand). Each loop alive names its pid.
@@ -827,13 +830,6 @@ doctor() {
     if [ ${#loops[@]} -gt 1 ]; then no "one Conveyor loop on this machine: ${loops[1]} runs beside ${loops[0]}" \
       "stop every loop but the machine's (a per-project service: systemctl --user disable --now conveyor-<name>.service, or launchctl bootout gui/\$(id -u)/conveyor.<name>), then run install-service once"
     elif [ ${#loops[@]} = 1 ]; then ok "one Conveyor loop on this machine: ${loops[0]}"; fi
-  fi
-  # Whether card work yields to the user (the host file's steer, lib/slots.sh steer_words), and how, on this machine.
-  # shellcheck disable=SC2034 # STEER and STEER_SLICE are set by steer_words and steer_end (lib/slots.sh)
-  local STEER STEER_HOW STEER_SLICE s
-  if ! steer_on; then ok "card work runs at normal priority: the host file's steer is off (the Board's Rules tab, or conveyor.sh machine steer on, turns it on)"
-  else steer_words session; s=${STEER_HOW:-normal priority}; steer_words test; steer_end
-    ok "card work yields to you (the host file's steer is on): card sessions run at $s, card test runs at ${STEER_HOW:-normal priority, as nothing on this machine can lower them and raise them again}"
   fi
   # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved), and the test slots left.
   local sl='the test-slot pool cannot be read'

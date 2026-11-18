@@ -142,8 +142,8 @@ at the top says **Conveyor is not set up for this repository yet**. Its **Set up
 **Finish** records the setup in the project's control record. The box then stops opening. When a newer Conveyor has a
 rule that you did not set, the box opens again with only the steps that hold the new rules.
 
-The box does not ask for the machine's settings, Card work yields to you and Cores kept for you: they belong to the
-build machine. The test command, the product paths and the owner stay with `/conveyor-belt:setup`.
+The box does not ask for the machine's setting, Cores kept for you: it belongs to the build machine. The test
+command, the product paths and the owner stay with `/conveyor-belt:setup`.
 
 ## Rules
 
@@ -157,9 +157,7 @@ The Rules tab holds the settings:
 - the builder, reviewer and judge: each a CLI installed on the loop's machine, then a model, then an effort
   ([Models](configuration.md#models)),
 - the accounts ([Accounts](#accounts)),
-- where new issues start,
-- **Card work yields to you**: a setting of the build machine, for every project. On, card sessions and test runs
-  run at a low priority ([Card work yields to you](configuration.md#card-work-yields-to-you)).
+- where new issues start.
 
 A setting changed there shows its new value at once. A value the host refuses goes back, with the refusal beside it.
 

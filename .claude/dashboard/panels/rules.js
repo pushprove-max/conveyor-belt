@@ -14,8 +14,7 @@
 // record's landAs or else the pack's; disabled the same way for a record with no landAs), Test before a push (On or Off: the
 // record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
-// way for a record with no rules.wholeSuite), Card work yields to you (On or Off, the machine's
-// steer, sent as POST /machine; disabled the same way when the snapshot does not say it), Cores kept for you (shown,
+// way for a record with no rules.wholeSuite), Cores kept for you (shown,
 // not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores), one row a standing kind of
 // routine yes the Foreman takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release
@@ -99,7 +98,7 @@
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
-    steer: null, steerSent: null, cores: null, bare: null, bareFor: null, idle: null, shown: new Map() };
+    cores: null, bare: null, bareFor: null, idle: null, shown: new Map() };
   // The setup of a repository not yet onboarded (drawOnboard()): its box and the line above the panels, once made; open;
   // later (Later pressed: shut for this visit); repo, the project it is for; keys, the rules it asks for, worked out
   // when it opens; set, the rules whose choice the host saved; rule, the rule of the row a box event is on (run());
@@ -107,8 +106,7 @@
   // box focused last, focused again when a redraw replaced it.
   const ONB = 'onboard';
   const OB = { box: null, line: null, open: false, later: false, repo: null, keys: [], set: new Set(), rule: null, out: null, step: 0, back: null, act: null };
-  // steer: the machine's Card work yields to you as the snapshot says (null: an engine that does not say); steerSent:
-  // the value the host took from here, shown until a snapshot says it. cores: the machine's cores kept for the user as
+  // cores: the machine's cores kept for the user as
   // the snapshot says ({reserved, slots, unavailable}; null: an engine that does not say).
   // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
@@ -971,26 +969,6 @@
     wOn.disabled = wOff.disabled = !wholeKnown;
     el.append(row('wholeSuite', 'Whole suite in a card', 'a card may run every test file when it cannot find the tests of its change',
       wOn, wOff, wholeKnown ? offLine(wholeOn, `a card runs only the test files it adds or changes (with none, 5 linked to its change)${checkOn ? ', the test files linked to the landings run before each push,' : ''} and the whole suite runs only in a release`) : newer(wholeKnown)));
-    // Card work yields to you: the machine's (the host file's steer, every project's alike), sent as POST /machine.
-    // On (the default) runs card sessions at lowered priority and card test runs at idle priority; Off runs them at
-    // normal priority. Undo sends the other value.
-    const steerKnown = S.steer !== null, steerOn = S.steerSent !== null ? S.steerSent : S.steer !== false;
-    const steerTo = (on) => {
-      if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return; }
-      S.busy = true; draw(); say('Sending…');
-      S.ctx.post('machine', { action: 'steer', value: on ? 'on' : 'off' }).then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the host answered ${r.status}`]),
-        () => [false, 'the host did not answer']).then(([ok, said]) => {
-        S.busy = false;
-        if (ok) S.steerSent = on;
-        draw();
-        say(ok ? `Done: Card work yields to you is ${on ? 'on' : 'off'}.` : `Not done: ${S.ctx.refusal(said)}`, ok ? () => steerTo(!on) : null);
-      });
-    };
-    const sOn = choice('On', 'steer-on', 'Card work yields to you: on', steerOn, () => { if (!steerOn) steerTo(true); });
-    const sOff = choice('Off', 'steer-off', 'Card work yields to you: off', !steerOn, () => { if (steerOn) steerTo(false); });
-    sOn.disabled = sOff.disabled = !steerKnown;
-    el.append(row('steer', 'Card work yields to you', 'card sessions and tests run at low priority on the build machine, for every project',
-      sOn, sOff, steerKnown ? offLine(steerOn, 'card work runs at normal priority, beside yours') : newer(steerKnown)));
     // Cores kept for you: the machine's (the host file's reserveCores), shown here and set in the host file.
     const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';
     el.append(row('cores', 'Cores kept for you', 'card sessions and tests never run on these cores, for every project (the host file\'s reserveCores)',
@@ -1965,8 +1943,8 @@
   }
 
   // ---- the setup of a repository not yet onboarded ----
-  // Its five steps, each the project's rules it asks for, by their row in rules(). The machine's rules (Card work yields
-  // to you, Cores kept for you) are the build machine's, not the repository's, and the pack's own setup answers stay
+  // Its five steps, each the project's rules it asks for, by their row in rules(). The machine's rule (Cores kept
+  // for you) is the build machine's, not the repository's, and the pack's own setup answers stay
   // with /conveyor-belt:setup: neither is asked here.
   const ONBOARD = [
     ['What to build', ['build', 'never']],
@@ -2293,9 +2271,7 @@
     S.idle = null;
     S.bare = key;
     S.raw = [d, read, view.repo];
-    // The machine's steer, whichever project is drawn (only the part's top names it); null from an older engine.
-    S.steer = d && typeof d.steer === 'boolean' ? d.steer : null;
-    if (S.steerSent === S.steer) S.steerSent = null;
+    // The machine's cores kept, whichever project is drawn (only the part's top names them); null from an older engine.
     S.cores = d && d.cores && typeof d.cores === 'object' && Array.isArray(d.cores.reserved) ? d.cores : null;
     if (S.d && view.repo !== S.d.repo) {
       S.picked.clear(); S.open.clear(); S.armed = null; S.asking = null; S.turned = false; S.dep = null;

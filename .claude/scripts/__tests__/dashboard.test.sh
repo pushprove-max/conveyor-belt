@@ -614,10 +614,9 @@ q '.panels.tests.data | (has("machine") | not) and (.others.widgetshop | has("ma
   and (.tests.files | map([.file, .cpu])) == [["a.test.sh", 3]] and .others.widgetshop.tests == null
   and (.tests.files[0].runs | map([.card, .issue, .url])) == [["c5-12", 12, "'"$PU"'/12"], ["odd", null, null]]' \
   "the Tests part names no machine load limit, and each project's own test files, each run with its card's link"
-# Issue 194: the Rules tab sets whether card work yields to the user, a setting of the machine (the host file's steer).
-# One record's health says it is off, the other's (an older snapshot) says nothing: the Rules part shows it off, never
-# on for the record that did not say.
-q '.panels.rules.data.steer == false' "the Rules part carries the machine's steer, off as one record's health says"
+# Issue 347: steer (Card work yields to you) is removed, so the Rules part carries no steer, even from a snapshot of
+# an engine before it that still says it is off.
+q '.panels.rules.data | has("steer") | not' "the Rules part carries no steer"
 # Issue 196: the Rules tab shows the cores kept for the user and the test slots left, the machine's, from whichever
 # record's health names them; a Rules part without them could not show the setting at all.
 q '.panels.rules.data.cores == {reserved: [14, 15], slots: 14, unavailable: null}' "the Rules part carries the machine's kept cores and slots left"

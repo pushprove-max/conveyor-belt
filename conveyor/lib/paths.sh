@@ -60,9 +60,6 @@ BOARD_PKGS='pyotp segno cryptography'
 # both when the file is not there and when a folder or link above it cannot be followed, and only the first means
 # absent. Anything else in the way (a link that cannot be followed, a file) is read, and fails.
 HOST=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json; ST=
-# Whether card work yields to the user, the host file's steer (lib/slots.sh steer_words): on unless it is false, so a
-# host file that is not there, or does not read, leaves it on.
-steer_on() { [ "$(jq -r '.steer' "$HOST" 2>/dev/null)" != false ]; }
 nohost() {
   local up=$HOST
   while ! [ -e "$up" ] && ! [ -L "$up" ]; do case $up in */*) up=${up%/*}; up=${up:-/} ;; *) up=. ;; esac; done

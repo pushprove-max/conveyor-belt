@@ -426,7 +426,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
 session() { apitries "$1" "${3:-build}" "$1.out" session1 "$@"; } # <worktree> <prompt> [step: build (when none is given), fix or rebase]
 # The builder program, the one seat() names for the model (its agent: the CLI the control record names, or the one the
 # pack's models.allowed lists the model under): OpenCode, Codex or Claude Code. Run in the background (watch() follows it), so it
-# execs the program in its own subshell, which a stall's kill ends, behind the words session1 lowers it with (STEER).
+# execs the program in its own subshell, which a stall's kill ends, behind the words session1 puts it on the cores left for card work with (KEEP).
 # Claude: bypass mode, as any other mode asks before a write under .claude/, and a headless session cannot answer, so
 # a tooling card ended with no change; the card hooks (the settings file) still run in this mode.
 # OpenCode (README.md, OpenCode builder): `opencode run` in the worktree, the prompt on stdin, its events as JSON
@@ -455,13 +455,13 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
       # A pool that cannot be made is left out: a test run then says why it takes no slot.
       ! slot_pool >/dev/null 2>&1 || a=(--add-dir "$SLOT_DIR")
       codexargs # its provider, when its route is the proxy
-      exec "${STEER[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json -s workspace-write -C "$1" "${a[@]}" "${CODEX_PX[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json -s workspace-write -C "$1" "${a[@]}" "${CODEX_PX[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \
         -c 'web_search="disabled"' \
         --enable hooks --dangerously-bypass-hook-trust --disable unified_exec_tty -c "hooks.PreToolUse=$h" - <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     opencode) export CLAUDE_PROJECT_DIR=$1 CONVEYOR_GUARD_SETTINGS=$1.settings OPENCODE_CONFIG=$1.opencode.json OPENCODE_DISABLE_PROJECT_CONFIG=1
-      exec "${STEER[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" opencode run --model "${3#opencode:}" --format json --auto <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" opencode run --model "${3#opencode:}" --format json --auto <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     *) proxyenv && acctrun "$5" || exit 1
-      exec "${STEER[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools Agent \
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools Agent \
         --setting-sources "" --strict-mcp-config --settings "$1.settings" --output-format stream-json --verbose <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
   esac
 }
@@ -511,21 +511,16 @@ session1() {
     *) dir=$(acctenv "$ACCT") || { echo "$dir"; return 1; } ;;
   esac
   rm -f "$1.spent" "$1.stalled"
-  # Card work yields to the user (lib/slots.sh steer_words): a build, fix or rebase session at lowered priority; a
-  # test-speed survey card's, which runs its test files itself, at a test run's idle one, given its normal priority
-  # back while it starves (steer_watch), as a test run is (card(): STEER_KIND).
-  # shellcheck disable=SC2034 # STEER_HOW and STEER_SLICE are set by steer_words and read by steer_watch (lib/slots.sh)
-  local STEER STEER_HOW STEER_SLICE sw='' bp
-  steer_words "${STEER_KIND:-session}"
+  # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
+  local KEEP bp
+  slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does
   # (reviewed()), on what it left in the worktree; the stalled try
   # is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step.
   while :; do
     sec=$SECONDS
     builder "$1" "$2" "$model" "$effort" "$dir" "$agent" & bp=$!
-    [ "${STEER_KIND:-session}" != test ] || { steer_watch $bp 8>&- & sw=$!; }
     watch $bp "$1.out" "$1.live" "${3:-build}" "$model" "$agent"; rc=$?; sec=$((SECONDS - sec))
-    [ -z "$sw" ] || { kill "$sw" 2>/dev/null; wait "$sw" 2>/dev/null; sw=''; }
     # A Codex session cut off before its turn completed: its running total, from the session file Codex keeps (read
     # and removed, as a review's is).
     run=''; [ "$agent" != codex ] || { roll=$(rollout "$1.out"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }; }
@@ -539,7 +534,6 @@ session1() {
     echo "conveyor: card ${1##*/}: its ${3:-build} made no progress for ${STUCK}s: ended, and run once more after ${REVIEW_PAUSE}s" >&2
     sleep "$REVIEW_PAUSE"
   done
-  steer_end
   [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f")
   [ "$agent" != claude ] || proxypack
   [ "$agent" = opencode ] || f=$(routed "$f" "$agent")

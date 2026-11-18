@@ -2,19 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: cores kept for the user (issue 196; the host file's reserveCores, lib/slots.sh slot_reserved, slot_keep,
-# slot_reserve_why, slot_cpus, steer_words): no test slot is on a kept core, no card session or test run runs on one,
-# and doctor and health name the kept cores and the slots left, or why the machine cannot keep cores.
+# slot_reserve_why, slot_cpus, slot_keepwords): no test slot is on a kept core, no card session or test run runs on one,
+# and doctor and health name the kept cores and the slots left, or why the machine cannot keep cores. Card sessions and
+# test runs run at normal priority (issue 347: the host file's steer is gone).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# The case's own host file, as the engine reads it, with <json> merged in; steer_on (lib/paths.sh) read with it.
+# The case's own host file, as the engine reads it, with <json> merged in.
 reserve_host() { # <json>
   HOST=$XDG_CONFIG_HOME/conveyor/host.json
   mkdir -p "${HOST%/*}" && jq -n "$1" > "$HOST" || fail "the host file could not be written"
-  eval "$(sed -n '/^steer_on() {/p' "$SRC/lib/paths.sh")"
 }
+# The priority of process <pid>: "<nice> <ionice class>" (ionice's word for the class: idle, best-effort, none).
+prio() { echo "$(ps -o ni= -p "$1" | tr -d ' ') $( { ionice -p "$1" 2>/dev/null || echo none; } | cut -d: -f1)"; } # <pid>
 # The cores a process may run on, one a line, from taskset's list ("0-3,6").
 cpus_of() { # <pid>
   local l x i r
@@ -51,41 +53,59 @@ t_reservepool() {
   [ -z "$(slot_reserved)" ] && ! slot_keep >/dev/null || fail "reserveCores 0 keeps cores: $(slot_reserved | paste -sd, -)"
 }
 
-# Bugs it catches: a card session or test run ran on the cores kept for the user. The builder (an OpenCode session,
-# through the words every session uses, steer_words session) runs on the cores left, with steer on and with it off
-# (the cores are kept either way); a test run's words (steer_words test) start it on the cores left too.
+# Bugs it catches: a card session ran on the cores kept for the user; and (issue 347) a card session ran at lowered
+# priority (nice 10, or taskpolicy's utility clamp), so card work crawled on a busy machine. The builder (an OpenCode
+# session, through the words every session uses, slot_keepwords) runs on the cores left, at its caller's priority,
+# with a host file that still sets the removed steer; with no cores kept its words are none.
 t_reservesession() {
   # shellcheck disable=SC2034 # BUILD_TIMEOUT is read by builder()
-  local d=$T/$CASE STEER STEER_HOW STEER_SLICE BUILD_TIMEOUT=30 n s c
+  local d=$T/$CASE KEEP BUILD_TIMEOUT=30 n c
   command -v taskset >/dev/null || return 0
   n=$(nproc --all); [ "$n" -ge 3 ] || return 0
   mkdir -p "$d/bin" "$d/wt"
-  # opencode stands in for every session's program: it writes the cores it may run on beside the worktree.
-  printf '%s\n' '#!/usr/bin/env bash' 'taskset -cp $$ > "$PWD.cpus"; cat > /dev/null' > "$d/bin/opencode"; chmod +x "$d/bin/opencode"
+  # opencode stands in for every session's program: it writes the cores it may run on, and its priority, beside the worktree.
+  printf '%s\n' '#!/usr/bin/env bash' 'taskset -cp $$ > "$PWD.cpus"; echo "$(ps -o ni= -p $$ | tr -d " ") $( { ionice -p $$ 2>/dev/null || echo none; } | cut -d: -f1)" > "$PWD.prio"; cat > /dev/null' \
+    > "$d/bin/opencode"; chmod +x "$d/bin/opencode"
   eval "$(sed -n '/^builder() {/,/^}/p' "$SRC/lib/session.sh")"
-  for s in none false; do
-    reserve_host "{reserveCores: 2} + (if \"$s\" == \"none\" then {} else {steer: false} end)"
-    steer_words session; rm -f "$d/wt.cpus"
-    ( PATH=$d/bin:$PATH; builder "$d/wt" prompt opencode:p/m '' '' opencode ) || fail "the builder did not run: $(cat "$d/wt.err" 2>&1)"
-    c=$(sed 's/.*: //' "$d/wt.cpus") && [ -n "$c" ] || fail "the session did not say its cores"
-    [ "$c" = "$(slot_keep)" ] || [ "$c" = "0-$((n - 3))" ] || fail "with steer $s the session runs on cores $c, not those left (0-$((n - 3)))"
-  done
-  reserve_host '{reserveCores: 2}'
-  steer_words test
-  c=$("${STEER[@]}" bash -c 'taskset -cp $$' 2>&1 | sed 's/.*: //'); steer_end
-  [ "$c" = "0-$((n - 3))" ] || [ "$c" = "$(slot_keep)" ] || fail "a test run runs on cores $c, not those left (0-$((n - 3))): ${STEER[*]}"
+  reserve_host '{reserveCores: 2, steer: true}'
+  slot_keepwords
+  ( PATH=$d/bin:$PATH; builder "$d/wt" prompt opencode:p/m '' '' opencode ) || fail "the builder did not run: $(cat "$d/wt.err" 2>&1)"
+  c=$(sed 's/.*: //' "$d/wt.cpus") && [ -n "$c" ] || fail "the session did not say its cores"
+  [ "$c" = "$(slot_keep)" ] || [ "$c" = "0-$((n - 3))" ] || fail "the session runs on cores $c, not those left (0-$((n - 3)))"
+  [ "$(cat "$d/wt.prio")" = "$(prio $$)" ] || fail "the session ran at priority $(cat "$d/wt.prio"), not its caller's $(prio $$)"
+  reserve_host '{steer: true}'
+  slot_keepwords; [ ${#KEEP[@]} = 0 ] || fail "with no cores kept a session or test run is still started behind: ${KEEP[*]}"
+}
+
+# Bugs it catches: a card test run ran on the cores kept for the user; and (issue 347) it ran at idle CPU and disk
+# priority (a steer slice, ionice's idle class, nice 19 or taskpolicy -b), so card tests crawled on a busy machine.
+# The card's test command, run as a card's test step runs it (testonce), with no slot core to pin to, runs on the
+# cores left at its caller's priority, with a host file that still sets the removed steer.
+t_reservetestrun() {
+  local w=$T/$CASE/wt out n
+  command -v taskset >/dev/null || return 0
+  n=$(nproc --all); [ "$n" -ge 3 ] || return 0
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" && mkdir -p "$w.testlog" || fail "the worktree"
+  reserve_host '{reserveCores: 2, steer: true}'
+  # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), which testonce() runs; names() is not run here
+  # SLOT_CPUS emptied: this runner's own slot pool would else stand for the card's (no slot core to pin to, here).
+  out=$( ( LIVE=0.2 STUCK=1200; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot CONVEYOR_TEST_BOX=1; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && reportask "$w" && SLOT_CPUS='' \
+    && testonce "$w" 'taskset -cp $$ > "$PWD.cpus"; echo "$(ps -o ni= -p $$ | tr -d " ") $( { ionice -p $$ 2>/dev/null || echo none; } | cut -d: -f1)" > "$PWD.prio"' ) 2>&1 ) \
+    || fail "the run failed: $out $(cat "$w.test" 2>/dev/null)"
+  [ "$(sed 's/.*: //' "$w.cpus")" = "0-$((n - 3))" ] || fail "the card's test command ran on cores $(cat "$w.cpus"), not those left (0-$((n - 3)))"
+  [ "$(cat "$w.prio")" = "$(prio $$)" ] || fail "the card's test command ran at priority $(cat "$w.prio"), not its caller's $(prio $$)"
 }
 
 # Bug it catches: on a machine that cannot keep a process off a core (macOS: no taskset) the setting read as in
-# force. There no core is kept, the words of a session name no taskset, and slot_reserve_why says why.
+# force. There no core is kept, the words of a session name no taskset (nor any lowering), and slot_reserve_why says why.
 t_reservemac() {
-  # shellcheck disable=SC2034 # STEER_HOW and STEER_SLICE are set by steer_words
-  local d=$T/$CASE STEER STEER_HOW STEER_SLICE t out
+  local d=$T/$CASE KEEP t out
   mkdir -p "$d/bin"
   for t in jq nproc bash; do ln -s "$(command -v "$t")" "$d/bin/$t" || fail "no $t"; done
-  reserve_host '{reserveCores: 2}'
-  out=$(PATH=$d/bin OSTYPE=darwin23; slot_reserve_why; echo "kept:$(slot_reserved)"; slot_keep && echo keep; steer_words session; echo "words:${STEER[*]}")
-  [ "$out" = $'macOS lets no program keep a process off a core\nkept:\nwords:nice -n 10' ] || fail "on macOS the setting is not shown as not available, or a core is kept: $out"
+  reserve_host '{reserveCores: 2, steer: true}'
+  out=$(PATH=$d/bin OSTYPE=darwin23; slot_reserve_why; echo "kept:$(slot_reserved)"; slot_keep && echo keep; slot_keepwords; echo "words:${KEEP[*]}")
+  [ "$out" = $'macOS lets no program keep a process off a core\nkept:\nwords:' ] || fail "on macOS the setting is not shown as not available, or a core is kept: $out"
 }
 
 # Bugs it catches: neither doctor nor health (the Board's Rules tab) said which cores are kept for the user, nor how

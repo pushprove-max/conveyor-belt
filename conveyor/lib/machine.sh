@@ -130,24 +130,16 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$(sed -n 's/^SigIgn:[[:space:]]*//p' "/pr
 # machine's lock, as hostput, and under the host file's own ($HOST.lock, which a lane's note holds while it reads and
 # replaces the file: lanenote), so neither writes its older reading over the other's change: the host file read and
 # written whole (made, as {}, when there is none); one that does not read as an object is left as it is.
-# conveyor.sh machine steer <on | off>: whether card work yields to the user, the host file's steer (lib/slots.sh
-# steer_words): on (the default) removes it, off writes false. Written the same way as the pause.
-machinemode() { # <pause | resume | steer <on | off>>
-  local f='if $a == "pause" then .mode = "pause" else del(.mode) end' v=${2:-}
-  if [ "$1" = steer ]; then
-    [[ $v =~ ^(on|off)$ ]] || { echo "conveyor: steer is on or off, not \"$v\": nothing changed" >&2; return 2; }
-    f='if $v == "off" then .steer = false else del(.steer) end'
-  fi
+machinemode() { # <pause | resume>
+  local f='if $a == "pause" then .mode = "pause" else del(.mode) end'
   mkdir -p "${HOST%/*}" || return 1
   ( flock -w 30 9 || exit 1
     [ -e "$HOST" ] || echo '{}' > "$HOST" || exit 1
     jq -es 'length == 1 and (.[0] | type) == "object"' "$HOST" >/dev/null 2>&1 \
       || { echo "conveyor: the host file $HOST does not read as one object: the machine's Conveyor is not changed" >&2; exit 1; }
     t=$(mktemp "$HOST.XXXXXX") || exit 1
-    jq --arg a "$1" --arg v "$v" "$f" "$HOST" > "$t" && mv "$t" "$HOST" || { rm -f "$t"; exit 1; }
+    jq --arg a "$1" "$f" "$HOST" > "$t" && mv "$t" "$HOST" || { rm -f "$t"; exit 1; }
   ) 9>>"$HOST.lock" || return 1
-  if [ "$1" = steer ] && [ "$v" = off ]; then echo "conveyor: card work no longer yields to you: card sessions and test runs start at normal priority"
-  elif [ "$1" = steer ]; then echo "conveyor: card work yields to you: card sessions start at lowered priority, and card test runs at idle priority"
-  elif [ "$1" = pause ]; then echo "conveyor: the machine's Conveyor is paused: no project starts a new card (cards running finish)"
+  if [ "$1" = pause ]; then echo "conveyor: the machine's Conveyor is paused: no project starts a new card (cards running finish)"
   else echo "conveyor: the machine's Conveyor runs again: each project picks as its own record says"; fi
 }

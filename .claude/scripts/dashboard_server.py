@@ -11,8 +11,7 @@ things and nothing else: answer one open decision through `POST /answer`, restar
 `POST /restart`, and steer the Conveyor loop from the Board through `POST /control`: one action of
 `conveyor.sh control`, or the yes, the no or the retry of a card, run on the host conveyor/host.json names (here on one
 machine: conveyor_host()), on the
-record of it the request names (`POST /machine` pauses or resumes the whole machine, or sets its
-steer, instead,
+record of it the request names (`POST /machine` pauses or resumes the whole machine instead,
 and names no record); and manage
 users (below). Every write is taken from the page's own address only (own_page), and each names the user who made it
 (the ruling row, the approval or decline line, the server's log line). An answer is recorded in the
@@ -485,13 +484,10 @@ def test_settings_ok(v):
 
 
 def machine_ok(body):
-    """Whether the page's body is one machine action POST /machine takes: {action: pause | resume} and nothing else,
-    or {action: steer, value: on | off} (the Rules tab's Card work yields to you), and nothing else. It names no
-    project: an action for a project goes to /control, which refuses one without its repo."""
+    """Whether the page's body is one machine action POST /machine takes: {action: pause | resume} and nothing else.
+    It names no project: an action for a project goes to /control, which refuses one without its repo."""
     if not isinstance(body, dict):
         return False
-    if body.get('action') == 'steer':  # the Rules tab's Card work yields to you, as `conveyor.sh machine steer` takes it
-        return set(body) == {'action', 'value'} and body['value'] in ('on', 'off')
     return set(body) == {'action'} and body['action'] in ('pause', 'resume')
 
 
@@ -1514,8 +1510,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def control(self, machine=False):
         """POST /control: one checked action, run on the Conveyor host over ssh; the reply is the host's answer.
-        Same checks and order as /answer. POST /machine (machine): the pause or resume of the whole machine, or its load
-        limit or steer, the same way, as `conveyor.sh machine pause|resume|load <value>|steer <value>` on the host's main; it names no project
+        Same checks and order as /answer. POST /machine (machine): the pause or resume of the whole machine, the same
+        way, as `conveyor.sh machine pause|resume` on the host's main; it names no project
         and changes no project's record."""
         if not self.own_page():
             return self.send_error(403)
@@ -1548,7 +1544,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except ValueError as e:
             return self.reply(503, str(e))
         if machine:
-            action, args = 'machine', [body['action']] + ([body['value']] if 'value' in body else [])
+            action, args = 'machine', [body['action']]
             # On one machine main is the Board's own copy of Conveyor: the machine is steered as this checkout's.
             try:
                 at = main if target else board_main()
