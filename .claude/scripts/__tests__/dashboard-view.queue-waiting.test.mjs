@@ -34,6 +34,30 @@ for (const [name, next] of [['next empty', []], ['next non-empty', NEXT]]) {
   });
 }
 
+// Bug (issue 439): "Waiting on #N" did not say why #N does not move (held, blocked, or only queued), so the owner could
+// not tell a stuck queue from one waiting on purpose. The snapshot's waitsOn gives each state; the Queue panel and the
+// Board's queue column say it.
+const STATED = { repo: 'sample', card: null, issue: 24, title: 'Second half', url: `${P}/24`, priority: 'P1', followup: false, retried: false,
+  waitsFor: [20, 21, 22], waitsOn: [{ issue: 20, state: 'held' }, { issue: 21, state: 'blocked' }, { issue: 22, state: 'queued' }] };
+const SAID = 'Waiting on #20 (held), #21 (blocked), #22 (queued)';
+function stated() {
+  const d = full();
+  d.panels.queue.data.waiting = [STATED];
+  d.panels.board.data.waits = [STATED];
+  return d;
+}
+test('the Queue panel says the state of each issue a waiting one waits on', () => {
+  const w = boot();
+  deliver(w, stated());
+  assert.ok(chips(w).includes(SAID), chips(w).join(' | '));
+});
+test('the Board queue column says the state of each issue a waiting card waits on', () => {
+  const c = boot({ tab: 'control' });
+  deliver(c, stated());
+  const card = panel(c, 'board').querySelector('[data-col="queue"] .bcard[data-issue="24"]');
+  assert.equal(card.querySelector('.chip[data-reason="waits"]').textContent, SAID);
+});
+
 test('the Queue filtered to the other project shows no waiting row', () => {
   const w = boot();
   deliver(w, part([]));

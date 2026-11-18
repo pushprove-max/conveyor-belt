@@ -93,7 +93,9 @@
 #   label never built, "follow-ups", or the priority); and waiting (every open issue with no card that waits on
 #   an open issue it depends on and that pick would take once those land: none held, skipped or waiting for the
 #   owner's yes before its build, which open.held gives with their wait; in pick order: issue, title, priority, followup, retried,
-#   created, waitsFor: the open issues it waits on, open follow-ups of its dependencies included, forced: `control
+#   created, waitsFor: the open issues it waits on, open follow-ups of its dependencies included, waitsOn: each
+#   number of waitsFor with its state ({issue, state}; state is one of "building", "blocked", "held", "waiting for a yes", "skipped by a rule", "waiting
+#   for #N" (it waits on another issue too), "queued" or "open, no card"), so a wait says why it does not end, forced: `control
 #   force` lets it be picked all the same, the dependency guard off; a forced one is in order too). All are null when gh cannot list the issues: the rest of the
 #   record is still given. holding and skipped list only issues pick would take but for the record.
 #   Each of order, holding and waiting, and each of open.held, also has since: when it came to Held or Queue, as
@@ -704,7 +706,20 @@ snapshot() (
            issues: ([$open[] | (.labels | map(.name)) as $l | {issue: .number, title: (.title // "")[0:200], priority: level($l; $prio), labels: $l, created: .createdAt, dependsOn: (needs + farneeds)}] | sort_by(.issue)),
            split: {queued: (($open | length) - ($hl | length) - ([$open[] | select(.number | IN($onbelt[]))] | length)), you: $you,
                    labelOrRule: (($hl | length) - $you), belt: ([$open[] | select(.number | IN($onbelt[]))] | length)}} end) as $openpart
-    | {time: $h.time, day: $day, repo: $h.repo,
+    # Why an open issue that others wait on does not move (waitsOn in queue.waiting): its newest card first, then
+    # a hold of the control record, a label, a rule, the yes of the owner, its own wait, the pick order; else no card.
+    | def depstate($n): ([$c[] | select(.issue == $n)] | last) as $k
+        | ($up // [] | map(select(.number == $n)) | .[0]) as $e
+        | if $k != null and $k.result == "" then "building"
+          elif $n | IN(($control // {} | .held // [])[]) then "held"
+          elif $k != null and $k.step == "blocked" then (if $k.reason // "" | startswith($yes) then "waiting for a yes" else "blocked" end)
+          elif $open // [] | any(.[]; .number == $n and any(.labels[]; .name == $builtl)) then "held"
+          elif $e.rule != null then "skipped by a rule"
+          elif $e.before then "waiting for a yes"
+          elif ($e.waits // []) != [] and ($e.forced | not) then "waiting for \($e.waits | map(if type == "number" then "#\(.)" else . end) | join(", "))"
+          elif $n | IN(($q.order // [] | map(.issue))[]) then "queued"
+          else "open, no card" end;
+    {time: $h.time, day: $day, repo: $h.repo,
        needsYou: {
          waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes)))
            | {card, issue, title, sentence: ((.x.visible | select(startswith("yes: ")) | .[5:]) // (.reason | ltrimstr($yes))), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, stalls: .x.stalls,
@@ -760,7 +775,8 @@ snapshot() (
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
          parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
          beyond: (if $landed then null else .x.beyond end)} + times],
-       queue: {next: ($next | if . == null then null else map(. + {parent: parent} + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end), holding: ($q.holding // null), skipped: ($q.skipped // null), waiting: ($q.waiting // null)},
+       queue: {next: ($next | if . == null then null else map(. + {parent: parent} + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end), holding: ($q.holding // null), skipped: ($q.skipped // null),
+         waiting: ($q.waiting // null | if . == null then null else map(. + {waitsOn: [.waitsFor[] | numbers | {issue: ., state: depstate(.)}]}) end)},
        open: $openpart,
        control: $control,
        modelSettings: $settings,

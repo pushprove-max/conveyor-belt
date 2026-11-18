@@ -409,6 +409,38 @@ test('QUEUE shows an issue that waits on another after the next ones, as "Waits 
   expect(section(tableText(board({ queue: { next: queued(1), held: {} } }), 80), 'QUEUE')).not.toContain('Waits for')
 })
 
+// Bug (issue 439): "Waits for #N" did not say why #N does not move, so the owner could not tell a stuck queue from one
+// waiting on purpose. Each issue waited on carries its state from the snapshot's waitsOn: held, blocked, queued.
+test('QUEUE says the state of each issue a waiting one waits for', () => {
+  const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3900, 3901, 3902],
+    waitsOn: [{ issue: 3900, state: 'held' }, { issue: 3901, state: 'blocked' }, { issue: 3902, state: 'queued' }] }]
+  expect(section(tableText(board({ queue: { next: queued(1), held: {}, waiting } }), 100), 'QUEUE').split('\n')[2])
+    .toMatch(/^ · #3950 Second half +Waits for #3900 \(held\), #3901 \(blocked\), #3902 \(queued\)$/)
+})
+
+// Bug: at /units' 56 columns the 55-column label above did not fit beside the title, and spread dropped it whole.
+// A label too long for the line goes under the title, wrapped at its words.
+test('QUEUE puts a "Waits for" label too long for the line under the title, not drops it', () => {
+  const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3900, 3901, 3902],
+    waitsOn: [{ issue: 3900, state: 'held' }, { issue: 3901, state: 'blocked' }, { issue: 3902, state: 'queued' }] }]
+  expect(section(tableText(board({ queue: { next: queued(1), held: {}, waiting } }), 56), 'QUEUE').split('\n').slice(2)).toEqual([
+    ' · #3950 Second half',
+    '    Waits for #3900 (held), #3901 (blocked),',
+    '      #3902 (queued)',
+  ])
+})
+
+// Bug (issue 439): a queue whose only issues wait on another read "the queue is empty" above them. It says nothing can
+// be picked and names what they wait for, once each, with its state.
+test('QUEUE whose issues all wait says nothing can be picked and names what they wait for, not that it is empty', () => {
+  const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3967, 3959], waitsOn: [{ issue: 3967, state: 'held' }, { issue: 3959, state: 'blocked' }] },
+    { issue: 3951, title: 'Third', waitsFor: [3967], waitsOn: [{ issue: 3967, state: 'held' }] }]
+  const part = section(tableText(board({ queue: { next: [], held: {}, waiting } }), 100), 'QUEUE')
+  expect(part).not.toContain('the queue is empty')
+  // Not "each waits for": #3951 waits for #3967 only.
+  expect(part.split('\n').slice(0, 2)).toEqual(['QUEUE', '  nothing can be picked: waiting for #3959 (blocked), #3967 (held)'])
+})
+
 test('the issues built and waiting for a PROD deploy are a section of their own under QUEUE, with how long each has waited; with none there is no section', () => {
   const awaitingDeploy = [{ issue: 3476, title: 'Stack split', since: ago(2 * 24 * 60) }, { issue: 3500, title: 'Label time not read', since: null }]
   const text = tableText(board({ queue: { next: queued(1), held: {} }, awaitingDeploy }), 80)

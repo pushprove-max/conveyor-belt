@@ -62,7 +62,11 @@ window.DASH_APP.panel({
     const parts = d.next.length ? [ol].concat(n === null ? [] : [line]) : [line];
     // Waiting: an issue that depends on one still open is not picked until that one closes.
     // One forced past its wait (`control force`) is in next, tagged "Forced past #N", not here.
-    const waitsFor = (ns) => `Waiting on ${ns.map(ctx.depRef).join(', ')}`;
+    // Each issue waited on says why it does not move when the snapshot gives its state (waitsOn): "#7 (held)".
+    const waitsFor = (ns, on) => `Waiting on ${ns.map((n) => {
+      const w = (Array.isArray(on) ? on : []).find((x) => x && x.issue === n);
+      return `${ctx.depRef(n)}${w && typeof w.state === 'string' && w.state ? ` (${w.state})` : ''}`;
+    }).join(', ')}`;
     const waits = queueWaits(d);
     if (waits.length) {
       const list = h('ul', 'rows');
@@ -71,7 +75,7 @@ window.DASH_APP.panel({
         const head = h('div', 'row-main');
         head.append(ctx.issueLink(w), h('span', 'title', w.title || 'untitled'));
         const meta = h('p', 'row-meta');
-        meta.append(ctx.tag(w.repo),ctx.chip(waitsFor(w.waitsFor), 'quiet'));
+        meta.append(ctx.tag(w.repo),ctx.chip(waitsFor(w.waitsFor, w.waitsOn), 'quiet'));
         li.append(head, meta);
         list.append(li);
       });

@@ -623,14 +623,16 @@
     return a;
   }
   // "Waiting on #12, #15": each issue a link to it, so the card it waits on is one click away; another
-  // repository's ("owner/repo#7") is said as that, as text.
-  function waitingChip(ns, url) {
+  // repository's ("owner/repo#7") is said as that, as text. Each one the snapshot gives a state for (waitsOn) says
+  // why it does not move: "Waiting on #12 (held)".
+  function waitingChip(ns, url, on) {
     const c = S.ctx.chip('Waiting on ', 'quiet'), words = c.lastChild;
+    const state = (n) => { const w = issues(on).find((x) => x && x.issue === n); return w && typeof w.state === 'string' && w.state ? ` (${w.state})` : ''; };
     ns.forEach((n, i) => {
       if (i) words.append(', ');
       if (typeof n === 'string') { words.append(n); return; }
       // The card's own issue address, its number swapped: issueLink takes only a GitHub issue address, else plain text.
-      words.append(S.ctx.issueLink({ issue: n, url: typeof url === 'string' ? url.replace(/\/\d+$/, `/${n}`) : null }));
+      words.append(S.ctx.issueLink({ issue: n, url: typeof url === 'string' ? url.replace(/\/\d+$/, `/${n}`) : null }), state(n));
     });
     c.dataset.reason = 'waits';
     return c;
@@ -692,7 +694,7 @@
         const c = r.kind === 'waits' ? waitingChip(issues(r.waitsFor), item.url) : ctx.chip(t, r.kind === 'you' ? 'warn' : 'quiet');
         c.dataset.reason = r.kind; tags.append(c);
       });
-      else if (waiting(item)) tags.append(waitingChip(item.waitsFor, item.url));
+      else if (waiting(item)) tags.append(waitingChip(item.waitsFor, item.url, item.waitsOn));
       else if (forced(item)) tags.append(ctx.chip(`Forced past ${item.waitsFor.map(ctx.depRef).join(', ')}`, 'warn'));
       // The machine holds this card back (its cap, its load or its free memory): why, with the reading.
       if (col === 'queue' && typeof item.room === 'string' && item.room) tags.append(ctx.chip(item.room, 'warn'));

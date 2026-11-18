@@ -303,7 +303,7 @@ landdeps() { # <#80's card lines after its picked line, as jq -c objects>
   deps_setup "$(jq -cs . <(issue 80 2026-01-01 P2) <(dep "$(issue 81 2026-01-02 P2)" 'Depends on: #80'))"
   mkdir -p "$ST"; jq -cn --arg c c0-80 '{card: $c, issue: 80, step: "picked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}' > "$ST/cards.jsonl"
   printf '%s\n' "$@" >> "$ST/cards.jsonl"
-  pick=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST" 2>&1); waits=$(loop snapshot | jq -c '[.queue.order, .queue.waiting] | map(map([.issue, (.waitsFor // [])]))')
+  pick=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST" 2>&1); snap=$(loop snapshot); waits=$(jq -c '[.queue.order, .queue.waiting] | map(map([.issue, (.waitsFor // [])]))' <<<"$snap")
 }
 t_depslanded() {
   # #80's card has its landed line and no pushed line: #81 is picked, and the queue shows it next, waiting on nothing.
@@ -316,6 +316,24 @@ t_depsblocked() {
   landdeps "$(landed 80 | jq -c '.step = "blocked" | .reason = "tests failed"')"
   [ -z "$pick" ] || fail "#81 was picked while #80's card is blocked and #80 is open: $pick"
   [ "$waits" = '[[],[[81,[80]]]]' ] || fail "the snapshot does not have #81 waiting on #80, whose card is blocked: $waits"
+  # Bug (issue 439): the wait named #80 only, not why #80 does not move.
+  local on; on=$(jq -c '.queue.waiting[0].waitsOn' <<<"$snap")
+  [ "$on" = '[{"issue":80,"state":"blocked"}]' ] || fail "the snapshot does not say #80, which #81 waits on, is blocked: $on"
+}
+# What a waiting issue waits on, with no card of it (issue 439). Bug: the snapshot named #80 only, so a queue of
+# waiting issues did not say whether #80 is held or only queued. One case a fixture: #80 open, #81 depends on it.
+depstate() { # <control args, or none>
+  deps_setup "$(jq -cs . <(issue 80 2026-01-01 P2) <(dep "$(issue 81 2026-01-02 P2)" 'Depends on: #80'))"; mkdir -p "$ST"
+  [ $# = 0 ] || loop control "$@" >/dev/null
+  loop snapshot | jq -c '.queue.waiting | map([.issue, .waitsOn])'
+}
+t_depsheld() {
+  local s; s=$(depstate hold 80)
+  [ "$s" = '[[81,[{"issue":80,"state":"held"}]]]' ] || fail "the snapshot does not say #80, which #81 waits on, is held: $s"
+}
+t_depsqueued() {
+  local s; s=$(depstate)
+  [ "$s" = '[[81,[{"issue":80,"state":"queued"}]]]' ] || fail "the snapshot does not say #80, which #81 waits on, is queued (not picked, not held): $s"
 }
 t_depsrepushed() {
   # #80's first card landed, a second card for #80 blocked, then a push-now wrote the first card's pushed line. Bug: that

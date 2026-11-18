@@ -71,8 +71,9 @@ export type Live = { action: string; turns: number | null; lastOutputAt: number 
 export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null }
 // room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not.
 export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; room: string }
-// An open issue that depends on one still open: not picked until each of waitsFor has closed.
-export type Waiting = Ref & { waitsFor: number[] }
+// An open issue that depends on one still open: not picked until each of waitsFor has closed. states: why each of
+// them does not move (the snapshot's waitsOn: held, blocked, building, queued, ...), by its number; none from an older engine.
+export type Waiting = Ref & { waitsFor: number[]; states: Record<number, string> }
 // An open issue labelled awaiting-deploy: built and merged, waiting for your PROD deploy. since: when it got the label.
 export type Deploy = Ref & { since: number | null }
 // push: the state of its Push step (now while the push runs, failed when it failed or GitHub left the issue open).
@@ -222,7 +223,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), room: one(x.room) })),
     // A record whose loop does not give the list (from an older engine, or GitHub did not list the issues) has none.
     waits: (Array.isArray(j.queue.waiting) ? j.queue.waiting : []).filter((x: unknown) => x && typeof x === 'object')
-      .map((x: any): Waiting => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), waitsFor: Array.isArray(x.waitsFor) ? x.waitsFor.filter((n: unknown): n is number => num(n) !== null) : [] }))
+      .map((x: any): Waiting => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), waitsFor: Array.isArray(x.waitsFor) ? x.waitsFor.filter((n: unknown): n is number => num(n) !== null) : [],
+        states: Object.fromEntries((Array.isArray(x.waitsOn) ? x.waitsOn : []).filter((w: any) => w && num(w.issue) !== null && one(w.state)).map((w: any) => [w.issue, one(w.state)])) }))
       .filter((x: Waiting) => x.waitsFor.length > 0),
     held: Object.fromEntries(Object.entries(j.queue.held && typeof j.queue.held === 'object' ? j.queue.held : {}).filter((e): e is [string, number] => (num(e[1]) ?? 0) > 0)),
     // A record whose loop does not give the list (or whose issues GitHub did not list) has none to show.
@@ -786,6 +788,15 @@ export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame
   }),
 ]
 
+// An issue waited on, with why it does not move when the snapshot says: `#967 (held)`.
+const waitRef = (x: Waiting, n: number) => `#${n}${x.states[n] ? ` (${x.states[n]})` : ''}`
+// Every issue the waiting ones wait on, once each (a project's own), lowest first, with its state; the last ends in no comma.
+const waitedOn = (ws: Waiting[]) => {
+  const seen = new Map<string, [number, string]>()
+  for (const x of ws) for (const n of x.waitsFor) if (!seen.has(`${x.repo}#${n}`) || x.states[n]) seen.set(`${x.repo}#${n}`, [n, waitRef(x, n)])
+  return [...seen.values()].sort((a, b) => a[0] - b[0]).map(([, r], i, l) => (i < l.length - 1 ? `${r},` : r))
+}
+
 // QUEUE: the next five, numbered, the title cut to fit and the priority right-aligned; then the
 // held-back line.
 const NEXT = 5
@@ -794,14 +805,24 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
   const all = snap.queue?.length ?? 0, more = all > NEXT || snap.queueMore
   return [
     [{ t: 'QUEUE', c: C.head, b: true }, ...(next.length ? [{ t: more ? `  next ${next.length} of ${all}${snap.queueMore ? '+' : ''}` : `  ${next.length}`, d: true }] : [])],
-    ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? [] : [empty('the queue is empty')]),
+    // A queue whose only issues wait on others is not empty: nothing can be picked, and it names what they wait on.
+    ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? []
+      : snap.waits.length ? wrapParts(['nothing can be picked: waiting for', ...waitedOn(snap.waits)], w, '  ', ' ', { d: true })
+      : [empty('the queue is empty')]),
     ...next.flatMap((q, i): Line[] => [titled(q, [{ t: ` ${i + 1} `, d: true }],
       [{ t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') },
         ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false),
       // The one the machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last.
       ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])]),
     // The issues that wait on another: not in the pick order, each with what it waits for.
-    ...snap.waits.slice(0, NEXT).map((x): Line => titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [{ t: `Waits for ${x.waitsFor.map(n => `#${n}`).join(', ')}`, d: true }], w, false)),
+    // A label too long to sit beside the title (with room for 6 columns of it) goes under it, wrapped at its words:
+    // beside it, spread would drop the label whole.
+    ...snap.waits.slice(0, NEXT).flatMap((x): Line[] => {
+      const refs = x.waitsFor.map((n, i, l) => `${waitRef(x, n)}${i < l.length - 1 ? ',' : ''}`), label = `Waits for ${refs.join(' ')}`
+      return cols(` · ${x.repo}#${x.issue} `) + 6 + 2 + cols(label) <= w
+        ? [titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [{ t: label, d: true }], w, false)]
+        : [titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [], w, false), ...wrapParts(['Waits for', ...refs], w, '    ', ' ')]
+    }),
     ...(snap.waits.length > NEXT ? [empty(`and ${snap.waits.length - NEXT} more waiting`)] : []),
     ...(snap.held.length ? [fitWidth([{ t: ` held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
   ]
