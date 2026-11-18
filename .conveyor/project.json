@@ -49,7 +49,8 @@
       "conveyor/conveyor.test.sh": {
         "wholeOnly": true
       }
-    }
+    },
+    "cardFiles": 5
   },
   "linkFromMain": [
     "node_modules"
