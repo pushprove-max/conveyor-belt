@@ -968,7 +968,10 @@ the fix: set `test.fileCommand`, with `node`, `bash` or `python3` when every tes
 script. The card also gets a `bugproof` line (result `wide`) with `wide: {given, ran, command}`. `doctor` prints a
 `warning:` line from the newest such line while the pack sets no `test.fileCommand` and its `test.command` is that
 command. Setup prints the same value as a suggestion when the pack has no `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
-file that failed (a runner that stops the run with no test failing proves nothing). A failed run whose logs give no
+file that failed (a runner that stops the run with no test failing proves nothing). Each test file keeps its own time
+limit there, its `# timeout: <seconds>` line among the comments it starts with; a file with no such line has the
+`testTimeout` setting's. When the runner's logs show a file begun and not ended past its limit, the run is stopped,
+the file is named as timed out, and it counts as failing without the fix: the result says so. A failed run whose logs give no
 result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
 that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:
 <the run's last lines>", with no second build session and no review. The review is shown the check's

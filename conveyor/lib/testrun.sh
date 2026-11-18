@@ -905,7 +905,8 @@ cleanrun() { # <worktree> <command> [<list>]
 # fix: in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.unfixed, holding those
 # files alone, staged, on a test slot, with the card's own command (test.command), which selects them as that change's
 # tests; or, when the pack sets test.fileCommand, each of them alone with that command (tests()). At least one must
-# fail there: a test that passes without the fix does not prove it. A product file whose change adds or changes tests
+# fail there: a test that passes without the fix does not prove it. A test file that runs past its own time limit
+# there (its `# timeout:` line, else testTimeout: bugrun()) is stopped and fails, and the result says it timed out. A product file whose change adds or changes tests
 # written inside it (the pack's tests.inline: inlinekinds(), inlinesplit()) is one of those files, staged with its
 # test lines changed and the rest of its change (the fix) taken out; when such a test shares a changed line with the
 # fix and the change has no other test, the check fails with that reason (SHARED), unrun. Writes the result in
@@ -969,10 +970,37 @@ widerun() { # <worktree> <n>
 }
 # One run of the bug-card check with the pack's command <field>, in <worktree>: given files, it runs them alone, each a
 # `fail` line of the run's list (CONVEYOR_TEST_RERUN); given none, the command selects the staged change's tests.
+# Each of those test files (the files given, else the staged change's test files: testpaths()) keeps its own time limit,
+# its `# timeout: <seconds>` line in the comments the file starts with (as the engine's runner reads it for its cases);
+# a file with none has the run's own, the testTimeout setting. The run's clock (testclock(), TEST_LIMITS) stops a
+# file that runs past its limit, or that is still running when the run's own limit stops the run, names it in
+# <worktree>.late, and the run's output ends with a line saying it timed out; testfailed() counts it as failing.
 bugrun() { # <worktree> <field> [<file>...]
-  local w=$1 f=$2; shift 2
-  [ $# != 0 ] || { tests "$w" "$f"; return; }
-  printf 'fail\t%s\n' "$@" > "$w.rerun" && tests "$w" "$f" alone
+  local w=$1 f=$2 rc TEST_LIMITS; shift 2
+  rm -f "$w.late"
+  TEST_LIMITS=$( { if [ $# != 0 ]; then printf '%s\n' "$@"; else git -C "$w" diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths; fi; } \
+    | while IFS= read -r tp; do
+        [ -n "$tp" ] && [[ $tp != *$'\t'* ]] || continue
+        n=$(awk 'FNR > 1 && !/^#/ && NF { exit } /^#[[:space:]]*timeout:[[:space:]]*[0-9]+[[:space:]]*$/ { gsub(/[^0-9]/, ""); print $0 + 0; exit }' "$w/$tp" 2>/dev/null)
+        [ "${n:-0}" -gt 0 ] 2>/dev/null || n=$TEST_TIMEOUT
+        printf '%s\t%s\n' "$n" "$tp"
+      done)
+  if [ $# = 0 ]; then tests "$w" "$f"; rc=$?
+  else printf 'fail\t%s\n' "$@" > "$w.rerun" && tests "$w" "$f" alone; rc=$?; fi
+  [ ! -s "$w.late" ] || latesaid "$w" >> "$w.test"
+  return $rc
+}
+# The line that says a file of the bug-card check's run timed out (<worktree>.late, testclock()).
+latesaid() { # <worktree>
+  local n f
+  [ -s "$1.late" ] && IFS=$'\t' read -r n f < "$1.late" || return 1
+  printf 'conveyor: %s timed out: it ran past its time limit, %s s, and the run was stopped there\n' "$f" "$n"
+}
+# The bug-card check's result line for a run whose file timed out (<worktree>.late): it counts as failing without the fix.
+latecount() { # <worktree>
+  local n f
+  [ -s "$1.late" ] && IFS=$'\t' read -r n f < "$1.late" || return 0
+  printf '%s timed out: it ran past its time limit, %s s, and was stopped. A test that hangs without the fix counts as failing without it.\n' "$f" "$n"
 }
 # The bug-card check's command while the rule Whole suite in a card is off (bugproof()): test.command given the test
 # files <file>... as test.list says (listwhy(), runnercmd(), listput(); env's paths exported in the command itself), in
@@ -1162,7 +1190,7 @@ bugproof() { # <card> <worktree> <issue json>
         elif [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
         elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."
         elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
-        else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; fi
+        else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; latecount "$mwt"; fi
         [ -z "$wide" ] || printf '%s.\n' "${wide^}"
         echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
     fi
@@ -1214,7 +1242,7 @@ bugproof() { # <card> <worktree> <issue json>
           elif [ -z "$rc" ]; then BUGWHY=$NOTBACK; echo "Main's code could not be put back without the fix, so they did not run without it."
           elif [ "$rc" = 0 ]; then echo "They all passed without the fix: $UNFIXED."
           elif [ -z "$held" ]; then echo "The run without the fix failed (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
-          else echo "They pass with the fix, and the run without it failed (exit $rc): at least one fails without the fix, as it should."; fi
+          else echo "They pass with the fix, and the run without it failed (exit $rc): at least one fails without the fix, as it should."; latecount "$mwt"; fi
           echo 'The end of the run without the fix:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
       fi
     elif [ -z "$stop" ] && [ -s "$mwt.stop" ]; then
@@ -1748,8 +1776,11 @@ aloneproof() { # <card> <worktree> <test file>
 }
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
-# own check refused the run) proves nothing. A command that writes no logs says no more than its exit.
+# own check refused the run) proves nothing. A command that writes no logs says no more than its exit. A test file
+# stopped at its own time limit (bugrun(): <worktree>.late, the run's exit 124) failed: a test that hangs without the
+# fix fails without it.
 testfailed() { # <worktree> <exit>
+  { [ "$2" = 124 ] && [ -s "$1.late" ]; } && return 0
   [ "$2" != 0 ] && { [ -z "$(testlogs "$1")" ] || jq -e '.files != []' <<<"$(testfails "$1.test" "$2")" >/dev/null 2>&1; }
 }
 # A failed run of the bug-card check that gave no result for a file it was given: the runner's logs (testlogs()) name
@@ -2113,13 +2144,33 @@ treediff() { # <worktree> <from> <to>
 # owner, 2026-11-13: no time limit changes for the turns). timeout itself is given no limit; when the clock runs out
 # it is sent ALRM, its own timer's signal, so it ends the run as on its own timeout: TERM to the command's group, KILL
 # 30 s later, exit 124. It holds no descriptor of the loop's (a lock, the slot) while it runs.
+# With TEST_LIMITS (the bug-card check's run, bugrun(): `<seconds><TAB><file>` lines), a file of it that the runner's
+# logs (testlogs(); its output when it wrote none) name as begun (`== <file>`) and not ended (`-- ok|FAIL <file>`)
+# for its seconds, counted from when the clock first saw it begun, ends the run the same way, and is named in
+# <worktree>.late as `<seconds><TAB><file>`; when the run's own limit ends the run, a file still begun and not ended
+# is named there with that limit (TEST_TIMEOUT).
 testclock() { # <timeout's pid> <turn wait file>
-  local s=$SECONDS w
+  local s=$SECONDS w wt=${2%.turnwait} f n open l=()
+  local -A at=() on=()
   closefds
   exec </dev/null >/dev/null 2>&1
   while sleep 1; do
+    if [ -n "${TEST_LIMITS:-}" ]; then
+      mapfile -t l < <(testlogs "$wt"); [ ${#l[@]} != 0 ] || l=("$wt.test")
+      on=(); open=
+      while IFS= read -r f; do
+        on[$f]=1; open=$f; [ -n "${at[$f]:-}" ] || at[$f]=$SECONDS
+        n=$(awk -F'\t' -v f="$f" '$2 == f { print $1; exit }' <<<"$TEST_LIMITS")
+        [ -n "$n" ] && [ $((SECONDS - at[$f])) -ge "$n" ] || continue
+        printf '%s\t%s\n' "$n" "$f" > "$wt.late"; kill -ALRM "$1"; return
+      done < <(cat "${l[@]}" 2>/dev/null | awk '/^== / { o[substr($0, 4)] = 1 } /^-- ok / { delete o[substr($0, 7)] } /^-- FAIL / { delete o[substr($0, 9)] }
+        END { for (f in o) print f }')
+      # A file that ended and began again is timed from its new start.
+      for f in "${!at[@]}"; do [ -n "${on[$f]:-}" ] || unset 'at[$f]'; done
+    fi
     w=$(cat "$2" 2>/dev/null); [[ $w =~ ^[0-9]{1,9}$ ]] || w=0
     [ $((SECONDS - s)) -ge $((TEST_TIMEOUT + w)) ] || continue
+    [ -z "${open:-}" ] || printf '%s\t%s\n' "$TEST_TIMEOUT" "$open" > "$wt.late"
     kill -ALRM "$1"; return
   done
 }

@@ -66,6 +66,36 @@ t_bugrunner() {
     || fail "a run on main whose file ran and passed was not blocked as passing without the fix: $(st 'select(.step == "blocked")'; cat "$STUB/mainran")"
 }
 
+# Bug it catches: the proof run had no time limit for one hung test, so a new test that waits for what the unfixed
+# code never writes held its card until stopped by hand. Here it hangs on main's code; its file's `# timeout: 2` line
+# stops the run there, far before the run's own limit (testTimeout 15 s, the limit a file with no such line has, as in
+# t_bughungdefault): the run's output and the review name a.test.sh as timed out at 2 s, not 15 s, it counts as failing
+# without the fix, and the card lands after one build.
+t_bughung() {
+  TUNE='.tunables.testTimeout = 15' MAINRUN='echo "== a.test.sh" > "$CONVEYOR_TEST_LOG/r"; bash a.test.sh && echo "-- ok a.test.sh" >> "$CONVEYOR_TEST_LOG/r"' \
+    bugcard $'# timeout: 2\nuntil grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
+  hungsaid 2
+}
+# The checks of t_bughung and t_bughungdefault: the review is shown a.test.sh timed out at <seconds>, counted as
+# failing without the fix, and the card lands after one build.
+hungsaid() { # <seconds>
+  grep -qxF "conveyor: a.test.sh timed out: it ran past its time limit, $1 s, and the run was stopped there" "$STUB/asked" \
+    && grep -q '^The run failed there (exit 124): at least one fails without the fix' "$STUB/asked" \
+    && grep -qxF "a.test.sh timed out: it ran past its time limit, $1 s, and was stopped. A test that hangs without the fix counts as failing without it." "$STUB/asked" \
+    || fail "the proof run was not stopped at the hung file's limit, naming it, and counted as failing: $(grep -A 40 '# The bug-card check' "$STUB/asked" 2>&1 | head -40)"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "a card whose new test hangs without the fix did not land after one build: $(st 'select(.step | IN("build", "blocked"))')"
+}
+
+# Bug it catches: a hung new test whose file has no `# timeout:` line was stopped by the run's own limit (testTimeout,
+# 4 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
+# build. The file is named as timed out at the testTimeout limit and counts as failing without the fix.
+t_bughungdefault() {
+  TUNE='.tunables.testTimeout = 4' MAINRUN='echo "== a.test.sh" > "$CONVEYOR_TEST_LOG/r"; bash a.test.sh && echo "-- ok a.test.sh" >> "$CONVEYOR_TEST_LOG/r"' \
+    bugcard 'until grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
+  hungsaid 4
+}
+
 # D1 of #69. Bug it catches: a run on main whose runner exits 1 and gives no result for the card's test file (its logs
 # name another file only, as a runner whose part for that file was unavailable) is taken for "the new tests pass
 # without the fix", and the card goes back to its build for a fault no build can mend. It runs once more on main, no
