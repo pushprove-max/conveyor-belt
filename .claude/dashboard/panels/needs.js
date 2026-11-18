@@ -138,7 +138,7 @@ window.DASH_APP.panel({
         const steps = c.track.steps, at = steps.map((s) => s.state).lastIndexOf('failed');
         const sec = at >= 0 && typeof steps[at].sec === 'number' && Number.isFinite(steps[at].sec) ? ctx.took(steps[at].sec) : '';
         if (at >= 0) li.append(h('p', 'stopped', `Failed at ${steps[at].name} (step ${at + 1} of ${steps.length})${sec ? ` after ${sec}` : ''}`));
-        li.append(track, ctx.trackDetail(c.track, c.card, null, c.earlier));
+        li.append(track, ctx.trackDetail(c.track, c.card, null, c.earlier, ctx.text.repoOf(c)));
       }
       const done = Array.isArray(c.reviews) ? c.reviews : [];
       if (done.length) {
@@ -457,7 +457,7 @@ window.DASH_APP.panel({
     };
     // A blocked card's output, drawn at each refresh: a longer one replaces it, and "Show output" opened stays open.
     const outputOf = (li, c) => {
-      const was = li.querySelector(':scope > details.output'), out = ctx.output(c.tail, c.card, null, was);
+      const was = li.querySelector(':scope > details.output'), out = ctx.output(c.tail, c.card, null, was, ctx.text.repoOf(c));
       if (was) was.remove();
       if (out) li.insertBefore(out, li.querySelector(':scope > .row-meta'));
     };

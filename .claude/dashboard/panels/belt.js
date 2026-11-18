@@ -170,7 +170,7 @@
           const prev = c.earlier.slice().reverse().map((e) => e && rows.find((r) => r !== li && r.dataset.key === `${c.repo}:${e.card}`)).find(Boolean);
           was = prev ? prev.querySelector(':scope > .more > details.track-detail') : null;
         }
-        const det = ctx.trackDetail(t, c.card, was, c.earlier);
+        const det = ctx.trackDetail(t, c.card, was, c.earlier, ctx.text.repoOf(c));
         more.replaceChildren(det);
         if (at >= 0 && det.querySelectorAll(keys)[at]) det.querySelectorAll(keys)[at].focus({ preventScroll: true });
       });

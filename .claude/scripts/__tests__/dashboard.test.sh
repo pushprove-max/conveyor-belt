@@ -467,6 +467,8 @@ q '[.panels.health.data.records[] | .cycles] == [[[40, 41]], null]' "a dependenc
 q '[.panels.health.data.records[] | has("pressure")] == [false, false]' "the machine's pressure no longer reaches the health part"
 # The Claude routes' states (the health record's routes): without them Health cannot show an expired login or the proxy.
 q '[.panels.health.data.records[] | .routes | if . == null then null else [.subscription.state, .proxy.state, .proxy.baseUrl] end] == [["expired", "works", "http://127.0.0.1:4141"], null]' "each record's Claude routes reach the health part; a record without the key has none"
+# Each record's repository address: without it Health cannot link a flaky case's or a kept-off file to the file.
+q '[.panels.health.data.records[] | .repoUrl] == ["https://github.com/example/sample-project", "https://github.com/example/WidgetShop"]' "each health record carries its repository's address"
 # The flaky cases of each record (the snapshot's flaky): without them the Health panel has no Flaky tests line.
 q '[.panels.health.data.records[] | .flaky] == [[{case: "b.test: flaky", count: 3, issue: 16, url: "'"$PU"'/16"}, {case: "c.test: other", count: 1, issue: null, url: null}], null]' "each record's flaky cases reach the health part, an issue filed with its link; a record without the key has none"
 # Issue 457: the test files kept off card test steps (the snapshot's slowOff), with why: without them Health cannot list them.

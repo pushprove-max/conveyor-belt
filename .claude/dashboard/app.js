@@ -184,13 +184,123 @@
   // the old one was. A box built new each
   // second sent a reader who scrolled up in a running card's output back to the top, and stalled a scroll over it.
   const FAILLINE = /\bFAIL(?:ED)?\b|\b(?:error|Error|ERROR)\b|: (?:cannot|can't) |No such file or directory|Permission denied|command not found/;
+  // ---- a finding's or a reason's text, drawn as the Declined panel first drew it (#403) ----
+  // Declined, a card's review output, a blocked card's reason and Health's lists all draw their text with these
+  // (window.DASH_APP.text, findingText here): each `code` span set apart (app.css .why-code), each file and line a link to that line.
+  // A text with no code span and no path draws as plain text.
+  // A text split into sentences, each a list of parts: {code} (a span the text has in backticks, drawn without them)
+  // or {text}. A sentence ends at a . ! or ? before a space, outside backticks; the space stays at its end, so the
+  // sentences joined (with the backticks) are the text as written. A lone backtick is left as text.
+  function sentences(text) {
+    const out = [[]];
+    let at = 0;
+    const plain = (s) => {
+      let from = 0;
+      for (const m of s.matchAll(/[.!?]\s+/g)) {
+        out[out.length - 1].push({ text: s.slice(from, m.index + m[0].length) });
+        out.push([]);
+        from = m.index + m[0].length;
+      }
+      if (from < s.length) out[out.length - 1].push({ text: s.slice(from) });
+    };
+    for (const m of text.matchAll(/`([^`]+)`/g)) {
+      plain(text.slice(at, m.index));
+      out[out.length - 1].push({ code: m[1] });
+      at = m.index + m[0].length;
+    }
+    plain(text.slice(at));
+    return out.filter((s) => s.length);
+  }
+  // The paths with a directory that a text names before a :line ("conveyor/lib/claim.sh:99").
+  const PATH_AT = /(?:^|[^A-Za-z0-9_./-])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+):[0-9]/g;
+  const pathsIn = (s) => (typeof s === 'string' ? Array.from(s.matchAll(PATH_AT), (m) => m[1]) : []);
+  // A repository's GitHub address as owner/repo, or null when it is not one.
+  const ownerRepo = (u) => /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/.exec(typeof u === 'string' ? u : '')?.[1] || null;
+  // An item's repository on GitHub: its repoUrl, else the repository of its issue's url; null when it has neither.
+  function repoOf(x) {
+    if (!x || typeof x !== 'object') return null;
+    if (ownerRepo(x.repoUrl)) return x.repoUrl;
+    const m = typeof x.url === 'string' ? /^(https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/\d+$/.exec(x.url) : null;
+    return m ? m[1] : null;
+  }
+  // A file of the repository, as a link to it on GitHub; null when the repository is not on GitHub or the path climbs
+  // out of it.
+  function fileUrl(repoUrl, path) {
+    const repo = ownerRepo(repoUrl);
+    if (!repo || typeof path !== 'string' || !/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/.test(path) || path.split('/').some((s) => s === '.' || s === '..')) return null;
+    return `https://github.com/${repo}/blob/HEAD/${path}`;
+  }
+  // A `file:line` (or `file:a–b`), as a link to those lines on GitHub in the repository repoUrl; null when the span is no
+  // file and line, or the repository is not on GitHub. A short path ("issues.sh:636") is the one path of known (the
+  // paths the text and its kin name) that ends with it; none or more than one, and it has no directory, it is no link,
+  // as the repository root is only a guess.
+  function lineUrl(repoUrl, code, known) {
+    const m = /^((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+):([0-9]+)(?:[–-]([0-9]+))?$/.exec(code);
+    if (!m) return null;
+    let path = m[1];
+    if (!known.has(path)) {
+      const ends = [...known].filter((k) => k.endsWith(`/${path}`));
+      if (ends.length === 1) path = ends[0];
+      else if (!path.includes('/')) return null;
+    }
+    const url = fileUrl(repoUrl, path);
+    return url ? { url: `${url}#L${m[2]}${m[3] ? `-L${m[3]}` : ''}`, at: `${path}:${m[2]}` } : null;
+  }
+  // A file path with a directory and a line ("shared/taxonomy/fields.ts:239") written without backticks.
+  const BARE = /(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_-][A-Za-z0-9_.-]*\.[A-Za-z0-9]+:[0-9]+(?:[–-][0-9]+)?/g;
+  // Plain text, each bare path in it given to at (drawn as code), the rest to plain; the text is kept as written.
+  function barePaths(s, at, plain) {
+    let from = 0;
+    for (const m of s.matchAll(BARE)) {
+      if (m.index > from) plain(s.slice(from, m.index));
+      at(m[0]);
+      from = m.index + m[0].length;
+    }
+    if (from < s.length) plain(s.slice(from));
+  }
+  // A link of class cls round el, opening url in a new tab.
+  function linkTo(el, url, cls) {
+    const a = h('a', cls);
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.append(el);
+    return a;
+  }
+  // A span of code: monospace, italic and in the accent colour (app.css .why-code); a file and line in it is a link of
+  // class cls to that line on GitHub (lineUrl), with the link returned so a caller can say more of it on hover.
+  function codeEl(repoUrl, s, known, cls) {
+    const c = h('code', 'why-code', s), to = lineUrl(repoUrl, s, known);
+    return to ? { el: linkTo(c, to.url, cls), to } : { el: c, to: null };
+  }
+  // Text s drawn into el: a span of class `${cls}-line` a sentence, its code spans and bare file paths as codeEl draws
+  // them (links of class `${cls}-at`), the rest as text.
+  function fill(el, s, repoUrl, known, cls) {
+    for (const parts of sentences(s)) {
+      const line = h('span', `${cls}-line`);
+      const code = (q) => line.append(codeEl(repoUrl, q, known, `${cls}-at`).el);
+      for (const p of parts) {
+        if ('code' in p) code(p.code);
+        else barePaths(p.text, code, (q) => line.append(q));
+      }
+      el.append(line);
+    }
+    return el;
+  }
+  // Where a finding's proof starts: its "Proof:" outside backticks, else -1; label: the "Proof:" and the space after it.
+  function proofAt(s) {
+    for (const p of s.matchAll(/`[^`]*`|\bProof:\s*/g)) if (p[0][0] !== '`') return { at: p.index, label: p[0] };
+    return { at: -1, label: '' };
+  }
+  const findingText = { sentences, pathsIn, repoOf, fileUrl, lineUrl, barePaths, linkTo, codeEl, fill, proofAt };
+
   // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional.
   const FINDING = /^\[(P[0-3])\]\s*(.*)$/;
   // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
-  // on one line, the place (path:line) under it, and the part after "Proof:" folded under a closed "Proof" toggle. A
-  // line that is not a finding is a row of its whole text.
-  function findingRows(folded) {
+  // in bold on one line, the place (path:line) under it as a link to that line, and the part after "Proof:" folded
+  // under a closed "Proof:" toggle. Code spans and file paths in the sentence and proof are drawn as fill draws them,
+  // linked in the repository repoUrl (none: no links). A line that is not a finding is a row of its whole text.
+  function findingRows(folded, repoUrl) {
     const list = h('ol', 'output-findings');
+    const known = new Set(folded.flatMap((x) => pathsIn(x.text)));
     folded.forEach((x) => {
       if (!x.text.trim()) return;
       const row = h('li', 'output-finding'), m = FINDING.exec(x.text), times = x.n > 1 ? ` ×${x.n}` : '';
@@ -198,22 +308,26 @@
       let rest = m[2];
       const at = /^(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S)/.exec(rest);
       if (at) rest = rest.slice(at[0].length);
-      const cut = rest.search(/(?:^|\s)Proof:/);
-      const sentence = (cut < 0 ? rest : rest.slice(0, cut)).trim(), proof = cut < 0 ? '' : rest.slice(cut).replace(/^\s*Proof:\s*/, '');
-      const head = h('div', 'finding-head');
-      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), h('p', 'finding-text', sentence + times));
+      const { at: cut, label } = proofAt(rest);
+      const sentence = (cut < 0 ? rest : rest.slice(0, cut)).trim(), proof = cut < 0 ? '' : rest.slice(cut + label.length);
+      const head = h('div', 'finding-head'), said = h('p', 'finding-text');
+      said.append(fill(h('strong', 'finding-claim'), sentence, repoUrl, known, 'finding'));
+      if (times) said.append(times);
+      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), said);
       row.append(head);
-      if (at) row.append(h('p', 'finding-at', at[1]));
+      if (at) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, at[1], known, 'finding-at-link').el); row.append(p); }
       if (proof) {
         const fold = h('details', 'finding-proof');
-        fold.append(h('summary', null, 'Proof'), h('p', 'finding-proof-text', proof));
+        fold.append(h('summary', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), proof, repoUrl, known, 'finding'));
         row.append(fold);
       }
       list.append(row);
     });
     return list;
   }
-  function output(tail, card, label, was) {
+  // repoUrl: the card's repository on GitHub (repoOf), in which a review finding's file paths link to their lines; none,
+  // and they are code with no link.
+  function output(tail, card, label, was, repoUrl) {
     if (typeof tail !== 'string' || !tail.trim()) return null;
     const same = JSON.stringify([tail, typeof card === 'string' ? card : '', label || '']);
     const keep = (det) => {
@@ -260,7 +374,7 @@
       top.append(h('p', 'output-count', `${fails.length} ${fails.length === 1 ? 'failure' : 'failures'}`), list);
       det.append(top);
     }
-    const pre = review ? findingRows(folded) : h('pre', 'output-text');
+    const pre = review ? findingRows(folded, repoUrl) : h('pre', 'output-text');
     if (!review) folded.forEach((x, i) => {
       const line = h('span', FAILLINE.test(x.text) ? 'output-line is-fail' : 'output-line', x.text);
       if (x.n > 1) line.append(h('span', 'output-times', ` ×${x.n}`));
@@ -603,7 +717,8 @@
   // earlier: the earlier cards of the same work (the snapshot's earlier, the first first), each above the steps as one
   // closed line, "Earlier attempt: <start> to <end>, <time>, ended: <reason>", opening to its own steps: the card's
   // overall time counts their seconds, so the steps it is made of are all here.
-  function trackDetail(t, card, was, earlier) {
+  // repoUrl: the card's repository (repoOf), in which its review findings' file paths link to their lines.
+  function trackDetail(t, card, was, earlier, repoUrl) {
     const det = h('details', 'track-detail'), sum = h('summary', null, 'Every step');
     if (typeof card === 'string') det.dataset.card = card;
     const total = h('p', 'tl-total'), ol = h('ol', 'timeline');
@@ -614,7 +729,7 @@
     const before = (Array.isArray(earlier) ? earlier : []).filter((e) => e && typeof e === 'object' && e.track && typeof e.track === 'object').map((e) => {
       const prior = Boolean(was && was.dataset.card === e.card);
       const old = prior ? was : was ? Array.from(was.querySelectorAll(':scope > details.tl-earlier')).find((x) => x.dataset.card === e.card) : null;
-      const d = trackDetail(e.track, e.card, old);
+      const d = trackDetail(e.track, e.card, old, null, repoUrl);
       // The earlier card's "Every step" was the whole box, never this line: the line starts closed.
       if (prior) d.open = false;
       d.classList.add('tl-earlier');
@@ -673,7 +788,7 @@
         if (cov) li.append(cov);
         const step = `${all.indexOf(s)}:${s.name}`;
         const old = mine ? Array.from(mine.querySelectorAll('details.output')).find((x) => x.dataset.step === step) : null;
-        const out = output(s.output, card, s.name === 'tests failed' ? 'Show full output' : null, old);
+        const out = output(s.output, card, s.name === 'tests failed' ? 'Show full output' : null, old, repoUrl);
         if (out) { out.dataset.step = step; li.append(out); }
       });
       ol.append(li);
@@ -793,12 +908,17 @@
     const cut = one.slice(0, 140), sp = cut.lastIndexOf(' ');
     return `${(sp > 60 ? cut.slice(0, sp) : cut).replace(/[\s,:;]+$/, '')}…`;
   }
-  // The sentence a blocked card leads with, and the whole reason on a tap when it says more.
+  // The sentence a blocked card leads with, and the whole reason on a tap when it says more, in a block labelled "Why it
+  // blocked" (app.css .why-block). Code spans and file paths in both are drawn as fill draws them, linked in the
+  // card's repository (repoOf).
   function failureLine(c) {
     const { said, full } = failure(c);
-    if (said === full) return h('p', 'reason why-said', said);
-    const det = h('details', 'why');
-    det.append(h('summary', 'reason why-said', said), h('p', 'reason why-full', full));
+    const repoUrl = repoOf(c), known = new Set(pathsIn(full));
+    const lead = (el) => fill(el, said, repoUrl, known, 'why-said');
+    if (said === full) return lead(h('p', 'reason why-said'));
+    const det = h('details', 'why'), box = h('div', 'reason why-block');
+    box.append(h('strong', 'why-label', 'Why it blocked'), fill(h('div', 'why-text why-full'), full, repoUrl, known, 'why'));
+    det.append(lead(h('summary', 'reason why-said')), box);
     return det;
   }
 
@@ -1562,7 +1682,7 @@
     }
     p.ctx = {
       h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
-      param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine,
+      param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
       // project's rows together then.
@@ -2121,5 +2241,5 @@
     window.setInterval(() => refresh(), REFRESH_MS);
   }
 
-  window.DASH_APP = { panel, head, overlay, start, pack, joined };
+  window.DASH_APP = { panel, head, overlay, start, pack, joined, text: findingText };
 }());

@@ -138,7 +138,15 @@ test('Declined: a finding and its reason draw a level badge, a file link, a bold
   const data = full();
   data.panels.declined.data.lines = [line({ finding: LONG, why: LONG_WHY, by: 'owner', round: null, findings: null }),
     line({ id: 'd00000000000b', finding: TAGGED, why: 'not worth it', by: 'owner', round: null, findings: null })];
+  // Bug #437: the panel kept its own copy of this formatting, so a review's output and a blocked card's reason drew the
+  // same kind of text another way. It draws through the Board's shared helper (app.js findingText), and draws as before.
+  const used = new Set();
+  for (const k of ['fill', 'codeEl', 'proofAt']) {
+    const was = w.DASH_APP.text[k];
+    w.DASH_APP.text[k] = (...a) => { used.add(k === 'proofAt' ? k : `${k}:${a[a.length - 1]}`); return was(...a); };
+  }
   deliver(w, data);
+  for (const k of ['codeEl:declined-at', 'codeEl:why-at', 'fill:declined', 'proofAt']) assert.ok(used.has(k), `the finding, its file and its reason draw through the shared helper: ${k}`);
   const long = rowOf(w, LONG.replaceAll('`', ''));
   const f = long.querySelector('.declined-finding');
   const badge = f.querySelector('.declined-head .declined-level');

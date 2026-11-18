@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
+// record: repoUrl (its repository's https address, else null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -59,13 +59,20 @@ window.DASH_APP.panel({
       return e ? [e.line, { tail: e.raw, label: 'Raw error' }] : [];
     };
     // One row of a Health list (a test case or file), in a review finding's row styles: its name, a chip of its count
-    // and the issue filed for it (f) as a link when there is one on a line; what more it says (why) under it.
-    const item = (name, count, f, why) => {
-      const row = h('li', 'output-finding'), head = h('div', 'finding-head');
-      head.append(h('p', 'finding-text', name), ctx.chip(count, 'quiet'));
+    // and the issue filed for it (f) as a link when there is one on a line; what more it says (why) under it. The
+    // name's file (file, the start of name) is code linked to the file in the record's repository (repo: its repoUrl,
+    // else its issue's), and why is drawn as a review finding's text (ctx.text.fill).
+    const item = (repo, name, file, count, f, why) => {
+      const T = ctx.text, row = h('li', 'output-finding'), head = h('div', 'finding-head'), said = h('p', 'finding-text');
+      const url = repo || T.repoOf(f);
+      if (file && name.startsWith(file)) {
+        const c = h('code', 'why-code', file), to = T.fileUrl(url, file);
+        said.append(to ? T.linkTo(c, to, 'finding-file') : c, name.slice(file.length));
+      } else said.append(name);
+      head.append(said, ctx.chip(count, 'quiet'));
       if (typeof f.issue === 'number' && f.issue > 0) head.append(ctx.issueLink(f));
       row.append(head);
-      if (why) row.append(h('p', 'detail', why));
+      if (why) row.append(T.fill(h('p', 'detail'), why, url, new Set(T.pathsIn(why)), 'finding'));
       return row;
     };
     // On one machine (host.local, #112) Conveyor runs here: the row is this machine's, read with no SSH. A host file
@@ -129,7 +136,8 @@ window.DASH_APP.panel({
         const cases = r.flaky.filter((f) => f && typeof f.case === 'string' && typeof f.count === 'number');
         if (cases.length) {
           const det = h('details', 'output'), list = h('ul', 'output-findings flaky-list');
-          list.append(...cases.map((f) => item(f.case, `${f.count} ${f.count === 1 ? 're-run' : 're-runs'}`, f)));
+          // A case is "<file>: <case>", or the file alone when the run named no case (conveyor/lib/testrun.sh notpassed).
+          list.append(...cases.map((f) => item(r.repoUrl, f.case, /^(.+?): /.exec(f.case)?.[1] ?? f.case, `${f.count} ${f.count === 1 ? 're-run' : 're-runs'}`, f)));
           det.append(h('summary', null, 'Show output'), list);
           check(`Flaky tests${of}`, ctx.chip(`${cases.length} case${cases.length === 1 ? '' : 's'}`, 'warn'),
             `${cases.length === 1 ? '1 case' : `${cases.length} cases`} passed only on re-run in the last 7 days`, det).next =
@@ -144,7 +152,7 @@ window.DASH_APP.panel({
         if (files.length) {
           const n = (x) => (typeof x === 'number' ? `${Math.round(x * 10) / 10}` : '?');
           const det = h('details', 'output'), list = h('ul', 'output-findings slow-off-list');
-          list.append(...files.map((f) => item(f.file, 'Kept off', f,
+          list.append(...files.map((f) => item(r.repoUrl, f.file, f.file, 'Kept off', f,
             `${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s; runs only in the full test suite until its issue lands`)));
           det.append(h('summary', null, 'Show output'), list);
           check(`Kept off card tests${of}`, ctx.chip(`${files.length} file${files.length === 1 ? '' : 's'}`, 'warn'),

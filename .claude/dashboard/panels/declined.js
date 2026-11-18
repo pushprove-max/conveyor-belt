@@ -45,70 +45,11 @@
   const open = (x) => !x.dismissed && typeof x.built !== 'number';
   // A finding's first sentence: its level, file and line lead it.
   const first = (s) => { const m = /^.*?[.!?](?=\s|$)/.exec(s); return m ? m[0] : s; };
-  // A reason's text split into sentences, each a list of parts: {code} (a span the reason has in backticks, drawn
-  // without them) or {text}. A sentence ends at a . ! or ? before a space, outside backticks; the space stays at its
-  // end, so the sentences joined (with the backticks) are the text as written. A lone backtick is left as text.
-  const sentences = (text) => {
-    const out = [[]];
-    let at = 0;
-    const plain = (s) => {
-      let from = 0;
-      for (const m of s.matchAll(/[.!?]\s+/g)) {
-        out[out.length - 1].push({ text: s.slice(from, m.index + m[0].length) });
-        out.push([]);
-        from = m.index + m[0].length;
-      }
-      if (from < s.length) out[out.length - 1].push({ text: s.slice(from) });
-    };
-    for (const m of text.matchAll(/`([^`]+)`/g)) {
-      plain(text.slice(at, m.index));
-      out[out.length - 1].push({ code: m[1] });
-      at = m.index + m[0].length;
-    }
-    plain(text.slice(at));
-    return out.filter((s) => s.length);
-  };
-  // The paths with a directory that a text names before a :line ("conveyor/lib/claim.sh:99").
-  const PATH = /(?:^|[^A-Za-z0-9_./-])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+):[0-9]/g;
-  const pathsIn = (s) => (typeof s === 'string' ? Array.from(s.matchAll(PATH), (m) => m[1]) : []);
-  // A `file:line` (or `file:a–b`) of a reason, as a link to those lines on GitHub, in the line's repository (repoUrl:
-  // a main-red fix card has no issue url); null when the span is no file and line, or the repository is not on GitHub.
-  // A short path ("issues.sh:636") is the one path of known (the paths the line's findings and reasons name) that ends
-  // with it; none or more than one, and it has no directory, it is no link, as the repository root is only a guess.
-  const lineUrl = (x, code, known) => {
-    const repo = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/.exec(typeof x.repoUrl === 'string' ? x.repoUrl : '');
-    const m = /^((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+):([0-9]+)(?:[–-]([0-9]+))?$/.exec(code);
-    if (!repo || !m || m[1].split('/').some((s) => s === '.' || s === '..')) return null;
-    let path = m[1];
-    if (!known.has(path)) {
-      const ends = [...known].filter((k) => k.endsWith(`/${path}`));
-      if (ends.length === 1) path = ends[0];
-      else if (!path.includes('/')) return null;
-    }
-    return { url: `https://github.com/${repo[1]}/blob/HEAD/${path}#L${m[2]}${m[3] ? `-L${m[3]}` : ''}`, at: `${path}:${m[2]}` };
-  };
-  // A file path with a directory and a line ("shared/taxonomy/fields.ts:239") written without backticks.
-  const BARE = /(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_-][A-Za-z0-9_.-]*\.[A-Za-z0-9]+:[0-9]+(?:[–-][0-9]+)?/g;
-  // Plain text, each bare path in it given to at (drawn as code), the rest to plain; the text is kept as written.
-  const barePaths = (s, at, plain) => {
-    let from = 0;
-    for (const m of s.matchAll(BARE)) {
-      if (m.index > from) plain(s.slice(from, m.index));
-      at(m[0]);
-      from = m.index + m[0].length;
-    }
-    if (from < s.length) plain(s.slice(from));
-  };
-  // A span of code: monospace, italic and in the accent colour (app.css .why-code); a file and line in it is a link to
-  // that line on GitHub (lineUrl), with the link returned so a caller can say more of it on hover.
-  const codeEl = (h, x, s, known, cls) => {
-    const c = h('code', 'why-code', s), to = lineUrl(x, s, known);
-    if (!to) return { el: c, to: null };
-    const a = h('a', `${cls}-at`);
-    a.href = to.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-    a.append(c);
-    return { el: a, to };
-  };
+  // The text formatting every panel shares (app.js, findingText): the sentences, the code spans and the links to a
+  // file's line, in the line's repository (repoUrl: a main-red fix card has no issue url).
+  const T = window.DASH_APP.text;
+  const { sentences, pathsIn, barePaths } = T;
+  const codeEl = (x, s, known, cls) => T.codeEl(x.repoUrl, s, known, `${cls}-at`);
   const LEVELS = new Set(['0', '1', '2', '3']);
   // A finding, as "[P<n>] <file>:<line> <claim>. <more> Proof: <proof>": a head line (the level as a coloured badge,
   // the file and line as code linked to that line), the claim in bold on its own line, then the proof under a "Proof"
@@ -117,16 +58,7 @@
   const findingEl = (h, x, known) => {
     const text = typeof x.finding === 'string' && x.finding ? x.finding : 'no finding';
     const box = h('div', 'title declined-finding');
-    const fill = (el, s) => {
-      for (const parts of sentences(s)) {
-        const line = h('span', 'declined-line');
-        for (const p of parts) {
-          if ('code' in p) line.append(codeEl(h, x, p.code, known, 'declined').el);
-          else barePaths(p.text, (q) => line.append(codeEl(h, x, q, known, 'declined').el), (q) => line.append(q));
-        }
-        el.append(line);
-      }
-    };
+    const fill = (el, s) => T.fill(el, s, x.repoUrl, known, 'declined');
     // A review's id for the finding ("[E1]", "[F2]"), when it has one, stands between the level and the file.
     const m = /^(\[P([0-9])\])(\s+)((?:\[[A-Za-z]+[0-9]+\]\s+)*)(\S+?:[0-9]+(?:[–-][0-9]+)?)(\s+)([\s\S]*)$/.exec(text);
     if (!m) { fill(box, text); return box; }
@@ -135,21 +67,19 @@
     badge.dataset.level = LEVELS.has(m[2]) ? `P${m[2]}` : 'none';
     head.append(badge, m[3]);
     if (m[4]) head.append(h('span', 'declined-ids', m[4]));
-    head.append(codeEl(h, x, m[5], known, 'declined').el, m[6]);
+    head.append(codeEl(x, m[5], known, 'declined').el, m[6]);
     box.append(head);
     const rest = m[7];
     // "Proof:" outside backticks splits the claim (and what follows it) from the proof.
-    let cut = -1;
-    for (const p of rest.matchAll(/`[^`]*`|\bProof:\s*/g)) if (p[0][0] !== '`') { cut = p.index; break; }
-    const said = cut < 0 ? rest : rest.slice(0, cut), proof = cut < 0 ? '' : rest.slice(cut);
+    const { at: cut, label } = T.proofAt(rest);
+    const said = cut < 0 ? rest : rest.slice(0, cut), proof = cut < 0 ? '' : rest.slice(cut + label.length);
     const claim = /^\S[\s\S]*?(?:[.!?](?=\s|$)|$)\s*/.exec(said)?.[0] || said; // the first sentence, its space kept
     if (claim) { const b = h('strong', 'declined-claim'); fill(b, claim); box.append(b); }
     if (said.length > claim.length) { const r = h('div', 'declined-more'); fill(r, said.slice(claim.length)); box.append(r); }
-    if (proof) {
-      const label = /^Proof:\s*/.exec(proof)[0];
+    if (cut >= 0) {
       const p = h('div', 'declined-proof');
       p.append(h('span', 'declined-proof-label', label));
-      fill(p, proof.slice(label.length));
+      fill(p, proof);
       box.append(p);
     }
     return box;
@@ -165,7 +95,7 @@
   // card; when several findings start there, it says each of them. An F<n> whose finding is not found is left as written, with "finding not found" on hover. The text is never
   // changed.
   // The project's other lines declined by the time x's reason was written (kin), and the paths the line's findings and
-  // reasons name (known, for lineUrl).
+  // reasons name (known, for the links to a file's line).
   const near = (x, pool) => {
     // Only a finding declined by the time the reason was written can be the one it names; a line with no readable
     // time is not known to be earlier.
@@ -214,7 +144,7 @@
     for (const parts of sentences(text)) {
       const line = h('span', 'why-line');
       const code = (s) => {
-        const { el: a, to } = codeEl(h, x, s, known, 'why');
+        const { el: a, to } = codeEl(x, s, known, 'why');
         if (!to) { line.append(a); return; }
         const at = new RegExp(`^\\[P[0-9]\\]\\s+${to.at.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b(?![-–])`);
         // Every finding that starts there, not only the first found: two findings can start at the same line, and the

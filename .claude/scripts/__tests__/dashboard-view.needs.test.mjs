@@ -4,7 +4,7 @@
 // with why it failed, and a push failing while it is tried again is said under Needs you's tick. Each case names the
 // bug it catches. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, panel, deliver, next, settle, full, trackOf, counts, board, loopP, bcard, act, note, record, rulesP, clone, cases, pickProject } from './dashboard-view.helpers.mjs';
+import { boot, panel, deliver, next, settle, full, trackOf, counts, board, loopP, bcard, act, note, record, rulesP, clone, cases, pickProject, P } from './dashboard-view.helpers.mjs';
 const test = cases(import.meta.url);
 
 const blockedRow = (w, card = 'c2-13') => panel(w, 'needs').querySelector(`li[data-key="blocked:${card}"]`);
@@ -24,6 +24,8 @@ test('Needs you: a blocked card leads with why it failed in one sentence, then w
   const review = trackOf('+!....', '');
   d.panels.needs.data.cards.blocked.push({ repo: 'sample', card: 'c3-14', issue: 14, title: 'Pay page', url: null, since: d.panels.needs.data.cards.blocked[0].since,
     reason: 'review: three rounds said NO-GO; the card stops', track: review, reviews: [1, 2, 3].map((round) => ({ round, verdict: 'NO-GO', counts: counts(0, 1, 0, 0) })) });
+  d.panels.needs.data.cards.blocked.push({ repo: 'sample', card: 'c4-15', issue: 15, title: 'Pay rules', url: `${P}/15`, since: d.panels.needs.data.cards.blocked[0].since,
+    reason: 'build: `make pay` failed at web/pay.ts:12. Nothing landed.' });
   deliver(w, d);
   const t = blockedRow(w);
   assert.deepEqual(lines(t).slice(0, 3), ['2 tests failed: pays once, refunds', 'Retry puts #13 back in the queue, and a new card builds it in its turn.', 'Show output'],
@@ -35,6 +37,19 @@ test('Needs you: a blocked card leads with why it failed in one sentence, then w
   assert.match(t.textContent, /Fix the cause\. Then press Retry\./);
   assert.doesNotMatch(panel(w, 'needs').textContent, /conveyor\.sh/, 'no command where a button does it');
   assert.equal(lines(blockedRow(w, 'c3-14'))[0], 'Review asked for changes three times');
+  // Bug #437: a blocked card's reason showed its raw backticks and its file paths as plain text, unlike a declined
+  // finding's reason: its code span and path are set apart, the path links to its line, and the whole reason is in a
+  // block labelled "Why it blocked".
+  const f = blockedRow(w, 'c4-15').querySelector('details.why'), href = `https://github.com/example/sample-project/blob/HEAD/web/pay.ts#L12`;
+  const code = (el) => Array.from(el.querySelectorAll('code.why-code'), (c) => c.textContent);
+  assert.deepEqual(code(f.querySelector('summary.why-said')), ['make pay', 'web/pay.ts:12'], 'the lead sentence sets its code and path apart');
+  assert.equal(f.querySelector('summary.why-said a').getAttribute('href'), href, "the lead sentence's path links to its line");
+  const box = f.querySelector('.why-block');
+  assert.equal(box.querySelector('.why-label').textContent, 'Why it blocked');
+  assert.deepEqual(code(box.querySelector('.why-full')), ['make pay', 'web/pay.ts:12'], 'the whole reason sets its code and path apart');
+  assert.equal(box.querySelector('.why-full a').getAttribute('href'), href, "the whole reason's path links to its line");
+  assert.equal(box.querySelector('.why-full').textContent, 'build: make pay failed at web/pay.ts:12. Nothing landed.', 'the reason as written, without its backticks');
+  assert.equal(why.querySelector('.why-full code'), null, 'a reason with no code span or path draws as plain text');
 });
 
 // Bug: a card whose tests failed, and whose fix of them then failed ("fix: …"), led with the earlier run's failing

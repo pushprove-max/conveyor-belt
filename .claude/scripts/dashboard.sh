@@ -83,7 +83,8 @@
 #           or owner), why, built (the issue "File as issue" filed for it, else null), dismissed ({time, by}, else null),
 #           round and findings (the review the judge declined it in and that review's findings as the judge numbered
 #           them, [{n, finding}], else null), as the snapshot's declined gives them; rest: every other line, so, as its declinedRest gives them.
-#   health  host {name, reachable, error}, records (each record's steered (the host answer's), loop, state (running, paused, stopped, as
+#   health  host {name, reachable, error}, records (each record's steered (the host answer's), repoUrl (its repository's https
+#           address, else null), loop, state (running, paused, stopped, as
 #           its control record says; a loop not meant to run is off, not a fault), newest line, stuck cards, pushes,
 #           cycles: the dependency cycles, flaky: the snapshot's flaky cases {case, count, issue, files, url}, null from a snapshot
 #           without them, slowOff: the snapshot's test files kept off card test steps, each with its issue's url, null
@@ -829,7 +830,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

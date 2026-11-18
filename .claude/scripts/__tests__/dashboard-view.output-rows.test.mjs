@@ -15,17 +15,25 @@ const row = (li) => [li.querySelector('.finding-text').textContent, li.querySele
 
 test('Health: each flaky case and each kept-off file is one row with its name, count chip and issue link, with no mono block', () => {
   const data = full(), r = data.panels.health.data.records[0];
-  r.flaky = [{ case: 'b.test: flaky', count: 3, issue: 16, url: `${P}/16` }, { case: 'c.test: other', count: 1, issue: null, url: null }];
+  r.repoUrl = 'https://github.com/example/sample';
+  r.flaky = [{ case: 'b.test: flaky', count: 3, issue: 16, url: `${P}/16` }, { case: 'c.test: other', count: 1, issue: null, url: null },
+    { case: 'd.test', count: 1, issue: null, url: null }];
   r.slowOff = [{ file: 'conveyor/tests/s.test.sh', issue: 17, url: `${P}/17`, cpu: 10.24, budget: 8, card: 'c2-9', last: { cpu: 9, card: 'c2-8' } }];
   const w = boot();
   deliver(w, data);
   const flaky = Array.from(dd(w, 'Flaky tests').querySelectorAll(':scope > details.output li.output-finding'));
-  assert.deepEqual(flaky.map(row), [['b.test: flaky', '3 re-runs', `${P}/16`], ['c.test: other', '1 re-run', null]]);
+  assert.deepEqual(flaky.map(row), [['b.test: flaky', '3 re-runs', `${P}/16`], ['c.test: other', '1 re-run', null], ['d.test', '1 re-run', null]]);
   const off = Array.from(dd(w, 'Kept off card tests').querySelectorAll(':scope > details.output li.output-finding'));
   assert.deepEqual(off.map(row), [['conveyor/tests/s.test.sh', 'Kept off', `${P}/17`]]);
   assert.equal(off[0].querySelector('.detail').textContent,
     "10.2 CPU s in c2-9's test run and 9 in c2-8's; runs only in the full test suite until its issue lands", 'why it is kept off, under its name');
   for (const li of [...flaky, ...off]) assert.equal(li.querySelector('pre.output-text'), null, 'no mono block in a row');
+  // Bug #437: a flaky case's file and a kept-off file were plain text, unlike a declined finding's paths: each is code
+  // linked to the file in the record's repository, a case with no issue filed too, and a whole file the run named no
+  // case of (d.test: conveyor/lib/testrun.sh notpassed gives the file alone, with no ": ").
+  const file = (li) => [li.querySelector('.finding-text code.why-code').textContent, li.querySelector('.finding-text a.finding-file')?.getAttribute('href') ?? null];
+  const blob = 'https://github.com/example/sample/blob/HEAD';
+  assert.deepEqual([...flaky, ...off].map(file), [['b.test', `${blob}/b.test`], ['c.test', `${blob}/c.test`], ['d.test', `${blob}/d.test`],['conveyor/tests/s.test.sh', `${blob}/conveyor/tests/s.test.sh`]]);
 });
 
 test('Health: a one-line git error is a plain sentence, the raw line under a closed "Raw error"; a one-line raw error has no failures list', () => {
