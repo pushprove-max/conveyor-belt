@@ -34,6 +34,18 @@ PY=$XDG_DATA_HOME/conveyor/board-venv/bin/python3
 # every part begins. A part PARTSEL leaves out ends here, passed.
 fresh() {
 [ -z "$PARTSEL" ] || [[ " $PARTSEL " == *" $1 "* ]] || exit 0
+setup "$1"
+}
+# A long part runs its stretches that need no state of one another side by side too: each `( setup <part>-<n>; ... ) &
+# PIECES+=($!)` has a folder of its own, set up as fresh's, and the part ends with `pieces`, failed when one failed.
+PIECES=()
+pieces() {
+  local p bad=0
+  for p in "${PIECES[@]}"; do wait "$p" || bad=1; done
+  [ "$bad" -eq 0 ] || fail "a piece of this part failed (its FAIL line is above)"
+}
+# setup <folder> -- the folder $TOP/<folder> and all in it, as above.
+setup() {
 T=$TOP/$1; mkdir -p "$T"
 # The limit read also walks the review sessions' Codex folder; without this a collect reads the owner's real spend.
 export CONVEYOR_CODEX_REVIEW_HOME=$T/codex-review
@@ -545,7 +557,8 @@ q '.panels.rules.data.waits | map([.issue, .waitsFor]) == [[32, [20]], [34, [20]
 ) & started cards
 
 # The collect of the cards above, which the machine's first checks read.
-( fresh machine; cards_fixture
+( fresh machine
+( cards_fixture
 answer "$P" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
 # --- the machine's one Conveyor over both projects, each project on its own, and each Foreman ---
@@ -719,6 +732,8 @@ answer "$P" "$P_URL" 1794000000 "$(jq -c '.needsYou.farDeps = [{issue: 42, title
 run
 q '.panels.needs.data.cards.farDeps | map([.repo, .issue, .ref, .line, .reason, .url]) == [["widgetshop", 42, "other/repo#600", "Depends on: other/repo#600", "no access", "'"$CU"'/42"]]' "a dependency that cannot be read is in Needs you with its line and why"
 q '.panels.machine.data.projects[1].needs | map([.repo, .issue]) == [["widgetshop", 42]]' "a project's Needs you counts its dependencies that cannot be read"
+) & PIECES+=($!)
+( setup machine-2; cards_fixture
 # The Foremen, read from this machine's state folders. A group of the host file's foreman.groups is one Foreman, in
 # its first project's folder (the host file's stateDir for the host's own checkout): shown once with both projects,
 # with when its session claimed the role, when it was last woken and the wakes still owed to it.
@@ -780,10 +795,8 @@ jq --arg l "$T/away/sample-here/.claude/metrics/decisions.jsonl" --arg w "$T/wma
 run
 jq -e '.foremen | map([.projects, .held, .since]) == [[["sample"], false, null], [["widgetshop"], true, "2026-11-12T04:00:00Z"]]' "$OUT/cache/part-foremen.json" >/dev/null \
   || fail "without ssh the Foreman is read under the record's main, never from a checkout matched by its origin ($(cat "$OUT/cache/part-foremen.json"))"
-rm -rf "$T/widgetshop-here" # beside the Board's checkout, it would be widgetshop's Foreman in every later read
-cp "$T/host.before" "$MAIN/conveyor/host.json"
-answer "$P" "$P_URL" 1794000000 "$C" "$C_URL" 0
-run
+) & PIECES+=($!)
+( setup machine-3; cards_fixture
 # A card that landed on an earlier day and is still on the belt (its push fails) stays on the Board, in Building
 # with its Push step and why; a card that landed today and is being pushed is in Landed today alone.
 L='[{"card": "c0-99", "issue": 99, "title": "Landed yesterday", "step": "push", "stepAt": "'"$(ago 90000)"'", "landed": true, "usd": 1, "reading": true, "track": {"reason": "the pre-push hook failed"}},
@@ -829,6 +842,8 @@ answer "$(jq -c --argjson b "$B" '.landed |= (map(. + {batch: $b}) + [.[0] + {ca
 run
 q '.panels.board.data.landed | map([.issue, .batch]) == [[7, '"$B"'], [8, '"$B"']]' "the Board's Landed today carries each card's batch, the cards it landed with"
 q '.panels.board.data.others.widgetshop.landed | map(.batch) == [null]' "a card that landed alone has no batch on the Board"
+) & PIECES+=($!)
+( setup machine-4; cards_fixture
 # A card waiting on a same-file card is in Building with the card it waits on and where that card is, never in Review.
 PICKED=$(ago 3600)
 L='[{"card": "c0-56", "issue": 56, "title": "Waits", "step": "waiting", "waitsOn": {"card": "c0-55", "issue": 55, "state": "queued"}, "stepAt": "'"$(ago 60)"'", "pickedAt": "'"$PICKED"'", "landed": false, "usd": 1, "reading": true}]'
@@ -891,6 +906,8 @@ answer "$(jq -c '.cost += {todayLeftOut: 0, weekLeftOut: 0, perLandedLeftOut: 0,
 run
 q '.panels.cost.data.cards | .todayLeftOut == 1 and .weekLeftOut == 2 and .perLandedLeftOut == 1
   and .unpriced == [{repo: "widgetshop", card: "c8-4", issue: 4, url: "'"$CU"'/4", step: "build", time: "2026-11-09T01:00:00Z", why: "no model recorded"}]' "the steps the figures leave out are counted and named, each with why and its link"
+) & PIECES+=($!)
+pieces
 ) & started machine
 
 ( fresh figures; cards_fixture
@@ -1069,13 +1086,19 @@ rm -rf "$SDH" "$SD" "$MAIN/conveyor/state"
 ) & started decisions
 
 ( fresh lanes
-# --- the lanes: each record's Fast lane and Research worktrees on this machine, at the folders the host file names ---
+gw() { git -C "$FL" -c user.email=t@t -c user.name=t "$@"; }
+# fast_lane <branch> -- the Fast lane as the piece before leaves it, on <branch>: two commits, f.txt added.
+fast_lane() {
+  g worktree add -q -b "$1" "$FL" main
+  gw commit -q --allow-empty -m "First lane commit"; gw commit -q --allow-empty -m "Second lane commit"
+  echo x > "$FL/f.txt"; gw add f.txt
+}
+( # --- the lanes: each record's Fast lane and Research worktrees on this machine, at the folders the host file names ---
 quiet
 run
 q '.panels.lanes == {error: null, data: {records: [{repo: "sample", fast: {present: false}, research: {present: false}},
   {repo: "widgetshop", fast: null, research: null}], cardsError: null}}' "a named lane folder that is not there is said, not guessed; a record that names no lane has none, and that is no error"
 g worktree add -q -b fix-123-fast "$FL" main
-gw() { git -C "$FL" -c user.email=t@t -c user.name=t "$@"; }
 run
 q '.panels.lanes.data.records[0].fast | .present and .branch == "fix-123-fast" and .ahead == 0 and .dirty == 0 and .subject == null and .landing == {state: "none"}' "a lane level with main has no open change"
 # A saved new file is work not committed: the tile counts it, never Idle.
@@ -1092,6 +1115,8 @@ gw commit -q --allow-empty -m "First lane commit"; gw commit -q --allow-empty -m
 echo x > "$FL/f.txt"; gw add f.txt
 run
 q '.panels.lanes.data.records[0].fast | .ahead == 2 and .subject == "Second lane commit" and .first == "First lane commit" and .dirty == 1 and .landing == {state: "none"}' "the open change: commits ahead of main, the newest and the oldest, and uncommitted files; no card lands it yet"
+) & PIECES+=($!)
+( setup lanes-2; fast_lane fix-123-fast
 lane_card() { jq -c --argjson c "$1" "$2" <<<"$(snap)"; }
 BELT_CARD='{"card": "c5-123", "issue": 123, "title": "Fast thing", "step": "tests", "review": null, "of": 3, "stepAt": "'"$(ago 30)"'", "model": null, "tokens": {"claude": 0, "codex": 0}, "usd": 0}'
 answer "$(lane_card "$BELT_CARD" '.belt = [$c]')" "$P_URL" 0 "$(snap)" "$C_URL" 0
@@ -1133,6 +1158,8 @@ q '.panels.lanes.data.records[0].fast.landing == {state: "none"}' "another branc
 echo 255 > "$T/ssh-rc"; : > "$T/ssh-out"
 run
 q '.panels.lanes | .error == null and .data.records[0].fast.ahead == 2 and .data.records[0].fast.landing == null and (.data.cardsError | test("did not answer"))' "with the cards unread the lane still shows its change, and its landing is unknown, never \"not landing\""
+) & PIECES+=($!)
+( setup lanes-3; fast_lane lane-work
 quiet
 g worktree add -q -b research-notes "$RSL" main
 # The owner's Board said "no worktrees folder is set (CONVEYOR_WORKSPACES)": its lanes were in no folder it could
@@ -1191,6 +1218,8 @@ rm -rf "$FLOG"
 
 # --- what the Foreman's watchers read from the same file ---
 q '(.panels.needs.data.decisions | type) == "array" and (.panels.health.data | has("limit") and has("limitError"))' "the decision and limit watchers find their fields"
+) & PIECES+=($!)
+pieces
 ) & started lanes
 
 ( fresh update
