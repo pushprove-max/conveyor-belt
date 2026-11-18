@@ -26,7 +26,7 @@ t_readyclaim() {
   done
   sed -i 1s/1/seven/ "$CARDS/c7-7/a.txt"; git -C "$CARDS/c7-7" add -A
   sed -i 1s/1/eight/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" add -A
-  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p; /^readysince() {/,/^}/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^bpid() {/,/^}/p' "$SRC/lib/claim.sh")"
   eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
   local HERE=$SRC GIVEWAY=3 w
@@ -60,6 +60,14 @@ t_readyclaim() {
   set7 '"held":false'; echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false}" > "$CARDS/c8-8.claim"
   w=$(cl 7) && [ "$(jq -r .on <<<"$w")" = c8-8 ] || fail "#7, ready after #8, did not wait on it: $w"
   w=$(cl 8) && [ -z "$w" ] || fail "#8, ready first, waited on #7: $w"
+  # Bug (#400): #7, ready first, holds a.txt for its batch, its worktree lent to it (batch(): <worktree>.lent, its own
+  # change in .bpatch, the batch's staged). #8, ready later, took that for #7 not ready, went past it and marked it
+  # passed, and land() refused the batch.
+  pass 7 100; pass 8 200; set7 '"held":true'; rm -f "$CARDS/c8-8.claim"
+  git -C "$CARDS/c7-7" diff --cached --binary --no-renames > "$CARDS/c7-7.bpatch"; git -C "$CARDS/c7-7" rev-parse HEAD > "$CARDS/c7-7.lent"
+  echo mate > "$CARDS/c7-7/z.txt"; git -C "$CARDS/c7-7" add -A
+  w=$(cl 8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] && [ "$(jq -c .passed "$CARDS/c7-7.claim")" = null ] \
+    || fail "#8, ready after #7, went past #7 while #7's batch ran: $w $(cat "$CARDS/c7-7.claim")"
 }
 
 # The fixture of batchreuse.test.sh (reusesetup): #7 and #8 change a.txt (#7 its first line, #8 a line at its end) and

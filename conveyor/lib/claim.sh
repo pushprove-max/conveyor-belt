@@ -537,11 +537,16 @@ tested() { [ ! -e "$1.ready" ] || { jq -c --arg t "$(git -C "$1" write-tree)" --
 # other card run its tests anew, and one card landed per test run), save for sharedtests() below.
 testedhere() { jq -e --arg p "$(cardpatch "$1")" '.tested == true and $p != "" and .patch == $p' "$1.ready" >/dev/null 2>&1; } # <worktree>
 # When its tests passed (since, tested()), for a card whose tests passed on the change it holds (testedhere()), not on
-# a stack's base (stackto(): there they ran with another card's change); fails for any other card (claim()).
+# a stack's base (stackto(): there they ran with another card's change); fails for any other card (claim()). While its
+# worktree is lent to its batch (<worktree>.lent, batch(), rebatch()), the change it holds is its own (bpid()), not the
+# batch's the worktree has then: else a later ready card would go past it there, and land() would refuse the batch.
 readysince() { # <worktree>
-  local s
-  s=$(jq -e 'select(.tested == true) | .since | numbers' "$1.ready" 2>/dev/null) && testedhere "$1" \
-    && ! jq -e --arg h "$(git -C "$1" rev-parse HEAD 2>/dev/null)" '.base == $h' "$1.stack" >/dev/null 2>&1 && printf '%s\n' "$s"
+  local s h
+  s=$(jq -e 'select(.tested == true) | .since | numbers' "$1.ready" 2>/dev/null) || return 1
+  if [ -s "$1.lent" ]; then
+    h=$(<"$1.lent") && jq -e --arg p "$(bpid "$1")" '$p != "" and .patch == $p' "$1.ready" >/dev/null 2>&1 || return 1
+  else h=$(git -C "$1" rev-parse HEAD 2>/dev/null) && testedhere "$1" || return 1; fi
+  ! jq -e --arg h "$h" '.base == $h' "$1.stack" >/dev/null 2>&1 && printf '%s\n' "$s"
 }
 # The test files that the staged change at <worktree> and the change main made from <the commit its tests ran on> to
 # the worktree's HEAD both touch, one a line; fails when there are none, or when HEAD is that commit or none is given.
@@ -651,12 +656,15 @@ fives() { # <card> <issue> <worktree> <commit message> <extra json> [skip]
 # say how many cases it had; a file kept both whole and case by case, as one pass named its cases and a batch run
 # passed it whole, counts the larger of the two, not both), all: whether nothing is left to run}.
 # The patch-id of a card's change in its batch (batch(): <worktree>.bpatch), as cardpatch() gives it (no line of
-# context, so it is the one in its <worktree>.ready): the patch put on the worktree's HEAD in an index of its own.
+# context, so it is the one in its <worktree>.ready): the patch put, in an index of its own, on the commit it goes on
+# (<worktree>.lent, which rebatch() keeps as the worktree moves onto main), else on the worktree's HEAD.
 bpid() { # <worktree>
-  local i
+  local i b p r
+  b=$(cat "$1.lent" 2>/dev/null) && [ -n "$b" ] || b=HEAD
   i=$(mktemp) || return 1; rm -f "$i"
-  GIT_INDEX_FILE=$i git -C "$1" read-tree HEAD 2>/dev/null && GIT_INDEX_FILE=$i git -C "$1" apply --cached < "$1.bpatch" 2>/dev/null && GIT_INDEX_FILE=$i cardpatch "$1"
-  rm -f "$i"
+  GIT_INDEX_FILE=$i git -C "$1" read-tree "$b" 2>/dev/null && GIT_INDEX_FILE=$i git -C "$1" apply --cached < "$1.bpatch" 2>/dev/null \
+    && p=$(GIT_INDEX_FILE=$i git -C "$1" diff --cached --binary --no-renames -U0 "$b" 2>/dev/null | git patch-id --stable 2>/dev/null); r=$?
+  rm -f "$i"; [ -z "${p:-}" ] || printf '%s\n' "${p%% *}"; return $r
 }
 batchkeep() { # <card> <worktree> <the run's cards>
   local c=$1 wt=$2 m w ps
