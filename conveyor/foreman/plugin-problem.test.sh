@@ -16,7 +16,8 @@ export CONVEYOR_FOREMAN=1 CONVEYOR_FOREMAN_ASK='exit 3' CLAUDE_PLUGIN_OPTION_boa
 OWN=$(jq -r '.repository | if type == "object" then .url else . end' "$SRC/../../.claude-plugin/plugin.json")
 LINE='Plugin problem (for the conveyor-belt repo): running cards keep the old engine code, card c20261118T045400-alpha-7, evidence ~/cards/c20261118T045400-alpha-7.err'
 fail() { echo "FAIL [plugin-problem-$CASE]: $*" >&2; exit 1; }
-# fixture <case> <origin>: a project alpha whose origin is <origin>, its one record, and its Foreman's folder.
+# fixture <case> <origin> [<record>]: a project alpha whose origin is <origin>, its one record (default alpha, its
+# main this checkout; else the record named <record>, its main on another host), and its Foreman's folder.
 fixture() {
   T=$B/$1 CASE=$1
   export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_STATE_HOME=$T/xstate
@@ -24,7 +25,7 @@ fixture() {
   export CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$M
   mkdir -p "$HOME" "$XDG_CONFIG_HOME/conveyor" "$FD" && git init -q "$M" && git -C "$M" remote add origin "$2" && mkdir -p "$M/.conveyor" \
     && jq -n '{plugin: {follow: "main"}}' > "$M/.conveyor/project.json" \
-    && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    && jq -n --arg m "$M" --arg r "${3:-}" --arg far "$T/far/${3:-}" '{records: [if $r == "" then {repo: "alpha", main: $m} else {repo: $r, main: $far} end]}' >"$XDG_CONFIG_HOME/conveyor/host.json" \
     || fail "the fixture was not made"
 }
 turn() { # <uuid> <reply> [<opening>]: the stop hook on a turn that ends with that reply
@@ -80,6 +81,19 @@ t_legacy() {
     || fail "the wake refusal does not give the filed form in the plugin's repository: $out"
 }
 
+# Split host: the Foreman runs in a checkout on the owner's machine and its record, named for the checkout's
+# repository, has its main on the belt's host. Bug (#480): plugin_home looked only at that main, not on this
+# machine, so the plugin's own repository passed a plugin problem with no issue number.
+t_split() {
+  fixture split "git@github.com:${OWN#https://github.com/}.git" "${OWN##*/}"
+  out=$(turn u1 "$LINE")
+  jq -e '.decision == "block" and (.reason | contains("filed as #<n>"))' <<<"$out" >/dev/null \
+    || fail "a plugin problem with no issue number passed in the plugin's repository with its belt on another host: $out"
+  out=$(start)
+  grep -q 'filed as #<n>' <<<"$out" && grep -q '^- .*running cards keep' <<<"$out" \
+    || fail "with its belt on another host the start-up text does not say to file the plugin problem and list it: $out"
+}
+
 # D2: in another project the same line with no number passes, as before, and the owner files it: the start-up text
 # lists no entry and does not tell the Foreman to file it.
 t_other() {
@@ -91,7 +105,7 @@ t_other() {
     || fail "in another project the start-up text does not leave the plugin problem to the owner: $out"
 }
 
-cases=(home legacy other)
+cases=(home legacy split other)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 rc=0; pids=()
 for c in $SEL; do (CASE=$c; "t_$c") & pids+=($!); done

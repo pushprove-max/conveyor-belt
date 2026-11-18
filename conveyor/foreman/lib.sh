@@ -41,16 +41,17 @@ repo_name() {
 }
 # plugin_home: 0 when one of the Foreman's projects (mine) is the plugin's own repository: a main checkout on this
 # machine whose remote (the pack's .remote, default origin) is the repository this plugin's plugin.json names, owner
-# and name alike (case aside). There the Foreman files a plugin problem itself (stop.sh, context).
+# and name alike (case aside). A record whose main is on another host (its belt runs there) is read from the checkout
+# this runs for (ledger). There the Foreman files a plugin problem itself (stop.sh, context).
 plugin_home() {
-  local want main r u
+  local want repo main r u
   # slug_ <address>: "owner/name" of git@host:owner/name.git or https://host/owner/name, lower case.
   slug_() { local s=${1%/} n; s=${s%.git}; s=${s//:/\/}; [[ $s == */*/* ]] || return 1; n=${s##*/}; s=${s%/*}; s="${s##*/}/$n"
     [[ ${s,,} =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] && printf '%s' "${s,,}"; }
   want=$(slug_ "$(jq -r '.repository | if type == "object" then .url else . end | strings' "$FHERE/../../.claude-plugin/plugin.json" 2>/dev/null)") \
     && [ -n "$want" ] || return 1
-  while IFS=$'\t' read -r _ main; do
-    [ -n "$main" ] && [ -d "$main" ] || continue
+  while IFS=$'\t' read -r repo main; do
+    [ -n "$main" ] && main=$(ledger "$repo" "$main") || continue
     r=$(jq -r '.remote // "origin" | strings' "$main/.conveyor/project.json" 2>/dev/null) && [ -n "$r" ] || r=origin
     u=$(git -C "$main" remote get-url -- "$r" 2>/dev/null) || continue
     [ "$(slug_ "$u")" = "$want" ] && return 0
