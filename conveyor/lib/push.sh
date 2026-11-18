@@ -380,21 +380,31 @@ tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".fi
 # writes (Conveyor takes none). Each is copied to <kept>/shots named by its content (git hash-object), the first
 # SHOTS_MAX by path, none over SHOT_MAX bytes, with shots.json: {patch: the hash of the kept patch <kept>/<card>.patch,
 # shots: [{file, caption: its path in the folder}]}. The Board shows them only while the card's kept patch is that one.
-# An image not newer, to the nanosecond, than every file the change touches outside the folder was made from an older
-# patch of the card, before a later session changed it: it is left out. A file the change deletes is reckoned by the
-# nearest folder that is still there, as removing it changed that folder's time. A folder outside the worktree (an absolute path, .., or a link
+# An image not newer, to the nanosecond, than every file the change touches outside the folder, and every tracked file
+# outside it, was made from an older patch of the card, before a later session changed it: it is left out. Tracked
+# files count too, as a session that puts a file back as it was in HEAD drops it from the change but not from what the
+# image shows. A file's time is the later of its mtime and its ctime, as a file moved away and back (git mv) keeps its
+# mtime but not its ctime. Every folder that holds such a file counts too, as a folder moved away and back keeps the
+# times of the files in it: only its own ctime and its parent's mtime change. A folder that holds the screenshot folder
+# (the worktree's own among them) does not: making the screenshot folder changed its time, in the same clock tick as the
+# first image. A file the change deletes is reckoned by the nearest folder that is still there, as removing it changed
+# that folder's time. A folder outside the worktree (an absolute path, .., or a link
 # out) gives none, and no link in it is followed. With no image, nothing is written.
 SHOTS_MAX=8 SHOT_MAX=$((2 * 1024 * 1024))
 keepshots() { # <worktree> <kept folder> <card>
-  local dir wt s f fs=() newest=0 sz mt n=0 h ext list=() p i
+  local dir wt s f fs=() newest=0 sz mt n=0 h ext list=() p i; local -A ds=()
   rm -rf "$2/shots"
   packget review.screenshots dir 2>/dev/null && [ -n "$dir" ] && [[ $dir != /* && /$dir/ != */../* ]] || return 0
   wt=$(cd "$1" && pwd -P) && s=$(cd "$1/$dir" 2>/dev/null && pwd -P) && [[ $s == "$wt"/* ]] || return 0
-  mapfile -d '' -t fs < <(git -C "$1" diff --cached -z --name-only --no-renames -- . ":(exclude,literal)$dir")
+  mapfile -d '' -t fs < <(git -C "$1" diff --cached -z --name-only --no-renames -- . ":(exclude,literal)$dir"
+    git -C "$1" ls-files -z -- . ":(exclude,literal)$dir")
   for i in "${!fs[@]}"; do
     p=${fs[i]}; while [ ! -e "$1/$p" ] && [ ! -L "$1/$p" ] && [ "$p" != . ]; do [[ $p == */* ]] && p=${p%/*} || p=.; done; fs[i]=$p
   done
-  [ "${#fs[@]}" = 0 ] || while read -r mt; do [ "$mt" -le "$newest" ] || newest=$mt; done < <(cd "$1" && p_mtimens "${fs[@]}")
+  p=${s#"$wt"/}; while [[ $p == */* ]]; do p=${p%/*}; ds[$p]=0; done
+  for p in "${fs[@]}"; do while [[ $p == */* ]]; do p=${p%/*}; [ -z "${ds[$p]-}" ] || break; ds[$p]=1; done; done
+  for p in "${!ds[@]}"; do [ "${ds[$p]}" = 0 ] || fs+=("$p"); done
+  while read -r mt; do [ "$mt" -le "$newest" ] || newest=$mt; done < <(cd "$1" && for ((i = 0; i < ${#fs[@]}; i += 1000)); do p_mtimens "${fs[@]:i:1000}"; p_ctimens "${fs[@]:i:1000}"; done)
   while IFS= read -r -d '' f && [ "$n" -lt "$SHOTS_MAX" ]; do
     read -r sz _ < <(p_stat "$f") && mt=$(p_mtimens "$f") && [ "$sz" -le "$SHOT_MAX" ] && [ "$mt" -gt "$newest" ] || continue
     ext=$(tr '[:upper:]' '[:lower:]' <<<"${f##*.}"); [ "$ext" != jpeg ] || ext=jpg

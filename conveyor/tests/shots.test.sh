@@ -23,7 +23,8 @@ blockyes() { fx_in 'block c7 7 "$FXWT" "${YES}guests see a Pay button" post'; [ 
 
 # Bugs: the owner approved a visible change from text alone, though the project's run had made screenshots of it;
 # a screenshot made before a later session changed the card was kept as the change's; a link out of the worktree was
-# followed; the snapshot gave no hash to tie the screenshots to the patch they show.
+# followed; the snapshot gave no hash to tie the screenshots to the patch they show; the worktree's own folder, whose
+# time making shots/ set in the clock tick of the image (#454), left the image out.
 t_shotskept() {
   shotswt; tune '.review.screenshots = "shots"'; blockyes
   k=$ST/kept/c7 h=$(echo new | git hash-object --stdin)
@@ -54,6 +55,43 @@ t_shotssamesec() {
     && git -C "$FXWT" add web/pay.ts || fail "the later edit"
   blockyes
   [ ! -e "$ST/kept/c7/shots" ] || fail "a screenshot from before an edit in the same second was kept: $(cat "$ST/kept/c7/shots/shots.json" 2>&1)"
+}
+# Bug (#454): a screenshot made before a later session put a changed file back as it is in HEAD was kept as the
+# change's: the restored file dropped out of the diff, so its time was not reckoned.
+t_shotsrestored() {
+  shotswt; tune '.review.screenshots = "shots"'
+  # Every file of the change is older than the screenshot (set in the future), so only the restored file's time, set
+  # later still, can leave it out.
+  s=$(date +%s); touch -d "@$((s + 5))" "$FXWT/shots/pay/button.png" || fail "the screenshot"
+  echo gone > "$FXWT/gone.ts" && touch -d "@$((s + 10))" "$FXWT/gone.ts" && git -C "$FXWT" diff --quiet HEAD -- gone.ts \
+    || fail "the restored file"
+  blockyes
+  [ ! -e "$ST/kept/c7/shots" ] || fail "a screenshot from before a file was restored was kept: $(cat "$ST/kept/c7/shots/shots.json" 2>&1)"
+}
+# Bug (#454): a screenshot made between a session's move of a file away and a later session's move of it back to its
+# own path (git mv) was kept: the move back drops the file from the diff and keeps its mtime; only its ctime changes.
+t_shotsmoved() {
+  shotswt; tune '.review.screenshots = "shots"'
+  git -C "$FXWT" mv gone.ts old.ts || fail "the move away"
+  sleep 0.05 # sleep: a ctime is the clock's at the change and no program sets it, so only time passing parts the two
+  touch "$FXWT/shots/pay/button.png" || fail "the screenshot"
+  sleep 0.05 # sleep: as above, so the move back's ctime is later than the screenshot's mtime
+  git -C "$FXWT" mv old.ts gone.ts && git -C "$FXWT" diff --cached --quiet HEAD -- gone.ts old.ts || fail "the move back"
+  blockyes
+  [ ! -e "$ST/kept/c7/shots" ] || fail "a screenshot from before a file was moved back was kept: $(cat "$ST/kept/c7/shots/shots.json" 2>&1)"
+}
+# Bug (#454): a screenshot made between a session's move of a folder away and a later session's move of it back was
+# kept: the files in the folder keep their mtime and ctime; only the folder's own ctime and its parent's mtime change.
+# The folder is nested, as in a Board's own folders.
+t_shotsmovedfolder() {
+  shotswt; tune '.review.screenshots = "shots"'
+  mkdir "$FXWT/ui" && mv "$FXWT/web" "$FXWT/ui/web" && mv "$FXWT/ui/web" "$FXWT/ui/old" || fail "the move away"
+  sleep 0.05 # sleep: a ctime is the clock's at the change and no program sets it, so only time passing parts the two
+  touch "$FXWT/shots/pay/button.png" || fail "the screenshot"
+  sleep 0.05 # sleep: as above, so the move back's times are later than the screenshot's mtime
+  mv "$FXWT/ui/old" "$FXWT/ui/web" || fail "the move back"
+  blockyes
+  [ ! -e "$ST/kept/c7/shots" ] || fail "a screenshot from before a folder was moved back was kept: $(cat "$ST/kept/c7/shots/shots.json" 2>&1)"
 }
 t_shotsout() {
   shotswt; tune --arg d "$T/$CASE" '.review.screenshots = $d'; blockyes

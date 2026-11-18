@@ -96,6 +96,8 @@ p_filekey() { stat -c '%s %.9Y %.9Z %i %n' -- "$1" 2>/dev/null; } # <file>
 # larger number, in any locale (stat writes the decimal point of LC_NUMERIC: a comma in de_DE). A file that is not there
 # gives no line.
 p_mtimens() { LC_ALL=C stat -c '%.9Y' -- "$@" 2>/dev/null | tr -d .; } # <file>...
+# The same with each file's ctime, which no program sets back: a rename or a chmod changes it, and keeps the mtime.
+p_ctimens() { LC_ALL=C stat -c '%.9Z' -- "$@" 2>/dev/null | tr -d .; } # <file>...
 
 # <date> (as GNU date -d reads it: "6 days ago", "2026-11-10") in <format>.
 p_date() { date -d "$1" "$2"; } # <date> <+format>
