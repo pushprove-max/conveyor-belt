@@ -135,6 +135,30 @@ t_watchslow() {
   kill $pid; wait $pid 2>/dev/null; :
 }
 
+# Bug #456: a card `retry` gave back stayed Blocked on the Board, with Retry, until a snapshot without it came, and the
+# snapshot after a retry reads the card records whole, which can take long. The retried line names the card while
+# that snapshot is still running (here each of its cksum calls waits 30 s).
+t_watchretried() {
+  watchstart
+  mkdir -p "$STUB/snapbin"
+  printf '#!/usr/bin/env bash\n[ ! -s "%s/snapslow" ] || sleep "$(cat "%s/snapslow" 2>/dev/null)" 2>/dev/null\nexec "%s" "$@"\n' "$STUB" "$STUB" "$(command -v cksum)" > "$STUB/snapbin/cksum" # sleep: a stand-in for a slow snapshot read
+  chmod +x "$STUB/snapbin/cksum"
+  stream 90 "$T/$CASE/watch5.out" "PATH=$STUB/snapbin:$PATH" CONVEYOR_WATCH_GITHUB=60 CONVEYOR_WATCH_GITHUB_FIRST=0
+  trap 'kill $pid 2>/dev/null' EXIT
+  come '.type == "snapshot" and .why == "start"' "the first snapshot"
+  [ "$(ev '.type == "retried"' | jq -c .cards)" = '[]' ] || fail "the retried line at the start: $(ev '.type == "retried"')"
+  echo 30 > "$STUB/snapslow"
+  jq -cn '{card: "c0", issue: 7, step: "blocked", time: "2026-01-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "x", retriedAt: "2026-01-01T01:00:00Z"}' >> "$S/retried.jsonl"
+  come '.type == "retried" and .cards == [{card: "c0", issue: 7, at: "2026-01-01T01:00:00Z"}]' "the retried line, while the snapshot runs,"
+  [ -z "$(ev '.type == "snapshot" and .why == "record"')" ] || fail "the retried line waited for the snapshot"
+  # Bug: Hold (unblock) holds the issue and gives its card back as retry does, so the card was shown as back in the
+  # queue, and its row, with the Undo of the Hold, was drawn anew. A held issue's card is not in the retried line.
+  loop control hold 7 >/dev/null || fail "control hold 7 failed"
+  # The newest retried line, not any: the empty one from the start is still in the stream.
+  till "the retried line without the held issue's card," last 'select(.type == "retried") | .cards' '[]'
+  rm -f "$STUB/snapslow"; kill $pid; wait $pid 2>/dev/null; :
+}
+
 # So is a running step's live record written as it connects (it waited out the wait for GitHub).
 t_watchslowlive() {
   watchstart; : > "$STUB/slow"

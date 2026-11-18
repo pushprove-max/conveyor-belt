@@ -7,7 +7,7 @@ dashboard.sh --loop runs it beside the page server. For every record conveyor/ho
 `ssh` target), or here on one machine (config()). After each line it writes <dashboard folder>/stream.json, the same
 object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), each record with readAt (when its
 snapshot began, by this machine's clock: data.js is dated when it is built, which can be after a change the snapshot
-did not read yet), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
+did not read yet) and retried (the blocked cards its host's last retried line names: {card, issue, at}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
 the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
 is down), writtenAt (when this file was written: every TICK seconds at least)}. After a line that changed something it
 has `dashboard.sh --publish` build data.js again from that and the slower parts the last cycle read, so a card's step
@@ -99,7 +99,7 @@ class Feed:
         self.engine = engine or hmain
         self.cfg = (host, hmain, recs, target, engine)
         self.lock = threading.Lock()
-        self.recs = [{'repo': repo, 'main': m, 'snap': None, 'overlay': None, 'repoUrl': None, 'lastPushAt': None, 'up': False,
+        self.recs = [{'repo': repo, 'main': m, 'snap': None, 'overlay': None, 'retried': [], 'repoUrl': None, 'lastPushAt': None, 'up': False,
                       'heardAt': None, 'downAt': time.time(), 'error': 'the stream has not opened yet', 'unreachable': False,
                       'snapAt': None, 'readAt': None, 'failed': None, 'failedAt': None}
                      for repo, m in recs]
@@ -184,6 +184,11 @@ class Feed:
             elif kind == 'live' and isinstance(ev.get('cards'), dict) and rec['snap'] is not None:
                 rec['overlay'] = ev['cards']
                 changed = True
+            elif kind == 'retried' and isinstance(ev.get('cards'), list):
+                # The cards given back, read at once by the host: a snapshot can take long after a retry, and until
+                # it comes Needs you shows such a blocked card as retried (docs/board.md).
+                rec['retried'] = [c for c in ev['cards'] if isinstance(c, dict) and isinstance(c.get('card'), str)]
+                changed = True
             elif kind == 'error':
                 # The host's snapshot failed: the board is its last good one, so it is not live (its beats say only
                 # that the stream is open) until a snapshot works again.
@@ -235,7 +240,7 @@ class Feed:
             down = [dict(r, error=r['failed'], downAt=r['failedAt']) if r['up'] else r for r in recs if stale(r)]
             records = None if any(r['snap'] is None for r in recs) else [
                 {'repo': r['repo'], 'snap': self.merged(r), 'steered': r['main'] == self.hmain, 'repoUrl': r['repoUrl'], 'lastPushAt': r['lastPushAt'],
-                 'readAt': iso(r['readAt'])}
+                 'readAt': iso(r['readAt']), 'retried': r['retried']}
                 for r in recs]
             error = None
             if records is None:

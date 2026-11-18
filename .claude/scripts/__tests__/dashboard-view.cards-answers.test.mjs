@@ -120,7 +120,7 @@ test('Needs you: a visible change is approved, approved with a condition or decl
   assert.deepEqual(['approve', 'condition', 'decline'].map((k) => btn(k).textContent), ['Approve', 'Approve with this condition', 'Decline']);
   assert.ok(row().querySelector('input[aria-label="Condition for the yes to #12"]') && row().querySelector('input[aria-label="Why not, for #12"]'), 'a text field for the condition and one for why');
   assert.doesNotMatch(panel(w, 'needs').querySelector('[data-group="waiting"]').textContent, /Visible change approved:|conveyor\.sh retry/, 'no hand instruction for a waiting card');
-  assert.match(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"]').textContent, /Fix the cause\. Then press Retry\./, 'a blocked card keeps its own');
+  assert.match(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"]').textContent, /Blocked because: tests failed twice\. Retry starts a new card, from the kept work if there is any\./, 'a blocked card keeps its own');
   assert.doesNotMatch(panel(w, 'needs').textContent, /conveyor\.sh retry/, 'no command where a button does it');
   const files = row().querySelector('.yes-files');
   assert.equal(files.querySelector('summary').textContent, '3 files changed: show the list');

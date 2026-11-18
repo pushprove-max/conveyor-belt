@@ -21,7 +21,13 @@ ends). Every line has `type` and `at` (when it was printed):
             Every card with a running step is in it; one whose step ended is left out. At most one a second, and only
             when something in it changed, and one right after every snapshot (its reader drops the live fields with
             each snapshot, which holds them as they were when it began).
-  beat      nothing more, every BEAT seconds: the stream is alive though nothing changed.
+  retried   {cards: [{card, issue, at}]}: the blocked cards `retry` gave back, the newest RETRIED_KEEP of retried.jsonl's
+            last RETRIED_TAIL bytes (at: retriedAt, null when not recorded), but those whose issue the control
+            record holds: Hold gives a card back as retry does, and a held issue waits for its release, not its
+            turn. Sent at the start and whenever retried.jsonl or control.json changes, before the snapshot that
+            follows: after a retry rewrote the card records, that snapshot reads them whole and can take long, and until it comes the Board shows a given-back card as
+            retried, not as blocked.
+  beat     nothing more, every BEAT seconds: the stream is alive though nothing changed.
   error     {error}: a snapshot failed (the end of what it said); the stream goes on, and the next change tries again.
 
 What it watches, by looking every POLL seconds (one way on every system; each look is a stat of a few files): the state folder (cards.jsonl, retried.jsonl, control.json, pushed, maintest.json,
@@ -62,6 +68,8 @@ GITHUB_EVERY = float(os.environ.get('CONVEYOR_WATCH_GITHUB') or 60)
 GITHUB_FIRST = float(os.environ.get('CONVEYOR_WATCH_GITHUB_FIRST') or 10)
 REFRESH = float(os.environ.get('CONVEYOR_WATCH_REFRESH') or 30)
 LIVE_EVERY = 1.0
+RETRIED_TAIL = 262144  # the end of retried.jsonl the retried line reads: retry appends, so the newest are there
+RETRIED_KEEP = 50
 PROOF_LIVE = '.unfixed.live'  # mainrun/<card>.unfixed.live: the live record of a bug card's proof run (testrun.sh)
 POLL = 0.5
 SNAPSHOT_LIMIT = 120  # a snapshot that hangs is killed, and the next change tries again
@@ -152,6 +160,7 @@ class Stream:
         self.belt = {}        # the last snapshot's belt, by card: what a live line is laid over
         self.models = None  # None until the first snapshot
         self.sent_live = None
+        self.sent_retried = None
         self.repo_url = self.origin()
         self.started = False  # the first snapshot is asked for
         self.first_github = threading.Event()  # GitHub's first answer is in (or failed)
@@ -285,7 +294,39 @@ class Stream:
     def start(self):
         if not self.started:
             self.started = True
+            self.send_retried()
             self.ask('start')
+
+    # ---- the cards given back: read from retried.jsonl itself, which no snapshot has to read first ----
+    def send_retried(self):
+        try:
+            with open(os.path.join(self.state, 'retried.jsonl'), 'rb') as f:
+                f.seek(0, os.SEEK_END)
+                cut = max(0, f.tell() - RETRIED_TAIL)
+                f.seek(cut)
+                data = f.read()
+        except OSError:
+            cut, data = 0, b''
+        try:
+            with open(os.path.join(self.state, 'control.json'), 'rb') as f:
+                held = json.loads(f.read()).get('held')
+        except (OSError, ValueError, AttributeError):
+            held = None
+        held = set(n for n in held if isinstance(n, int)) if isinstance(held, list) else set()
+        cards = []
+        # Whole lines only: the first may begin before the part read, the last may be being written.
+        for line in data.split(b'\n')[1 if cut else 0:-1]:
+            try:
+                x = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(x, dict) and x.get('step') == 'blocked' and isinstance(x.get('card'), str) \
+                    and not (isinstance(x.get('issue'), int) and x['issue'] in held):
+                cards.append({'card': x['card'], 'issue': x.get('issue'), 'at': x.get('retriedAt')})
+        cards = cards[-RETRIED_KEEP:]
+        if cards != self.sent_retried:
+            self.sent_retried = cards
+            Out.send('retried', cards=cards)
 
     # ---- live records ----
     def live_cards(self):
@@ -395,6 +436,8 @@ class Stream:
                 if kind == 'state':
                     if name == 'loop.json':
                         self.loop = self.loop_runs(True)  # its snapshot follows, as for any state file
+                    if name in ('retried.jsonl', 'control.json') and self.started:
+                        self.send_retried()  # before the snapshot, which can take long after a retry
                     if STATE_FILES[name] == 'kept':
                         # A new kept snapshot reads the change the last one was too old to read: it goes as that
                         # change. One that owes none (a snapshot built here, its own read) asks for nothing.

@@ -105,7 +105,25 @@ Click the button, then click it again. The text next to the button shows that th
 
   A landing conflict ("rebase onto main conflicts") has no Fix button. **Retry** already brings the kept patch onto
   main. A push that fails a check needs a fix on main first. A card that waits for your yes to a visible change has
-  **Approve** and **Decline**. Other reasons need you to fix the cause, then press **Retry**.
+  **Approve** and **Decline**.
+- **The last line of a block.** The last line above the buttons tells you the step to take for that kind of block:
+  - A review asked for changes again, the changed tests failed again, or the card's process ended without a result:
+    "Retry: a new session gets the open finding (or the failing tests) and starts from the kept work." Retry is the
+    fix. You do not have to do anything first.
+  - A review that says main does not do what the issue asks, after the card made no change: "Retry: a new session
+    gets the reviewer's finding and builds the issue."
+  - A landing conflict: "Retry: a new session brings the kept change onto main as it is now." You do not have to
+    wait for the conflict to go.
+  - A block that needs you first says what to do, then "Then press Retry.". For example: sign in again on the build
+    machine, install a tool that is missing, set a model the account can run, make the project's dependencies reach
+    the card, finish or release an issue that it depends on, answer a decision or an approval, or add a missing model
+    price.
+  - Any other block names its reason, then what Retry does: "Blocked because: ... Retry starts a new card, from the
+    kept work if there is any."
+- **Retried.** After a retry, the card shows "Retried, waiting for its turn" in place of Blocked, with no buttons.
+  The card leaves Needs you at the Board's next full read of Conveyor, and a new card builds the issue in its turn.
+  This needs the live feed. Without it, the card shows as Blocked until that read. A card that you held is not shown
+  as retried: it keeps **Undo** until the Board's next full read.
 - **Screenshots.** When the pack sets `review.screenshots` ([Configuration](configuration.md#the-pack)), a card that
   waits for your yes shows the screenshots that your project's own run made of its change, above **Approve**. The
   Board shows only the screenshots made from the change that you approve. A screenshot made before a later change to

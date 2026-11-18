@@ -79,6 +79,7 @@ line() { jq -cn --arg t snapshot --argjson s "$1" --argjson took "$TOOK" '{type:
 S1=$(line "$(snap "[$(card c1 11)]")")
 S2=$(line "$(snap "[$(card c1 11), $(card c2 12)]")")
 LIVE='{"type":"live","at":"x","cards":{"c1":{"tokens":{"claude":5000,"codex":0},"usd":1.25,"reading":true,"live":{"turns":4,"lastOutputAt":"'"$NOWISO"'","action":"Bash: npm test"},"files":null}}}'
+RETRIED='{"type":"retried","at":"x","cards":[{"card":"c9","issue":9,"at":"x"}]}'
 ERR='{"type":"error","at":"x","error":"the snapshot failed: jq: error"}'
 BEAT='{"type":"beat","at":"x"}' AFTER=${LIVE/Bash: npm test/after three beats}
 
@@ -92,7 +93,7 @@ until_is() {
 
 ( fresh lost
 # The first stream: a snapshot, then a live line, then it ends when the test drops it.
-printf 'echo %q\nsleep 0.3\necho %q\nwhile [ ! -e %q ]; do echo %q; sleep 0.3; done\n' "$S1" "$LIVE" "$T/drop" '{"type":"beat","at":"x"}' > "$T/conn.1" # sleep: the stand-in stream's pace, a line every 0.3 s
+printf 'echo %q\nsleep 0.3\necho %q\necho %q\nwhile [ ! -e %q ]; do echo %q; sleep 0.3; done\n' "$S1" "$LIVE" "$RETRIED" "$T/drop" '{"type":"beat","at":"x"}' > "$T/conn.1" # sleep: the stand-in stream's pace, a line every 0.3 s
 # The second: a whole snapshot again, beats (with one failed snapshot once the test says so), then silence once the
 # test says so.
 printf 'echo %q\nwhile [ ! -e %q ]; do [ ! -e %q ] || [ -e %q ] || { echo %q; echo %q; echo %q; echo %q; echo %q; : > %q; }; echo %q; sleep 0.3; done\nsleep 100\n' "$S2" "$T/quiet" "$T/fail" "$T/failsent" "$ERR" "$BEAT" "$BEAT" "$BEAT" "$AFTER" "$T/failsent" "$BEAT" > "$T/conn.2" # sleep: the stand-in stream, open and silent at its end
@@ -111,7 +112,10 @@ data | jq -e '(.updatedAt | fromdate) - (.panels.rules.data.readAt | fromdate) |
 # the step ends; the panels show the cost whenever reading is true, so this checks the data, not the page).
 until_is "a_live_line_reaches_data_js" data '.panels.belt.data.cards[0] | .live.action == "Bash: npm test" and .usd == 1.25 and .tokens.claude == 5000 and .reading and .atEnd == false' .panels.belt
 until_is "health_says_live" data '.panels.health.data.stream | .live == true and (.heardAt | type) == "string" and .since == null'
-pass=$((pass + 6))
+# Bug #456: a card the host gave back stayed Blocked, with Retry, until a snapshot without it came, which can take
+# long after a retry. The host's retried line, which no snapshot waits for, reaches Needs you at once.
+until_is "a_retried_line_reaches_needs_you" data '.panels.needs.data.retried == [{repo: "sample", card: "c9", issue: 9}]' .panels.needs.data.retried
+pass=$((pass + 7))
 
 # A stream that drops is opened again, and starts from a whole snapshot: the live line of the first is gone with it.
 : > "$T/drop"

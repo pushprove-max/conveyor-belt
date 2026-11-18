@@ -39,7 +39,8 @@
 #           test on main fails now: the issue filed for it, the failing cases and the commits it failed between), decisions (null when no named ledger
 #           read; decisionsError names each record whose ledger did not read, beside the decisions of those that did),
 #           retrying (each landed card whose push of main failed and is tried again, not one whose issue GitHub kept open: repo, card, issue, title, url, and fix, the
-#           issue of a card on the belt whose parent it is, else null), kinds (the kinds of Needs you, in order, as
+#           issue of a card on the belt whose parent it is, else null), retried (the cards the live feed says
+#           `retry` gave back, but those of held issues: repo, card, issue; none without a live feed), kinds (the kinds of Needs you, in order, as
 #           dashboard_needs.json beside this script lists them: kind, from, title) and entries (for each kind, every record's
 #           entries of it: repo, url, card, issue, title, reason, since).
 #   belt    cards: every open card (but a landed card whose push failed, while Landed today shows it) with its step, the time the step began, model, tokens and usd so far (reading
@@ -776,7 +777,9 @@ PANELS_JQ='
         # shows these.
         kinds: $kinds, entries: ($kinds | map(.from as $f | {key: .kind, value: ($R // [] | map(. as $r | .snap | (try getpath($f) catch null)
           | (if type == "array" then .[] else . end) | objects | tag($r) | {repo, url, card, issue, name: (.name // null), title, reason, since}))}) | from_entries),
-        decisions: $dec.decisions, decisionsError: $dec.error, retrying: $retrying}} end),
+        decisions: $dec.decisions, decisionsError: $dec.error, retrying: $retrying,
+        # The cards the host of each record gave back (the retried line of its stream): a blocked card among them waits for its turn.
+        retried: ($R // [] | map(. as $r | .retried | arrays | .[] | objects | select(.card | type == "string") | {repo: $r.repo, card, issue}))}} end),
    belt: (if $R == null then {error: $cerr, data: null} else {error: null, data: {cards: [$belt[] | select((pushFailed and (. as $c | any($landed[]; .repo == $c.repo and .card == $c.card))) | not)],
         cap: ($R | slots), waiting: ($R | idle),
         byRepo: ($R | map({key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end), waiting: ([.] | idle)}}) | from_entries)}} end),

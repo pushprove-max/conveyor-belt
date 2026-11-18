@@ -34,7 +34,6 @@ test('Needs you: a blocked card leads with why it failed in one sentence, then w
   assert.equal(why.open, false);
   assert.match(why.querySelector('.why-full').textContent, /^tests: the changed tests failed again after their one fix round \(exit 1\); nothing landed\.\nFAIL web\/pay\.test\.ts$/, 'the reason as recorded, whole, on a tap');
   assert.equal(t.querySelector('.stopped').textContent, 'Failed at Test (step 4 of 6)', 'where it stopped comes after');
-  assert.match(t.textContent, /Fix the cause\. Then press Retry\./);
   assert.doesNotMatch(panel(w, 'needs').textContent, /conveyor\.sh/, 'no command where a button does it');
   assert.equal(lines(blockedRow(w, 'c3-14'))[0], 'Review asked for changes three times');
   // Bug #437: a blocked card's reason showed its raw backticks and its file paths as plain text, unlike a declined
@@ -50,6 +49,59 @@ test('Needs you: a blocked card leads with why it failed in one sentence, then w
   assert.equal(box.querySelector('.why-full a').getAttribute('href'), href, "the whole reason's path links to its line");
   assert.equal(box.querySelector('.why-full').textContent, 'build: make pay failed at web/pay.ts:12. Nothing landed.', 'the reason as written, without its backticks');
   assert.equal(why.querySelector('.why-full code'), null, 'a reason with no code span or path draws as plain text');
+});
+
+// Bug #456: every block ended "Fix the cause. Then press Retry.", though for a review, test or no-result block Retry is
+// the fix and nothing on the Board fixes anything first. Each kind's last line names its step; the review block's
+// finding holds words of other kinds ("sign-in", "depends on"), which do not change its kind.
+test('Needs you: a blocked card\'s last line names the step its kind of block takes', () => {
+  const w = boot();
+  const d = full(), b = d.panels.needs.data.cards.blocked, since = b[0].since;
+  const add = (card, issue, reason) => b.push({ repo: 'sample', card, issue, title: `T${issue}`, url: `${P}/${issue}`, since, reason });
+  b.length = 0;
+  add('c1-21', 21, 'the fix for [P1] web/pay.ts:3 the total depends on the sign-in state did not hold after 2 rounds');
+  add('c1-22', 22, 'tests: the changed tests failed again after their one fix round (exit 1); nothing landed.\nFAIL sign-in.test.ts');
+  add('c1-23', 23, 'its process ended without a result in its build step');
+  add('c1-24', 24, "build: Claude Code's own sign-in expired (exit 1): run claude /login, then conveyor.sh control resume");
+  deliver(w, d);
+  const step = (card) => blockedRow(w, card).querySelector('.block-step').textContent;
+  const retry = 'Retry: a new session gets the open finding (or the failing tests) and starts from the kept work.';
+  assert.equal(step('c1-21'), retry, 'a review block: Retry is the fix');
+  assert.doesNotMatch(blockedRow(w, 'c1-21').textContent, /Fix the cause/, 'nothing to fix before Retry on a review block');
+  assert.equal(step('c1-22'), retry, 'a test block: Retry is the fix');
+  assert.equal(step('c1-23'), retry, 'a no-result block: Retry is the fix');
+  assert.equal(step('c1-24'), 'Sign in again on the build machine, as the reason says. Then press Retry.', 'a sign-in block: what to do, then Retry');
+  // Bug: these two got the fallback, which told the owner to wait for the conflict to clear (Retry ports the kept
+  // patch while it stands) and gave a review's NO-GO of ALREADY-DONE no review step. (Five rows show at a time.)
+  b.length = 0;
+  add('c1-25', 25, 'rebase onto main conflicts: error: patch failed: a.txt:1');
+  add('c1-26', 26, 'the session made no change and said that main already fixes the issue. The reviewer says that main does not do what the issue asks. [P1] a.txt:1 wrong word');
+  add('c1-27', 27, 'push: the remote refused the branch.');
+  next(w, d);
+  assert.equal(step('c1-25'), 'Retry: a new session brings the kept change onto main as it is now.', 'a landing conflict: Retry is the fix');
+  // Bug: both promised kept work, which an ALREADY-DONE session, or a block before any change, does not leave.
+  assert.equal(step('c1-26'), "Retry: a new session gets the reviewer's finding and builds the issue.", 'a review that rejects ALREADY-DONE is a review block, with no kept work');
+  assert.match(step('c1-27'), /^Blocked because: .+\. Retry starts a new card, from the kept work if there is any\.$/, 'any other block names its reason');
+  assert.doesNotMatch(step('c1-27'), /no longer stands|wait|first/i, 'the fallback asks for nothing before Retry');
+});
+
+// Bug #456: a card already retried stayed Blocked, with Retry, until its new card was picked (the snapshot that drops
+// it can take long after a retry). Its own card in the retried records shows it waiting, with no Retry; an issue whose
+// earlier card was retried and whose newer card blocked again stays Blocked.
+test('Needs you: a blocked card its host gave back shows "Retried, waiting for its turn" and no Retry', () => {
+  const w = boot();
+  const d = full(), n = d.panels.needs.data;
+  n.cards.blocked.push({ repo: 'sample', card: 'c5-14', issue: 14, title: 'Again', url: `${P}/14`, since: n.cards.blocked[0].since, reason: 'tests failed twice' });
+  n.retried = [{ repo: 'sample', card: 'c2-13', issue: 13 }, { repo: 'sample', card: 'c4-14', issue: 14 }];
+  deliver(w, d);
+  const gone = panel(w, 'needs').querySelector('li[data-key="blocked:c2-13:retried"]');
+  assert.ok(gone, 'the retried card is drawn as retried');
+  assert.equal(gone.querySelector('.row-main .chip').textContent, 'Retried, waiting for its turn');
+  assert.doesNotMatch(gone.querySelector('.row-main').textContent, /Blocked/);
+  assert.equal(gone.querySelector('button[data-act="retry"]'), null, 'no Retry for a card already retried');
+  const again = blockedRow(w, 'c5-14');
+  assert.equal(again.querySelector('.row-main .chip').textContent, 'Blocked', 'a newer card of a retried issue is blocked');
+  assert.ok(again.querySelector('button[data-act="retry"]'));
 });
 
 // Bug: a card whose tests failed, and whose fix of them then failed ("fix: …"), led with the earlier run's failing

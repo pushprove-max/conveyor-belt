@@ -5,8 +5,10 @@
 // sentence (ctx.failureLine: the reason as recorded opens on a tap), then what Retry does, then its output on demand.
 // It has Retry and Close, each sent as POST /control retry or close on a second click (Retry costs a new build; Close
 // cannot be undone, and says so), and Hold (POST /control unblock: one click with Undo, a release). A card whose reason
-// has a fix Conveyor runs itself (FIXES) also has Fix, which says what it does. Its part:
-// {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, kinds, entries}. A group that was not read says so; it is never "nothing". A card
+// has a fix Conveyor runs itself (FIXES) also has Fix, which says what it does. Its last line names the step its kind
+// of block takes (STEPS). One its host already gave back (retried) shows "Retried, waiting for its turn", with no
+// buttons. Its part:
+// {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, retried, kinds, entries}. A group that was not read says so; it is never "nothing". A card
 // comes with its reviews and its track, as `conveyor.sh snapshot` gives them: a blocked card is off the
 // belt, so the step it failed at, with the seconds that step ran, is shown here on its six steps. There is no main
 // session any more: an answer that is recorded is done, and nothing is listed as unsent. It stays on
@@ -44,6 +46,34 @@ const FIXES = [
   [/^(worktree: the kept patch of card \S+ could not be taken out of the worktree|review [0-9]+: the engine could not compare the port with the kept patch)/,
     ['--fresh'], (n) => `Fix builds ${n} again from nothing, without its kept work, which Conveyor cannot use. That work moves to kept-dropped/ in the state folder.`],
 ];
+// The step a blocked card's last line names, by its kind of block (docs/board.md, Needs you), read from the first line
+// of its reason: the rest of it is a review finding or test output, which can hold any words. A review, test or
+// no-result block is fixed by Retry itself, as its new session gets the open finding or the failing tests; so is a
+// landing conflict, which its new session brings onto main. A block that needs the owner first says what to do, then
+// Retry. Any other names its reason and what Retry does, and never asks the owner to wait for anything first.
+const RETRY_FIXES = 'Retry: a new session gets the open finding (or the failing tests) and starts from the kept work.';
+const STEPS = [
+  [/^(the fix for |review \d+ ended without one clear verdict|the review ended without one clear verdict|review: .*NO-GO)/, RETRY_FIXES],
+  [/^(tests: )?(the changed tests (failed again|gave no result)|the project's checks failed again|the Done-when check failed again)/, RETRY_FIXES],
+  [/^its process ended without a result/, RETRY_FIXES],
+  // A review that says main does not do what the issue asks, where the session said ALREADY-DONE: a review block too,
+  // but that session made no change, so there is no kept work to start from.
+  [/^the session made no change and said that main already fixes the issue\. The reviewer says/, "Retry: a new session gets the reviewer's finding and builds the issue."],
+  // Retry does not wait for the conflict to clear: its new session brings the kept patch onto main as it is.
+  [/^rebase onto main conflicts/, 'Retry: a new session brings the kept change onto main as it is now.'],
+  [/sign-in/i, 'Sign in again on the build machine, as the reason says. Then press Retry.'],
+  [/\bis not installed\b|\bnot on PATH\b/, 'Install what the reason names on the build machine. Then press Retry.'],
+  [/\bcannot run the model\b/, 'Set a model the account can run, on the Rules tab. Then press Retry.'],
+  [/^worktree: the engine could not link the dependencies|\bmissing in the card's worktree\b/, "Make the project's dependencies reach the card's worktree, as the reason says. Then press Retry."],
+  [/\bdepends on\b|\bdependency\b/i, 'Land, release or close the issue it depends on. Then press Retry.'],
+  [/\b(decision|approval)\b/i, 'Answer the decision or approval that the reason names. Then press Retry.'],
+  [/\bprice\b/i, "Add the model's price to the prices of the project pack. Then press Retry."],
+];
+const stepOf = (c, said) => {
+  const head = typeof c.reason === 'string' ? c.reason.trim().split('\n')[0] : '';
+  const kind = STEPS.find(([re]) => re.test(head));
+  return kind ? kind[1] : `Blocked because: ${String(said).replace(/[.…]+$/, '')}. Retry starts a new card, from the kept work if there is any.`;
+};
 const fixOf = (c) => (c.issue > 0 && typeof c.reason === 'string' ? FIXES.find(([re]) => re.test(c.reason)) || null : null);
 // The project's own screenshots of a waiting card's change (its shots: keepshots(), conveyor/lib/push.sh), only while
 // they were kept for its kept patch as it is now (shots.patch is the card's patch): an image of an older patch of the
@@ -101,7 +131,11 @@ window.DASH_APP.panel({
       const decisions = groupOf('decisions');
       if (decisions) el.insertBefore(group, decisions); else el.append(group);
     }
-    const keyOf = { tests: (x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
+    // A blocked card its host already gave back (retried: the record's retried lines, read at once, before the
+    // snapshot that drops the card) waits for its new card: it is drawn anew, with no buttons, until that snapshot.
+    const retried = new Set((Array.isArray(d.retried) ? d.retried : []).filter((x) => x && typeof x.card === 'string').map((x) => `${x.repo}\n${x.card}`));
+    const isRetried = (c) => retried.has(`${c.repo}\n${c.card}`);
+    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     for (const key of Object.keys(items)) if (!Object.hasOwn(keyOf, key)) keyOf[key] = (x) => `${key}:${x.repo}#${x.issue}:${x.card}:${x.since}`;
     const isNew = new Set(ctx.fresh(Object.keys(items).flatMap((k) => items[k].map(keyOf[k]))));
@@ -118,7 +152,9 @@ window.DASH_APP.panel({
     const cardRow = (kind) => (c) => {
       const li = h('li', 'row');
       const head = h('div', 'row-main');
-      head.append(ctx.issueLink(c), h('span', 'title', c.title || 'untitled'), ctx.chip(kind === 'waiting' ? 'Waiting for your yes' : 'Blocked', kind === 'waiting' ? 'warn' : 'bad'));
+      const again = kind === 'blocked' && !c.push && isRetried(c);
+      head.append(ctx.issueLink(c), h('span', 'title', c.title || 'untitled'), kind === 'waiting' ? ctx.chip('Waiting for your yes', 'warn')
+        : again ? ctx.chip('Retried, waiting for its turn', 'quiet') : ctx.chip('Blocked', 'bad'));
       const meta = h('p', 'row-meta');
       meta.append(ctx.tag(c.repo), ctx.since(c.since, ' ago'));
       const n = c.issue > 0 ? `#${c.issue}` : 'its issue';
@@ -128,7 +164,8 @@ window.DASH_APP.panel({
       else {
         li.append(head, ctx.failureLine(c));
         li.append(h('p', 'hint retry-does', c.push && c.check ? `Land a fix for ${c.check} on main. Conveyor then pushes again by itself. It does not retry until main moves.`
-          : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.' : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`));
+          : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
+            : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`));
       }
       // A blocked card's output goes here, above its meta line, drawn at each refresh (outputOf): the row is kept.
       // A follow-up whose change goes beyond the yes of an issue above it says what goes beyond it, as its reviewer said.
@@ -161,9 +198,9 @@ window.DASH_APP.panel({
       if (kind === 'waiting') li.append(yesActions(c));
       // A push that keeps failing is not a card to retry (its card has landed): the loop pushes again by itself; one
       // that failed its check (c.check names it) is pushed again only once a fix lands on main.
-      else if (!c.push) {
+      else if (!c.push && !again) {
         const fix = fixOf(c);
-        li.append(h('p', 'hint', 'Fix the cause. Then press Retry.'));
+        li.append(h('p', 'hint block-step', stepOf(c, ctx.failure(c).said)));
         if (fix) li.append(h('p', 'hint fix-does', fix[2](n)));
         li.append(blockedActions(c, fix));
       }
