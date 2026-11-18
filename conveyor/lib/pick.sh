@@ -20,10 +20,10 @@
 # reading's percent and the open issues, both asked for before the lock (each may wait on the network, and every
 # card's line waits on the lock), and reads the record itself under the lock.
 # Dependencies (DEPS above) come on top of that too: each issue gets waits (the open issues it depends on, and
-# the open follow-ups filed from them and from theirs) and,
+# the open follow-ups filed from them and from theirs, less those whose newest card landed, push on or off) and,
 # in the whole list, stuck (it waits, through the chain, on an issue in a cycle: nothing will ever clear it). An issue
-# that waits is left out of the list unless it is asked for whole, like a held one. A dependency that is open is
-# waited for whatever keeps it off the belt (held, a label, blocked): it is open. That is the dependency guard of the
+# that waits is left out of the list unless it is asked for whole, like a held one. A dependency that is open and not
+# landed is waited for whatever keeps it off the belt (held, a label, blocked, building, waiting for a yes). That is the dependency guard of the
 # control record, on unless `control dep-guard off`: only then does an issue `control force` names (forced) go into the
 # list while it waits; nothing else (a release, the order list, a retry) lets one through.
 # Approve before build (SEE above): an issue whose section names a change and that has no approval line gets

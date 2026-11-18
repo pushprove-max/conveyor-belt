@@ -24,7 +24,9 @@
 - `conveyor.sh control hold <issue>...` keeps issues from being built. `conveyor.sh control release <issue>...` lets
   them be built again.
 - A `Depends on: #N` line in an issue's body (several numbers, comma separated) makes the issue wait while #N is open,
-  and while a follow-up filed from #N is open. `owner/repo#N` names an issue of another repository
+  and while a follow-up filed from #N is open. When the card of #N (or of a follow-up) lands, #N (or that follow-up) stops
+  holding the issue, also with push off: the issue is built on top of the landed change. Any other open issue it waits
+  on still holds it. `owner/repo#N` names an issue of another repository
   (`gh issue view --repo`). A repository that gh cannot read counts as open, and Needs you names the issue.
 - The dependency guard is on by default. It keeps a waiting issue from being picked, whatever you do to it.
   `conveyor.sh control dep-guard off` turns it off (`dep-guard on` turns it on). Only then does

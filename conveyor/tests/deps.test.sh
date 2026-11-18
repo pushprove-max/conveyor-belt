@@ -296,6 +296,36 @@ t_followdeps() {
   echo "[$(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50')]" > "$STUB/issues.json"
   loop run >/dev/null; [ "$(order)" = "landed:50 picked:70 landed:100102 picked:60 " ] || fail "#60 not picked once every follow-up closed: $(order)"
 }
+# A dependency whose card landed and was not pushed (push off: its issue stays open until the push). Bug (issue 356):
+# its issue being open held every issue that depends on it, though its change is on the main they are built from, so
+# the queue showed "Waits for #N" and the belt sat empty until the push. One case a fixture: #80 open, #81 depends on it.
+landdeps() { # <#80's card lines after its picked line, as jq -c objects>
+  deps_setup "$(jq -cs . <(issue 80 2026-01-01 P2) <(dep "$(issue 81 2026-01-02 P2)" 'Depends on: #80'))"
+  mkdir -p "$ST"; jq -cn --arg c c0-80 '{card: $c, issue: 80, step: "picked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}' > "$ST/cards.jsonl"
+  printf '%s\n' "$@" >> "$ST/cards.jsonl"
+  pick=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST" 2>&1); waits=$(loop snapshot | jq -c '[.queue.order, .queue.waiting] | map(map([.issue, (.waitsFor // [])]))')
+}
+t_depslanded() {
+  # #80's card has its landed line and no pushed line: #81 is picked, and the queue shows it next, waiting on nothing.
+  landdeps "$(landed 80)"
+  [ "$pick" = 81 ] || fail "#81 is not picked while #80's card has landed, not pushed, and #80 is open: $pick"
+  [ "$waits" = '[[[81,[]]],[]]' ] || fail "the snapshot has #81 waiting on #80, which has landed: $waits"
+}
+t_depsblocked() {
+  # #80's card is blocked (it never landed), #80 open: #81 still waits on it.
+  landdeps "$(landed 80 | jq -c '.step = "blocked" | .reason = "tests failed"')"
+  [ -z "$pick" ] || fail "#81 was picked while #80's card is blocked and #80 is open: $pick"
+  [ "$waits" = '[[],[[81,[80]]]]' ] || fail "the snapshot does not have #81 waiting on #80, whose card is blocked: $waits"
+}
+t_depsrepushed() {
+  # #80's first card landed, a second card for #80 blocked, then a push-now wrote the first card's pushed line. Bug: that
+  # later line made the old card newest again, so #81 was picked though #80's newest card is blocked.
+  local c1='{card: "c1-80", issue: 80, time: "2026-11-02T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}'
+  landdeps "$(landed 80)" "$(jq -cn "$c1 + {step: \"picked\"}")" "$(jq -cn "$c1 + {step: \"blocked\", reason: \"tests failed\"}")" \
+    "$(landed 80 | jq -c '.step = "pushed"')"
+  [ -z "$pick" ] || fail "#81 was picked while #80's newest card is blocked (an older card's pushed line came after it): $pick"
+  [ "$waits" = '[[],[[81,[80]]]]' ] || fail "the snapshot does not have #81 waiting on #80, whose newest card is blocked: $waits"
+}
 t_followdepscycle() {
   # A cycle through a follow-up: #60 depends on #50, whose follow-up #100101 depends on #60. Health names it, and a run
   # limited to #60 says so at its start and ends instead of polling for it forever.

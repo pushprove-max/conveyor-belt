@@ -546,10 +546,13 @@ still be raised, at any level. Do not review the rest of the change again: it pa
 # An issue waits while any issue it depends on is open, and while any follow-up Conveyor filed from one
 # of them is open, and theirs through the chain (a card is not built on work whose known
 # faults are not fixed yet, and the follow-ups take priority). It is picked at the next poll after the last of them
-# closes; closed for any reason (not planned, a withdrawn follow-up, too) clears it. These read one list of open
+# closes; closed for any reason (not planned, a withdrawn follow-up, too) clears it. One whose newest card (the card of
+# its last first line: a later line of an older card, such as the pushed line of a push-now, does not make that card
+# newest again) has a landed or pushed line clears it too, open or not: the change is on the main a card is built from,
+# so with push off the issues that wait on it are not held until the push (landed($cards)). These read one list of open
 # issues (number and body): needs is an issue's dependencies in this repository; ups($cards; $o) is the issues $o with the follow-ups
 # filed from them and theirs, up to MAX_DEPTH (the card lines name them; a run limited by --only reads its
-# set the same way); waits($cards; $open) an issue's open dependencies and their open follow-ups, then the open ones of
+# set the same way); waits($cards; $open) an issue's open dependencies and their open follow-ups not landed, then the open ones of
 # another repository (as "owner/repo#N"; nothing reaches past them, so no cycle goes through one); graph each open issue's
 # open ones (through the follow-ups too), reach every open issue it waits on, through the chain, and cycles($cards)
 # every set of open issues that wait on each other, through the follow-ups as well (an issue that depends on itself is one).
@@ -558,7 +561,13 @@ DEPS='def deprefs: [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on
   def needs: [deprefs[] | select((.[0] // "") == "") | .[1] | tonumber] | unique;
   def farneeds: [deprefs[] | select((.[0] // "") != "") | "\(.[0])#\(.[1] | tonumber)"] | unique;
   def ups($cards; $o): reduce range('"$MAX_DEPTH"') as $_ ($o; . as $s | $s + [$cards[] | select(.followups and (.issue | IN($s[]))) | .followups[]] | unique);
-  def waits($cards; $open): [ups($cards; needs)[] | select(IN($open[]))] + [farneeds[] as $r | select(.far[$r].open != false) | $r];
+  def landed($cards): reduce ($cards[] | select(.issue | type == "number")) as $l ({};
+      ($l.issue | tostring) as $k | ($l.step | IN("landed", "pushed")) as $d
+      | if .[$k].card == $l.card then .[$k].done = (.[$k].done or $d)
+        elif .[$k].seen // [] | any(. == $l.card) then .
+        else .[$k] = {card: $l.card, done: $d, seen: ((.[$k].seen // []) + [$l.card])} end)
+    | [to_entries[] | select(.value.done) | .key | tonumber];
+  def waits($cards; $open): landed($cards) as $done | [ups($cards; needs)[] | select(IN($open[]) and (IN($done[]) | not))] + [farneeds[] as $r | select(.far[$r].open != false) | $r];
   def graph($cards): map(.number) as $open | map({key: (.number | tostring), value: waits($cards; $open)}) | from_entries;
   def reach($g; $n): {seen: [], todo: ($g[$n | tostring] // [])}
     | until(.todo == []; .todo[0] as $x | .todo |= .[1:] | if .seen | any(. == $x) then . else .seen += [$x] | .todo += ($g[$x | tostring] // []) end) | .seen;
