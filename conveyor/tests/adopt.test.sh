@@ -382,6 +382,54 @@ t_gonealive() {
   [ -n "$c" ] && [ "$(st "select(.card == \"$c\" and .step == \"worktree\") | .reason")" = "" ] || fail "#8 was not built again from the start: $(st 'select(.issue == 8)') $out"
 }
 
+# wtchange <card>: a worktree for the card, with a change (a tracked edit, not staged): the work a block must keep.
+wtchange() { git -C "$R" worktree add -q --detach "$T/$CASE/cards/$1" && echo two >> "$T/$CASE/cards/$1/a.txt" || fail "no worktree for $1"; }
+
+# Bug (#466): a card whose process is gone, with no loop running to block it, was open for good: `retry` refused it
+# ("still open") and nothing on the owner's side freed it. retry ends it as a block does, its change kept, then gives
+# the issue back, and the next card of #7 is built from that kept work.
+t_retrygone() {
+  local ended out c=c20260101T000000-t-7 c2
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo : > "$STUB/build"
+  sleep 0 & ended=$!; wait $ended # sleep: a stand-in for the card's process, ended
+  gonecard $c 7 $ended "$(date)" review; wtchange $c
+  out=$(loop retry 7 2>&1) || fail "retry of #7, its card's process gone, exited non-zero: $out"
+  grep -qF "card $c was open with its process gone; it is blocked, its work kept" <<<"$out" && grep -qF 'issue #7 can be picked again' <<<"$out" \
+    || fail "retry did not say it ended the card and gave #7 back: $out"
+  [ "$(jq -r --arg c "$c" 'select(.card == $c and .step == "blocked") | [.reason, .kept] | @tsv' "$ST/retried.jsonl")" = "its process was gone: the machine or the loop stopped"$'\t'"kept/$c" ] \
+    && [ "$(git apply --numstat "$ST/kept/$c/$c.patch" | cut -f3)" = a.txt ] || fail "the card was not blocked with its work kept: $(cat "$ST/retried.jsonl" 2>&1)"
+  out=$(loop run 1 2>&1) || fail "the run after the retry exited non-zero: $out"
+  c2=$(st 'select(.issue == 7 and .step == "picked") | .card')
+  [ -n "$c2" ] && [ "$(st 'select(.step == "worktree") | .reason')" = "resumed from the kept patch of card $c: one session, then review" ] \
+    && [ "$(st 'select(.step == "landed") | .card')" = "$c2" ] || fail "#7 was not picked again from the kept work: $(st 'select(.issue == 7) | .step' | tr '\n' ' ') $out"
+}
+
+# Bug (#466): retry and shut refused a card alive with no process of its step, as one with a session running. Here
+# three cards' processes run (stand-ins): #7 is in its build with a live record (its session runs), #8 is past its
+# build line with no live record and nothing written for longer than stuck and reviewPause, and #9 too, its issue
+# closed. retry 7 still refuses #7 and leaves it as it is; retry 8 ends #8 and everything under it, blocks it naming
+# its review step, with its work kept, and gives #8 back; shut 9 ends #9 the same way and closes the card.
+t_retrystuck() {
+  local p7 p8 p9 out c7=c20260101T000000-t-7 c8=c20260101T000000-t-8 c9=c20260101T000000-t-9 why
+  setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"; tune '.tunables.stuck = 1 | .tunables.reviewPause = 0'
+  sleep 600 & p7=$!; sleep 600 & p8=$!; sleep 600 & p9=$! # sleep: stand-ins for three cards' processes that run
+  gonecard $c7 7 $p7 "$(p_started $p7)"; gonecard $c8 8 $p8 "$(p_started $p8)"; gonecard $c9 9 $p9 "$(p_started $p9)"
+  jq -c 'if .step == "start" and (.card | endswith("-7") | not) then .step = "build" | del(.of) else . end' "$ST/cards.jsonl" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/cards.jsonl"
+  wtchange $c7; wtchange $c8; wtchange $c9; echo '{"step":"build","at":"2026-01-01T00:00:00Z","last":null,"turns":0}' > "$T/$CASE/cards/$c7.live"
+  touch -t 202601010000 "$T/$CASE/cards/$c8" "$T/$CASE/cards/$c9"
+  out=$(loop retry 7 2>&1) && fail "retry took #7, whose session runs: $out"
+  grep -qF 'issue #7 has a card that is still open; nothing changed' <<<"$out" && kill -0 $p7 && [ "$(st "select(.card == \"$c7\") | .step" | tr '\n' ' ')" = "picked worktree start " ] \
+    && [ -d "$T/$CASE/cards/$c7" ] || fail "retry touched #7, whose session runs: $out $(st "select(.card == \"$c7\")")"
+  out=$(loop retry 8 2>&1) || fail "retry of #8 exited non-zero: $out"
+  why="review: no process of this step ran for 1s (the pack's stuck and reviewPause), so the engine stopped the card"
+  ! kill -0 $p8 2>/dev/null && [ "$(jq -r --arg c "$c8" 'select(.card == $c and .step == "blocked") | [.reason, .kept] | @tsv' "$ST/retried.jsonl")" = "$why"$'\t'"kept/$c8" ] \
+    && grep -qF 'issue #8 can be picked again' <<<"$out" || fail "retry did not end #8, block it naming its step with its work kept, and give it back: $out $(cat "$ST/retried.jsonl" 2>&1)"
+  out=$(loop shut 9 2>&1) || fail "shut of #9 exited non-zero: $out"
+  ! kill -0 $p9 2>/dev/null && [ "$(st "select(.card == \"$c9\") | [.step, .reason] | @tsv" | tail -n 2)" = "blocked	$why"$'\n'"closed	the issue was closed by hand while the card was blocked" ] \
+    && [ -s "$ST/kept/$c9/$c9.patch" ] || fail "shut did not end #9, block it with its work kept, and close it: $out $(st "select(.card == \"$c9\")")"
+  kill $p7; wait $p7 $p8 $p9 2>/dev/null; return 0
+}
+
 # The same mid-batch: a card testing a batch holds the batch's changes in its worktree (batch(), rebatch()), its own
 # only in <worktree>.bpatch. #7 is stopped running #8's change alone (its own change taken out, as a split does).
 # Bug: its worktree is kept as it stands, #8's change saved as #7's work and #7's own lost with its .bpatch. Its own

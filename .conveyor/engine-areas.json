@@ -976,6 +976,7 @@
 {"area": "cmd-shut", "test": "control.test.sh"}
 {"area": "cmd-shut", "test": "records.test.sh"}
 {"area": "cmd-shut", "test": "mainred.test.sh"}
+{"area": "cmd-shut", "test": "adopt.test.sh"}
 {"area": "cmd-snapshot", "file": "conveyor/commands/snapshot.sh"}
 {"area": "cmd-snapshot", "test": "accounts.test.sh"}
 {"area": "cmd-snapshot", "test": "accountsflight.test.sh"}

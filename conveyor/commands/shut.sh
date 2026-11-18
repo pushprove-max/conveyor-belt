@@ -6,10 +6,19 @@
 . "$HERE/lib/views.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1
+# What block() and gonewt() need, to end a card stuck in flight first (unstick(), lib/run.sh).
+. "$HERE/lib/session.sh" || exit 1
+. "$HERE/lib/review.sh" || exit 1
+. "$HERE/lib/testrun.sh" || exit 1
+. "$HERE/lib/claim.sh" || exit 1
+. "$HERE/lib/push.sh" || exit 1
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
 # A main-red fix card, which has no issue, is shut by its card id.
 if [[ ${2:-} =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0$ ]]; then locked shut "$2"; exit; fi
-[[ ${2:-} =~ ^[0-9]+$ ]] || { echo "usage: conveyor.sh shut <issue | the card id of a main-red fix card>" >&2; exit 2; }; locked shut "[$2]"
+[[ ${2:-} =~ ^[0-9]+$ ]] || { echo "usage: conveyor.sh shut <issue | the card id of a main-red fix card>" >&2; exit 2; }
+# The issue's card stuck in flight (its process gone, or no process of its step for the pack's stuck) is ended first,
+# blocked with its work kept, outside the lock (unstick(), lib/run.sh), so it is shut as a blocked card is.
+unstick "$2"; locked shut "[$2]"

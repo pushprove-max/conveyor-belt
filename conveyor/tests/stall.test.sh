@@ -185,3 +185,22 @@ EOF
   [ "$(st 'select(.step == "review") | [.result, .stalls, (.firstTry.reason | test("^stalled at review: no progress since 20[0-9-]+T"))] | tostring')" = '["GO",1,true]' ] \
     || fail "the review was not ended and run once more: $(st 'select(.step == "review")')"
 }
+
+# Bug (#466): a card whose build line is written and whose next step never starts (here the project's checks hang
+# after the build, with no live record) sat at review with no reviewer for good: the loop left it open, its slot
+# taken, and `retry` refused it. Once stuck and reviewPause pass with no line and no write, the loop ends the card and
+# everything under it, and blocks it naming its review step, with no review run.
+t_stallnostep() {
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.stuck = 3 | .tunables.reviewPause = 1 | .tunables.poll = 1'
+  echo 'echo two >> a.txt' > "$STUB/build"
+  printf '%s\n' 'echo $$ > "$STUB/hang.pid"; exec sleep 600' > "$STUB/hang" # sleep: checks that never end, ended by the loop
+  tune --arg c "bash $STUB/hang" '.test.checkCommand = $c'
+  s=$SECONDS; out=$(loop run --only 7 2>&1) || fail "run exited non-zero: $out"
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "review: no process of this step ran for 4s (the pack's stuck and reviewPause), so the engine stopped the card" ] \
+    || fail "#7 was not blocked naming its review step: $(st 'select(.issue == 7) | [.step, .of, .reason] | map(strings) | join(" ")' | tr '\n' ,) $out"
+  [ $((SECONDS - s)) -lt 60 ] || fail "the stuck card was not ended soon after stuck and reviewPause: the run took $((SECONDS - s)) s"
+  [ ! -e "$STUB/reviews" ] && [ -z "$(st 'select(.issue == 7 and .step == "review")')" ] || fail "#7 was reviewed: $(st 'select(.issue == 7 and .step == "review")')"
+  [ -s "$STUB/hang.pid" ] && ! kill -0 "$(cat "$STUB/hang.pid")" 2>/dev/null || fail "the hung checks under the card were left running"
+  c=$(st 'select(.step == "picked") | .card')
+  [ "$(st 'select(.step == "blocked") | .kept')" = "kept/$c" ] && [ -s "$ST/kept/$c/$c.patch" ] || fail "the card's work was not kept: $(st 'select(.step == "blocked")')"
+}

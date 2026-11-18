@@ -2426,13 +2426,11 @@ checks() { # <worktree>; prints the lines of every check that fails, and fails w
 # when they pass or the pack sets no command (nothing printed); 1 when they fail, with the command and its output
 # (the first 20000 characters); 2 when the key cannot be read or the result cannot be kept, saying why.
 treecheck() { # <worktree>
-  local cc k h t ix r out d=$1.checks
+  local cc k h t r out d=$1.checks
   packget test.checkCommand cc || { echo "the project pack's test.checkCommand could not be read"; return 2; }
   [ -n "$cc" ] || return 0
-  h=$(git -C "$1" rev-parse HEAD 2>/dev/null) && ix=$(mktemp) || { echo "the worktree's commit could not be read for the checks"; return 2; }
-  cp "$(git -C "$1" rev-parse --path-format=absolute --git-path index)" "$ix" 2>/dev/null || rm -f "$ix"
-  t=$(GIT_INDEX_FILE=$ix git -C "$1" add -A 2>/dev/null && GIT_INDEX_FILE=$ix git -C "$1" write-tree 2>/dev/null); r=$?
-  rm -f "$ix"; [ $r = 0 ] && [ -n "$t" ] || { echo "the worktree's tree could not be read for the checks"; return 2; }
+  h=$(git -C "$1" rev-parse HEAD 2>/dev/null) || { echo "the worktree's commit could not be read for the checks"; return 2; }
+  t=$(treeof "$1") || { echo "the worktree's tree could not be read for the checks"; return 2; }
   k=$d/$h-$t
   if [ -s "$k.rc" ] && [ -f "$k.out" ]; then r=$(<"$k.rc")
   else
@@ -2610,8 +2608,35 @@ dwfields() { # <card> <worktree> <step> <the Done-when check, or ""> <jq filter>
     || { echo "conveyor: card $c: the $s session's fields (its tokens, stats and Done-when check) could not be put on its $s line; the line is written without them" >&2; return 0; }
   printf '%s\n' "$x"
 }
+# The tree of a worktree's files as they are, staged, unstaged and untracked (not ignored), written through a copy of
+# its index so its own index is left as it is: the key of treecheck()'s kept result and the tree asks() compares.
+# Fails, printing nothing, when it cannot be written.
+treeof() { # <worktree>
+  local i t r
+  i=$(mktemp) || return 1
+  cp "$(git -C "$1" rev-parse --path-format=absolute --git-path index)" "$i" 2>/dev/null || rm -f "$i"
+  t=$(GIT_INDEX_FILE=$i git -C "$1" add -A 2>/dev/null && GIT_INDEX_FILE=$i git -C "$1" write-tree 2>/dev/null); r=$?
+  rm -f "$i"; [ $r = 0 ] && [ -n "$t" ] && printf '%s\n' "$t"
+}
+# The question a session's reply ends with, when the session changed nothing: its worktree's tree is the one session()
+# kept before it (<worktree>.before), so a fix whose earlier change is still staged counts too. The question is the
+# reply's last paragraph, on one line, cut to 1000 characters, when it ends with a question mark (quote, bracket or
+# emphasis marks after it aside). The reply is the last text of the session's stream: a Claude result, a Codex
+# agent_message or an OpenCode text part. Fails when the session made a change, its tree before is not known, or the
+# reply does not end with a question.
+asks() { # <worktree>
+  local q b
+  b=$(cat "$1.before" 2>/dev/null) && [ -n "$b" ] && [ "$(treeof "$1" 2>/dev/null)" = "$b" ] || return 1
+  q=$(jq -Rrjn '[inputs | fromjson? // empty | objects | if .type == "result" then .result
+      elif .type == "item.completed" and .item.type? == "agent_message" then .item.text elif .type == "text" then .part.text? else empty end
+      | strings | select(test("\\S"))] | last // ""' "$1.out" 2>/dev/null \
+    | awk 'NF == 0 { b = 1; next } { $1 = $1; p = (b || p == "") ? $0 : p " " $0; b = 0 } END { print p }')
+  [[ $q =~ \?[\"\'\)\*_\`]*$ ]] || return 1
+  printf '%s\n' "${q:0:1000}"
+}
 # A build, fix or rebase session's line, with the Done-when check of its reply on it (doneWhen, and the reply's D<n>
-# lines: doneLines). A failed check is not a block: one fix session is told the failed items, as a NO-GO's findings
+# lines: doneLines). A session that changed nothing and asks the owner a question (asks()) blocks the card with that
+# question, before the check; so does each fix session below that changed nothing and asks one. A failed check is not a block: one fix session is told the failed items, as a NO-GO's findings
 # are, and the check runs again on its reply, its line carrying that result; a second failure blocks the card with the items listed.
 # Then the project's checks (treecheck()), before any review or test: a failure goes to one fix session told their
 # output, and they run again on its change; a second failure blocks the card with that output. Fails when the card blocked.
@@ -2624,6 +2649,7 @@ checked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <ste
   began "$1" "$2" fix
   t=$(session "$3" "$5"$'\n\n'"$CHECKFIX"$'\n'"$out" fix) || { block "$1" "$2" "$3" "fix: $t"; return 1; }
   record "$1" "$2" fix ok "$(jq -c --arg r "the project's checks failed (test.checkCommand)" '. + {reason: $r}' <<<"$t")"
+  [ "$2" = 0 ] || ! t=$(asks "$3") || { block "$1" "$2" "$3" "fix: the session changed nothing and asks the owner: $t"; return 1; }
   out=$(treecheck "$3"); r=$?
   [ $r != 2 ] || { block "$1" "$2" "$3" "the engine could not run the project's checks: $out"; return 1; }
   [ $r = 0 ] || { block "$1" "$2" "$3" "the project's checks failed again after their one fix session; nothing landed."$'\n'"$out"; return 1; }
@@ -2632,6 +2658,10 @@ dwchecked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <s
   local k t f
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
   record "$1" "$2" "$6" ok "$(dwfields "$1" "$3" "$6" "$k" 'if $k == null then . else . + {doneWhen: $k, doneWhenItems: $i, doneLines: $d} end' <<<"$7")"
+  # A session that changed nothing and ends by asking the owner something (asks()) goes to the owner, with its
+  # question as the reason: no Done-when fix, check or review answers it (#466). Not a main-red fix card (issue 0):
+  # with no change, it runs main's failing cases again (nochange()), which no owner's answer replaces.
+  [ "$2" = 0 ] || ! t=$(asks "$3") || { block "$1" "$2" "$3" "$6: the session changed nothing and asks the owner: $t"; return 1; }
   [ -n "$k" ] && [ "$(jq '.failed | length' <<<"$k")" != 0 ] || return 0
   f=$(jq -r '.failed | join("; ")' <<<"$k")
   began "$1" "$2" fix
@@ -2639,6 +2669,7 @@ dwchecked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <s
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
   record "$1" "$2" fix ok "$(dwfields "$1" "$3" fix "$k" '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k, doneWhenItems: $i, doneLines: $d} end)' \
     --arg r "the Done-when check failed: $f" <<<"$t")"
+  [ "$2" = 0 ] || ! t=$(asks "$3") || { block "$1" "$2" "$3" "fix: the session changed nothing and asks the owner: $t"; return 1; }
   [ -z "$k" ] || [ "$(jq '.failed | length' <<<"$k")" = 0 ] \
     || { block "$1" "$2" "$3" "the Done-when check failed again after its one fix session: $(jq -r '.failed | join("; ")' <<<"$k")"; return 1; }
 }

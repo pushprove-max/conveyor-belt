@@ -460,7 +460,13 @@ apitries() { # <worktree> <step> <output file> <command ...>
     sleep "$w"
   done
 }
-session() { local p=$2; newtexts p; apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"; } # <worktree> <prompt> [step: build (when none is given), fix or rebase]
+# The worktree's tree before the session is kept in <worktree>.before (treeof(), lib/testrun.sh), so asks() can tell a
+# session that changed nothing from one that found a change already there.
+session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase]
+  local p=$2; newtexts p
+  treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"
+  apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"
+}
 # The texts of a card's prompts that its old code made, each with the one the new code makes in its place, in the
 # order of its switches (switchcode(), lib/card.sh); newtexts() puts the new ones in a prompt, in that order.
 SWAPOLD=() SWAPNEW=()

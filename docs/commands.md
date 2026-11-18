@@ -41,6 +41,9 @@
   If the issue is held, `retry` also releases it. If the issue has no card, `retry` names the state folder it read
   and says to release the issue with `conveyor.sh control release <issue>`, which starts a new card. If another
   state folder of the checkout has a card of the issue, `retry` and `conveyor.sh doctor` name that folder too.
+  A card can stop in flight: its process is gone, or no process of its step ran for the pack's `tunables.stuck` plus
+  `tunables.reviewPause`. `retry` first blocks that card and keeps its work, then gives it back. `shut` blocks it the
+  same way before it shuts it. `retry` still refuses a card with a step that runs.
 - `conveyor.sh retry <issue> --fresh` gives a blocked card back without its kept work: the next card builds from
   nothing. The kept work moves to a dated folder under `kept-dropped/` in the state folder; it is not deleted.
 - `conveyor.sh unblock <issue> --hold` takes a blocked card off the belt and holds its issue. Its kept work stays.

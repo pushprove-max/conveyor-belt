@@ -217,6 +217,57 @@ cardgone() { # <card> <its last step>
   elif [ "$rc" -gt 128 ] && a=$(kill -l $((rc - 128)) 2>/dev/null); then echo "$why; signal $a killed it (exit status $rc)"
   else echo "$why; it exited with status $rc"; fi
 }
+# A card stuck in flight (#466): open, its worktree line naming its process (pid and start), and either that process
+# gone, or alive with no process of its step for a stall's time (below). Its step is the one the Board shows it in: the step
+# its last start line begins, else the one after its last line. A step's process (a session, a review, a test run, a
+# wait at the claim or for the machine or the model API, a bug card's run on main's code) keeps a live record while it
+# runs, and watch() ends one that makes no progress for STUCK seconds; the step then waits REVIEW_PAUSE and runs once
+# more, writing nothing meanwhile. So a card in its build, review, fix or test step with no live record, and with no
+# new line and no write to any of its files for STUCK and REVIEW_PAUSE together, has no process of that step. Prints
+# "<pid> <step> gone" or "<pid> <step> stuck"; fails for any other card.
+stuckcard() { # <card>
+  local c=$1 p t s at m f
+  IFS=$'\t' read -r p t s at < <(stdb ask card "$c" 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c and .step != "push")) as $l
+    | ($l | map(select(.step == "worktree" and (.pid | type) == "number" and (.started | type) == "string")) | last) as $w | ($l | last) as $z
+    | select($w != null and all($l[]; .step | IN("landed", "closed", "blocked", "pushed") | not))
+    | [$w.pid, $w.started, (if $z.step == "start" then $z.of elif $z.step | IN("build", "fix", "rebase") then "review" elif $z.step == "brief" then "build"
+        elif $z.step == "review" then (if $z.result == "GO" then "test" else "fix" end) elif $z.step == "test" then (if $z.result == "fail" then "fix" else "land" end)
+        else $z.step end), ($z.time | fromdate? // 0)] | @tsv' 2>/dev/null) && [ -n "$p" ] || return 1
+  p_alive "$p" "$t" || { echo "$p $s gone"; return 0; }
+  [[ $s =~ ^(build|review|fix|test)$ ]] && [ ! -e "$CARDS/$c.live" ] && [ ! -e "$CARDS/mainrun/$c.unfixed.live" ] || return 1
+  m=$at
+  while read -r f _; do [[ ! $f =~ ^[0-9]+$ ]] || [ "$f" -le "$m" ] || m=$f; done < <(p_mtimes "$CARDS/$c" "$CARDS/$c".* "$CARDS/mainrun/$c".* 2>/dev/null)
+  [ $((EPOCHSECONDS - m)) -ge $((STUCK + REVIEW_PAUSE)) ] || return 1
+  echo "$p $s stuck"
+}
+# The reason a card stuck in flight is blocked with: <step> <gone | stuck>, as stuckcard() prints them.
+stuckwhy() { # <step> <gone | stuck>
+  if [ "$2" = gone ]; then echo "$GONE"; else echo "$1: no process of this step ran for $((STUCK + REVIEW_PAUSE))s (the pack's stuck and reviewPause), so the engine stopped the card"; fi
+}
+# Ends a card stuck in flight (stuckcard()) as a block ends a card: a process that is still alive is stopped with
+# every process under it, then all are killed, so none writes a line after; then the card is blocked with <reason>,
+# its work kept (gonewt(), block()). Fails, leaving the card open, when its change cannot be put back (gonewt()).
+endcard() { # <card> <issue> <pid, or "" when its process is gone> <its step> <reason>
+  local k=''
+  [ -z "$3" ] || { k=$(freeze "$3"); kill -KILL $k 2>/dev/null; }
+  for k in $k; do while ps -o stat= -p "$k" 2>/dev/null | grep -qv Z; do sleep 0.1; done; done
+  # Closed meanwhile (a card writes its closing line before its process ends): closed, not stuck.
+  [ "$(stdb ask ended "$1" 2>/dev/null)" != true ] || return 0
+  gonewt "$1" "$CARDS/$1" "$4" || return 1
+  ( block "$1" "$2" "$CARDS/$1" "$5" )
+}
+# `retry <issue>` and `shut <issue>` (#466): each open card of the issue stuck in flight (stuckcard()) is ended first,
+# as the loop ends one (endcard()), outside the records' lock, which block() takes. retry then takes the issue as it
+# takes a blocked card's; a card with a step running, or not yet started, is left, and retry still refuses it.
+unstick() { # <issue>
+  local c p s how
+  [ -n "${NAMED:-}" ] || names || return 1
+  for c in $(stdb ask issue cards "$1" 2>/dev/null | jq -r '.card' 2>/dev/null | sort -u); do
+    read -r p s how < <(stuckcard "$c") || continue
+    [ "$how" = stuck ] || p=''
+    endcard "$c" "$1" "$p" "$s" "$(stuckwhy "$s" "$how")" && echo "conveyor: card $c was open with $([ "$how" = gone ] && echo "its process gone" || echo "no process of its $s step for $((STUCK + REVIEW_PAUSE))s"); it is blocked, its work kept"
+  done
+}
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
@@ -296,6 +347,14 @@ run() { # [max-cards] [serve]
     # under them with them, then killed: one that ignores TERM never holds the loop, and none starts another on TERM
     # that would outlive it unseen.
     for p in "${!mine[@]}"; do
+      # One alive with no process of its step for STUCK and REVIEW_PAUSE seconds (stuckcard(), #466) is ended and blocked, naming that
+      # step, so `retry` can take it.
+      if kill -0 "$p" 2>/dev/null && [ ! -e "$CARDS/${mine[$p]% *}.live" ] && read -r _ gs gone < <(stuckcard "${mine[$p]% *}") && [ "$gone" = stuck ]; then
+        read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
+        gone=$(stuckwhy "$gs" stuck)
+        endcard "$c" "$n" "$p" "$gs" "$gone" && echo "conveyor: card $c: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
+        wait "$p" 2>/dev/null; rm -f "$CARDS/$c.exit"; stdbkeeps; continue
+      fi
       if kill -0 "$p" 2>/dev/null; then
         # Those of the last list still alive are kept: one killed during this look has none under it to be found.
         kids[$p]=$( { while read -r k t; do [ -n "$k" ] && p_alive "$k" "$t" && echo "$k $t"; done <<<"${kids[$p]:-}"
@@ -308,6 +367,8 @@ run() { # [max-cards] [serve]
       # made the whole read fail, and a card that had landed was blocked; its push is the loop's, as for any landing.
       [ "$(stdb ask ended "$c" 2>/dev/null)" = true ] && { rm -f "$CARDS/$c.exit"; continue; }
       gs=$(cardstep "$c"); gone=$(cardgone "$c" "$gs"); rm -f "$CARDS/$c.exit"
+      # No line left: `retry` ended it (unstick()) and moved its lines out; a blocked line now would stand alone.
+      [ -n "$gs" ] || { stdb ask card "$c" 2>/dev/null | grep -q . || continue; }
       k=$(while read -r p t; do [ -n "$p" ] && p_alive "$p" "$t" && echo "$p $t"; done <<<"$k")
       kill -KILL $(while read -r p t; do [ -z "$p" ] || freeze "$p"; done <<<"$k") 2>/dev/null
       while read -r p t; do while [ -n "$p" ] && p_alive "$p" "$t"; do sleep 0.1; done; done <<<"$k"

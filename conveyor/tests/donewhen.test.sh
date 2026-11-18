@@ -127,6 +127,52 @@ t_dwblock() {
     || fail "the snapshot does not carry the blocked card's Done-when check: $(jq -c '.needsYou.blocked | map({issue, doneWhen})' <<<"$snap")"
 }
 
+# Bug (#466): a build that ends with a question for the owner and changes nothing is blocked with a reason that hides
+# the question ("nothing to review"), or goes on to a fix session that answers it in the owner's place, or to review.
+# The card is blocked at once with the question (its last paragraph, on one line) as its reason, with no fix or review.
+t_dwasks() {
+  dwsetup "$(issue 12 2026-01-06 | jq -c --arg b "$DW" '.body = $b')"
+  echo : > "$STUB/build"
+  printf 'I read the issue and changed nothing.\n\nShould the new word go in a.txt\nor in b.txt?\n' > "$STUB/reply.1"
+  loop run --only 12 >/dev/null
+  [ "$(st 'select(.issue == 12 and .step == "blocked") | .reason')" = "build: the session changed nothing and asks the owner: Should the new word go in a.txt or in b.txt?" ] \
+    || fail "#12 was not blocked with the build's question as its reason: $(st 'select(.issue == 12) | [.step, .reason] | join(" ")')"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/reviews" ] && [ -z "$(st 'select(.issue == 12 and (.step == "review" or (.step == "start" and .of == "review")))')" ] \
+    || fail "#12 had a fix session or a review after its question: $(wc -l < "$STUB/sessions") session(s), $(st 'select(.issue == 12) | .of // .step' | tr '\n' ' ')"
+  # Bug (#466 review): the tree session() keeps before each session (<worktree>.before) was left in the cards folder.
+  [ -z "$(find "$T/$CASE/cards" -maxdepth 1 -name '*.before' 2>/dev/null)" ] || fail "a .before file was left after the card ended: $(ls "$T/$CASE/cards")"
+}
+
+# Bug (#466): a fix session that changes nothing and only asks the owner a question is not caught: the build's change
+# is still in the worktree, so it reads as a change, and the fixes inside checked() never looked. Here the Done-when
+# fix asks: the card is blocked with its question, with no review.
+t_dwfixasks() {
+  dwsetup "$(issue 13 2026-01-07 | jq -c --arg b "$DW" '.body = $b')"
+  echo '[ "$(wc -l < "$STUB/sessions")" != 1 ] || echo two >> a.txt' > "$STUB/build" # the build changes a.txt, the fix nothing
+  printf 'Done.\n' > "$STUB/reply.1"
+  printf 'Which file should I edit?\n' > "$STUB/reply.2"
+  loop run --only 13 >/dev/null
+  [ "$(st 'select(.issue == 13 and .step == "blocked") | .reason')" = "fix: the session changed nothing and asks the owner: Which file should I edit?" ] \
+    && [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ ! -e "$STUB/reviews" ] \
+    || fail "#13's fix question did not block it before any review: $(wc -l < "$STUB/sessions") session(s), $(st 'select(.issue == 13) | [.step, .reason] | map(strings) | join(" ")' | tr '\n' ,)"
+}
+
+# Bugs (#466): asks() reads a Claude reply only, so a Codex or OpenCode builder's question goes on to review; and it
+# counts a change already in the worktree before the session (a fix after a NO-GO) as the session's. asks()
+# (lib/testrun.sh) is called on one worktree with each builder's stream in <worktree>.out, as checked() calls it.
+t_asksreply() {
+  setup '[]'
+  local w=$T/$CASE/w q
+  git -C "$R" worktree add -q --detach "$w" && echo earlier >> "$w/a.txt" && git -C "$w" add -A || fail "the worktree could not be made"
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...)
+  q=$( ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"
+    treeof "$w" > "$w.before" || exit 1 # session() keeps this before each session: here, with the earlier change staged
+    jq -cn '{type: "item.completed", item: {type: "agent_message", text: "I changed nothing.\n\nWhich file should I edit?"}}' > "$w.out"; asks "$w" || echo 'codex: none'
+    jq -cn '{type: "step_start"}, {type: "text", part: {text: "I changed nothing.\n\nWhich file, a.txt or b.txt?"}}, {type: "step_finish"}' > "$w.out"; asks "$w" || echo 'opencode: none'
+    echo more >> "$w/a.txt"; ! asks "$w" || echo 'asked after a change' ) ) || fail "asks() could not be run"
+  [ "$q" = $'Which file should I edit?\nWhich file, a.txt or b.txt?' ] || fail "asks() did not read a Codex and an OpenCode question past an earlier change, or read one after a change: $q"
+}
+
 # Bug: a rebuild after a landing conflict goes to review unchecked, with the build's D<n> lines.
 t_dwrebase() {
   # #11: the landing conflicts and the rebuild's reply has no D<n> line: the rebase line carries the failed check, one
