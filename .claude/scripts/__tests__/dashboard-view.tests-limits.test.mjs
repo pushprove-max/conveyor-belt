@@ -45,6 +45,18 @@ test('Tests: Take a file off card runs picked sends nothing until Save, a new sn
   assert.ok(shown(w, 'slow-issues-save'), 'and still unsaved');
 });
 
+// Issue 392. Bug: when the pack does not read, the snapshot sends tests: null, and the page still drew a Settings
+// control that opened on only the Test limits heading.
+test('Tests: no Settings control when the snapshot has no test figures', () => {
+  const w = boot({ tab: 'tests' });
+  const d = full();
+  d.panels.tests.data.tests = null;
+  deliver(w, d);
+  assert.match(panel(w, 'tests').querySelector('.warn-note').textContent, /could not read the test figures/);
+  assert.equal(panel(w, 'tests').querySelector('.tests-settings'), null);
+  assert.equal(sec(w), null);
+});
+
 // Two places for one setting drift apart: the Rules tab keeps no Load limit, and says where the test limits are.
 test('Rules: no Load limit field, and one line that says test limits are on the Tests page', () => {
   const w = boot({ tab: 'rules' });

@@ -2121,7 +2121,9 @@
     // The Benchmarks part, also before any run (the snapshot's bench is null then); not from an engine older than it.
     if ('bench' in S.d) parts.push(benchPart(obj(S.d.bench) || {}));
     // Settings: the Tests model, Test limits and Auto-file, collapsed until opened; it stays as it was from one draw to
-    // the next.
+    // the next. With no test figures (the pack does not read: tests is null) there is no Settings control: Test limits and
+    // Auto-file read the figures, and the Tests model (read from control and testActions) is only for Judge and Explain
+    // the slowdown, which act on the table's files, and there is no table then.
     const wasSet = el.querySelector('.tests-settings');
     if (wasSet) S.settingsOpen = wasSet.open;
     const wasRecent = el.querySelector('.tests-results');
@@ -2132,7 +2134,6 @@
     set.append(h('summary', 'board-head', 'Settings'));
     if (!t) {
       parts.push(h('p', 'warn-note', 'Conveyor could not read the test figures of this project. Its pack does not read, or the build machine runs an older Conveyor.'));
-      set.append(limits());
     } else {
       const counts = countsOf(files);
       if (S.filter !== 'all' && !counts[S.filter]) S.filter = 'all';
@@ -2146,7 +2147,7 @@
       set.append(actionsHead(), limits(), autofile());
     }
     if (obj(S.d.drift)) parts.push(driftPart(S.d.drift));
-    parts.push(set);
+    if (t) parts.push(set);
     const note = h('p', 'board-note tests-note');
     note.setAttribute('aria-live', 'polite');
     const was = el.querySelector('.tests-note');
