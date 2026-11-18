@@ -424,7 +424,10 @@ failure gets a verdict:
   card is blocked with "<case> still fails with the change", with no review. When every case passes without the
   change, main is no longer red for them: the card closes as already done, with no review, and its change does not
   land. Its `closed` line names the cases. When some cases pass without the change and others fail, or a run gives
-  no result for a case, the card is blocked, and the reason names the case. When its build session makes no change,
+  no result for a case, the card is blocked, and the reason names the case. The output of each run is kept with the
+  card's kept work, as `<card>.redrun-without.out` and `<card>.redrun-with.out`. When a run gives no result, or its
+  worktree cannot be made (then the file is `<card>.redrun-setup.out`), the reason names that file and quotes its
+  last 40 lines. When its build session makes no change,
   its cases run again on main as it is now. When they all pass, the card closes as not needed, and its `closed`
   line says so; main is no longer red. Otherwise it is blocked, and the reason gives the result on main. An
   `ALREADY-DONE` line in the session's reply does not change this.

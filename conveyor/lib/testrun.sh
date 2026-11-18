@@ -1443,17 +1443,20 @@ bugproof() { # <card> <worktree> <issue json>
 # Exit 0 when the check holds; 3 when every case passes without the change (main is no longer red for them: card()
 # closes the card as already done); 2 when a case still fails with the change, a case passes without it while another
 # fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
+# The output of each run (redkeep()) stays beside the card's kept work after the run's worktree goes: a reason that a
+# run gave no result, or could not be made, names that file and quotes its end. A check that holds, or a card that
+# closes as already done, keeps none.
 redproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf=''
   cs=$(jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, files: [.files[]? | strings], case: (.file as $f
     | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null) \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null); then
-    wo=$(redrun "$mwt" "$cs") || wo=''
+    wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without)
     if [ -z "$wo" ] || [ -n "$(rednames none "$wo")" ]; then
-      out="the run on main's code at $sha without the change gave no result for $(rednames none "${wo:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"
+      out="the run on main's code at $sha without the change gave no result for $(rednames none "${wo:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"; kf=$kw
     elif [ -z "$(rednames fail "$wo")" ]; then
       out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change, so the card closes as already done"; rc=3
     elif [ -n "$(rednames pass "$wo")" ]; then
@@ -1463,20 +1466,33 @@ redproof() { # <card> <worktree>
     elif ! out=$(git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>&1); then
       out="the change could not be applied to main's code at $sha, so the cases did not run with it: ${out:0:400}"
     else
-      wi=$(redrun "$mwt" "$cs") || wi=''
+      wi=$(redrun "$mwt" "$cs") || wi=''; ki=$(redkeep "$1" "$mwt.test" with)
       if [ -n "$wi" ] && [ -n "$(rednames fail "$wi")" ]; then out="$(rednames fail "$wi") still fails with the change"
       elif [ -z "$wi" ] || [ -n "$(rednames none "$wi")" ]; then
-        out="the run on main's code at $sha with the change gave no result for $(rednames none "${wi:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"
+        out="the run on main's code at $sha with the change gave no result for $(rednames none "${wi:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"; kf=$ki
       else out="each case main fails at $sha fails there without the change and passes with it: $(rednames pass "$wi")"; rc=0; fi
     fi
+    [ -z "$kf" ] || out+=". The whole output of that run is kept in $kf"
     { printf '%s\n' "${out^}."
       echo 'This card fixes a red main, so its proof is the cases main fails, each run alone on main'"'"'s code without the change and then with it; it need not add a test.'
-      echo 'The end of the last run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
+      if [ -n "$kf" ]; then echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 40 "$kf"; echo '```'
+      else echo 'The end of the last run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; fi; } > "$2.unfixed"
+  elif kf=$(redkeep "$1" <(printf '%s\n' "$out") setup); then
+    { printf 'The cases main fails could not be run on main'"'"'s code at %s: its worktree could not be made. The whole output of making it is kept in %s.\n' "${sha:-a commit that could not be read}" "$kf"
+      echo 'The end of that output:'; echo '```'; tail -n 40 "$kf"; echo '```'; } > "$2.unfixed"
   else
     printf 'The cases main fails could not be run on main'"'"'s code at %s: %s\n' "${sha:-a commit that could not be read}" "${out:0:600}" > "$2.unfixed"
   fi
+  [ $rc = 2 ] || { rm -f "$kw" "$ki" 2>/dev/null; rmdir "$ST/kept/$1" 2>/dev/null; }
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   return $rc
+}
+# A run's output (<output file>: a run's <worktree>.test) of redproof(), kept beside the card's kept work ($ST/kept/<card>,
+# block()) as <card>.redrun-<name>.out, its NUL bytes dropped; an output that cannot be read keeps an empty file. Prints
+# its path; fails when it cannot be written.
+redkeep() { # <card> <output file> <without|with|setup>
+  local f=$ST/kept/$1/$1.redrun-$3.out
+  mkdir -p "${f%/*}" 2>/dev/null && { tr -d '\000' < "$2" || :; } 2>/dev/null > "$f" && printf '%s\n' "$f"
 }
 # The cases of <verdict> in a run's result (redrun()), as `<case>`, joined by ", ".
 rednames() { # <verdict> <redrun() output>

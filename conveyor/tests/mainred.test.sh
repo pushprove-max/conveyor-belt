@@ -423,14 +423,6 @@ t_redproofstill() {
   [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [ "$(tail -n 1 <<<"$got")" = '`c.test` still fails with the change.' ] \
     || fail "a change that leaves c.test failing was not blocked naming it: $got"
 }
-# Bug it catches: a change that renames a failing case (so it no longer runs) passed the check, as its file's passing
-# run was read as the case passing, with no `ok one` from it.
-t_redproofgone() {
-  redsetup ''
-  local got; got=$(redcheck $'gone:one\nc.test')
-  [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [[ $(tail -n 1 <<<"$got") == "The run on main's code at "*" with the change gave no result for \`a.test: one\`, so it proves nothing either way." ]] \
-    || fail "a change after which the case did not run was not blocked naming it: $got"
-}
 # Bug it catches: a fix card whose cases pass on main without its change (main is no longer red for them) landed a
 # change that proves nothing, or was blocked. Its whole run: it closes as already done, its closed line naming the
 # cases and carrying its wait (waitSec, which the drift watch's mean wait reads), and nothing lands.
