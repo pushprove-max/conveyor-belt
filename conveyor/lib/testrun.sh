@@ -754,7 +754,9 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
   + [.failures.timeout.file // empty] | unique;'
 # Before a card's failure goes to its fix session (card()), what still did not pass after the run again runs on main
 # (the owner, 2026-11-14: a fix session cannot repair main or the machine): in a worktree of main's commit as it is now
-# ($CARDS/mainrun/<card>), on a test slot, with the card's own command (test.command), its list (CONVEYOR_TEST_RERUN)
+# ($CARDS/mainrun/<card>), on a test slot, under the card's test time limit (testTimeout, which ends it even while it
+# waits for a whole-suite turn), with the card's own command (test.command; test.fileCommand when the pack sets it,
+# each failing file run alone once), its list (CONVEYOR_TEST_RERUN)
 # naming every other file of the card's runs as passed (those of its last run, and those its own list names) and, of a
 # file with failing cases, those cases; a file that failed naming no case or ran out of time, as `fail\t<file>` with no
 # case (the command runs it whole: on main's clean tree nothing else selects it). Each failure's
@@ -782,7 +784,7 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local mwt=$CARDS/mainrun/${2##*/} sha='' u um nt m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg
+  local mwt=$CARDS/mainrun/${2##*/} sha='' u um nt m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg lim fld fc
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
@@ -809,7 +811,16 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
         '$u[0] as $u | $um[0] as $um | $ctl[0] as $ctl | ([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))]
           | unique - [$u[].file] - $ctl | .[] | "pass\t\(.)"),
         ($um[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
-      s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 tests "$mwt" test.command alone; rc=$?; s=$((SECONDS - s))
+      # Its limit (issue 420): the card's own (testTimeout), never none, kept by timeout itself (TEST_HARD), as a
+      # runner waiting for a whole-suite turn stops the run's clock. With test.fileCommand, each failing file runs alone
+      # through it, as the card's own run does, once however many of its cases failed.
+      lim=${TEST_TIMEOUT:-}; [[ $lim =~ ^[1-9][0-9]*$ ]] || { packget tunables.testTimeout lim 2>/dev/null && [[ $lim =~ ^[1-9][0-9]*$ ]]; } || lim=3600
+      fld=test.command; packget test.fileCommand fc 2>/dev/null || fc=''
+      if [ -n "$fc" ]; then
+        fld=test.fileCommand
+        awk -F'\t' -v OFS='\t' '$1 != "fail" { print; next } !s[$2]++ { print "fail", $2 }' "$mwt.rerun" > "$mwt.rerun.new" && mv -f "$mwt.rerun.new" "$mwt.rerun"
+      fi
+      s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 TEST_HARD=$lim tests "$mwt" "$fld" alone; rc=$?; s=$((SECONDS - s))
       # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit).
       if [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
       # The controls that did not pass: each one the run did not end ok (failed, timed out or not run).
@@ -2112,6 +2123,8 @@ mainwait() { # <worktree> <main's commit> <case>...
 # cores left would undo that pin, so the run is lowered without it (with it only when no slot has a core to pin to).
 # CONVEYOR_TEST_TIME is the path of tools/testtime.sh, for a test command the Board's Record CPU time wrapped in it
 # (cpuplan(), lib/testfiles.sh).
+# TEST_HARD, when set, is a limit in seconds that timeout itself keeps: the run ends there even while a runner of the
+# command waits for a whole-suite turn, which stops testclock's clock (the check on main, verdicts()).
 testonce() { # <worktree> <cmd>
   # shellcheck disable=SC2034 # STEER_HOW and STEER_SLICE are set by steer_prio and read by steer_watch (lib/slots.sh)
   local pid clock sw rc r='' t0 k STEER STEER_HOW STEER_SLICE
@@ -2120,7 +2133,7 @@ testonce() { # <worktree> <cmd>
   t0=$(date +%s); steer_prio test "$k"
   [ -n "$SLOT_CPUS" ] || [ -z "$k" ] || STEER=(taskset -c "$k" "${STEER[@]}")
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec "${STEER[@]}" timeout --kill-after=30 0 bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} exec "${STEER[@]}" timeout --kill-after=30 "${TEST_HARD:-0}" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" & clock=$!; steer_watch $pid 8>&- & sw=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock $sw 2>/dev/null; wait $clock $sw 2>/dev/null; rm -f "$1.turnwait"; steer_end
