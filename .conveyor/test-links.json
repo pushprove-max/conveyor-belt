@@ -155,6 +155,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/prompts.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/slots.sh": [
@@ -305,5 +306,8 @@
   ],
   "docs/demo/record-terminal.sh": [
     "conveyor/e2e.test.sh"
+  ],
+  "conveyor/tests/slices.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ]
 }
