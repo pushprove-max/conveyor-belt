@@ -307,7 +307,7 @@ To release from the panel:
 1. Make sure that the field has the version to release.
 2. If **Release** says "needs release notes docs/releases/<version>.md", click **Draft notes**. Read the draft, then
    commit it to `main`.
-3. If **Release** says "needs the whole suite to pass on main's head (<commit>)", click **Run suite**.
+3. If **Release** says "needs the whole suite to succeed on main's head (<commit>)", click **Run suite**.
 4. Wait for the suite. While it runs, **Release** says "the suite is running (N of M files)". If it fails, **Release**
    says "the suite failed: <count> failures". Fix the failures, then run the suite again.
 5. When the notes are on `main` and the suite passed on the head of `main`, **Release** is enabled. Click it, then

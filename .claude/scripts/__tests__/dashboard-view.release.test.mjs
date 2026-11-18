@@ -52,7 +52,7 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.ok(shown(w, act(card(w), 'release-prep')) && shown(w, act(card(w), 'release')), 'both buttons show');
   const release = act(card(w), 'release');
   assert.equal(release.disabled, true);
-  assert.equal(release.textContent, 'Release 1.0.0: needs the whole suite to pass on main\'s head (bbbbbbbbbbbb)');
+  assert.equal(release.textContent, 'Release 1.0.0: needs the whole suite to succeed on main\'s head (bbbbbbbbbbbb)');
   assert.deepEqual(await sent(w, () => { release.click(); release.click(); }), [], 'a disabled Release sends nothing');
   assert.equal(card(w).querySelector('[data-figure="version-notes"]'), null, 'no line under the box for a version with notes');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [], 'one press sends nothing');

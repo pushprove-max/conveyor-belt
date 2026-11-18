@@ -273,7 +273,7 @@
       : !notes ? `needs release notes docs/releases/${v}.md`
         : s.going ? `the suite is running${num(prog.done) && num(prog.of) && prog.of > 0 ? ` (${prog.done} of ${prog.of} files)` : ''}`
           : s.failed ? `the suite failed: ${bad} ${bad === 1 ? 'failure' : 'failures'}`
-            : !s.passed ? `needs the whole suite to pass on main's head (${short(m.head)})` : '';
+            : !s.passed ? `needs the whole suite to succeed on main's head (${short(m.head)})` : '';
     const rel = h('button', 'btn', waits ? `Release ${v}: ${waits}` : `Release ${v}`);
     rel.type = 'button'; rel.dataset.act = 'release'; rel.disabled = !!waits;
     rel.title = waits ? `Release ${v} waits: ${waits}.` : `${suiteSaid}, then make the tag v${v} and the GitHub release.`;

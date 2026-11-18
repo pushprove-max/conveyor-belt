@@ -268,5 +268,17 @@
     "conveyor/tests/models.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/proxyroute.test.sh"
+  ],
+  ".claude/dashboard/panels/declined.js": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.declined.test.mjs": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  ".claude/dashboard/panels/release.js": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.release.test.mjs": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ]
 }
