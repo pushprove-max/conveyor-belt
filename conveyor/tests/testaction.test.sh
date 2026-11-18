@@ -170,6 +170,17 @@ t_tacarried() {
   [ "$out" = '[{"time":"2026-11-09T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},[["suite",false,1],["c7-12",true,1]],[{"card":"c7-12","issue":12}]]' ] \
     || fail "the newest run is not the failed step that passed the file, or the carried times are lost or not marked as carried: $out"
 }
+# Bug it catches (#342): a passing release-suite run and a failing run of the file on its own that ended in the same
+# second (times are to the second) were told to the judge as one of them, the suite's pass, picked by its place in
+# the list: both are named, with how each ended, and that which ran last is not known.
+t_tasamesecond() {
+  tasetup; local out
+  jq -cn '{time: "2026-11-09T00:01:00Z", how: "release", sha: "0123456789abcdef", files: {"tests/x.test.sh": {result: "ok", sec: 1, cpu: 1}}}' >> "$ST/suiteruns.jsonl"
+  mkdir -p "$ST/testactions" && jq -cn '{id: "0000000000bb", action: "run", file: "tests/x.test.sh", commit: "fedcba9876543210", start: "2026-11-09T00:00:00Z", end: "2026-11-09T00:01:00Z", state: "done", result: "fail"}' > "$ST/testactions/0000000000bb.json"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-09T00:01:00Z","run":"its run on its own from the Tests page (test action 0000000000bb) on fedcba987654 and the release suite'"'"'s run on 0123456789ab, which ended in the same second, so which of them ran last is not known","result":"failed on its run on its own from the Tests page (test action 0000000000bb) on fedcba987654; passed on the release suite'"'"'s run on 0123456789ab"}' ] \
+    || fail "two runs that ended in the same second are not both named, with how each ended: $out"
+}
 
 # The Board's File an issue (`testissue`) files the issue with the pack's type and last priority and keeps it for the
 # file, and refuses a file main lacks. Bug it catches: an issue the Board filed was kept nowhere, so its file's row had

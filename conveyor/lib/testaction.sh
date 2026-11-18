@@ -191,7 +191,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # named held; a step that ran it, its line with no time of it as a failed step saves none, passed it when the card's
 # next step carried it), a whole-suite run (the
 # release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
-# result}, null with none.}
+# result}, null with none. Times are to the second: runs that share the newest time are all named in one, as which
+# ran last is not known.}
 TAFAILS=5
 testfacts() { # <file>
   local fl defs refs
@@ -220,7 +221,10 @@ testfacts() { # <file>
        + [$su[] | . as $w | .files | objects | .[$f] | objects
         | {time: $w.time, run: "the \(if $w.how == "release" then "release suite" else "full test suite" end)'"'"'s run on \($w.sha // "" | .[:12])",
            result: (if .result == "ok" then "passed" elif .result == "fail" then "failed" else "no result named" end)}]
-       | map(select(.time | type == "string")) | max_by(.time)) as $nw
+       | map(select(.time | type == "string")) | unique | (map(.time) | max) as $t | map(select(.time == $t))
+       | if length < 2 then first
+         else {time: $t, run: ((map(.run) | join(" and ")) + ", which ended in the same second, so which of them ran last is not known"),
+           result: (if (map(.result) | unique | length) == 1 then .[0].result else map("\(.result) on \(.run)") | join("; ") end)} end) as $nw
     | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails, newest: $nw}'
 }
 # The worktree a session read, gone: made writable again, then removed.
