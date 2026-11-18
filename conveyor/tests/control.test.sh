@@ -264,7 +264,9 @@ t_controlnewkeywrite() {
 }
 # A project's own record keeps every value it sets; only the keys it leaves out take the defaults (#593). Bugs: the
 # new defaults' cap 6 or judge on win over a record's cap 2 and judge off, or a key the record leaves out is not the
-# defaults' (no guard, no seat, the judge's seat lost); the push-off default overrides a record that turned push on.
+# defaults' (no guard, no seat, the judge's seat lost); conveyor/README.md gives a rule the record leaves out another
+# value than it reads (#446: "reads that rule as on" while visible is off); the push-off default overrides a record
+# that turned push on.
 t_controlkept() {
   # shellcheck disable=SC2034 # CTL_K and HERE are read by ctlread, run by the eval
   local CTL0 CTL_K=() CTL_V CONTROL=$T/$CASE/control.json HERE=$SRC
@@ -272,9 +274,25 @@ t_controlkept() {
   eval "$(sed -n '/^ctlread() {/,/^}/p; /^ctlcheck() {/,/^}/p; /^notwhole() {/p' "$SRC/lib/control.sh")"
   mkdir -p "$T/$CASE" && echo '{"cap":2,"judgeOn":false}' > "$CONTROL"
   ctlread || fail "a record that sets cap and judgeOn alone did not read"
-  [ "$(jq -c '[.cap, .judgeOn, .guard, .model, .reviewer, .judge, .rules.visible, .rules.push, .depGuard, .start]' <<<"$CTL_V")" \
-    = '[2,false,98,{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},false,false,true,"queue"]' ] \
+  [ "$(jq -c '[.cap, .judgeOn, .guard, .model, .reviewer, .judge, .rules.visible, .rules.push, .rules.wholeSuite, .rules.split, .depGuard, .start]' <<<"$CTL_V")" \
+    = '[2,false,98,{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},false,false,false,"shadow",true,"queue"]' ] \
     || fail "the record's cap 2 and judge off were not kept, or a key it leaves out is not the new defaults': $CTL_V"
+  # conveyor/README.md's rule defaults paragraph must say what this record (saved with no rules) reads (#446): its
+  # rules are what the paragraph claims for an older record, built from its own words, not a copy of them.
+  local para off split want
+  para=$(awk '/^Every rule is on by default/ {p = 1} p && /^$/ {exit} p' "$SRC/README.md" | tr '\n' ' ')
+  off=$(sed -n 's/.*except \(.*\), which are off.*/\1/p' <<<"$para" | grep -o '`[A-Za-z0-9]*`' | tr -d '`' | jq -Rsc 'split("\n") | map(select(. != ""))')
+  split=$(sed -n 's/.*`split`, which is `\([a-z]*\)`.*/\1/p' <<<"$para")
+  case $para in
+    *"saved before a rule existed reads that rule at its default"*)
+      want=$(jq -c --argjson off "$off" --arg s "$split" '{P0: true, P1: true, P2: true, P3: true, followups: true, push: true, visible: true, wholeSuite: true}
+        | with_entries(.value = (.key | IN($off[]) | not)) + {split: $s}' <<<null) ;;
+    *"saved before a rule existed reads that rule as on"*)
+      want='{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":true,"visible":true,"wholeSuite":true,"split":"on"}' ;;
+    *) want='"no rule for an older record"' ;;
+  esac
+  [ "$(jq -c '.rules | {P0, P1, P2, P3, followups, push, visible, wholeSuite, split}' <<<"$CTL_V")" = "$want" ] \
+    || fail "conveyor/README.md's rule defaults paragraph claims $want for a record saved before its rules, but it reads $(jq -c .rules <<<"$CTL_V")"
   echo '{"rules":{"push":true}}' > "$CONTROL"
   ctlread && [ "$(jq .rules.push <<<"$CTL_V")" = true ] || fail "a record with push on did not keep it over the defaults: $CTL_V"
 }

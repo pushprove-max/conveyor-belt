@@ -53,7 +53,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   ([Split large issues](../docs/configuration.md#split-large-issues)).
 
 Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off, and `split`, which is `shadow`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
-that skips it. A record saved before a rule existed reads that rule as on.
+that skips it. A record saved before a rule existed reads that rule at its default.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's
 `push.landAs`). With `pr`, the push sends main to `conveyor/landing` and keeps one pull request open from it into the
