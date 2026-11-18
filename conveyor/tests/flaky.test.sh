@@ -118,6 +118,25 @@ t_flakyfile() {
   [ "$(flakyfiled)" = 2 ] || fail "an entry after the issue was closed filed none: $(cat "$STUB/filed")"
 }
 
+# Once the case's filed issue is closed (its fix landed), only the entries made after it closed count toward a new
+# issue, and only they are listed. Bug it catches (#440): one entry after the close filed a new issue that counted
+# and listed the three entries from before the fix.
+t_flakyclosed() {
+  setup '[]'; flakymain
+  local k="b.test: flaky" hour=3600 b
+  flakyat $((72 * hour)) "$k" one "first" > /dev/null && flakyat $((48 * hour)) "$k" two "second" > /dev/null \
+    && flakyat $((24 * hour)) "$k" three "third" > /dev/null || fail "flaky add failed"
+  [ "$(flakyfiled)" = 1 ] || fail "three sources did not file the first issue: $(cat "$STUB/filed" 2>&1)"
+  echo CLOSED > "$STUB/state.100101"; jq -rn "now - 12 * $hour | todate" > "$STUB/closedAt.100101"
+  flakyat $((6 * hour)) "$k" four "fourth" > /dev/null || fail "flaky add failed"
+  [ "$(flakyfiled)" = 1 ] || fail "one entry after the close filed an issue, counting the entries from before it: $(cat "$STUB/filed")"
+  flakyat $((3 * hour)) "$k" five "fifth" > /dev/null && loop flaky add "$k" six "sixth" > /dev/null || fail "flaky add failed"
+  [ "$(flakyfiled)" = 2 ] || fail "three sources after the close did not file one issue: $(cat "$STUB/filed")"
+  b=$(jq -rs '.[-1].body' "$STUB/filed")
+  [ "$(grep -c '^- ' <<<"$b")" = 3 ] && for s in four:fourth five:fifth six:sixth; do grep -q "^- .* ${s%%:*}: ${s#*:}$" <<<"$b" || fail "the new issue does not list the entry of $s: $b"; done \
+    || fail "the new issue does not list exactly the three entries after the close: $b"
+}
+
 # `flaky off` (the Board's Keep a case off, an action that files no issue) adds its entry and files none, though it is
 # the case's third source within seven days. Bug it catches: the Board ran `flaky add`, which filed an issue then.
 t_flakyoffadd() {

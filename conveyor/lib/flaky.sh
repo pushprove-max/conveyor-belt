@@ -72,23 +72,28 @@ flakyprune() {
   exec {lock}>&-
 }
 # One issue for a case whose entries come from FLAKY_SOURCES different sources within FLAKY_DAYS days, unless the one
-# filed for it last is open; its state unread files none (it may be open), and the next entry asks again. An issue
+# filed for it last is open; its state unread files none (it may be open), and the next entry asks again. When that
+# issue is closed, only the entries made after it closed count, and only they are listed (when GitHub says when). An issue
 # GitHub did not take is not kept, so the next entry files it. Its labels: the pack's type, its last priority, the
 # area label <areaPrefix>engine when the pack's nonProductAreas names it, and flaky-test (made when the repo lacks it).
 flakyfile() { # <case> <now>, under flaky()'s lock
-  local rec n state title body labels out
+  local rec n state at='' title body labels out
+  # The entries that count: the case's, made within FLAKY_DAYS days of now and after $at (when the last filed issue closed).
+  local counted='($now | fromdate) as $t | (($at | fromdate?) // 0) as $a
+    | def counted: .entries[] | select(.case == $c and (((.time | fromdate?) // 0) as $e | $e > $t - $d * 86400 and $e > $a));'
   rec=$(jq -ce 'objects' "$FLAKY") || return 1
-  jq -e --arg c "$1" --arg now "$2" --argjson d "$FLAKY_DAYS" --argjson k "$FLAKY_SOURCES" '($now | fromdate) as $t
-    | [.entries[] | select(.case == $c and ((.time | fromdate?) // 0) > $t - $d * 86400) | .source] | unique | length >= $k' <<<"$rec" >/dev/null || return 0
+  jq -e --arg c "$1" --arg now "$2" --arg at '' --argjson d "$FLAKY_DAYS" --argjson k "$FLAKY_SOURCES" "$counted"'[counted | .source] | unique | length >= $k' <<<"$rec" >/dev/null || return 0
   n=$(jq -r --arg c "$1" '[.filed[] | select(.case == $c) | .issue][-1] // empty' <<<"$rec")
   if [ -n "$n" ]; then
-    state=$(timeout 20 gh issue view "$n" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''
+    state=$(timeout 20 gh issue view "$n" --json state,closedAt 2>/dev/null | jq -r '"\(.state // "")\t\(.closedAt // "")"' 2>/dev/null) || state=''
+    at=${state#*$'\t'} state=${state%%$'\t'*}
     [ "$state" = CLOSED ] || { [ "$state" = OPEN ] || echo "conveyor: flaky test $1: the state of #$n could not be read; nothing filed" >&2; return 0; }
+    jq -e --arg c "$1" --arg now "$2" --arg at "$at" --argjson d "$FLAKY_DAYS" --argjson k "$FLAKY_SOURCES" "$counted"'[counted | .source] | unique | length >= $k' <<<"$rec" >/dev/null || return 0
   fi
   title="Flaky test: $1 fails at random"; title=${title:0:200}
-  body=$(jq -r --arg c "$1" --arg now "$2" --argjson d "$FLAKY_DAYS" --argjson k "$FLAKY_SOURCES" '($now | fromdate) as $t
-    | "The test case `\($c)` failed and then passed when run again, with nothing changed, from \($k) or more different sources within \($d) days. Until this issue is closed, card test steps are told to keep the case off: it runs only in the full test suite and the whole test on main.\n\nIts entries in the flaky-test record of Conveyor:\n"
-    + ([.entries[] | select(.case == $c and ((.time | fromdate?) // 0) > $t - $d * 86400)
+  body=$(jq -r --arg c "$1" --arg now "$2" --arg at "$at" --argjson d "$FLAKY_DAYS" --argjson k "$FLAKY_SOURCES" "$counted"'
+    "The test case `\($c)` failed and then passed when run again, with nothing changed, from \($k) or more different sources within \($d) days. Until this issue is closed, card test steps are told to keep the case off: it runs only in the full test suite and the whole test on main.\n\nIts entries in the flaky-test record of Conveyor:\n"
+    + ([counted
         | "- \(.time) \(.source)" + (if .issue != null then ", issue #\(.issue)" else "" end) + (if (.note // "") != "" then ": \(.note)" else "" end)] | join("\n"))
     + "\n\nMake the test reliable, or remove it.\n\nDone when: the case passes alone and in the whole test."' <<<"$rec") || return 1
   labels=(--label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")")

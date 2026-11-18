@@ -941,8 +941,8 @@ one issue through its GitHub write path (the privacy check included): the title 
 the labels of the pack's type, its last priority, `<areaPrefix>engine` when the pack's `nonProductAreas` names it, and
 `flaky-test` (made when the repo lacks it), and a body that lists the entries of those seven days and asks for the
 test to be made reliable or removed, with "Done when: the case passes alone and in the whole test." It is an ordinary
-issue, not a review follow-up. While that issue is open, later entries file nothing; once it is closed, the next entry
-that meets the rule files a new one. When GitHub does not say whether it is open, nothing is filed until the next entry.
+issue, not a review follow-up. While that issue is open, later entries file nothing; once it is closed, only the entries
+made after it closed count, and the next entry that meets the rule with them files a new one that lists only them. When GitHub does not say whether it is open, nothing is filed until the next entry.
 
 A card whose run again still failed adds an entry for each case that passed in it (its file passed, or the case
 printed `ok`); a case that failed again, or did not run, adds none.
