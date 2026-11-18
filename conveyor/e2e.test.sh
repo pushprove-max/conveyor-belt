@@ -113,10 +113,10 @@ EOF
 # One break per step, planted in a copy of the engine: <step>, the text it replaces, the text it puts there.
 BREAKS=(
   land 'git update-ref -m "conveyor ${a[0]}"' 'true git update-ref -m "conveyor ${a[0]}"'
-  push 'git push "$REMOTE" "$sha:refs/heads/$BRANCH"' 'git push --dry-run "$REMOTE" "$sha:refs/heads/$BRANCH"'
+  push 'git push "$REMOTE" "$sha:refs/heads/$to"' 'git push --dry-run "$REMOTE" "$sha:refs/heads/$to"'
   kept '--no-renames > "$k/$1.patch" 2>/dev/null' '--no-renames > /dev/null 2>/dev/null'
   retry 'if git -C "$wt" apply --index "$fromk/$from.patch" 2>/dev/null; then' 'if false; then'
-  gate 'git push "$REMOTE" "$sha:refs/heads/$BRANCH"' 'git push --no-verify "$REMOTE" "$sha:refs/heads/$BRANCH"'
+  gate 'git push "$REMOTE" "$sha:refs/heads/$to"' 'git push --no-verify "$REMOTE" "$sha:refs/heads/$to"'
 )
 ( scenario "$T/engine" "$SRC" ) > "$T/engine.out" 2>&1 &
 for ((i = 0; i < ${#BREAKS[@]}; i += 3)); do

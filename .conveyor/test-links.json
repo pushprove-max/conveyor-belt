@@ -255,6 +255,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/demo/index.html": [
+    "conveyor/e2e.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/demo/timeline.js": [
@@ -280,5 +281,29 @@
   ],
   ".claude/scripts/__tests__/dashboard-view.release.test.mjs": [
     ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "docs/belt-3d.gif": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo.gif": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo.mp4": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo/captures/beat2.txt": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo/demo-gif.test.sh": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo/index.test.mjs": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo/make.sh": [
+    "conveyor/e2e.test.sh"
+  ],
+  "docs/demo/record-terminal.sh": [
+    "conveyor/e2e.test.sh"
   ]
 }
