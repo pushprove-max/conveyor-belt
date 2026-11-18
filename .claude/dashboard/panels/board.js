@@ -90,11 +90,13 @@
   // The open issues a card waits on, as its Held reason or the snapshot's waits name them.
   const waitsOf = (x) => { const r = issues(x.reasons).find((y) => y && y.kind === 'waits'); return issues(r ? r.waitsFor : x.waitsFor); };
   // Why an issue is held: the snapshot's reasons, with "you" as the record in force says (a hold or release answered
-  // since the snapshot moves the card at once) and the rule that skips it.
+  // since the snapshot moves the card at once) and the rule that skips it. The snapshot's own "you" is kept as it
+  // came: outside says someone outside the project opened the issue.
   function reasonsOf(x, mine) {
     const base = issues(x.reasons).filter((r) => r && KINDS.includes(r.kind) && r.kind !== 'you');
     if (x.rule && !base.some((r) => r.kind === 'rule')) base.push({ kind: 'rule', rule: x.rule });
-    return mine.has(x.issue) ? [{ kind: 'you' }].concat(base) : base;
+    const you = issues(x.reasons).find((r) => r && r.kind === 'you') || { kind: 'you' };
+    return mine.has(x.issue) ? [you].concat(base) : base;
   }
   // Held, Queue and Waits as the record says. A card is in Held while anything holds it; the snapshot may list one
   // under several parts, and it is shown once. One a control answer moved between Held and Queue since the snapshot
@@ -515,7 +517,7 @@
     // The four states an owner can change, each in one word everywhere: Held by you, Held by a label, Skipped by a rule
     // (a standing rule of Conveyor's own and one not picked for a reason named too), Waiting on #N.
     return issues(x.reasons).map((r) => ({
-      you: 'Held by you', label: `Held by a label: ${r.label}`, rule: `Skipped by a rule: ${r.rule}`, standing: `Skipped by a rule: ${r.rule || 'Conveyor\'s own'}`,
+      you: r.outside ? 'Opened by someone outside the project: release it to build it' : 'Held by you', label: `Held by a label: ${r.label}`, rule: `Skipped by a rule: ${r.rule}`, standing: `Skipped by a rule: ${r.rule || 'Conveyor\'s own'}`,
       waits: `Waiting on ${issues(r.waitsFor).map(S.ctx.depRef).join(', ')}`, card: r.step === 'blocked' ? 'Card blocked (Needs you)' : `Card ${r.step || 'open'}`,
       parent: 'Waits for its parent card to land', approve: 'Approve before build (Needs you)', other: 'Skipped by a rule',
     }[r.kind]));

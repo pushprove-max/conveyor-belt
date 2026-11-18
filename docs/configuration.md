@@ -400,6 +400,13 @@ whole backlog of the project. Release an issue with `conveyor.sh control release
 issues go into the Queue by themselves, run `conveyor.sh control start queue`, or set where new issues start on the
 Rules tab. A second setup keeps the record as it is.
 
+When new issues start in the Queue, Conveyor queues only the issues that the repository's owner, a member of its
+organization or a collaborator opened. It holds each other open issue, whatever the setting, and the Board shows it in
+Held with "Opened by someone outside the project: release it to build it". The reason: on a public repository, anyone
+with a GitHub account can open an issue, and a card builds from the text of its issue with tools that change files.
+Thus text from outside the project gets to a build only after you read it and release the issue. Release it with
+`conveyor.sh control release <issue>` or on the Board, and Conveyor builds it as it builds other issues.
+
 Each other value of a new project starts on Conveyor's default values (`conveyor/README.md`, Control). A record keeps each value it sets.
 With the default push rule, Conveyor lands each card and pushes when you press "Push landed" on the Board, or on its
 own once you turn push on in the Rules tab.

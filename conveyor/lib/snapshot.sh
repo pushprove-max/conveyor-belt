@@ -577,7 +577,7 @@ snapshot() (
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
-    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL"'
+    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.
@@ -689,7 +689,8 @@ snapshot() (
     # labels, created, dependsOn: the numbers its own `Depends on:` lines name (needs, DEPS), the ones `control depends
     # remove` can take off, then the "owner/repo#N" of another repository they name (farneeds), unlike waitsFor, which adds follow-ups and leaves closed ones out), so the Rules tab can
     # list them all with their state. held lists every open issue that is
-    # neither queued nor on the belt, each with why (reasons, one or more): you (the control record holds it), label
+    # neither queued nor on the belt, each with why (reasons, one or more): you (the control record holds it; with
+    # outside: true when someone outside the project opened it, INSIDE, so it waits for a release by the owner), label
     # (the built label, awaiting-deploy, holds it back; label names it), rule (a rule of the
     # control record excludes it; rule names it), waits (an open issue it depends on; waitsFor), card (a card of it
     # is blocked, or landed with the issue still open; step) or parent (a follow-up filed before its parent card
@@ -709,7 +710,7 @@ snapshot() (
         | ($up | map({key: (.number | tostring), value: .}) | from_entries) as $u
         | [$open[] | select((.number | IN($onbelt[])) | not) | . as $i | ($i.labels | map(.name)) as $l | $u[$i.number | tostring] as $e
             | ($l | index($fu) != null) as $isfu
-            | ([(if $i.number | IN($mine[]) then {kind: "you"} else empty end),
+            | ([(if $i.number | IN($mine[]) then {kind: "you"} + (if ($i.authorAssociation | type == "string") and ($i | inside | not) then {outside: true} else {} end) else empty end),
                 ($l[] | select(. == $builtl) | {kind: "label", label: .}),
                 (if $e.rule != null then {kind: "rule", rule: $e.rule} else empty end),
                 (if ($e.waits // []) != [] then {kind: "waits", waitsFor: $e.waits} else empty end),

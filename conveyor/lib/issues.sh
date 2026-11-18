@@ -608,13 +608,24 @@ labelled() {
         | select(.value)] | from_entries' 2>/dev/null || echo '{}'
 }
 
+# authorAssociation, which gh issue list cannot give, is asked of GitHub's GraphQL API, every open issue's in one
+# question (paged), after the list; a listed issue the second answer leaves out (closed between the two questions) is
+# left without one (INSIDE: not inside).
 openissues() { # <json fields> [gh issue list arguments]
-  local out f=$1 lim=1000; shift
+  local out f=$1 lim=1000 a; shift
   [ -z "$GITHUB" ] || { [ -s "$GITHUB/issues" ] && cat "$GITHUB/issues"; return; }  # the snapshot's fields, as `github` kept them
+  [[ ,$f, != *,authorAssociation,* ]] || { a=1; f=$(tr ',' '\n' <<<"$f" | grep -vx authorAssociation | paste -sd, -); }
   while :; do # a full page means there may be more: ask again for ten times as many until the answer is short
     out=$(gh issue list --state open --limit "$lim" --json "$f" "$@") || { echo "conveyor: gh issue list failed" >&2; return 1; }
     [ "$(jq length <<<"$out")" -ge "$lim" ] || break; lim=$((lim * 10))
   done
+  if [ -n "${a:-}" ]; then
+    a=$(gh api graphql --paginate -F owner='{owner}' -F repo='{repo}' -f query='query($owner: String!, $repo: String!, $endCursor: String) {
+      repository(owner: $owner, name: $repo) { issues(states: OPEN, first: 100, after: $endCursor) { nodes { number authorAssociation } pageInfo { hasNextPage endCursor } } } }') \
+      && a=$(jq -cse '[.[].data.repository.issues.nodes[] | {key: (.number | tostring), value: .authorAssociation}] | from_entries' <<<"$a") \
+      || { echo "conveyor: who opened the open issues could not be read (gh api graphql)" >&2; return 1; }
+    out=$(jq -c --argjson a "$a" 'map(.authorAssociation = $a[.number | tostring])' <<<"$out") || return 1
+  fi
   farstates "$out"
 }
 # The open issues given, each whose `Depends on:` lines name an issue of another repository (owner/repo#N, farneeds

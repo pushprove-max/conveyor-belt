@@ -10,7 +10,7 @@
 # judgeOn is whether the judge reads the reviews (judged()) and judgeAlways the finding kinds it always accepts; account and
 # reviewAccount are null or the name of one of the host file's accounts (ACCT, above); start is where
 # new issues start, queue or held, startHeld the spans it was held ({from, to}: the newest issue number at each switch;
-# to is null for the one in force, the last), startSeen the issues this setting has had its say on: held by adopt(), or released while there is a span.
+# to is null for the one in force, the last), startSeen the issues this setting has had its say on: held by adopt(), or released.
 # depGuard is the dependency guard (true, the seed's, for a record written before it: no issue is picked while an
 # issue it depends on is open) and forced the issues `control force` lets past their open dependencies while it is
 # off (adopted() drops each once it lands or its issue closes). landAs is null (the pack's push.landAs) or the rule
@@ -787,7 +787,8 @@ control() { # [action [arguments]]
     adopt) [ $# != 0 ] && nums "$@" || { bad; return; }
       f='. as $c | [$v[] | tonumber | select(. as $i | (IN($c.startSeen[]) | not) and ($c.startHeld | any($i > .from)))] as $n
          | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique)' ;;
-    release) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held -= ($v | map(tonumber)) | if .startHeld == [] then . else .startSeen = (.startSeen + ($v | map(tonumber)) | unique) end' ;;
+    # release: one released is never held again by adopted(), whatever the setting or who opened it.
+    release) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)' ;;
     order) nums "$@" || { bad; return; }; f='.order = reduce ($v[] | tonumber) as $n ([]; if index($n) then . else . + [$n] end)' ;;
     unpin) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.order -= ($v | map(tonumber))' ;;
     # The dependency guard; with it off, `force` lets one issue be picked while issues it depends on are open.
@@ -969,7 +970,9 @@ movedhold() { # <hold|release> <the control record as it now stands> <issue>...
 # opened in a span of startHeld joins held, unless it is a follow-up (it builds as before: it inherits its parent's
 # yes) or startSeen already has it (held once, or released), which it then joins. So an issue opened while the
 # setting is Held is held from its first sight, even when the setting is Queue again by then; one released, before
-# its first sight or after, is never held again; and one opened before the switch keeps its place. pick and snapshot call it with the open issues they read.
+# its first sight or after, is never held again; and one opened before the switch keeps its place. Whatever the
+# setting, an open issue opened by someone outside the project (its authorAssociation known and not INSIDE, a follow-up
+# too) joins held and startSeen the same way, until the owner releases it. pick and snapshot call it with the open issues they read.
 adopt() { # <open issues json>
   local c new
   c=$(ctl) && new=$(adopted "$c" "$1") && [ -n "$new" ] || return 1
@@ -979,8 +982,9 @@ adopt() { # <open issues json>
 # forced issue (`control force`) leaves forced once a card of it has landed or it is no longer open; the card records
 # are read only while forced lists one, and a line not whole yet (a card writing it) is skipped.
 adopted() { # <control record> <open issues json>
-  jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --rawfile r <([[ $1 == *'"forced":[]'* ]] || recs 2>/dev/null) '[.[] | select((.number | IN($c.startSeen[]) | not) and (.labels // [] | any(.name == $fu) | not)
-      and (.number as $i | $c.startHeld | any($i > .from and (.to == null or $i <= .to)))) | .number] as $n
+  jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --rawfile r <([[ $1 == *'"forced":[]'* ]] || recs 2>/dev/null) "$INSIDE"'[.[] | select((.number | IN($c.startSeen[]) | not)
+      and (((.labels // [] | any(.name == $fu) | not) and (.number as $i | $c.startHeld | any($i > .from and (.to == null or $i <= .to))))
+        or (.authorAssociation | type == "string") and (inside | not))) | .number] as $n
     | map(.number) as $open | [$r | splits("\n") | fromjson? | objects | select(.step == "landed") | .issue] as $landed
     | if $n == [] then $c else $c | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique) end
     | if .forced == [] then . else .forced |= map(select(IN($open[]) and (IN($landed[]) | not))) end' <<<"$2"

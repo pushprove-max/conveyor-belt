@@ -204,7 +204,10 @@ case $2 in
     # closedAt: $STUB/closedAt.<n>, else "" (a closed issue whose closing time GitHub did not give).
     *'--json state'*) echo "{\"state\":\"$(cat "$STUB/state.$3" 2>/dev/null || cat "$STUB/state" 2>/dev/null || echo CLOSED)\",\"closedAt\":\"$(cat "$STUB/closedAt.$3" 2>/dev/null)\"}" ;;
     *) issues | jq --argjson n "$3" '.[] | select(.number == $n)' ;; esac ;;
-  graphql) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; # gh api graphql: when the awaiting-deploy labels were added
+  # gh api graphql: who opened each open issue (an issue's authorAssociation, else OWNER), or when the awaiting-deploy
+  # labels were added.
+  graphql) case "$*" in *authorAssociation*) issues | jq -c '{data: {repository: {issues: {nodes: map({number, authorAssociation: (.authorAssociation // "OWNER")}), pageInfo: {hasNextPage: false, endCursor: null}}}}}' ;;
+      *) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; esac ;;
   # gh auth token: the token gh holds, read without the network (none with $STUB/signed-out). gh auth status: the
   # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.
   token) [ ! -e "$STUB/signed-out" ] && echo gho_stub ;;
@@ -254,9 +257,9 @@ template() { # <name> <make>
   ln -s "${b##*/}" "$t" 2>/dev/null || rm -rf "$b"
   [ -e "$t" ]
 }
-issue() { # <number> <created> <label>...
+issue() { # <number> <created> <label>...: an open issue as asked() gives it, opened by the owner
   local n=$1 d=$2; shift 2
-  jq -cn --argjson n "$n" --arg d "$d" '{number:$n,title:"title \($n)",body:"body of \($n)",milestone:null,createdAt:$d,labels:($ARGS.positional|map({name:.}))}' --args "$@"
+  jq -cn --argjson n "$n" --arg d "$d" '{number:$n,title:"title \($n)",body:"body of \($n)",milestone:null,createdAt:$d,labels:($ARGS.positional|map({name:.})),authorAssociation:"OWNER"}' --args "$@"
 }
 landed() { # <issue> [follow-ups json]: the landed line of an earlier card for that issue
   jq -cn --argjson n "$1" --argjson f "${2:-null}" '{card:"c0-\($n)",issue:$n,step:"landed",time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"abc",reason:"",product:false}

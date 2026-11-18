@@ -239,6 +239,8 @@ slice lands or is already done on main. Off checks no issue ([Split large issues
 
 An issue that is not being built is in Held for one of four reasons: **Held by you**, **Held by a label**,
 **Skipped by a rule** or **Waiting on #N**. "What these mean", under the Held heading, says where to change each.
+An issue that someone outside the project opened shows **Opened by someone outside the project: release it to build
+it** in place of **Held by you** ([The control record](configuration.md#the-control-record)).
 
 On the Rules tab, "waiting on another card" opens the waiting list. It shows each waiting card with the cards it waits
 on, as "waits on #12 (testing), #13 (landed)". The **Dependency guard** row sets the guard On or Off. With it Off,

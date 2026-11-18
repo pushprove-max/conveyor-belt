@@ -14,7 +14,10 @@
       | . + {later: ($l | index($fu) | not), p: level($l; $prio), rank: rank($l; $prio), again: (.number | IN($again[])),
              waits: waits($cards; $open), before: ($ctl.rules.visible != false and before($area; $np)), stuck: ($all != "" and (reach($g; .number) | any(IN($cyc[]))))})
     # forced: `control force` lets it past its open dependencies, only while the dependency guard is off.
-    | map(. + {forced: (.waits != [] and $ctl.depGuard == false and (.number | IN($ctl.forced[]))), hold: (.number | IN($ctl.held[])), rule: (([.labels[].name | select(IN($ctl.rules.never[]))] | sort | .[0])
+    # hold: the control record holds it, or someone outside the project opened it (INSIDE) and the owner has not
+    # released it (startSeen): held here too, before adopted() saves the hold, or when it cannot know who opened it.
+    | map(. + {forced: (.waits != [] and $ctl.depGuard == false and (.number | IN($ctl.forced[]))),
+        hold: ((.number | IN($ctl.held[])) or ((inside | not) and (.number | IN($ctl.startSeen[]) | not))), rule: (([.labels[].name | select(IN($ctl.rules.never[]))] | sort | .[0])
         // (if .later | not then (if $ctl.rules.followups then null else "follow-ups" end) elif $ctl.rules[.p] == false then .p else null end)
         // (if $loud and (.title // "" | startswith("Test-speed survey, ")) then "the survey hour" else null end))})
     | map(select($all != "" or ((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))))

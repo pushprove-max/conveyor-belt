@@ -188,6 +188,19 @@ test('the Board: a card excluded by a standing rule with no label says so and is
   assert.deepEqual(w.posts, [{ url: 'control', body: { action: 'release', args: ['76'], repo: 'sample' } }], 'held only by you: released as before');
 });
 
+// Issue 453: an issue someone outside the project opened starts held; the Board said only "Held by you", so the
+// owner could not tell it from one they held themselves. Its chip says why, and Queue releases it as before.
+test('the Board: an issue opened by someone outside the project says so in Held, and Queue releases it', async () => {
+  const held = clone(OPEN.held); held[0].reasons = [{ kind: 'you', outside: true }];
+  const w = boot({ tab: 'control' });
+  deliver(w, withOpen({ held }));
+  assert.deepEqual(Array.from(bcard(w, 76).querySelectorAll('.chip[data-reason]'), (c) => c.textContent),
+    ['Opened by someone outside the project: release it to build it']);
+  act(bcard(w, 76), 'release').click();
+  await settle();
+  assert.deepEqual(w.posts, [{ url: 'control', body: { action: 'release', args: ['76'], repo: 'sample' } }]);
+});
+
 test('the Board: an issue held only by an issue it waits on is in Held, counted there, and can still be held by you', async () => {
   const wait = { repo: 'sample', issue: 44, title: 'Second half', url: `${P}/44`, priority: 'P2', labels: [], reasons: [{ kind: 'waits', waitsFor: [20] }] };
   const w = boot({ tab: 'control' });

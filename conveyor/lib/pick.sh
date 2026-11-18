@@ -42,7 +42,7 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
   cards=$(recs) && old=$(olds) || return 1
   jq -c --slurpfile cards <(printf '%s' "$cards") --slurpfile retried <(printf '%s' "$old") --arg mode "${2:-}" --arg built "$BUILT" --argjson only "${ONLY:-null}" --argjson sh "$sh" \
     --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" \
-    "$DEPS$SEE$LEVEL$(<"$HERE/jq/upnext.jq")" <<<"$1"
+    "$DEPS$SEE$LEVEL$INSIDE$(<"$HERE/jq/upnext.jq")" <<<"$1"
 }
 # One Conveyor per machine (docs/setup.md, Run): the machine's settings are the host file's, over every project's loop.
 # cap is the most cards building, reviewing or testing at once on this machine across every project (each project's

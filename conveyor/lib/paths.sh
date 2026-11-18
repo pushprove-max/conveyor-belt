@@ -279,7 +279,15 @@ GITHUB=${CONVEYOR_GITHUB:-}
 # The loop asks GitHub for the open issues before each pick, never under the records' lock (every card's line waits
 # on that lock), and keeps the answer here; the minute's sample takes it while it is younger than SAMPLE.
 ISSUES=${STATE%/*}/issues.json
-FIELDS=number,title,body,labels,milestone,createdAt # what a pick, the sample and the snapshot read of an open issue
+# shellcheck disable=SC2034 # read by lib/issues.sh, lib/run.sh, lib/records.sh and lib/snapshot.sh, sourced beside this file
+FIELDS=number,title,body,labels,milestone,createdAt,authorAssociation # what a pick, the sample and the snapshot read of an open issue
+# An issue opened from inside the project: by the repository's owner, a member of its organization or a collaborator
+# (GitHub's authorAssociation, which openissues() adds). Any other is opened by someone outside the project: anyone
+# with a GitHub account can open one, and its text would reach a card session with write tools, so it starts held
+# (adopted(), lib/control.sh) whatever the rule "Queue new issues" says, until the owner releases it. One with no
+# authorAssociation (closed between the two questions openissues asks) is not inside.
+# shellcheck disable=SC2034 # read by lib/pick.sh, lib/control.sh and lib/snapshot.sh, sourced beside this file
+INSIDE='def inside: .authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR");'
 # The core of the rules every build, fix, rebase and test-fix session is given: its flags load no CLAUDE.md
 # and no .claude/rules/, so this text is how a card knows them (cardrules() adds the pack's). A missing or empty file
 # blocks the card.

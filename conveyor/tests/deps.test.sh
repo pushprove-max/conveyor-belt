@@ -108,6 +108,29 @@ t_startadopt() {
     || fail "an issue filed after Queue was selected was not held: $(cat "$C")"
   out=$(ctl adopt 0); [ $? = 2 ] || fail "adopt 0 was not refused: $out"
 }
+# Issue 453: under Queue, every new issue was picked, whoever opened it, so text from anyone with a GitHub account
+# reached a card session with write tools. Bug: an issue whose author is NONE or CONTRIBUTOR (someone outside the
+# project) is picked, or not shown held for that reason; one whose author is the owner, a member or a collaborator
+# is held.
+out() { jq -c --arg a "$2" '.authorAssociation = $a' <<<"$1"; } # <issue json> <authorAssociation>
+t_startoutside() {
+  startsetup
+  add "$(out "$(issue 5 2000-01-01T00:00:00Z P2)" NONE),$(out "$(issue 6 2000-01-01T00:00:00Z P2)" CONTRIBUTOR),$(out "$(issue 7 2000-01-01T00:00:00Z P2)" MEMBER),$(out "$(issue 8 2000-01-01T00:00:00Z P2)" COLLABORATOR)"
+  s=$(loop snapshot) || fail "snapshot exited non-zero"
+  [ "$(jq -c '[.control.start, .control.held, (.queue.order | map(.issue) | sort), (.open.held | map([.issue, .reasons]))]' <<<"$s")" \
+    = '["queue",[5,6],[4,7,8],[[5,[{"kind":"you","outside":true}]],[6,[{"kind":"you","outside":true}]]]]' ] \
+    || fail "an issue from outside the project is queued, or not held as such: $(jq -c '[.control, .queue.order, .open.held]' <<<"$s")"
+  loop run >/dev/null 2>&1; [ "$(picks)" = "4 7 8 " ] || fail "picks under Queue with issues from outside the project: $(picks)"
+}
+# Bug: the owner's release of an issue from outside the project does not queue it, or it is held again at the next read.
+t_startoutrel() {
+  startsetup
+  landed 4 > "$ST/cards.jsonl"; add "$(out "$(issue 5 2000-01-01T00:00:00Z P2)" NONE)"
+  loop snapshot >/dev/null; [ "$(jq -c .held "$C")" = '[5]' ] || fail "an issue from outside the project was not held: $(cat "$C")"
+  ctl release 5 >/dev/null; s=$(loop snapshot) || fail "snapshot exited non-zero"
+  [ "$(jq -c '[.control.held, (.queue.order | map(.issue))]' <<<"$s")" = '[[],[5]]' ] || fail "released, it is not in the queue: $(jq -c '[.control, .queue]' <<<"$s")"
+  loop run >/dev/null 2>&1; [ "$(picks)" = "5 " ] || fail "released, it was not picked: $(picks)"
+}
 dep() { jq -c --arg b "$2" '.body = "body\n" + $b' <<<"$1"; } # <issue json> <Depends on: lines>
 order() { st 'select(.step == "picked" or .step == "landed") | "\(.step):\(.issue)"' | tr '\n' ' '; }
 t_depends() {

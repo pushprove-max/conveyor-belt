@@ -60,6 +60,8 @@ case $2 in
   view) case "$*" in *'--json state'*) echo '{"state":"CLOSED"}' ;; *) jq --argjson n "$3" '.[] | select(.number == $n)' "$STUB/issues.json" ;; esac ;;
   comment) shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed" ;;
+  # gh api graphql: who opened each open issue (the owner: an issue from outside the project is held).
+  graphql) jq -c '{data: {repository: {issues: {nodes: map({number, authorAssociation: "OWNER"})}}}}' "$STUB/issues.json" ;;
 esac
 EOF
   # The builder runs $STUB/build in the card's worktree; the reviewer answers GO.
