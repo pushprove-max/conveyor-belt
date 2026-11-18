@@ -76,7 +76,7 @@ suiteprog() { # <worktree>
     END { print "of\t" (seen ? n + 0 : "null"); print "fof\t" (fseen ? fn + 0 : "null") }')
   { find "$d/ok" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|ok\t|'; find "$d/failed" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|failed\t|'
     find "$d/timedout" -maxdepth 1 -type f 2>/dev/null | sed 's|.*/|timedout\t|'; } \
-    | jq -Rsc --arg ls "$ls" '($ls | [split("\n")[] | select(. != "") | split("\t")]) as $l | ($l | map(select(.[0] == "of" or .[0] == "fof") | {(.[0]): (.[1] | fromjson)}) | add) as $n
+    | jq -Rsc --rawfile ls <(printf '%s' "$ls") '($ls | [split("\n")[] | select(. != "") | split("\t")]) as $l | ($l | map(select(.[0] == "of" or .[0] == "fof") | {(.[0]): (.[1] | fromjson)}) | add) as $n
       | [split("\n")[] | select(. != "") | split("\t")] | [.[] | select(.[0] == "timedout") | .[1]] as $late | map(select(.[0] != "timedout"))
       | {done: length, of: $n.of, failed: map(select(.[0] == "failed")) | length, cases: [.[] | select(.[0] == "failed") | .[1]] | sort,
         timedout: [.[] | select(.[0] == "failed" and IN(.[1]; $late[])) | .[1]] | sort,
@@ -141,8 +141,8 @@ suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
   of=$(suiteprog "$1"); of=$(jq -r '.files.of // null' <<<"$of" 2>/dev/null) || return 1
   [ "$of" != null ] && [ "$(jq length <<<"$r")" -ge "$of" ] || return 1
   [ "$3" = 0 ] || jq -e 'any(.[]; . == "fail")' <<<"$r" > /dev/null || return 1
-  jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --argjson r "$r" --argjson o "${5:-null}" --rawfile tr <(git ls-tree -r --name-only "$2") '
-    ($tr | split("\n") | map({(.): true}) | add) as $has
+  jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --slurpfile r <(printf '%s' "$r") --slurpfile o <(printf '%s' "${5:-null}") --rawfile tr <(git ls-tree -r --name-only "$2") '
+    $r[0] as $r | $o[0] as $o | ($tr | split("\n") | map({(.): true}) | add) as $has
     | (if $o == null then {} else $o.files | with_entries(select(.value == "ok" and $has[.key] and ($r[.key] | not))) end) as $k
     | {sha: $s, time: $t, by: $by, files: ($k + $r | with_entries(select($has[.key])))},
       (if $o == null then null else {sha: $o.sha, time: $o.time, ran: ($r | keys), kept: ($k | length)} end)' \
@@ -236,8 +236,8 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
   read -r c n <<<"$4"
   if [ "$how" = anyway ]; then
     pushed=$(fullpush "$sha" "$c" "$n")
-    fullline "$(jq -cn --arg s "$sha" --argjson p "$pushed" --arg by "$5" --argjson r "$6" \
-      '{kind: "anyway", push: true, sha: $s, state: $r.state, exit: $r.exit, cases: $r.cases, pushed: $p, by: $by}')"
+    fullline "$(jq -cn --arg s "$sha" --argjson p "$pushed" --arg by "$5" --slurpfile r <(printf '%s' "$6") \
+      '$r[0] as $r | {kind: "anyway", push: true, sha: $s, state: $r.state, exit: $r.exit, cases: $r.cases, pushed: $p, by: $by}')"
     return
   fi
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
@@ -272,14 +272,14 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
   else
     state=failed; f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
     # A file kept from the reused run passed: each case run alone is told so, as of a file that passed in this run.
-    [ -z "$l" ] || f=$(jq -c --argjson l "$l" --rawfile run "$wt.files" '.passed = ((.passed // []) + ([$l.files | to_entries[] | select(.value == "ok") | .key] - ($run | split("\n"))))' <<<"$f")
+    [ -z "$l" ] || f=$(jq -c --slurpfile l <(printf '%s' "$l") --rawfile run "$wt.files" '$l[0] as $l | .passed = ((.passed // []) + ([$l.files | to_entries[] | select(.value == "ok") | .key] - ($run | split("\n"))))' <<<"$f")
     # Each case run alone below runs in this worktree and starts a new log folder: the suite's counts are kept first.
-    jq -c --argjson p "$(suiteprog "$wt")" '. + {counts: $p}' "$FULLTEST.running" > "$FULLTEST.running.new" 2>/dev/null && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
+    jq -c --slurpfile p <(suiteprog "$wt") '. + {counts: $p[0]}' "$FULLTEST.running" > "$FULLTEST.running.new" 2>/dev/null && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
     cases=$(fulljudge "$wt" "$sha" "$3" "$f") || cases='[]'
   fi
   git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
-  fullline "$(jq -cn --arg s "$sha" --argjson p "$([ "$how" = push ] && echo true || echo false)" --arg st "$state" --argjson rc "$rc" --argjson c "$cases" --argjson pu "$pushed" --argjson u "$reused" \
-    '{kind: "run", push: $p, sha: $s, state: $st, exit: $rc, cases: $c, pushed: $pu, reused: $u}')"
+  fullline "$(jq -cn --arg s "$sha" --argjson p "$([ "$how" = push ] && echo true || echo false)" --arg st "$state" --argjson rc "$rc" --slurpfile c <(printf '%s' "$cases") --argjson pu "$pushed" --slurpfile u <(printf '%s' "$reused") \
+    '$c[0] as $c | $u[0] as $u | {kind: "run", push: $p, sha: $s, state: $st, exit: $rc, cases: $c, pushed: $pu, reused: $u}')"
 }
 # One run of a unit ({file, case}) alone in <worktree>: every other file of the run (<testfails()>) listed as passed,
 # and the case as the one to run of its file (a `fail` line; a unit with no case, its file whole), so a command that

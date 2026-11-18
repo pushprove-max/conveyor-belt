@@ -232,3 +232,18 @@ t_tatimeout() {
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json'" || fail "the action that passed its time limit did not end"
   [ "$(tarec "$id" '[.state, .limit] | tojson')" = '["timed out",1]' ] || fail "the record of an action past its time limit does not say timed out: $(cat "$ST/testactions/$id.json")"
 }
+
+# Bug it catches (#344): the snapshot gave the test actions, each with up to TATEXT_MAX of its text, to jq as one
+# argument, which Linux refuses over 128 KiB ("Argument list too long"), so the Board stopped refreshing. Ten ended
+# actions with 16,000 bytes of text each (about 160 KB): the snapshot lists every one with its text.
+t_tabigtexts() {
+  local i id out
+  setup '[]'; mkdir -p "$ST/testactions"
+  for i in 0 1 2 3 4 5 6 7 8 9; do
+    id=00000000000$i
+    jq -cn --arg id "$id" --arg s "2026-01-01T00:0$i:00Z" '{id: $id, action: "explain", file: "tests/x.test.sh", start: $s, end: $s, state: "done"}' > "$ST/testactions/$id.json"
+    head -c 16000 /dev/zero | tr '\0' x > "$ST/testactions/$id.txt"
+  done
+  out=$(loop snapshot 2>&1 | jq -c '[.testActions.actions[] | .text | length] | [length, unique]' 2>&1)
+  [ "$out" = '[10,[16000]]' ] || fail "the snapshot does not list the ten actions with their texts: ${out:0:300}"
+}

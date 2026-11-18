@@ -271,7 +271,7 @@ relsuite() { # <command name> <commit>
     # A run with some files only whose results could not be kept proves nothing of the others: it is no pass.
     [ -z "$l" ] || [ "$u" != null ] || [ $rc != 0 ] || { rc=1; echo "conveyor: $n: the rerun's results could not be read, so the passes of $(jq -r '.sha[0:12]' <<<"$l") are not reused" >&2; }
   fi
-  relrec --argjson u "$u" '.reused = $u'
+  relrec --slurpfile u <(printf '%s' "$u") '.reused = $u[0]'
   # The cases its runner named as ended; a red run whose runner named no failed case has those its output names
   # (testfails()), each named as fulljudge() names it.
   p=$(suiteprog "$wt")

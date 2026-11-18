@@ -117,7 +117,7 @@ mapfail() { echo "$1 failed under coverage; the end of its output:" >&2; tail -n
 mapskip() { # <tmp folder> <why or ""> <test file>...
   local tmp=$1 w=$2; shift 2
   [ -n "$w" ] || w="failed under coverage; the end of its output:"$'\n'"$(tail -n 10 "$tmp/out" 2>/dev/null | cut -c 1-300)"
-  jq -nc --arg w "$w" '$ARGS.positional[] | {file: ., why: $w}' --args "$@" >> "$tmp/skipped"
+  [ $# = 0 ] || printf '%s\n' "$@" | jq -Rc --arg w "$w" 'select(. != "") | {file: ., why: $w}' >> "$tmp/skipped"
 }
 # Why a Node <test file> in <dir> runs only under another runner, from its imports (exit 1 when it does not):
 # claude-code/testing, the test API of Claude Code's mod test runner, which node --test does not have.
@@ -209,11 +209,11 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
 # path, as a module name, is the longest that starts it (tests/test_a.py: tests.test_a, or test_a as pytest may import it).
 mappy() { # <dir, absolute> <json> <test file>...
   local r=$1/ j=$2; shift 2
-  jq -rn --arg r "$r" --slurpfile j "$j" '$ARGS.positional as $ts
+  jq -rn --arg r "$r" --slurpfile j "$j" --rawfile ts <(printf '%s\n' "$@") '[$ts | split("\n")[] | select(. != "")] as $ts
     | [$ts[] | . as $t | sub("\\.py$"; "") | split("/") as $p | range($p | length) | {t: $t, m: ($p[.:] | join("."))}] as $ms
     | $j[0].files | to_entries[] | .key as $f | ($f | ltrimstr($r)) as $f
     | [.value.contexts // {} | .[][]] | unique[] | select(. != "") as $c
-    | [$ms[] | select(.m as $m | $c | startswith($m + "."))] | max_by(.m | length) // empty | "\(.t)\t\($f)"' --args "$@"
+    | [$ms[] | select(.m as $m | $c | startswith($m + "."))] | max_by(.m | length) // empty | "\(.t)\t\($f)"'
 }
 # The pairs of V8's coverage files in <folder> (NODE_V8_COVERAGE) of a run in <dir>: a file is a Node process, and
 # each test file of <tests> it ran goes with every file of <dir> it ran (node --test runs each test file in a process
@@ -221,9 +221,10 @@ mappy() { # <dir, absolute> <json> <test file>...
 mapv8() { # <dir, absolute> <folder> <test file>...
   local r=$1/ c=$2 fs=(); shift 2
   fs=("$c"/*.json); [ -e "${fs[0]}" ] || return 0
-  jq -rn --arg r "file://$r" '($ARGS.positional | INDEX(.)) as $ts
+  # The coverage files and the tests go through standard input and a file, not as arguments: both grow with the project.
+  printf '%s\0' "${fs[@]}" | xargs -0 cat | jq -rn --arg r "file://$r" --rawfile ts <(printf '%s\n' "$@") '([$ts | split("\n")[] | select(. != "")] | INDEX(.)) as $ts
     | inputs | [.result[]?.url | strings | select(startswith($r)) | ltrimstr($r)] | unique
-    | . as $fs | .[] | select($ts[.]) as $t | $fs[] | "\($t)\t\(.)"' "${fs[@]}" --args "$@"
+    | . as $fs | .[] | select($ts[.]) as $t | $fs[] | "\($t)\t\(.)"'
 }
 # Writes the map of <dir> from <pairs> (mapcollect()'s lines): of each test, the tracked files it touched that are not
 # test files are its sources. With no <tests>, a new map, of every test the run mapped, on <dir>'s HEAD; with
@@ -236,18 +237,18 @@ mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds> 
   local d=$1 p=$2 nm=${3:-/dev/null} lang=$4 sec=$5 f cmd sha; shift 5
   f=$(mappath); packget test.command cmd && sha=$(git -C "$d" rev-parse HEAD) || return 1
   jq -n --rawfile p "$p" --rawfile all <(git -C "$d" -c core.quotePath=false ls-files) --rawfile ts <(git -C "$d" -c core.quotePath=false ls-files | testpaths) \
-    --slurpfile old <(if [ $# -gt 0 ]; then cat "$f" 2>/dev/null; fi) --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" --slurpfile nm "$nm" '
+    --slurpfile old <(if [ $# -gt 0 ]; then cat "$f" 2>/dev/null; fi) --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" --slurpfile nm "$nm" --rawfile only <(printf '%s\n' "$@") '
     def ls: split("\n") | map(select(. != ""));
     (($all | ls) - ($ts | ls) | INDEX(.)) as $src
     | [$p | ls[] | split("\t") | select(length == 2 and $src[.[1]])] as $pairs
-    | ($ARGS.positional) as $only
+    | ($only | ls) as $only
     | (if $only == [] then {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}}
        else ($old[0] // {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}})
          | .sources |= map_values(. - $only) | .tests -= $only end)
     | .notMapped = ([.notMapped[]? | select(.file as $f | $only | index($f) | not)] + [$nm[] | objects] | unique_by(.file))
     | .tests = (.tests + (if $only == [] then [$pairs[][0]] else $only - [.notMapped[].file] end) | unique)
     | reduce $pairs[] as $x (.; .sources[$x[1]] = ((.sources[$x[1]] // []) + [$x[0]] | unique))
-    | .sources |= with_entries(select(.value != []))' --args "$@" > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
+    | .sources |= with_entries(select(.value != []))' > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
 }
 # What the run that makes the map may cost, as setup asks before it: the time of the last whole-suite run recorded
 # (its files' seconds added up: suiterec(), lib/testrun.sh), or that none is recorded.
@@ -487,8 +488,8 @@ maprefresh() { # <worktree>
   esac
   # A Node or Python whole run says nothing of the files it could not map: those the map listed, still test files
   # and still not mapped by this run, stay listed.
-  case $lang in node|python) jq -c --rawfile p "$c/pairs" '[$p | split("\n")[] | split("\t")[0]] as $m
-    | .notMapped[]? | select(.file as $f | ($ARGS.positional | index($f)) and ($m | index($f) | not))' "$(mappath)" --args "${ts[@]}" > "$c/skipped" 2>/dev/null || : ;; esac
+  case $lang in node|python) jq -c --rawfile p "$c/pairs" --rawfile ts <(printf '%s\n' "${ts[@]}") '[$p | split("\n")[] | split("\t")[0]] as $m
+    | ($ts | split("\n")) as $ts | .notMapped[]? | select(.file as $f | ($ts | index($f)) and ($m | index($f) | not))' "$(mappath)" > "$c/skipped" 2>/dev/null || : ;; esac
   if [ -s "$c/pairs" ] && mapwrite "$1" "$c/pairs" "$c/skipped" "$lang" "$sec"; then
     mapend
     jq -r '"conveyor: test map: made again from the whole run'\''s coverage: \(.sources | length) source files, \(.tests | length) test files"' "$(mappath)"

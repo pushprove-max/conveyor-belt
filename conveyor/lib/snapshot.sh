@@ -313,8 +313,8 @@ suites() {
         t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '.state = "stopped" | .ended = ($t | todate)' <<<"$r")
       elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
         # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end.
-        r=$(jq -c --argjson p "$(suiteprog "$CARDS/release/wt")" --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
-          '. + $p | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
+        r=$(jq -c --slurpfile p <(suiteprog "$CARDS/release/wt") --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
+          '. + $p[0] | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that
@@ -322,7 +322,7 @@ suites() {
   m=$(cat "$FULLTEST.running" 2>/dev/null); free=''
   ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || free=1
   if [ -z "$free" ] && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
-    fr=$(jq -c --argjson p "$(suiteprog "$CARDS/fulltest/wt")" '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + (.counts // $p)' <<<"$fr")
+    fr=$(jq -c --slurpfile p <(suiteprog "$CARDS/fulltest/wt") '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + (.counts // $p[0])' <<<"$fr")
   elif l=$({ [ -n "$free" ] && [ -n "$m" ] && [ "$(cat "$FULLTEST.running" 2>/dev/null)" = "$m" ] && fulldead; } \
       || tail -n 1 "$FULLTEST" 2>/dev/null | jq -ce 'select(.kind == "run")' 2>/dev/null); then
     fr=$(jq -c '{kind: "full test", version: null, step: (if .push then "push" else "run" end), sha, since: null, ended: .time, state, done: null,
@@ -529,7 +529,7 @@ snapshot() (
   packget plugin.follow eng && [ -n "$eng" ] && eng=$(jq -ce '.refused | objects | {commit, reason, since}' "$ENGINE" 2>/dev/null) || eng=null
   local defs refs
   testowners
-  fl=$(jq -ce --argjson h "$h" --argjson days "$FLAKY_DAYS" --argjson defs "$defs" --argjson refs "$refs" "$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
+  fl=$(jq -ce --slurpfile h "$d/health" --argjson days "$FLAKY_DAYS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$h[0] as $h | '"$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
     | [.entries | arrays | .[] | objects | select((.case | type) == "string" and ((.time | fromdate?) // 0) > $t - $days * 86400)] | group_by(.case)
     | map(.[0].case as $c | {case: $c, count: length, issue: ([$f[] | select(.case == $c) | .issue][-1] // null), files: ($c | caseowners)}) | sort_by(-.count, .case)' "$FLAKY" 2>/dev/null) || fl='[]'
   # The slow-test list, from the snapshot's copy of the card records (health brought their summary up to date).
@@ -540,7 +540,7 @@ snapshot() (
   # file), and the last line of its record.
   packget test.full ft 2>/dev/null || ft=''
   fr=null; ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null) || fr=null
-  ft=$({ tail -n 1 "$FULLTEST" 2>/dev/null || :; } | jq -cs --arg ft "$ft" --argjson r "$fr" '{command: ($ft != ""),
+  ft=$({ tail -n 1 "$FULLTEST" 2>/dev/null || :; } | jq -cs --arg ft "$ft" --slurpfile r <(printf '%s' "$fr") '$r[0] as $r | {command: ($ft != ""),
       why: (if $ft == "" then "the pack names no full test suite (test.full)" else null end), running: $r, last: (map(objects) | last)}' 2>/dev/null) || ft=null
   # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).
   su=$(suites) || su='[]'; rl=$(releasemain) || rl=null; dr=$(driftof "$d")
@@ -550,11 +550,11 @@ snapshot() (
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
-  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --argjson fl "$fl" --argjson so "$so" --argjson ft "$ft" --argjson su "$su" --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --argjson built "$built" \
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" \
-    --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --argjson q "$queue" --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
+    --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
-    --argjson t0d "$(p_date "$day" +%s)" --argjson t0w "$(p_date "$since" +%s)" --argjson t0p "$(p_date "$prev" +%s)" "$DEPS$LEVEL"'
+    --argjson t0d "$(p_date "$day" +%s)" --argjson t0w "$(p_date "$since" +%s)" --argjson t0p "$(p_date "$prev" +%s)" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.
@@ -845,7 +845,7 @@ snapshot() (
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
-  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --argjson ta "$(testacts)" --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" 'del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk
+  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk
     | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = $bn[0] | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1

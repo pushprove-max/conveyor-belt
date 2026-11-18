@@ -279,3 +279,18 @@ t_fullalonefile() {
     cat "$w.seen" )
   [ "$got" = $'failed\npass\tb.test\npass\tc.test\nfail\ta.test\ntest.main' ] || fail "the file with no case was not named alone as a failed file: $got"
 }
+
+# Bug caught (#344): fullrun() gave the judged cases to jq as one argument, which Linux refuses over 128 KiB ("Argument
+# list too long"), so a red run with many failed cases wrote no line to the full test's record. The suite fails and
+# its judge (stubbed, as are the run and its worktree's setup) gives 1000 cases of long names, about 250 KB.
+t_fullbigcases() {
+  setup '[]'; mkdir -p "$T/$CASE"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+      && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names || exit 1
+    deps() { :; }; slot_pool() { :; }; suitereuse() { return 1; }; tests() { return 1; }; suiterec() { :; }; suitekeep() { return 1; }
+    testfails() { echo '{"files":[]}'; }
+    fulljudge() { jq -cn '[range(1000) | {case: ("a.test: case-\(.)-" + ("x" * 200)), verdict: "fix", runs: ["failed"]}]'; }
+    fullrun run "$(git rev-parse HEAD)" 'bash full' '' ) > "$T/$CASE/run.out" 2>&1
+  [ "$(ftl '[.state, (.cases | length)]')" = '["failed",1000]' ] \
+    || fail "the red run with many cases left no line with them: $(ftl '[.state, (.cases | length)]') $(tail -c 300 "$T/$CASE/run.out")"
+}

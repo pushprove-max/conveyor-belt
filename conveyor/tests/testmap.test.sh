@@ -113,6 +113,22 @@ t_testmapnew() {
   grep -qF 'conveyor: test map: mapped test/d.test.js on its first run' "$T/$CASE/cards/c7.test" || fail "the run did not say it mapped the new test: $(cat "$T/$CASE/cards/c7.test")"
 }
 
+# Bug it catches (#344): testsel() gave the made test map to jq as one argument, so a map over the system's argument
+# limit (about 1 MB on macOS; on Linux 128 KB for one argument) failed with "Argument list too long", and no card made
+# its list of tests. Under a lowered limit (ulimit -s 4096: 1 MB for all arguments), a card's list is still made from
+# a map over 2 MB: the change to src/a.js runs test/a.test.js, by the map.
+t_testmapbig() {
+  local wt=$T/$CASE/cards/c7
+  nodemain
+  jq -n --arg c "$(git -C "$R" rev-parse HEAD)" '{commit: $c, language: "node", tests: ["test/a.test.js", "test/b.test.js", "test/c.test.js"],
+    sources: ({"src/a.js": ["test/a.test.js"]} + ([range(40000) | {key: "src/generated/module/folder/file-\(.).js", value: ["test/b.test.js"]}] | from_entries))}' \
+    > "$R/.conveyor/test-map.json" && [ "$(wc -c < "$R/.conveyor/test-map.json")" -gt 2097152 ] || fail "the map over 2 MB could not be written"
+  git -C "$R" worktree add -q --detach "$wt" && echo '// more' >> "$wt/src/a.js" && git -C "$wt" add -A || fail "the card's change could not be staged"
+  mapeng 'ulimit -s 4096 && tests "'"$wt"'" && testrec "'"$wt"'" 0 0 | jq -c .list > "'"$T/$CASE/list"'"' || fail "the test step failed: $(cat "$T/$CASE/eng.out")"
+  [ "$(cat "$STUB/got")" = test/a.test.js ] && jq -e '.mode == "changed" and .by == "map"' "$T/$CASE/list" >/dev/null \
+    || fail "the card's list was not made from the big map: $(cat "$STUB/got" "$T/$CASE/list" "$T/$CASE/eng.out" 2>&1 | tail -n 5)"
+}
+
 # Bug it catches (#155): a Node test file the pack's tests.patterns name but not named *.test.*, *.spec.* or under
 # __tests__/ (src/test-a.mjs, checks/one.js) never entered the map, made (mapbuild()) or added (mapnew()), as a fixed
 # filename filter dropped it. The map's Node tests are the pack's test files that are JS or TS files.

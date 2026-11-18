@@ -8,6 +8,17 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
+# Bug caught (#344): a passing test line got its times by file (slowrec()) as one jq argument, which Linux refuses over
+# 128 KiB ("Argument list too long"), so a run that timed many files landed with no times. The run times s.test and
+# 1500 files of long names (about 200 KB of times): the test line holds the times of every one.
+t_budgetbigrec() {
+  budgetsetup; echo 'echo two >> a.txt; echo 1 1 > s.test' > "$STUB/build"
+  echo 'awk '"'"'BEGIN { for (i = 0; i < 1500; i++) printf "TESTRUN sec\tsuite/generated/module/folder/a-long-test-file-name-to-fill-the-record-%05d.test\t1\t1\n", i }'"'"' >> "$CONVEYOR_TEST_LOG/r.log"' >> "$STUB/test-cmd"
+  loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
+  [ "$(st 'select(.step == "test" and .issue == 7) | [(.times | length), (.clocks | length)] | tojson' | head -n 1)" = '[1501,1501]' ] \
+    || fail "the passing test line lost the times of a run that timed many files: $(st 'select(.step == "test" and .issue == 7) | [.result, (.times | length?), .reason] | tojson')"
+}
+
 # Bug caught: a run after a fix session, which does not run again the files that passed, lost the time the runs before
 # it took of them (tests() deleted <worktree>.times), so a 9 CPU s file the card added that passed while f.test failed
 # landed with no time of it on record. f.test fails twice (the run and its run again) until the fix session; s.test passes in the

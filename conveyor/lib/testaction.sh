@@ -198,9 +198,9 @@ testfacts() { # <file>
   local fl defs refs
   fl=$(jq -c --arg f "$1" '[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": ")))]' "$FLAKY" 2>/dev/null) || fl='[]'
   testowners
-  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --argjson fl "$fl" --argjson n "$TAFAILS" --argjson defs "$defs" --argjson refs "$refs" \
+  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --slurpfile fl <(printf '%s' "$fl") --argjson n "$TAFAILS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
     --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) \
-    --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
+    --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) '$fl[0] as $fl | '"$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
     | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first), carried: (if any(.carried | arrays | .[]; . == $f) then true else null end)}
          | select(.times != null or .clocks != null or .timed != null) | del(.[] | nulls)] as $c
@@ -271,9 +271,9 @@ tarun() { # <the record> <worktree> <prompt>
   if [ "$(jq -r .action <<<"$r")" = judge ]; then
     v=$(taverdict "$f.txt")
     hv=$(tahollow "$f.txt" 2>/dev/null) || hv='{"hollow": [], "hollowSkipped": 0}'
-    hv=$(jq -c --argjson c "$(tacauses "$f.txt" 2>/dev/null || echo '{"causes": []}')" --argjson w "$(tawaits "$f.txt" 2>/dev/null || echo '{"waits": []}')" '. + $c + $w' <<<"$hv")
+    hv=$(jq -c --slurpfile c <(tacauses "$f.txt" 2>/dev/null || echo '{"causes": []}') --slurpfile w <(tawaits "$f.txt" 2>/dev/null || echo '{"waits": []}') '. + $c[0] + $w[0]' <<<"$hv")
   fi
-  taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" --argjson hv "$hv" '. + {end: $t, state: $s, verdict: $v} + $hv + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
+  taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" --slurpfile hv <(printf '%s' "$hv") '$hv[0] as $hv | . + {end: $t, state: $s, verdict: $v} + $hv + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"
   taqueue # the next queued action, now that this one has ended
 }

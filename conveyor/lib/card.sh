@@ -553,8 +553,8 @@ card() { # <card> <issue> [<branch> <tip>]
         cr='{}'; [ -z "$own" ] || cr=$(carriedrec "$wt")
         if t=$(voidrun "$wt" "$rc"); then
           voids=$((voids + 1))
-          record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson o "$cr" --arg r "no result: $t" \
-            'sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
+          record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$wt" "$rc" "$sec") --slurpfile o <(printf '%s' "$cr") --arg r "no result: $t" \
+            '$x[0] as $x | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
           [ "$voids" -lt 3 ] || { block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
           echo "conveyor: card $c: its test run gave no result ($t): the test step runs again"
           continue
@@ -565,8 +565,8 @@ card() { # <card> <issue> [<branch> <tip>]
         # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: its test line is `held`,
         # not `fail` (the card's test step is not counted as failed), and it waits for the machine hold (below).
         held=''; jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$t" >/dev/null && held=machine
-        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --argjson x "$(testrec "$wt" "$rc" "$sec")" --argjson f "${out:-null}" --arg rc "$rc" --argjson r "$(firstrun "$wt")" --argjson v "$t" --argjson o "$cr" \
-          'sub("\n+$"; "") as $t | $x + $o + {
+        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$wt" "$rc" "$sec") --slurpfile f <(printf '%s' "${out:-null}") --arg rc "$rc" --slurpfile r <(firstrun "$wt") --slurpfile v <(printf '%s' "$t") --slurpfile o <(printf '%s' "$cr") \
+          '$x[0] as $x | $f[0] as $f | $r[0] as $r | $v[0] as $v | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {
              reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
            + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v')"
         testrulespass > /dev/null
@@ -634,9 +634,9 @@ card() { # <card> <issue> [<branch> <tip>]
       # reused that pass.
       # A batch that ran no case (batch(): TEST_BATCH) says so in selected: no case ran, and how many passes it kept.
       # A card the repair lane passed (repairlane()): its line says so, with the clean run of its changed tests.
-      if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 "$sec")" --arg r "$repaired" '$x + {reason: $r}')"
-      elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 "$sec")" --argjson r "$(firstrun "$wt" pass)" --argjson b "${TEST_BATCH:-null}" \
-        --argjson s "$([ -z "$own" ] && echo '{}' || slowrec "$wt")" '$x + $r + $s | if $b then .selected += $b else . end')"
+      if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
+      elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --argjson b "${TEST_BATCH:-null}" \
+        --slurpfile s <([ -z "$own" ] && echo '{}' || slowrec "$wt") '$x[0] + $r[0] + $s[0] | if $b then .selected += $b else . end')"
       else record "$c" "$n" test pass "$(jq -cn --argjson s "$sec" '{sec:$s,usage:{input:0,write:0,write1h:0,read:0,output:0},reused:true}')"; fi
       # The test rules read the line just recorded (lib/testrules.sh): with their switch off, they file nothing.
       [ -z "$ran" ] || testrulespass > /dev/null

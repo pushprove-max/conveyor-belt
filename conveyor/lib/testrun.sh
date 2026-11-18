@@ -51,7 +51,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $n then .n += ($n | tonumber) else . end)') || return 1
-  sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --argjson log "$log" "$named"'
+  sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") '$log[0] as $log | '"$named"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
     (if $log.files == [] and $cmd != "" then $cmd else null end) as $only
     | [inputs] as $ls | ($log.order | map(length)) as $ns
@@ -163,7 +163,7 @@ slowtests() { # <worktree>
   c=$(git -C "$1" diff --cached --no-renames --name-status -z --diff-filter=AM HEAD 2>/dev/null \
     | jq -cRs 'split("\u0000") | . as $a | [range(0; length - 1; 2) | {key: $a[. + 1], value: $a[.]}] | from_entries') || return 1
   t=$(timed "$1") || return 1
-  jq -c --argjson c "$c" '[to_entries[] | select($c[.key] != null) | {file: .key} + .value]' <<<"$t" > "$1.timed" || return 1
+  jq -c --slurpfile c <(printf '%s' "$c") '$c[0] as $c | [to_entries[] | select($c[.key] != null) | {file: .key} + .value]' <<<"$t" > "$1.timed" || return 1
   { IFS= read -r x && IFS= read -r y; } < <(jq -c '(with_entries(select(.value.cpu != null)) | map_values(.cpu)), map_values(.sec)' <<<"$t") \
     && printf '%s\n' "$x" > "$1.cpus" && printf '%s\n' "$y" > "$1.clocks"
 }
@@ -491,7 +491,10 @@ listcmd() { # <worktree> <command>
   LISTCMD=$2; TEST_FILES=''; LISTNONE=''
   packget test.list lm || return 1
   if ! wholerule; then
-    s=$(testsel "$1" narrow) || { narrowstop "the list of the card's tests could not be made: $s" > "$1.stop"; return 1; }
+    # The list that could not be made says why (the error of the command that failed); the settings are named only
+    # while test.fileCommand is not set.
+    s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
+      narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
     testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
     jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
@@ -526,12 +529,12 @@ testcap() { # <file>...
   packget test.cardFiles n 2>/dev/null && [[ $n =~ ^[1-9][0-9]*$ ]] || n=50
   [ $# -gt "$n" ] || return 0
   testowners
-  fl=$({ olds; recs; } 2>/dev/null | jq -cRn --argjson defs "$defs" --argjson refs "$refs" "$OWNERS$FAILURE"'
+  fl=$({ olds; recs; } 2>/dev/null | jq -cRn --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") "$OWNERS$FAILURE"'
     [inputs | fromjson? | objects | select(.step == "test") | failedrun | (.time // "") as $t | failedfiles[] | {f: ., t: $t}]
     | group_by(.f) | map(max_by(.t)) | sort_by(.t) | reverse | map(.f)') || fl='[]'
   # A record that cannot be read leaves the given order: the first test.cardFiles files.
   CAPFILES=("${@:1:n}")
-  fl=$(printf '%s\n' "$@" | jq -cRn --argjson fl "$fl" --argjson n "$n" '[inputs] as $all
+  fl=$(printf '%s\n' "$@" | jq -cRn --slurpfile fl <(printf '%s' "$fl") --argjson n "$n" '$fl[0] as $fl | [inputs] as $all
     | ($all | map({key: ., value: true}) | from_entries) as $have | [$fl[] | select($have[.])] as $f
     | ($f | map({key: ., value: true}) | from_entries) as $first | ($f + [$all[] | select($first[.] | not)])[:$n]') \
     && mapfile -t ks < <(jq -r '.[]' <<<"$fl") && [ ${#ks[@]} = "$n" ] && CAPFILES=("${ks[@]}")
@@ -561,9 +564,12 @@ listput() { # <command> <form> [<file>...]
     env) [ $# = 0 ] || TEST_FILES=$(printf '%s\n' "$@") ;;
   esac
 }
-# The reason a card stops at its test step, or its bug-card check fails, while the rule is off (NARROW), with <why>.
-narrowstop() { # <why>
-  printf '%s\n' "${NARROW//'<why>'/"$1"}"
+# The reason a card stops at its test step, or its bug-card check fails, while the rule is off (NARROW), with <why>;
+# with bare, without the settings that fix it (the part after its first `;`).
+narrowstop() { # <why> [bare]
+  local t=$NARROW
+  [ -z "${2:-}" ] || t=${t%%;*}
+  printf '%s\n' "${t//'<why>'/"$1"}"
 }
 # The command of a card's run with test.list runner (listcmd()): <command> given the test files <file>... in the form
 # its runner (testrunner()) takes: go test, the package (folder) of each, as ./<folder> or ., in place of the word
@@ -614,7 +620,7 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
   local out tm d=(--cached HEAD)
   [ -z "${3:-}" ] || d=("$3" "$4")
   tm=$(mapread "$1") || { [ "${2:-}" = narrow ] || { printf '%s\n' "$tm"; return 1; }; tm=null; }
-  out=$(jq -rn "$RX"'def ls: split("\n") | map(select(. != ""));
+  out=$(jq -rn '$tm[0] as $tm | '"$RX"'def ls: split("\n") | map(select(. != ""));
       def base: split("/")[-1]; def dir: split("/")[:-1];
       def stem: base | sub("\\.[^.]*$"; "");
       # A helper, setup, fixture or mock file (or one in a folder of such a name), that many tests may read.
@@ -643,7 +649,7 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
       | if $w and ($nw | not) then error($w.whole) else [.[] | if type == "array" then .[] else (.map // [])[] end] | unique
         | if . == [] and ($nw | not) then error("the change touches no test")
           else {by: (if any($l[]; type == "object" and (.map // []) != []) then "map" else "name" end), age: $tm.age} as $b
-          | ($b | tojson), .[] end end' --argjson tm "${tm:-null}" --argjson nw "$([ "${2:-}" = narrow ] && echo true || echo false)" \
+          | ($b | tojson), .[] end end' --slurpfile tm <(printf '%s' "${tm:-null}") --argjson nw "$([ "${2:-}" = narrow ] && echo true || echo false)" \
     --rawfile ch <(git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null) \
     --rawfile ct <(git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null | testpaths) \
     --rawfile all <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) \
@@ -701,22 +707,22 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   # unit is the card's (card) and does not run on main. When the change cannot be read, no unit runs on main: each is
   # the card's.
   chg=$(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null) && chg=$(jq -cRn '[inputs | select(. != "")]' <<<"$chg") || chg=null
-  um=$(jq -c --argjson c "$chg" 'if $c == null then [] else map(select(.file | IN($c[]) | not)) end' <<<"$u") || um='[]'
+  um=$(jq -c --slurpfile c <(printf '%s' "$chg") '$c[0] as $c | if $c == null then [] else map(select(.file | IN($c[]) | not)) end' <<<"$u") || um='[]'
   if [ "$um" != '[]' ]; then
     if sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
       && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
         && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
       && { hits=$(cachehits "$mwt" | jq -cRn '[inputs | select(. != "")]') || hits='[]'
-        ctl=$(jq -cn --argjson h "$hits" --argjson u "$u" --argjson c "${ctl:-[]}" '[$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique' 2>/dev/null) || ctl='[]'; } \
-      && jq -r --argjson u "$u" --argjson um "$um" --argjson ctl "$ctl" --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
-        '([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))]
+        ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$u") --slurpfile c <(printf '%s' "${ctl:-[]}") '$h[0] as $h | $u[0] as $u | $c[0] as $c | [$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique' 2>/dev/null) || ctl='[]'; } \
+      && jq -r --slurpfile u <(printf '%s' "$u") --slurpfile um <(printf '%s' "$um") --slurpfile ctl <(printf '%s' "$ctl") --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
+        '$u[0] as $u | $um[0] as $um | $ctl[0] as $ctl | ([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))]
           | unique - [$u[].file] - $ctl | .[] | "pass\t\(.)"),
         ($um[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
       s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 tests "$mwt" test.command alone; rc=$?; s=$((SECONDS - s))
       # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit).
       if [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
       # The controls that did not pass: each one the run did not end ok (failed, timed out or not run).
-      [ $rc = 0 ] || cf=$(jq -c --argjson c "$ctl" '[.passed // []] as $p | [$c[] | select(IN($p[0][]) | not)]' <<<"${mf:-null}" 2>/dev/null) || cf=$ctl
+      [ $rc = 0 ] || cf=$(jq -c --slurpfile c <(printf '%s' "$ctl") '$c[0] as $c | [.passed // []] as $p | [$c[] | select(IN($p[0][]) | not)]' <<<"${mf:-null}" 2>/dev/null) || cf=$ctl
       m=$(jq -cn --arg sha "$sha" --argjson s "$s" --argjson rc "$rc" '{sha: $sha, sec: $s, exit: $rc}')
     else
       echo "conveyor: card $1: its failing cases could not be run on main: ${out:-the commit of main could not be read}" >&2
@@ -725,7 +731,9 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   fi
   TEST_WAIT=$w; TEST_RUN=$r; TEST_FREE=$fr
   fst=$(jq -ce objects "$2.first" 2>/dev/null) || fst=null
-  v=$(jq -cn --argjson u "$u" --argjson um "$um" --argjson m "${mf:-null}" --argjson l "${3:-null}" --argjson fst "$fst" --argjson h "$hits" --argjson ctl "${ctl:-[]}" --argjson cf "$cf" "$NOTPASSED$PASSEDAGAIN"'
+  v=$(jq -cn --slurpfile u <(printf '%s' "$u") --slurpfile um <(printf '%s' "$um") --slurpfile m <(printf '%s' "${mf:-null}") --slurpfile l <(printf '%s' "${3:-null}") \
+    --slurpfile fst <(printf '%s' "$fst") --slurpfile h <(printf '%s' "$hits") --slurpfile ctl <(printf '%s' "${ctl:-[]}") --slurpfile cf <(printf '%s' "$cf") \
+    '$u[0] as $u | $um[0] as $um | $m[0] as $m | $l[0] as $l | $fst[0] as $fst | $h[0] as $h | $ctl[0] as $ctl | $cf[0] as $cf | '"$NOTPASSED$PASSEDAGAIN"'
     [($fst | select(. != null) | passedagain($l)[] | {case: ., verdict: "flaky"}),
      ($u[] | . as $x | {case: (if .case == null then .file else "\(.file): \(.case)" end), file,
        verdict: (if $m != null and ($x | IN($um[])) and any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] else any(.cases[]; .name == $x.case) end))
@@ -734,9 +742,9 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   # A machine verdict holds the loop (machinehold()) until the controls that failed, and the files that failed with
   # the inputs they last passed with, pass on main again (a file whose inputs changed may fail there for good).
   jq -e 'any(.[]; .verdict == "machine")' <<<"$v" >/dev/null \
-    && { machinehold "$1" "$sha" "$(jq -c --argjson cf "$cf" --argjson h "$hits" --argjson ctl "${ctl:-[]}" '$cf + [.[] | select(.verdict == "machine") | .file | select(IN($h[]))] | unique' <<<"$v")" \
+    && { machinehold "$1" "$sha" "$(jq -c --slurpfile cf <(printf '%s' "$cf") --slurpfile h <(printf '%s' "$hits") '$cf[0] as $cf | $h[0] as $h | $cf + [.[] | select(.verdict == "machine") | .file | select(IN($h[]))] | unique' <<<"$v")" \
       "$(jq -c '[.[] | select(.verdict == "machine") | .case]' <<<"$v")" || :; }
-  jq -cn --argjson v "$v" --argjson m "$m" '{verdicts: [$v[] | {case, verdict}]} + if $m then {mainRun: $m} else {} end'
+  jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict}]} + if $m then {mainRun: $m} else {} end'
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
 # last passed (cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
@@ -750,8 +758,8 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 machinehold() { # <card> <main's commit> <the files, json> <the cases, json>
   local lock
   { exec {lock}>>"$MACHINEHOLD.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the machine hold could not be locked: the loop is not held" >&2; return 1; }
-  jq -cn --slurpfile o <(jq -ce objects "$MACHINEHOLD" 2>/dev/null) --arg c "$1" --arg s "$2" --argjson f "$3" --argjson k "$4" \
-    '($o[0] // {since: (now | todate), card: $c, sha: $s, controls: [], cases: []}) | .controls = (.controls + $f | unique) | .cases = (.cases + $k | unique)' \
+  jq -cn --slurpfile o <(jq -ce objects "$MACHINEHOLD" 2>/dev/null) --arg c "$1" --arg s "$2" --slurpfile f <(printf '%s' "$3") --slurpfile k <(printf '%s' "$4") \
+    '$f[0] as $f | $k[0] as $k | ($o[0] // {since: (now | todate), card: $c, sha: $s, controls: [], cases: []}) | .controls = (.controls + $f | unique) | .cases = (.cases + $k | unique)' \
     > "$MACHINEHOLD.new" && mv -f "$MACHINEHOLD.new" "$MACHINEHOLD" || { exec {lock}>&-; echo "conveyor: the machine hold could not be written: the loop is not held" >&2; return 1; }
   exec {lock}>&-
 }
@@ -1306,7 +1314,7 @@ redrun() { # <worktree> <cases json>
   jq -r '.[] | if .case == "" then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
   tests "$1" test.command alone; rc=$?
   [ -z "$(testlogs "$1")" ] || t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'
-  jq -c --argjson t "$t" --argjson rc "$rc" 'def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
+  jq -c --slurpfile t <(printf '%s' "$t") --argjson rc "$rc" '$t[0] as $t | def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
     map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)
     elif any($t.files[]?; (.file | of($c)) and ($c.case == "" or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file then "fail"
     elif ($c.case == "" and any($t.passed[]?; . == $c.file)) or any(($t.okcases // []) + ($t.passcases // []) | .[]; (.file | of($c)) and any(.cases[]?; . == $c.case)) then "pass"
@@ -2015,8 +2023,8 @@ rerunlist() { # <worktree> <the staged change's id> <testfails() of the run> <HE
   if [ ${#logs[@]} != 0 ]; then
     ran=$(cat "${logs[@]}" 2>/dev/null | sed -n 's/^== //p'); sel=$(cat "${logs[@]}" 2>/dev/null | sed -n 's/^TESTRUN case\t//p')
   fi
-  old=$(jq -rRn --arg ran "$ran" --arg sel "$sel" --arg ch "$ch" --argjson r "$3" '
-    ($ran | split("\n") | map(select(. != ""))) as $ran
+  old=$(jq -rRn --rawfile ran <(printf '%s' "$ran") --rawfile sel <(printf '%s' "$sel") --arg ch "$ch" --slurpfile r <(printf '%s' "$3") '
+    $r[0] as $r | ($ran | split("\n") | map(select(. != ""))) as $ran
     | ($sel | split("\n") | map(select(. != "") | split("\t"))) as $sel
     | inputs | split("\t") | select(.[0] == "pass" or .[0] == "ok") | . as [$k, $f, $c]
     | [$r.files[]? | select(.file == $f)] as $fl | [$fl[].cases[].name] as $n
@@ -2044,7 +2052,7 @@ passlist() { # <worktree>
   else packget test.command cmd && f=$(jq -cn --arg c "$cmd" '{passed: [$c], passcases: [], okcases: []}') || return 1; fi
   { awk -F'\t' '$1 == "pass" {print $2} $1 == "ok" {print $2 "\t" $3}' "$1.rerun" 2>/dev/null
     jq -r '((.passcases + .okcases)[] | .file as $f | .cases[] | "\($f)\t\(.)"), (.passed - [.passcases[].file])[]' <<<"$f"
-  } | jq -cRn --argjson x "$(testrec "$1" 0 0)" '[inputs | select(. != "")] | unique as $u | [$u[] | select(contains("\t") | not)] as $w
+  } | jq -cRn --slurpfile x <(testrec "$1" 0 0) '$x[0] as $x | [inputs | select(. != "")] | unique as $u | [$u[] | select(contains("\t") | not)] as $w
     | {units: [$u[] | select((contains("\t") | not) or (split("\t")[0] | IN($w[]) | not))],
        cases: (if $x.selected.cases == null then null else $x.selected.cases + ($x.selected.kept // 0) end)}' > "$1.passed"
 }

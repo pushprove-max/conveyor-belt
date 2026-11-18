@@ -197,8 +197,8 @@ mutqueue() { # <main's commit>
   mutorder "$(mutrecs)" "$tp" "$(testacts)" < <(git -C "$MAIN" -c core.quotePath=false ls-tree -r "$1")
 }
 mutorder() { # <the checks' records> <the snapshot's tests part, or null> <the test actions' records>; main's tree (ls-tree -r) on stdin
-  jq -rRn --argjson recs "$1" --argjson tp "$2" --argjson ta "$3" --argjson nr "$NEVER_RUNS" '
-    ([inputs | capture("^\\S+ blob (?<b>\\S+)\t(?<p>.*)$")] | map({key: .p, value: .b}) | from_entries) as $b
+  jq -rRn --slurpfile recs <(printf '%s' "$1") --slurpfile tp <(printf '%s' "$2") --slurpfile ta <(printf '%s' "$3") --argjson nr "$NEVER_RUNS" '
+    $recs[0] as $recs | $tp[0] as $tp | $ta[0] as $ta | ([inputs | capture("^\\S+ blob (?<b>\\S+)\t(?<p>.*)$")] | map({key: .p, value: .b}) | from_entries) as $b
     | ($recs | map(select(.state == "done" or .state == "failed")) | group_by(.file) | map(max_by(.at) | {key: .file, value: .}) | from_entries) as $last
     | ([($tp.files // [])[] | objects | select(((.runsOnRecord // 0) >= $nr and .caught == 0) or ((.hollow // []) | length) > 0) | .file]
        + [$ta[] | objects | select(.action == "judge" and ((.hollow // []) | length) > 0) | .file]) as $flag

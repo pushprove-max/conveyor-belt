@@ -102,7 +102,7 @@ maintest() {
   fi
   git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
   pass=$(jq -r '.pass // ""' <<<"$was"); git rev-parse -q --verify "$pass^{commit}" >/dev/null 2>&1 || pass=''
-  n=$(jq -r --argjson c "$cases" '[.filed | arrays | .[] | select(.cases == $c) | .issue][-1] // empty' <<<"$was")
+  n=$(jq -r --slurpfile c <(printf '%s' "$cases") '$c[0] as $c | [.filed | arrays | .[] | select(.cases == $c) | .issue][-1] // empty' <<<"$was")
   [ -z "$n" ] || state=$(timeout 20 gh issue view "$n" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''
   if [ -n "$short" ]; then
     body="The whole test on main (the pack's test.main) $short at ${sha:0:12}. It named no failing case, but it ran under 90% of the cases of its last full run, so it is not a pass.
@@ -136,8 +136,8 @@ $(if [ -n "$pass" ]; then echo "Commits since the last pass (${pass:0:12}..${sha
   else
     told=false; echo "conveyor: the whole test on main failed again; the state of #$n could not be read" >&2
   fi
-  mainput "$(jq -c --argjson c "$cases" --argjson n "${n:-null}" --arg p "$pass" --arg s "$sha" --arg at "$at" --argjson rc "$rc" --argjson told "$told" \
-    '([.fail | objects | select(.cases == $c) | .since][0]) as $since
+  mainput "$(jq -c --slurpfile c <(printf '%s' "$cases") --argjson n "${n:-null}" --arg p "$pass" --arg s "$sha" --arg at "$at" --argjson rc "$rc" --argjson told "$told" \
+    '$c[0] as $c | ([.fail | objects | select(.cases == $c) | .since][0]) as $since
      | . + (if $told then {sha: $s} else {} end) + {fail: {issue: $n, cases: $c, from: (if $p == "" then null else $p end), to: $s, since: ($since // $at), exit: $rc}}
      | if $n == null then . else .filed = [.filed | arrays | .[] | select(.cases != $c)] + [{issue: $n, cases: $c}] end' <<<"$was")"
 }

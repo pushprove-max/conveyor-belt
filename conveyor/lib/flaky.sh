@@ -21,7 +21,7 @@ flaky() { # <source> <entries, a JSON array of {case} and any of {card, issue, n
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the flaky-test record could not be locked; nothing added" >&2; return 1; }
   now=$(clock)
   rec=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || rec='{}'
-  rec=$(jq -c --arg s "$1" --arg now "$now" --argjson add "$2" --argjson keep "$FLAKY_KEEP" '($now | fromdate) as $t
+  rec=$(jq -c --arg s "$1" --arg now "$now" --slurpfile add <(printf '%s' "$2") --argjson keep "$FLAKY_KEEP" '$add[0] as $add | ($now | fromdate) as $t
     | .entries = [(.entries | arrays | .[] | objects | select(((.time | fromdate?) // 0) > $t - $keep * 86400)),
         ($add[] | . + {source: $s, time: $now})]
     | .filed = [.filed | arrays | .[] | objects]' <<<"$rec") && flakyput "$rec" \

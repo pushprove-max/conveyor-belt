@@ -401,7 +401,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
     j=$(jq -c --slurpfile d "$wt.judge.said" '. + {accepted: ($d[0] | map(select(.accept) | del(.accept))), declined: ($d[0] | map(select(.accept | not) | del(.accept)))}' <<<"$j")
   fi
   rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new"
-  jq -ce --argjson j "${j:-null}" '. + {judge: $j}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
+  jq -ce --slurpfile j <(printf '%s' "${j:-null}") '. + {judge: $j[0]}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
 }
 # The P3 findings the review still holds after the judge (judged()) are handled by the control record's rule P3 (the
 # Rules tab). On, the default, each is a finding as a P2 is: it makes a NO-GO, goes to the fix round and, still open

@@ -472,6 +472,22 @@ t_mainredowncard() {
     || fail "the main-red record does not hold only the case that fails on main: $(cat "$ST/mainred.json" 2>&1)"
 }
 
+# Bug it catches (#344): verdicts() gave the failed cases and their verdicts to jq as arguments, which Linux refuses
+# over 128 KiB ("Argument list too long"): with many failures, they did not run on main and the card lost every
+# verdict. Card c7's last run fails 300 cases of a.test, each with a long name (about 150 KB); all pass on main, so
+# main runs them and each is the card's.
+t_mainredbigverdicts() {
+  local w=$T/$CASE/cards/c7 out
+  redrunner "$(for i in $(seq 300); do printf 'case-%03d-%0480d\n' "$i" 0; done)"
+  echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
+    && git -C "$R" worktree add -q --detach "$w" && echo '# a comment' >> "$w/a.test" && git -C "$w" add a.test || fail "the card's worktree could not be made"
+  jq -cR '{name: ., line: 1}' "$R/ok.txt" | jq -cs '{files: [{file: "a.test", cases: .}]}' > "$STUB/fails"
+  out=$(eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" "$(cat "$STUB/fails")" | jq -c "[(.verdicts | length), ([.verdicts[].verdict] | unique), (.mainRun | type)]"' 2>&1) \
+    || fail "verdicts failed: ${out:0:300}"
+  [ "$out" = '[300,["card"],"object"]' ] && [ "$(grep -c $'^fail\ta.test\t' "$STUB/redlist")" = 300 ] \
+    || fail "the many failures did not run on main or lost their verdicts: ${out:0:300}"
+}
+
 # Issue 323: a main-fix card's whole run, its session making no change, and main now passing its cases. Its entry links
 # lib/x.sh to a.test, so the engine stages .conveyor/test-links.json in its worktree before the build. Bug it catches:
 # the card was blocked ("the session made no change, so there is nothing to review"), or the staged links were taken

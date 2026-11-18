@@ -63,15 +63,16 @@ TESTKEEP=5
 # `<case>()`), else for the named file and the test files of main's checkout that define it and name that runner (a
 # case file runs itself through its runner). A file with a case of the same name that runs alone or through another
 # runner is not that runner's. testowners sets the caller's defs (each case name to the files that define it) and refs
-# (each test file to the test file names it holds); OWNERS is the jq that reads them, given as $defs and $refs:
-# caseowners (the files a flaky entry's case counts for) and failedfiles (the files a failed test line counts for).
+# (each test file to the test file names it holds); OWNERS is the jq that reads them, given as files (they grow with
+# the project, too long for an argument: `--slurpfile defs <(printf '%s' "$defs")`, and refs the same), at the start
+# of the program: caseowners (the files a flaky entry's case counts for) and failedfiles (the files a failed test line counts for).
 testowners() {
   defs=$(git -C "$MAIN" grep -oE '^(t_)?[A-Za-z0-9_]+\(\)' -- '*.test.*' 2>/dev/null \
     | jq -cRn '[inputs | capture("^(?<f>.+):(t_)?(?<c>[A-Za-z0-9_]+)\\(\\)$")] | group_by(.c) | map({key: .[0].c, value: [.[].f] | unique}) | from_entries') || defs='{}'
   refs=$(git -C "$MAIN" grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- '*.test.*' 2>/dev/null \
     | jq -cRn '[inputs | capture("^(?<f>[^:]+):(?<n>.+)$")] | group_by(.f) | map({key: .[0].f, value: [.[].n] | unique}) | from_entries') || refs='{}'
 }
-OWNERS='def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]) as $n
+OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]) as $n
       | if $c == null or any($d[]; . == $f) then [$f] else [$f] + [$d[] | select(any($refs[.][]?; . == $n))] end;
     def caseowners: index(": ") as $i | if $i == null then [.] else owners(.[:$i]; .[$i + 2:]) end;
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
@@ -227,14 +228,16 @@ HOLLOW_AWK='function flush() {
   }
   name != "" { count($0) }
   END { flush() }'
-# Each file is given to awk as ./<path>, so a name with = in it is never read as an assignment.
+# Each file is given to awk as ./<path>, so a name with = in it is never read as an assignment; xargs gives them in
+# runs that fit the argument limit (awk starts each file afresh).
 testhollow() { # <the test files of main's checkout, a JSON list>
   local f fs=()
   while IFS= read -r -d '' f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done < <(jq -j --arg re "$HOLLOWFILES" '.[] | select(test($re)) | . + "\u0000"' <<<"$1")
   [ ${#fs[@]} -gt 0 ] || { echo '{}'; return; }
-  (cd "$MAIN" && LC_ALL=C awk "$HOLLOW_AWK" "${fs[@]}") | jq -Rnc '($ARGS.positional | map({key: .[2:], value: []}) | from_entries) as $all
+  (cd "$MAIN" && printf '%s\0' "${fs[@]}" | LC_ALL=C xargs -0 awk "$HOLLOW_AWK") \
+    | jq -Rnc --rawfile fs <(printf '%s\n' "${fs[@]}") '($fs | split("\n") | map(select(. != "") | {key: .[2:], value: []}) | from_entries) as $all
     | reduce (inputs | split("\t") | select(length == 3)) as [$f, $c, $k] ($all; .[$f] += [{case: $c, kind: $k,
-        reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])' --args "${fs[@]}"
+        reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])'
 }
 # What the Tests part reads of each line of the records (linesum(), lib/records.sh). A project with no test line has
 # its part all the same. The steps other than test are those that give a Board filing's state (optimize, below) and a
@@ -302,12 +305,13 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | jq -Rsc --arg want "$ch" '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
-    --argjson mn "$mn" --argjson fs "$fs" --argjson fl "$fl" --argjson sf "$sf" --argjson keep "$TESTKEEP" --argjson defs "$defs" --argjson refs "$refs" \
-    --argjson ru "$ru" --argjson all "$all" --argjson hv "$hv" --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
+    --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
+    --slurpfile hv <(printf '%s' "$hv") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
     --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
     --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$OWNERS$FAILURE$RUNDEFS"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | '"$OWNERS$FAILURE$RUNDEFS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
@@ -374,7 +378,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
   rp=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || rp=null
   cp=$(cpuplan 2>/dev/null) || cp=null
-  jq -c --argjson nv "$nv" --argjson rp "$rp" --argjson cp "$cp" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) '.files |= map(.neverRun = ($nv[.file] // null))
+  jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) '$nv[0] as $nv | .files |= map(.neverRun = ($nv[.file] // null))
     | .settings.report = $rp | .settings.cpuTime = $cp
     | .suite = ($su | max_by(.time // "") | if . == null then null
         else {time, cpu: ([.files | objects | .[] | objects | .cpu | numbers] | if . == [] then null else add * 1000 | round / 1000 end)} end)' <<<"$out"

@@ -369,7 +369,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); return 4; }
         # Its test files' times go on its test line (slowtests()).
         trc=''; slowtests "$3" || :
-        record "$1" "$2" test pass "$(jq -cn --argjson x "$(testrec "$3" 0 "$sec")" --argjson r "$(firstrun "$3" pass)" --argjson s "$(slowrec "$3")" '$x + $r + $s')"
+        record "$1" "$2" test pass "$(jq -cn --slurpfile x <(testrec "$3" 0 "$sec") --slurpfile r <(firstrun "$3" pass) --slurpfile s <(slowrec "$3") '$x[0] + $r[0] + $s[0]')"
         testrulespass > /dev/null
         tested "$3"; began "$1" "$2" "$5"; continue
       fi

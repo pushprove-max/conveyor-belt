@@ -203,3 +203,30 @@ t_narrowcapproof() {
   grep -qF '1 of the 3 test files linked to the change did not run, as a card runs at most 2 (test.cardFiles)' "$T/$CASE/unfixed" && ! grep -qx -- '- c.test.sh' "$T/$CASE/unfixed" \
     || fail "the check's result does not say one file was left out: $(cat "$T/$CASE/unfixed")"
 }
+
+# Card c7's list of tests (listcmd()) with the rule off, on a pack changed by <filter>, when testsel() fails as jq does
+# on a test map over the argument limit (#344): its stop reason in $T/$CASE/stop.
+listfail() { # <pack filter>
+  local wt=$T/$CASE/cards/c7
+  narrowsetup none; tune "$1"
+  git -C "$R" worktree add -q --detach "$wt" || fail "the card's worktree could not be made"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
+    names || exit 1
+    testsel() { echo 'jq: Argument list too long'; return 1; }
+    ! listcmd "$wt" 'bash run' ) > "$T/$CASE/run.out" 2>&1 && cp "$wt.stop" "$T/$CASE/stop" \
+    || fail "the list did not fail with a stop reason: $(cat "$T/$CASE/run.out")"
+}
+# Bug it catches (#344): a list of tests that could not be made stopped the card with a reason that told the owner to
+# set test.fileCommand, which the pack had set. With it set, the reason says what failed and names no setting.
+t_narrowlistfail() {
+  listfail '.test.fileCommand = "bash one"'
+  [ "$(cat "$T/$CASE/stop")" = "the rule Whole suite in a card is off, and the list of the card's tests could not be made: jq: Argument list too long" ] \
+    || fail "the reason does not say what failed, or names a setting the pack has: $(cat "$T/$CASE/stop")"
+}
+# Bug it catches: with test.fileCommand not set, the reason stopped naming the settings that let a card run its files.
+t_narrowlistfailset() {
+  listfail 'del(.test.fileCommand)'
+  grep -qF "could not be made: jq: Argument list too long; set test.list" "$T/$CASE/stop" && grep -qF 'or set test.fileCommand to a command that runs one test file' "$T/$CASE/stop" \
+    || fail "the reason with no test.fileCommand does not say what failed and name the settings: $(cat "$T/$CASE/stop")"
+}

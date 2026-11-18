@@ -51,7 +51,7 @@ testrulesmatches() { # <now> <settings: testrulesettings()>
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   testowners
   { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --argjson now "$1" --argjson s "$2" \
-    --argjson fl "$fl" --argjson defs "$defs" --argjson refs "$refs" "$OWNERS"'
+    --slurpfile fl <(printf '%s' "$fl") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$fl[0] as $fl | '"$OWNERS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     [inputs | fromjson? | objects | select(.step == "test")] | sort_by(.time) as $ls
     | [$ls[] | select(.result == "fail") | {at: ((.time | fromdate?) // 0), card, files: failedfiles}] as $fails
@@ -95,8 +95,8 @@ testrulespass() { # [preview]
       st=$(jq -c --arg n "$n" --argjson x "${x:-null}" '.[$n] = ($x // {state: "", closedAt: ""})' <<<"$st")
     done < <(jq -r '[.[] | select(.event == "filed" and (.file | type) == "string" and (.issue | type) == "number")] | group_by(.file) | .[] | last.issue' <<<"$log")
   fi
-  r=$(jq -c --argjson s "$s" --argjson m "$m" --argjson log "$log" --argjson st "$st" --arg t "$t" --argjson cpu "$TESTRULES_CPU" --argjson fs "$fs" -n '
-    def closed: .state == "CLOSED" and ((.closedAt | fromdate?) // null) != null;
+  r=$(jq -c --argjson s "$s" --slurpfile m <(printf '%s' "$m") --slurpfile log <(printf '%s' "$log") --slurpfile st <(printf '%s' "$st") --arg t "$t" --argjson cpu "$TESTRULES_CPU" --slurpfile fs <(printf '%s' "$fs") -n '
+    $m[0] as $m | $log[0] as $log | $st[0] as $st | $fs[0] as $fs | def closed: .state == "CLOSED" and ((.closedAt | fromdate?) // null) != null;
     ($t | fromdate) as $now | ($now | strflocaltime("%Y-%m-%d")) as $today
     | [$log[] | select(.event == "filed" and (.file | type) == "string" and (.issue | type) == "number")] as $filed
     | ($filed | group_by(.file) | map({key: .[0].file, value: last.issue}) | from_entries) as $last

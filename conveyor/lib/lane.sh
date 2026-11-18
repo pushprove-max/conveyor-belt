@@ -3,8 +3,8 @@
 # messages as the body, so the reviewer has something to hold the change against and the owner's
 # `Visible change approved:` line has a place to be.
 branchissue() { # <branch> <tip>
-  jq -cn --arg t "$(git log --reverse --format=%s "refs/heads/$BRANCH..$2" | head -n 1)" --arg b "$1" --arg m "$(git log --reverse --format='%B' "refs/heads/$BRANCH..$2")" \
-    '{number: 0, title: ($t[0:200]), body: "No issue: this card lands the change of branch \($b) against main. The commit messages of the branch say what the change is for:\n\n\($m)", labels: [], milestone: null}'
+  jq -cn --arg t "$(git log --reverse --format=%s "refs/heads/$BRANCH..$2" | head -n 1)" --arg b "$1" --rawfile m <(git log --reverse --format='%B' "refs/heads/$BRANCH..$2") \
+    '{number: 0, title: ($t[0:200]), body: "No issue: this card lands the change of branch \($b) against main. The commit messages of the branch say what the change is for:\n\n\($m | sub("\n+$"; ""))", labels: [], milestone: null}'
 }
 
 # Under the lock: the picked line of a land-branch card. Prints the card id. An issue with an open card is refused:
