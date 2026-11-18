@@ -168,14 +168,15 @@ def fetch(folder=None, cache_dir=None):
     account = active_folder() if folder is None else {"folder": folder, "email": account_email(metadata(folder))}
     # With a cache folder (dashboard.sh's), the account's 429 deadline is the one accounts() keeps for it
     # (account_reading()), whichever of the two was refused: dashboard.sh drops its own deadline on a switch, so an
-    # account switched to or from was asked again at once. Each read here is kept there too.
+    # account switched to or from was asked again at once. Each read here is kept there too. Any refused read is
+    # honoured until its kept `next`, a 429 with no (or a malformed) Retry-After too (note() keeps ACCOUNT_TTL for it).
     if cache_dir:
         now = time.time()
         cache, kept = account_cache(cache_dir, account["folder"])
         err = kept.get("error") if isinstance(kept.get("error"), str) else ""
-        wait = re.search(r"; retry after [0-9]+ s$", err)
-        if wait and isinstance(kept.get("next"), (int, float)) and now < kept["next"]:
-            print("%s; retry after %d s" % (err[:wait.start()], math.ceil(kept["next"] - now)), file=sys.stderr)
+        if err and isinstance(kept.get("next"), (int, float)) and now < kept["next"]:
+            err = re.sub(r"; retry after [0-9]+ s$", "", err)
+            print("%s; retry after %d s" % (err, math.ceil(kept["next"] - now)), file=sys.stderr)
             return 1
     body, why = usage(account["folder"])
     if cache_dir:

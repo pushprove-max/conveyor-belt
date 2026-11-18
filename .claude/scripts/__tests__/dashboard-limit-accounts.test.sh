@@ -31,8 +31,10 @@ class R(io.BytesIO):
 def urlopen(req, timeout=None):
     who = req.headers["Authorization"]
     asked.append(who)
-    if answer.get(who) == 429:
-        m = Message(); m["Retry-After"] = "3600"
+    if answer.get(who) in (429, "429 bare"):
+        m = Message()
+        if answer[who] == 429:
+            m["Retry-After"] = "3600"
         raise urllib.error.HTTPError("u", 429, "x", m, None)
     return R(json.dumps({"seven_day": {"utilization": answer.get(who, 53)}}).encode()).__enter__()
 
@@ -117,6 +119,25 @@ check(asked == [], "accounts asked the account switched from inside the hour fet
 clock[0] = t1 + 3601
 answer["Bearer tok-2"] = 40
 check(run_fetch(X)[0] == 0 and asked == ["Bearer tok-2"], "fetch did not read the account once its hour had passed: %s" % asked)
+# Issue 404: a 429 with no Retry-After was kept as "rate limited (429)" with no wait in it, so fetch() did not honour
+# its kept deadline: switching back to that account asked the refusing API at once, and on each Board refresh after.
+# X is read while the other account is in use; then the Board switches to X and fetches the account in use (None).
+t2 = t1 + 10000
+clock[0] = t2
+answer["Bearer tok-2"] = "429 bare"
+in_use(HC)
+asked.clear()
+check(run_fetch(X) == (1, "rate limited (429)") and asked == ["Bearer tok-2"], "a 429 with no Retry-After: %s" % asked)
+in_use(X)
+asked.clear()
+clock[0] = t2 + 60
+got = run_fetch(None)
+check(asked == [] and got == (1, "rate limited (429); retry after %d s" % (d.ACCOUNT_TTL - 60)),
+      "fetch asked again 60 s after a 429 with no Retry-After: %s %s" % (asked, got))
+clock[0] = t2 + d.ACCOUNT_TTL
+answer["Bearer tok-2"] = 40
+check(run_fetch(X)[0] == 0 and asked == ["Bearer tok-2"],
+      "fetch did not read the account once its kept next had passed: %s" % asked)
 
 for f in fail:
     print("FAIL: " + f, file=sys.stderr)
