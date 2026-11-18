@@ -224,6 +224,11 @@ landed cards to the default branch. Pull request pushes them to the branch `conv
 from there collects them until you merge it. The tab then says "one pull request from conveyor/landing collects the
 cards; merge it to close their issues" ([Land as](configuration.md#land-as)).
 
+**Merge PR** is **Button**, **Release** or **Idle**. Until you set it, it shows the pack's `push.prMerge`. Button
+leaves the merge to you, with **Merge** on the Control tab. Release merges the pull request when you make a release.
+Idle merges it when no card is on the belt and no issue can be picked, after the test files linked to its cards pass
+([Merge PR](configuration.md#merge-pr)).
+
 **Test before a push** is a switch per project. On, before each push Conveyor runs the test files linked to the
 landings since the last push, and a file that fails holds the push. Off, a push runs no test first, and the tab says
 "off: a push runs no test first". The switch shows the pack's `push.check` (on in a new project) until you change it
@@ -294,6 +299,11 @@ It pushes main as Conveyor does after each card when the rule is On: through the
 hook fails, nothing is pushed and the card shows in Needs you with the failed check. It is greyed while a full test
 run is under way, or when nothing waits for a push. Use Push now for a small change that the card's own tests and the
 pre-push hook cover. Use Push landed when you want the whole suite green before the push.
+
+**Merge** shows while the pull request of Land as `pr` is open, whatever the rule Merge PR says. Beside it are the
+pull request's number, as a link to it on GitHub, and how many cards it holds. Click it, then click again: Conveyor
+merges the pull request at once, with a merge commit. When GitHub refuses the merge (a failed check, a conflict), the
+pull request stays open, and GitHub's reason shows beside Merge ([Merge PR](configuration.md#merge-pr)).
 
 ## Release
 

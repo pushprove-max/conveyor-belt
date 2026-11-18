@@ -3,7 +3,8 @@
 # timeout: 300
 # Engine cases: the rule Land as (lib/push.sh pushone, landas, landpr; lib/control.sh `control land-as`): with pr, the
 # push sends main to conveyor/landing and keeps one pull request open from it, never pushing origin's default branch;
-# with main, the push goes to the default branch and opens no pull request.
+# with main, the push goes to the default branch and opens no pull request. And the rule Merge PR (lib/push.sh
+# prmerge, idlemerge; `conveyor.sh pr merge`; release in commands/release-prep.sh): who merges that pull request.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -43,16 +44,23 @@ la_land() { # <n> [<fix rounds>]
     || fail "card $1's lines could not be written"
 }
 # gh's pull requests, in front of the shared stub (its issues): each one a file $STUB/pr.<n>, numbered from 7; every
-# pr call is logged in $STUB/pr-calls.
+# pr call is logged in $STUB/pr-calls. A merge (gh pr merge <n> --merge) makes GitHub's merge commit on origin's
+# main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives.
 la_prstub() {
   mv "$STUB/gh" "$STUB/gh.issues"
+  echo "$T/$CASE/origin" > "$STUB/origin"
   cat > "$STUB/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = pr ] || exec "$STUB/gh.issues" "$@"
-echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] || { n=$3; shift; }; shift 2
-while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; esac; shift 2; done
+echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] && [ "$c" != merge ] || { n=$3; shift; }; shift 2
+while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; --merge) shift; continue ;; esac; shift 2; done
 case $c in
-  list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN") | {number}]' ;;
+  list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN") | {number, url: "https://github.com/o/r/pull/\(.number)"}]' ;;
+  merge) [ ! -e "$STUB/merge-refuse" ] || { cat "$STUB/merge-refuse" >&2; exit 1; }
+    o=$(cat "$STUB/origin"); export GIT_AUTHOR_NAME=gh GIT_AUTHOR_EMAIL=gh@example.com GIT_COMMITTER_NAME=gh GIT_COMMITTER_EMAIL=gh@example.com
+    hd=$(git -C "$o" rev-parse "refs/heads/$(jq -r .head "$STUB/pr.$n")") && bs=refs/heads/$(jq -r .base "$STUB/pr.$n") \
+      && m=$(git -C "$o" commit-tree "$hd^{tree}" -p "$bs" -p "$hd" -m "Merge pull request #$n") && git -C "$o" update-ref "$bs" "$m" || exit 1
+    jq '.state = "MERGED"' "$STUB/pr.$n" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.$n" ;;
   create) n=$((7 + $(cat "$STUB"/pr.* 2>/dev/null | jq -s length)))
     jq -n --argjson n "$n" --arg h "$h" --arg b "$b" --arg t "$t" --arg y "$y" '{number: $n, head: $h, base: $b, title: $t, body: $y, state: "OPEN"}' > "$STUB/pr.$n"
     echo "https://github.com/o/r/pull/$n" ;;
@@ -110,4 +118,121 @@ t_landmain() {
   sha=$(git -C "$R" rev-parse HEAD)
   [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$sha" ] || fail "the push did not go to origin's default branch"
   [ ! -e "$STUB/pr-calls" ] && ! git -C "$T/$CASE/origin" rev-parse -q --verify refs/heads/conveyor/landing >/dev/null || fail "Land as main touched a pull request or conveyor/landing: $(cat "$STUB/pr-calls" 2>/dev/null)"
+}
+
+# The state of pull request <n> in the stub (OPEN or MERGED).
+la_prst() { jq -r .state "$STUB/pr.$1" 2>/dev/null; }
+# Issue 248 (the owner: the rule Merge PR, button by default, and the Board's Merge, which runs `conveyor.sh pr merge`).
+# Bugs it catches: with button, the loop's idle look (idlemerge()) merged the pull request by itself; health gave the
+# Board no open pull request, link or card count for its Merge; Merge did not merge with a merge commit, left main here
+# behind origin's default branch, or left an issue of its cards open; and the push after the merge updated the merged
+# pull request (its cards would never reach the default branch) in place of opening a new one.
+t_prbutton() {
+  local out
+  setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  la_eng idlemerge
+  [ "$(la_prst 7)" = OPEN ] && ! grep -q '^pr merge' "$STUB/pr-calls" || fail "with Merge PR button, the pull request merged by itself: $(cat "$STUB/pr-calls")"
+  out=$(loop health | jq -c '.landingPr | [.number, .url, .cards]')
+  [ "$out" = '[7,"https://github.com/o/r/pull/7",1]' ] || fail "health does not give the open pull request, its link and its card count: $out"
+  echo OPEN > "$STUB/state.1"
+  out=$(loop pr merge 2>&1) || fail "pr merge failed: $out"
+  grep -qx 'pr merge 7 --merge' "$STUB/pr-calls" && [ "$(la_prst 7)" = MERGED ] || fail "pull request 7 was not merged with a merge commit: $(cat "$STUB/pr-calls")"
+  [ "$(git -C "$R" rev-parse main)" = "$(git -C "$T/$CASE/origin" rev-parse main)" ] && [ -z "$(git -C "$R" status --porcelain --untracked-files=no)" ] \
+    || fail "main here is not origin's default branch after the merge: $out"
+  [ "$(cat "$STUB/closed" 2>/dev/null)" = 1 ] || fail "issue 1, still open after the merge, was not closed: $(cat "$STUB/closed" 2>&1)"
+  [ "$(loop health | jq -c .landingPr)" = null ] || fail "the merged pull request is still shown open: $(loop health | jq -c .landingPr)"
+  la_land 2; la_eng push c2 2 || fail "the push after the merge failed"
+  [ "$(la_prst 8)" = OPEN ] && [ "$(la_prst 7)" = MERGED ] || fail "the push after the merge opened no new pull request: $(cat "$STUB/pr-calls")"
+  [ "$(jq -r .body "$STUB/pr.8" | grep -o '^Closes #[0-9]*' | paste -sd ' ')" = 'Closes #2' ] || fail "the new pull request does not hold only the card landed since: $(jq -r .body "$STUB/pr.8")"
+}
+# Bugs it catches: a merge GitHub refuses (checks, conflicts) taken as done: the pull request dropped from the Board,
+# main here moved or its issues closed; or the refusal shown with no reason, to the owner or the Foreman (health).
+t_prrefused() {
+  local out h
+  setup "[$(issue 1 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  echo OPEN > "$STUB/state.1"; h=$(git -C "$R" rev-parse main)
+  echo 'Pull request is not mergeable: the base branch policy prohibits the merge' > "$STUB/merge-refuse"
+  out=$(loop pr merge 2>&1); [ $? = 1 ] && grep -qF 'the base branch policy prohibits the merge' <<<"$out" || fail "the refused merge did not fail with GitHub's reason: $out"
+  [ "$(la_prst 7)" = OPEN ] && [ "$(git -C "$R" rev-parse main)" = "$h" ] && [ ! -e "$STUB/closed" ] || fail "a refused merge moved main or closed an issue"
+  out=$(loop health | jq -r '.landingPr | "\(.number) \(.merge.result): \(.merge.reason)"')
+  [ "$out" = '7 refused: Pull request is not mergeable: the base branch policy prohibits the merge' ] || fail "health does not show the open pull request with the refusal's reason: $out"
+  # Health reads GitHub's state, not only the file the push wrote: a pull request open before that file was kept shows,
+  # and one merged on GitHub, not here, is gone.
+  rm -f "$(la_eng eval 'echo "$LANDPR"')"
+  out=$(loop health | jq -c '.landingPr | [.number, .url]')
+  [ "$out" = '[7,"https://github.com/o/r/pull/7"]' ] || fail "health does not show the pull request GitHub has open: $out"
+  # The owner sets Land as to main with it open, then merges it on GitHub: health must still ask GitHub, or the Board
+  # keeps showing Merge for a merged pull request.
+  loop control land-as main > /dev/null || fail "control land-as main was refused"
+  [ "$(loop health | jq -c '.landingPr.number')" = 7 ] || fail "the pull request still open is not shown after Land as main"
+  jq '.state = "MERGED"' "$STUB/pr.7" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.7"
+  out=$(loop health | jq -c .landingPr)
+  [ "$out" = null ] || fail "health still shows the pull request merged on GitHub as open (Land as main): $out"
+}
+# Bugs it catches: with Merge PR idle, the pull request merged while a card was on the belt, or before (or without)
+# the push run passing on it: the test files linked to every card in it (here card 1's lib/m.test.js, which card 2's
+# push alone would not run), each alone on its head; or it merged when the rule was set to button during that run
+# (the rule and the belt were read only before it); or it never merged once the belt was empty and that run passed.
+t_pridle() {
+  local sha
+  setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; [ ! -e "$STUB/during" ] || { bash "$STUB/during"; rm -f "$STUB/during"; }' \
+    '[ ! -e "$STUB/red" ] && bash "$1"' > "$STUB/one"
+  tune '.push.landAs = "pr" | .test.fileCommand = "bash \"$STUB/one\""'
+  loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
+  mkdir -p "$R/lib" && echo good > "$R/lib/m.js" && echo 'grep -qx good lib/m.js' > "$R/lib/m.test.js" || fail "the fixture could not be made"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  sha=$(git -C "$R" rev-parse main); rm -f "$STUB/ran"
+  la_eng record c9 9 picked ok '{}' || fail "card 9's line could not be written"
+  la_eng idlemerge
+  [ "$(la_prst 7)" = OPEN ] && [ ! -e "$STUB/ran" ] || fail "the pull request merged, or its run began, with card 9 on the belt"
+  la_eng record c9 9 closed ok '{}' || fail "card 9's line could not be written"
+  touch "$STUB/red"; la_eng idlemerge
+  [ "$(cat "$STUB/ran" 2>&1)" = "$sha lib/m.test.js" ] || fail "the push run did not run lib/m.test.js alone on the pull request's head: $(cat "$STUB/ran" 2>&1)"
+  [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though its push run failed"
+  rm -f "$STUB/red" "$STUB/ran"; la_land 2; la_eng push c2 2 || fail "the push of card 2 failed"
+  # The owner sets the rule to button while the push run runs (it takes minutes): the run passes, and nothing merges.
+  printf '%s\n' "CONVEYOR_MAIN='$R' CONVEYOR_CARDS='$T/$CASE/cards' bash '$SRC/conveyor.sh' control pr-merge button > /dev/null" > "$STUB/during"
+  sha=$(git -C "$R" rev-parse main); la_eng idlemerge
+  [ "$(cat "$STUB/ran" 2>&1)" = "$sha lib/m.test.js" ] || fail "the push run did not run card 1's test file on the new head: $(cat "$STUB/ran" 2>&1)"
+  [ ! -e "$STUB/during" ] && [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though the rule was set to button while its push run ran"
+  loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
+  la_eng idlemerge
+  [ "$(la_prst 7)" = MERGED ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$sha" main || fail "the pull request did not merge once the belt was empty and its run passed"
+}
+# Bugs it catches: with Merge PR release, release-prep ran the suite on origin's default branch, which lacks the cards
+# waiting in the pull request, in place of conveyor/landing; `release` tagged the default branch without them (it did
+# not merge the pull request first), or merged it only after the tag; a release a check refused (here a tag that
+# exists) had merged the pull request already; or it ran the suite again on the merge commit,
+# though it holds the files release-prep's pass was on. gh posts a commit status as GitHub does: the status of a
+# commit is the last one posted on it.
+t_prrelease() {
+  local out t m l
+  setup '[]'; la_prstub
+  printf '%s\n' '#!/usr/bin/env bash' 'case $1 in release) echo "$*" >> "$STUB/gh-calls" ;; issue) echo "{\"state\":\"CLOSED\"}" ;;' \
+    '  api) if [ "$2" = -X ]; then echo "$*" >> "$STUB/gh-calls"; else s=${2#*/commits/}; s=${s%%/*}' \
+    '    grep -q "statuses/$s .*state=success" "$STUB/gh-calls" 2>/dev/null && echo "[{\"context\":\"conveyor/release-suite\",\"state\":\"success\"}]" || echo "[]"; fi ;; esac' > "$STUB/gh.issues"
+  tune '.push.landAs = "pr" | .test.full = "git rev-parse HEAD > \"$STUB/full-at\""'
+  mkdir -p "$R/.claude-plugin" "$R/docs/releases" && jq -n '{name: "p", version: "1.0.0"}' > "$R/.claude-plugin/plugin.json" \
+    && jq -n '{name: "m", plugins: [{name: "p", source: {source: "url", url: "https://github.com/o/p.git", ref: "v1.0.0"}}]}' > "$R/.claude-plugin/marketplace.json" \
+    && git -C "$R" add -A && git -C "$R" commit -qm 'the first release' && git -C "$R" tag -a v1.0.0 -m 'Release 1.0.0' \
+    && printf '# 1.1.0\n\n## Fixes\n\n- A fix\n' > "$R/docs/releases/1.1.0.md" && git -C "$R" add -A && git -C "$R" commit -qm 'fix: A fix' \
+    && git -C "$R" push -q origin main v1.0.0 || fail "the fixture could not be made"
+  loop control pr-merge release > /dev/null || fail "control pr-merge release was refused"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  l=$(git -C "$T/$CASE/origin" rev-parse refs/heads/conveyor/landing)
+  out=$(loop release-prep 1.1.0 2>&1) && [ "$(cat "$STUB/full-at" 2>/dev/null)" = "$l" ] || fail "release-prep did not run the suite on conveyor/landing ($l): $out"
+  rm -f "$STUB/full-at"
+  out=$(loop release 1.0.0 2>&1) && fail "a release of 1.0.0, whose tag exists, was not refused: $out"
+  grep -qF 'the tag v1.0.0 already exists' <<<"$out" && [ "$(la_prst 7)" = OPEN ] || fail "a refused release merged the pull request: $out"
+  out=$(loop release 1.1.0 2>&1) || fail "the release was refused: $out"
+  [ "$(la_prst 7)" = MERGED ] || fail "release did not merge the pull request: $out"
+  [ ! -e "$STUB/full-at" ] || fail "release ran the suite again on the merge, though release-prep passed on the same files: $out"
+  m=$(git -C "$T/$CASE/origin" log --format=%H --grep='^Merge pull request #7' main) && t=$(git -C "$T/$CASE/origin" rev-parse 'v1.1.0^{commit}' 2>/dev/null) \
+    && [ -n "$m" ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$m" "$t" && [ "$(git -C "$T/$CASE/origin" show "$t:f1.txt")" = 1 ] \
+    || fail "the tag v1.1.0 is not on the merge of the pull request, with card 1's change: $out"
 }

@@ -90,6 +90,7 @@ cmd lane lane.sh 'lane research create | lane fast create | review | land | rese
 cmd flaky flaky.sh 'flaky add <case> <source> <note> | flaky off <case> <source> <note>'
 cmd full-test full-test.sh 'full-test [push | anyway <run id> [--by <who>]]'
 cmd push-now full-test.sh 'push-now'
+cmd pr pr.sh 'pr merge'
 cmd release-prep release-prep.sh 'release-prep <version>'
 cmd release release-prep.sh 'release <version> [--anyway] [--allow-commit <sha>]... [--by <who>]'
 cmd release-run release-prep.sh 'release-run [prep] <version> | release-run anyway <version> --by <who> | release-run stop'

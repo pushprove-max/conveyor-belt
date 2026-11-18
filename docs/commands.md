@@ -96,6 +96,8 @@ Tests:
 - `push-now` pushes what landed through the project's pre-push hook only, as Conveyor pushes each card when the rule
   is On, with no `test.full` run. It refuses when nothing waits for a push or a full test run is under way. Use it for
   a small change. Use `full-test push` when the whole suite must pass first.
+- `pr merge` merges the open pull request of Land as `pr` now, with a merge commit, whatever the rule Merge PR says
+  ([Merge PR](configuration.md#merge-pr)). It fails with GitHub's reason when GitHub refuses the merge.
 - `main-test` runs the whole test on main when one is due (the pack's `test.main`).
 - `survey` files the monthly test-speed survey's issue when one is due (the pack's `test.survey`).
 - `flaky add <case> <source> <note>` adds a flaky-test entry. `flaky off` adds one and files no issue.

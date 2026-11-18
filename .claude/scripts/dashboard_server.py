@@ -188,6 +188,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # me, `control card <issue> pick`, whose answer is the judge's settings, changing nothing),
 # or full-test (the Rules tab's Run full test suite, Push landed and Push anyway: `conveyor.sh full-test [push | anyway <run id>]`),
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
+# or merge-pr (the Control tab's Merge: `conveyor.sh pr merge`, the open pull request of Land as pr merged now),
 # or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`,
 # and Release anyway: `release-run anyway <version> --by <Board user>`),
 # or test-settings (the Tests page's limits, and one file's "slow on purpose" mark: `conveyor.sh test-settings`),
@@ -396,6 +397,10 @@ def control_ok(body):
         return v in (['on'], ['off'])
     if a == 'land-as':  # Land as: the push to main, or to one pull request
         return v in (['main'], ['pr'])
+    if a == 'pr-merge':  # Merge PR: who merges the pull request of Land as pr
+        return v in (['button'], ['release'], ['idle'])
+    if a == 'merge-pr':  # Merge: the open pull request of Land as pr, merged now
+        return n == 0
     if a == 'onboarded':  # the Board's setup finished: the keys of the rules the owner confirmed there
         return 1 <= n <= 40 and all(re.fullmatch(r'[a-z][A-Za-z0-9-]{0,39}', x) for x in v)
     if a == 'force':  # one waiting issue built before its dependencies land (the host refuses it while the guard is on)
@@ -617,6 +622,9 @@ def control_script(action, args, main, today, record=None, user=None):
         # The run goes on on the host after the answer (conveyor.sh full-test starts it and returns); a push over a red
         # suite names the red run the confirm showed and is logged under the Board user who confirmed it.
         return '%s full-test%s%s' % (conv, ''.join(' ' + q(x) for x in args), ' --by %s' % q('Board user %s' % user) if args[:1] == ['anyway'] else '')
+    if action == 'merge-pr':
+        # The merge is GitHub's answer: a refusal fails the command, so the Board shows GitHub's reason.
+        return '%s pr merge' % conv
     if action == 'push-now':
         # The push goes on on the host after the answer (conveyor.sh push-now starts it and returns).
         return '%s push-now' % conv

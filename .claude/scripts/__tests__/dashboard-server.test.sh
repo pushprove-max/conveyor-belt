@@ -713,7 +713,7 @@ control_actions() {
 control_actions 'rules P1=off followups=on area:infra=on' 'rules P3=off' 'rules P3=on' 'rules team/billing=off' 'rules visible=off' 'rules visible=on' 'rules split=shadow' 'rules split=on' 'model claude claude-opus-5-5 high' 'model claude claude-opus-5-5' 'model default' 'reviewer codex gpt-6.1-sol low' 'reviewer default' 'start held' 'start queue' \
   'reviewer opencode openrouter/vendor/model-1:free high' 'judge opencode openrouter/vendor/model-1' 'model claude opus[1m]' 'model codex gpt-6.1-sol' \
   'judge on' 'judge off' 'judge claude claude-opus-5-5 high' 'judge default' 'judge always security data' 'judge always' \
-  'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'force 12' 'land-as pr' 'land-as main' 'onboarded build review-account dep-guard'
+  'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'force 12' 'land-as pr' 'land-as main' 'pr-merge idle' 'pr-merge release' 'pr-merge button' 'onboarded build review-account dep-guard'
 grep -q "dashboard: control model default by max from 127.0.0.1" "$M/server.err" || fail "control_is_logged: no line for the control in the log"
 done_part
 ) & started actions
@@ -858,7 +858,13 @@ fresh_control
 [ "$(ctl "$(act push-now)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM push-now" ] || fail "push_now_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
 fresh_control
 [ "$(ctl "$(act push-now push)")" = 400 ] && [ -z "$(calls)" ] || fail "push_now_takes_no_argument: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
-pass=$((pass + 6))
+# The Control tab's Merge (#248) reaches `conveyor.sh pr merge` on the record, with no argument. Bug: the button
+# reaches no command, or an argument reaches the host.
+fresh_control
+[ "$(ctl "$(act merge-pr)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM pr merge" ] || fail "merge_pr_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control
+[ "$(ctl "$(act merge-pr 7)")" = 400 ] && [ -z "$(calls)" ] || fail "merge_pr_takes_no_argument: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
+pass=$((pass + 8))
 # The Release panel's Release (the version typed) and Stop reach `conveyor.sh release-run` on the record. Bug: a press
 # reaches no command, or a version the engine does not take (or a word the shell reads) reaches the host. Run suite's
 # `prep <version>` (release-prep alone) reaches it as two words.
@@ -1110,7 +1116,7 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act judge)" "$(act judge on off)" "$(act judge always 'a b')" "$(act judge always 'x;id')" "$(act judge always -x)" "$(act judge always $(seq 21))" "$(act judge claude m bogus)" \
   "$(act account a b)" "$(act account 'a;id')" "$(act account -x)" "$(act review-account '')" \
   "$(act dep-guard)" "$(act dep-guard maybe)" "$(act dep-guard on off)" "$(act push-check)" "$(act push-check maybe)" "$(act push-check on off)" "$(act force)" "$(act force x)" "$(act force 12 13)" "$(act force '12;id')" \
-  "$(act land-as)" "$(act land-as branch)" "$(act land-as main pr)" \
+  "$(act land-as)" "$(act land-as branch)" "$(act land-as main pr)" "$(act pr-merge)" "$(act pr-merge never)" "$(act pr-merge idle button)" \
   "$(act onboarded)" "$(act onboarded Build)" "$(act onboarded 'build;id')" "$(act onboarded -x)" "$(act onboarded $(seq -f r%g 41))" \
   "$(act approve)" "$(act approve 12 a b)" "$(act retry x)" "$(act retry 12 13)" "$(act retry x --fresh)" "$(act retry 12 --hold)" "$(act retry c20261115T120000-sample-0 --fresh)" "$(act unblock)" "$(act unblock x)" "$(act unblock 12 --hold)" "$(act close)" "$(act close x)" "$(act close 012)" "$(act close '12;id')" "$(act close 12 13)" "$(act decline '')" "$(act approve x why)" \
   "$(act build)" "$(act build 12)" "$(act build 'd0123456789ab;id')" "$(act build d0123456789ab d0123456789ab)" \

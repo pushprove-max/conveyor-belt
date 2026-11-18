@@ -133,6 +133,17 @@ grep -qxF 'alpha: Main is red (0123456789ab) is blocked since 2026-11-15T11:58:0
 ! grep -qF '#0' <<<"$w" || fail "the wake calls the main-red card #0: $w"
 }
 
+# Issue 248: a merge of the landing pull request that GitHub refused (health's landingPr). Bug it catches: the
+# pull request stayed open and the Foreman was never told why.
+t_prmerge() {
+CASE=prmerge; fixture prmerge
+snap '.health.landingPr = {number: 12, url: "https://github.com/o/r/pull/12", cards: 2,
+  merge: {time: "2026-11-15T11:59:00Z", by: "idle", sha: "abcdef0123456789", result: "refused", reason: "Pull request is not mergeable: required checks failed"}}'
+poll || fail "a refused merge woke nothing: $(cat "$T/err")"
+grep -qxF 'alpha: GitHub refused the merge of landing pull request #12, which stays open: Pull request is not mergeable: required checks failed' "$FD"/pending/*.wake \
+  || fail "the wake does not give GitHub's reason: $(cat "$FD"/pending/*.wake)"
+}
+
 # Issue 201: a card that only waits on another card takes no build slot, and the status says so. Bug it catches: the
 # owner saw three cards on the belt with the cap at 3 and could not tell one of them was waiting and held no slot.
 t_building() {
@@ -297,7 +308,7 @@ grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' 
   || fail "the wake does not name the pending #8 alone as not yet reported: $w"
 }
 
-cases=(status wake suite suitedead mainred building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported)
+cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

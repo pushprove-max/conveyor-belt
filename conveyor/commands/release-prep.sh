@@ -17,7 +17,10 @@
 # notes. When the head has no notes, release-prep has a model write a draft of them in that style (relnotes()), from
 # the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md, prints its path and
 # stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
-# pushed runs the suite. It tags and releases nothing.
+# pushed runs the suite. It tags and releases nothing. With Land as pr and Merge PR release (lib/push.sh), it runs on
+# the remote's head of the landing branch while that holds a commit the default branch lacks, and `release` checks that
+# head (release-prep's pass is on it) and merges the landing pull request only when every check passed (a refused merge
+# refuses the release), then makes the release commit on top of the merge and tags that commit.
 # Exit 0: passed and posted; 1: the suite failed (failure posted), the head has no notes yet (draft written, nothing
 # run), its notes break the style, or a step could not be done; 2: refused at the ask.
 # release, in the main checkout, refuses (exit 1), changing nothing and naming each reason, unless all of:
@@ -305,6 +308,13 @@ releaseprep() { # <version>
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's.
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}") || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
+  # Merge PR release (prmergerule(), lib/push.sh): the cards wait in the pull request of Land as pr, which `release`
+  # merges before it tags, so the suite runs on the head of LANDING while that holds a commit the default branch lacks.
+  if [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ] \
+    && git fetch -q "$REMOTE" "+refs/heads/$LANDING:refs/remotes/$REMOTE/$LANDING" < /dev/null 2>/dev/null \
+    && out=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$LANDING^{commit}") && ! git merge-base --is-ancestor "$out" "$sha"; then
+    sha=$out; echo "conveyor: release-prep: the suite runs on $REMOTE/$LANDING (${sha:0:12}), which release merges before it tags"
+  fi
   last=$(lasttag)
   # `release` releases the remote's head and reads the status of that commit, so the suite runs only on a head that
   # holds the notes, in the notes style: a status posted on another commit is on one the release does not use.
@@ -324,7 +334,7 @@ releaseprep() { # <version>
 RELBY='' RELANY='' RELALLOW=() # release [--anyway] [--allow-commit <sha>]... --by <who>: the owner's choices, and who made them
 release() { # <version>
   local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=() red='' body='' known='' a f allow=() passed=()
-  local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-}
+  local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-} at=refs/remotes/$REMOTE/$BRANCH pr=''
   [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
   unset CONVEYOR_RELEASE_SHA
   rellock release || return 1
@@ -332,8 +342,22 @@ release() { # <version>
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify 'HEAD^{commit}') \
     || { echo "conveyor: release: refused, nothing tagged or released: $REMOTE/$BRANCH or the checkout's HEAD could not be read" >&2; return 1; }
-  [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] && [ "$sha" = "$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}")" ] \
-    || why+=("the checkout is not on $BRANCH at the head of $REMOTE/$BRANCH")
+  # Merge PR release (prmergerule(), lib/push.sh): with the pull request of Land as pr open, what is released is the head
+  # of LANDING it merges (release-prep ran the suite there), and every check below, the suite's too, reads that commit.
+  # The pull request is merged only once none of them refuses (prmerge(), below): a refused release merges nothing. With
+  # origin's default branch holding a commit LANDING lacks, the merge would hold files no check read: refused.
+  if [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ]; then
+    out=$(timeout 60 gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number 2>&1) && pr=$(jq -er '.[0].number // ""' <<<"$out" 2>/dev/null) \
+      || { echo "conveyor: release: refused, nothing tagged or released: the open pull request from $LANDING could not be read: ${out:0:600}" >&2; return 1; }
+    if [ -n "$pr" ]; then
+      git fetch -q "$REMOTE" "+refs/heads/$LANDING:refs/remotes/$REMOTE/$LANDING" < /dev/null && at=refs/remotes/$REMOTE/$LANDING \
+        || { echo "conveyor: release: refused, nothing tagged or released: $REMOTE/$LANDING could not be read" >&2; return 1; }
+      git merge-base --is-ancestor "refs/remotes/$REMOTE/$BRANCH" "$at" \
+        || why+=("$REMOTE/$BRANCH holds a commit $LANDING lacks, so the merge of pull request #$pr would hold files no check read")
+    fi
+  fi
+  [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] && [ "$sha" = "$(git rev-parse -q --verify "$at^{commit}")" ] \
+    || why+=("the checkout is not on $BRANCH at the head of ${at#refs/remotes/}")
   [ -z "$(git status --porcelain --untracked-files=no)" ] || why+=("the checkout has uncommitted changes")
   # The Board's Release (releasego()): the commit its release-prep tested. A card landed since: refused, the record
   # moved, for the owner to press Run again on the new main.
@@ -350,10 +374,10 @@ release() { # <version>
     why+=("the release notes break the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)")
   fi
   # --allow-commit: a commit named by the owner whose hits the commit check passes over, only when it is already on
-  # $REMOTE/$BRANCH (pushed history, which only a rewrite could change). The tracked-files check passes over nothing.
+  # $REMOTE/$BRANCH, or the LANDING head released (pushed history, which only a rewrite could change). The tracked-files check passes over nothing.
   for a in "${RELALLOW[@]}"; do
     if ! f=$(git rev-parse -q --verify "$a^{commit}"); then why+=("--allow-commit $a: there is no such commit")
-    elif ! git merge-base --is-ancestor "$f" "refs/remotes/$REMOTE/$BRANCH"; then why+=("--allow-commit $a: ${f:0:12} is not on $REMOTE/$BRANCH, so its hits are not passed over")
+    elif ! git merge-base --is-ancestor "$f" "$at"; then why+=("--allow-commit $a: ${f:0:12} is not on ${at#refs/remotes/}, so its hits are not passed over")
     else allow+=("$f"); fi
   done
   terms=$(termsfile)
@@ -410,6 +434,18 @@ release() { # <version>
   # The suite takes long: a checkout that moved meanwhile would tag commits no check above read.
   [ "$(git rev-parse -q --verify HEAD)" = "$sha" ] && [ -z "$(git status --porcelain --untracked-files=no)" ] \
     || { echo "conveyor: release: refused, nothing tagged or released: the checkout moved or changed while the suite ran" >&2; return 1; }
+  # Merge PR release: every check passed on the head of LANDING, so the pull request is merged now, main here brought
+  # to the merge (exit 3: an issue or main not brought in line after it, which the check below finds for main), and
+  # the release is made on the merge, which must hold the files checked.
+  if [ -n "$pr" ]; then
+    out=$(prmerge release 2>&1); rc=$?
+    [ $rc = 0 ] || [ $rc = 3 ] || { echo "conveyor: release: refused, nothing tagged or released: the landing pull request was not merged: ${out:0:600}" >&2; return 1; }
+    printf '%s\n' "$out"
+    t=$(git rev-parse -q --verify 'HEAD^{commit}') && git merge-base --is-ancestor "$sha" "$t" && [ "$(git rev-parse "$t^{tree}")" = "$(git rev-parse "$sha^{tree}")" ] \
+      && [ -z "$(git status --porcelain --untracked-files=no)" ] \
+      || { echo "conveyor: release: refused, nothing tagged or released: pull request #$pr is merged, but the checkout is not at a merge holding the files checked on ${sha:0:12}" >&2; return 1; }
+    sha=$t
+  fi
   # A step that fails undoes what was made here: the tag, the commits, and the two files' changes, nothing else.
   relundo() { git tag -d "v$v" > /dev/null 2>&1; git reset -q "$sha" && git checkout -q "$sha" -- "$P" "$M"; }
   relset() { jq "${@:2}" "$1" > "$1.new" && mv "$1.new" "$1"; } # <file> <jq arguments>

@@ -59,6 +59,15 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
    and makes the GitHub release with the notes as its text (`gh release create`).
 
+With Land as `pr` and the rule Merge PR set to `release` ([Merge PR](configuration.md#merge-pr)), the cards wait in
+the pull request from `conveyor/landing`. Step 4 then runs the suite on the head of `conveyor/landing`. In step 5,
+the checkout must be at the head of `conveyor/landing`, and the checks read that commit. When a check stops the
+release, the pull request stays open. When all checks pass, step 5 merges the pull request and moves your local `main`
+to the merged `main` on GitHub. Step 6 then works on top of the merge: the release commit follows it, and the tag is on
+that commit. When `main` on GitHub has a commit that
+`conveyor/landing` does not have, the release stops before the merge. When GitHub refuses the merge, the release
+stops with GitHub's reason, and the pull request stays open.
+
 ## A release over a failed suite
 
 Use this only when the owner says so, and only when the failures are not in the code that you release. An example is

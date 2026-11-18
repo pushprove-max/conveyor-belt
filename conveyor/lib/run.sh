@@ -210,7 +210,7 @@ cardgone() { # <card> <its last step>
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
-  local mhold htold='' prober='' htried=-1000000 gone gs
+  local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
   # kids: a card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
   # before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's first turn still
@@ -335,7 +335,7 @@ run() { # [max-cards] [serve]
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
       stried=$SECONDS; survey 8>&- < /dev/null; noprice 8>&- < /dev/null || :
     fi
-    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}") + ${#took[@]})); waits=''
+    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}") + ${#took[@]})); waits=''
     # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
     # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
     idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)"); [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
@@ -458,6 +458,13 @@ run() { # [max-cards] [serve]
         [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
         continue
       fi
+    fi
+    # Nothing was picked. With none of the loop's cards running and no push under way, the rule Merge PR idle
+    # (idlemerge(), lib/push.sh, which checks the rule and the card records) is looked at once every IDLE seconds: a job
+    # beside the cards, never counted as one, and given no run lock.
+    if [ -n "$serve" ] && [ -z "$nopack" ] && [ -z "$new" ] && [ "$running" = 0 ] && [ -z "$pusher" ] && [ $((SECONDS - gtried)) -ge "$IDLE" ] \
+      && { [ -z "$merger" ] || ! jobs -rp | grep -qx "$merger"; }; then
+      gtried=$SECONDS; ( idlemerge ) 8>&- < /dev/null & merger=$!
     fi
     # A card that landed after this turn's push check is owed a push no turn has tried: one more turn makes it.
     if [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then

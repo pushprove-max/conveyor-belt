@@ -583,7 +583,8 @@ privmask() {
 }
 # github <folder> -- the GitHub reads of a snapshot, each written whole into the folder for `watch`: issues (the
 # open issues with the snapshot's fields; no file when gh did not list them, so the queue is not read, as it would not
-# be), labelled, gh (signed in: true or false) and ghreach (GitHub reached: true or false). It also keeps the host's report of its CLIs and their models (hostclis()).
+# be), labelled, gh (signed in: true or false) and ghreach (GitHub reached: true or false). It also keeps the host's report of its CLIs and their models (hostclis()), and
+# the landing pull request's state (prsync(), lib/push.sh, which `conveyor.sh github` loads).
 github() {
   local d=$1 i
   if i=$(openissues "$FIELDS" 2>/dev/null); then printf '%s\n' "$i" > "$d/issues.new" && mv -f "$d/issues.new" "$d/issues"
@@ -591,6 +592,7 @@ github() {
   labelled > "$d/labelled.new" && mv -f "$d/labelled.new" "$d/labelled"
   { ghok && echo true || echo false; } > "$d/gh.new" && mv -f "$d/gh.new" "$d/gh"
   { ghreach && echo true || echo false; } > "$d/ghreach.new" && mv -f "$d/ghreach.new" "$d/ghreach"
+  prsync # the landing pull request's state, which health reads from $LANDPR (lib/push.sh)
   # On this slower timer too, never in a snapshot the feed builds: the CLIs' models, read again once the host's report
   # is CLI_TTL old (a snapshot with no feed reads them itself, as it reads GitHub).
   hostclis due >/dev/null 2>&1 || :

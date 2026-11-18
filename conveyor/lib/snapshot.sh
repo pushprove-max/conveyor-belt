@@ -118,6 +118,8 @@
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
 # packLandAs: the pack's push.landAs (main or pr), the rule Land as while the control record's landAs is null; null
 #   when the pack cannot be read.
+# packPrMerge: the pack's push.prMerge (button, release or idle), the rule Merge PR while the control record's prMerge
+#   is null; null when the pack cannot be read.
 # standing: the pack's auto.standing, the standing kinds of routine yes that are on (lib/standing.sh), for the Rules
 #   tab; null when the pack cannot be read.
 # pushCheck: the pack's push.check (true or false), whether the run before a push runs when the control record's
@@ -568,13 +570,14 @@ snapshot() (
   su=$(suites) || su='[]'; rl=$(releasemain) || rl=null; dr=$(driftof "$d")
   packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
   packget push.landAs pla 2>/dev/null || pla=''
+  packget push.prMerge ppm 2>/dev/null || ppm=''
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
-    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" \
+    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
@@ -808,6 +811,7 @@ snapshot() (
        inFlight: ([$c[] | select(.result == "" and .x.accounts != null) | .x.accounts] | unique),
        areaPrefix: $area,
        packLandAs: (if $pla == "" then null else $pla end),
+       packPrMerge: (if $ppm == "" then null else $ppm end),
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,

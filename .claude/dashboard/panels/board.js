@@ -501,6 +501,20 @@
     const last = f && f.last && typeof f.last === 'object' ? f.last : null;
     if (last) full.append(lastResult(last));
     el.append(landed, full);
+    // Merge: the open pull request of Land as pr (health's landingPr), with its card count and link, whatever the rule
+    // Merge PR says. A merge cannot be undone: it acts on a second click. GitHub's reason for a refused merge shows here.
+    const pr = S.d.landingPr && typeof S.d.landingPr === 'object' && Number.isInteger(S.d.landingPr.number) ? S.d.landingPr : null;
+    if (pr) {
+      const box = h('div', 'board-ctl'), n = Number.isInteger(pr.cards) ? pr.cards : 0, link = h('a', 'board-push-item', `#${pr.number}`);
+      box.dataset.push = 'merge';
+      if (typeof pr.url === 'string' && /^https:\/\//.test(pr.url)) { link.href = pr.url; link.target = '_blank'; link.rel = 'noopener'; }
+      box.append(h('span', 'board-label', 'Pull request'), link, h('span', 'board-value', `${n} ${n === 1 ? 'card' : 'cards'}`),
+        guarded('merge-pr', 'final', 'Merge', `Click again to merge pull request #${pr.number} into the default branch`, 'merge-pr',
+          'Merge the open pull request now, with a merge commit', () => send('merge-pr', [])));
+      const m = pr.merge && typeof pr.merge === 'object' ? pr.merge : null;
+      if (m && m.result === 'refused') box.append(h('span', 'board-from board-push-why', `GitHub refused the last merge: ${typeof m.reason === 'string' && m.reason ? m.reason : 'it gave no reason'}`));
+      el.append(box);
+    }
     return el;
   }
 

@@ -269,6 +269,8 @@ MISSING='def bare: if .agent == "opencode" then .model | ltrimstr("opencode:") e
 SAMPLES=${STATE%/*}/samples.jsonl # the loop's and the host's samples, one a minute (README.md)
 PUSHED=${STATE%/*}/pushed         # the last push that worked: "<commit> <remote> <branch>"
 PUSHING=${STATE%/*}/pushing       # the push in progress: {pid, since, sha}, while the loop's push job runs
+# shellcheck disable=SC2034 # read by lib/push.sh and lib/views.sh, which conveyor.sh sources beside this file
+LANDPR=${STATE%/*}/landingpr.json # the pull request of Land as pr and its last merge (prstate(), lib/push.sh)
 MAINTEST=${STATE%/*}/maintest.json # the whole test on main (maintest()): its last run, its last pass and what fails now
 # shellcheck disable=SC2034 # read by lib/testrun.sh and lib/views.sh, which conveyor.sh sources beside this file
 MACHINEHOLD=${STATE%/*}/machinehold.json # the machine hold (machinehold(), lib/testrun.sh), while one stands

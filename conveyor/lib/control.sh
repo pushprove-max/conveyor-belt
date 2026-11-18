@@ -16,7 +16,8 @@
 # depGuard is the dependency guard (true, the seed's, for a record written before it: no issue is picked while an
 # issue it depends on is open) and forced the issues `control force` lets past their open dependencies while it is
 # off (adopted() drops each once it lands or its issue closes). landAs is null (the pack's push.landAs) or the rule
-# "Land as", main or pr (landas(), lib/push.sh). pushCheck is null (the pack's push.check holds) or whether the run before a push runs
+# "Land as", main or pr (landas(), lib/push.sh). prMerge is null (the pack's push.prMerge) or the rule "Merge PR",
+# button, release or idle (prmergerule(), lib/push.sh). pushCheck is null (the pack's push.check holds) or whether the run before a push runs
 # (`control push-check`, over the pack's: pushcheck(), lib/push.sh). signin is null, or why the loop paused itself: a session
 # whose sign-in failed, with no fallback route left (signinpause()); resume clears it. A key this copy of the engine does not know, at the top
 # or in rules (one a newer copy added, while a card runs on the older copy in its worktree), is passed through
@@ -76,6 +77,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.judgeOn | type == "boolean") and (.judgeAlways | type == "array" and all(type == "string"))
       and (.depGuard | type == "boolean") and (.forced | type == "array" and all(type == "number"))
       and (.signin == null or (.signin | type == "string")) and (.landAs == null or (.landAs | IN("main", "pr")))
+      and (.prMerge == null or (.prMerge | IN("button", "release", "idle")))
       and (.onboarded == null or (.onboarded | type == "object" and keys == ["at", "rules"] and (.at | type == "string") and (.rules | type == "array" and all(type == "string"))))
       and ([.account, .reviewAccount] | all(. == null or (type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")))))' \
     "$@" 2>/dev/null
@@ -864,7 +866,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | rules split=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|wholeSuite|<areaPrefix><name>>=<on|off>... | rules split=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -890,6 +892,8 @@ control() { # [action [arguments]]
     dep-guard) [ $# = 1 ] && [[ $1 =~ ^(on|off)$ ]] || { bad; return; }; f='.depGuard = ($v[0] == "on")' ;;
     # Land as: main pushes main to the pack's branch, pr to one pull request (landas(), lib/push.sh).
     land-as) [ $# = 1 ] && [[ $1 =~ ^(main|pr)$ ]] || { bad; return; }; f='.landAs = $v[0]' ;;
+    # Merge PR: who merges the pull request of Land as pr (prmergerule(), lib/push.sh).
+    pr-merge) [ $# = 1 ] && [[ $1 =~ ^(button|release|idle)$ ]] || { bad; return; }; f='.prMerge = $v[0]' ;;
     # The Board's setup finished: when, and the rules the owner confirmed there (each a rule's key on the Board, as
     # dep-guard); a rule the Board has that this list lacks opens the setup again, at that rule's step.
     onboarded) [ $# -ge 1 ] && [ $# -le 40 ] || { bad; return; }

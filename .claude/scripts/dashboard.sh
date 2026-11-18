@@ -123,7 +123,8 @@
 #           split {queued, you, labelOrRule, belt}, held, each with its reasons, and issues, every open issue with its
 #           labels and dependsOn, the numbers its Depends on: lines name; null when GitHub did not list them),
 #           unpushed (the landed cards whose commits origin lacks, oldest first, each with since; null from a snapshot
-#           without them) and fullTest (the snapshot's: command, why, running, last; null from a snapshot without it),
+#           without them), fullTest (the snapshot's: command, why, running, last; null from a snapshot without it) and
+#           landingPr (health's: the open pull request of Land as pr, {number, url, cards, merge}, for Merge; null with none),
 #           for Push landed and Run full test suite.
 #           checkRuns: each record's check run (its snapshot's checkRun, conveyor.sh checkrun(), with its repo), of
 #           every record, steered or not, whose pack names checks.progress and has one to show (repo null too: no
@@ -132,7 +133,8 @@
 #   rules   the Rules tab, of the same record (repo null when none is; repos and others as the Board's): repoUrl (its
 #           GitHub address, null when it is none), state, control, cap, guard,
 #           modelSettings and limit (as the Board's), areaPrefix (the pack's; null from a snapshot without
-#           one), packLandAs (the pack's push.landAs, Land as while the record's landAs is null; null from a snapshot
+#           one), packPrMerge (the pack's push.prMerge, Merge PR while the record's prMerge is null; null from a snapshot
+#           without it), packLandAs (the pack's push.landAs, Land as while the record's landAs is null; null from a snapshot
 #           without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
 #           the held, skipped or yes-gated issues that wait too (keptWaits), each with waitsFor; each null,
 #           with issuesError, when GitHub did not list the issues), building (how many cards are on the belt), onBelt
@@ -699,13 +701,14 @@ PANELS_JQ='
        landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), split: (.split // null), stalls: (.stalls // 0)}] | few($r),
        today: {landed: $s.landedCount, usd: $s.landedUsd},
        unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, name: (.name // null), since}) | few($r) end), fullTest: ($s.fullTest // null),
+       landingPr: ($s.health.landingPr // null),
        open: openOf($r)};
   # The Rules of one record: its rules and what they produce: the queue, the held and the skipped, the cards on the
   # belt (building, how many; onBelt, their issues) and the cards blocked, and the snapshot'"'"'s forecast. The page
   # computes no queue of its own.
   def rulesOf($r): $r.snap as $s
     | {repo: $r.repo, repoUrl: ($r.repoUrl // null), state: $s.health.state, control: $s.control, cap: $s.health.builderCap, guard: $s.health.guard,
-       modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), limit: limitOf($s),
+       modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), packPrMerge: ($s.packPrMerge // null), limit: limitOf($s),
        held: ($s.queue.holding | if . == null then null else few($r) end),
        queue: ($s.queue.order | if . == null then null else few($r) end),
        skipped: ($s.queue.skipped | if . == null then null else few($r) end),

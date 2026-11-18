@@ -11,7 +11,8 @@
 // accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
 // card lands (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull request, the
-// record's landAs or else the pack's; disabled the same way for a record with no landAs), Test before a push (On or Off: the
+// record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR (Button, Release or
+// Idle, the record's prMerge or else the pack's; disabled the same way for a record with no prMerge), Test before a push (On or Off: the
 // record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
 // way for a record with no rules.wholeSuite), Split large issues (Off, Shadow or On; disabled the same way for a
@@ -133,6 +134,10 @@
   // names landAs (null too: the pack's); an older engine is never sent `land-as`.
   const landNow = (c) => (c && (c.landAs === 'main' || c.landAs === 'pr') ? c.landAs : (S.d.packLandAs === 'pr' ? 'pr' : 'main'));
   const landKnown = () => { const c = ctl(); return !!c && Object.prototype.hasOwnProperty.call(c, 'landAs'); };
+  // Merge PR in force: the record's prMerge, else the pack's push.prMerge (packPrMerge), else button. Known as Land as is.
+  const PRMERGE = { button: 'with the Merge button', release: 'at the release', idle: 'when Conveyor is idle' };
+  const prNow = (c) => (c && PRMERGE[c.prMerge] ? c.prMerge : (PRMERGE[S.d.packPrMerge] ? S.d.packPrMerge : 'button'));
+  const prKnown = () => { const c = ctl(); return !!c && Object.prototype.hasOwnProperty.call(c, 'prMerge'); };
   // Whether the run before a push runs (pushcheck(), conveyor/lib/push.sh): the record's pushCheck when it sets one,
   // else the pack's push.check as the snapshot gives it; on when neither says.
   const pushCheckOn = (c) => (c && typeof c.pushCheck === 'boolean' ? c.pushCheck : S.d.pushCheck !== false);
@@ -283,6 +288,7 @@
     if (action === 'start') return `new issues start in ${a[0] === 'held' ? 'Held' : 'the Queue'}`;
     if (action === 'dep-guard') return `dependency guard ${a[0]}`;
     if (action === 'land-as') return a[0] === 'pr' ? 'land as one pull request' : 'land on main';
+    if (action === 'pr-merge') return `merge the pull request ${PRMERGE[a[0]] || a[0]}`;
     if (action === 'push-check') return `test before a push ${a[0]}`;
     if (action === 'onboarded') return 'setup finished';
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
@@ -319,6 +325,7 @@
     if (action === 'start') { r.start = a[0]; return [r, 'start']; }
     if (action === 'dep-guard') { r.depGuard = a[0] === 'on'; return [r, 'dep-guard']; }
     if (action === 'land-as') { r.landAs = a[0]; return [r, 'land-as']; }
+    if (action === 'pr-merge') { r.prMerge = a[0]; return [r, 'pr-merge']; }
     if (action === 'push-check') { r.pushCheck = a[0] === 'on'; return [r, 'push-check']; }
     if (action === 'onboarded') { r.onboarded = { at: new Date(Date.now()).toISOString(), rules: a.slice() }; return [r, ONB]; }
     return null;
@@ -944,6 +951,15 @@
     lMain.disabled = lPr.disabled = !landK;
     el.append(row('land-as', 'Land as', 'where the push sends the cards that landed',
       lMain, lPr, landK ? (land === 'pr' ? h('span', 'board-from', 'one pull request from conveyor/landing collects the cards; merge it to close their issues') : null) : newer(landK)));
+    // Merge PR: who merges that pull request. Button (the default): only you, with Merge on the Control tab; Release:
+    // the release merges it before it tags; Idle: Conveyor merges it when nothing is on the belt and nothing can be
+    // picked, once the test files linked to its cards succeed. The record's value, else the pack's (prNow).
+    const pm = prNow(c), pmK = prKnown();
+    const pms = [['button', 'Button'], ['release', 'Release'], ['idle', 'Idle']].map(([v, t]) =>
+      choice(t, `pr-merge-${v}`, `Merge PR: ${PRMERGE[v]}`, pm === v, () => { if (pm !== v) send('pr-merge', [v], null, ['pr-merge', [pm]]); }));
+    pms.forEach((b) => { b.disabled = !pmK; });
+    el.append(row('pr-merge', 'Merge PR', 'who merges the pull request of Land as',
+      ...pms, pmK ? h('span', 'board-from', `merged ${PRMERGE[pm]}`) : newer(pmK)));
     // Test before a push: On (the default of a new pack) runs the test files linked to the landings since the last
     // push before each push, and a file that fails holds it; Off pushes with no test first. The pack's push.check
     // sets it until a change here, which the control record keeps over the pack.

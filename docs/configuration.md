@@ -46,6 +46,8 @@ Some pack settings that this site names:
   one time. The default is 2. The loop's own test step keeps its full share.
 - `push.landAs`: the rule Land as, `main` (the default) or `pr`, until the control record sets it ([Land
   as](#land-as)).
+- `push.prMerge`: the rule Merge PR, `button` (the default), `release` or `idle`, until the control record sets it
+  ([Merge PR](#merge-pr)).
 - `prices`: your model prices, added models and aliases, by model ID. Set them on the Board's Rules tab (Model
   prices, [The Board](board.md#rules)) or with `conveyor.sh prices` ([Commands](commands.md)). Each entry can have:
   - `input`, `output` and `cacheRead`, together, and `cacheWrite`: prices in dollars per million tokens. They win
@@ -389,6 +391,8 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - where new issues start,
 - Land as: `main` or `pr` (`conveyor.sh control land-as main|pr`, or Land as on the Rules tab; [Land
   as](#land-as)),
+- Merge PR: `button`, `release` or `idle` (`conveyor.sh control pr-merge button|release|idle`, or Merge PR on the
+  Rules tab; [Merge PR](#merge-pr)),
 - the test run before a push (`conveyor.sh control push-check on|off`), when you set it over the pack's `push.check`.
 
 A card that only waits on another card does not take one of the cards at once: for example, a card that waits to land
@@ -486,6 +490,28 @@ reply, met or not met), its fix rounds and the tests it ran (each file, with the
 The pack's `push.landAs` sets the rule for the project. `conveyor.sh control land-as main|pr`, or Land as on the Board's
 Rules tab, sets it in the control record, and the record wins over the pack. The rule Push when a card lands still
 decides when a push happens.
+
+## Merge PR
+
+Merge PR sets who merges the pull request of Land as `pr`.
+
+- `button` (the default): only you merge it. Use **Merge** on the Board's Control tab, or `conveyor.sh pr merge`.
+- `release`: the release merges it. `release-prep` runs the whole suite on `conveyor/landing`. `release` checks
+  that head first. When all checks pass, it merges the pull request, then makes the release on top of the merge. A release
+  that a check stops merges nothing.
+- `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. First, Conveyor runs the test
+  files linked to every card in the pull request, each one alone, on the head of `conveyor/landing`. Conveyor merges
+  only when they all pass. A file that fails goes to a main-fix card, as in the run before a push.
+
+With every rule, **Merge** shows on the Control tab while a pull request is open. Conveyor merges with a merge
+commit. Then your local default branch moves to the remote's default branch, Conveyor closes the issues of the cards
+in the pull request, and the next push opens a new pull request.
+
+When GitHub refuses a merge (a failed check, a conflict), the pull request stays open. The Board shows GitHub's reason
+beside **Merge**, and the Foreman gets the same reason.
+
+The pack's `push.prMerge` sets the rule for the project. `conveyor.sh control pr-merge button|release|idle`, or Merge
+PR on the Board's Rules tab, sets it in the control record, and the record wins over the pack.
 
 ## Models
 

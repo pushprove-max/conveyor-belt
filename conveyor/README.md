@@ -59,6 +59,9 @@ that skips it. A record saved before a rule existed reads that rule at its defau
 `push.landAs`). With `pr`, the push sends main to `conveyor/landing` and keeps one pull request open from it into the
 default branch ([Land as](../docs/configuration.md#land-as)).
 
+`conveyor.sh control pr-merge button|release|idle` sets Merge PR (`prMerge` in the record; null, the default, is the
+pack's `push.prMerge`): who merges that pull request ([Merge PR](../docs/configuration.md#merge-pr)).
+
 `conveyor.sh control dep-guard on|off` sets the dependency guard (`depGuard` in the record; a record saved before it
 reads as on). On, an issue is never picked while an issue its `Depends on:` lines name is open, nor while a follow-up
 filed from one is: a release, the order list and a retry do not change that. Off, `conveyor.sh control force <issue>`
