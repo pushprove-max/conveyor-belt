@@ -2,17 +2,17 @@
 # `conveyor.sh snapshot`: the snapshot the Board reads (snapshot(), lib/snapshot.sh), sourced by conveyor.sh.
 # Until #398: where the state folder holds snapshot.kept.on, a reader prints the last finished snapshot
 # (snapshot.kept.json) at once, and when it is over 15 s old, one build at a time (snapshot.kept.lock) makes the next
-# one in the background. With no finished snapshot yet, the reader builds one as before. CONVEYOR_SNAPSHOT_FRESH=1
-# always builds.
+# one in the background. With no finished snapshot yet, the reader starts that build too and waits up to 40 s for it.
+# CONVEYOR_SNAPSHOT_FRESH=1 always builds.
 if [ -z "${CONVEYOR_SNAPSHOT_FRESH:-}" ] && [ -f "$ST/snapshot.kept.on" ]; then
   kept=$ST/snapshot.kept.json
-  if [ ! -s "$kept" ]; then
-    CONVEYOR_SNAPSHOT_FRESH=1 bash "$HERE/conveyor.sh" snapshot > "$kept.$$" && [ -s "$kept.$$" ] && mv -f "$kept.$$" "$kept" || { rm -f "$kept.$$"; exit 1; }
-  elif ! p_newer "$kept" 15; then
+  if [ ! -s "$kept" ] || ! p_newer "$kept" 15; then
     ( exec 9> "$kept.lock"; flock -n 9 || exit 0
       CONVEYOR_SNAPSHOT_FRESH=1 bash "$HERE/conveyor.sh" snapshot > "$kept.new" 2>/dev/null && [ -s "$kept.new" ] && mv -f "$kept.new" "$kept"
       rm -f "$kept.new" ) < /dev/null > /dev/null 2>&1 &
   fi
+  for _ in $(seq 40); do [ -s "$kept" ] && break; sleep 1; done
+  [ -s "$kept" ] || { echo "conveyor: the first snapshot is still being made" >&2; exit 1; }
   cat "$kept"; exit 0
 fi
 . "$HERE/lib/slots.sh" || exit 1
