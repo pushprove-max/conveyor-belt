@@ -14,7 +14,7 @@ ends). Every line has `type` and `at` (when it was printed):
             Changes that come while one is built give one more after it, not one each. With no other for REFRESH
             seconds, one is made anyway (refresh): what counts on the clock alone (a card stuck for want of output,
             today's totals at midnight, a loop that ended in a way no notification shows) never stands still.
-  live      {cards: {<card>: {tokens, usd, reading, live: {turns, lastOutputAt, action}, files}}}: the running steps'
+  live      {cards: {<card>: {tokens, usd, reading, atEnd, live: {turns, lastOutputAt, action}, files}}}: the running steps'
             live records (conveyor.sh keeps <worktree>.live up to date every LIVE seconds), laid over the last
             snapshot's belt as that snapshot would have them (tokens and dollars so far, the step's own included).
             Every card with a running step is in it; one whose step ended is left out. At most one a second, and only
@@ -340,7 +340,9 @@ class Stream:
                 live_usd = None
         base = done.get('usd')
         usd = None if not reading or base is None or (u is not None and live_usd is None) else round(base + (live_usd or 0), 4)
-        return {'tokens': tokens, 'usd': usd, 'reading': reading,
+        # atEnd: no reading, and the running Claude session's answers all report usage 0 (session.sh's zero): its
+        # route gives the cost only when the step ends (#391).
+        return {'tokens': tokens, 'usd': usd, 'reading': reading, 'atEnd': not reading and live.get('zero') is True,
                 'live': {'turns': live.get('turns'), 'lastOutputAt': live.get('last'), 'action': live.get('action')},
                 'files': live.get('files') if isinstance(live.get('files'), dict) else None}
 

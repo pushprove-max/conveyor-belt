@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // On the belt: each card being built and where it is. Its part: {cards, cap, waiting}; a card is {repo, card,
-// issue, title, url, parent, step, review, of, stepAt, landed, model, tokens, usd, reading, live ({turns, lastOutputAt,
+// issue, title, url, parent, step, review, of, stepAt, landed, model, tokens, usd, reading, atEnd, live ({turns, lastOutputAt,
 // action} | null), reviews, track, start, pickedAt, priorSec, earlier, totalSec}, as `conveyor.sh snapshot` gives its
 // belt. track is the six steps Build, Review, Fix,
 // Test, Land, Push, each done, now, skipped, failed or todo with its measured seconds, the step in progress (at, label,
@@ -111,10 +111,10 @@
         if (why) ctx.tip(pill, why);
         head.append(times(c, ctx), pill);
         // The dollars and the tokens (the builder's and the reviewer's together) are the finished steps and the running one so far; before
-        // any token is read there is no figure.
+        // any token is read there is no figure, and when the running session's route reports no usage until it ends (atEnd), it says so.
         const tok = c.tokens && num(c.tokens.claude) && num(c.tokens.codex) ? c.tokens.claude + c.tokens.codex : null;
         // One unwrapped piece of the meta row, dollars and tokens together a held width (app.css, .live-cost): it counts on as refreshes come.
-        let cost = h('span', 'live-cost', 'no reading yet');
+        let cost = h('span', 'live-cost', c.atEnd === true ? 'cost shown when the step ends' : 'no reading yet');
         if (c.reading) {
           cost = h('span', 'live-cost');
           cost.append(ctx.number(`usd:${c.card}`, c.usd, ctx.money), h('span', null, tok !== null ? ` · ${count(tok)} tokens so far` : typeof c.usd === 'number' ? ' so far' : ''));

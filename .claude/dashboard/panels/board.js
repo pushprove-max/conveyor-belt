@@ -725,7 +725,7 @@
       const prog = col === 'building' && item.step === 'tests' ? ctx.testProgress({ files: item.files, tests: item.tests }) : null;
       meta.append(behind || h('span', null, col === 'review' ? `review ${item.review || '?'} of ${item.of || 3}`
         : (item.step === 'waiting' ? waitsOn(item.waitsOn) : (STEP[item.step] || item.step || 'in progress')) + (prog ? `, ${prog}` : '')), ctx.since(item.stepAt, ''),
-        h('span', null, item.reading === false ? 'no reading yet' : ctx.money(item.usd)));
+        h('span', null, item.reading === false ? (item.atEnd === true ? 'cost shown when the step ends' : 'no reading yet') : ctx.money(item.usd)));
       el.append(meta);
       // A main-red fix the loop started with the cap reached takes one slot beyond it: the Board says so.
       if (typeof item.beyond === 'string' && item.beyond) el.append(ctx.chip(`beyond the cap: ${item.beyond}`, 'warn'));

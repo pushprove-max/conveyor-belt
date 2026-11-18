@@ -64,7 +64,8 @@ is shown. A figure is never cut: figures are right-aligned and the title is what
      never the raw `[P2] path:line …` title), then right-aligned when the card was picked up (local time, with the date
      when it is not today), its overall time so far (from its pick-up, never the time it sat queued; a card resumed
      from a kept patch counts the earlier card's time and shows its first start) and its cost (`no reading yet` before
-     any token is read, never $0; `cost partial` when a step has no price).
+     any token is read, never $0; `cost shown when the step ends` when the running session's route reports no token
+     use until the step ends; `cost partial` when a step has no price).
   2. The six steps Build, Review, Fix, Test, Land, Push as one track: done `✓` with a filled join `━━`, the step in
      progress lit `▶`, to come dim, skipped `–` (Fix after a GO), failed `✗` in red. Where the width has room, a
      done step adds the time it took (`✓ Build 16m`) and a step that ran more than once its count (`Review 2 of 3`,

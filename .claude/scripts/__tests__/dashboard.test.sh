@@ -269,7 +269,7 @@ rm -f "$T/userhome/.claude.json" "$OUT/cache/claude-usage"; quiet
 # --- the live feed: a fresh stream.json is Conveyor's part, and no host is asked; --publish builds data.js
 # again from it and the parts the last cycle kept, with no slow read at all ---
 feed() { # <live true|false> <belt card> -- stream.json as dashboard_stream.py writes it
-  jq -cn --argjson s "$(snap "{\"belt\":[{\"card\":\"$2\",\"issue\":5,\"title\":\"T5\",\"step\":\"build\",\"stepAt\":\"$NOWISO\",\"landed\":false,\"tokens\":{\"claude\":0,\"codex\":0},\"usd\":null,\"reading\":false,\"reviews\":[],\"track\":null}]}")" \
+  jq -cn --argjson s "$(snap "{\"belt\":[{\"card\":\"$2\",\"issue\":5,\"title\":\"T5\",\"step\":\"build\",\"stepAt\":\"$NOWISO\",\"landed\":false,\"tokens\":{\"claude\":0,\"codex\":0},\"usd\":null,\"reading\":false,\"atEnd\":true,\"reviews\":[],\"track\":null}]}")" \
     --argjson live "$1" --arg at "$NOWISO" '{host: "devbox", reachable: true, error: null,
       records: [{repo: "sample", snap: $s, steered: true, repoUrl: "https://github.com/o/r", lastPushAt: null}],
       stream: {live: $live, heardAt: $at, since: (if $live then null else $at end), error: (if $live then null else "devbox: no line in 30 s" end)}}' > "$OUT/stream.json"
@@ -278,6 +278,8 @@ feed true c-fed; : > "$T/ssh-calls"
 run
 [ ! -s "$T/ssh-calls" ] || fail "a cycle with the live feed fresh asked the host: $(cat "$T/ssh-calls")"
 q '(.panels.belt.data.cards | map(.card)) == ["c-fed"] and .panels.health.data.stream.live == true' "a cycle takes Conveyor's part from a fresh live feed"
+# The Board's building column keeps a card's atEnd (its cost shown when the step ends, #391): a bug dropped it there.
+q '.panels.board.data.building | map([.card, .atEnd]) == [["c-fed", true]]' "the Board's building column dropped atEnd"
 for k in limit decisions lanes; do [ -s "$OUT/cache/part-$k.json" ] || fail "the cycle did not keep its $k part for --publish"; done
 feed false c-later; stub sleep 'exit 0'  # a slow read would show here: --publish runs none
 # Each jq run of --publish is counted. The feed runs one --publish per change, up to one each 2 s, so its cost is the

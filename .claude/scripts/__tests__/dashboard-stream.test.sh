@@ -72,7 +72,7 @@ snap() {
      cost: {today: 0, week: 0, perLanded: null, landedAfter: {"1": 0, "2": 0, "3": 0, more: 0}, unpricedSteps: 0, cards: []}}'
 }
 card() { jq -cn --arg c "$1" --argjson i "$2" --arg now "$NOWISO" '{card: $c, issue: $i, title: "T\($i)", step: "build", review: null, of: 3, stepAt: $now, landed: false,
-  model: "claude-x", tokens: {claude: 0, codex: 0}, usd: null, reading: false, live: null, reviews: [], track: null}'; }
+  model: "claude-x", tokens: {claude: 0, codex: 0}, usd: null, reading: false, atEnd: true, live: null, reviews: [], track: null}'; }
 # Each snapshot took TOOK seconds on the host, a time drawn here: the record's readAt is that long before the line came.
 TOOK=$((RANDOM % 5000 + 1000))
 line() { jq -cn --arg t snapshot --argjson s "$1" --argjson took "$TOOK" '{type: $t, at: "x", why: "start", took: $took, snap: $s, repoUrl: "https://github.com/o/r", lastPushAt: null}'; }
@@ -106,7 +106,10 @@ grep -q 'CONVEYOR_MAIN=/srv/main exec bash /srv/main/conveyor/conveyor.sh watch'
 # answered while the snapshot ran was judged by a snapshot that had not read it, and came back "Not queued").
 data | jq -e '(.updatedAt | fromdate) - (.panels.rules.data.readAt | fromdate) | . >= $t - 1 and . < $t + 100' --argjson t "$TOOK" >/dev/null \
   || fail "the rules part's readAt is not when its snapshot began, $TOOK s before the line: $(data | jq -c '[.updatedAt, .panels.rules.data.readAt]')"
-until_is "a_live_line_reaches_data_js" data '.panels.belt.data.cards[0] | .live.action == "Bash: npm test" and .usd == 1.25 and .tokens.claude == 5000 and .reading' .panels.belt
+# The snapshot's card had no reading and its cost shown at the step's end (atEnd, #391); the live line has a reading,
+# so atEnd is laid over too (a bug would leave a card that has a reading still marked as reporting no usage until
+# the step ends; the panels show the cost whenever reading is true, so this checks the data, not the page).
+until_is "a_live_line_reaches_data_js" data '.panels.belt.data.cards[0] | .live.action == "Bash: npm test" and .usd == 1.25 and .tokens.claude == 5000 and .reading and .atEnd == false' .panels.belt
 until_is "health_says_live" data '.panels.health.data.stream | .live == true and (.heardAt | type) == "string" and .since == null'
 pass=$((pass + 6))
 

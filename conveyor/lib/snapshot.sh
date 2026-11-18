@@ -43,7 +43,8 @@
 #   fix), stepAt (when the step began: its live record's at while it runs), model (the one running the step: a session's or a review's, else null),
 #   tokens (fresh, so far) and usd so far: the finished steps and the live record of the running one. reading is
 #   false, and usd null, while neither a finished session or review nor the live record holds a token: "no reading
-#   yet", never $0. live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
+#   yet", never $0; atEnd is true when, in that time, the running Claude session's answers all report usage 0 (a route
+#   that streams none): "cost shown when the step ends". live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
 #   card waiting for main to change, testrun.sh mainwait(), when that wait began), or null. beyond: why it took a slot beyond the
 #   project's cap ("main is red": a main-red fix, redfix()), null once it has landed or when it took none. reviews and
 #   track are as below.
@@ -474,7 +475,7 @@ snapshot() (
   # it runs (its live record there, the card open, its last line no start), it is the card's proof, the step in progress.
   jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson proof "$(proofs)" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '(map($live[.card] as $v | $proof[.card] as $p
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
-      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits} +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end
+      | if $v != null and .result == "" and (.x.log | last | .step == "start" and .of == $v.step) then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end
       | if ($p | type) == "object" and .result == "" and (.x.log | last | .step != "start") then .proof = ($p | {at, files, tests, list, action}) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$d/rows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
@@ -574,7 +575,9 @@ snapshot() (
     def leftout: map(select(.usd == null)) | length;
     def sofar: . as $card | (.live // {} | .usage // null) as $u
       | ((.steps | any(.step != "test")) or (($u // {} | [.[]] | add // 0) > 0)) as $reading
-      | {reading: $reading,
+      # atEnd: no reading yet, and every answer of the running Claude session reports usage 0 (its route streams no
+      # usage, #391): its cost is shown when the step ends, not "no reading yet".
+      | {reading: $reading, atEnd: (($reading | not) and $card.live.zero == true),
          tokens: (.x.tokens | if $u == null then . elif $card.live.step == "review" and ($card.live.model // "" | startswith("claude-") | not) then .codex +=$u.input + $u.output
            else .claude += $u.input + ($u.write // 0) + ($u.write1h // 0) + $u.output end),
          usd: (if ($reading | not) or .usd == null or ($u != null and .live.usd == null) then null else (.usd + (.live.usd // 0)) * 10000 | round / 10000 end)};
@@ -774,7 +777,7 @@ snapshot() (
              | {card: $w, issue: ($r.issue // ($w | capture("-(?<n>[0-9]+)$").n | tonumber? ) // null),
                 state: (if $r == null then "gone" elif $r.x.retried then "queued" elif $r.result == "" then $r.x.at else $r.step end)} end) as $won
          | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $step == "review" then .x.review // (.reviews + 1) else null end), of: $max, stepAt: $stepAt, landed: $landed,
-         model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), tokens: $s.tokens, usd: $s.usd, reading: $s.reading,
+         model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), tokens: $s.tokens, usd: $s.usd, reading: $s.reading, atEnd: $s.atEnd,
          # A proof run gives what it does now, "waiting for a test slot (2 of 2 in use)" while the slots are full (testrun.sh).
          live: (if .live then {turns: .live.turns, lastOutputAt: .live.last, action: (.live.action // null), at: (.live.at // null)}
            elif .proof then {turns: 0, lastOutputAt: null, action: (.proof.action // null), at: (.proof.at // null)} else null end),

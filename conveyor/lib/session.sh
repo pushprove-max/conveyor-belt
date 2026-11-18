@@ -207,6 +207,9 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
                   | if .ocost == false then . else .usage.cost = .ocost end
                 elif $e.type == "tool_use" and ($e.part | type) == "object" then .action = ($e.part | ocact)
                 elif $e.type == "text" then .action = "writing" elif $e.type == "reasoning" then .action = "thinking" else . end
+            # A Claude turn'"'"'s result: its whole usage (rdone, the sum of the results so far). It is the reading when its
+            # answers report less (a route whose stream gives every answer usage 0, #391).
+              elif $e.type == "result" and ($e.usage | type) == "object" then .rdone = ((.rdone // {input: 0, write: 0, write1h: 0, read: 0, output: 0}) | plus($e.usage | use))
             # A Claude review streams as a session does: its answers are read as a session'"'"'s.
               elif .step == "review" and $e.type != "assistant" then
                 (if $e.type == "item.completed" then .turns += 1 else . end)
@@ -225,7 +228,12 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
                 (if .id == $e.message.id then . else (.cur // {}) as $c | .done = ((.done // {input: 0, write: 0, write1h: 0, read: 0, output: 0}) | plus($c)) | .turns += 1 end)
                 | .id = $e.message.id | .cur = ($e.message.usage | use) | .cur as $c | .usage = (.done | plus($c))
                 | (($e.message | act) // .action) as $a | if $a == null then . else .action = $a end
-              else . end) | if any($ls[]; test("\\S")) then .last = ([($t | todate), (.last // "")] | max) else . end' 2>/dev/null) && [ -n "$new" ] && st=$new && have=$n && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
+              else . end)
+          | if (.rdone | type) == "object" and ((.usage // {} | del(.cost) | [.[]] | add // 0) < (.rdone | [.[]] | add)) then .usage = .rdone else . end
+          # zero: a Claude session whose answers so far all report usage 0, and no result yet: its cost is read when
+          # its step ends (sofar in snapshot.sh), not "no reading yet".
+          | .zero = (.id != null and (.usage // {} | [.[] | numbers] | add // 0) == 0)
+          | if any($ls[]; test("\\S")) then .last = ([($t | todate), (.last // "")] | max) else . end' 2>/dev/null) && [ -n "$new" ] && st=$new && have=$n && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
     fi
     [ $((EPOCHSECONDS - seen)) -ge "$STUCK" ] || continue
     at=$(holds "$wt")

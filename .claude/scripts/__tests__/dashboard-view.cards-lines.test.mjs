@@ -112,6 +112,18 @@ test('a card with no token read yet says no reading yet, never $0; one with a re
   assert.equal(cost({ usd: null, reading: false }), 'no reading yet');
   assert.equal(cost({ usd: 0, reading: false }), 'no reading yet');
   assert.equal(cost({ usd: null, reading: true }), 'not priced · 412k tokens so far');
+  // Bug (#391): a build whose route streams every answer with usage 0 read "no reading yet" for its whole step, which
+  // reads as a fault; the snapshot marks it atEnd, and the belt (here) and the Board (below) say when the cost comes.
+  assert.equal(cost({ usd: null, reading: false, atEnd: true }), 'cost shown when the step ends');
+});
+
+test('the Board\'s building column says a card\'s cost is shown when the step ends, when its route streams usage 0 (#391)', () => {
+  const w = boot({ tab: 'control' });
+  const data = full();
+  Object.assign(data.panels.board.data.building[0], { atEnd: true });
+  deliver(w, data);
+  const col = panel(w, 'board').querySelector('.board-col[data-col="building"]');
+  assert.ok(col.textContent.includes('cost shown when the step ends') && !col.textContent.includes('no reading yet'), col.textContent);
 });
 
 // Bug: a card waiting on a same-file card showed as a running review on the Board and the belt, though no reviewer

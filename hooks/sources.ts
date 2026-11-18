@@ -64,11 +64,12 @@ export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as 
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
 export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null }
 export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null; over: number | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null }
-// reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0.
+// reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0; atEnd: in
+// that time the running session's route reports no usage until its step ends: "cost shown when the step ends".
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
 // live: the running step as it streams: what it is doing now, its turns so far and when it last printed.
 export type Live = { action: string; turns: number | null; lastOutputAt: number | null }
-export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null }
+export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; atEnd: boolean; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null }
 // room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not.
 export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; room: string }
 // An open issue that depends on one still open: not picked until each of waitsFor has closed. states: why each of
@@ -219,7 +220,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
       ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
     ],
-    belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live) })),
+    belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live) })),
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), room: one(x.room) })),
     // A record whose loop does not give the list (from an older engine, or GitHub did not list the issues) has none.
     waits: (Array.isArray(j.queue.waiting) ? j.queue.waiting : []).filter((x: unknown) => x && typeof x === 'object')
@@ -726,8 +727,9 @@ const titled = (c: Ref & { parent: number | null }, lead: Seg[], right: Seg[], w
   const title = fitWidth([{ t: shortTitle(c.title) || (c.issue ? '' : 'a branch with no issue'), c: C.name, b: bold }], Math.max(6, w - fixed))
   return spread([...lead, ref, ...title, ...parent], right.length ? right : null, w)
 }
-// A card's cost so far: its dollars, "no reading yet" before any token is read, "cost partial" with a step not priced.
-const costOf = (b: Belt): Seg => (!b.reading ? { t: 'no reading yet', d: true } : cost(b.usd))
+// A card's cost so far: its dollars, "no reading yet" before any token is read ("cost shown when the step ends" when the
+// running session's route reports no usage until then), "cost partial" with a step not priced.
+const costOf = (b: Belt): Seg => (!b.reading ? { t: b.atEnd ? 'cost shown when the step ends' : 'no reading yet', d: true } : cost(b.usd))
 // The finished reviews on one line: one round as its verdict and counts, several each as R1, R2, ...
 const verdicts = (rs: Review[]): Seg[][] => rs.map(r => {
   const f = findingsOf(r, ' ')

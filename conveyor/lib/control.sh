@@ -509,7 +509,8 @@ codexpx() { # <base URL> [key variable]
 # Codex's in the variable keyEnv names, through its provider settings (codexpx()). The key goes in the call's
 # environment, never on a command line. A proxy (not kind api) with no key is sent the stand-in key (NOKEY), as a
 # session is (proxyenv(), codexargs()). Prints "works", else "fails (<the first line it wrote with an authentication status, else that reads as an error and is not a retry, else its first line>)", with the key and what
-# looks like a credential left out, and fails. A progress line on stderr first, as the call can take up to 120 s.
+# looks like a credential left out, and fails. A progress line on stderr first, as the call can take up to 120 s; for
+# Claude, a "warning:" line on stderr after it when the call works and every answer of its stream reports usage 0.
 routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route JSON> <key>]
   local d o rc k='' v=${4:-}
   echo "conveyor: checking $1${2:+ ($2)} $([ -z "${3:-}" ] && echo "on its own login" || jq -r '"through \(.baseUrl // "https://api.anthropic.com")"' <<<"$3") with one call (up to 120 s)..." >&2
@@ -521,12 +522,22 @@ routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route 
       if [ -n "${3:-}" ]; then export ANTHROPIC_BASE_URL; ANTHROPIC_BASE_URL=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$3")
         if [ -z "$v" ]; then :; elif [ "$(jq -r .kind <<<"$3")" = api ]; then export ANTHROPIC_API_KEY="$v"; else export ANTHROPIC_AUTH_TOKEN="$v"; fi
       fi
-      exec timeout --kill-after=10 120 claude -p ${2:+--model "$2"} --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." 2>&1
+      exec timeout --kill-after=10 120 claude -p ${2:+--model "$2"} --setting-sources "" --strict-mcp-config --no-session-persistence --output-format stream-json --verbose <<<"Reply with the one word OK." 2>&1
     fi
     CODEX_PX=()
     if [ -n "${3:-}" ]; then { [ -n "$k" ] && [ -n "$v" ] && export "$k=$v"; } || k=''; codexpx "$(jq -r '.baseUrl | strings' <<<"$3")" "$k"; fi
     exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" ${2:+-m "$2"} - <<<"Reply with the one word OK." 2>&1); rc=$?
   rm -rf "$d"
+  if [ "$1" = claude ]; then
+    # Claude's call streams as a session does (stream-json): a stream whose answers all report usage 0 gives a card
+    # no cost while its step runs (#391), so it is named on stderr, as setup and doctor show it. The stream's other
+    # lines are read as its text: a result's message, and every line that is not JSON.
+    if [ $rc = 0 ] && jq -Rne '[inputs | try fromjson catch null | objects | select(.type == "assistant") | .message.usage | objects
+        | [.[] | numbers] | add // 0] | length > 0 and all(. == 0)' <<<"$o" >/dev/null 2>&1; then
+      echo "warning: claude$([ -z "${3:-}" ] || jq -r '" through \(.baseUrl // "https://api.anthropic.com")"' <<<"$3") reports token usage 0 in every answer of its stream: a card's cost on /units and the Board is shown only when its step ends" >&2
+    fi
+    o=$(jq -Rr '. as $l | (try fromjson catch null) as $e | if ($e | type) != "object" then $l elif $e.type == "result" then ($e.result // empty | tostring) else empty end' <<<"$o" 2>/dev/null) || :
+  fi
   [ $rc != 0 ] || { echo works; return 0; }
   [ -z "${4:-}" ] || o=${o//"$4"/[left out]}
   # The first line that gives an authentication status, else the first other line that reads as an error and is not a

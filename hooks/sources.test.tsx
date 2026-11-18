@@ -358,6 +358,8 @@ test('/units shows how many findings the judge declined today', () => {
 test('a card with no token read yet says no reading yet, never $0; one with a step not priced reads cost partial', () => {
   expect(beltCard({ usd: null, reading: false })[0]).toMatch(/ · no reading yet$/)
   expect(beltCard({ usd: 0, reading: false })[0]).toMatch(/ · no reading yet$/)
+  // Bug (#391): a build whose route streams every answer with usage 0 read "no reading yet" for its whole step.
+  expect(beltCard({ usd: null, reading: false, atEnd: true }, 90)[0]).toMatch(/ · cost shown when the step ends$/)
   expect(beltCard({ usd: 0.5, reading: true })[0]).toMatch(/ · \$0\.50$/)
   expect(beltCard({ usd: null, reading: true })[0]).toMatch(/ · cost partial$/)
 })

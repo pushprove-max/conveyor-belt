@@ -279,6 +279,25 @@ t_routedoctor() {
   grep -qxF "builder: m (claude) on the subscription login; its login works" <<<"$out" || fail "doctor did not check the login of the account the cards run on: $out"
 }
 
+# Issue 391: a proxy whose stream gave every answer usage 0 left each card on it with no cost for its whole build, and
+# nothing said so at setup. doctor's call through the route (routecall()) streams as a session does and warns of it;
+# answers that report their usage give no warning. The stub claude answers through the proxy with no network.
+t_zerodoctor() {
+  local out w="warning: claude through http://192.0.2.1:4141 reports token usage 0 in every answer of its stream: a card's cost on /units and the Board is shown only when its step ends"
+  export CONVEYOR_CLAUDE_SETTINGS=$T/$CASE/settings.json; mkdir -p "$T/$CASE" "$XDG_CONFIG_HOME/conveyor"
+  echo '{"env": {"CLAUDE_PROXY_KEY": "px-in-settings"}}' > "$CONVEYOR_CLAUDE_SETTINGS"
+  jq -n '{claudeProxy: {kind: "proxy", baseUrl: "http://192.0.2.1:4141", keyEnv: "CLAUDE_PROXY_KEY", roles: {builder: "proxy", reviewer: "proxy"}},
+    codexProxy: {kind: "subscription"}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  setup '[]'
+  echo '[ -n "${out:-}" ] || exit 0' > "$STUB/review-cmd"
+  echo 'echo "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":$(cat "$STUB/used"),\"output_tokens\":0}}}"' > "$STUB/build"
+  echo 0 > "$STUB/used"; out=$(cd "$R" && loop doctor 2>&1)
+  grep -qxF "$w" <<<"$out" && grep -qF "builder: m (claude) through http://192.0.2.1:4141, key in CLAUDE_PROXY_KEY; the service reads the key from CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS, and one call through it works" <<<"$out" \
+    || fail "doctor did not warn of a route whose stream reports usage 0: $out"
+  echo 12 > "$STUB/used"; out=$(cd "$R" && loop doctor 2>&1)
+  ! grep -qF "reports token usage 0" <<<"$out" || fail "doctor warned of a route whose answers report their usage: $out"
+}
+
 # Each kind's key as the session is given it (proxyenv(), codexargs()), called in the engine's shell: the Anthropic
 # API's as ANTHROPIC_API_KEY (x-api-key), never as a Bearer token, always or only on the try after the login failed
 # (fallback); a proxy's as ANTHROPIC_AUTH_TOKEN (Bearer); a key file others may read is not read; Codex's API key

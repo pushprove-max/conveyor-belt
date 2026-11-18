@@ -219,7 +219,7 @@ class Feed:
             if o is None:
                 b['live'] = None  # its step ended after the snapshot; the next snapshot has the step's line
                 continue
-            b.update(tokens=o.get('tokens'), usd=o.get('usd'), reading=o.get('reading'), live=o.get('live'))
+            b.update(tokens=o.get('tokens'), usd=o.get('usd'), reading=o.get('reading'), atEnd=o.get('atEnd') is True, live=o.get('live'))
             if isinstance(o.get('files'), dict) and isinstance(b.get('track'), dict):
                 b['track']['files'] = o['files']
         return snap
