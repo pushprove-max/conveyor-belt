@@ -174,6 +174,20 @@ ownonly() {
        | select(. != "" and ((contains("/") and (test("\\.[A-Za-z0-9]+$") or endswith("/") or IN($t[]))) or IN($tn[]) or IN($c[])))]
     | if length > 0 and all(IN($c[]) or ((contains("/") | not) and IN($cn[]))) then "1" else "" end'
 }
+# <worktree>: prints the first finding of its review (<worktree>.review) that quotes a word the privacy check flags
+# (privwords(), lib/issues.sh) which a line the card's staged change adds holds, the word's leading and closing marks
+# (quotes, brackets, a closing . or :) aside. Such a finding is a privacy hit in the card's own change: a follow-up
+# would land the hit on main, so the card fixes it (card.sh). Prints nothing when the check could not be made.
+privown() {
+  local f w x added
+  added=$(git -C "$1" diff --cached --no-renames -U0 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ') || return 0
+  while IFS= read -r f; do
+    while IFS=$'\t' read -r x w; do
+      w=$(sed -E 's/^[^[:alnum:]/~\\]+//; s/[^[:alnum:]]+$//' <<<"$w")
+      [ -z "$w" ] || [[ $added != *"$w"* ]] || { printf '%s\n' "$f"; return 0; }
+    done < <(privwords "$f" 2>/dev/null)
+  done < <(leftovers "$1.review")
+}
 unfile() { # <parent issue> <review file> <follow-up issue>...
   local n=$1 r=$2 i j=0 found=(); shift 2
   mapfile -t found < <(leftovers "$r")
@@ -183,8 +197,9 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
   done
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost own='' free res
+  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
+  packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
   ! standingon review-followup || { packget auto.reserved res || { echo "cannot read the pack's auto.reserved"; return 1; }; own=1; }
   n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r --arg p "$AREA" '(.labels | map(.name | select(startswith($p))) | .[0] // empty | "--label", .),
     (.milestone.title // empty | "--milestone", .)' <<<"$2") || { echo "cannot read the parent issue's labels and milestone"; return 1; }
@@ -194,7 +209,16 @@ followups() { # <card> <issue json> <review file>
     # The finding's level, P0 to P3 (P1 when it names none), is the pack's priority at that place, or its last one.
     # A P3 finding in a pack of fewer than four priorities gets none of them: the engine reads an issue with none as P3
     # (LEVEL), and the pack's last one would file it at a higher level. Bug: P3 follow-ups were filed as P2.
-    mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$f" | head -n 1)
+    # With the pack's privacy.mode public, the issue's text holds the finding with each word the privacy check flags
+    # masked (privmask(), lib/issues.sh), and says so: gh_write would post none of it. Bug: a finding that quoted a
+    # home path could not be filed, so its card was blocked.
+    g=$f masked=''
+    if [ "$pm" = public ]; then
+      g=$(privmask "$f") || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed: the privacy check could not be made (finding: ${f:0:200})"; return 1; }
+      masked=${f//"$CARDS"/<cards>}; [ "$g" = "${masked//"${STATE%/*}"/<state>}" ] && masked='' \
+        || masked=$'\n\nConveyor masked the parts of the finding that the privacy check flags.'
+    fi
+    mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$g" | head -n 1)
     mark=$(jq -r --argjson i "${mark:-1}" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] end' <<<"$PRIOS")
     cost=$(onpipeline "$f" <<<"$pipe") || { unfile "$n" "$3" "${nums[@]}"; echo "cannot tell whether a finding names a pipeline file, so nothing landed (finding: ${f:0:200})"; return 1; }
     # A finding that holds a word or phrase of auto.reserved (in any case, as auto decide reads it) is never let
@@ -203,11 +227,11 @@ followups() { # <card> <issue json> <review file>
       || [ "$(jq --arg f "$f" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$res" 2>/dev/null)" != false ] \
       || free=$(ownonly "$f" "${3%.review}")
     cost=${cost:+$'\nCost to every card: not assessed'}
-    out=$(gh_write issue create --title "${f:0:200}" --label "$FOLLOWUP" --label "$TYPE" ${mark:+--label "$mark"} "${more[@]}" \
+    out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" --label "$TYPE" ${mark:+--label "$mark"} "${more[@]}" \
       --body "Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue.
 
-Finding: $f
-Where: ${where:-the finding names no file:line}$cost
+Finding: $g
+Where: ${where:-the finding names no file:line}$cost$masked
 Follow-up depth: 1" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")

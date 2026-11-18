@@ -21,6 +21,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
+  local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
@@ -353,15 +354,21 @@ card() { # <card> <issue> [<branch> <tip>]
     rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
     hard=$(jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"' <<<"$rep")
     [ -z "$hard" ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
+    # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
+    # one more fix round, once a card: a follow-up would land the hit on main. Bug: such a finding was filed as a
+    # follow-up that the privacy check refused, and the card was blocked.
+    priv=''
     if [ "$res" = GO ] && [ -z "$earlier" ]; then mode=''
-    elif [ "$res" = GO ] || [ $((pass + rounds)) -ge "$MAX_REVIEWS" ] || [ -n "$rebased" ] || [ -n "$tfix" ] || [ "$mode" = land ] \
-      || { [ -n "$rep" ] && [ "$(counts "$wt.review" | jq '.P0 + .P1')" = 0 ]; }; then
+    elif { [ "$res" = GO ] || [ $((pass + rounds)) -ge "$MAX_REVIEWS" ] || [ -n "$rebased" ] || [ -n "$tfix" ] || [ "$mode" = land ] \
+      || { [ -n "$rep" ] && [ "$(counts "$wt.review" | jq '.P0 + .P1')" = 0 ]; }; } \
+      && { [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ]; }; then
       # A card whose issue is itself a follow-up (the pack's follow-up label, or its body's depth line) files none:
       # its findings are declined.
       mode=''; last=1; isfu=''; ! jq -e --arg fu "$FOLLOWUP" '(.labels // [] | any(.name == $fu)) or (.body // "" | test("(^|\n)Follow-up depth: 0*[1-9][0-9]*[ \t\r]*(\n|$)"))' <<<"$issue" >/dev/null || isfu=1
     else
       # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
       # (giveway(), claim()).
+      [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
       locked giveway "$c" "$wt" fix; began "$c" "$n" fix
       old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
       # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), or a P3 listed only

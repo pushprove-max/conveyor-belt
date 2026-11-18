@@ -67,6 +67,10 @@ Findings still open after the last review become follow-up issues, which become 
 leftover findings go to the Declined list. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
 It builds only once you release it.
 
+When the pack's `privacy.mode` is public, a follow-up's finding is filed with each part the privacy check flags
+replaced by a mark such as `<home path>`, and the issue says the text was masked. A last finding that the privacy check
+flags in a line the card itself adds gets one more fix round instead of a follow-up.
+
 ## Tests
 
 A card's tests run before it lands. When some cases fail, they run once more before any fix session. A card whose

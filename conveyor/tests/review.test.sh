@@ -173,6 +173,37 @@ t_filefail() {
     || fail "the withdrawn follow-up was not closed as not planned naming #7, or its finding was not kept: $(cat "$STUB/close-comments" "$k"/*.withdrawn 2>&1)"
 }
 
+# A home path, put together here so this file holds none itself (the privacy check runs over it).
+HX=/hom"e"/x
+# A private key header, put together the same way: a hit of several words, which no one word of it makes.
+KX="-----BEGIN PRIVATE"" KEY-----"
+# Bug: with the pack's privacy.mode public, a last finding that quotes a home path (here also as an escaped string)
+# could not be filed, as the privacy check refused its text, so the whole card was blocked; one that quotes a private
+# key header still was, as each of its words passes the check alone.
+t_privmask() {
+  setup "[$(issue 7 2026-01-01)]"; tune '.privacy.mode = "public"'
+  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done
+  printf '%s\n' "[P2] b.txt:3 reads $HX/notes, and ${HX//\//\\/} and $KX too" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "landed") | .followups | tojson')" = '[100101]' ] || fail "the card did not land with its follow-up filed: $(st 'select(.step | IN("landed", "blocked"))')"
+  [ "$(jq -r .title "$STUB/filed")" = '[P2] b.txt:3 reads <home path> and <home path> and <token> too' ] && jq -r .body "$STUB/filed" | grep -q 'Conveyor masked the parts' \
+    && ! grep -qF -e "${HX#/}" -e "${KX#-----}" "$STUB/filed" || fail "the follow-up's text is not masked, or does not say so: $(cat "$STUB/filed")"
+}
+
+# Bug: a last finding that is a privacy hit in the card's own change (a line the card added holds a home path) was
+# filed as a follow-up, which would land the hit on main, instead of going to a fix round.
+t_privfix() {
+  setup "[$(issue 7 2026-01-01)]"; export HX
+  echo 'if [ -e "$STUB/built" ]; then echo fix >> a.txt; ! grep -qF "$HX/bench" "$STUB/brief" || { grep -vF "$HX/bench" a.txt > a.new; mv a.new a.txt; }
+    else : > "$STUB/built"; printf "two\ncd %s/bench\n" "$HX" >> a.txt; fi' > "$STUB/build"
+  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "review") | .result' | tr '\n' ' ')" = "NO-GO NO-GO NO-GO GO " ] && [ ! -e "$STUB/filed" ] \
+    || fail "the privacy finding on the card's own line did not go to a fix round: $(st 'select(.step == "review") | .result' | tr '\n' ' ') $(cat "$STUB/filed" 2>&1)"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] && ! grep -qF "$HX" "$R/a.txt" || fail "the card did not land without the hit: $(cat "$R/a.txt")"
+}
+
 # Bug: a follow-up chain goes on: a card whose issue is a follow-up at any depth (here 2, filed before a follow-up's
 # card filed none) files another level on its third NO-GO, or its leftover finding is in no declined list.
 t_deep() {

@@ -507,6 +507,60 @@ gh_write() { # <gh arguments>
   timeout 60 gh "${args[@]}"; rc=$?
   rm -f "$h" "$h".body.*; return $rc
 }
+# <text>: each word of the text (a run of characters that are not spaces) the privacy check flags, once, as
+# "<the hit's name>\t<word>"; the check reads the text as gh_write does: the <cards> and <state> folders so named, each
+# word with its string escapes decoded as well, the host's terms file. Fails when the check could not be made. A hit
+# that only words together make (a private key header, a term of two words) is printed as the shortest run of words
+# of one line that holds it, those words with the spaces between them as the text has them.
+privwords() {
+  local a t hits terms w l rc
+  local row='def row: [., ('"$UNESCAPE"')] | map(gsub("[\\n\\r]"; " ")) | join(" ");'
+  # privhit: each "<line> <name>" the check finds in $t (a line per piece, row() of it). Fails when it could not be made.
+  privhit() {
+    hits=$("$HERE/privacy/check.sh" ${terms:+--terms "$terms"} "$t"); [ $? -le 1 ] || return 1
+    jq -rn --arg h "$hits" --arg t "$t:" '$h | split("\n")[] | select(startswith($t)) | ltrimstr($t)
+      | capture("^(?<l>[0-9]+): (?<n>[^(]*[^ (])") | "\(.l) \(.n)"'
+  }
+  a=${1//"$CARDS"/<cards>}; a=${a//"${STATE%/*}"/<state>}
+  t=$(mktemp) || return 1; terms=$(termsfile)
+  # One line per word: the word, then each decoding of it (one line, its line breaks made spaces).
+  jq -rn --arg a "$a" "$row"' $a | [scan("\\S+")] | unique[] | row' > "$t" && l=$(privhit) \
+    && w=$(jq -rn --arg a "$a" --arg l "$l" '[$a | scan("\\S+")] | unique as $w
+      | [$l | split("\n")[] | select(. != "") | capture("^(?<l>[0-9]+) (?<n>.*)") | {w: $w[(.l | tonumber) - 1], n}]
+      | unique_by(.w)[] | "\(.n)\t\(.w)"') || { rm -f "$t"; return 1; }
+  # Each line of the text with the words found made "_": a line that still hits holds a hit of several words.
+  local wins='($w | split("\n") | map(select(. != "") | split("\t") | {key: .[1], value: 1}) | from_entries) as $s
+    | [$a | split("\n") | to_entries[] | .key as $k | .value | [scan("\\s+|\\S+")] | . as $tok
+      | [range(length) | select($tok[.] | test("^\\S"))] as $p | {k: $k, tok: $tok, p: $p,
+        masked: ([$tok[] | if $s[.] then "_" else . end] | join(""))}]'
+  jq -rn --arg a "$a" --arg w "$w" "$row$wins"'[] | .masked | row' > "$t" && l=$(privhit) || { rm -f "$t"; return 1; }
+  if [ -n "$l" ]; then
+    # Every run of two or more words of those lines that holds no word found, each checked as a piece.
+    local runs="$wins"' | ($l | split("\n") | map(select(. != "") | split(" ")[0] | tonumber - 1)) as $hl
+      | [.[] | select(IN(.k; $hl[])) | . as $x | range($x.p | length) as $i | range($i + 1; $x.p | length) as $j
+        | select(all($x.p[$i:$j + 1][]; $s[$x.tok[.]] | not))
+        | {k: $x.k, i: $i, j: $j, r: ($x.tok[$x.p[$i]:$x.p[$j] + 1] | join(""))}]'
+    jq -rn --arg a "$a" --arg w "$w" --arg l "$l" "$row$runs"'[] | .r | row' > "$t" && rc=$(privhit) \
+      && w+=$'\n'$(jq -rn --arg a "$a" --arg w "$w" --arg l "$l" --arg rc "$rc" "$runs"' as $r
+        | [$rc | split("\n")[] | select(. != "") | capture("^(?<l>[0-9]+) (?<n>.*)") | $r[(.l | tonumber) - 1] + {n}]
+        | unique_by(.k, .i, .j) | . as $h
+        | .[] | . as $x | select(any($h[]; .k == $x.k and .i >= $x.i and .j <= $x.j and (.i != $x.i or .j != $x.j)) | not)
+        | "\(.n)\t\(.r)"') || { rm -f "$t"; return 1; }
+  fi
+  rm -f "$t"; printf '%s\n' "$w" | grep -v '^$'; return 0
+}
+# <text>: the text as gh_write posts it, with each word the privacy check flags (privwords()) written as a neutral
+# mark of what it is (<home path>, <email>, <private term>). Fails when the check could not be made.
+privmask() {
+  local w a
+  w=$(privwords "$1") || return 1
+  a=${1//"$CARDS"/<cards>}; a=${a//"${STATE%/*}"/<state>}
+  # A run of several words (privwords()) is masked first, then each word.
+  jq -rn --arg a "$a" --arg w "$w" '($w | split("\n") | map(select(. != "") | split("\t") | {key: .[1], value: .[0]})) as $e
+    | ($e | map(select(.key | test("\\s") | not)) | from_entries) as $m
+    | reduce ($e[] | select(.key | test("\\s"))) as $r ($a; split($r.key) | join("<\($r.value)>"))
+    | [scan("\\s+|\\S+") | if $m[.] then "<\($m[.])>" else . end] | join("")'
+}
 # github <folder> -- the GitHub reads of a snapshot, each written whole into the folder for `watch`: issues (the
 # open issues with the snapshot's fields; no file when gh did not list them, so the queue is not read, as it would not
 # be), labelled, and gh (true or false). It also keeps the host's report of its CLIs and their models (hostclis()).

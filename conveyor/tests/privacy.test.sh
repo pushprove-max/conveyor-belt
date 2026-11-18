@@ -9,21 +9,23 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Bugs (plan section 8, P4 and P5): a finding holding a home path is posted on a public repo's issue or filed as
-# a follow-up; the held text is lost, or the card's reason does not say why nothing was posted; a private repo's
-# (the host project's) comments stop posting; a write is made on a public repo whose named terms file cannot be read.
+# Bugs (plan section 8, P4 and P5): a finding holding a home path is posted on a public repo's issue; the held text
+# is lost, or the card's reason does not say why nothing was posted; a private repo's (the host project's) comments
+# stop posting; a write is made on a public repo whose named terms file cannot be read. The card is blocked here by
+# its P1 finding coming back after its fix round, so its blocked comment, which quotes the finding, is held. (A
+# follow-up of such a finding is filed masked: review.test.sh, t_privmask.)
 t_privacy() {
   # The home path is put together here, as AT is, so this file holds none itself.
   local H=/home; local f="[P1] a.txt:1 reads $H/user/notes.txt" S a b; export XDG_CONFIG_HOME=$T/$CASE/config
-  setup "[$(issue 7 2026-01-01)]"; S=$ST; for i in 1 2 3; do printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$(moved "${i/3/}" "$f")" > "$STUB/review.$i"; done
+  setup "[$(issue 7 2026-01-01)]"; S=$ST; for i in 1 2; do printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$f" > "$STUB/review.$i"; done
   mkdir -p "$XDG_CONFIG_HOME/conveyor"; echo 'case:Zed' > "$STUB/terms"; jq -n --arg t "$STUB/terms" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   tune '.privacy.mode = "public"'
   loop run >/dev/null 2>&1
   [ ! -e "$STUB/comments" ] && [ ! -e "$STUB/filed" ] || fail "a public repo's issue got the home path: $(cat "$STUB/comments" "$STUB/filed" 2>&1)"
-  st 'select(.step == "blocked") | .reason' | grep -q 'follow-up not filed.*privacy: nothing posted; the text is kept at <state>/privacy/[^:]*: line [0-9]*: home path.*not posted on the issue: conveyor: privacy: nothing posted' \
-    || fail "the blocked reason does not say the privacy check held the follow-up and the comment: $(st 'select(.step == "blocked") | .reason')"
-  [ "$(ls "$S/privacy" | wc -l)" = 2 ] && [ "$(grep -l "reads $H/user/notes.txt" "$S/privacy"/* | wc -l)" = 2 ] && grep -q '<state>/kept/' "$S/privacy"/* \
-    && ! grep -q "$T" "$S/privacy"/* || fail "the held follow-up and comment are not both kept locally, or name an absolute path: $(ls "$S/privacy"; cat "$S/privacy"/*)"
+  st 'select(.step == "blocked") | .reason' | grep -q 'did not hold.*not posted on the issue: conveyor: privacy: nothing posted; the text is kept at <state>/privacy/[^:]*: line [0-9]*: home path' \
+    || fail "the blocked reason does not say the privacy check held the comment: $(st 'select(.step == "blocked") | .reason')"
+  [ "$(ls "$S/privacy" | wc -l)" = 1 ] && grep -q "reads $H/user/notes.txt" "$S/privacy"/* && grep -q '<state>/kept/' "$S/privacy"/* \
+    && ! grep -q "$T" "$S/privacy"/* || fail "the held comment is not kept locally, or names an absolute path: $(ls "$S/privacy"; cat "$S/privacy"/*)"
 }
 
 # The checks of gh-write itself, a public pack's, with no run of the loop: each part is a case of its own (privwrite,
