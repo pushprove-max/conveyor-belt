@@ -441,6 +441,16 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .judged { color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
 .judged-open { display: inline; min-height: 0; padding: 0 var(--sp-1); font: inherit; text-decoration: underline; }
 .finding-ref.is-missing { text-decoration: underline dotted; cursor: help; }
+/* A declined finding's reason: its own tinted block with a left rule in the colour of who declined it, a bold label,
+   each sentence on its own line, and backticked text as code. The colours are the theme's, so both themes hold. */
+.why-block { --why: var(--muted); margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--why);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: color-mix(in srgb, var(--why) 10%, var(--surface)); }
+.why-block[data-by="judge"] { --why: var(--accent); }
+.why-block[data-by="code"] { --why: var(--warn); }
+.why-block[data-by="owner"] { --why: var(--ok); }
+.why-label { display: block; color: var(--why); }
+.why-line { display: block; margin-top: 2px; }
+.why-code { padding: 0 3px; border-radius: 3px; background: var(--surface-2); font-family: var(--mono); font-size: 0.95em; }
 .day-totals .foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .tl-findings { font-weight: 500; color: var(--muted); font-size: var(--fs-xs); }
 .tl-lane { position: relative; height: 18px; border-radius: 4px; background: var(--surface-2); }

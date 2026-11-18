@@ -61,7 +61,9 @@ card's reviewer reads that section and does not raise what it lists.
 ## Declined findings and follow-ups
 
 Every finding that is not built is a line of the Declined list, with who declined it and why. The Board's Declined
-panel lists them, and "File as issue" files one as an issue (`conveyor/README.md`, Declined findings).
+panel lists them, and "File as issue" files one as an issue (`conveyor/README.md`, Declined findings). A line's reason
+is in its own block under the finding, led by "Why the judge declined it" or "Why the code declined it". Each sentence
+starts a new line, code shows in a code font, and a file and line in it opens that line on GitHub.
 
 Findings still open after the last review become follow-up issues, which become cards of their own. A follow-up's own
 leftover findings go to the Declined list. A follow-up that changes one of the pack's `pipelineFiles` is filed held.

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Declined panel: what an F<n> of the judge's reason means; when a line leaves the panel; "Dismiss all shown (n)".
+// The Declined panel: how a reason is drawn; what an F<n> of the judge's reason means; when a line leaves the panel; "Dismiss all shown (n)".
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { T0, iso, boot, panel, deliver, next, settle, full, tick, P, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const FINDINGS = [{ n: 1, finding: '[P1] a.txt:2 reads the old word. Proof: a.txt:2 still says it' }, { n: 2, finding: '[P1] a.txt:2 the old word again. Proof: none new' }];
-const line = (over) => ({ repo: 'sample', id: 'd00000000000a', time: iso(T0 - 60000), card: 'c3-63', issue: 63, url: `${P}/63`, finding: '[P1] a.txt:2 the old word again',
+const REPO = 'https://github.com/example/sample-project';
+const line = (over) => ({ repo: 'sample', repoUrl: REPO, id: 'd00000000000a', time: iso(T0 - 60000), card: 'c3-63', issue: 63, url: `${P}/63`, finding: '[P1] a.txt:2 the old word again',
   by: 'judge', why: 'the same as F1, so this is F1 again with nothing new', built: null, dismissed: null, round: 2, findings: FINDINGS, ...over });
 const rowOf = (w, finding) => Array.from(panel(w, 'declined').querySelectorAll('.rows > .row')).find((r) => r.querySelector('.title').textContent === finding);
 
@@ -19,7 +20,7 @@ test("Declined: an F1 in the judge's reason shows the card's first finding of th
   deliver(w, data);
   const row = rowOf(w, '[P1] a.txt:2 the old word again');
   const reason = row.querySelector('.reason');
-  assert.equal(reason.textContent, 'Why: the same as F1, so this is F1 again with nothing new', 'the reason reads as the judge wrote it');
+  assert.equal(reason.querySelector('.why-text').textContent, 'the same as F1, so this is F1 again with nothing new', 'the reason reads as the judge wrote it');
   const refs = Array.from(reason.querySelectorAll('button[data-act="finding"]'));
   assert.deepEqual(refs.map((b) => b.textContent), ['F1', 'F1']);
   const says = 'F1, review round 2: [P1] a.txt:2 reads the old word.';
@@ -45,19 +46,79 @@ test('Declined: an F<n> with no matching finding is shown as written, with "find
     line({ id: 'd00000000000c', finding: '[P2] c.txt:1 by the owner', by: 'owner', why: 'not F1', round: null, findings: null })];
   deliver(w, data);
   const first = rowOf(w, '[P1] a.txt:2 the old word again').querySelector('.reason');
-  assert.equal(first.textContent, 'Why: F3 said it first; F1 is another');
+  assert.equal(first.querySelector('.why-text').textContent, 'F3 said it first; F1 is another');
   const missing = first.querySelector('.finding-ref.is-missing');
   assert.equal(missing.textContent, 'F3');
   assert.equal(missing.title, 'finding not found');
   assert.equal(missing.tagName, 'SPAN', 'nothing to open');
   assert.deepEqual(Array.from(first.querySelectorAll('button[data-act="finding"]'), (b) => b.textContent), ['F1'], 'the F<n> that is found still opens');
   const lost = rowOf(w, '[P2] b.txt:1 lost round').querySelector('.reason');
-  assert.equal(lost.textContent, 'Why: this is F1 again');
+  assert.equal(lost.querySelector('.why-text').textContent, 'this is F1 again');
   assert.equal(lost.querySelector('.is-missing').title, 'finding not found', 'a line whose review was not found');
   assert.equal(rowOf(w, '[P2] b.txt:1 lost round').querySelector('.finding-said'), null);
   const owner = rowOf(w, '[P2] c.txt:1 by the owner').querySelector('.reason');
-  assert.equal(owner.textContent, 'Why: not F1');
+  assert.equal(owner.querySelector('.why-text').textContent, 'not F1');
   assert.equal(owner.querySelector('.finding-ref'), null, "the owner's reason is not the judge's numbering");
+});
+
+// Bug: a reason was one plain paragraph after "Why: ", its backticks shown as raw text, its file and line not linked,
+// and nothing said whether the judge or the code declined it.
+test("Declined: a reason is its own block, led by who declined it, a line a sentence, backticked text as code, a file and line linked", () => {
+  const w = boot();
+  const data = full();
+  const why = 'In `t_stackfixround`, #7 is away. The remaining point repeats the declined finding at `conveyor/lib/claim.sh:99`.';
+  data.panels.declined.data.lines = [
+    line({ why, findings: FINDINGS.concat({ n: 3, finding: '[P3] conveyor/lib/claim.sh:99 drops the wait. Proof: none' }) }),
+    line({ id: 'd00000000000d', finding: '[P2] d.txt:1 by the code', by: 'code', why: 'follow-up of a follow-up', round: null, findings: null })];
+  deliver(w, data);
+  const judge = rowOf(w, '[P1] a.txt:2 the old word again').querySelector('.reason');
+  assert.equal(judge.querySelector('strong.why-label').textContent, 'Why the judge declined it');
+  assert.equal(judge.dataset.by, 'judge', 'the rule is in the colour of who declined it');
+  const lines = Array.from(judge.querySelectorAll('.why-line'), (l) => l.textContent);
+  assert.deepEqual(lines, ['In t_stackfixround, #7 is away. ', 'The remaining point repeats the declined finding at conveyor/lib/claim.sh:99.'], 'a line a sentence');
+  assert.deepEqual(Array.from(judge.querySelectorAll('code'), (c) => c.textContent), ['t_stackfixround', 'conveyor/lib/claim.sh:99']);
+  assert.ok(!judge.textContent.includes('`'), 'no backtick is shown');
+  assert.equal(judge.querySelector('.why-text').textContent, why.replaceAll('`', ''), 'the text is never changed');
+  const at = judge.querySelector('a.why-at');
+  assert.equal(at.href, 'https://github.com/example/sample-project/blob/HEAD/conveyor/lib/claim.sh#L99', 'the file and line on GitHub');
+  assert.equal(at.querySelector('code').textContent, 'conveyor/lib/claim.sh:99');
+  assert.equal(at.title, 'F3, review round 2: [P3] conveyor/lib/claim.sh:99 drops the wait.', 'hover: the finding it names');
+  const code = rowOf(w, '[P2] d.txt:1 by the code').querySelector('.reason');
+  assert.equal(code.querySelector('strong.why-label').textContent, 'Why the code declined it');
+  assert.equal(code.dataset.by, 'code');
+});
+
+// Bugs: a `file:line` naming a declined finding of an earlier card showed nothing on hover (only the same review's
+// findings were searched); a main-red fix card's reason (issue 0, no issue url) linked no file:line; a short
+// `issues.sh:636` linked the repository root's issues.sh, not the conveyor/lib/issues.sh the findings name; when two
+// declined findings start at the same file:line, hover named only the first one found, which can be the wrong one.
+test('Declined: a reason links a file:line on a main-red fix card, finds the full path of a short one, and names the findings of another card', () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = [
+    line({ why: 'This repeats the declined finding at `conveyor/lib/claim.sh:99`. Also `issues.sh:636` and `nowhere.sh:3`.',
+      finding: '[P2] conveyor/lib/issues.sh:630 reads the old list', round: 1, findings: [{ n: 1, finding: '[P2] conveyor/lib/issues.sh:630 reads the old list' }] }),
+    line({ id: 'd00000000000e', time: iso(T0 - 120000), card: 'c4-red', issue: 0, name: 'Main is red (0123456789ab)', url: null, finding: '[P3] e.txt:1 a red nit',
+      by: 'code', why: 'The proof needs `conveyor/lib/snapshot.sh:525`.', round: null, findings: null }),
+    line({ id: 'd000000000010', finding: '[P1] conveyor/lib/rules.sh:80 one switch resets its row', why: 'Earlier cards declined this finding at `conveyor/lib/rules.sh:20`.',
+      round: null, findings: null })];
+  const old = (id, finding) => line({ id, time: iso(T0 - 9 * 86400000), card: 'c1-250', issue: 250, url: `${P}/250`, finding, round: 1, findings: null });
+  data.panels.declined.data.rest = [line({ id: 'd00000000000f', time: iso(T0 - 9 * 86400000), card: 'c1-380', issue: 380, url: `${P}/380`,
+    finding: '[P2] conveyor/lib/claim.sh:99 shows a ready card waiting. Proof: none', round: 1, findings: null }),
+    old('d000000000011', '[P1] conveyor/lib/rules.sh:20 a default leaves the rule unset. Proof: none'),
+    old('d000000000012', '[P1] conveyor/lib/rules.sh:20 a click changes its row. Proof: none')];
+  deliver(w, data);
+  const judge = rowOf(w, '[P2] conveyor/lib/issues.sh:630 reads the old list').querySelector('.reason');
+  const links = Array.from(judge.querySelectorAll('a.why-at'));
+  assert.deepEqual(links.map((a) => a.href), [`${REPO}/blob/HEAD/conveyor/lib/claim.sh#L99`, `${REPO}/blob/HEAD/conveyor/lib/issues.sh#L636`],
+    'the short path is the full one the findings name; one no finding names is not linked');
+  assert.equal(links[0].title, 'Declined on #380: [P2] conveyor/lib/claim.sh:99 shows a ready card waiting.', "hover: the earlier card's finding it names");
+  assert.equal(judge.querySelectorAll('code').length, 3, 'the unlinked span is still code');
+  const red = rowOf(w, '[P3] e.txt:1 a red nit').querySelector('.reason a.why-at');
+  assert.equal(red.href, `${REPO}/blob/HEAD/conveyor/lib/snapshot.sh#L525`, "a main-red fix card's reason links to its repository");
+  const both = rowOf(w, '[P1] conveyor/lib/rules.sh:80 one switch resets its row').querySelector('.reason a.why-at');
+  assert.equal(both.title, '2 findings start at conveyor/lib/rules.sh:20: Declined on #250: [P1] conveyor/lib/rules.sh:20 a default leaves the rule unset.'
+    + ' Declined on #250: [P1] conveyor/lib/rules.sh:20 a click changes its row.', 'hover names every finding at that line, not one picked of them');
 });
 
 // Audit UX14. Bug: a line left the panel 7 days after its time with no word before, and said "More than 7 days old"

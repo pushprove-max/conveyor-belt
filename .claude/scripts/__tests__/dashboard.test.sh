@@ -459,8 +459,9 @@ q '.panels.landed.data.cards | map([.repo, .issue, .step, .tookSec, .reviews, .u
 # Bug: the Declined panel lists one record's lines after another's, not the newest first, or loses who declined a finding and why;
 # a built or dismissed line is in the panel's lines, or lost from the rest ("Show every line"), or loses who dismissed it.
 # Issue 141: a main-red fix card's line (issue 0) keeps its name, or the panel can only call it "#0".
-q '.panels.declined.data.lines | map([.repo, .id, .issue, .name, .url, .finding, .by, .why, .built, .dismissed]) == [["sample", "d0123456789ab", 801, null, "'"$PU"'/801", "[P1] b.txt:2 no mark here", "judge", "its proof needs a stub built to misbehave", null, null],
-  ["widgetshop", "d00000000000c", 0, "Main is red (0123456789ab)", null, "[P2] c.txt:3 a nit", "owner", "not worth a card", null, null]]' \
+# Issue 403: each line keeps its repository's address, or a main-red fix card's reason (no issue url) cannot link a file:line.
+q '.panels.declined.data.lines | map([.repo, .repoUrl, .id, .issue, .name, .url, .finding, .by, .why, .built, .dismissed]) == [["sample", "https://github.com/example/sample-project", "d0123456789ab", 801, null, "'"$PU"'/801", "[P1] b.txt:2 no mark here", "judge", "its proof needs a stub built to misbehave", null, null],
+  ["widgetshop", "https://github.com/example/WidgetShop", "d00000000000c", 0, "Main is red (0123456789ab)", null, "[P2] c.txt:3 a nit", "owner", "not worth a card", null, null]]' \
   "the declined findings the panel shows, of every record, newest first, each with who declined it and why"
 q '.panels.declined.data.rest | map([.repo, .id, .url, .built, .dismissed]) == [["sample", "d0000000000dd", "'"$PU"'/801", null, {time: "'"$TODAY_ISO"'T09:00:00Z", by: "Board user owner"}],
   ["sample", "dba9876543210", "'"$PU"'/6", 90, null]]' "the rest, newest first: the dismissed line with who dismissed it and when, and the built line with its issue"

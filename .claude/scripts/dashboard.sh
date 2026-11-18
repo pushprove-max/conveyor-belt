@@ -79,7 +79,7 @@
 #           the commits since it, the next version, whether main holds its notes, main's head, whether it releases
 #           with Conveyor) and suites (its whole-suite runs), as the snapshot gives them.
 #   declined lines: the review findings the Declined panel shows (not dismissed, not built, at most 7 days old), of every
-#           record, newest first: each with repo, id, time, card, issue, url, finding, by (who declined it: code, judge
+#           record, newest first: each with repo, repoUrl (its repository's https address, else null), id, time, card, issue, url, finding, by (who declined it: code, judge
 #           or owner), why, built (the issue "File as issue" filed for it, else null), dismissed ({time, by}, else null),
 #           round and findings (the review the judge declined it in and that review's findings as the judge numbered
 #           them, [{n, finding}], else null), as the snapshot's declined gives them; rest: every other line, so, as its declinedRest gives them.
@@ -794,7 +794,7 @@ PANELS_JQ='
    # a snapshot from before it carried them), newest first.
    declined: (if $R == null then {error: $cerr, data: null} else {error: null, data: ({lines: "declined", rest: "declinedRest"} | map_values(. as $k
         | $R | map(. as $r | .snap[$k] | arrays | .[] | objects | tag($r)
-        | {repo, id, time, card, issue, name: (.name // null), url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))} end),
+        | {repo, repoUrl: ($r.repoUrl // null), id, time, card, issue, name: (.name // null), url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))} end),
    # Belt 3D: the belt, Needs you, the queue (next, held, waiting) and Landed today as above, each card with what its
    # lane, bay and details show.
    belt3d: (if $R == null then {error: $cerr, data: null} else

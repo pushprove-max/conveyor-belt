@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Declined: the review findings that were not built, newest first, each with who declined it (code, the judge or
 // the owner) and why. Its part: {lines, rest}; lines are the ones the panel shows (not dismissed, not built, at most 7
-// days old), rest every other (the newest the snapshot keeps, and the older ones from the history); a line is {repo, id, time, card, issue, name (a main-red fix card's, which has issue 0, or null), url, finding, by, why, built, dismissed}, as
+// days old), rest every other (the newest the snapshot keeps, and the older ones from the history); a line is {repo, repoUrl, id, time, card, issue, name (a main-red fix card's, which has issue 0, or null), url, finding, by, why, built, dismissed}, as
 // the project's declined list holds it (conveyor.sh declined()), with round and findings (the review the judge
 // declined it in and that review's findings as the judge numbered them), which turn each F<n> of the judge's reason
 // into the finding it means (why, below). "File as issue" (confirmed by a second click: it costs a build) files the
@@ -45,36 +45,119 @@
   const open = (x) => !x.dismissed && typeof x.built !== 'number';
   // A finding's first sentence: its level, file and line lead it.
   const first = (s) => { const m = /^.*?[.!?](?=\s|$)/.exec(s); return m ? m[0] : s; };
-  // The line's reason. In the judge's, each F<n> (the n-th finding of the card's review it was declined in, as the
-  // judge numbered them: the snapshot's round and findings) is a button: on hover and on click (a line under the
-  // reason, a second click hides it) it says which finding it means, its first sentence and its review round. An F<n>
-  // whose finding is not found is left as written, with "finding not found" on hover. The text is never changed.
-  const why = (x, h) => {
-    const text = x.why || 'no reason given', p = h('p', 'reason', 'Why: ');
-    if (x.by !== 'judge') { p.append(text); return [p]; }
+  // A reason's text split into sentences, each a list of parts: {code} (a span the reason has in backticks, drawn
+  // without them) or {text}. A sentence ends at a . ! or ? before a space, outside backticks; the space stays at its
+  // end, so the sentences joined (with the backticks) are the text as written. A lone backtick is left as text.
+  const sentences = (text) => {
+    const out = [[]];
+    let at = 0;
+    const plain = (s) => {
+      let from = 0;
+      for (const m of s.matchAll(/[.!?]\s+/g)) {
+        out[out.length - 1].push({ text: s.slice(from, m.index + m[0].length) });
+        out.push([]);
+        from = m.index + m[0].length;
+      }
+      if (from < s.length) out[out.length - 1].push({ text: s.slice(from) });
+    };
+    for (const m of text.matchAll(/`([^`]+)`/g)) {
+      plain(text.slice(at, m.index));
+      out[out.length - 1].push({ code: m[1] });
+      at = m.index + m[0].length;
+    }
+    plain(text.slice(at));
+    return out.filter((s) => s.length);
+  };
+  // The paths with a directory that a text names before a :line ("conveyor/lib/claim.sh:99").
+  const PATH = /(?:^|[^A-Za-z0-9_./-])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+):[0-9]/g;
+  const pathsIn = (s) => (typeof s === 'string' ? Array.from(s.matchAll(PATH), (m) => m[1]) : []);
+  // A `file:line` (or `file:a–b`) of a reason, as a link to those lines on GitHub, in the line's repository (repoUrl:
+  // a main-red fix card has no issue url); null when the span is no file and line, or the repository is not on GitHub.
+  // A short path ("issues.sh:636") is the one path of known (the paths the line's findings and reasons name) that ends
+  // with it; none or more than one, and it has no directory, it is no link, as the repository root is only a guess.
+  const lineUrl = (x, code, known) => {
+    const repo = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/.exec(typeof x.repoUrl === 'string' ? x.repoUrl : '');
+    const m = /^((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+):([0-9]+)(?:[–-]([0-9]+))?$/.exec(code);
+    if (!repo || !m || m[1].split('/').some((s) => s === '.' || s === '..')) return null;
+    let path = m[1];
+    if (!known.has(path)) {
+      const ends = [...known].filter((k) => k.endsWith(`/${path}`));
+      if (ends.length === 1) path = ends[0];
+      else if (!path.includes('/')) return null;
+    }
+    return { url: `https://github.com/${repo[1]}/blob/HEAD/${path}#L${m[2]}${m[3] ? `-L${m[3]}` : ''}`, at: `${path}:${m[2]}` };
+  };
+  // The line's reason, in its own block under the finding: a tinted panel with a left rule in the colour of who
+  // declined it, led by a bold "Why the judge declined it" (or the code, or the owner). Each sentence is a line of its
+  // own; text in backticks is code, and a file and line in it a link to them on GitHub. In the judge's, each F<n> (the
+  // n-th finding of the card's review it was declined in, as the judge numbered them: the snapshot's round and
+  // findings) is a button: on hover and on click (a line under the reason, a second click hides it) it says which
+  // finding it means, its first sentence and its review round; a `file:line` that a finding of that review starts with
+  // ("repeats the declined finding at `<file>:<line>`") says the same of that finding, and one that a declined finding
+  // of another review or card of the project starts with (pool: every line of the list) says that finding and its
+  // card; when several findings start there, it says each of them. An F<n> whose finding is not found is left as written, with "finding not found" on hover. The text is never
+  // changed.
+  const why = (x, h, pool) => {
+    const kin = pool.filter((y) => y && y.repo === x.repo && typeof y.finding === 'string' && key(y) !== key(x));
+    const known = new Set([x.finding, x.why].concat(Array.isArray(x.findings) ? x.findings.map((y) => y && y.finding) : [], kin.map((y) => y.finding)).flatMap(pathsIn));
+    const text = x.why || 'no reason given';
+    const box = h('div', 'reason why-block');
+    box.dataset.by = WHO[x.by] ? x.by : 'none';
+    const body = h('div', 'why-text');
+    box.append(h('strong', 'why-label', WHO[x.by] ? `Why ${WHO[x.by]} declined it` : 'Why it was declined'), body);
+    const judged = x.by === 'judge' && Number.isInteger(x.round) && Array.isArray(x.findings);
     const said = h('p', 'row-meta finding-said');
     said.hidden = true;
     const refs = [];
-    let at = 0;
-    for (const m of text.matchAll(/\bF([0-9]+)\b/g)) {
-      p.append(text.slice(at, m.index));
-      at = m.index + m[0].length;
-      const f = Number.isInteger(x.round) && Array.isArray(x.findings) ? x.findings.find((y) => y && y.n === Number(m[1]) && typeof y.finding === 'string') : null;
-      if (!f) { const s = h('span', 'finding-ref is-missing', m[0]); s.title = 'finding not found'; p.append(s); continue; }
-      const tell = `${m[0]}, review round ${x.round}: ${first(f.finding)}`;
-      const b = h('button', 'btn btn-quiet judged-open finding-ref', m[0]);
-      b.type = 'button'; b.dataset.act = 'finding'; b.title = tell;
-      b.setAttribute('aria-expanded', 'false');
-      b.addEventListener('click', () => {
+    // A button or link that opens what it names under the reason, on click; on hover its title says it.
+    const opener = (el, tell) => {
+      el.title = tell;
+      el.setAttribute('aria-expanded', 'false');
+      el.addEventListener('click', () => {
         const shut = !said.hidden && said.textContent === tell;
         said.textContent = tell; said.hidden = shut;
-        refs.forEach((r) => r.setAttribute('aria-expanded', String(r === b && !shut)));
+        refs.forEach((r) => r.setAttribute('aria-expanded', String(r === el && !shut)));
       });
-      refs.push(b);
-      p.append(b);
+      refs.push(el);
+    };
+    const refsIn = (line, s) => {
+      if (x.by !== 'judge') { line.append(s); return; }
+      let at = 0;
+      for (const m of s.matchAll(/\bF([0-9]+)\b/g)) {
+        line.append(s.slice(at, m.index));
+        at = m.index + m[0].length;
+        const f = judged ? x.findings.find((y) => y && y.n === Number(m[1]) && typeof y.finding === 'string') : null;
+        if (!f) { const t = h('span', 'finding-ref is-missing', m[0]); t.title = 'finding not found'; line.append(t); continue; }
+        const b = h('button', 'btn btn-quiet judged-open finding-ref', m[0]);
+        b.type = 'button'; b.dataset.act = 'finding';
+        opener(b, `${m[0]}, review round ${x.round}: ${first(f.finding)}`);
+        line.append(b);
+      }
+      line.append(s.slice(at));
+    };
+    for (const parts of sentences(text)) {
+      const line = h('span', 'why-line');
+      for (const part of parts) {
+        if (!('code' in part)) { refsIn(line, part.text); continue; }
+        const c = h('code', 'why-code', part.code), to = lineUrl(x, part.code, known);
+        if (!to) { line.append(c); continue; }
+        const a = h('a', 'why-at');
+        a.href = to.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.append(c);
+        const at = new RegExp(`^\\[P[0-9]\\]\\s+${to.at.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b(?![-–])`);
+        // Every finding that starts there, not only the first found: two findings can start at the same line, and the
+        // text alone does not say which one the reason means.
+        const fs = judged ? x.findings.filter((y) => y && Number.isInteger(y.n) && typeof y.finding === 'string' && y.finding !== x.finding && at.test(y.finding)) : [];
+        const os = kin.filter((y) => at.test(y.finding) && !fs.some((f) => f.finding === y.finding));
+        const tells = fs.map((f) => `F${f.n}, review round ${x.round}: ${first(f.finding)}`)
+          .concat(os.map((o) => `Declined on ${typeof o.name === 'string' && o.name ? o.name : `#${o.issue}`}: ${first(o.finding)}`));
+        if (tells.length === 1) opener(a, tells[0]);
+        else if (tells.length) opener(a, `${tells.length} findings start at ${to.at}: ${tells.join(' ')}`);
+        line.append(a);
+      }
+      body.append(line);
     }
-    p.append(text.slice(at));
-    return refs.length ? [p, said] : [p];
+    return refs.length ? [box, said] : [box];
   };
   const answer = (r) => r.text().then((t) => ({ ok: r.ok, said: String(t).trim() || `the build machine answered ${r.status}` }));
   const noAnswer = () => ({ ok: false, said: 'the build machine did not answer. Make sure that it is on. Then try again' });
@@ -95,6 +178,7 @@
     render(el, d, ctx) {
       const h = ctx.h;
       const ul = h('ul', 'rows');
+      const pool = d.lines.concat(d.rest || []); // every line, for a reason that names a finding of another card
       // Marks lines dismissed on the host, one request a project of at most DISMISS_MAX lines (more lines, more
       // requests); then the panel is drawn again without them.
       const dismiss = (xs, done) => {
@@ -121,7 +205,7 @@
         head.append(h('span', 'title', x.finding || 'no finding'));
         const meta = h('p', 'row-meta');
         meta.append(ctx.tag(x.repo), h('span', null, `declined by ${WHO[x.by] || 'no one named'}`), ctx.since(x.time, ' ago'));
-        li.append(head, meta, ...why(x, h));
+        li.append(head, meta, ...why(x, h, pool));
         if (x.dismissed) {
           const m = h('p', 'row-meta mark');
           m.append(h('span', null, `Dismissed by ${x.dismissed.by || 'no one named'}`), ctx.since(x.dismissed.time, ' ago'));
