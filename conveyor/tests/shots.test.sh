@@ -9,12 +9,14 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# Card c7 of #7 changes web/pay.ts; its project's run wrote shots/ (ignored by git): pay.png after the change, old.png
-# before it (from an older patch of the card), and link.png, a link to a file outside the worktree. Main also holds
-# gone.ts, which a case deletes later.
+# Card c7 of #7 adds web/pay.ts and a line to function a of web/list.ts (whose functions a and b have the same body);
+# its project's run wrote shots/ (ignored by git): pay.png after the change, old.png before it (from an older patch of
+# the card), and link.png, a link to a file outside the worktree. Main also holds gone.ts, which a case deletes later.
 shotswt() {
   setup "[$(issue 7 2026-01-01)]"; FXWT=
-  fx_wt 'mkdir -p web && echo pay > web/pay.ts' .gitignore 'shots/' gone.ts gone
+  mkdir -p "$R/web"
+  fx_wt 'echo pay > web/pay.ts && printf "a {\n1\n2\n3\nx\n4\n5\n6\n}\nb {\n1\n2\n3\n4\n5\n6\n}\n" > web/list.ts' .gitignore 'shots/' gone.ts gone \
+    web/list.ts $'a {\n1\n2\n3\n4\n5\n6\n}\nb {\n1\n2\n3\n4\n5\n6\n}'
   echo secret > "$T/$CASE/secret.png"
   mkdir -p "$FXWT/shots/pay" && echo new > "$FXWT/shots/pay/button.png" && echo old > "$FXWT/shots/old.png" \
     && touch -d "@$(($(date +%s) - 600))" "$FXWT/shots/old.png" && ln -s "$T/$CASE/secret.png" "$FXWT/shots/link.png" || fail "the screenshots"
@@ -96,4 +98,31 @@ t_shotsmovedfolder() {
 t_shotsout() {
   shotswt; tune --arg d "$T/$CASE" '.review.screenshots = $d'; blockyes
   [ -s "$ST/kept/c7/c7.patch" ] && [ ! -e "$ST/kept/c7/shots" ] || fail "a folder outside the worktree gave screenshots: $(ls "$ST/kept/c7" 2>&1)"
+}
+# Bug: `conveyor.sh retry` of a card stopped for the yes, with no approval line since, stops again on the same kept
+# patch, applied in a new worktree with no screenshots (the project's run wrote them in the old one): the new card
+# kept none, and the Board showed the change from text alone. It keeps the earlier card's, tied to its own patch: the
+# retry is built on a newer main (a line above web/list.ts's change), so its patch differs byte for byte, and a
+# shots.json copied as it was would tie them to c7's patch. A card whose change is no longer that patch keeps none of
+# them, even when it differs only in whitespace (`.a .b` to `.a.b` in CSS), which git patch-id --stable does not read
+# (c9), or adds the same line, between the same lines, in another function (c10: b, not a), which git patch-id does not
+# read either.
+t_shotsretry() {
+  shotswt; tune '.review.screenshots = "shots"'; blockyes
+  local w=$T/$CASE/cards/c8 x=$T/$CASE/cards/c9 y=$T/$CASE/cards/c10 h
+  printf '0\na {\n1\n2\n3\n4\n5\n6\n}\nb {\n1\n2\n3\n4\n5\n6\n}\n' > "$R/web/list.ts" && git -C "$R" commit -qam 'main moves on' \
+    && git -C "$R" worktree add -q --detach "$w" && git -C "$w" apply --index "$ST/kept/c7/c7.patch" \
+    && git -C "$R" worktree add -q --detach "$x" && git -C "$x" apply --index "$ST/kept/c7/c7.patch" && echo 'pa y' > "$x/web/pay.ts" && git -C "$x" add -A \
+    && git -C "$R" worktree add -q --detach "$y" && git -C "$y" apply --index "$ST/kept/c7/c7.patch" && printf '0\na {\n1\n2\n3\n4\n5\n6\n}\nb {\n1\n2\n3\nx\n4\n5\n6\n}\n' > "$y/web/list.ts" && git -C "$y" add -A \
+    || fail "the retried worktrees"
+  fx_in 'from=c7 fromk=$ST/kept/c7; block c8 7 "'"$w"'" "${YES}guests see a Pay button" post && block c9 7 "'"$x"'" "${YES}guests see a Pay button" post && block c10 7 "'"$y"'" "${YES}guests see a Pay button" post'
+  [ "$RC" = 0 ] || fail "block: $(cat "$T/$CASE/run.out")"
+  h=$(echo new | git hash-object --stdin)
+  ! cmp -s "$ST/kept/c7/c7.patch" "$ST/kept/c8/c8.patch" || fail "the retried card's patch is c7's byte for byte: the case proves nothing"
+  [ "$(jq -c '[.patch, .shots]' "$ST/kept/c8/shots/shots.json" 2>&1)" = "[\"$(git hash-object "$ST/kept/c8/c8.patch")\",[{\"file\":\"$h.png\",\"caption\":\"pay/button.png\"}]]" ] \
+    && [ "$(cat "$ST/kept/c8/shots/$h.png")" = new ] || fail "the retried card did not keep the screenshots of the same patch: $(ls "$ST/kept/c8" 2>&1)"
+  [ ! -e "$ST/kept/c9/shots" ] || fail "a retried card whose change differs from the kept patch kept its screenshots: $(cat "$ST/kept/c9/shots/shots.json")"
+  [ "$(git patch-id --verbatim < "$ST/kept/c7/c7.patch" | cut -d' ' -f1)" = "$(git patch-id --verbatim < "$ST/kept/c10/c10.patch" | cut -d' ' -f1)" ] \
+    || fail "c10's change has its own git patch-id: the case proves nothing"
+  [ ! -e "$ST/kept/c10/shots" ] || fail "a retried card that adds the same line in another place kept its screenshots: $(cat "$ST/kept/c10/shots/shots.json")"
 }

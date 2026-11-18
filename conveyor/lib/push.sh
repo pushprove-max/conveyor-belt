@@ -414,6 +414,25 @@ keepshots() { # <worktree> <kept folder> <card>
   [ "$n" -gt 0 ] && p=$(git hash-object -- "$2/$3.patch") || return 0
   jq -cn --arg p "$p" '{patch: $p, shots: [$ARGS.positional | range(0; length; 2) as $i | {file: .[$i], caption: .[$i + 1][0:200]}]}' --args "${list[@]}" > "$2/shots/shots.json"
 }
+# A patch file (git diff), hashed without what changes when it sits on a newer base: each hunk's line numbers and each
+# index line. Nothing for a missing or empty file.
+samechange() { # <patch>
+  [ -s "$1" ] && LC_ALL=C sed -E '/^index /d; s/^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/@@/' "$1" | git hash-object --stdin
+}
+# The screenshots a card kept, kept again for the card that resumed its kept patch: only when they were kept for that
+# patch, and the new card's patch is the same change: the same patch, byte for byte, once the line numbers of its hunks
+# and the blob ids of its index lines are taken out (samechange()), so it may sit on a newer base. Context lines and
+# each hunk's function name still count: git patch-id reads neither, so it gives one id to a line added in two places
+# (and --stable reads no whitespace either, so `.a .b` to `.a.b` in CSS would pass). Its shots.json is tied to the new
+# card's own patch.
+keptshots() { # <kept folder of the earlier card> <earlier card> <kept folder> <card>
+  local a b
+  [ -r "$1/shots/shots.json" ] && [ "$(jq -r .patch "$1/shots/shots.json" 2>/dev/null)" = "$(git hash-object -- "$1/$2.patch" 2>/dev/null)" ] \
+    && a=$(samechange "$1/$2.patch") && b=$(samechange "$3/$4.patch") && [ -n "$a" ] && [ "$a" = "$b" ] || return 0
+  rm -rf "$3/shots"
+  cp -R "$1/shots" "$3/shots" && b=$(git hash-object -- "$3/$4.patch") \
+    && jq -c --arg p "$b" '.patch = $p' "$1/shots/shots.json" > "$3/shots/shots.json" || rm -rf "$3/shots"
+}
 clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
@@ -433,7 +452,8 @@ clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdraw
 # of the speed check that blocks the card (SPEEDCHECK, lib/testrun.sh): the line's speedcheck. Called in card(), the
 # line's waitSec is the seconds the card waited on other cards and for main to change (card()'s waitsec and mainsec),
 # as on its landed line, for the drift watch (bench/drift.sh); outside card() it has none.
-# A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()).
+# A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()),
+# or, retried on the same kept patch, those of the card it resumes (keptshots()).
 block() { # <card> <issue> <worktree> <reason> [post the reason on the issue whatever the review holds]
   local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null
   [ -z "${waitsec+x}" ] || ws=$((waitsec + ${mainsec:-0}))
@@ -469,6 +489,11 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   fi
   # The screenshots go only with a patch of the staged change (d 1): they are tied to that patch.
   [[ $reason != "$YES"* ]] || [ "$d" != 1 ] || [ -z "$kept" ] || keepshots "$3" "$k" "$1"
+  # A retried card (card()'s from and fromk: the card whose kept patch it applied) whose worktree has no screenshots
+  # (the project's run wrote them in the old worktree, not in the patch) keeps that card's, while its change is still
+  # that patch (keptshots()).
+  [[ $reason != "$YES"* ]] || [ "$d" != 1 ] || [ -z "$kept" ] || [ -e "$k/shots" ] || [ -z "${from:-}" ] || [ -z "${fromk:-}" ] \
+    || keptshots "$fromk" "$from" "$k" "$1"
   f=$(grep -Ev "$UNRECORDED" "$3.review" 2>/dev/null)
   # The comment is one argument, and an issue comment at most 65536 characters, beside up to 60000 of findings: it
   # shows the output's last whole lines within 4000 characters (the blocked line keeps all 60).
