@@ -277,3 +277,20 @@ t_controlkept() {
   echo '{"rules":{"push":true}}' > "$CONTROL"
   ctlread && [ "$(jq .rules.push <<<"$CTL_V")" = true ] || fail "a record with push on did not keep it over the defaults: $CTL_V"
 }
+# The Board's setup (issue 250) reopens until the record says the project is onboarded. Bugs: a new record reads as
+# onboarded, so the setup never opens; `control onboarded` does not write when and the rules confirmed (or keeps a
+# rule twice), so the Board cannot tell a rule added later; a bad key is written; an onboarded entry of another shape reads.
+t_controlonboarded() {
+  setup '[]'
+  # The key must be there, null: the Board asks only a record that has it (a missing key also reads null in jq).
+  [ "$(loop control | jq -c 'has("onboarded") and .onboarded == null')" = true ] || fail "a new record does not read as not onboarded: $(loop control)"
+  local out; out=$(loop control onboarded build cap build 2>&1)
+  [ "$(jq -c '.onboarded.rules' <<<"$out")" = '["build","cap"]' ] && jq -e '.onboarded.at | test("^20[0-9]{2}-[0-9]{2}-[0-9]{2}T")' <<<"$out" >/dev/null \
+    && [ "$(jq -c .onboarded.rules "$ST/control.json")" = '["build","cap"]' ] || fail "control onboarded did not write when and the rules: $out"
+  for bad in 'onboarded' 'onboarded Build' 'onboarded -x' 'onboarded a=b'; do
+    # shellcheck disable=SC2086
+    out=$(loop control $bad 2>&1); [ $? = 2 ] && [ "$(jq -c .onboarded.rules "$ST/control.json")" = '["build","cap"]' ] || fail "control $bad was not refused with nothing changed: $out"
+  done
+  jq -c '.onboarded = {at: "x", rules: "build"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  ! loop control >/dev/null 2>&1 || fail "an onboarded entry whose rules are not a list was read"
+}

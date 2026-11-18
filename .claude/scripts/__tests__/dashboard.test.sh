@@ -494,9 +494,9 @@ q '.panels.board.data.today == {landed: 1, usd: 41.5}' "the Board's Today figure
 q '.panels.board.data.blocked[0] | .track.records[0].failures.files[0].cases[0].name == "adds up" and (.reviews | map(.verdict)) == ["NO-GO"]' \
   "the Board's blocked card carries its track and reviews, to lead with why it failed"
 # The Rules panel is the same record's rules and what they produce, with the snapshot's forecast as it is.
-q '.panels.rules.data | .repo == "sample" and .control.rules.never == ["area:infra"] and .cap == 3 and .guard.at == 90 and .building == 1 and .issuesError == null
+q '.panels.rules.data | .repo == "sample" and .repoUrl == "https://github.com/example/sample-project" and .control.rules.never == ["area:infra"] and .cap == 3 and .guard.at == 90 and .building == 1 and .issuesError == null
   and [(.held | map([.issue, .url])), (.queue | map(.issue)), (.skipped | map([.issue, .rule]))] == [[[30, "'"$PU"'/30"]], [20], [[31, "area:infra"]]]
-  and .forecast == {cards: 1, usd: 0.95, perCard: {usd: 0.95, pct: 0.5}, guard: 90, reading: 42, pausesAt: null}' "the Rules part: the record's rules, its queue, held and skipped, the cards on the belt and the forecast"
+  and .forecast == {cards: 1, usd: 0.95, perCard: {usd: 0.95, pct: 0.5}, guard: 90, reading: 42, pausesAt: null}' "the Rules part: the record's GitHub address (the setup's owner/repo title), its rules, its queue, held and skipped, the cards on the belt and the forecast"
 # The landed cards not pushed and the full test suite (Push landed, Run full test suite: actions on the Control tab's
 # Board, not rules), as the snapshot has them; none from a snapshot without them.
 q '.panels.board.data | (.unpushed | map([.issue, .card, .url])) == [[7, "c5-7", "'"$PU"'/7"]] and .fullTest.command == true and .fullTest.last.state == "failed"

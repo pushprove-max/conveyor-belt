@@ -713,7 +713,7 @@ control_actions() {
 control_actions 'rules P1=off followups=on area:infra=on' 'rules P3=off' 'rules P3=on' 'rules team/billing=off' 'rules visible=off' 'rules visible=on' 'model claude claude-opus-5-5 high' 'model claude claude-opus-5-5' 'model default' 'reviewer codex gpt-6.1-sol low' 'reviewer default' 'start held' 'start queue' \
   'reviewer opencode openrouter/vendor/model-1:free high' 'judge opencode openrouter/vendor/model-1' 'model claude opus[1m]' 'model codex gpt-6.1-sol' \
   'judge on' 'judge off' 'judge claude claude-opus-5-5 high' 'judge default' 'judge always security data' 'judge always' \
-  'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'force 12' 'land-as pr' 'land-as main'
+  'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'force 12' 'land-as pr' 'land-as main' 'onboarded build review-account dep-guard'
 grep -q "dashboard: control model default by max from 127.0.0.1" "$M/server.err" || fail "control_is_logged: no line for the control in the log"
 done_part
 ) & started actions
@@ -1111,6 +1111,7 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act account a b)" "$(act account 'a;id')" "$(act account -x)" "$(act review-account '')" \
   "$(act dep-guard)" "$(act dep-guard maybe)" "$(act dep-guard on off)" "$(act push-check)" "$(act push-check maybe)" "$(act push-check on off)" "$(act force)" "$(act force x)" "$(act force 12 13)" "$(act force '12;id')" \
   "$(act land-as)" "$(act land-as branch)" "$(act land-as main pr)" \
+  "$(act onboarded)" "$(act onboarded Build)" "$(act onboarded 'build;id')" "$(act onboarded -x)" "$(act onboarded $(seq -f r%g 41))" \
   "$(act approve)" "$(act approve 12 a b)" "$(act retry x)" "$(act retry 12 13)" "$(act retry x --fresh)" "$(act retry 12 --hold)" "$(act retry c20261115T120000-sample-0 --fresh)" "$(act unblock)" "$(act unblock x)" "$(act unblock 12 --hold)" "$(act close)" "$(act close x)" "$(act close 012)" "$(act close '12;id')" "$(act close 12 13)" "$(act decline '')" "$(act approve x why)" \
   "$(act build)" "$(act build 12)" "$(act build 'd0123456789ab;id')" "$(act build d0123456789ab d0123456789ab)" \
   "$(act approve 12 '')" "$(act approve 12 ' padded')" "$(act decline 12 $'two\nlines')" "$(act decline 12 "$(printf 'x%.0s' $(seq 301))")" \

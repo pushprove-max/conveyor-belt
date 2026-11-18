@@ -117,6 +117,34 @@ Click the button, then click it again. The text next to the button shows that th
 - A blocked landing in the Fast lane shows its reason on one line. Its log is under **Show output**, as plain text,
   with **Copy output**.
 
+## Set up a new repository
+
+The first time the Board opens for a repository, a box asks you to set each project rule. Its title is
+**Set up Conveyor for <owner/repo>**. It has five steps, and a bar at the top names each step:
+
+1. **What to build**: Build and Never build.
+2. **Landing**: Land as, Push when a card lands, Test before a push, Dependency guard, New issues start in and Whole
+   suite in a card.
+3. **Models**: Builder, Reviewer, Judge, Account and Review account.
+4. **Limits**: Cards at once and Pause when the weekly limit reaches.
+5. **Your yes**: Visible changes need your yes.
+
+Each rule shows its name, what it does and the controls of the Rules tab. The default is already selected, also when
+the rule has another value now. To keep the default, click the selected choice or the **default: <value>** button.
+A rule is set only when the build machine saves your choice. **Next** is on when each rule of the step is set. On the
+last step it is **Finish**. The footer says how many rules are set.
+
+Each choice is saved when you click it. A model is saved when you pick it, with no **Save**. If you leave before the
+end, the rules you set stay set.
+**Later**, or Escape, closes the box until the next time the Board opens. While the repository is not set up, a line
+at the top says **Conveyor is not set up for this repository yet**. Its **Set up** button opens the box again.
+
+**Finish** records the setup in the project's control record. The box then stops opening. When a newer Conveyor has a
+rule that you did not set, the box opens again with only the steps that hold the new rules.
+
+The box does not ask for the machine's settings, Card work yields to you and Cores kept for you: they belong to the
+build machine. The test command, the product paths and the owner stay with `/conveyor-belt:setup`.
+
 ## Rules
 
 The Rules tab holds the settings:

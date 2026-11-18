@@ -127,7 +127,8 @@
 #           every record, steered or not, whose pack names checks.progress and has one to show (repo null too: no
 #           record steered); no field when none
 #           names it.
-#   rules   the Rules tab, of the same record (repo null when none is; repos and others as the Board's): state, control, cap, guard,
+#   rules   the Rules tab, of the same record (repo null when none is; repos and others as the Board's): repoUrl (its
+#           GitHub address, null when it is none), state, control, cap, guard,
 #           modelSettings and limit (as the Board's), areaPrefix (the pack's; null from a snapshot without
 #           one), packLandAs (the pack's push.landAs, Land as while the record's landAs is null; null from a snapshot
 #           without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
@@ -701,7 +702,7 @@ PANELS_JQ='
   # belt (building, how many; onBelt, their issues) and the cards blocked, and the snapshot'"'"'s forecast. The page
   # computes no queue of its own.
   def rulesOf($r): $r.snap as $s
-    | {repo: $r.repo, state: $s.health.state, control: $s.control, cap: $s.health.builderCap, guard: $s.health.guard,
+    | {repo: $r.repo, repoUrl: ($r.repoUrl // null), state: $s.health.state, control: $s.control, cap: $s.health.builderCap, guard: $s.health.guard,
        modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), limit: limitOf($s),
        held: ($s.queue.holding | if . == null then null else few($r) end),
        queue: ($s.queue.order | if . == null then null else few($r) end),

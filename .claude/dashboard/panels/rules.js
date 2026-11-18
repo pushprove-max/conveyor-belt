@@ -56,7 +56,14 @@
 // Open issues: every open issue of the project, each with its state, filtered, sorted, picked and managed (issuesSection).
 // With more than one project on the host the machine head's Show picks the one shown, as on the Board, and the
 // Rules panel's heading names it ("Rules: sample"); every change names it.
-// Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), state, control, cap, guard,
+// The setup (onboard: ONBOARD, drawOnboard), over whichever tab is shown (DASH_APP.overlay): while the project's control
+// record has onboarded null, or a list without a rule of ONBOARD its engine has, a line above the panels with Set up,
+// and a modal in steps, each rule's row as the Rules panel draws it, its default selected until it is set, with a
+// "default: <value>" button. A rule is set once the host saved a choice of it (the default selected too, which sends
+// the default); Next waits for every rule of its step; Later (or Escape) shuts it for this visit;
+// Finish sends `onboarded` with the keys confirmed, those confirmed before too. A record with no onboarded key (an
+// older engine, which cannot save it) is never asked.
+// Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), repoUrl, state, control, cap, guard,
 // modelSettings, areaPrefix, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps,
 // blocked, forecast, prices, standing, open (with issues: every open issue), repos, others}.
 (function () {
@@ -93,6 +100,13 @@
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
     steer: null, steerSent: null, cores: null, bare: null, bareFor: null, idle: null, shown: new Map() };
+  // The setup of a repository not yet onboarded (drawOnboard()): its box and the line above the panels, once made; open;
+  // later (Later pressed: shut for this visit); repo, the project it is for; keys, the rules it asks for, worked out
+  // when it opens; set, the rules whose choice the host saved; rule, the rule of the row a box event is on (run());
+  // out, the rule whose change is out; step, the step shown; back, the focus before it opened; act, the control of the
+  // box focused last, focused again when a redraw replaced it.
+  const ONB = 'onboard';
+  const OB = { box: null, line: null, open: false, later: false, repo: null, keys: [], set: new Set(), rule: null, out: null, step: 0, back: null, act: null };
   // steer: the machine's Card work yields to you as the snapshot says (null: an engine that does not say); steerSent:
   // the value the host took from here, shown until a snapshot says it. cores: the machine's cores kept for the user as
   // the snapshot says ({reserved, slots, unavailable}; null: an engine that does not say).
@@ -271,6 +285,7 @@
     if (action === 'dep-guard') return `dependency guard ${a[0]}`;
     if (action === 'land-as') return a[0] === 'pr' ? 'land as one pull request' : 'land on main';
     if (action === 'push-check') return `test before a push ${a[0]}`;
+    if (action === 'onboarded') return 'setup finished';
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
     if (action === 'depends') return `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`;
     if (action === 'prices') return priceWords(a);
@@ -305,6 +320,7 @@
     if (action === 'dep-guard') { r.depGuard = a[0] === 'on'; return [r, 'dep-guard']; }
     if (action === 'land-as') { r.landAs = a[0]; return [r, 'land-as']; }
     if (action === 'push-check') { r.pushCheck = a[0] === 'on'; return [r, 'push-check']; }
+    if (action === 'onboarded') { r.onboarded = { at: new Date(Date.now()).toISOString(), rules: a.slice() }; return [r, ONB]; }
     return null;
   }
 
@@ -312,7 +328,8 @@
   // the tab's panels (PANELS) has its own: the line shows in the panel the action came from (where, by default S.from:
   // the panel last clicked or typed in), so a panel folded away never holds what another panel's action said, and
   // the other panels' lines are emptied.
-  const tabLine = (where = S.from) => (S.at.has(where) ? S.at.get(where).el.querySelector('.rules-note') : null);
+  // The setup (ONB) has its own line, in its footer.
+  const tabLine = (where = S.from) => (where === ONB ? (OB.box && OB.box.querySelector('.rules-note')) : S.at.has(where) ? S.at.get(where).el.querySelector('.rules-note') : null);
   function say(text, undo, where = S.from) {
     S.at.forEach(({ el }, id) => { const n = el.querySelector('.rules-note'); if (n && id !== where) n.replaceChildren(); });
     const n = tabLine(where);
@@ -340,6 +357,11 @@
     if (S.busy) { say('Wait: the build machine did not answer the last change yet.'); return Promise.resolve(false); }
     // Its answer shows in the panel it was asked from, whatever panel is clicked while it is out.
     const where = S.from, tell = (text, u) => say(text, u, where);
+    // From the setup: the rule of the row acted on (OB.rule) is set once the host saved each of these changes; a choice
+    // there is the rule confirmed, and it has no Undo (its row may show the default rather than the value in force).
+    const rule = where === ONB ? OB.rule : null;
+    if (where === ONB) undo = null;
+    OB.out = rule;
     S.busy = true; S.refused = null; draw();
     tell('Sending…');
     const repo = to || S.d.repo;
@@ -388,9 +410,10 @@
         return next();
       }, (e) => { moves({ error: `${MOVES[action]}: the host did not answer.` }); back('the host did not answer', null); throw e; });
     };
-    const free = (ok) => { S.busy = false; draw(); return ok; };
+    const free = (ok) => { S.busy = false; OB.out = null; draw(); return ok; };
     return next().then((ok) => {
       if (ok) {
+        if (rule && repo === OB.repo) OB.set.add(rule);
         lastWrite(what, undo || null, repo);
         if (done && repo === S.d.repo) done();
         tell('Done. What the rules produce updates in about a minute.', undo && undo.length && repo === S.d.repo ? () => undoAsk(undo, () => run(undo, `undid: ${what}`, null, null, repo), repo) : null);
@@ -603,7 +626,8 @@
   // from that CLI's list (for a CLI that lists none, the pack's models for it), then Other… for a name typed in (a
   // text box alone for a CLI with neither list), then an effort of those the CLI takes there. A model in force that
   // the list does not have is said to be "(not listed)". A pick sends nothing: the row says Unsaved, and Save sends
-  // the CLI, model and effort as one action (Default clears the role); Cancel puts back what is in force.
+  // the CLI, model and effort as one action (Default clears the role); Cancel puts back what is in force. In the setup a
+  // pick that leaves a whole role, or a model typed in and left, is saved at once.
   // A role the host cannot start (s.missing: its CLI gone) says so; a judge on the reviewer's CLI says it is of the
   // reviewer's family.
   function modelCtl(name, key, s) {
@@ -650,8 +674,13 @@
     const edit = (o, redraw) => {
       const d = Object.assign({}, draftOf(key) || now, o);
       if (d.cli === setCli && d.model.trim() === setModel && d.effort === setEffort && !(d.other && !d.model.trim())) draftDrop(key); else draftPut(key, d);
+      // In the setup each choice is saved at once: a pick that leaves a whole role (the default, or a CLI with its model),
+      // the one in force too while the role is not yet set there (Codex, then Default, before a model is picked).
+      if (S.from === ONB && redraw && (!d.cli || d.model.trim()) && (draftOf(key) || !OB.set.has(key))) { draftPut(key, d); saveNow(); return; }
       if (redraw) draw(); else mark();
     };
+    // A model typed in, in the setup, is saved when the field is left (or Enter).
+    const typedSave = (f) => f.addEventListener('change', () => { if (S.from === ONB && draftOf(key)) saveNow(); });
     const dflt = s.default || (s.modelFrom === 'seed' && s.model);
     const pick = h('select', 'field board-select');
     pick.dataset.act = `${key}-cli`; pick.setAttribute('aria-label', `${name} CLI`);
@@ -666,6 +695,7 @@
       model = h('input', 'field rules-field');
       model.type = 'text'; model.value = v.model; model.placeholder = `a ${cli} model`;
       model.addEventListener('input', () => edit({ model: model.value }, false));
+      typedSave(model);
     } else {
       model = h('select', 'field board-select');
       if (!cli) opt(model, '', 'Default model', true);
@@ -684,6 +714,7 @@
         field.type = 'text'; field.value = v.model; field.placeholder = `a ${cli} model`;
         field.dataset.act = `${key}-model-other`; field.setAttribute('aria-label', `${name} model, not listed`);
         field.addEventListener('input', () => edit({ model: field.value, other: true }, false));
+        typedSave(field);
       }
     }
     model.dataset.act = `${key}-model`; model.setAttribute('aria-label', `${name} model`);
@@ -695,7 +726,7 @@
     effort.addEventListener('change', () => edit({ effort: effort.value }, true));
     // Save sends the role whole, as one action; Cancel puts back what is in force. Both show only while unsaved.
     const flag = S.ctx.chip('Unsaved', 'warn');
-    const save = button('Save', 'btn-primary', `${key}-save`, `Save the ${name}'s CLI, model and effort`, () => {
+    function saveNow() {
       const d = draftOf(key);
       if (!d) return;
       const m = d.model.trim();
@@ -712,7 +743,8 @@
         draw();
         say(`Saved: ${key} now ${d.cli ? `${m} · ${d.effort || 'default effort'}` : 'the default'}`, null, where);
       });
-    });
+    }
+    const save = button('Save', 'btn-primary', `${key}-save`, `Save the ${name}'s CLI, model and effort`, saveNow);
     const cancel = button('Cancel', 'btn-quiet', `${key}-cancel`, `Put the ${name} back as it is in force`, () => { draftDrop(key); draw(); });
     function mark() { const on = unsaved(); [flag, save, cancel].forEach((x) => { x.hidden = !on; }); }
     mark();
@@ -809,14 +841,15 @@
     form.append(...[field, areaPick, button('Add', 'btn-quiet', 'area-off', 'Never build the issues with this area label', add)].filter(Boolean));
     el.append(row('never', 'Never build', 'labels Conveyor skips', never, form, areaNote));
 
-    // At once: the record's cap, else the seed's (d.cap, when the snapshot's cap came from there). After the
-    // host clears a cap set here, the seed's number is not known until the next snapshot: both steps are off.
+    // At once: the record's cap, else the one in force when the snapshot's cap came from the seed (d.cap), else the
+    // seed's own, CAP0 (a record with no cap runs at it: capnow in control.sh). So the setup, which shows the record
+    // with no cap until the rule is set, and a cap just cleared here, both step from a number.
     const capSet = num(c.cap);
-    const capNow = capSet !== null ? capSet : ((d.control || {}).cap == null ? num(d.cap) : null);
+    const capNow = capSet !== null ? capSet : ((d.control || {}).cap == null && num(d.cap) !== null ? num(d.cap) : CAP0);
     el.append(row('cap', 'Cards at once', 'cards building together',
-      stepper('cards at once', capNow === null ? '–' : String(capNow), () => send('cap', [String(capNow - 1)], null, ['cap', [capSet !== null ? String(capSet) : 'off']]),
+      stepper('cards at once', String(capNow), () => send('cap', [String(capNow - 1)], null, ['cap', [capSet !== null ? String(capSet) : 'off']]),
         () => send('cap', [String(capNow + 1)], null, ['cap', [capSet !== null ? String(capSet) : 'off']]),
-        capNow !== null && capNow > 1, capNow !== null && capNow < 100),
+        capNow > 1, capNow < 100),
       h('span', 'board-from', capSet !== null ? 'set here' : 'the default'),
       capSet !== null ? button('Default', 'btn-quiet', 'cap-off', 'Cards at once: back to the default', () => send('cap', ['off'], null, ['cap', [String(capSet)]])) : null));
 
@@ -1931,6 +1964,214 @@
     return el;
   }
 
+  // ---- the setup of a repository not yet onboarded ----
+  // Its five steps, each the project's rules it asks for, by their row in rules(). The machine's rules (Card work yields
+  // to you, Cores kept for you) are the build machine's, not the repository's, and the pack's own setup answers stay
+  // with /conveyor-belt:setup: neither is asked here.
+  const ONBOARD = [
+    ['What to build', ['build', 'never']],
+    ['Landing', ['land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite']],
+    ['Models', ['builder', 'reviewer', 'judge', 'account', 'review-account']],
+    ['Limits', ['cap', 'guard']],
+    ['Your yes', ['visible']],
+  ];
+  const GUARD0 = 98;  // the guard of control-defaults.json
+  const CAP0 = 6;  // the cap of control-defaults.json (CAP0 in paths.sh)
+  // A rule the project's engine has: one whose switch is drawn disabled for an older engine (rules()) is not asked.
+  function onbHas(k, c) {
+    const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
+    if (k === 'push' || k === 'visible' || k === 'wholeSuite') return typeof r[k] === 'boolean';
+    if (k === 'dep-guard') return typeof c.depGuard === 'boolean';
+    if (k === 'land-as') return Object.prototype.hasOwnProperty.call(c, 'landAs');
+    if (k === 'push-check') return typeof S.d.pushCheck === 'boolean';
+    return true;
+  }
+  // The rules the record c does not say were confirmed. An engine whose record has no onboarded key cannot save the
+  // setup: it is never asked there.
+  const onbTodo = (c) => (c && Object.prototype.hasOwnProperty.call(c, 'onboarded')
+    ? ONBOARD.flatMap(([, ks]) => ks).filter((k) => onbHas(k, c) && !list(c.onboarded && c.onboarded.rules).includes(k)) : []);
+  const onbSteps = () => ONBOARD.map(([name, ks]) => [name, ks.filter((k) => OB.keys.includes(k))]).filter(([, ks]) => ks.length);
+  // The repository as owner/repo, from its GitHub address (repoUrl); else the project's name.
+  function onbSlug() {
+    const x = /^https:\/\/github\.com\/([^/]+\/[^/]+)$/.exec(typeof S.d.repoUrl === 'string' ? S.d.repoUrl : '');
+    return x ? x[1] : S.d.repo;
+  }
+  // Each rule's default, in words; the changes that set it, sent as the Rules tab sends them, whatever the record holds
+  // (none only for a Never build list that is empty already: no command sets it); and the record c with the rule at
+  // its default, as the box shows it until it is set (control-defaults.json: a record with no setting).
+  function onbDefault(k, c) {
+    const r = c.rules && typeof c.rules === 'object' ? c.rules : {}, m = S.d.modelSettings || {};
+    const at = (o, rules) => Object.assign({}, c, o, rules ? { rules: Object.assign({}, r, rules) } : {});
+    const role = (key) => { const s = m[key] && typeof m[key] === 'object' ? m[key] : {}; return s.default || (s.modelFrom === 'seed' ? s.model : null) || 'the pack\'s model'; };
+    if (k === 'build') return [BUILDS.map(([, n]) => n).join(', '), [['rules', BUILDS.map(([b]) => `${b}=on`)]], at({}, Object.fromEntries(BUILDS.map(([b]) => [b, true])))];
+    if (k === 'never') {
+      const n = list(r.never), steps = [];
+      for (let i = 0; i < n.length; i += 10) steps.push(['rules', n.slice(i, i + 10).map((a) => `${a}=on`)]);
+      return ['none', steps, at({}, { never: [] })];
+    }
+    if (k === 'push' || k === 'visible' || k === 'wholeSuite') return ['Off', [['rules', [`${k}=off`]]], at({}, { [k]: false })];
+    if (k === 'dep-guard') return ['On', [['dep-guard', ['on']]], at({ depGuard: true })];
+    // Land as and Test before a push: the pack's value, which a record with no setting takes.
+    if (k === 'land-as') { const v = landNow(null); return [v === 'pr' ? 'Pull request' : 'Main', [['land-as', [v]]], at({ landAs: null })]; }
+    if (k === 'push-check') { const v = pushCheckOn(null); return [v ? 'On' : 'Off', [['push-check', [v ? 'on' : 'off']]], at({ pushCheck: null })]; }
+    if (k === 'start') return ['Queue', [['start', ['queue']]], at({ start: 'queue' })];
+    if (k === 'builder') return [role('builder'), [['model', ['default']]], at({ model: null })];
+    if (k === 'reviewer') return [role('reviewer'), [['reviewer', ['default']]], at({ reviewer: null })];
+    // The judge's default is on, on its default model, and always accepting no kind.
+    if (k === 'judge') return [`On, ${role('judge')}`, [['judge', ['on']], ['judge', ['default']], ['judge', ['always']]], at({ judgeOn: true, judge: null, judgeAlways: [] })];
+    if (k === 'account') return ['the build machine\'s own login', [['account', []]], at({ account: null })];
+    if (k === 'review-account') return ['the Account', [['review-account', []]], at({ reviewAccount: null })];
+    if (k === 'cap') return [(S.d.control || {}).cap == null && num(S.d.cap) !== null ? String(S.d.cap) : String(CAP0), [['cap', ['off']]], at({ cap: null })];
+    return [`${GUARD0}%`, [['guard', [String(GUARD0)]]], at({ guard: GUARD0 })];
+  }
+  // Confirms rule k at its default: its changes sent, from the setup; none to send sets it at once.
+  function onbConfirm(k, name) {
+    const [, steps] = onbDefault(k, ctl());
+    if (!steps.length) { OB.set.add(k); onbDraw(); return; }
+    S.from = ONB; OB.rule = k;
+    run(steps, `${name}: the default`);
+    OB.rule = null;
+  }
+  const onbFocusable = () => Array.from(OB.box.querySelectorAll('.onboard button, .onboard select, .onboard input')).filter((x) => !x.disabled && !x.hidden);
+  function onbClose(later) {
+    if (later) OB.later = true;
+    OB.open = false;
+    OB.box.hidden = true;
+    // The focus goes back where it was before the box opened, else to Set up while it shows.
+    const to = OB.back && OB.back.isConnected && OB.back !== document.body ? OB.back : !OB.line.hidden ? OB.line.querySelector('button') : null;
+    if (to) to.focus({ preventScroll: true });
+  }
+  // The first control of the step shown takes the focus.
+  function onbFocusStep() {
+    const first = OB.box.querySelector('.onboard-body button:not([disabled]), .onboard-body select:not([disabled]), .onboard-body input:not([disabled])');
+    if (first) first.focus({ preventScroll: true });
+  }
+  // The box and the line, made once: the box over the page, the line above the panels.
+  function onbMake() {
+    const h = S.ctx.h;
+    OB.line = h('p', 'onboard-line');
+    OB.line.id = 'onboard-line';
+    OB.line.append(h('span', null, 'Conveyor is not set up for this repository yet.'),
+      button('Set up', 'btn-primary', 'onboard-open', 'Set up Conveyor for this repository', () => { OB.later = false; drawOnboard(true); }));
+    const grid = document.getElementById('grid');
+    if (grid) grid.before(OB.line); else document.body.append(OB.line);
+    OB.box = h('div', 'onboard-back');
+    OB.box.id = 'onboard';
+    const dlg = h('div', 'onboard'), title = h('h2', 'onboard-title'), note = h('p', 'board-note rules-note');
+    dlg.setAttribute('role', 'dialog'); dlg.setAttribute('aria-modal', 'true'); dlg.setAttribute('aria-labelledby', 'onboard-title');
+    title.id = 'onboard-title';
+    note.setAttribute('aria-live', 'polite');
+    const foot = h('div', 'onboard-foot');
+    foot.append(h('span', 'onboard-count'), button('Later', 'btn-quiet', 'onboard-later', 'Later: close the setup for this visit', () => onbClose(true)),
+      button('Back', 'btn-quiet', 'onboard-back', 'Back to the step before', () => { OB.step -= 1; onbDraw(); onbFocusStep(); }),
+      button('Next', 'btn-primary', 'onboard-next', 'Next step', onbNext));
+    dlg.append(title, h('ol', 'onboard-steps'), h('progress', 'onboard-bar'), h('div', 'onboard-body'), note, foot);
+    OB.box.append(dlg);
+    OB.box.hidden = true;
+    document.body.append(OB.box);
+    // Every action here says what it did on the box's own line, and a change it sends is on the rule of its row
+    // (OB.rule): the rule is set only when the host saved it (run()), so a check that sends nothing, a first click
+    // that asks again, a draft or a refusal does not set it.
+    ['click', 'input', 'change', 'keydown'].forEach((t) => {
+      dlg.addEventListener(t, (e) => { S.from = ONB; const row = e.target.closest && e.target.closest('.rules-row'); OB.rule = row ? row.dataset.rule : null; }, true);
+      dlg.addEventListener(t, () => { OB.rule = null; });
+    });
+    // The control focused last, focused again when a redraw replaced it (onbDraw).
+    dlg.tabIndex = -1;
+    dlg.addEventListener('focusin', (e) => { if (e.target.dataset && e.target.dataset.act) OB.act = e.target.dataset.act; });
+    // A click on the choice shown selected of a rule not yet set, its default, sends the default: the Rules tab's
+    // control sends nothing for the value in force. A selected Build choice (each is, at the default) keeps the
+    // default too, rather than turning that choice off: once the rule is set, a click toggles it as on the Rules tab.
+    const body = dlg.querySelector('.onboard-body');
+    body.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.rules-tog[aria-pressed="true"]'), row = b && b.closest('.rules-row');
+      if (!row || b.disabled || OB.set.has(row.dataset.rule)) return;
+      e.stopPropagation();
+      onbConfirm(row.dataset.rule, row.querySelector('.board-label').textContent);
+    }, true);
+    // A control that sends nothing (a first click that asks again) is drawn again.
+    body.addEventListener('click', () => { if (OB.open) onbDraw(); });
+    // Escape is Later; Tab stays in the box.
+    dlg.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onbClose(true); return; }
+      if (e.key !== 'Tab') return;
+      const all = onbFocusable();
+      if (!all.length) return;
+      const at = all.indexOf(document.activeElement);
+      if (e.shiftKey && at <= 0) { e.preventDefault(); all[all.length - 1].focus(); } else if (!e.shiftKey && at === all.length - 1) { e.preventDefault(); all[0].focus(); }
+    });
+  }
+  function onbNext() {
+    const steps = onbSteps();
+    if (OB.step < steps.length - 1) { OB.step += 1; onbDraw(); onbFocusStep(); return; }
+    // Finish: the rules confirmed now and those confirmed before, sent as one action.
+    const c = ctl(), done = list(c && c.onboarded && c.onboarded.rules).filter((k) => typeof k === 'string' && !OB.keys.includes(k));
+    run([['onboarded', done.concat(OB.keys)]], words('onboarded'));
+  }
+  // The step shown: each rule's row as the Rules tab draws it, with its default; the steps, the count and the buttons.
+  function onbDraw() {
+    const h = S.ctx.h, c = ctl(), steps = onbSteps(), dlg = OB.box.querySelector('.onboard');
+    OB.step = Math.max(0, Math.min(OB.step, steps.length - 1));
+    const [, keys] = steps[OB.step];
+    const a = OB.act;
+    dlg.querySelector('.onboard-title').textContent = `Set up Conveyor for ${onbSlug()}`;
+    const set = (k) => OB.set.has(k);
+    dlg.querySelector('.onboard-steps').replaceChildren(...steps.map(([name, ks], i) => {
+      const li = h('li', `onboard-step${ks.every(set) ? ' onboard-done' : ''}`, `${i + 1}. ${name}`);
+      if (i === OB.step) li.setAttribute('aria-current', 'step');
+      return li;
+    }));
+    const n = OB.keys.filter(set).length, bar = dlg.querySelector('.onboard-bar');
+    bar.max = OB.keys.length; bar.value = n;
+    bar.setAttribute('aria-label', `Step ${OB.step + 1} of ${steps.length}: ${steps[OB.step][0]}`);
+    // A rule not yet set (nor out) shows its default selected, not the value in force: the rows are drawn from the
+    // record with each such rule at its default.
+    const keep = S.ctl;
+    S.ctl = OB.keys.filter((k) => !set(k) && k !== OB.out).reduce((x, k) => onbDefault(k, x)[2], c);
+    let rows;
+    try { rows = new Map(Array.from(rules(held()).querySelectorAll('.rules-row'), (r) => [r.dataset.rule, r])); } finally { S.ctl = keep; }
+    dlg.querySelector('.onboard-body').replaceChildren(h('h3', 'board-head', steps[OB.step][0]), ...keys.filter((k) => rows.has(k)).map((k) => {
+      const row = rows.get(k), [text] = onbDefault(k, c), name = row.querySelector('.board-label').textContent;
+      row.dataset.set = String(set(k));
+      row.querySelector('.rules-key').append(
+        button(`default: ${text}`, 'btn-quiet onboard-default', `onboard-default-${k}`, `${name}: the default, ${text}`, () => onbConfirm(k, name)),
+        set(k) ? S.ctx.chip('Set', 'ok') : h('span', 'board-from', 'Click a choice to set it'));
+      return row;
+    }));
+    lock(dlg.querySelector('.onboard-body'));
+    dlg.querySelector('.onboard-count').textContent = `${n} of ${OB.keys.length} rules set`;
+    const last = OB.step === steps.length - 1, next = dlg.querySelector('[data-act="onboard-next"]');
+    next.textContent = last ? 'Finish' : 'Next';
+    next.setAttribute('aria-label', last ? 'Finish the setup' : 'Next step');
+    next.disabled = S.busy || !keys.every(set);
+    dlg.querySelector('[data-act="onboard-back"]').disabled = OB.step === 0;
+    // The focus stays in the box: on the control focused last, drawn again; while that one is off (a change out), on
+    // the box itself, so Escape and Tab still work, and back on the control when it is on again.
+    const again = a && dlg.querySelector(`[data-act="${a}"]`);
+    if (again && !again.disabled) again.focus({ preventScroll: true });
+    else if (!dlg.contains(document.activeElement)) dlg.focus({ preventScroll: true });
+  }
+  // The line, while the project is not onboarded; the box over it, unless Later shut it for this visit. ask: Set up was
+  // pressed.
+  function drawOnboard(ask) {
+    if (!S.ctx || !S.d) return;
+    if (!OB.box) onbMake();
+    // Another project: the box of the one before is shut (its controls would send to this one), then asked anew.
+    if (OB.repo !== S.d.repo) {
+      Object.assign(OB, { repo: S.d.repo, open: false, later: false, keys: [], set: new Set(), rule: null, out: null, step: 0, act: null });
+      OB.box.hidden = true;
+    }
+    const c = S.d.repo !== null ? ctl() : null, todo = c ? onbTodo(c) : [];
+    OB.line.hidden = !todo.length;
+    if (!todo.length) { if (OB.open) onbClose(false); return; }
+    if (OB.open) { onbDraw(); return; }
+    if (OB.later) return;
+    OB.keys = todo; OB.open = true; OB.box.hidden = false;
+    OB.back = ask ? OB.line.querySelector('button') : document.activeElement;
+    onbDraw();
+    onbFocusStep();
+  }
+
   // Controls that change nothing (the search, the grouping, the issue filters and picks, and showing more) stay on while a change is out.
   const STILL = new Set(['held-search', 'held-by', 'held-link', 'list-more', 'list-all', 'pick', 'pick-all'].concat(IFILTERS));
   // While a change is out every other control is off, a page drawn by "Show more" too.
@@ -1950,8 +2191,11 @@
     // No record on the host's main, and another to pick (under Show in the machine head): nothing until one is picked.
     if (S.d.repo === null) {
       at.forEach(([, p]) => p.el.replaceChildren(S.ctx.state('empty', 'No rules to show', 'Conveyor did not run on this project on the build machine yet, so it has no rules. Pick a project under Show, above the tabs.')));
+      drawOnboard();
       return;
     }
+    // The setup over every tab is drawn from the same record (a change sent from it or from the tab shows in both).
+    if (!only) drawOnboard();
     // The focus a control had comes back to the control with the same action (on the same issue, in the same group,
     // in the same panel), if it is still there. While a change is out its control is off and cannot take the focus: it
     // is kept, and given back when the controls are on again.
@@ -2015,13 +2259,18 @@
     S.at.set(id, { el, ctx });
     // The panel acted in last (S.from), for the line that says what the action did (say): heard before the control's own handler.
     if (!S.heard.has(el)) { S.heard.add(el); ['click', 'input', 'change', 'keydown', 'drop'].forEach((t) => el.addEventListener(t, () => { S.from = id; }, true)); }
-    const view = ctx.project(d), read = readOf(view, ctx);
+    const view = ctx.project(d);
     // The Rules show one project: with more than one on the host the Rules panel's heading names it, whatever Show says.
     if (id === PART) ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Rules: ${view.repo}` : null);
+    take(d, ctx, id, drawn);
+  };
+  // A snapshot d, from the panel id (drawn: it shows S.d already), or from the setup over every tab (id null).
+  function take(d, ctx, id, drawn) {
+    const view = ctx.project(d), read = readOf(view, ctx);
     if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) {
       // A panel that shows a part with the same content (S.idle: the part drew nothing) draws nothing either.
       if (drawn && S.idle === d) return;
-      draw(id); return;
+      draw(id || undefined); return;
     }
     // A part that differs from the one drawn only in when its records were read (readAt, new on every refresh) draws
     // nothing while no change, turned-away snapshot or moved row waits on that time: drawing it again replaced an open
@@ -2057,7 +2306,7 @@
     S.d = view; S.turned = false;
     moveJudge(view, read);
     draw();
-  };
+  }
 
   PANELS.forEach(([id, title, size]) => window.DASH_APP.panel({
     id,
@@ -2082,4 +2331,15 @@
       if ((S.ctl || S.turned || S.moved.size) && read !== S.read) render(id)(el, d, ctx);
     },
   }));
+  // The setup opens over whichever tab is shown: the part the Rules tab drew already is not taken again. A part not
+  // read hides it.
+  window.DASH_APP.overlay({
+    part: PART,
+    draw(d, ctx) {
+      if (!d) { if (OB.box) { OB.open = false; OB.box.hidden = true; OB.line.hidden = true; } return; }
+      // A project picked under Show since (the same part, another project of it) is taken: the setup is for it.
+      if (S.raw && S.raw[0] === d && S.raw[2] === ctx.project(d).repo) { drawOnboard(); return; }
+      take(d, ctx, null, false);
+    },
+  });
 }());

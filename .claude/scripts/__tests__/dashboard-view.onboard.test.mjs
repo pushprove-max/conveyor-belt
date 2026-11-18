@@ -1,0 +1,237 @@
+// SPDX-License-Identifier: Apache-2.0
+// The setup of a repository not yet onboarded (issue 250): a modal over the Board, in five steps, that asks every
+// project rule and opens on each Board load until Finish writes `onboarded` to the control record.
+// Shared setup: dashboard-view.helpers.mjs.
+import assert from 'node:assert/strict';
+import { clone, boot, deliver, next, settle, key, full, act, rulesP, record, pickProject, CONTROL, cases } from './dashboard-view.helpers.mjs';
+
+const test = cases(import.meta.url);
+const box = (w) => w.document.getElementById('onboard');
+const shown = (w) => !!box(w) && !box(w).hidden;
+const line = (w) => w.document.getElementById('onboard-line');
+const step = (w) => box(w).querySelector('[aria-current="step"]').textContent;
+const asked = (w) => Array.from(box(w).querySelectorAll('.onboard-body .rules-row'), (r) => r.dataset.rule);
+const nextB = (w) => act(box(w), 'onboard-next');
+const count = (w) => box(w).querySelector('.onboard-count').textContent;
+const isSet = (w, k) => box(w).querySelector(`[data-rule="${k}"]`).dataset.set;
+const pressed = (w, a) => act(box(w), a).getAttribute('aria-pressed');
+const sent = async (w, fn) => { fn(); await settle(); return w.posts.splice(0).map((p) => p.body); };
+const pick = (w, a, value) => { const s = act(box(w), a); s.value = value; s.dispatchEvent(new w.Event('change', { bubbles: true })); };
+// A project whose engine knows onboarding (its record has the key), with push, visible, the whole suite, Land as
+// and Test before a push known too: 16 rules. The pack lands as one pull request. part: the Rules part's own fields
+// over the fixture's.
+function snap(onboarded = null, over = {}, part = {}) {
+  const d = full(), c = d.panels.rules.data.control;
+  d.panels.rules.data.control = { ...c, rules: { ...c.rules, push: false, visible: false, wholeSuite: false }, landAs: null, onboarded, ...over };
+  Object.assign(d.panels.rules.data, { repoUrl: 'https://github.com/example/sample-project', packLandAs: 'pr', pushCheck: true }, part);
+  return d;
+}
+const ALL = ['build', 'never', 'land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite', 'builder', 'reviewer', 'judge', 'account', 'review-account', 'cap', 'guard', 'visible'];
+
+// Bug: a new repository's rules were left at whatever the defaults were, and nobody was asked. The modal opens over
+// the tab shown (Overview here), Later shuts it for this visit only, and the line at the top stays to open it again.
+// The title names owner/repo from the repository's address, with no issue to read it from.
+test('Setup: a project with no onboarded opens the modal; Later closes it and a reload opens it again', () => {
+  const w = boot();
+  const none = (d) => ({ queue: [], held: [], open: { ...d.panels.rules.data.open, issues: [], held: [] } });
+  deliver(w, snap(null, {}, none(full())));
+  assert.ok(shown(w), 'the modal opens over the Overview tab');
+  const dlg = box(w).querySelector('[role="dialog"]');
+  assert.equal(dlg.getAttribute('aria-modal'), 'true');
+  assert.equal(box(w).querySelector('.onboard-title').textContent, 'Set up Conveyor for example/sample-project');
+  assert.deepEqual(Array.from(box(w).querySelectorAll('.onboard-step'), (s) => s.textContent), ['1. What to build', '2. Landing', '3. Models', '4. Limits', '5. Your yes']);
+  assert.equal(step(w), '1. What to build');
+  assert.deepEqual(asked(w), ['build', 'never']);
+  assert.equal(count(w), '0 of 16 rules set');
+  assert.ok(w.document.activeElement && dlg.contains(w.document.activeElement), 'the focus is in the modal');
+  assert.equal(line(w).hidden, false);
+  assert.match(line(w).textContent, /Conveyor is not set up for this repository yet/);
+  act(box(w), 'onboard-later').click();
+  assert.ok(!shown(w), 'Later closes it');
+  next(w, snap());
+  assert.ok(!shown(w), 'a new snapshot in the same visit keeps it closed');
+  assert.equal(line(w).hidden, false, 'the line stays while not onboarded');
+  act(line(w), 'onboard-open').click();
+  assert.ok(shown(w), 'Set up opens it again');
+  // Escape is Later.
+  key(w, w.document.activeElement, 'Escape');
+  assert.ok(!shown(w), 'Escape closes it');
+  const again = boot();
+  deliver(again, snap());
+  assert.ok(shown(again), 'the next Board load opens it again');
+});
+
+// Bug guarded: a rule counted as set with nothing saved (a check that sent nothing, a refusal), a preselected choice
+// sent nothing, a value in force that is not the default showed as preselected, and a choice made by keyboard left
+// the focus outside the modal. Next waits for each rule of its step to be saved; each choice is the Rules tab's command.
+test('Setup: Next stays disabled until each rule on the step is saved; a preselected default sends it; each choice sends the Rules tab\'s command', async () => {
+  const s = () => snap(null, { rules: { ...CONTROL.rules, push: true, visible: false, wholeSuite: false } });
+  const tab = boot({ tab: 'rules' });
+  deliver(tab, s());
+  act(box(tab), 'onboard-later').click();
+  const fromTab = await sent(tab, () => act(rulesP(tab), 'rule-P0').click());
+  const w = boot();
+  deliver(w, s());
+  assert.equal(nextB(w).disabled, true, 'nothing set yet');
+  // Bug: clicking the selected P0 turned it off, though a click on the selected choice keeps the default.
+  assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'sample' }],
+    'the selected P0 keeps the Build default');
+  assert.equal(count(w), '1 of 16 rules set');
+  assert.equal(pressed(w, 'rule-P0'), 'true');
+  assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), fromTab, 'once set, P0 off is the command the Rules tab sends');
+  assert.deepEqual(fromTab, [{ action: 'rules', args: ['P0=off'], repo: 'sample' }]);
+  // Add with an empty field sends nothing: Never build is not set.
+  assert.deepEqual(await sent(w, () => act(box(w), 'area-off').click()), []);
+  assert.equal(isSet(w, 'never'), 'false', 'a check that sent nothing does not set the rule');
+  // A change the host refuses does not set it either.
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve('refused') };
+  const chip = act(box(w), 'onboard-default-never');
+  assert.equal(chip.textContent, 'default: none');
+  assert.deepEqual(await sent(w, () => chip.click()), [{ action: 'rules', args: ['area:infra=on'], repo: 'sample' }]);
+  assert.equal(isSet(w, 'never'), 'false', 'a refused change does not set the rule');
+  w.reply = null;
+  await sent(w, () => act(box(w), 'onboard-default-never').click());
+  assert.equal(nextB(w).disabled, false);
+  nextB(w).click();
+  assert.equal(step(w), '2. Landing');
+  assert.deepEqual(asked(w), ['land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite']);
+  // Bug: Land as and Test before a push, rules added after the setup was first built, went unasked. Their default is
+  // the pack's value (here one pull request), and the preselected choice sends it.
+  assert.equal(act(box(w), 'onboard-default-land-as').textContent, 'default: Pull request');
+  assert.equal(pressed(w, 'land-as-pr'), 'true');
+  assert.deepEqual(await sent(w, () => act(box(w), 'land-as-pr').click()), [{ action: 'land-as', args: ['pr'], repo: 'sample' }]);
+  assert.equal(isSet(w, 'land-as'), 'true');
+  assert.deepEqual(await sent(w, () => act(box(w), 'push-check-off').click()), [{ action: 'push-check', args: ['off'], repo: 'sample' }]);
+  // Push is on in the record, but the default, Off, is shown selected until the rule is set.
+  assert.equal(pressed(w, 'push-off'), 'true');
+  assert.equal(pressed(w, 'push-on'), 'false');
+  // A preselected choice sends its command and sets the rule.
+  assert.equal(pressed(w, 'start-queue'), 'true');
+  assert.deepEqual(await sent(w, () => act(box(w), 'start-queue').click()), [{ action: 'start', args: ['queue'], repo: 'sample' }]);
+  assert.equal(isSet(w, 'start'), 'true');
+  assert.deepEqual(await sent(w, () => act(box(w), 'whole-suite-off').click()), [{ action: 'rules', args: ['wholeSuite=off'], repo: 'sample' }]);
+  // By keyboard: the focus stays in the modal while the change is out, and comes back to the control after it.
+  const dlg = box(w).querySelector('[role="dialog"]');
+  act(box(w), 'push-on').focus();
+  act(box(w), 'push-on').click();
+  assert.ok(dlg.contains(w.document.activeElement), 'the focus is in the modal while the change is out');
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'rules', args: ['push=on'], repo: 'sample' }]);
+  assert.equal(w.document.activeElement.dataset.act, 'push-on', 'the focus comes back to the control');
+  key(w, w.document.activeElement, 'Escape');
+  assert.ok(!shown(w), 'Escape still reaches the modal');
+  act(line(w), 'onboard-open').click();
+  assert.equal(nextB(w).disabled, true, 'the dependency guard is not set yet');
+  assert.equal(act(box(w), 'onboard-default-dep-guard').textContent, 'default: On');
+  assert.deepEqual(await sent(w, () => act(box(w), 'onboard-default-dep-guard').click()), [{ action: 'dep-guard', args: ['on'], repo: 'sample' }]);
+  assert.equal(nextB(w).disabled, false);
+  assert.equal(count(w), '8 of 16 rules set');
+});
+
+// Bug guarded: the setup reopened for ever, or not when the engine added a rule; a model picked stayed a draft until
+// Save; the Judge's default left its always-accepted kinds in force. Finish writes onboarded with every rule's key;
+// the modal and the line go, and a later load does not open it.
+test('Setup: Finish writes onboarded and the modal stops opening', async () => {
+  const w = boot();
+  deliver(w, snap(null, { guard: 98, judgeAlways: ['security'] }, { cap: null }));
+  for (let i = 0; i < 5; i += 1) {
+    for (const k of asked(w)) {
+      if (k === 'builder') {
+        // A model picked is saved at once, with no Save.
+        pick(w, 'builder-cli', 'codex');
+        await settle();
+        assert.deepEqual(w.posts.splice(0), [], 'a CLI with no model picked sends nothing');
+        assert.equal(isSet(w, 'builder'), 'false');
+        assert.deepEqual(await sent(w, () => pick(w, 'builder-model', 'gpt-6-astra')), [{ action: 'model', args: ['codex', 'gpt-6-astra'], repo: 'sample' }]);
+        assert.equal(isSet(w, 'builder'), 'true');
+        continue;
+      }
+      if (k === 'reviewer') {
+        // Bug: Codex, then Default before a model was picked, came back to the role in force: no command, not set.
+        pick(w, 'reviewer-cli', 'codex');
+        await settle();
+        assert.deepEqual(await sent(w, () => pick(w, 'reviewer-cli', '')), [{ action: 'reviewer', args: ['default'], repo: 'sample' }]);
+        assert.equal(isSet(w, 'reviewer'), 'true');
+        continue;
+      }
+      if (k === 'cap') {
+        // Bug: with no cap in the snapshot, both steps were off ('–') until the default was saved first.
+        const up = act(box(w), 'cards at once-up');
+        assert.equal(up.previousSibling.textContent, '6', 'the default cap, control-defaults.json\'s');
+        assert.equal(act(box(w), 'onboard-default-cap').textContent, 'default: 6');
+        assert.deepEqual(await sent(w, () => up.click()), [{ action: 'cap', args: ['7'], repo: 'sample' }]);
+        continue;
+      }
+      const posts = await sent(w, () => act(box(w), `onboard-default-${k}`).click());
+      if (k === 'judge') {
+        assert.deepEqual(posts.map((p) => [p.action, p.args]), [['judge', ['on']], ['judge', ['default']], ['judge', ['always']]],
+          'the Judge default is on, on its default model, accepting no kind always');
+      }
+    }
+    if (i < 4) { assert.equal(nextB(w).textContent, 'Next'); nextB(w).click(); }
+  }
+  assert.equal(step(w), '5. Your yes');
+  assert.equal(count(w), '16 of 16 rules set');
+  assert.equal(nextB(w).textContent, 'Finish');
+  const on = { at: '2026-11-09T17:00:00.000Z', rules: ALL };
+  w.reply = record({ rules: { ...CONTROL.rules, push: false, visible: false, wholeSuite: false }, onboarded: on });
+  assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'onboarded', args: ALL, repo: 'sample' }]);
+  await settle();
+  assert.ok(!shown(w), 'the modal closes');
+  assert.equal(line(w).hidden, true, 'the line goes');
+  const later = boot();
+  deliver(later, snap(clone(on)));
+  assert.ok(!shown(later), 'an onboarded project does not open it');
+  assert.equal(line(later).hidden, true);
+});
+
+// Bug guarded: a rule the engine added later went unasked, or every rule was asked again. A record whose
+// onboarded.rules lacks one opens at that rule's step alone; an engine with no onboarded key is never asked.
+test('Setup: a record whose onboarded.rules lacks one rule opens with only that rule\'s step', async () => {
+  const w = boot();
+  deliver(w, snap({ at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'visible') }));
+  assert.ok(shown(w));
+  assert.deepEqual(Array.from(box(w).querySelectorAll('.onboard-step'), (s) => s.textContent), ['1. Your yes']);
+  assert.deepEqual(asked(w), ['visible']);
+  assert.equal(count(w), '0 of 1 rules set');
+  assert.equal(nextB(w).textContent, 'Finish');
+  assert.deepEqual(await sent(w, () => act(box(w), 'visible-on').click()), [{ action: 'rules', args: ['visible=on'], repo: 'sample' }]);
+  assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'onboarded', args: ALL.filter((k) => k !== 'visible').concat(['visible']), repo: 'sample' }],
+    'the rules confirmed before are kept');
+  const old = boot();
+  deliver(old, full());
+  assert.ok(!shown(old) && (!line(old) || line(old).hidden), 'a record with no onboarded key (an older engine) is never asked');
+});
+
+// Bug guarded: after another project was picked under Show on Overview, with no new snapshot, Set up still sent to
+// the project picked before.
+test('Setup: a project picked under Show is the one Set up sends to', async () => {
+  const w = boot();
+  const d = snap();
+  const other = { ...clone(d.panels.rules.data), repo: 'widgetshop', repoUrl: 'https://github.com/example/WidgetShop' };
+  Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: other } });
+  d.panels.machine.data.repos = ['sample', 'widgetshop'];
+  deliver(w, d);
+  act(box(w), 'onboard-later').click();
+  pickProject(w, 'widgetshop');
+  act(line(w), 'onboard-open').click();
+  assert.ok(shown(w));
+  assert.equal(box(w).querySelector('.onboard-title').textContent, 'Set up Conveyor for example/WidgetShop');
+  assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'widgetshop' }]);
+});
+
+// Bug guarded: a switch to an onboarded project left the box of the one before open, its controls sending to the
+// project now shown.
+test('Setup: a switch to an onboarded project shuts the box of the one before', async () => {
+  const w = boot();
+  const d = snap();
+  const other = { ...clone(d.panels.rules.data), repo: 'widgetshop', repoUrl: 'https://github.com/example/WidgetShop' };
+  other.control = { ...other.control, onboarded: { at: '2026-11-01T00:00:00Z', rules: ALL } };
+  Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: other } });
+  d.panels.machine.data.repos = ['sample', 'widgetshop'];
+  deliver(w, d);
+  assert.ok(shown(w), 'the box opens for sample');
+  pickProject(w, 'widgetshop');
+  assert.ok(!shown(w), 'the box of sample is shut once widgetshop shows');
+  assert.equal(line(w).hidden, true);
+});

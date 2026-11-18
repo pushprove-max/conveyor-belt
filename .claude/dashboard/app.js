@@ -1791,6 +1791,22 @@
     });
     fitHead();
     drawMachine(part);
+    drawOverlays(part);
+  }
+  // What a panel's file draws over every tab (overlay({part, draw(data, ctx)}): the Rules' setup of a new repository),
+  // from that part, whichever tab is open; given null when the part is not read. One that throws takes nothing with it.
+  const overlays = [];
+  function overlay(mod) {
+    if (!mod || typeof mod.part !== 'string' || typeof mod.draw !== 'function') throw new Error('an overlay needs part and draw');
+    overlays.push(mod);
+  }
+  function drawOverlays(part) {
+    overlays.forEach((mod) => {
+      try {
+        mod.draw(part(mod.part), { h, chip, money, post, undoLine, refusal, project, state: stateBlock, param, params, issueLink, depRef, depPicked,
+          since, when, setTab, updatedAt: () => updatedAt, title() {}, relength() {} });
+      } catch (e) { /* the overlay is not drawn */ }
+    });
   }
   // The machine head, under the tabs on every tab: head.js states it (machine: {part, draw(el, data, ctx)}) and it is
   // drawn from that part, whichever tab is open; with no such part to draw (not read, or an error) it is not shown.
@@ -2105,5 +2121,5 @@
     window.setInterval(() => refresh(), REFRESH_MS);
   }
 
-  window.DASH_APP = { panel, head, start, pack, joined };
+  window.DASH_APP = { panel, head, overlay, start, pack, joined };
 }());

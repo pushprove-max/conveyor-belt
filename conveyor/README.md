@@ -64,6 +64,12 @@ issue waits again while the guard is on.
 landings since the last push run before a push (`pushCheck` in the record). A record that does not set it, as a new
 one does not, takes the pack's `push.check` (on by default). Off, a push runs no test first.
 
+`conveyor.sh control onboarded <rule>...` records that the owner set up the project on the Board: `onboarded` in the
+record becomes `{at, rules}`, the time and the rules the owner confirmed, each by its key on the Board (`build`,
+`dep-guard`, `review-account`). A new record has `onboarded` null, and the Board opens its setup
+([Set up a new repository](../docs/board.md#set-up-a-new-repository)). A rule that the list does not name opens the
+setup again, at that rule's step.
+
 `conveyor.sh control depends <issue> add|remove <issue>...` (the Board's "Depends on…", on the Control and Rules tabs)
 changes the issue's `Depends on:` line on GitHub, through `gh-write`; the control record is not touched. add puts the
 numbers on the body's last `Depends on:` line, or writes `Depends on: #N` at the end of the body; remove takes them off,

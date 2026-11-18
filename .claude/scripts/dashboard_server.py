@@ -372,6 +372,8 @@ def control_ok(body):
         return v in (['on'], ['off'])
     if a == 'land-as':  # Land as: the push to main, or to one pull request
         return v in (['main'], ['pr'])
+    if a == 'onboarded':  # the Board's setup finished: the keys of the rules the owner confirmed there
+        return 1 <= n <= 40 and all(re.fullmatch(r'[a-z][A-Za-z0-9-]{0,39}', x) for x in v)
     if a == 'force':  # one waiting issue built before its dependencies land (the host refuses it while the guard is on)
         return issues(1, 1)
     if a == 'retry' and n == 2 and v[1] == '--fresh':  # a blocked card's Fix that drops its kept work, by its issue
