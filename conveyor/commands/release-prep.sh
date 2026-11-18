@@ -51,8 +51,8 @@
 # ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
 # (null for a whole suite; else {sha and time: the run it reused, ran: the files it reran, none when no test ran, kept:
 # the passes it kept}), reasons
-# (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree
-# `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
+# (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree, and
+# the processes that carry its mark, `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
 # and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
 # commits: {by, commits}, else null)}. A release after a passed release-prep of the same
 # version keeps that run's suite (sha, done, failed, cases, moved, reused, since); one after a failed release-prep of
@@ -66,8 +66,9 @@
 # its record says moved, so it is never tested and released again without the owner's yes. Without prep, when the
 # record is a passed release-prep of that version on main's head, main not moved since, it starts release alone, told
 # that commit: the suite that passed is used, not run again. `conveyor.sh release-run
-# stop` ends the run under way: the processes of that run alone (the tree of the record's pid), never a process group,
-# and its record says stopped. Exit 2: refused (a run is already under way; none to stop).
+# stop` ends the run under way: the processes of that run alone (the tree of the record's pid, and each process that
+# carries the run's mark, in whatever process group), never a whole process group, and its record says stopped. A
+# run that ends in any other way (a KILL too) ends the processes left of it too, so none holds the release lock. Exit 2: refused (a run is already under way; none to stop).
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
@@ -144,11 +145,11 @@ relfirst() { # <version> <commit>
   done < <(git ls-tree --name-only "$2" docs/ 2>/dev/null | grep '\.md$')
   printf '%s\n' "$p"
 }
-# The release lock, held until the command ends. 1: it could not be made; 2: another run holds it.
+# The release lock (its descriptor RELLK), held until the command ends. 1: it could not be made; 2: another run holds it.
+RELLK=''
 rellock() { # <command name>
-  local lk
-  mkdir -p "$CARDS/release" && { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: $1: its lock could not be made; nothing run" >&2; return 1; }
-  flock -n "$lk" || { echo "conveyor: $1: release-prep or release is already running; this one is not started" >&2; return 2; }
+  mkdir -p "$CARDS/release" && { exec {RELLK}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: $1: its lock could not be made; nothing run" >&2; return 1; }
+  flock -n "$RELLK" || { echo "conveyor: $1: release-prep or release is already running; this one is not started" >&2; return 2; }
 }
 # The run's record (above), begun once the lock is held. RELSTARTED says it was, so a run refused before it (or at the
 # lock) leaves the record of the one under way as it is.
@@ -166,7 +167,41 @@ relstart() { # <command name> <version>
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" \
     '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
+  # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
+  # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
+  # lock it inherited. A KILL runs no trap, so a watcher, without the lock, ends them once the run's pid has ended.
+  export CONVEYOR_RELEASE_RUN="${CONVEYOR_RELEASE_PID:-$$}"
+  ( [ -z "$RELLK" ] || exec {RELLK}>&-
+    while kill -0 "$CONVEYOR_RELEASE_RUN" 2>/dev/null; do sleep 1; done # sleep: the watcher's pause between two checks
+    relreap "$$" "$CONVEYOR_RELEASE_RUN" "$BASHPID" ) < /dev/null > /dev/null 2>&1 &
+  trap 'relreap $$ "$CONVEYOR_RELEASE_RUN"' EXIT; trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
   unset CONVEYOR_RELEASE_PID # the suite's own commands are no part of this run's record
+}
+# The processes of a release run, one a line: <pid> and those under it, and each that carries the run's <mark>
+# (CONVEYOR_RELEASE_RUN=<mark> in its environment, relstart()), which a process group or session of its own, or a
+# parent that ended, takes out from under <pid>. Never <pid left out> (default this process), nor
+# one that has ended (a zombie), nor the process that lists them and its ps (which carries the mark when it does).
+relprocs() { # <pid> <mark> [<pid left out>]
+  local t e me=$BASHPID x=${3:-$$}
+  t=$(ps -A -o pid= -o ppid= -o stat= 2>/dev/null); e=$(ps axeww -o pid= -o ppid= -o command= 2>/dev/null)
+  awk -v r="$1" -v me="$me" -v x="$x" '{ k[$2] = k[$2] " " $1; a[$1] = ($3 !~ /Z/) } END { q[1] = r; n = 1
+    for (i = 1; i <= n; i++) { if (q[i] == me) continue; if (a[q[i]] && q[i] != x) print q[i]; m = split(k[q[i]], c, " "); for (j = 1; j <= m; j++) q[++n] = c[j] } }' <<<"$t"
+  awk -v k=" CONVEYOR_RELEASE_RUN=$2 " -v me="$me" -v x="$x" '$1 != me && $1 != x && $2 != me && index($0 " ", k) { print $1 }' <<<"$e"
+}
+# A release run ended (relprocs()'s arguments): each of its processes told to end, then killed 10 s later if they
+# have not, and killed again while one is left (one started meanwhile, or one still ending), for up to 2 s.
+relreap() { # <pid> <mark> [<pid left out>]
+  local ps i
+  ps=$(relprocs "$@" | sort -u) && [ -n "$ps" ] || return 0
+  # shellcheck disable=SC2086 # one pid a word
+  kill -TERM $ps 2>/dev/null
+  # shellcheck disable=SC2086
+  for ((i = 0; i < 100; i++)); do kill -0 $ps 2>/dev/null || break; sleep 0.1; done
+  for ((i = 0; i < 20; i++)); do
+    ps=$(relprocs "$@" | sort -u) && [ -n "$ps" ] || return 0
+    # shellcheck disable=SC2086
+    kill -KILL $ps 2>/dev/null; sleep 0.1
+  done
 }
 # The record at the command's end: its state, and each line it printed to stderr (<file>) as a reason.
 relend() { # <exit> <stderr file>
@@ -418,19 +453,13 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
   elif [ -n "$ok" ]; then echo "conveyor: release-run: release $1 is running, with the suite that passed on ${ok:0:12}; its output is in $CARDS/release/run.log"
   else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
-# The run under way ended: its record's pid and every process under it, told to end, then killed 10 s later if they
-# have not. Only a pid that runs conveyor.sh is taken, so a record left by a run that died names no other process.
+# The run under way ended: its record's pid and every process of the run (relreap()). Only a pid that runs
+# conveyor.sh is taken, so a record left by a run that died names no other process.
 releasestop() {
-  local p ps i
+  local p
   p=$(jq -er 'select(.ended == null) | .pid | numbers' "$RELRUN" 2>/dev/null) && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' \
     || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
-  ps=$(ps -A -o pid= -o ppid= | awk -v r="$p" '{ k[$2] = k[$2] " " $1 } END { q[1] = r; n = 1
-    for (i = 1; i <= n; i++) { print q[i]; m = split(k[q[i]], c, " "); for (j = 1; j <= m; j++) q[++n] = c[j] } }')
-  # shellcheck disable=SC2086 # one pid a word
-  kill -TERM $ps 2>/dev/null
-  for ((i = 0; i < 100; i++)); do kill -0 $ps 2>/dev/null || break; sleep 0.1; done
-  # shellcheck disable=SC2086
-  kill -KILL $ps 2>/dev/null
+  relreap "$p" "$p"
   relrec --arg t "$(clock)" '.state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"]'
   echo "conveyor: release-run: the release run of $(jq -r .version "$RELRUN") is stopped"
 }

@@ -6,7 +6,7 @@
 # or explain (which card and what cause made it slower). With no Tests seat set it starts nothing and says why (exit 2).
 # The session is given the file, its recorded times from the test lines of the card records (times, clocks, timed, slow) and
 # from the whole-suite runs, as the Tests page shows them, the
-# cards that ran it, its flaky entries and its recent failures (testfacts()). It reads a copy of main as it is at the ask, a worktree of
+# cards that ran it, its flaky entries, its recent failures, and its newest run of them all, named (testfacts()). It reads a copy of main as it is at the ask, a worktree of
 # that commit whose files it cannot write ($CARDS/testactions/<id>, removed when it ends), and finds a gh that refuses
 # every call first on its PATH; a Claude session has only Read, Grep and Glob, a Codex one its read-only sandbox and an
 # OpenCode one the review's read-only agent (ocrun()). The ask returns once the session has started, or is queued
@@ -157,7 +157,9 @@ tastart() { # <id>
     out=$(git -C "$MAIN" worktree add -q --detach "$wt" "$sha" 2>&1 < /dev/null && chmod -R a-w "$wt" 2>&1) \
       || { tadrop "$wt"; tafail "$1" "the copy of $BRANCH the session reads could not be made: ${out:0:300}"; return; }
     if [ "$how" = judge ]; then p=$TAJUDGE; else p=$TAEXPLAIN; fi
-    p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
+    p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts newest run, from the card test steps, the whole-suite runs (the release suite'"'"'s too) and its runs on its own: "
+      + (if .newest == null then "none recorded" else "\(.newest.run), \(.newest.time): \(.newest.result). When you say how its newest run ended, say it of this run and name it" end)
+      + ".\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; slow: that run found it over its CPU budget; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
       + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
       + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
       + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)
@@ -182,19 +184,38 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
 # them (FAILURE and failedrun, lib/testfiles.sh):
-# {card, issue, time, verdict, cases, tail}}.
+# {card, issue, time, verdict, cases, tail}; newest: its newest run of every record that holds one, a card's test step
+# (a file that passed on its run again while another file failed again: failed, then passed, unless the run again timed
+# out, which may have ended before the file ran; a `held` step, its failures the machine's, read as a failed one and
+# named held), a whole-suite run (the
+# release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
+# result}, null with none.}
 TAFAILS=5
 testfacts() { # <file>
   local fl defs refs
   fl=$(jq -c --arg f "$1" '[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": ")))]' "$FLAKY" 2>/dev/null) || fl='[]'
   testowners
   { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --argjson fl "$fl" --argjson n "$TAFAILS" --argjson defs "$defs" --argjson refs "$refs" \
-    --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) "$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
+    --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) \
+    --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
     | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first),
          slow: ([.slow | arrays | .[] | objects | select(.file == $f)] | first)} | select(.times != null or .clocks != null or .timed != null or .slow != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
-    | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails}'
+    | ([$ls[] | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
+        | select($x != [] or ((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed, .slow | arrays | .[] | objects | select(.file == $f)] | first)) != null)
+        | {time, run: "the test step of card \(.card) (#\(.issue))", result: ((if $x == [] then "passed"
+            elif $x[0].result == "pass" then "failed, then passed when run again"
+            elif ($x[0].again | type) == "array" and (any($x[0].again[]; . == $f) | not) then
+              (if ($x[0].failures.timeout | type) == "object" then "failed, and its run again timed out\($x[0].failures.timeout.file | strings | " in " + .) before it was known to pass"
+               else "failed, then passed when run again" end)
+            else "failed" end) + (if $r == "held" then " (the card was held: the machine was at fault)" else "" end))}]
+       + [$ta[] | {time: .end, run: "its run on its own from the Tests page (test action \(.id)) on \(.commit // "" | .[:12])", result: (if .result == "pass" then "passed" else "failed" end)}]
+       + [$su[] | . as $w | .files | objects | .[$f] | objects
+        | {time: $w.time, run: "the \(if $w.how == "release" then "release suite" else "full test suite" end)'"'"'s run on \($w.sha // "" | .[:12])",
+           result: (if .result == "ok" then "passed" elif .result == "fail" then "failed" else "no result named" end)}]
+       | map(select(.time | type == "string")) | max_by(.time)) as $nw
+    | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails, newest: $nw}'
 }
 # The worktree a session read, gone: made writable again, then removed.
 tadrop() { chmod -R u+w "$1" 2>/dev/null; git -C "$MAIN" worktree remove --force "$1" 2>/dev/null; rm -rf "$1"; git -C "$MAIN" worktree prune 2>/dev/null; } # <worktree>

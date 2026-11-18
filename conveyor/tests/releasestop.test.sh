@@ -25,6 +25,47 @@ t_relstop() {
   jq '.state = "running" | .ended = null' "$RUN" > "$RUN.new" && mv "$RUN.new" "$RUN" || fail "the record could not be changed"
   relsnap "a record left running with no run behind it is not shown stopped, with when" '.state == "stopped" and .ended != null'
 }
+# The suite of relstopgroup and relendleft (a runsetup command), on its first run: a process left out from under the
+# run, as a suite's own timeout leaves one: a process group of its own whose parent has ended, holding the descriptors
+# it inherited (the release lock's too). Its pid is in $STUB/left. The suite then waits (<wait>: sleep 300) or ends.
+RELLEFT='[ -e "$STUB/left" ] || { ( timeout 300 sleep 300 & echo $! > "$STUB/left" ); ' # sleep: the left process, which the run's end must end
+# Bug (#335): Stop ended the tree of the run's pid alone, so the suite's process in a group of its own ran on, kept the
+# release lock, and the next release-prep was refused ("already running") until it was killed by hand.
+t_relstopgroup() {
+  local O RUN out
+  runsetup "$RELLEFT sleep 300; }" # sleep: the suite runs until the case ends the run
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run did not start the run: $out"
+  wait_until '[ -s "$STUB/left" ]' || fail "the suite did not start: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
+  out=$(loop release-run stop 2>&1) || fail "the stop failed: $out"
+  ! kill -0 "$(cat "$STUB/left")" 2>/dev/null || fail "the suite's process in a group of its own still runs after the stop"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "the next release-prep did not start at once after the stop: $out"
+  relwait "the next release-prep did not pass" '.state == "passed"'
+}
+# Bug (#335): a run whose pid was killed (KILL, which runs no trap) left its release-prep and the suite's process in a
+# group of its own running, holding the lock.
+t_relkilled() {
+  local O RUN out
+  runsetup "$RELLEFT sleep 300; }" # sleep: the suite runs until the case ends the run
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run did not start the run: $out"
+  wait_until '[ -s "$STUB/left" ]' || fail "the suite did not start: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
+  kill -KILL "$(jq .pid "$RUN")" || fail "the run's pid could not be killed"
+  wait_until "! kill -0 $(cat "$STUB/left") 2>/dev/null && flock -n '$T/$CASE/cards/release/lock' true" \
+    || fail "the suite's process in a group of its own still runs, or the lock is held, after the run's pid was killed"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "the next release-prep did not start once the killed run's processes ended: $out"
+  relwait "the next release-prep did not pass" '.state == "passed"'
+}
+# Bug (#335): a run that ended on its own left the suite's process in a group of its own running, holding the lock.
+t_relendleft() {
+  local O RUN out p
+  runsetup "$RELLEFT }"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run did not start the run: $out"
+  relwait "the run did not end" '.ended != null'
+  p=$(jq .pid "$RUN")
+  wait_until "! kill -0 $p 2>/dev/null" || fail "the run's process did not end"
+  ! kill -0 "$(cat "$STUB/left")" 2>/dev/null || fail "the suite's process in a group of its own still runs after the run ended"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "the next release-prep did not start once the run ended: $out"
+  relwait "the next release-prep did not end" ".pid != $p and .ended != null"
+}
 # Bug: a card that lands and is pushed while the Board's release-prep runs its suite moves main, and release then runs
 # the suite again and releases the new main, with no second press by the owner.
 t_relboardmoved() {

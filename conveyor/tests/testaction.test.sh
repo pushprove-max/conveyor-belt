@@ -44,6 +44,7 @@ t_tajudge() {
   # Bug it catches (#130): a file timed in whole-suite runs alone was "not timed" to the judge, while the Tests page
   # showed its runs: the whole-suite runs ($SUITERUNS) are in its recorded times too.
   jq -cn '{time: "2026-11-03T00:00:00Z", how: "full", sha: "", files: {"tests/x.test.sh": {result: "ok", sec: 50, cpu: 45.5}, "tests/other.test.sh": {result: "ok", sec: 1, cpu: 1}}}' > "$ST/suiteruns.jsonl"
+  jq -cn '{time: "2026-11-07T00:00:00Z", how: "release", sha: "0123456789abcdef", files: {"tests/x.test.sh": {result: "fail", sec: 9, cpu: 8}}}' >> "$ST/suiteruns.jsonl"
   echo '{"entries":[{"case":"tests/x.test.sh: one","source":"c2-6","time":"2026-11-02T00:00:00Z","card":"c2-6","issue":6}],"filed":[]}' > "$ST/flaky.json"
   # Its failed test steps (#188): one failed on main too, with the end of its output; one the card's own change caused;
   # and one of another file.
@@ -79,6 +80,11 @@ t_tajudge() {
   [[ $out == *$'\n- 2026-11-06T00:00:00Z, card c6-11 (#11), verdict flaky, failing cases: four\n- 2026-11-05T00:00:00Z, card c4-9 (#9), verdict card, failing cases: one\n  The end of its output:\n    not ok one\n- 2026-11-04T00:00:00Z, card c3-8 (#8), verdict main, failing cases: two\n  The end of its output:\n    ok one\n    not ok two: port 8080 in use'* ]] \
     && ! grep -qF 'not ok three' <<<"$out" && grep -qF 'CAUSE: <case> | <kind> | <one-line reason>' <<<"$out" && grep -qF 'VERDICT: <keep | speed up | split | merge | delete | stabilise>' <<<"$out" \
     || fail "the prompt does not give the failures of the file alone, with their verdicts, cards, cases and output, and ask for CAUSE lines and stabilise: $out"
+  # Bug it catches (#335): the judge told the owner the file's newest run passed, read from a card's run, when the
+  # release suite had failed it since. Its newest run is the release suite's failed run (newer than every card line
+  # above), named as the run it is.
+  grep -qF 'Its newest run, from the card test steps, the whole-suite runs (the release suite'"'"'s too) and its runs on its own: the release suite'"'"'s run on 0123456789ab, 2026-11-07T00:00:00Z: failed. When you say how its newest run ended, say it of this run and name it.' <<<"$out" \
+    || fail "the prompt does not name the newer failed release run as the file's newest run: $out"
   : > "$STUB/ta-go"
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json'" || fail "the record still says running after the session ended"
   [ "$(tarec "$id" '[.state, .cli, .model, .effort, .verdict, (.end | type), has("pid")] | tojson')" = '["done","claude","m-tests","high","split","string",false]' ] \
@@ -116,6 +122,37 @@ t_tajudge() {
   echo old > "$ST/testactions/0000000000aa.txt"
   out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/snapshot.sh")" && TATEXT_SHOWN=0 testacts | jq -c '[.[] | [.id, (.text | type)]]')
   [ "$out" = "[[\"$id\",\"string\"]]" ] || fail "past the newest, not the judge alone with its text: $out"
+}
+
+# The newest run the judge is told of (testfacts(), called as the session's start calls it).
+tanewest() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" && testfacts tests/x.test.sh | jq -c .newest ); }
+# Bugs it catches (#335): a card's test step where this file and another failed and this one alone passed when run
+# again was told to the judge as a failed run of this file; and a run of the file on its own (Run this file now), newer
+# than every card and suite run, was not read at all.
+t_tanewest() {
+  tasetup; local out
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-08T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "tests/other.test.sh", cases: [{name: "b"}]}], timeout: null},
+    rerun: {exit: 1, failures: {files: [{file: "tests/x.test.sh", cases: [{name: "a"}]}, {file: "tests/other.test.sh", cases: [{name: "b"}]}], timeout: null}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-08T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"failed, then passed when run again"}' ] \
+    || fail "the newest run is not the card's step, where the file passed when run again: $out"
+  mkdir -p "$ST/testactions" && jq -cn '{id: "0000000000bb", action: "run", file: "tests/x.test.sh", commit: "fedcba9876543210", start: "2026-11-09T00:00:00Z", end: "2026-11-09T00:01:00Z", state: "done", result: "fail"}' > "$ST/testactions/0000000000bb.json"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-09T00:01:00Z","run":"its run on its own from the Tests page (test action 0000000000bb) on fedcba987654","result":"failed"}' ] \
+    || fail "the newest run is not the file's run on its own: $out"
+  # Bug: a step the machine held (result held, card.sh) with a time for the file was told as passed.
+  jq -cn '{card: "c8-13", issue: 13, step: "test", time: "2026-11-10T00:00:00Z", result: "held", times: {"tests/x.test.sh": 1},
+    failures: {files: [{file: "tests/x.test.sh", cases: [{name: "a"}]}], timeout: null}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-10T00:00:00Z","run":"the test step of card c8-13 (#13)","result":"failed (the card was held: the machine was at fault)"}' ] \
+    || fail "a held step that failed the file is not told as failed and held: $out"
+  # Bug: a run again that timed out in another file before it reached this one was told as this file passing on it.
+  jq -cn '{card: "c9-14", issue: 14, step: "test", time: "2026-11-11T00:00:00Z", result: "fail",
+    failures: {files: [{file: "tests/other.test.sh", cases: []}], timeout: {sec: 600, file: "tests/other.test.sh"}},
+    rerun: {exit: 1, failures: {files: [{file: "tests/other.test.sh", cases: [{name: "b"}]}, {file: "tests/x.test.sh", cases: [{name: "a"}]}], timeout: null}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-11T00:00:00Z","run":"the test step of card c9-14 (#14)","result":"failed, and its run again timed out in tests/other.test.sh before it was known to pass"}' ] \
+    || fail "a run again that timed out before the file ran is told as the file passing on it: $out"
 }
 
 # The Board's File an issue (`testissue`) files the issue with the pack's type and last priority and keeps it for the

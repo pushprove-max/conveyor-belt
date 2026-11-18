@@ -28,18 +28,19 @@ t_fdstarun() {
 # fds 3 to 255, so it kept the locks taken above 255, the release lock among them: release-prep itself waited for
 # that process before it ended, and a release could not start until it had. The run takes a slot of a pool of the case's
 # own, as a loop outside a test does (slot_left runs only then); the suite leaves a process of its group behind for
-# 20 s, one that closed every fd it inherited, and killed at the case's end.
+# 60 s, one that closed every fd it inherited. Release-prep's end ends it (#335), so the case times release-prep: it
+# ends well before the left process would have.
 t_fdsrelease() {
   local out left; export XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_SLOT
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" \
     || fail "the host file was not written"
   cutsetup true
-  left='(for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done; echo $BASHPID >> "$STUB/left"; exec sleep 20) </dev/null >/dev/null 2>&1 &' # sleep: the left process, killed at the case's end
+  left='(for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done; echo $BASHPID >> "$STUB/left"; exec sleep 60) </dev/null >/dev/null 2>&1 &' # sleep: the left process, which release-prep must not wait for
   printf 'git rev-parse HEAD > "$STUB/full-at"\n%s\n' "$left" > "$STUB/full-cmd" || fail "the suite stub was not written"
   trap 'kill $(cat "$STUB/left" 2>/dev/null) 2>/dev/null' EXIT
   holdfds
-  out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
-  kill -0 "$(cat "$STUB/left")" 2>/dev/null || fail "release-prep ended only once the process its suite left had: its slot_left kept a lock above 255"
+  SECONDS=0; out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
+  [ "$SECONDS" -lt 60 ] || fail "release-prep ended only once the process its suite left had: its slot_left kept a lock above 255"
   # release-prep's passing status: release takes it, so it runs no suite and needs no slot.
   echo '[{"context":"conveyor/release-suite","state":"success"}]' > "$STUB/statuses"
   out=$(loop release 1.1.0 2>&1) || fail "release right after release-prep was refused: $out"
