@@ -132,6 +132,11 @@ t_other() {
   out=$(start)
   grep -q 'only they can fix or file it' <<<"$out" && ! grep -q 'filed as #<n>\|running cards keep' <<<"$out" \
     || fail "in another project the start-up text does not leave the plugin problem to the owner: $out"
+  # Bug (#483): here the owner files it, so the Foreman reporting the issue they filed replaced the first note; it
+  # must add its own row, as before #450.
+  out=$(turn u2 "$LINE, filed as #449"); [ -z "$out" ] || fail "a filed plugin problem was refused in another project: $out"
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 2 ] && grep -q ' · running cards keep .*alpha-7\.err · evidence: ' "$FD/plugin-bugs.md" \
+    || fail "in another project a filed line replaced the older note: $(cat "$FD/plugin-bugs.md")"
 }
 
 cases=(home legacy split other)

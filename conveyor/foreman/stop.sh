@@ -54,8 +54,9 @@ U=$(jq -r '.uuid // empty' <<<"$TURN" 2>/dev/null); REPLY=$(jq -r '.reply // emp
 PLUG='^[[:space:]*_>-]*plugin problem \(for the conveyor-belt repo\):[[:space:]*_]*'
 FORM="'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>'"
 # Each plugin-problem line is noted once: a reply that says it again (after a refusal) adds no second note. A line
-# that ends "filed as #<n>" names the issue it was filed as; said after the same line without it (or as the line
-# context gives a listed note), it takes that note's place, so the note names the issue (context lists those with none).
+# that ends "filed as #<n>" names the issue it was filed as; in the plugin's own repository, said after the same line
+# without it (or as the line context gives a listed note), it takes that note's place, so the note names the issue
+# (context lists those with none).
 # An issue number is 1 or more: "filed as #0" names no issue, so that line is refused and noted without it, as unfiled.
 NOTES=$FD/plugin-bugs.md
 FILED='[,;]?[[:space:]]*filed as #([1-9][0-9]*)[[:space:]]*\.?$'
@@ -76,10 +77,11 @@ while IFS= read -r l; do
   ! grep -qF -- " · $seen · evidence: " "$NOTES" 2>/dev/null || continue
   card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]|#[0-9]+' <<<"$what" | head -n 1)
   ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$what" | head -n 1); ev=${ev%.}
-  # A filed line takes the place of the first note that names no issue and says the same thing: its own text (the
-  # line the start-up list gives for it), or that text with its own card and evidence fields after it. Never a note
-  # that only shares a card or path: that may be a different problem.
-  if [ "$what" != "$seen" ] && [ -s "$NOTES" ] \
+  # In the plugin's own repository (plugin_home) a filed line takes the place of the first note that names no issue
+  # and says the same thing: its own text (the line the start-up list gives for it), or that text with its own card
+  # and evidence fields after it. Never a note that only shares a card or path: that may be a different problem. In
+  # any other project the owner files it, and a filed line is noted as its own row, as before.
+  if [ "$what" != "$seen" ] && [ -s "$NOTES" ] && plugin_home \
     && W="$what" S="$seen" LC_ALL=C awk '
       BEGIN { D = " · "; C = " · card "; E = " · evidence: " }
       !done && /^- / && tolower($0) !~ / filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: / && (i = index($0, C)) {
