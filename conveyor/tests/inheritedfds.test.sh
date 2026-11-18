@@ -24,12 +24,30 @@ t_fdstarun() {
   trfree || fail "the slot is still held once the run ended: a process of the run kept its fd above 255"
 }
 
-# Bug (#216): slot_left, which holds release-prep's slot while a process its suite left behind runs on, closed only
-# fds 3 to 255, so it kept the locks taken above 255, the release lock among them: release-prep itself waited for
-# that process before it ended, and a release could not start until it had. The run takes a slot of a pool of the case's
-# own, as a loop outside a test does (slot_left runs only then); the suite leaves a process of its group behind for
-# 60 s, one that closed every fd it inherited. Release-prep's end ends it (#335), so the case times release-prep: it
-# ends well before the left process would have.
+# Bug (#216): slot_left, which holds a runner's slot while a process its worker left behind runs on, closed only fds 3
+# to 255, so it kept the locks taken above 255, the release lock among them: a release could not start until that
+# process had ended. The case calls slot_left itself (#343): in a release-prep, relreap ends slot_left's process with
+# the run, so a lock it leaked would be free again before any check there.
+t_fdsslotleft() {
+  local lk g i
+  holdfds
+  exec {lk}>>"$T/$CASE.lock" && flock -n "$lk" && [ "$lk" -gt 255 ] || fail "the lock was not taken above 255: fd $lk"
+  g=$( (set -m; sleep 30 {lk}>&- >/dev/null 2>&1 & echo $!) ) # sleep: the worker's left process, its own group
+  # shellcheck disable=SC2064 # g is local: the trap must hold its value now, as it runs after this function returns
+  trap "kill $g 2>/dev/null" EXIT
+  slot_left "$g"
+  exec {lk}>&-
+  # slot_left's process starts with every fd of this shell and closes them in the background: the lock is given 10 s
+  # to come free, and the left process must still run after it has, so slot_left's process is still waiting then.
+  for ((i = 0; i < 100; i++)); do flock -n "$T/$CASE.lock" true && break; sleep 0.1; done
+  [ "$i" -lt 100 ] || fail "the lock is still held while slot_left waits: it kept the lock's fd above 255"
+  pgrep -g "$g" >/dev/null || fail "the left process ended before the check: the lock may have come free only then"
+}
+
+# Bug (#216, #335): release-prep waited for a process its suite left behind before it ended, and a release could not
+# start until it had. The run takes a slot of a pool of the case's own, as a loop outside a test does (slot_left runs
+# only then); the suite leaves a process of its group behind for 60 s, one that closed every fd it inherited.
+# Release-prep's end ends it (#335), so the case times release-prep: it ends well before the left process would have.
 t_fdsrelease() {
   local out left; export XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_SLOT
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" \
@@ -40,7 +58,7 @@ t_fdsrelease() {
   trap 'kill $(cat "$STUB/left" 2>/dev/null) 2>/dev/null' EXIT
   holdfds
   SECONDS=0; out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
-  [ "$SECONDS" -lt 60 ] || fail "release-prep ended only once the process its suite left had: its slot_left kept a lock above 255"
+  [ "$SECONDS" -lt 60 ] || fail "release-prep ended only once the process its suite left had"
   # release-prep's passing status: release takes it, so it runs no suite and needs no slot.
   echo '[{"context":"conveyor/release-suite","state":"success"}]' > "$STUB/statuses"
   out=$(loop release 1.1.0 2>&1) || fail "release right after release-prep was refused: $out"
