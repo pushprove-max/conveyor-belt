@@ -77,7 +77,7 @@ arms on the same tasks. With no `--arm`, the run uses the `conveyor` arm.
 
 | Arm | What builds a task | Install in the container | Login |
 | --- | --- | --- | --- |
-| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, and the engine version | Claude and Codex |
+| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, and the engine version | Claude, and Codex when the builder, the reviewer or the judge uses Codex |
 | `conveyor-codex-claude` | Conveyor, with Codex as the builder and Claude as the reviewer | The same as `conveyor` | Claude and Codex |
 | `solo` | One Claude session, with no shell (the same as `--solo`) | The Claude Code CLI | Claude |
 | `solo-review` | One Claude session, then one more Claude session that reviews the change and fixes it | The Claude Code CLI | Claude |
@@ -122,7 +122,7 @@ An arm runs only after its preflight passes. The preflight checks that Docker an
 is on this machine. It then installs the arm in a container and runs the arm on one small task: a file that prints a
 word with a spelling mistake. The arm must fire and change the file. A preflight that fails says what is missing. A
 run does not start when the preflight of one of its arms fails. A preflight that passed stays good for one day, while
-the arm's file does not change.
+the arm's file and the logins it needs do not change.
 
 ```
 conveyor.sh bench swe arms

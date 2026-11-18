@@ -42,6 +42,7 @@ rec picked ok; rec build ok
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
 if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
 cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"
+cat "$HOME/.codex/auth.json" > "$SWE_FX/codex.seen" 2>/dev/null || :
 rec review GO '' null 'no findings'; rec test pass '' null 'test output'; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" add -A; git -C "$CONVEYOR_MAIN" commit -qm fix; rec landed ok; gh issue close 1
 EOF
   # The functions and globals the stage map (bench/stagemap.sh) starts each stage from, one file a stage or two.
@@ -122,11 +123,13 @@ swe() {
   mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE/acct" "$CODEX_HOME" && echo CLAUDE-LOGIN > "$T/$CASE/acct/.credentials.json" && echo CODEX-LOGIN > "$CODEX_HOME/auth.json" \
     && jq -cn --arg a "$T/$CASE/acct" '{accounts: [{name: "bench", configDir: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     && jq -c '.account = "bench"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the logins were not made"
-  # The conveyor arm on both engines and Claude alone passed their preflight an hour ago (a case of the preflight runs it).
+  # The conveyor arm on both engines and Claude alone passed their preflight an hour ago (a case of the preflight runs it),
+  # with the logins their seats take: the conveyor arm's builder m is Claude's, its reviewer x Codex's.
   local k a
   for k in conveyor/$EA conveyor/$EB solo/solo-m; do a=${k%/*}; mkdir -p "$B/preflight/$a"
     jq -cn --arg k "${k#*/}" --argjson e "$(($(date +%s) - 3600))" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" \
-      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s}' > "$B/preflight/$a/${k#*/}.json" || fail "the preflight passes were not kept"
+      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end)}' \
+      > "$B/preflight/$a/${k#*/}.json" || fail "the preflight passes were not kept"
   done
 }
 # The tasks in the pinned order: sha256 of "<seed>:<id>", as swe.json's seed gives it.
@@ -470,7 +473,43 @@ t_sweseats() {
     && jq -e '.models.allowed.codex | index("x")' "$SWE_FX/pack.seen" > /dev/null || fail "the engine was not given the arm's seats: $(cat "$SWE_FX/control.seen") $(jq -c .models "$SWE_FX/pack.seen")"
   # Bug: the engine in the container ran the project's own test command, not the task's (its cmd in the task list).
   jq -e '.test == {command: "true", survey: false}' "$SWE_FX/pack.seen" > /dev/null || fail "the engine's pack does not hold the task's test command: $(jq -c .test "$SWE_FX/pack.seen")"
+  # Bug: the container was given the arm file's logins only, so the Codex builder seat had no Codex login there.
+  [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] || fail "the Codex seat's container had no Codex login"
   [ -s "$B/results/conveyor-seats-$EB/$(sweorder | head -n 1).json" ] || fail "the seats arm's results are not kept apart from the conveyor arm's: $(ls "$B/results")"
+}
+
+# Bug: the conveyor arm's preflight asked for a Codex login on a project whose seats all use Claude, so the default
+# arm could not run on a machine with no Codex login. A seat on Codex still needs one. The Tests seat serves
+# `testaction`, which the benchmark's `run 1` does not start: a Codex Tests seat asked for a Codex login too.
+t_swearmlogin() {
+  swe; local out
+  rm "$CODEX_HOME/auth.json"
+  jq -c '.model = {cli: "claude", model: "m"} | .reviewer = {cli: "claude", model: "m"} | .judgeOn = false | .tests = {cli: "codex", model: "x"}' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  jq '.seats = {model: {cli: "codex", model: "x"}}' "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-seats.json"
+  out=$(loop bench swe arms check conveyor conveyor-seats 2>&1)
+  grep -q "^conveyor: ready$" <<<"$out" || fail "the conveyor arm on Claude seats asked for a Codex login: $out"
+  grep -q "^conveyor-seats: failed: no codex login on this machine" <<<"$out" || fail "an arm with a Codex seat passed with no Codex login: $out"
+  # Bug: a run took the passed check from before the reviewer moved to Codex, and its task's container could not be made.
+  jq -c '.reviewer = {cli: "codex", model: "x"}' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  out=$(loop bench swe 1 2>&1) && fail "the run started with a Codex seat and no Codex login: $out"
+  grep -q "the arm conveyor cannot run: its preflight failed: no codex login on this machine" <<<"$out" || fail "the run reused the check from before the seat moved to Codex: $out"
+  # Bug: the judge's CLI was not counted, so a judge on Codex over Claude seats ran with no Codex login.
+  jq -c '.reviewer = {cli: "claude", model: "m"} | .judgeOn = true | .judge = {cli: "codex", model: "x"}' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  out=$(loop bench swe arms check conveyor 2>&1)
+  grep -q "^conveyor: failed: no codex login on this machine" <<<"$out" || fail "the arm with a Codex judge passed with no Codex login: $out"
+}
+
+# Bug: the seats were worked out on this host's models, so on a host with no Codex and a pack that lists no models the
+# default reviewer was Claude's, while in the container, where the arm installs Codex, the same default is Codex's:
+# the arm passed with no Codex login and its container had none.
+t_swearmdefault() {
+  swe; local out p='' d
+  rm "$CODEX_HOME/auth.json" "$STUB/codex"
+  for d in ${PATH//:/ }; do [ -x "$d/codex" ] || p+=$d:; done
+  tune 'del(.models.allowed)'
+  jq -c '.model = {cli: "claude", model: "claude-opus-5-5"} | del(.reviewer) | .judgeOn = false' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  out=$(PATH=${p%:} loop bench swe arms check conveyor 2>&1)
+  grep -q "^conveyor: failed: no codex login on this machine" <<<"$out" || fail "the default reviewer, Codex's in the container, asked for no Codex login: $out"
 }
 
 # Bug: the harness kept every dataset row (each task's reference fix and hidden tests) in the state folder and in

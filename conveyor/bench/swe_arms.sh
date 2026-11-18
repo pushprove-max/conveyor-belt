@@ -6,7 +6,8 @@
 #   kind       "conveyor": the engine's loop builds the task's card (`conveyor.sh run 1`) on the project's seats with
 #              the arm's seats over them; "agent": the arm's own run command builds it
 #   seats      (conveyor) the control record's model, reviewer and judge the arm sets, as the control record holds them
-#   login      the subscription logins the arm uses: "claude" (the builder's account, `control account`), "codex"
+#   login      the subscription logins the arm uses: "claude" (the builder's account, `control account`), "codex";
+#              a conveyor arm's container is given the login of each seat's CLI as well (swe_logins)
 #   install    shell run first in the task's container, as the bench user (HOME /bench, ~/.local/bin on PATH)
 #   preflight  shell run in the container after install: exit 0 when the arm's tools are in place and signed in
 #   run        (agent) shell that builds the task headless in the task's checkout: $SWE_PROMPT is the file of the
@@ -42,6 +43,25 @@ swe_login() { # <claude | codex>
     codex) printf '%s\n' "${CODEX_HOME:-$HOME/.codex}/auth.json" ;;
     *) return 1 ;;
   esac
+}
+# The logins an arm's container is given: the arm's own, and for a conveyor arm the CLI of each seat `run 1` uses
+# there (the project's control record with the arm's seats over it: the builder, the reviewer and the judge only when
+# it is on; the Tests seat serves `testaction`, which the run does not start), so a Conveyor arm on Claude seats needs
+# no Codex login. The seats are worked out on the models the engine in the container offers, not this host's: the
+# task's pack (swe_pack: the project's models.allowed with the arm's seats in it) when it lists some, else the
+# built-in MODELS0, as the arm's install puts Codex in the container even where this host has none.
+swe_logins() { # <arm json>
+  local c a s x=''
+  if [ "$(jq -r .kind <<<"$1")" = conveyor ]; then
+    s=$(jq -c '.seats // {}' <<<"$1")
+    c=$(ctl 2>/dev/null) && c=$(jq -c --argjson s "$s" '. + $s' <<<"$c") || c=null
+    packget models.allowed a 2>/dev/null || a=''
+    x=$(jq -r --argjson c "$c" --argjson s "$s" --argjson d "$MODELS0" "$SEATNOW$JUDGENOW"'
+        reduce ($s[] | objects | select(.cli != null)) as $x (.; .[$x.cli] = ((.[$x.cli] // []) + [$x.model] | unique)) | (. // $d)
+        | ([try seatnow("builder"; $c)] | first) as $b | ([try seatnow("reviewer"; $c)] | first) as $r
+        | $b, $r, (if $c.judgeOn == true and $r != null then [try judgenow($c; $r)] | first else null end) | .agent? // empty' <<<"${a:-null}")
+  fi
+  jq -r --arg x "$x" '[(.login // [])[], ($x | splits("\n")) | select(IN("claude", "codex"))] | unique | join(" ")' <<<"$1"
 }
 swe_logindest() { case $1 in claude) echo .claude/.credentials.json ;; codex) echo .codex/auth.json ;; esac; }
 # A trial's container: the task's image; the sandbox mounted at its own path (and, for a conveyor arm, the engine's
@@ -101,7 +121,7 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     run="CONVEYOR_MAIN=$(printf %q "$sb/$SWE_MAIN") CONVEYOR_CARDS=$(printf %q "$sb/cards") bash $(printf %q "$4") run 1 > $(printf %q "$sb/loop.log") 2>&1"
   else run=$(jq -r .run <<<"$a"); fi
   printf '%s\n' "$c" > "$h/box"; docker rm -f "$c" > /dev/null 2>&1
-  swe_box "$c" "$(jq -r .image <<<"$1")" "$sb" "$(jq -r '.login // [] | join(" ")' <<<"$a")" "$eng" > "$h/box.err" 2>&1 \
+  swe_box "$c" "$(jq -r .image <<<"$1")" "$sb" "$(swe_logins "$a")" "$eng" > "$h/box.err" 2>&1 \
     || { docker rm -f "$c" > /dev/null 2>&1; echo "its container could not be made: $(cliwords "$(cat "$h/box.err")" | tail -n 2 | paste -sd ' ' -)"; return 1; }
   if ! swe_in "$to" "$c" "$sb/$SWE_MAIN" "$(jq -r '.install // "true"' <<<"$a")" "SWE_SB=$sb" < /dev/null > "$h/install.log" 2>&1; then
     why="its install failed: $(cliwords "$(tail -n 20 "$h/install.log")" | tail -n 2 | paste -sd ' ' -)"
@@ -163,7 +183,7 @@ swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kin
   if jq -e '.offered == false' <<<"$a" > /dev/null; then why="not offered: $(jq -r '.why // "no reason given"' <<<"$a")"
   elif ! docker info > /dev/null 2>&1; then why="Docker is not installed or not running (docker info failed)"
   else
-    for l in $(jq -r '.login // [] | .[]' <<<"$a"); do
+    for l in $(swe_logins "$a"); do
       f=$(swe_login "$l") && [ -s "$f" ] && continue
       why="no $l login on this machine: ${f:+${f/#$HOME/\~} is missing; }sign in with $l (on macOS a Claude login kept in the Keychain has no such file)"; break
     done
@@ -177,13 +197,14 @@ swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kin
     { chmod -R u+w "$sb" "$sb.h"; rm -rf "$sb" "$sb.h"; } 2>/dev/null
   fi
   mkdir -p "$SWE_DIR/preflight/$n" && swe_put "$SWE_DIR/preflight/$n/$2.json" "$(jq -nc --argjson a "$a" --arg k "$2" --arg w "$why" --arg at "$(swe_now)" --argjson e "$(date +%s)" \
-    '{arm: $a.name, key: $k, ok: ($w == ""), why: (if $w == "" then null else $w end), at: $at, epoch: $e, spec: $a}')"
+    --arg l "$(swe_logins "$a")" '{arm: $a.name, key: $k, ok: ($w == ""), why: (if $w == "" then null else $w end), at: $at, epoch: $e, spec: $a, logins: $l}')"
   printf '%s' "$why"
 }
-# An arm can be picked once its preflight passed: a pass of the same arm file and key from the last day is taken,
-# else the preflight runs now. Prints nothing when the arm is ready, else why not.
+# An arm can be picked once its preflight passed: a pass of the same arm file and key from the last day, with the
+# same logins (a seat may have moved to another CLI since), is taken, else the preflight runs now. Prints nothing
+# when the arm is ready, else why not.
 swe_ready() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
-  jq -e --argjson a "$1" --argjson now "$(date +%s)" '.ok and .spec == $a and $now - .epoch < 86400' "$SWE_DIR/preflight/$(jq -r .name <<<"$1")/$2.json" > /dev/null 2>&1 \
+  jq -e --argjson a "$1" --arg l "$(swe_logins "$1")" --argjson now "$(date +%s)" '.ok and .spec == $a and .logins == $l and $now - .epoch < 86400' "$SWE_DIR/preflight/$(jq -r .name <<<"$1")/$2.json" > /dev/null 2>&1 \
     || swe_preflight "$@"
 }
 # `bench swe arms`: each arm with its preflight state (its latest preflight); `bench swe arms check <arm>...` runs
