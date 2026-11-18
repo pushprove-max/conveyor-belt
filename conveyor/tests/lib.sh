@@ -115,11 +115,13 @@ tuned() { # <jq filter> <command...>
 # seat's model changed and its effort kept (seatset). The judge off, visible changes waiting for the owner's yes and
 # a push after each landing are set here, not left to control-defaults.json (judge on, visible off, push off): a case
 # turns them as it needs. So is the rule Whole suite in a card, on (its default is off): the cases of a card's test
-# step test a run that may be the whole suite; those of the rule (narrow.test.sh) turn it off. The rule Split large
+# step test a run that may be the whole suite; those of the rule (narrow.test.sh) turn it off, and a case with FILEMODE
+# (filemode()) has it off. The rule Split large
 # issues is off (its default is shadow): a card's lines are those of today's cards; its cases (slices.test.sh) turn it on.
 seed() {
+  local whole=true; [ -z "${FILEMODE:-}" ] || whole=false
   mkdir -p "$ST"
-  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"wholeSuite":true,"split":"off","never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
+  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"wholeSuite":'"$whole"',"split":"off","never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
     > "$ST/control.json"
 }
 # The loop's turns, for a check that something did not happen: a case waits for turns the loop takes, not for seconds
@@ -165,8 +167,27 @@ setup() { # <issues json>: a fresh main repo, the three stubs, one billing and o
   jq --arg l "$STUB/rulings" '.test.command = "case $PWD in */mainrun/*) [ ! -f \"$STUB/mainrun-cmd\" ] || . \"$STUB/mainrun-cmd\" ;; *) . \"$STUB/test-cmd\" ;; esac" | .test.survey = false | .rulings.log = $l | .owner.name = "Dana" | .landBatch = 1
       | .models.allowed.claude += ["m"] | .models.allowed.codex += ["x"] | .tunables += {live: 0.2, closeWait: 0, reviewPause: 0}' \
     "$SRC/lib/test-pack.json" > "$R/.conveyor/project.json"
+  [ -z "${FILEMODE:-}" ] || filemode
   seed
   echo "$1" > "$STUB/issues.json"; PATH=$STUB:$PATH
+}
+# The per-file fixture, for a case that sets `local -x FILEMODE=1` before its setup (-x, so shellcheck does not take
+# it for unused): main commits a.txt's stub test file a.test.sh and .conveyor/test-links.json linking a.txt to it, and
+# pushes them; the pack's test.command and test.fileCommand are both the stub $STUB/file-cmd (the test command setup
+# gives every other case: $STUB/mainrun-cmd on main, else $STUB/test-cmd), its push.check false; seed turns the rule
+# Whole suite in a card off. So a card that changes a.txt runs a.test.sh alone, through test.fileCommand.
+filemode() {
+  echo 'case $PWD in */mainrun/*) [ ! -f "$STUB/mainrun-cmd" ] || . "$STUB/mainrun-cmd" ;; *) . "$STUB/test-cmd" ;; esac' > "$STUB/file-cmd"
+  echo '# The stub test file of a.txt: the pack'"'"'s test.fileCommand runs $STUB/file-cmd for it.' > "$R/a.test.sh"
+  git -C "$R" add a.test.sh || fail "main's stub test file a.test.sh could not be staged"
+  linkset '{"a.txt": ["a.test.sh"]}'
+  tune '.test.command = ". \"$STUB/file-cmd\"" | .test.fileCommand = .test.command | .push.check = false'
+}
+# Main's committed test links (.conveyor/test-links.json, which the fixture's .gitignore leaves out, so added by
+# force) set to <json>, committed with anything staged and pushed: after a FILEMODE setup, a case's links of its own.
+linkset() { # <links json>
+  echo "$1" > "$R/.conveyor/test-links.json" && git -C "$R" add -f .conveyor/test-links.json && git -C "$R" commit -qm 'test links' \
+    && git -C "$R" push -q origin main || fail "main's test links could not be set to $1"
 }
 # The fixture every case's setup copies (cp -a), made once per run, as this file is read, in $FIXTURE: main's repo
 # (a.txt and .gitignore committed, its pack's card rules and hooks, untracked), origin (a bare repo main is pushed to)
