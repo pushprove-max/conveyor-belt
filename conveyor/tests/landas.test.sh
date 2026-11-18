@@ -21,6 +21,13 @@ la_eng() { # <command...>
     eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
     names || exit 1; "${a[@]}" )
 }
+# `conveyor.sh <args>` as loop runs it, from a copy of the engine with no lib/fulltest.sh: a command that loads a lib it
+# does not use (issue 465: pr.sh loaded lib/fulltest.sh) fails here, at the load.
+la_nofull() { # <args...>
+  [ -d "$T/$CASE/eng" ] || { mkdir -p "$T/$CASE/eng" && cp -R "$SRC"/. "$T/$CASE/eng" && rm -rf "$T/$CASE/eng/tests" "$T/$CASE/eng/lib/fulltest.sh"; } \
+    || fail "the engine could not be copied"
+  CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$T/$CASE/eng/conveyor.sh" "$@"
+}
 # Card <n> of issue <n> lands: a commit on main and its lines, as a card that passed its Done-when check (its reply's
 # D<n> lines on the build line) and tests: a run of two cases of one file (its why names a second file, which the test
 # cache kept off: the body must not list it as run), then a pass that reused that run (its line
@@ -128,7 +135,8 @@ la_prst() { jq -r .state "$STUB/pr.$1" 2>/dev/null; }
 # Bugs it catches: with button, the loop's idle look (idlemerge()) merged the pull request by itself; health gave the
 # Board no open pull request, link or card count for its Merge; Merge did not merge with a merge commit, left main here
 # behind origin's default branch, or left an issue of its cards open; and the push after the merge updated the merged
-# pull request (its cards would never reach the default branch) in place of opening a new one.
+# pull request (its cards would never reach the default branch) in place of opening a new one. Issue 465: Merge
+# loaded lib/fulltest.sh, which it does not use (la_nofull).
 t_prbutton() {
   local out
   setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
@@ -139,7 +147,7 @@ t_prbutton() {
   out=$(loop health | jq -c '.landingPr | [.number, .url, .cards]')
   [ "$out" = '[7,"https://github.com/o/r/pull/7",1]' ] || fail "health does not give the open pull request, its link and its card count: $out"
   echo OPEN > "$STUB/state.1"
-  out=$(loop pr merge 2>&1) || fail "pr merge failed: $out"
+  out=$(la_nofull pr merge 2>&1) || fail "pr merge failed (it runs with no lib/fulltest.sh, which it does not use): $out"
   grep -qx 'pr merge 7 --merge' "$STUB/pr-calls" && [ "$(la_prst 7)" = MERGED ] || fail "pull request 7 was not merged with a merge commit: $(cat "$STUB/pr-calls")"
   [ "$(git -C "$R" rev-parse main)" = "$(git -C "$T/$CASE/origin" rev-parse main)" ] && [ -z "$(git -C "$R" status --porcelain --untracked-files=no)" ] \
     || fail "main here is not origin's default branch after the merge: $out"
@@ -184,6 +192,7 @@ t_prdiverge() {
 }
 # Bugs it catches: a merge GitHub refuses (checks, conflicts) taken as done: the pull request dropped from the Board,
 # main here moved or its issues closed; or the refusal shown with no reason, to the owner or the Foreman (health).
+# Issue 465: this error path loaded lib/fulltest.sh, which it does not use (la_nofull).
 t_prrefused() {
   local out h
   setup "[$(issue 1 2026-01-01)]"; la_prstub
@@ -191,7 +200,7 @@ t_prrefused() {
   la_land 1; la_eng push c1 1 || fail "the push failed"
   echo OPEN > "$STUB/state.1"; h=$(git -C "$R" rev-parse main)
   echo 'Pull request is not mergeable: the base branch policy prohibits the merge' > "$STUB/merge-refuse"
-  out=$(loop pr merge 2>&1); [ $? = 1 ] && grep -qF 'the base branch policy prohibits the merge' <<<"$out" || fail "the refused merge did not fail with GitHub's reason: $out"
+  out=$(la_nofull pr merge 2>&1); [ $? = 1 ] && grep -qF 'the base branch policy prohibits the merge' <<<"$out" || fail "the refused merge did not fail with GitHub's reason: $out"
   [ "$(la_prst 7)" = OPEN ] && [ "$(git -C "$R" rev-parse main)" = "$h" ] && [ ! -e "$STUB/closed" ] || fail "a refused merge moved main or closed an issue"
   out=$(loop health | jq -r '.landingPr | "\(.number) \(.merge.result): \(.merge.reason)"')
   [ "$out" = '7 refused: Pull request is not mergeable: the base branch policy prohibits the merge' ] || fail "health does not show the open pull request with the refusal's reason: $out"

@@ -13,7 +13,6 @@
 . "$HERE/lib/push.sh" || exit 1
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/flaky.sh" || exit 1
-. "$HERE/lib/fulltest.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
