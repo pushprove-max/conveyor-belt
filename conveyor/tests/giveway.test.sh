@@ -340,6 +340,54 @@ t_givewayfixalone() {
     && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#7 did not land as fixed, or something is left: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
 }
 
+# Issue 428: #7's tests fail and main has moved since its commit (b.txt, added once #8 waits stacked on #7 and red), so
+# #7 is fitted onto main and tested again there before any fix round. #7 gives way for that run, as for a fix round:
+# #8, stacked on it, is fitted onto main alone and lands during it. Bug it catches: #7 kept its claim through that run,
+# so #8 waited on it until the run ended (its run here then gives up at once, and #8 lands after it, not during it).
+t_givewaymoved() {
+  gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 6 7 8; do echo "$GO" > "$STUB/review.$i"; done
+  jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break
+    jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done
+    echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main moves"' > "$STUB/firsttest"
+  echo : > "$STUB/fixing"
+  # #7's first run on the moved main (b.txt in its worktree) keeps its claim and waits for #8 to land, unless #7 holds
+  # a.txt; before the rest of the test command, which fails the run on `broken`.
+  { cat <<'EOF'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
+case $PWD in *-7) if [ -e b.txt ] && [ ! -e "$STUB/fitclaim" ]; then cp "$PWD.claim" "$STUB/fitclaim"
+  while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/landedduring"; break; }
+    ls -d ../*-8 >/dev/null 2>&1 || break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done
+fi ;; esac
+EOF
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  grep -q "card $(st 'select(.issue == 7 and .step == "picked") | .card'): main moved since its commit" <<<"$out" || fail "#7 did not take the main-moved path: $out"
+  [ "$(jq -c '[.held, .away, .fixing]' "$STUB/fitclaim" 2>/dev/null)" = '[false,true,true]' ] \
+    || fail "#7 held its claim through its tests on the moved main: $(cat "$STUB/fitclaim" 2>/dev/null)"
+  [ -e "$STUB/landedduring" ] || fail "#8 did not land while #7 was tested again on the moved main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] && [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] \
+    && [ -e "$R/b.txt" ] && [ ! -e "$R/broken" ] && [ -z "$(ls "$T/$CASE/cards")" ] \
+    || fail "#8 then #7 did not land with both changes on main, or something is left: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+
+# Issue 428: #7's tests fail, main moves (b.txt) and #7 gives way for the run on the moved main, which passes; main
+# stays there. Bug it catches: #7 landed on its given-way claim (held false), as nothing claimed its files again.
+t_givewaymovedpass() {
+  gwfixsetup "[$(issue 7 2026-01-01)]"; echo 'sed -i 1s/.*/seven/ a.txt' > "$STUB/build"
+  { cat <<'EOF'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
+case $PWD in *-7) [ -e b.txt ] || { [ -e "$R/b.txt" ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qnm "main moves"; }
+  echo "FAIL broken.test"; printf "%s\n" "== broken.test" "-- FAIL broken.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;; esac
+EOF
+  # land() runs main's pre-commit hook just before it lands: the claim #7 lands on.
+  printf '#!/bin/sh\nfor c in "%s"/*-7.claim; do [ ! -e "$c" ] || cp "$c" "%s/landclaim"; done\n' "$T/$CASE/cards" "$STUB" > "$R/.git/hooks/pre-commit"
+  chmod +x "$R/.git/hooks/pre-commit"
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  grep -q "main moved since its commit" <<<"$out" || fail "#7 did not take the main-moved path: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(jq -c .held "$STUB/landclaim" 2>/dev/null)" = true ] || fail "#7 landed without claiming its files again: $(cat "$STUB/landclaim" 2>/dev/null)"
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(head -n 1 "$R/a.txt")" = seven ] && [ -e "$R/b.txt" ] \
+    || fail "#7 did not land on the moved main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+
 # Stacking is bounded (stackto()): a card stacked on a holder whose change kept changing would be ported and reviewed
 # again each time. #8 waits on #7: it is stacked onto main plus #7's kept change; with that change the same, not
 # again; changed, once more (restacks 1); changed again, not: #8 waits, as before stacking. Bug it catches too: a card

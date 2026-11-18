@@ -619,6 +619,8 @@ card() { # <card> <issue> [<branch> <tip>]
         # round. Once before each fix round, so a card whose own change fails does not follow a busy main for ever.
         # caught is cleared, as after a wait on a red main above: a change that no longer applies on main is brought there
         # by a session, not put back on its old commit (settle()), where what failed would only run again as it did.
+        # Fitted there (settle() claims its files again), it gives way for that run, as for a fix round (fixing): a card
+        # stacked on it (stackto()) is fitted onto main alone and lands, not waiting through this run (claim()).
         if [ -z "$repaired" ] && [ -z "$tmain" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
           echo "conveyor: card $c: main moved since its commit: its change goes onto main as it is now, and what failed runs again there"
           tmain=1; rm -f "$wt.ready"; unmate; away=''; caught=''
@@ -627,7 +629,8 @@ card() { # <card> <issue> [<branch> <tip>]
           [ $rc != 3 ] || break 2 # a batch landed it
           [ $rc != 4 ] || continue
           [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 2; }
-          continue
+          # Away now, it claims its files again (settle()) once that run passes, before it lands, main moved or not.
+          locked giveway "$c" "$wt" fixing; ! jq -e '.away == true' "$wt.claim" >/dev/null 2>&1 || away=1; continue
         fi
         if [ -z "$repaired" ]; then
           tmain=''
