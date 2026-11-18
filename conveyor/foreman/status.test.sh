@@ -36,6 +36,9 @@ poll() { CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --once 2>"$T/err"; }
 # and never why): here none has run.
 t_status() {
 CASE=status; fixture status
+# Issue 357: the watcher's last poll, from its poll log. Bug it catches: a wake 5 minutes late, and nothing told how
+# long each poll had taken.
+mkdir -p "$FD" && echo '2026-11-15T11:59:00Z 2026-11-15T11:59:47Z 47s alpha: slow, read health; woke' > "$FD/conveyor-polls.log"
 snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it keeps the address typed' build),$(card 4 'Add a field' review),$(card 5 'Speed up tests' tests)"']
   | .queue.waiting = [{issue: 6, title: "Later", waitsFor: [3]}] | .open.held = [{issue: 8}]
   | .health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
@@ -50,6 +53,7 @@ for l in 'alpha: 3 on the belt' '  #3 build 12m Fix the login form on the accoun
   'needs you: #7 is blocked since 2026-11-15T11:00:00Z: tests failed twice' \
   'needs you: the push has failed since 2026-11-15T11:59:00Z: remote rejected the push' \
   'needs you: the card records line 2518 is set aside in quarantined.jsonl: the record check refused its field list' \
+  'watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read health; woke)' \
   'waiter: down: no waiter has run yet; the end of the next turn starts one'; do
   grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
 done
@@ -181,8 +185,72 @@ nosnap "exit 124"
 grep -qxF 'alpha: no snapshot (it took over 45 s and was stopped)' <<<"$out" || fail "the status does not say the read was stopped at its wait: $out"
 }
 
+# Issue 357: a snapshot made anew from the whole card records runs past the ask's wait (its timeout exit, 124) while
+# health lists a blocked card, with the record already 2 minutes without a snapshot. Bug it catches: the watcher read
+# health only from the snapshot, and each poll waited for the read with the longer wait too, so the Foreman heard of
+# two blocked cards 5 minutes late. Health's blocked card wakes at this poll, with no longer read and no
+# "unreachable"; the other kinds stay the snapshot's.
+t_healthwake() {
+CASE=healthwake; fixture healthwake; mkdir -p "$FD"
+snap '.health.blocked = [{card: "c948", issue: 948, since: "2026-11-15T11:58:00Z", reason: "tests failed twice"}] | .health.loop = false | .health'
+export CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_CMD \${ASK_LIMIT:-45}\" >> $T/asks; [ \"\$CONVEYOR_CMD\" = health ] && cat $T/snap && exit;
+  echo 'conveyor: the snapshot is being made anew from the whole card records; this one takes longer' >&2; exit 124"
+echo "$((NOW - 120)) $((NOW - 60))" > "$FD/conveyor-down-alpha.txt"
+poll || fail "no wake for the blocked card health lists: $(cat "$T/err")"
+w=$(cat "$FD"/pending/*.wake)
+grep -qxF 'alpha: #948 is blocked since 2026-11-15T11:58:00Z: tests failed twice' <<<"$w" || fail "the wake does not name the blocked card: $w"
+! grep -qF -e 'no loop' -e 'no snapshot' <<<"$w" || fail "the wake holds more than health's blocked card: $w"
+[ "$(paste -sd' ' "$T/asks")" = "snapshot 45 health 45" ] || fail "the poll did not read health after the slow snapshot alone: $(cat "$T/asks")"
+grep -qxF 'alpha/blocked:c948' "$FD/conveyor-reported.txt" || fail "the blocked card is not marked reported: $(cat "$FD/conveyor-reported.txt")"
+# Once reported, the next poll finds the snapshot slow still: the blocked card does not wake again, the longer read
+# is made, and with it failing too the record is unreachable; the blocked card stays reported.
+: > "$T/asks"; rm -f "$FD"/pending/*.wake
+poll || fail "no unreachable wake when both snapshot reads fail: $(cat "$T/err")"
+[ "$(paste -sd' ' "$T/asks")" = "snapshot 45 health 45 snapshot 150" ] || fail "the longer read was not made once health had nothing new: $(cat "$T/asks")"
+w=$(cat "$FD"/pending/*.wake)
+grep -qF 'alpha: no snapshot for 2 minutes' <<<"$w" && ! grep -qF '#948' <<<"$w" || fail "the second wake is not the outage alone: $w"
+grep -qxF 'alpha/blocked:c948' "$FD/conveyor-reported.txt" || fail "the blocked card is no longer marked reported"
+# A new blocked card in health, with the outage reported: it wakes with no longer read, and the outage stays
+# reported. Bug it catches: that poll dropped the unreachable key, so the next failed longer read reported the same
+# outage again.
+snap '.health.blocked += [{card: "c950", issue: 950, since: "2026-11-15T11:59:00Z", reason: "review said no"}] | .health.loop = false | .health'
+: > "$T/asks"; rm -f "$FD"/pending/*.wake
+poll || fail "no wake for the second blocked card: $(cat "$T/err")"
+w=$(cat "$FD"/pending/*.wake)
+grep -qF '#950' <<<"$w" && ! grep -qF -e '#948' -e 'no snapshot' <<<"$w" || fail "the third wake is not the new blocked card alone: $w"
+grep -qxF 'alpha/unreachable' "$FD/conveyor-reported.txt" || fail "the outage is no longer marked reported: $(cat "$FD/conveyor-reported.txt")"
+rm -f "$FD"/pending/*.wake
+poll && fail "the same outage woke again: $(cat "$FD"/pending/*.wake)"
+grep -qxF 'alpha/unreachable' "$FD/conveyor-reported.txt" || fail "the outage is not marked reported after the longer read"
+# The Foreman closed for 10 minutes, with the outage still marked reported, then a new outage: its first poll reads
+# health with no longer read, and two minutes on the longer read fails too. Bug it catches: that first poll kept the
+# old outage's unreachable key, so the new outage never woke.
+echo "$((NOW - 660)) $((NOW - 600))" > "$FD/conveyor-down-alpha.txt"
+poll && fail "the first poll of a new outage woke: $(cat "$FD"/pending/*.wake)"
+! grep -qxF 'alpha/unreachable' "$FD/conveyor-reported.txt" || fail "the new outage keeps the old outage's reported key"
+CONVEYOR_FOREMAN_NOW=$((NOW + 120)) poll || fail "no wake for the new outage after 2 minutes: $(cat "$T/err")"
+grep -qF 'alpha: no snapshot for 2 minutes' "$FD"/pending/*.wake || fail "the wake does not name the new outage: $(cat "$FD"/pending/*.wake)"
+}
+
+# Issue 357: each poll writes one line to the poll log: its start, end, time taken, each record's outcome and the read
+# it used; the log keeps to its limit. Bug it catches: nothing told how long each poll took, so a late wake could not
+# be explained from the logs.
+t_polllog() {
+CASE=polllog; fixture polllog; mkdir -p "$FD"; snap .
+L=$FD/conveyor-polls.log
+poll && fail "a snapshot with no problem woke: $(cat "$FD"/pending/*.wake)"
+[ "$(wc -l < "$L")" = 1 ] || fail "one poll did not write one line: $(cat "$L")"
+grep -Eqx '20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z 20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z [0-9]+s alpha: ok, read snapshot; no wake' "$L" \
+  || fail "the line does not give start, end, time and outcome: $(cat "$L")"
+export CONVEYOR_FOREMAN_ASK="echo 'the engine is stopped' >&2; exit 1"
+for i in $(seq 1000); do echo "old line $i"; done > "$L"
+poll
+[ "$(wc -l < "$L")" -le 1000 ] || fail "the poll log grew past its limit: $(wc -l < "$L") lines"
+tail -n 1 "$L" | grep -Eq ' alpha: failed, read none; no wake$' || fail "the last line is not this poll's failed read: $(tail -n 1 "$L")"
+}
+
 cases=(status wake suite mainred building slowlive slowdown)
-cases=(status wake suite suitedead mainred building nosnapanew nosnapquiet)
+cases=(status wake suite suitedead mainred building nosnapanew nosnapquiet healthwake polllog)
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

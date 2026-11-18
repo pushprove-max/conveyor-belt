@@ -37,6 +37,7 @@ see only that project. It shows:
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
   error and a problem of the engine
+- the watcher's last poll: when it ended and how long it took, with what it read for each project
 - last, the Foreman's waiter: `waiter: listening`, `waiter: starting again` or `waiter: down: <why>`
 
 The Foreman uses this command for its status checks. Its rules also tell it to run short commands in the foreground,
@@ -46,7 +47,9 @@ A watcher wakes the Foreman when something needs it. The wake holds the outcome,
 it up:
 
 - A card that the Foreman waits for lands: the wake names its commit.
-- A blocked card: the wake names the reason.
+- A blocked card: the wake names the reason. When the snapshot fails or is slow, as when it is made anew from the
+  whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
+  then wakes the Foreman from health at that poll, and does not wait for the snapshot.
 - A release or full-test run that ends: the wake names the result and the failed cases.
 - A card that waits for main to change, or waits on another card, for the minutes of the pack setting
   `foreman.waitWake` (in `.conveyor/project.json`): the wake names the card and what it waits on. For another card,
@@ -111,7 +114,9 @@ check of the waiter's process runs at each of them. It starts a waiter only when
 session is idle, no check runs, and the waiter stays down until your next message. The file `waiter.log` in the
 Foreman's folder (`foreman` in the folder that `conveyor.sh state-dir` prints) has a line each time a waiter starts and each time
 one stops, with the reason. A waiter that was killed has no time to write its reason. Its start line is then the last
-line.
+line. The file `conveyor-polls.log` in the same folder has a line for each poll of the Conveyor watcher: when it
+started and ended, how long it took, what it read for each project (the snapshot, health or nothing) and if it woke
+the Foreman. It keeps only its newest lines. Use it to find why a wake came late.
 
 ## The Foreman on your own machine
 

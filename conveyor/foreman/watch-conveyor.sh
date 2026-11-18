@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # watch-conveyor.sh [--once | --status [<project>]] -- the Foreman's Conveyor watcher, run by waiter.sh. Once a minute it asks the
 # Foreman's own record, or each record of its group (lib.sh mine), never another project's, for `conveyor.sh
-# snapshot` (lib.sh ask) and, on any NEW problem, puts one wake in pending and
+# snapshot` (lib.sh ask), or, when that read fails or is slow, `conveyor.sh health` for the blocked, waiting and
+# before entries (record()), and, on any NEW problem, puts one wake in pending and
 # exits. The problems, each a record's own:
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked
@@ -40,12 +41,16 @@
 # "<repo>/<key>", of the reported problems still there, so a restart repeats nothing. While a record gives no
 # snapshot, its reported problems stay reported.
 # A card that only moves on the belt (build to review, review to tests) needs no one and wakes nothing.
+# Each poll writes one line to conveyor-polls.log in the Foreman's folder: its start, end, time taken, each record's
+# outcome and read, and whether it woke (the main loop, below).
 # --status prints the records' state for the Foreman to read, and reports nothing as seen (STATUS, below).
 # For tests: CONVEYOR_FOREMAN_ASK (lib.sh), CONVEYOR_FOREMAN_NOW (the clock, epoch seconds), --once (one poll: exit 0
 # with a wake put, 1 with nothing new).
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
 SEEN=$FD/conveyor-reported.txt
+# The poll log, and this poll's outcome a record a line (record(), for the poll log): see the main loop, below.
+PLOG=$FD/conveyor-polls.log POLLF=$FD/conveyor-poll.now PLOG_MAX=1000
 POLL=60 DOWN_S=120 SLOW_S=150 PUSH_S=600
 # The kinds of the Board's Needs you, the list the Board reads too: one that does not read stops the watcher here,
 # never as a record read as unreachable.
@@ -167,7 +172,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
 # above), each "needs you: <text>". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
-# never empty. <project> names one record of mine; with none, every one of them. Last, the Foreman's
+# never empty. <project> names one record of mine; with none, every one of them. Then the watcher's last poll, from
+# the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
@@ -201,6 +207,9 @@ if [ "${1:-}" = --status ]; then
     [ "${PIPESTATUS[0]}" = 0 ] || echo "needs you: unknown, the snapshot holds no health record"
   done <<<"$RECS"
   [ "$n" -gt 0 ] || { echo "foreman status: $2 is none of this Foreman's projects ($(cut -f1 <<<"$RECS" | paste -sd' ' -))" >&2; exit 2; }
+  if read -r _ t1 took rest < <(tail -n 1 "$PLOG" 2>/dev/null); [ -n "${rest:-}" ]; then
+    echo "watcher: last poll ended $t1, took ${took%s} s ($rest)"
+  else echo "watcher: no poll logged yet"; fi
   echo "waiter: $(waiter_state)"
   exit 0
 fi
@@ -216,20 +225,49 @@ record() { # <repo> <main> <now> <await>
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone; one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
   # 128 KB a single argument may hold (#544).
-  readsnap() { # <ask limit, seconds>: rec, the history file and cur, the problems; nonzero when the record does not read
-    rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") \
-    && { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
-      && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; } \
-    && cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
+  readsnap() { # <ask limit, seconds>: rec, the history file and cur, the problems; nonzero when the record does not read (the ask's exit when it failed)
+    rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") || return
+    { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
+      && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; }
+    cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
+  }
+  # A snapshot that does not read, or not within the first wait (one made anew from the whole card records takes
+  # minutes), is no reason to wake late on a card that needs the owner: `conveyor.sh health` holds the blocked, waiting
+  # and before entries and needs no snapshot. hcur: those problems, as PROBLEMS gives them; nonzero when health does not read.
+  readhealth() {
+    local h all
+    h=$(ask "$repo" "$main" health 2>>"$errf") \
+    && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
+    && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all")
   }
   # The outage so far: a gap of more than three polls since the last failed one is a new outage, timed from now.
+  # goes: set when the last failed poll's outage goes on, so its reported unreachable key is still this outage's.
   read -r first last 2>/dev/null < "$down" || first=
-  [[ $first =~ ^[0-9]+$ ]] && [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -le $((POLL * 3)) ] || first=$now
+  local goes=1
+  [[ $first =~ ^[0-9]+$ ]] && [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -le $((POLL * 3)) ] || { first=$now goes=; }
   # A failed read that would make the record unreachable is read once more with the longer wait SLOW_S first (#241):
   # under a high machine load a live engine's snapshot can take longer than the first wait. An engine that fails
   # fast (stopped, its host down) fails the second read as fast, so its wake is not later; one that hangs wakes up to
-  # SLOW_S seconds later.
-  if readsnap "${ASK_LIMIT:-45}" || { [ $((now - first)) -ge "$DOWN_S" ] && readsnap "$SLOW_S"; }; then
+  # SLOW_S seconds later. Before it, health is read (readhealth); when health lists a problem not reported yet, the
+  # longer read waits for the next poll, so that wake is not SLOW_S seconds late, and the record is not called
+  # unreachable at this poll. The poll's outcome for the poll log: ok, slow (stopped at its wait) or failed, and the
+  # read it used (snapshot, health or none).
+  local hcur="" hnew="" tried="" rc outcome=ok used=snapshot
+  readsnap "${ASK_LIMIT:-45}"; rc=$?
+  if [ "$rc" != 0 ]; then
+    if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then outcome=slow; else outcome=failed; fi
+    used=none
+    if readhealth; then
+      used=health
+      hnew=$(awk -F'\t' -v p="$repo/" '!cur { seen[$0]; next } $1 != "" && !((p $1) in seen)' "$SEEN" cur=1 - <<<"$hcur")
+    fi
+    if [ -z "$hnew" ] && [ $((now - first)) -ge "$DOWN_S" ]; then
+      tried=1; readsnap "$SLOW_S"; rc=$?
+      [ "$rc" != 0 ] || { outcome=slow used=snapshot; }
+    fi
+  fi
+  printf '%s: %s, read %s\n' "$repo" "$outcome" "$used" >> "$POLLF"
+  if [ "$rc" = 0 ]; then
     rm -f "$down"
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi
@@ -245,13 +283,18 @@ record() { # <repo> <main> <now> <await>
     # A failed poll breaks a run of idle polls.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
     echo "$first $now" > "$down"
-    # Its reported keys stay reported (no text: a key already reported is never printed again).
-    cur=$(awk -v p="$repo/" 'index($0, p) == 1 && $0 != p "unreachable" { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
+    # Its reported keys stay reported (no text: a key already reported is never printed again). When health read, its
+    # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again
+    # when it comes back. The unreachable key is this poll's only when the longer read was made; a poll that woke on
+    # health in its place keeps it reported while the same outage goes on, so that outage is not reported again at the
+    # next failed read. A new outage drops it, so its own failed longer read is reported.
+    cur=$(awk -v p="$repo/" -v h="$used" -v t="$tried" -v g="$goes" 'index($0, p) == 1 && ($0 != p "unreachable" || (t == "" && g != "")) && !(h == "health" && substr($0, length(p) + 1) ~ /^(blocked|waiting|before):/) { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
+    [ -z "$hcur" ] || cur+=$'\n'$hcur
     err=$(tr -s '[:space:]' ' ' < "$errf" | tail -c 200)
     # The install this watcher runs from, removed under it, fails every poll on its own missing files: the line names
     # that install and the fix, not the file it missed.
     [ -f "$KINDS" ] || err="the Conveyor install ${FHERE%/conveyor/foreman} the Foreman's watcher runs from is gone; run /conveyor-belt:setup in $2 to install the project's engine again"
-    [ $((now - first)) -lt "$DOWN_S" ] || cur+=$'\n'"unreachable"$'\t'"unreachable"$'\t\t'"no snapshot for $(((now - first) / 60)) minutes${err:+ ($err)}"
+    [ -z "$tried" ] || cur+=$'\n'"unreachable"$'\t'"unreachable"$'\t\t'"no snapshot for $(((now - first) / 60)) minutes${err:+ ($err)}"
   fi
   awk -F'\t' -v r="$repo" '$1 != "" { print r "\t" $0 }' <<<"$cur"
 }
@@ -293,8 +336,17 @@ poll() { # 0 when a wake was put in pending
   [ -n "$new" ]
 }
 
+utc() { TZ=UTC0 printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$1"; }
 while :; do
-  poll && exit 0
+  t0=$EPOCHSECONDS; : > "$POLLF"
+  poll; rc=$?
+  # The poll log (PLOG): one line a poll, so a late wake can be told from the logs: its start, end, seconds taken,
+  # each record's outcome (record()) and whether it woke. Past PLOG_MAX lines it keeps the newest half.
+  t1=$EPOCHSECONDS
+  { printf '%s %s %ss %s; %s\n' "$(utc "$t0")" "$(utc "$t1")" "$((t1 - t0))" "$(paste -sd'|' - < "$POLLF" | sed 's/|/ | /g')" \
+      "$([ "$rc" = 0 ] && echo woke || echo 'no wake')" >> "$PLOG"
+    [ "$(wc -l < "$PLOG")" -le "$PLOG_MAX" ] || { tail -n $((PLOG_MAX / 2)) "$PLOG" > "$PLOG.tmp" && mv "$PLOG.tmp" "$PLOG"; }; } 2>/dev/null
+  [ "$rc" != 0 ] || exit 0
   [ "${1:-}" != --once ] || exit 1
   sleep "$POLL"
 done
