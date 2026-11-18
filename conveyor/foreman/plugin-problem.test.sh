@@ -63,6 +63,11 @@ t_home() {
   out=$(start)
   grep -q 'filed as #<n>' <<<"$out" || fail "the role text does not say to file a plugin problem and name its issue: $out"
   grep -q '^- .*setup never sets linkFromMain' <<<"$out" || fail "the start-up text does not list the unfiled entry: $out"
+  # Bug (#482): a note with no number may name a problem the owner already filed (as #449 was), yet the start-up
+  # text said "file each one now", so the Foreman filed a duplicate; it must look for an existing issue first.
+  w=$(grep '^# WARNING: plugin problems noted' <<<"$out")
+  grep -q 'search this repository.s issues, open and closed, for one that already reports it' <<<"$w" && grep -q 'file it now only when none does' <<<"$w" && ! grep -q 'file each one now' <<<"$w" \
+    || fail "the start-up text tells the Foreman to file an unnumbered note without looking for an issue that reports it: $w"
   grep -q '^- .*npm ci runs twice, filed as #0 · evidence: ' <<<"$out" || fail "the start-up text hides a saved note filed as #0: $out"
   ! grep -q 'running cards keep' <<<"$out" || fail "the start-up text lists an entry filed as #449: $out"
 }

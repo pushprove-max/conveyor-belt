@@ -354,7 +354,7 @@ EOF
   # evidence fields after it, unless the text already ends with them (a note saved from a line in the form), which
   # stop.sh matches exactly.
   if [ -n "$home" ] && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE ' filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: ') && [ -n "$n" ]; then
-    echo "# WARNING: plugin problems noted in $FD/plugin-bugs.md and not filed yet: file each one now, and then say the line under it with the issue's number, word for word, so the entry is marked filed."
+    echo "# WARNING: plugin problems noted in $FD/plugin-bugs.md with no issue number yet: for each one, first search this repository's issues, open and closed, for one that already reports it (the owner may have filed it); file it now only when none does. Then say the line under it with that issue's number, word for word, so the entry is marked filed."
     local l t f re='^- [^ ]* · card ([^ ]*) · (.*) · evidence: (.*)$'
     while IFS= read -r l; do
       t=$l

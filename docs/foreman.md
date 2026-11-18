@@ -80,7 +80,8 @@ problem that the Foreman finds in Conveyor itself always needs you. Who files it
   `Plugin problem (for the conveyor-belt repo): <what it saw>, card <card>, evidence <path>, filed as #<n>`
 
   If the line has no issue number, the Foreman cannot end its reply. It gets the reason and files the issue. When the
-  Foreman starts, it gets a list of each entry in `plugin-bugs.md` that has no issue number, and it files them.
+  Foreman starts, it gets a list of each entry in `plugin-bugs.md` that has no issue number. For each entry, it first looks for an issue that already reports the problem, such as
+  one that you filed, and uses that issue's number. It files only the entries that no issue reports.
 
 Each such problem also goes into `plugin-bugs.md` in the Foreman's folder, one line each: the time, the card, what the
 Foreman saw and the evidence path. The Board's Health panel and `/units` then show "N plugin problems noted", with
