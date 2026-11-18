@@ -99,6 +99,11 @@ Click the button, then click it again. The text next to the button shows that th
   A landing conflict ("rebase onto main conflicts") has no Fix button. **Retry** already brings the kept patch onto
   main. A push that fails a check needs a fix on main first. A card that waits for your yes to a visible change has
   **Approve** and **Decline**. Other reasons need you to fix the cause, then press **Retry**.
+- **Screenshots.** When the pack sets `review.screenshots` ([Configuration](configuration.md#the-pack)), a card that
+  waits for your yes shows the screenshots that your project's own run made of its change, above **Approve**. The
+  Board shows only the screenshots made from the change that you approve. A screenshot made before a later change to
+  the card does not show. The images stay on the machines of the Board and Conveyor. Conveyor does not take
+  screenshots, so a project without them shows none.
 - **Queue and Close.** Each entry under "Pipeline changes held for you" has a **Queue** button, which releases
   the issue (`conveyor.sh control release`), and a **Close** button.
 

@@ -11,7 +11,8 @@
 // belt, so the step it failed at, with the seconds that step ran, is shown here on its six steps. There is no main
 // session any more: an answer that is recorded is done, and nothing is listed as unsent. It stays on
 // Overview whatever its cause. A card waiting for the owner's yes is answered here too: the reviewer's sentence,
-// the files it changed, and Approve, Approve with a condition and Decline, each confirmed by a second click and sent
+// the files it changed, the project's own screenshots of that change when it kept some (shotsOf), and Approve,
+// Approve with a condition and Decline, each confirmed by a second click and sent
 // as POST /control approve or decline, with the card's repository (the host acts on that record's issue). A
 // follow-up that goes beyond its parent's yes says what goes beyond it. An issue whose section "What customers
 // or staff will see" names a change waits here before it is built (cards.before: null when it was not read):
@@ -44,6 +45,12 @@ const FIXES = [
     ['--fresh'], (n) => `Fix builds ${n} again from nothing, without its kept work, which Conveyor cannot use. That work moves to kept-dropped/ in the state folder.`],
 ];
 const fixOf = (c) => (c.issue > 0 && typeof c.reason === 'string' ? FIXES.find(([re]) => re.test(c.reason)) || null : null);
+// The project's own screenshots of a waiting card's change (its shots: keepshots(), conveyor/lib/push.sh), only while
+// they were kept for its kept patch as it is now (shots.patch is the card's patch): an image of an older patch of the
+// card is not shown as the current one. Each file is named by its content, so it is read by that name only.
+const SHOT = /^[0-9a-f]{40,64}\.(png|jpg|gif|webp)$/;
+const shotsOf = (c) => (c.shots && typeof c.shots === 'object' && typeof c.patch === 'string' && c.patch !== '' && c.shots.patch === c.patch
+  && Array.isArray(c.shots.shots) ? c.shots.shots.filter((s) => s && typeof s.file === 'string' && SHOT.test(s.file)) : []);
 const testsOf = (d) => (Array.isArray(d.tests) ? d.tests : []);
 const enginesOf = (d) => (Array.isArray(d.engines) ? d.engines : []);
 const testRulesOf = (d) => (Array.isArray(d.testRules) ? d.testRules : []);
@@ -244,6 +251,30 @@ window.DASH_APP.panel({
       det.append(list);
       box.append(det);
       return box;
+    }
+    // A waiting card's screenshots (shotsOf), above its Approve, drawn at each refresh: the row is kept. Each comes from
+    // the page's own server (GET /shot), which reads it from the card's kept folder on Conveyor's host.
+    function shotsIn(li, c) {
+      const list = shotsOf(c), old = li.querySelector(':scope > .yes-shots'), sig = JSON.stringify([c.repo, c.card, list]);
+      if (old && old.dataset.sig === sig) return;
+      if (old) old.remove();
+      if (!list.length) return;
+      const box = h('div', 'yes-shots'), ul = h('ul', 'shots');
+      box.dataset.sig = sig;
+      box.append(h('p', 'row-meta', `Screenshots from your project's run of this change (${list.length}):`));
+      ul.append(...list.map((s) => {
+        const cap = typeof s.caption === 'string' && s.caption ? s.caption : s.file;
+        const src = `shot?${new URLSearchParams({ repo: c.repo, card: c.card, file: s.file })}`;
+        const item = h('li', 'shot'), fig = h('figure'), a = h('a'), img = h('img');
+        a.href = src; a.target = '_blank'; a.rel = 'noopener';
+        img.src = src; img.alt = cap; img.loading = 'lazy';
+        a.append(img);
+        fig.append(a, h('figcaption', null, cap));
+        item.append(fig);
+        return item;
+      }));
+      box.append(ul);
+      li.querySelector(':scope > .yes').before(box);
     }
     // The whole test of a project, failing on main: the issue filed for it, the cases and the commits it failed between.
     const short = (s) => (typeof s === 'string' && s ? s.slice(0, 12) : null);
@@ -491,6 +522,7 @@ window.DASH_APP.panel({
       const show = (xs) => ctx.list(g.querySelector('.rows'), xs, keyOf[key], make[key], (li, x) => {
         li.classList.toggle('is-new', isNew.has(keyOf[key](x)));
         if (key === 'blocked') outputOf(li, x);
+        if (key === 'waiting') shotsIn(li, x);
       });
       if (key !== 'blocked') { show(items[key]); continue; }
       // The blocked cards, newest first (sorted by project, the newest first in each project), five at a time.

@@ -3,7 +3,9 @@
 # views show, so the dashboard and /units read one record and cannot disagree. Every object in it that names a
 # main-red fix card (card), which has no issue (issue 0), also has name: "Main is red (<commit>)" (rows.jq). It holds:
 # needsYou: waiting (the cards blocked for the owner's yes to a visible change: card, issue, title, sentence: the
-#   reviewer's, since, files: {count, paths: the first 200 its blocked line names, or null}) and blocked
+#   reviewer's, since, files: {count, paths: the first 200 its blocked line names, or null}, shots: the project's own
+#   screenshots it kept, {patch: the hash of the patch they were kept for, shots: [{file, caption}]}, and patch: the
+#   hash of its kept patch now; both null when it kept none) and blocked
 #   (every other blocked card: card, issue, title, reason: the sentence, tail: the end of the output that failed, with its
 #   newlines, "" for none, since; and, while a push of main has failed again on its next try, one item for it:
 #   push true, under the card of the last landing not pushed, reason naming the cards not pushed, unpushed: their
@@ -529,6 +531,13 @@ snapshot() (
     [ -r "$k/$c.patch" ] || continue
     git apply --numstat -z "$k/$c.patch" 2>/dev/null | jq -Rcs --arg c "$c" '{($c): (split("\u0000") | map(select(. != "") | split("\t") | .[2:] | join("\t") | .[0:300])) | select(length > 0)}' 2>/dev/null
   done < "$d/yes" | jq -cs 'add // {}' > "$d/paths" 2>/dev/null || echo '{}' > "$d/paths"
+  # The project's own screenshots each such card kept (keepshots(), lib/push.sh), and the hash of its kept patch now:
+  # the Board shows them only while the two hashes are one.
+  while IFS=$'\t' read -r c k; do
+    [ -r "$k/shots/shots.json" ] || continue
+    jq -c --arg c "$c" --arg p "$(git hash-object -- "$k/$c.patch" 2>/dev/null)" \
+      'objects | {($c): {patch: (if $p == "" then null else $p end), shots: {patch, shots}}}' "$k/shots/shots.json" 2>/dev/null
+  done < "$d/yes" | jq -cs 'add // {}' > "$d/shots" 2>/dev/null || echo '{}' > "$d/shots"
   # Today and the 7 days are reckoned from the health record's time (CONVEYOR_NOW when set), as now is.
   # Each of the three days with its midnight's epoch (t0d, t0w, t0p), from one date program: day by bash's own printf.
   ht=$(jq -r '.time | fromdate' <<<"$h") && [[ $ht =~ ^[0-9]+$ ]] && printf -v day '%(%F)T' "$ht" \
@@ -564,7 +573,7 @@ snapshot() (
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
-  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -735,6 +744,8 @@ snapshot() (
          waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes)))
            | {card, issue, title, sentence: ((.x.visible | select(startswith("yes: ")) | .[5:]) // (.reason | ltrimstr($yes))), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls,
               files: (($allp[0][.card] // .x.paths) as $p | {count: (.x.diff.files // ($p | if . == null then null else length end)), paths: $p})}
+             # The screenshots it kept, beside the hash of its kept patch now (the Board shows them while the two are one).
+             + ($shots[0][.card] // {patch: null, shots: null})
              # A follow-up whose change goes beyond the yes up its chain: what goes beyond, as its reviewer said (the ask).
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],

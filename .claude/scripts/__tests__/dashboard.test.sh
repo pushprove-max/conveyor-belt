@@ -396,6 +396,22 @@ d=''; ! d=$(drun nosuch c1 2>/dev/null) && [ -z "$d" ] || fail "a record the hos
 d=''; ! d=$(drun widgetshop c1 2>/dev/null) && [ -z "$d" ] || fail "a host that gave no answer was passed off as a check with no item: $d"
 ) & started donewhen
 
+# --- --shot (#308): one screenshot a card waiting for the owner's yes kept, from the named record's kept folder on the
+# host, in one host command. Bugs: another record was asked; the card or file reached the host unquoted; a host that
+# gives no image is passed off as one ---
+( fresh shot
+echo 'iVBORw==' > "$T/ssh-out"; : > "$T/ssh-calls"
+srun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" \
+  CONVEYOR_DASHBOARD_DIR="$OUT" timeout 20 bash "$DASH" --shot "$@"; }
+o=$(srun widgetshop c1-12 a.png) || fail "--shot exited non-zero"
+[ "$o" = 'iVBORw==' ] || fail "--shot does not give the host's image: $o"
+[ "$(wc -l < "$T/ssh-calls")" = 1 ] && grep -q "CONVEYOR_MAIN='/srv/cd' bash .*conveyor.sh' state-dir)\"/kept/'c1-12'/shots/'a.png'" "$T/ssh-calls" \
+  || fail "--shot does not ask the host once, for the named record's kept folder with the card and file quoted: $(cat "$T/ssh-calls")"
+o=''; ! o=$(srun nosuch c1-12 a.png 2>/dev/null) && [ -z "$o" ] || fail "a record the host file does not name gave a screenshot: $o"
+echo 1 > "$T/ssh-rc"; : > "$T/ssh-out"
+o=''; ! o=$(srun widgetshop c1-12 a.png 2>/dev/null) && [ -z "$o" ] || fail "a host that gave no screenshot was passed off as one: $o"
+) & started shot
+
 # --- cards on both records: every row names its repo and links to that repo's issue ---
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
@@ -1328,7 +1344,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 RETIRED='\b([u]nits?|[s]eats?|[p]ass(es)?|[m]erge queue|[c]hain)\b'

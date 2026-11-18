@@ -375,6 +375,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .yes-files { margin-top: var(--sp-2); font-size: var(--fs-sm); }
 .yes-paths summary { cursor: pointer; color: var(--muted); }
 .yes-paths .paths { margin-top: var(--sp-1); padding-left: var(--sp-4); font-family: var(--mono); overflow-wrap: anywhere; list-style: disc; }
+/* Its project's own screenshots, above its Approve: each a thumbnail that opens whole. */
+.yes-shots { margin-top: var(--sp-2); font-size: var(--fs-sm); }
+.yes-shots .shots { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
+.yes-shots img { display: block; max-width: 240px; max-height: 180px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.yes-shots figcaption { max-width: 240px; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
 /* The output a blocked card failed on, under its sentence: closed until asked for, its failures first. */
 .output { margin-top: var(--sp-1); font-size: var(--fs-sm); }
 .output > summary { cursor: pointer; color: var(--muted); }

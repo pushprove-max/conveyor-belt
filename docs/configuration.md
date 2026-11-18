@@ -16,6 +16,8 @@ Some pack settings that this site names:
 - `review.proof`: the proof a review finding needs. `any`, the default, takes any proof that can be reproduced. `real`
   asks for a proof with what the project really runs ([How a card goes](cards.md#review-and-the-judge)).
 - `review.wording`: a file with the wording of `/conveyor-belt:review` in place of `conveyor/rules/review.md`.
+- `review.screenshots`: the folder where your project's own run writes screenshots. The Board shows them beside the
+  approval of a visible change ([Board](board.md#needs-you)). Conveyor does not take screenshots.
 - `pipelineFiles`: the files that change how cards are built, reviewed, fixed, tested, landed or pushed. A follow-up
   that changes one is filed held.
 - `auto.reserved`: what `/conveyor-belt:auto` never decides ([Foreman](foreman.md)).

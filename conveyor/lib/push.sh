@@ -375,6 +375,35 @@ owed() {
 }
 
 tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".oldfiles; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks; }
+# The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images
+# (PNG, JPEG, GIF, WebP) in the worktree folder the pack's review.screenshots names, which the project's own run
+# writes (Conveyor takes none). Each is copied to <kept>/shots named by its content (git hash-object), the first
+# SHOTS_MAX by path, none over SHOT_MAX bytes, with shots.json: {patch: the hash of the kept patch <kept>/<card>.patch,
+# shots: [{file, caption: its path in the folder}]}. The Board shows them only while the card's kept patch is that one.
+# An image not newer, to the nanosecond, than every file the change touches outside the folder was made from an older
+# patch of the card, before a later session changed it: it is left out. A file the change deletes is reckoned by the
+# nearest folder that is still there, as removing it changed that folder's time. A folder outside the worktree (an absolute path, .., or a link
+# out) gives none, and no link in it is followed. With no image, nothing is written.
+SHOTS_MAX=8 SHOT_MAX=$((2 * 1024 * 1024))
+keepshots() { # <worktree> <kept folder> <card>
+  local dir wt s f fs=() newest=0 sz mt n=0 h ext list=() p i
+  rm -rf "$2/shots"
+  packget review.screenshots dir 2>/dev/null && [ -n "$dir" ] && [[ $dir != /* && /$dir/ != */../* ]] || return 0
+  wt=$(cd "$1" && pwd -P) && s=$(cd "$1/$dir" 2>/dev/null && pwd -P) && [[ $s == "$wt"/* ]] || return 0
+  mapfile -d '' -t fs < <(git -C "$1" diff --cached -z --name-only --no-renames -- . ":(exclude,literal)$dir")
+  for i in "${!fs[@]}"; do
+    p=${fs[i]}; while [ ! -e "$1/$p" ] && [ ! -L "$1/$p" ] && [ "$p" != . ]; do [[ $p == */* ]] && p=${p%/*} || p=.; done; fs[i]=$p
+  done
+  [ "${#fs[@]}" = 0 ] || while read -r mt; do [ "$mt" -le "$newest" ] || newest=$mt; done < <(cd "$1" && p_mtimens "${fs[@]}")
+  while IFS= read -r -d '' f && [ "$n" -lt "$SHOTS_MAX" ]; do
+    read -r sz _ < <(p_stat "$f") && mt=$(p_mtimens "$f") && [ "$sz" -le "$SHOT_MAX" ] && [ "$mt" -gt "$newest" ] || continue
+    ext=$(tr '[:upper:]' '[:lower:]' <<<"${f##*.}"); [ "$ext" != jpeg ] || ext=jpg
+    h=$(git hash-object -- "$f") && mkdir -p "$2/shots" && cp "$f" "$2/shots/$h.$ext" || continue
+    list+=("$h.$ext" "${f#"$s"/}"); n=$((n + 1))
+  done < <(find "$s" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.webp' \) -print0 | LC_ALL=C sort -z)
+  [ "$n" -gt 0 ] && p=$(git hash-object -- "$2/$3.patch") || return 0
+  jq -cn --arg p "$p" '{patch: $p, shots: [$ARGS.positional | range(0; length; 2) as $i | {file: .[$i], caption: .[$i + 1][0:200]}]}' --args "${list[@]}" > "$2/shots/shots.json"
+}
 clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
@@ -394,6 +423,7 @@ clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdraw
 # of the speed check that blocks the card (SPEEDCHECK, lib/testrun.sh): the line's speedcheck. Called in card(), the
 # line's waitSec is the seconds the card waited on other cards and for main to change (card()'s waitsec and mainsec),
 # as on its landed line, for the drift watch (bench/drift.sh); outside card() it has none.
+# A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()).
 block() { # <card> <issue> <worktree> <reason> [post the reason on the issue whatever the review holds]
   local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null
   [ -z "${waitsec+x}" ] || ws=$((waitsec + ${mainsec:-0}))
@@ -427,6 +457,8 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
       fi
     fi
   fi
+  # The screenshots go only with a patch of the staged change (d 1): they are tied to that patch.
+  [[ $reason != "$YES"* ]] || [ "$d" != 1 ] || [ -z "$kept" ] || keepshots "$3" "$k" "$1"
   f=$(grep -Ev "$UNRECORDED" "$3.review" 2>/dev/null)
   # The comment is one argument, and an issue comment at most 65536 characters, beside up to 60000 of findings: it
   # shows the output's last whole lines within 4000 characters (the blocked line keeps all 60).

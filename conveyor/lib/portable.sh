@@ -92,6 +92,10 @@ p_mtimes() { stat -c '%Y %n' "$@" 2>/dev/null; } # <file>...
 # "<size> <mtime> <ctime> <inode> <path>" of a file, the times to the nanosecond: a file written since, even to the same
 # size within the same second, gives another line. Fails, with no line, when the file is not there.
 p_filekey() { stat -c '%s %.9Y %.9Z %i %n' -- "$1" 2>/dev/null; } # <file>
+# The mtime of each file in nanoseconds since the epoch, one line each: a file written later in the same second gives a
+# larger number, in any locale (stat writes the decimal point of LC_NUMERIC: a comma in de_DE). A file that is not there
+# gives no line.
+p_mtimens() { LC_ALL=C stat -c '%.9Y' -- "$@" 2>/dev/null | tr -d .; } # <file>...
 
 # <date> (as GNU date -d reads it: "6 days ago", "2026-11-10") in <format>.
 p_date() { date -d "$1" "$2"; } # <date> <+format>

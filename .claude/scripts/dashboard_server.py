@@ -32,6 +32,8 @@ panel asks for it when the owner opens Work now or reads it again.
 that data.js no longer carries (dashboard.sh --older): the Tests page asks for it when that file's Timeline is opened.
 `GET /donewhen?repo=<repo>&card=<card id>`, behind the login too, gives a card's last Done-when check item by item,
 which data.js does not carry (dashboard.sh --donewhen): the Board asks for it when that card's Done-when line is opened.
+`GET /shot?repo=<repo>&card=<card>&file=<file>`, behind the login too, gives one screenshot that a card waiting for the
+owner's yes kept (dashboard.sh --shot): Needs you shows it beside the card's Approve.
 
 The login: users in dashboard-auth.json beside the ruling log (env CONVEYOR_DASHBOARD_AUTH), each with a name, a
 role (admin or member), an scrypt hash, when it was created and last logged in, its MFA state and its trusted
@@ -67,6 +69,8 @@ for recovery:
   dashboard_server.py revoke <id>|all                 end a device (`all`: every device and every session)
 Sessions live in memory (a restart logs them out); a trusted device lasts a year and survives a restart.
 """
+import base64
+import binascii
 import datetime
 import fcntl
 import functools
@@ -108,6 +112,10 @@ HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command 
 WORK_LIMIT = 90        # GET /work: dashboard.sh --work's one ssh command (its SSH_LIMIT, 60 s) and the merge
 OLDER_LIMIT = 90       # GET /older: dashboard.sh --older's one ssh command (its SSH_LIMIT, 60 s) and the tagging
 DONEWHEN_LIMIT = 90    # GET /donewhen: dashboard.sh --donewhen's one ssh command (its SSH_LIMIT, 60 s) and its check
+SHOT_LIMIT = 90        # GET /shot: dashboard.sh --shot's one ssh command (its SSH_LIMIT, 60 s)
+# GET /shot: a screenshot a card kept, named by its content (keepshots(), lib/push.sh); the card is a CARD id.
+SHOT = re.compile(r'([0-9a-f]{40,64})\.(png|jpg|gif|webp)')
+SHOT_TYPES = {'png': 'image/png', 'jpg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp'}
 ANSWER_KEYS = {'id', 'answer', 'askedAt', 'repo'}
 DECISION_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$')
 ASKED_AT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
@@ -1621,6 +1629,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.older()
         if path == '/donewhen':
             return self.donewhen()
+        if path == '/shot':
+            return self.shot()
         if path in ('/me', '/users'):
             return self.users_get(path)
         if path == '/me/qr':
@@ -1891,6 +1901,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def shot(self):
+        """GET /shot?repo=<repo>&card=<card>&file=<file>: one screenshot a card waiting for the owner's yes kept (the
+        snapshot's needsYou.waiting[].shots), read from the host by dashboard.sh --shot, which gives it as base64: the
+        image goes only from Conveyor's host to this page. 400 for a repo, card or file of another shape, 502 with
+        the reason when the host gives none."""
+        if not self.authed():
+            return self.reply(401, 'log in to see the screenshots')
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        repo, card, file = ((q.get(k) or [''])[0] for k in ('repo', 'card', 'file'))
+        m = SHOT.fullmatch(file)
+        if not REPO.fullmatch(repo) or not CARD.fullmatch(card) or not m:
+            return self.reply(400, 'no repo, card or screenshot of the shape the Board names')
+        try:
+            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--shot', repo, card, file], SHOT_LIMIT)
+        except subprocess.TimeoutExpired:
+            return self.reply(502, 'the screenshot did not come in %d s' % SHOT_LIMIT)
+        except OSError as e:
+            return self.reply(502, 'could not start dashboard.sh: %s' % e)
+        try:
+            body = base64.b64decode(run.stdout) if run.returncode == 0 else b''
+        except (binascii.Error, ValueError):
+            body = b''
+        if not body:
+            return self.reply(502, (run.stderr.strip().splitlines() or ['the host gave no screenshot'])[-1])
+        self.send_response(200)
+        self.send_header('Content-Type', SHOT_TYPES[m.group(2)])
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Cache-Control', 'private, max-age=3600')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)

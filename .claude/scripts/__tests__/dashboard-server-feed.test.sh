@@ -183,6 +183,31 @@ ds.Handler.donewhen(bad)
 check(bad.code == 502 and 'gave no Done-when detail' in bad.text and bad.out.getvalue() == b'',
       'donewhen: a failed read is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
 
+# D5 (#308). Bugs: GET /shot ran dashboard.sh --shot for a card or file of a shape the snapshot never names (a path out
+# of the card's kept folder); the image did not reach the page as the bytes the host gave; a failed read reached the
+# page as an empty image.
+PNG = '%s.png' % ('c' * 40)
+started.clear()
+ds.run_script = lambda *a, **k: (started.append(a[0]), subprocess.CompletedProcess(a[0], 0, 'iVBORw==\n', ''))[1]
+shot = Page()
+shot.path = '/shot?repo=sample&card=c20260101T000000-sample-12&file=' + PNG
+ds.Handler.shot(shot)
+check(started == [started[0]] and started[0][-4:] == ['--shot', 'sample', 'c20260101T000000-sample-12', PNG] and shot.code == 200
+      and shot.out.getvalue() == b'\x89PNG', 'shot: an ask runs dashboard.sh --shot for its card and file and gives the image: %r %s' % (started, shot.code))
+started.clear()
+for q in ('repo=sample&card=..&file=' + PNG, 'repo=sample&card=c20260101T000000-sample-12&file=../x.png', 'repo=sample&card=c20260101T000000-sample-12&file=%s.svg' % ('c' * 40), 'repo=sample&card=c20260101T000000-sample-12'):
+    bad = Page()
+    bad.path = '/shot?' + q
+    ds.Handler.shot(bad)
+    check(bad.code == 400, 'shot: %s is refused: %s' % (q, bad.code))
+check(started == [], 'shot: a refused ask starts no process: %r' % started)
+ds.run_script = lambda *a, **k: subprocess.CompletedProcess(a[0], 1, '', 'dashboard: devbox gave no screenshot\n')
+bad = Page()
+bad.path = '/shot?repo=sample&card=c20260101T000000-sample-12&file=' + PNG
+ds.Handler.shot(bad)
+check(bad.code == 502 and 'gave no screenshot' in bad.text and bad.out.getvalue() == b'',
+      'shot: a failed read is a 502 with its reason: %s %r' % (bad.code, getattr(bad, 'text', None)))
+
 for f in fail:
     print('FAIL: ' + f, file=sys.stderr)
 sys.exit(1 if fail else 0)

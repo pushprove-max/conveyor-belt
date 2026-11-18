@@ -337,7 +337,8 @@
       "properties": {
         "proof": { "description": "any: any proof that can be reproduced makes a finding; real: a finding's proof must happen with what the project really runs, else it is an UNPROVEN line (a security finding is exempt).", "enum": ["any", "real"], "default": "any" },
         "rereviewWhole": { "description": "The review after a fix of review findings reviews the fix's diff and the findings it was told to fix, not the whole change again, unless the fix touches more than this percent of the change's added and removed lines: then it reviews the whole change. 0 reviews the whole change after every fix that changes a line.", "type": "integer", "minimum": 0, "default": 50 },
-        "wording": { "description": "A file of the project, from its checkout's root, holding the wording /conveyor-belt:review gives Codex, in place of the plugin's conveyor/rules/review.md: a `# adversarial` section and a `# review` section (conveyor.sh wording).", "type": "string", "minLength": 1 }
+        "wording": { "description": "A file of the project, from its checkout's root, holding the wording /conveyor-belt:review gives Codex, in place of the plugin's conveyor/rules/review.md: a `# adversarial` section and a `# review` section (conveyor.sh wording).", "type": "string", "minLength": 1 },
+        "screenshots": { "description": "A folder of the project, from its checkout's root, where the project's own run writes screenshots (PNG, JPEG, GIF, WebP). A card that waits for the owner's yes to a visible change keeps those made since its change last changed, and the Board shows them beside the approval. Conveyor takes none itself. None: no screenshots.", "type": "string", "minLength": 1 }
       }
     },
     "split": {

@@ -61,6 +61,13 @@ t_host() {
   printf xyz > "$T/f"; touch -d @1700000000 "$T/f"
   [ "$(p p_filekey "$T/f")" != "$k" ] || fail "a file written again to the same size and mtime kept its key: $k"
   ! p p_filekey "$T/none" >/dev/null || fail "a file not there has a key"
+  # A screenshot is kept only when newer than the change (keepshots, push.sh): a file written later in the same second
+  # has the larger nanosecond mtime.
+  touch -d @1700000000.25 "$T/f"; touch -d @1700000000.75 "$T/g"
+  [ "$(p p_mtimens "$T/f" "$T/none" "$T/g")" = $'1700000000250000000\n1700000000750000000' ] || fail "mtimens: $(p p_mtimens "$T/f" "$T/none" "$T/g")"
+  # In a locale with a decimal comma stat wrote "1700000000,250000000", not a number, and every screenshot was left out.
+  l=$(locale -a 2>/dev/null | grep -iE '^(de_DE|en_DK|fr_FR|nl_NL)\.utf-?8$' | head -1)
+  [ -z "$l" ] || [ "$(LC_ALL=$l p p_mtimens "$T/f")" = 1700000000250000000 ] || fail "mtimens in $l: $(LC_ALL=$l p p_mtimens "$T/f")"
   [ "$(TZ=UTC p p_date 2026-11-10 +%s)" = 1794268800 ] || fail "date: $(TZ=UTC p p_date 2026-11-10 +%s)"
   # The snapshot reads its three days, each with its midnight, from one p_dates: a line each, in order.
   k=$(printf '%s\n' 2026-11-10 '2026-11-10 6 days ago' | TZ=UTC p p_dates '+%F %s' | paste -sd ' ' -)
