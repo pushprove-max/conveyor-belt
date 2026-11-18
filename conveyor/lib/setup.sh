@@ -868,6 +868,9 @@ doctor() {
     echo "not checked: the pack, its models' programs, the pin and the terms file: they are read with jq and git"; return 1
   fi
   git -C "$CALLED" rev-parse --git-dir >/dev/null 2>&1 || { no "a git checkout of the project at $CALLED" "run conveyor.sh doctor in the project's checkout"; return 1; }
+  # A main checkout set to bare: each git command that needs a work tree fails in it (rev-parse --git-dir does not), so no card lands (land(), lib/claim.sh).
+  [ "$(git -C "$MAIN" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] \
+    || no "a working main checkout: $MAIN is not one (core.bare is true), so no card can land" "run git -C $MAIN config core.bare false"
   if [ ! -e "$PACK" ]; then no "the pack $PACK" "run /conveyor-belt:setup"; return 1; fi
   # A field this engine does not know, in a pack for a newer commit (packnewer(), lib/prompts.sh): the pack is right,
   # and the fix is to run the commit it names, not to correct the pack.

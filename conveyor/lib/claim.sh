@@ -837,10 +837,13 @@ PASSED="an ordered card went past it since its claim; nothing was landed" # what
 # stand. A change that does not apply to main, nor merge onto it three-way with no conflict left, is the rebase conflict
 # first; one that merges so is only this (settle() fits it with the same merge).
 STALE="main moved since its checks and tests ran; nothing was landed"
+NOTWORK="the main checkout is not a working checkout (core.bare is true): set core.bare to false" # what land() prints for that
 land() { # <card> <issue> <worktree> <commit message> [extra json for the landed line] [those five of each further card of a batch, in its order]
   local err sha l p base tip want x i h b='[]' a=("$@") g=() ls=() wts=() shas=() paths=()
   [ $# -le 5 ] || b=$(for ((i = 0; i < $#; i += 5)); do printf '%s\n' "${a[i]}"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
   onmain() { [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] || { echo "main's checkout is not on the $BRANCH branch; nothing was landed"; return 1; }; }
+  # A checkout set to bare (core.bare=true) fails each git command that needs a work tree (status, diff, merge), so it is named as that, first (#254).
+  [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || { echo "$NOTWORK"; return 1; }
   onmain && base=$(git rev-parse "refs/heads/$BRANCH") || return 1
   tip=$base
   for ((i = 0; i < ${#a[@]}; i += 5)); do
@@ -858,7 +861,10 @@ land() { # <card> <issue> <worktree> <commit message> [extra json for the landed
     want=${want##*$'\n'} # the tree id alone: what git apply printed on success (a new blank line at EOF, a clean three-way merge) comes first
     h=$3; [ ! -e "$3.batch" ] || h=$CARDS/$(jq -r .by "$3.batch" 2>/dev/null)
     [ "$(git -C "$h" rev-parse HEAD 2>/dev/null)" = "$base" ] || { echo "$STALE"; return 1; }
-    git diff --quiet "$base" -- "${paths[@]}" || { echo "main checkout has changes of its own to the card's files"; return 1; }
+    # Exit 1 with nothing on stderr is a change; any other failure is git's own error, never read as a change.
+    err=$(git diff --quiet "$base" -- "${paths[@]}" 2>&1); h=$?
+    [ $h = 0 ] || { if [ $h = 1 ] && [ -z "$err" ]; then echo "main checkout has changes of its own to the card's files"
+      else echo "cannot check main's checkout for changes of its own: git diff failed (exit $h): ${err:0:600}"; fi; return 1; }
     # A later card of a batch is judged on the commit before it: HEAD is that commit (a checkout-less worktree's own
     # HEAD), main's checkout its files, so its hooks see its own change alone, as if it landed alone.
     g=(); [ "$tip" = "$base" ] || { git worktree remove --force "$3.head" 2>/dev/null; git worktree add -q --detach --no-checkout "$3.head" "$tip" 2>/dev/null \

@@ -187,6 +187,27 @@ t_conflict() {
   st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'not on the main branch' && [ "$(git -C "$R" rev-parse refs/heads/main)" = "$landed" ] || fail "a landing ran with main's checkout on another branch"
 }
 
+# Bug (#254): a main checkout set to bare (core.bare=true) fails each git command that needs a work tree, and the landing read the
+# failed git diff as the checkout's own changes, so the card was blocked for changes that did not exist.
+t_barelanding() {
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; head=$(git -C "$R" rev-parse HEAD)
+  echo 'echo two >> a.txt; git -C "$R" config core.bare true' > "$STUB/build"
+  loop run >/dev/null; git -C "$R" config core.bare false
+  [ "$(st 'select(.step == "blocked") | .reason')" = "the main checkout is not a working checkout (core.bare is true): set core.bare to false" ] \
+    || fail "a bare main checkout was not blocked as one: $(st 'select(.step == "blocked") | .reason')"
+  [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "the card landed on a bare main checkout"
+}
+
+# Bug (#254): a git diff that failed in the landing's check for main's own changes was read as a change, so its error
+# was lost behind "changes of its own".
+t_diffcheckfails() {
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo 'echo two >> a.txt' > "$STUB/build"
+  real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' 'case " $* " in *" diff --quiet "*) echo "fatal: index file corrupt" >&2; exit 128 ;; esac' "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
+  loop run >/dev/null; rm "$STUB/git"; why=$(st 'select(.step == "blocked") | .reason')
+  [[ $why == *"git diff failed (exit 128): fatal: index file corrupt"* && $why != *"changes of its own to"* ]] \
+    || fail "a failed git diff in the landing's check was not blocked with its own error: $why"
+}
+
 # Bugs (#157): a line that does not parse, or parses but is not a whole record of a known step (a landing with no
 # commit, an unknown step, a required field missing), stopped the loop and every snapshot until a hand fixed it; or,
 # before that, was skipped or trusted. Now each is set aside: moved out of the records to quarantined.jsonl with its
