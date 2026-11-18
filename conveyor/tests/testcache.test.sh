@@ -49,6 +49,12 @@ t_testcacheskip() {
     || fail "the run's log does not say why a.test did not run: $(cat "$T/$CASE/cards/c8.testlog"/* 2>&1)"
   [ "$(jq -c '.why["a.test"]' "$T/$CASE/cards/c8.rec")" = '["passed before with the same inputs"]' ] \
     || fail "the test line's why does not say why a.test did not run: $(cat "$T/$CASE/cards/c8.rec")"
+  # The line's ran names the file that ran, not the one the cache kept off (which why names): bug it catches, the
+  # landing pull request (landpr()) listing a.test as run and leaving out b.test.
+  [ "$(jq -c .ran "$T/$CASE/cards/c8.rec")" = '["b.test"]' ] || fail "the test line's ran is not b.test alone: $(cat "$T/$CASE/cards/c8.rec")"
+  # And the record check takes the line (a field it does not know sets the whole line aside).
+  jq -c '{card: "c8", issue: 7, step: "test", time: "2026-01-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "pass", sha: "", reason: ""} + .' \
+    "$T/$CASE/cards/c8.rec" > "$T/$CASE/line.jsonl" && recok "$T/$CASE/line.jsonl" testrec
   ! grep -q $'^off\tb.test' "$T/$CASE/cards/c8.rerun" 2>/dev/null || fail "b.test, with no inputs line, was kept off"
 }
 

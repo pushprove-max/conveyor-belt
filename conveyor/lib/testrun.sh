@@ -120,7 +120,8 @@ keeprun() { # <worktree> <output file to> <log folder to> <first run's record to
 # signal: an exit over 128), "timed out" (124) or "nothing selected" (a run that passed and selected no file); and
 # why, why each file ran, {file: [reasons]}, from its log lines `TESTRUN why<TAB><file><TAB><reason>`, when it gives
 # any (a first run and a run again alike); wholeSuite (true), when a log says the runner ran every case file of the
-# engine (`TESTRUN whole-suite`); ranCases, the cases it selected of each file it ran only part of, {file: [cases]},
+# engine (`TESTRUN whole-suite`); ran, the files the logs name as begun (`== <file>`), sorted: the files it ran (why
+# also names files it kept off, such as those the test cache skipped: cacheoff()); ranCases, the cases it selected of each file it ran only part of, {file: [cases]},
 # from its log lines `TESTRUN case<TAB><file><TAB><case>` (brokeby()); refused, "refused full run: <why>", when
 # tests() refused the whole selection (TEST_REFUSED); and list, the list of tests the command was given (listcmd():
 # {mode: "changed", files} or {mode: "whole", why}), when the pack sets test.list; and coverage, the changed lines no
@@ -144,6 +145,7 @@ testrec() { # <worktree> <exit> <seconds>
          elif $rc > 128 then "killed" else "failed" end)}
     + if $why == [] then {} else {why: ($why | group_by(.f) | map({key: .[0].f, value: (map(.w) | unique)}) | from_entries)} end
     + if any($in[]; . == "TESTRUN whole-suite") then {wholeSuite: true} else {} end
+    + ([$in[] | capture("^== (?<f>.*\\S.*)$") | .f] | unique | if . == [] then {} else {ran: .} end)
     + if $cs == [] then {} else {ranCases: ($cs | group_by(.f) | map({key: .[0].f, value: (map(.c) | unique)}) | from_entries)} end
     + if $z == "" then {} else {refused: $z} end
     + if $tl[0] | type == "object" then {list: $tl[0]} else {} end
@@ -2398,20 +2400,23 @@ donewhen() { # <worktree> <issue json>
   { jq -r '.lines[]' <<<"$k"; jq -r '.[] | "Note: " + .' <<<"$miss"; } > "$1.donewhen"
   jq -c --argjson x "$miss" '{items, met: (.met | length), failed} + (if $x == [] then {} else {notes: $x} end)' <<<"$k"
 }
-# A build, fix or rebase session's line, with the Done-when check of its reply on it (doneWhen). A failed check is not a
-# block: one fix session is told the failed items, as a NO-GO's findings are, and the check runs again on its reply,
-# its line carrying that result; a second failure blocks the card with the items listed. Fails when the card blocked.
+# The reply's D<n> lines as donewhen() kept them in <worktree>.donewhen, each with its state (met or not met), cut to
+# 300 characters: a JSON array, for the session's line (doneLines; the pull request of Land as pr lists them).
+donelines() { jq -Rsc '[splits("\n") | select(. != "" and (startswith("Note: ") | not)) | .[0:300]]' "$1.donewhen" 2>/dev/null || echo '[]'; }
+# A build, fix or rebase session's line, with the Done-when check of its reply on it (doneWhen, and the reply's D<n>
+# lines: doneLines). A failed check is not a block: one fix session is told the failed items, as a NO-GO's findings
+# are, and the check runs again on its reply, its line carrying that result; a second failure blocks the card with the items listed. Fails when the card blocked.
 checked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <step> <the session's fields>
   local k t f
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
-  record "$1" "$2" "$6" ok "$(jq -c --argjson k "${k:-null}" 'if $k == null then . else . + {doneWhen: $k} end' <<<"$7")"
+  record "$1" "$2" "$6" ok "$(jq -c --argjson k "${k:-null}" --argjson d "$(donelines "$3")" 'if $k == null then . else . + {doneWhen: $k, doneLines: $d} end' <<<"$7")"
   [ -n "$k" ] && [ "$(jq '.failed | length' <<<"$k")" != 0 ] || return 0
   f=$(jq -r '.failed | join("; ")' <<<"$k")
   began "$1" "$2" fix
   t=$(session "$3" "$5"$'\n\n'"$DWFIX"$'\n'"$(jq -r '.failed[] | "- " + .' <<<"$k")" fix) || { block "$1" "$2" "$3" "fix: $t"; return 1; }
   k=$(donewhen "$3" "$4") || { block "$1" "$2" "$3" "the engine could not run the Done-when check"; return 1; }
-  record "$1" "$2" fix ok "$(jq -c --argjson k "${k:-null}" --arg r "the Done-when check failed: $f" \
-    '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k} end)' <<<"$t")"
+  record "$1" "$2" fix ok "$(jq -c --argjson k "${k:-null}" --argjson d "$(donelines "$3")" --arg r "the Done-when check failed: $f" \
+    '. + {reason: $r} + (if $k == null then {} else {doneWhen: $k, doneLines: $d} end)' <<<"$t")"
   [ -z "$k" ] || [ "$(jq '.failed | length' <<<"$k")" = 0 ] \
     || { block "$1" "$2" "$3" "the Done-when check failed again after its one fix session: $(jq -r '.failed | join("; ")' <<<"$k")"; return 1; }
 }

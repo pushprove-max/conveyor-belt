@@ -49,6 +49,10 @@ its own, and the Board's Rules tab sets them in its Judge row.
 Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule as on.
 
+`conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's
+`push.landAs`). With `pr`, the push sends main to `conveyor/landing` and keeps one pull request open from it into the
+default branch ([Land as](../docs/configuration.md#land-as)).
+
 `conveyor.sh control dep-guard on|off` sets the dependency guard (`depGuard` in the record; a record saved before it
 reads as on). On, an issue is never picked while an issue its `Depends on:` lines name is open, nor while a follow-up
 filed from one is: a release, the order list and a retry do not change that. Off, `conveyor.sh control force <issue>`
@@ -329,6 +333,8 @@ Each run of a card's changed tests writes one `test` line to the card records, `
 - `why`: why each file ran, `{"<file>": [reasons]}`, on a first run and a run again alike, when the runner says (below).
 - `wholeSuite`: `true` when the runner ran every engine case file (its log line `TESTRUN whole-suite`), so a reader
   does not count files; absent otherwise.
+- `ran`: the test files the run began, from its log lines `== <file>`; absent when it names none. `why` can name a
+  file that did not run, such as one the test cache kept off.
 - `ranCases`: the cases the runner selected of each file it ran only part of, `{"<file>": [cases]}`, from its log
   lines `TESTRUN case<TAB><file><TAB><case>`; absent when it gives none. The search for the landing that broke a case
   on main counts a card that ran the case so.

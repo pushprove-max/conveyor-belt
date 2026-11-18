@@ -51,7 +51,7 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
              stalls: (map(.stalls // 0) | add),
              # Why its picked line took a slot beyond the project's cap (pick(): "main is red"), else null.
              beyond: (.[0].beyond // null),
-             log: [range(0; $all | length) as $i | $all[$i] | {step, of, result, time, counts, created, sec: (if .step == "pushed" then .sec else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
+             log: [range(0; $all | length) as $i | $all[$i] | {step, of, result, time, counts, created, sec: (if .step == "pushed" then .sec else null end), pr: (if .step == "pushed" then .pr else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
                # An issue line, a test line and a review that failed, a blocked line (its sentence) and a fix line (what started it) keep their reason; a blocked line and a failed test line their output and a NO-GO review its findings (tail); a failed test line its failing files (failures).
                reason: (if (.step == "issue" and .result != "ok") or (.step == "test" and .result != "pass") or (.step == "review" and (.result | IN("fail", "stopped")))
                  or .step == "blocked" or .step == "fix" then .reason else null end),

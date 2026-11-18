@@ -10,7 +10,8 @@
 // reading), Builder and Reviewer (CLI, model and effort), Judge (on or off, CLI, model and effort, the finding kinds it always
 // accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
 // (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
-// card lands (On or Off; disabled the same way for a record with no rules.push), Visible changes need your yes (On or
+// card lands (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull request, the
+// record's landAs or else the pack's; disabled the same way for a record with no landAs), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
 // way for a record with no rules.wholeSuite), Card work yields to you (On or Off, the machine's
 // steer, sent as POST /machine; disabled the same way when the snapshot does not say it), Cores kept for you (shown,
@@ -114,6 +115,10 @@
   // Whether the project's engine knows the dependency guard and `control force`: its control record names depGuard
   // (the engine fills in every field it knows). An older pinned engine is never sent either.
   const depKnown = () => { const c = ctl(); return !!c && typeof c.depGuard === 'boolean'; };
+  // Land as in force: the record's landAs, else the pack's push.landAs (packLandAs), else main. Known when the record
+  // names landAs (null too: the pack's); an older engine is never sent `land-as`.
+  const landNow = (c) => (c && (c.landAs === 'main' || c.landAs === 'pr') ? c.landAs : (S.d.packLandAs === 'pr' ? 'pr' : 'main'));
+  const landKnown = () => { const c = ctl(); return !!c && Object.prototype.hasOwnProperty.call(c, 'landAs'); };
   // The rule that skips an issue, in words.
   function why(rule) {
     if (rule === 'follow-ups') return 'follow-ups are off';
@@ -260,6 +265,7 @@
     if (action === 'order') return a.length ? `pinned order ${a.map((n) => `#${n}`).join(', ')}` : 'no pinned order';
     if (action === 'start') return `new issues start in ${a[0] === 'held' ? 'Held' : 'the Queue'}`;
     if (action === 'dep-guard') return `dependency guard ${a[0]}`;
+    if (action === 'land-as') return a[0] === 'pr' ? 'land as one pull request' : 'land on main';
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
     if (action === 'depends') return `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`;
     if (action === 'prices') return priceWords(a);
@@ -292,6 +298,7 @@
     if (action === 'review-account') { r.reviewAccount = a[0] || null; return [r, 'review-account']; }
     if (action === 'start') { r.start = a[0]; return [r, 'start']; }
     if (action === 'dep-guard') { r.depGuard = a[0] === 'on'; return [r, 'dep-guard']; }
+    if (action === 'land-as') { r.landAs = a[0]; return [r, 'land-as']; }
     return null;
   }
 
@@ -890,6 +897,14 @@
     pOn.disabled = pOff.disabled = !pushKnown;
     el.append(row('push', 'Push when a card lands', 'Conveyor pushes each card when it lands',
       pOn, pOff, pushKnown ? offLine(pushOn, 'land only: cards land on main, and Push landed on the Control tab pushes them') : newer(pushKnown)));
+    // Land as: Main pushes main to the default branch; Pull request pushes it to conveyor/landing and keeps one pull
+    // request open into the default branch. The record's value, else the pack's (landNow).
+    const land = landNow(c), landK = landKnown();
+    const lMain = choice('Main', 'land-as-main', 'Land as: main', land === 'main', () => { if (land !== 'main') send('land-as', ['main'], null, ['land-as', ['pr']]); });
+    const lPr = choice('Pull request', 'land-as-pr', 'Land as: one pull request', land === 'pr', () => { if (land !== 'pr') send('land-as', ['pr'], null, ['land-as', ['main']]); });
+    lMain.disabled = lPr.disabled = !landK;
+    el.append(row('land-as', 'Land as', 'where the push sends the cards that landed',
+      lMain, lPr, landK ? (land === 'pr' ? h('span', 'board-from', 'one pull request from conveyor/landing collects the cards; merge it to close their issues') : null) : newer(landK)));
     // Visible changes need your yes: On stops a card whose change customers or staff will see until its
     // issue has a `Visible change approved:` line; Off (the default) lets it land without one, and says so beside the switch, so a
     // landed visible change is not read as approved.

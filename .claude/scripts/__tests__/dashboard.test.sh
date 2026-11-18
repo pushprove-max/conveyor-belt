@@ -382,7 +382,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
-  "areaPrefix": "team/", "standing": ["asked-fix"],
+  "areaPrefix": "team/", "packLandAs": "pr", "standing": ["asked-fix"],
   "health": {"state": "paused", "reason": "the loop says why", "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
     "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
@@ -502,6 +502,8 @@ q '.panels.rules.data | .repo == "sample" and .control.rules.never == ["area:inf
 q '.panels.board.data | (.unpushed | map([.issue, .card, .url])) == [[7, "c5-7", "'"$PU"'/7"]] and .fullTest.command == true and .fullTest.last.state == "failed"
   and (.others.widgetshop.unpushed | map(.issue)) == [2] and .others.widgetshop.fullTest == null' "the Board part: the landed cards not pushed and the full test suite"
 q '.panels.rules.data | has("unpushed") or has("fullTest") | not' "the Rules part carries neither: its tab has no Push landed or Run full test suite"
+# The pack's Land as (#247): without it, the Rules tab shows Main for a project whose pack lands as a pull request.
+q '.panels.rules.data.packLandAs == "pr"' "the Rules part gives the pack's push.landAs"
 # The Rules tab has the loop's state (its tab's count), the models, the limit reading, the waits and every held
 # issue with its labels and reasons, as the Board has them.
 q '.panels.rules.data | .state == "paused" and .modelSettings.builder.choices == ["claude-x"] and .areaPrefix == "team/" and .standing == ["asked-fix"] and .limit == {pct: 42, from: "loop"} and (.waits | type) == "array"

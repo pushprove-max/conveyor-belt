@@ -187,6 +187,11 @@ test files it adds or changes (with none, 5 linked to its change), the test file
 each push, and the whole suite runs only in a release". On, a card runs the whole suite when it cannot find the tests of
 its change ([Whole suite in a card](configuration.md#whole-suite-in-a-card)).
 
+**Land as** is **Main** or **Pull request**. Until you set it, it shows the pack's `push.landAs`. Main pushes the
+landed cards to the default branch. Pull request pushes them to the branch `conveyor/landing`, and one pull request
+from there collects them until you merge it. The tab then says "one pull request from conveyor/landing collects the
+cards; merge it to close their issues" ([Land as](configuration.md#land-as)).
+
 ## Held issues and dependencies
 
 An issue that is not being built is in Held for one of four reasons: **Held by you**, **Held by a label**,

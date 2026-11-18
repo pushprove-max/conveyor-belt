@@ -187,7 +187,8 @@
       "required": ["env"],
       "additionalProperties": false,
       "properties": {
-        "env": { "description": "Variables set for the engine's push.", "type": "object", "additionalProperties": { "type": "string" } }
+        "env": { "description": "Variables set for the engine's push.", "type": "object", "additionalProperties": { "type": "string" } },
+        "landAs": { "description": "The rule Land as, until the control record sets it (docs/configuration.md, Land as): main pushes main to defaultBranch; pr pushes main to the branch conveyor/landing and keeps one pull request open from it into defaultBranch, which closes the cards' issues when it is merged.", "type": "string", "enum": ["main", "pr"], "default": "main" }
       }
     },
     "remote": { "type": "string", "minLength": 1 },

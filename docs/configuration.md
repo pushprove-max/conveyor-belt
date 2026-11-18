@@ -40,6 +40,8 @@ Some pack settings that this site names:
   example `npm ci`. Use it in place of `linkFromMain` when a card can change a lockfile. When it fails, the card is
   blocked with the end of its output.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
+- `push.landAs`: the rule Land as, `main` (the default) or `pr`, until the control record sets it ([Land
+  as](#land-as)).
 - `prices`: your model prices, added models and aliases, by model ID. Set them on the Board's Rules tab (Model
   prices, [The Board](board.md#rules)) or with `conveyor.sh prices` ([Commands](commands.md)). Each entry can have:
   - `input`, `output` and `cacheRead`, together, and `cacheWrite`: prices in dollars per million tokens. They win
@@ -333,7 +335,9 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - the usage at which no new card starts,
 - the builder, reviewer and judge, each a CLI, a model and an effort,
 - the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card and the dependency guard,
-- where new issues start.
+- where new issues start,
+- Land as: `main` or `pr` (`conveyor.sh control land-as main|pr`, or Land as on the Rules tab; [Land
+  as](#land-as)).
 
 A card that only waits on another card does not take one of the cards at once: for example, a card that waits to land
 after a card that changes the same files. The loop leaves out no more waiting cards than the cap. Each waiting card
@@ -404,6 +408,25 @@ starts on the CLI's own login. When no role runs on the subscription, the Usage 
 usage limit (billed per token)`. Each such project has its own row. When Conveyor runs on the Board's machine, the
 row of the Board's own project also gives that project's cost today on that machine, from the session logs.
 [Setup](setup.md#setup) finds the routes this machine can use and writes `claudeProxy` and `codexProxy` for you.
+
+## Land as
+
+Land as sets where the push sends the cards that landed. Either way, each card lands on your local default branch, in
+order, and each next card builds on the last.
+
+- `main`: the push sends main to the default branch of the remote (`remote` and `defaultBranch` in the pack). Each
+  card's `Closes #N` line closes its issue when the push reaches the remote.
+- `pr`: the push sends main to the branch `conveyor/landing` and keeps one pull request open from it into the
+  default branch. The first push opens the pull request, and so does the first push after you merge it. Each later
+  push updates it. Conveyor never pushes the default branch. The issues close when you merge the pull request.
+
+At each push, Conveyor writes the pull request's body again. It lists every card in it, in the order they landed: the
+`Closes #N` line, the title, the card id, its Done-when check (how many items are met, and each `D<n>` line of the
+reply, met or not met), its fix rounds and the tests it ran (each file, with the cases it ran of a file it ran in part).
+
+The pack's `push.landAs` sets the rule for the project. `conveyor.sh control land-as main|pr`, or Land as on the Board's
+Rules tab, sets it in the control record, and the record wins over the pack. The rule Push when a card lands still
+decides when a push happens.
 
 ## Models
 

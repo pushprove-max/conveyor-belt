@@ -72,7 +72,9 @@ push() { # <card> <issue> [<commit>]
   pushone "$@" {lk}>&-; rc=$?; exec {lk}>&-; return $rc
 }
 pushone() { # <card> <issue> [<commit>]
-  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at; local -A said=()
+  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to; local -A said=()
+  la=$(landas) || { echo "conveyor: the rule Land as could not be read (the pack's push.landAs or the control record); nothing pushed" >&2; return 1; }
+  to=$BRANCH; [ "$la" != pr ] || to=$LANDING
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
     [ -z "$a" ] || ! a=$(git rev-parse -q --verify "$a^{commit}" 2>/dev/null) || before+=("$a")
   done
@@ -89,12 +91,13 @@ pushone() { # <card> <issue> [<commit>]
       packget push.env e && mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$e") \
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
         && slot_pool && slot_box && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
-        && "${SLOT_BOX[@]}" env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push "$REMOTE" "$sha:refs/heads/$BRANCH"
-    } 2>&1 < /dev/null 8>&-) && echo "$sha $REMOTE $BRANCH" > "$PUSHED" || rc=$?
+        && "${SLOT_BOX[@]}" env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push "$REMOTE" "$sha:refs/heads/$to"
+    } 2>&1 < /dev/null 8>&-) && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
     # remote's commits in a merge commit and is pushed again, once, in this same turn. The worktree stays until they
     # are fetched: the fetch is made from it, as the push was.
-    [ $rc != 0 ] && [ $try = 1 ] && grep -qF '[rejected]' <<<"$out"; a=$?
+    # With Land as pr, origin's default branch is not pushed to, so there is nothing of it to merge.
+    [ $rc != 0 ] && [ $try = 1 ] && [ "$la" != pr ] && grep -qF '[rejected]' <<<"$out"; a=$?
     [ $a != 0 ] || [ -z "$want" ] || { out+=$'\n'"$REMOTE/$BRANCH holds a commit ${sha:0:12} lacks: a merge with it is a commit the full test run did not test, so nothing is pushed"; a=1; }
     [ $a != 0 ] || m=$(theirs "$sha" "$wt") || { out+=$'\n'"the remote's commits were not merged into main: ${m:0:600}"; a=1; }
     git worktree remove --force "$wt" 2>/dev/null
@@ -113,6 +116,15 @@ pushone() { # <card> <issue> [<commit>]
   rm -f "$wt.trace"
   mapfile -t got < <(jq -rs --rawfile in <(git rev-list "$sha" --not "${before[@]}" 2>/dev/null) '($in | split("\n") | map(select(. != "")) | INDEX(.)) as $in
     | map(select(.step == "pushed") | .card) as $have | .[] | select(.step == "landed" and $in[.sha] and (.card | IN($have[]) | not)) | "\(.card) \(.issue) \(.sha)"' < <(stdb ask lines cards))
+  # With Land as pr: the pull request is opened or updated before the push counts. When it fails, the push line says
+  # why and the push is owed still (the commit is not written as pushed), so the next push tries the pull request
+  # again. Each card's pushed line names the pull request (pr); no issue is waited on: they close when it is merged.
+  if [ "$la" = pr ]; then
+    m=$(landpr "${got[@]}") || { record "$1" "$2" push fail "$(jq -cn --arg s "$sha" --argjson t "$took" --arg r "the commit is on $REMOTE/$LANDING, but $m" '{sha:$s,reason:$r,sec:$t,kind:"transport"}')"; return; }
+    echo "$sha $REMOTE $LANDING" > "$PUSHED"
+    for a in "${got[@]}"; do read -r c n s <<<"$a"; record "$c" "$n" pushed ok "{\"sha\":\"$s\",\"sec\":$took,\"head\":\"$sha\",\"pr\":$m}"; done
+    return 0
+  fi
   for a in "${got[@]}"; do read -r c n s <<<"$a"; record "$c" "$n" pushed ok "{\"sha\":\"$s\",\"sec\":$took,\"head\":\"$sha\"}"; done
   for a in "${got[@]}"; do read -r c n s <<<"$a"; [ "$n" = 0 ] || pend+=("$a"); done
   t=$SECONDS
@@ -256,9 +268,55 @@ remerge() { # <the commit that was pushed>
 }
 # The push in progress, for health to read: this push job's pid, when it began and the commit it pushes. The
 # loop clears it when the job ends; one left by a loop that was killed names a pid that is gone, and health ignores it.
-# The commit of the last push that worked, when it went to the pack's remote and branch: a push to another one
-# says nothing of what this one holds.
-pushed() { local s r b; read -r s r b 2>/dev/null < "$PUSHED" && [ "$r" = "$REMOTE" ] && [ "$b" = "$BRANCH" ] && echo "$s"; }
+# The commit of the last push that worked, when it went to the pack's remote and to the branch Land as pushes to
+# (pushto(): the pack's branch, or LANDING): a push to another one says nothing of what this one holds.
+pushed() { local s r b; read -r s r b 2>/dev/null < "$PUSHED" && [ "$r" = "$REMOTE" ] && [ "$b" = "$(pushto)" ] && echo "$s"; }
+# The rule "Land as" (docs/configuration.md): main, the push goes to the pack's branch; pr, it goes to LANDING, and one
+# pull request from there into the pack's branch collects the cards (landpr()). The control record's landAs, else the
+# pack's push.landAs. Fails when either cannot be read: a push to the wrong branch is not undone.
+LANDING=conveyor/landing
+landas() { local d x; packget push.landAs d && x=$(ctl 2>/dev/null) && x=$(jq -er --arg d "$d" '.landAs // $d' <<<"$x" 2>/dev/null) && echo "$x"; }
+pushto() { local la; la=$(landas) || return 1; if [ "$la" = pr ]; then echo "$LANDING"; else echo "$BRANCH"; fi; }
+# The one pull request of Land as pr, from LANDING into the pack's branch: the open one is updated, and with none open
+# (the first push, or the first after it was merged) one is opened. Its body is written whole at each push: every card
+# in it, in landing order (the cards whose pushed line names it, then those this push carries), each with its
+# "Closes #N" (a card of no issue has none), title, card id, Done-when check with its D<n> lines (doneLines, each with
+# its state), fix rounds and the tests it ran (each file, with the cases it selected of it). Prints the
+# pull request's number, or why it failed.
+landpr() { # <"card issue sha" of each card this push carries>...
+  local n out text
+  out=$(timeout 60 gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number 2>&1) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
+    || { echo "the open pull request from $LANDING could not be read: ${out:0:600}"; return 1; }
+  text=$(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" --arg b "$BRANCH" '. as $all | $ARGS.positional as $new
+    | (map(select(.step == "pushed" and $n != 0 and .pr == $n) | .card) + $new) as $in
+    | reduce (.[] | select(.step == "landed" and (.card | IN($in[])))) as $l ([]; if any(.[]; .card == $l.card) then . else . + [$l] end)
+    | "Conveyor: \(length) card\(if length == 1 then "" else "s" end) landed on \($b)",
+      "Conveyor lands these cards on \($b) through this pull request, in the order they landed. Merging it closes their issues.", "",
+      (.[] | . as $l | [$all[] | select(.card == $l.card)] as $c
+        | ([$c[] | .title // empty | strings | select(. != "")] | first // "(no title)" | .[0:200]) as $t
+        | ([$c[] | select(.doneWhen)] | last // null) as $dl | ($dl.doneWhen // null) as $d
+        # The tests it ran: its last test line that ran them (a line that reused an earlier pass names none).
+        | ([$c[] | select(.step == "test" and (.reused | not))] | last // null) as $x
+        | "## \(if $l.issue != 0 then "#\($l.issue) " else "" end)\($t)", "",
+          (if $l.issue != 0 then "Closes #\($l.issue)" else empty end),
+          "- Card: `\($l.card)`",
+          (if $d == null then "- Done when: not checked" else "- Done when: \($d.met) of \($d.items) met" end),
+          ($dl.doneLines // [] | .[] | strings | "  - \(.[0:300])"),
+          ($d.failed // [] | .[] | "  - not met: \(.[0:300])"),
+          "- Fix rounds: \([$c[] | select(.step == "fix")] | length)",
+          (if $x == null then "- Tests: none ran"
+           else "- Tests: \($x.ended // $x.result)\($x.tests // {} | to_entries | map(select(.value != null) | ", \(.value) \(.key)") | join(""))",
+             ([($x.ran // [] | arrays | .[] | strings), ($x.times, $x.clocks, $x.ranCases | objects | keys[])] | unique[]
+               | . as $f | "  - `\($f)`\($x.ranCases // {} | .[$f] // [] | if . == [] then "" else ": " + join(", ") end)") end), "")' --args "${@%% *}") \
+    || { echo "the pull request's body could not be made from the card records"; return 1; }
+  if [ "$n" = 0 ]; then
+    out=$(gh_write pr create --base "$BRANCH" --head "$LANDING" --title "${text%%$'\n'*}" --body "${text#*$'\n'}" 2>&1) && n=$(tail -n 1 <<<"$out") && n=${n##*/pull/} && [[ $n =~ ^[1-9][0-9]*$ ]] \
+      || { echo "the pull request could not be opened: ${out:0:600}"; return 1; }
+  else
+    out=$(gh_write pr edit "$n" --title "${text%%$'\n'*}" --body "${text#*$'\n'}" 2>&1) || { echo "pull request #$n could not be updated: ${out:0:600}"; return 1; }
+  fi
+  echo "$n"
+}
 pushing() { jq -cn --argjson p "$BASHPID" --arg s "$1" '{pid:$p,since:(now|todate),sha:$s}' > "$PUSHING" 2>/dev/null || :; }
 # Did the push's pre-push hook exit non-zero? Read from git's trace2 events of the push (the file given): the first
 # event is the push's own, and only its own children count (a check that runs git, or pushes in a test of its own,

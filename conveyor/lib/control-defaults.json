@@ -37,5 +37,6 @@
   "startSeen": [],
   "depGuard": true,
   "forced": [],
-  "signin": null
+  "signin": null,
+  "landAs": null
 }

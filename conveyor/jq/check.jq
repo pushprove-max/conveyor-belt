@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran"];
 def steps: ["picked", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -43,6 +43,10 @@ def ok: . as $r | (keys - known) == need
         and (.speedcheck // 0 | type == "number") and (.retriedWhy // "" | type == "string")
         # waitSec: the seconds a landed or blocked card waited on other cards and for main to change (card(), block()).
         and (.waitSec // 0 | type == "number")
+        # doneLines: the reply's D<n> lines on a session's line with a Done-when check (checked(), lib/testrun.sh).
+        and (.doneLines // [] | type == "array" and all(type == "string"))
+        # pr: the pull request a pushed line's push went into, with the rule Land as pr (pushone(), lib/push.sh).
+        and (.pr // 0 | type == "number")
         # cost: the dollars an OpenCode review's own usage report gave (OCREVIEWREAD).
         and (.sec // 0 | type == "number") and (.cost // 0 | type == "number") and (.limit // 0 | type == "number") and (.depth // 0 | type == "number") and (.yesFrom // 0 | type == "number") and (.stalls // 0 | type == "number")
         and (.paths // [] | type == "array" and all(type == "string")) and (.batch // [] | type == "array" and all(type == "string"))
@@ -80,6 +84,8 @@ def ok: . as $r | (keys - known) == need
         # Why each test file ran (testrec()), {file: [reasons]}; wholeSuite: the run ran every engine case file.
         and (.why // {} | type == "object" and all(type == "array" and all(type == "string")))
         and (.wholeSuite // true | . == true)
+        # The files a run began (testrec()): why may name files it kept off.
+        and (.ran // [] | type == "array" and all(type == "string"))
         # The cases a run of only part of a file selected (testrec()), {file: [cases]}.
         and (.ranCases // {} | type == "object" and all(type == "array" and all(type == "string")))
         # A full run the test step refused (tests()): "refused full run: <why>".

@@ -110,6 +110,8 @@
 #   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, review), pct, readAt, email (its
 #   login on this machine)}]; null when it could not be read.
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
+# packLandAs: the pack's push.landAs (main or pr), the rule Land as while the control record's landAs is null; null
+#   when the pack cannot be read.
 # standing: the pack's auto.standing, the standing kinds of routine yes that are on (lib/standing.sh), for the Rules
 #   tab; null when the pack cannot be read.
 # waitWake: the pack's foreman.waitWake (default 10), the minutes a card waits for main to change, or on another card,
@@ -545,13 +547,14 @@ snapshot() (
   # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).
   su=$(suites) || su='[]'; rl=$(releasemain) || rl=null; dr=$(driftof "$d")
   packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
+  packget push.landAs pla 2>/dev/null || pla=''
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
-    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" \
+    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL"'
@@ -594,7 +597,9 @@ snapshot() (
         if .step != "landed" then null
         elif .sha | IN($un[]) then (if $pushOff then "wait" elif $h.pushError != null and $h.pushError.time >= .x.endAt then (if $h.pushError.kind == "check" then "pushheld" else "pushfail" end) else "push" end)
         else (.x.log | map(select(.step == "pushed")) | last) as $p | (.x.log | map(select(.step == "issue")) | last) as $il
-          | if .issue == 0 or $p == null or .x.shut then null
+          # A push into the pull request of Land as pr (its pushed line names it: pr) waits for no issue: the issue
+          # closes when the owner merges the pull request, so the push is done, not failed.
+          | if .issue == 0 or $p == null or $p.pr != null or .x.shut then null
             # No issue line yet: GitHub is waited for $wait; an issue line that never comes (the loop died) then
             # leaves Push failed while the issue is still open (or the open issues could not be listed).
             elif $il == null then (if ($h.time | fromdate) - ($p.time | fromdate) < $wait then "issue" else "issuefail" end)
@@ -761,6 +766,7 @@ snapshot() (
        limits: $ga,
        inFlight: ([$c[] | select(.result == "" and .x.accounts != null) | .x.accounts] | unique),
        areaPrefix: $area,
+       packLandAs: (if $pla == "" then null else $pla end),
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,

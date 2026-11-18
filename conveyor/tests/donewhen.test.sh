@@ -25,8 +25,8 @@ jq -cn --arg r "$r" '{type: "result", is_error: false, result: $r, usage: {input
 EOF
 }
 
-# Bugs: a reply with every item met and real evidence fails; the reviewer is not given the D<n> lines, or its
-# `DONE-WHEN: D<n> holds` line is read as a finding; the snapshot (the Board's card detail) lacks a landed card's check.
+# Bugs: a reply with every item met and real evidence fails; its D<n> lines not kept on the build line; the reviewer
+# is not given the D<n> lines, or its `DONE-WHEN: D<n> holds` line is read as a finding; the snapshot (the Board's card detail) lacks a landed card's check.
 t_dwland() {
   dwsetup "$(issue 7 2026-01-01 | jq -c --arg b "body of 7"$'\n\n'"$DW" '.body = $b')"
   # #7: every item met, with evidence that holds (a test file the change adds, a root file and its line): one
@@ -37,6 +37,9 @@ t_dwland() {
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.issue == 7 and .step == "build") | .doneWhen | tojson')" = '{"items":2,"met":2,"failed":[]}' ] \
     || fail "a reply with every item and real evidence did not pass the check in one session: $(st 'select(.issue == 7 and .step == "build")')"
+  # The build line keeps the reply's D<n> lines with their state: the pull request of Land as pr lists them.
+  [ "$(st 'select(.issue == 7 and .step == "build") | .doneLines | tojson')" = '["D1 met: lib/t.test.sh case one passes","D2 met: a.txt:2 holds the second thing"]' ] \
+    || fail "the build line does not carry the reply's D<n> lines: $(st 'select(.issue == 7 and .step == "build")')"
   [ "$(st 'select(.issue == 7 and .step == "review") | .result')" = GO ] && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
     || fail "a DONE-WHEN holds line was read as a finding, or #7 did not land: $(st 'select(.issue == 7 and .step == "review")')"
   grep -q "^# The card's Done-when lines$" "$STUB/asked" && grep -qx 'D1 met: lib/t.test.sh case one passes' "$STUB/asked" \
