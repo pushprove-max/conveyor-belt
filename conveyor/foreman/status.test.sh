@@ -145,8 +145,9 @@ grep -qxF 'alpha: 2 on the belt; building 1 of the cap 1, 1 waiting not counted'
 # Issue 241: a snapshot read that takes longer than the ask's first wait (45 s), here as the ask's timeout exit, after 2
 # minutes with no snapshot. Bug it catches: under a high machine load the live engine's snapshot ran past the wait,
 # and the Foreman was woken with "unreachable" while the engine ran. The read is tried once more with a longer wait.
+# The health read between the two fails, so it shows no new problem; only the snapshot reads' waits are recorded.
 slowask() { # <what the read with the longer wait does>
-  export CONVEYOR_FOREMAN_ASK="echo \$ASK_LIMIT >> $T/limits; [ \"\$ASK_LIMIT\" -gt 45 ] || exit 124; $1"
+  export CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" = snapshot ] || exit 1; echo \$ASK_LIMIT >> $T/limits; [ \"\$ASK_LIMIT\" -gt 45 ] || exit 124; $1"
   echo "$((NOW - 120)) $((NOW - 60))" > "$FD/conveyor-down-alpha.txt"
 }
 t_slowlive() {
@@ -271,8 +272,11 @@ grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' 
   || fail "the wake does not name the pending #8 alone as not yet reported: $w"
 }
 
-cases=(status wake suite mainred building slowlive slowdown)
-cases=(status wake suite suitedead mainred building nosnapanew nosnapquiet healthwake polllog unreported)
+cases=(status wake suite suitedead mainred building slowlive slowdown nosnapanew nosnapquiet healthwake polllog unreported)
+# The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
+SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
+for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
+read -ra cases <<<"$SEL"
 for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
 bad=0

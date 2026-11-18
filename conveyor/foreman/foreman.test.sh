@@ -1180,6 +1180,10 @@ bash "$SRC/../privacy/check.sh" --terms "$TERMS" "$SRC"/* "$SRC/../../commands/"
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
 cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin ask_self session stale reopen projects projects_filing projects_groups remote words auto privacy)
+# The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
+SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
+for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done
+read -ra cases <<<"$SEL"
 # (A case's own variables, as its loops' c, are its own: the case's name is in one none of them uses.)
 for one_case in "${cases[@]}"; do
   (CASE=${one_case//_/-}; fixture "$one_case"; "t_$one_case"; : > "$B/$one_case.passed") > "$B/$one_case.out" 2>&1 &

@@ -110,9 +110,13 @@ t_fresh() {
 }
 
 cases=(once again off down fresh)
+# The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
+SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
+for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
+read -ra cases <<<"$SEL"
 pids=()
 for c in "${cases[@]}"; do (t_"$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & pids+=($!); done
-wait "${pids[@]}"
+[ ${#pids[@]} = 0 ] || wait "${pids[@]}" # with no pid, wait waits for the Board's server too
 bad=0
 for c in "${cases[@]}"; do cat "$B/$c.out" >&2; [ -e "$B/$c.passed" ] || bad=1; done
 [ "$bad" = 0 ] || exit 1
