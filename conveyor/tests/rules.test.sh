@@ -239,10 +239,10 @@ EOF
 # review does not see the trailers; a pack rule's trailer is missing and the card commits anyway, or gets no session
 # to write it; a pack with no commit.trailers changes the message or asks for a trailer; a trailer the fix session
 # writes lands unreviewed; the tests delete the trailers after the check and the card commits without them; a path
-# git quotes (café/), or one holding a newline, escapes the rule; a rule whose when is not a valid ERE silently requires nothing.
+# git quotes (café/) escapes the rule; a rule whose when is not a valid ERE silently requires nothing.
 t_trailers() {
   local -x FILEMODE=1
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05) <(issue 12 2026-01-06))"
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05))"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   for i in 1 2 3 4 5 6 7; do echo "$GO" > "$STUB/review.$i"; done
   msgis() { # <issue> <trailer lines>: main's head message is the card's, with those lines after Closes
@@ -278,17 +278,26 @@ t_trailers() {
     || fail "the trailer the fix session wrote did not land: $(git -C "$R" log -1 --format=%B) $(st 'select(.issue == 9)')"
   [ "$(wc -l < "$STUB/reviews")" = 5 ] && grep -qx 'Mutation-verified: removed the check, the test went red' "$STUB/asked" \
     || fail "the trailer the fix session wrote was not reviewed: $(wc -l < "$STUB/reviews") reviews"
-  # #12: a path holding a newline matches the rule as one path: no trailer, so one fix session, then blocked.
-  printf '%s\n' 'touch "$(printf "e-guard\n.test.ts")"' > "$STUB/build"; : > "$STUB/sessions"; head=$(git -C "$R" rev-parse HEAD)
-  loop run --only 12 >/dev/null || fail "run of #12 exited non-zero"
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] && st 'select(.issue == 12 and .step == "blocked") | .reason' | grep -q 'missing after its one fix session; nothing landed: Mutation-verified' \
-    && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a path holding a newline escaped the pack's rule: $(st 'select(.issue == 12)')"
   # #11: a when grep cannot read blocks the card with the reason; nothing lands.
   tune '.commit.trailers = [{"when": "[", "token": "Mutation-verified", "ask": "Say what you broke."}]'
   echo 'touch d.txt' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
   loop run --only 11 >/dev/null || fail "run of #11 exited non-zero"
   st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q 'valid extended regular expression' && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] \
     || fail "a pack rule with an invalid when did not block the card: $(st 'select(.issue == 11)')"
+}
+
+# Bug: a path holding a newline escaped the pack's trailer rule: read a line a name, neither half matches the rule's
+# when, so the card owed no trailer and committed without one. owing() (lib/testrun.sh) reads the added names whole.
+t_trailerpath() {
+  local W=$T/$CASE/w out rc
+  mkdir -p "$W" && git -C "$W" init -q && touch "$W/$(printf 'e-guard\n.test.ts')" && git -C "$W" add -A || fail "the worktree"
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh
+  out=$( (STATE=$T/$CASE/cards.jsonl; . "$SRC/lib/testrun.sh" || exit 3
+    packget() { case $1 in commit.trailers) printf -v "$2" '%s' '[{"when": "(conformance|guard|parity|coverage)[^/]*\\.test\\.(ts|tsx)$", "token": "Mutation-verified", "ask": "Say what you broke."}]' ;;
+      *) printf -v "$2" '%s' '[]' ;; esac; }
+    owing "$W") 2>&1); rc=$?
+  [ $rc = 0 ] && [ "$out" = '{"token":"Mutation-verified","ask":"Say what you broke.","paths":["e-guard\n.test.ts"]}' ] \
+    || fail "a path holding a newline escaped the pack's rule: exit $rc, $out"
 }
 
 # Bugs: a card whose change fails a product check (here two of the case's own: a baseline raised, a schema added)
