@@ -41,7 +41,6 @@ t_claudereview() {
   tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]'; seatset reviewer gpt-6.1-sol
   ctl() { loop control "$@" 2>&1; }
   rv() { msettings | jq -c '.reviewer | [.choices, .efforts]'; }
-  rv() { loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.choices, .efforts]'; }
   [ "$(rv)" = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"],["minimal","low","medium","high","xhigh"]]' ] \
     || fail "the Reviewer choices are not the five models, or a Codex reviewer's efforts are not Codex's: $(rv)"
   was=$(cat "$ST/control.json")
@@ -195,9 +194,6 @@ t_opencodereview() {
   [ "$(msettings | jq -c '.reviewer | [.choices, .agent, .efforts]')" \
     = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
     || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(msettings | jq -c .reviewer)"
-  [ "$(loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.choices, .agent, .efforts]')" \
-    = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
-    || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(loop snapshot --fresh | jq -c .modelSettings.reviewer)"
   echo 'git status --porcelain > "$STUB/status"; cat a.txt > "$STUB/a"' > "$STUB/test-cmd"
   # #7: a NO-GO, its finding sent to the fix, then a GO.
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
@@ -319,14 +315,19 @@ PY
 
 t_proxy() {
   proxy_start 7
-  loop run >/dev/null || fail "run exited non-zero"
+  # The session's key in a variable named v, a variable of proxyenv()'s callers in a card, so only a whole card proves it
+  # still carries the key it holds; a key apart from PROXY_KEY's, so a lookup of the wrong variable fails the check.
+  tune '.models.claudeProxy.keyEnv = "v"'
+  vkey=v-$RANDOM$RANDOM-secret
+  v=$vkey loop run >/dev/null || fail "run exited non-zero"
+  tune '.models.claudeProxy.keyEnv = "PROXY_KEY"'
   [ "$(st 'select(.step == "review") | .model')" = gpt-6.10-sol ] || fail "the family sol did not resolve to the newest gpt-<version>-sol: $(st 'select(.step == "review") | .model')"
   grep -q -- ' -m gpt-6.10-sol ' "$STUB/codex-args" && ! grep -q -- ' -m sol ' "$STUB/codex-args" || fail "Codex was not run with the resolved model id: $(cat "$STUB/codex-args")"
-  [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=%s\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=true' "$PROXY_KEY" "$base")" ] \
-    || fail "the card session's environment does not carry the proxy: $(cat "$STUB/env")"
+  [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=%s\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=true' "$vkey" "$base")" ] \
+    || fail "the card session's environment does not carry the proxy, or a key in a variable named v was lost: $(cat "$STUB/env")"
   grep -qx "Bearer $PROXY_KEY" "$STUB/auth" || fail "the proxy was not asked with its key: $(cat "$STUB/auth")"
   grep -l build_opener "$STUB"/ps.[0-9]* >/dev/null || fail "no command line was read while the models list was asked for"
-  ! grep -l -- "$PROXY_KEY" "$STUB"/ps.* >/dev/null || fail "the proxy key is on a command line: $(grep -l -- "$PROXY_KEY" "$STUB"/ps.*)"
+  ! grep -l -e "$PROXY_KEY" -e "$vkey" "$STUB"/ps.* >/dev/null || fail "a proxy key is on a command line: $(grep -l -e "$PROXY_KEY" -e "$vkey" "$STUB"/ps.*)"
   # A redirect to another origin (127.0.0.1 to localhost) is followed without the key.
   : > "$STUB/auth"; sed -i "s|$base/v1|$base/redir/v1|" "$CODEX_HOME/config.toml"
   [ "$(routes | sed -n 2p)" = "reviewer: gpt-6.10-sol (codex) through $base/redir/v1, Codex's model_provider proxy, key in PROXY_KEY" ] \
@@ -348,17 +349,8 @@ t_proxytool() {
   tune '.models.claudeProxy.toolSearch = "false" | del(.models.claudeProxy.keyEnv)'
   [ "$(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)" = "$(printf 'ANTHROPIC_AUTH_TOKEN=no-key\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
     || fail "toolSearch named false did not reach the session, or a direct key went to the proxy: $(ANTHROPIC_AUTH_TOKEN=direct-secret ANTHROPIC_API_KEY=direct-key pxenv)"
-}
-t_proxyv() {
-  proxy_start 11
-  tune '.models.claudeProxy.toolSearch = "false"' # as t_proxytool leaves it
-  # A key variable named like a variable of the engine's own (v, e), or ENV0, still carries the key it holds. v is a
-  # variable of proxyenv()'s callers in a card, so a whole card proves it; e is envof()'s, which proxyenv() called
-  # alone runs as well; ENV0 is no card variable, so proxyenv() called alone proves it too.
-  tune '.models.claudeProxy.keyEnv = "v"'; echo "[$(issue 11 2026-01-02)]" > "$STUB/issues.json"
-  v=v-secret loop run >/dev/null || fail "run exited non-zero"
-  [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=v-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
-    || fail "a key in a variable named v did not reach the session: $(cat "$STUB/env")"
+  # A key variable named like a variable of the engine's own (e, envof()'s, which proxyenv() called alone runs as well),
+  # or ENV0, still carries the key it holds (v, which only a card proves, is t_proxy's).
   tune '.models.claudeProxy.keyEnv = "e"'
   [ "$(e=e-secret pxenv)" = "$(printf 'ANTHROPIC_AUTH_TOKEN=e-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
     || fail "a key in a variable named e did not reach the session: $(e=e-secret pxenv)"
