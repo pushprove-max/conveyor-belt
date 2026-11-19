@@ -11,8 +11,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The card of the case's one picked issue, run by card() in a shell of the engine (fx_in), not by a loop run: the
 # pick takes the issue, and card() runs it to its end. A case calls this only for what card() alone makes as it goes.
-rulecard() { # <issue> [<commands after the card, with its card in $c>]
-  fx_in 'cd "$R" && read -r c n _ <<<"$(locked pick "" "" "$(asked)")" && [ "$n" = '"$1"' ] || { echo "pick took ${n:-nothing}"; exit 3; }; card "$c" "$n"; '"${2:-}"
+rulecard() { # <issue>
+  fx_in 'cd "$R" && read -r c n _ <<<"$(locked pick "" "" "$(asked)")" && [ "$n" = '"$1"' ] || { echo "pick took ${n:-nothing}"; exit 3; }; card "$c" "$n"'
   [ "$RC" != 3 ] && [ -s "$ST/cards.jsonl" ] || fail "#$1 was not picked (exit $RC): $(tail -n 20 "$T/$CASE/run.out")"
 }
 # A worktree of main, $T/$CASE/cards/<name>, with <change> made in it and staged, as a card's change is staged.
