@@ -2046,9 +2046,13 @@ casesgone() { # <worktree> <test file> <cases>
   [ -e "$1/$2" ] || { awk 'NF' <<<"$3"; return 0; }
   st=$(casestarts "$1" "$2")
   if [ "$(head -n 1 <<<"$st")" = row ]; then
-    kept=$(tail -n +2 <<<"$st" | cut -f3- | sed -E -e 's/^[[:space:]]*(function[[:space:]]+)?((t_|test)[A-Za-z0-9_]*)[[:space:]]*\(\).*/\2/' -e t \
-      -e 's/^[[:space:]]*@test[[:space:]]+("[^"]*"|[^[:space:]]+).*/\1/' -e t \
-      -e "s/^[[:space:]]*[xf]?(it|test)(\\.[A-Za-z]+)?[[:space:]]*\\([[:space:]]*(\"[^\"]*\"|'[^']*'|\`[^\`]*\`).*/\\3/" -e t -e 's/,.*//')
+    # The name is read from the start line as the file holds it, escapes and all, and unescaped after: on the plain line
+    # an escaped quote (test('the project\'s rows')) would end the name early, so the case would read as gone.
+    kept=$(tail -n +2 <<<"$st" | cut -f1 | awk 'NR == FNR { n[$1]; next } FNR in n' - "$1/$2" \
+      | sed -E -e 's/^[[:space:]]*(function[[:space:]]+)?((t_|test)[A-Za-z0-9_]*)[[:space:]]*\(\).*/\2/' -e t \
+      -e 's/^[[:space:]]*@test[[:space:]]+("(\\.|[^"\\])*"|[^[:space:]]+).*/\1/' -e t \
+      -e "s/^[[:space:]]*[xf]?(it|test)(\\.[A-Za-z]+)?[[:space:]]*\\([[:space:]]*(\"(\\\\.|[^\"\\\\])*\"|'(\\\\.|[^'\\\\])*'|\`(\\\\.|[^\`\\\\])*\`).*/\\3/" -e t -e 's/,.*//' \
+      | sed 's/\\\(.\)/\1/g')
   else kept=$(sed 's/\\\(.\)/\1/g' "$1/$2" 2>/dev/null); fi
   K=$kept awk 'function held(c,   s, i, n, b, a) { n = length(c); s = ENVIRON["K"]
       while ((i = index(s, c)) > 0) { b = substr(s, i - 1, 1); a = substr(s, i + n, 1)

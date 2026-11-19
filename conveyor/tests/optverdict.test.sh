@@ -202,3 +202,15 @@ t_optdirect() {
     || fail "a rewrite that drops a case its DIRECT lines name was not blocked: exit $RC, $WHY"
   [ "$(st 'select(.step == "bugproof") | .result')" = fail ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
 }
+
+# Bug it catches (#798): casesgone() read a JavaScript case's name from its unescaped start line, so an escaped quote
+# in it (test('... project\'s', ...)) ended the name early and a case the file still holds was read as gone, which
+# blocked optproof() and hollowproof(). Only the case the file does not hold is gone.
+t_optdirectescape() {
+  setup '[]'
+  mkdir -p "$T/$CASE/wt"
+  printf '%s\n' "test('the switch changes the rows to that project\\'s', () => {" '  x();' '});' 'it("a \"quoted\" name", () => {});' \
+    'test(`a tick \` name`, () => {});' > "$T/$CASE/wt/f.test.mjs"
+  fx_in "casesgone \"\$T/\$CASE/wt\" f.test.mjs \"\$(printf '%s\n' \"the switch changes the rows to that project's\" 'a \"quoted\" name' 'a tick \` name' 'gone one')\""
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'gone one' ] || fail "cases with escaped quotes in their names were read as gone: exit $RC, $(cat "$T/$CASE/run.out")"
+}
