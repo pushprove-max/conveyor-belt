@@ -29,6 +29,7 @@
 {"area": "slots", "test": "closurequick.test.sh"}
 {"area": "slots", "test": "closuremiss.test.sh"}
 {"area": "slots", "test": "closurereach.test.sh"}
+{"area": "slots", "test": "closuretables.test.sh"}
 {"area": "slots", "test": "mutate.test.sh"}
 {"area": "slots", "test": "inheritedfds.test.sh"}
 {"area": "slots", "test": "reserve.test.sh"}

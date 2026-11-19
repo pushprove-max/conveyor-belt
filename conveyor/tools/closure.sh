@@ -10,8 +10,9 @@
 # BASH_SOURCE, __file__, import.meta.url, and a variable holding one of them) or the checkout's top
 # (git rev-parse --show-toplevel). A bare path such as 'src/x.ts' is the user's repository's, not ours (a hook's test
 # input, a check's pattern), and a path in a comment, a document or a data file is for its reader; neither is
-# followed. The project pack (the .conveyor/ folder: the host project's input, read at run time), the area rule files and
-# the startup instructions stay in the host project (section 11): a reference to one is never followed. A page's relative
+# followed. A file a table names (TABLES, below: the command table, SNAPLIBS, FETCH) is required: a missing or
+# untracked one fails, naming the file that holds the table, the name and the path it expects. The project pack (the
+# .conveyor/ folder: the host project's input, read at run time), the area rule files and the startup instructions stay in the host project (section 11): a reference to one is never followed. A page's relative
 # src/href/import, an ES module's relative import (a test's shared helper) and a Python import resolve from the file's
 # folder. closure.test.sh
 # copies exactly this set into an empty directory and runs the hooks, the Board and the engine tests from there: a
@@ -39,8 +40,9 @@ HOOKS=(git-safety bash-guardrails bash-write-rules file-size-cop dependency-addi
   bugfix-test-lock suite-rerun-guard literal-secret-warning adversarial-review-gate)
 # The plugin's hooks: hooks/hooks.json runs each one through shim.sh, so both ship, and so does every hook it names.
 ENTRY+=(shim.sh hooks/hooks.json)
-# The /units fetch (hooks/units.tsx runs it), which the engine's Board cases run from the install too.
-ENTRY+=(hooks/units-fetch.sh)
+# The /units pane: its FETCH (a table, below) names the fetch it runs, which the engine's Board cases run from the
+# install too.
+ENTRY+=(hooks/units.tsx)
 # Foreman mode: the hooks its setup writes run its scripts through the shim, and they reach one another through
 # lib.sh's FHERE, which is not followed, so the whole folder ships, with the plugin commands that set it up (its test
 # checks them for private names).
@@ -146,27 +148,46 @@ def rewrite(text, here, py):
             break
     return text
 
+# The tables that name files the code reaches by a path built at run time: the file that holds one, its name, the
+# line that names its entries (each word of the value one entry), and the path an entry stands for. The command table
+# of conveyor.sh (each line `cmd <command> <script>`), the libraries the snapshot loads (SNAPLIBS: those, not the
+# whole lib/ folder) and the fetch the /units pane runs (FETCH, from the plugin root).
+TABLES = {
+    "conveyor/conveyor.sh": ("cmd", r"^cmd \S+ (\S+)", "conveyor/commands/%s"),
+    "conveyor/commands/snapshot.sh": ("SNAPLIBS", r"^SNAPLIBS=[\x27\"]([^\x27\"]*)[\x27\"]", "conveyor/lib/%s.sh"),
+    "hooks/units.tsx": ("FETCH", r"^const FETCH = [\x27\"]([^\x27\"]*)[\x27\"]", "%s"),
+}
+
 def refs(path):
     if not os.path.isfile(path):
         sys.exit("closure: a file of the set is missing: " + path)
+    out = set()
+    if path in TABLES:
+        name, rx, at = TABLES[path]
+        vals = re.findall(rx, open(path, encoding="utf-8").read(), re.M)
+        if not vals:
+            sys.exit("closure: %s: its %s table names no file" % (path, name))
+        for s in (s for v in vals for s in v.split()):
+            if norm(at % s) not in files:
+                sys.exit("closure: %s: %s names %s, but %s is missing or untracked" % (path, name, s, at % s))
+            out.add(norm(at % s))
     ext = os.path.splitext(path)[1]
     if ext not in (".sh", ".py", ".jq", ".js", ".mjs", ".cjs", ".html", ".css", ".service", ""):
-        return set()
+        return out
     try:
         text = open(path, encoding="utf-8").read()
     except UnicodeDecodeError:
-        return set()
-    here, out = os.path.dirname(path), set()
+        return out
+    here = os.path.dirname(path)
     if ext in (".sh", ".py", ".jq", ".service", ""):
         text = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))
     # The parts of the engine (conveyor/lib/*.sh) and the scripts of its commands (conveyor/commands/*.sh), sourced
     # by conveyor.sh, read HERE as it sets it: the engine folder.
     if re.fullmatch(r"conveyor/(?:lib|commands)/[^/]+\.sh", path) and ".test." not in path:
         text = "HERE=" + mk("conveyor") + "\n" + text
-    # The command table of conveyor.sh: each line `cmd <command> <script>` names its script under commands/, and the line
-    # that sources the script of the given command by name reads that one script, not the whole folder.
+    # The line of conveyor.sh that sources the script of the given command by name reads the one script its command
+    # table names (TABLES), not the whole folder.
     if path == "conveyor/conveyor.sh":
-        out.update(p for p in ("conveyor/commands/" + s for s in re.findall(r"^cmd \S+ (\S+)", text, re.M)) if p in files)
         text = text.replace(". \"$HERE/commands/$CMD_RUN\"", "")
     text = rewrite(text, here, ext in (".py", ".js", ".mjs", ".cjs"))
     # A file the code first tests for ([ -e x ] || skip, [ ! -e x ] || run x) is optional, so not followed; but not one
