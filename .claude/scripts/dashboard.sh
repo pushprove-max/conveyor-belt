@@ -472,13 +472,17 @@ limit() {
   else jq -cn --arg e "$(tail -n 1 "$RUN/err-limit" | cut -c1-200)" --argjson acc "$acc" '{limit: null, error: ("the usage limit could not be built" + (if $e == "" then "" else ": " + $e end)), accounts: $acc}'; fi
 }
 
+# latest_cwd <record> -- the folder a Claude session's record says it works in now: the cwd of the last of its lines
+# that carry one, each such line read, so one long message cannot hide it.
+latest_cwd() { grep -F '"cwd":' "$1" 2>/dev/null | jq -rR 'fromjson? | .cwd? | strings | select(test("\n") | not)' 2>/dev/null | tail -n 1; }
+
 # One lane's worktree on this machine: {present, branch, ahead, subject, first, dirty, run}. ahead is the commits it
 # has that main does not, subject the newest of them and first the oldest (the title Conveyor gives a card of a
 # branch that names no issue); dirty counts its files with an uncommitted change, new files too. run is the newest Claude
 # session in the folder (begun there, or working there now): when it began, when its record last moved, whether
 # that was in the last ACTIVE seconds, and how its first prompt opens. A folder that is not there is {present: false}.
 lane() { # <worktree>
-  local d=$1 br ahead=null subj='' first='' dirty=null f g cwd run=null
+  local d=$1 br ahead=null subj='' first='' dirty=null f g c cwd run=null
   [ -e "$d/.git" ] || { echo '{"present":false}'; return 0; }
   br=$(git -C "$d" symbolic-ref -q --short HEAD 2>/dev/null) || br=''
   if ahead=$(git -C "$d" rev-list --count main..HEAD 2>/dev/null); then
@@ -491,15 +495,20 @@ lane() { # <worktree>
   # Claude Code files a session under the folder it began in, and each record carries the folder it works in now
   # (cwd): a session begun in the main checkout or in a folder of the lane, working in the lane, is filed elsewhere.
   # A newer record that moved in the last ACTIVE seconds, whose latest cwd is the lane or a folder in it, is the run;
-  # a session filed under the lane whose latest cwd has left it is not. The latest cwd is read from every line of the
-  # record that carries one, so one long message cannot hide it.
-  cwd=$([ -z "$f" ] || grep -F '"cwd":' "$f" 2>/dev/null | jq -rR 'fromjson? | .cwd? | strings' 2>/dev/null | tail -n 1)
+  # a session filed under the lane whose latest cwd has left it is not. The records that moved in the last ACTIVE
+  # seconds, each with its latest cwd, are LANE_ACTIVE, which lanes() lists once a cycle.
+  cwd=''
+  if [ -n "$f" ]; then
+    g=''
+    while IFS=$'\t' read -r g c; do [ "$g" != "$f" ] || { cwd=$c; break; }; done <<<"$LANE_ACTIVE"
+    [ "$g" = "$f" ] || cwd=$(latest_cwd "$f")
+  fi
   case $cwd in ''|"$d"|"$d"/*) ;; *) f='' ;; esac
-  while IFS= read -r g; do
+  while IFS=$'\t' read -r g c; do
+    [ -n "$g" ] || continue
     [ -z "$f" ] || [ "$g" -nt "$f" ] || continue
-    cwd=$(grep -F '"cwd":' "$g" 2>/dev/null | jq -rR 'fromjson? | .cwd? | strings' 2>/dev/null | tail -n 1)
-    case $cwd in "$d"|"$d"/*) f=$g ;; esac
-  done < <(find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -mmin -$((ACTIVE / 60)) 2>/dev/null)
+    case $c in "$d"|"$d"/*) f=$g ;; esac
+  done <<<"$LANE_ACTIVE"
   # The record is read in whole lines, however long, up to its first timestamp and first prompt and no further.
   [ -z "$f" ] || run=$(jq -cRn --argjson last "$(stat -c %Y "$f")" --argjson now "$NOW" --argjson active "$ACTIVE" '
       def prompt: select(.type == "user" and .isSidechain != true) | .message.content
@@ -517,13 +526,18 @@ lane() { # <worktree>
 # is under the home folder), and is null when the record names none: a lane is the owner's own worktree, wherever
 # `conveyor.sh lane fast create` or `lane research create` made it, and each writes its folder into the host file.
 lanes() {
-  local cfg=$HOST_FILE recs='[]' repo f r out='[]'
+  local cfg=$HOST_FILE recs='[]' repo f r out='[]' LANE_ACTIVE='' g
   [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
   if [ -e "$cfg" ]; then
     recs=$(jq -ec 'def w: . // "" | if type == "string" then . else error("worktree") end;
         [.records // [] | .[] | [(.repo | tostring), (.lanes.fast.worktree | w), (.lanes.research.worktree | w)]]' "$cfg" 2>/dev/null) \
       || { jq -cn '{error: "conveyor/host.json records are not understood"}'; return 0; }
   fi
+  # The Claude records that moved in the last ACTIVE seconds, each with its latest cwd, one "<record><tab><cwd>" a
+  # line: listed and read once a cycle, not once a lane.
+  while IFS= read -r g; do
+    LANE_ACTIVE+=$g$'\t'$(latest_cwd "$g")$'\n'
+  done < <(find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -mmin -$((ACTIVE / 60)) 2>/dev/null)
   while IFS= read -r -d '' repo && IFS= read -r -d '' f && IFS= read -r -d '' r; do
     [[ $f != "~/"* ]] || f=$HOME/${f#"~/"}
     [[ $r != "~/"* ]] || r=$HOME/${r#"~/"}
