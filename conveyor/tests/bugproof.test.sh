@@ -147,8 +147,8 @@ t_bugcommentcode() {
 # line (the code no longer runs), or edits a # line in a shell heredoc (text the program prints), is let skip the
 # check; and so are a/**/b in js read as ab, and two .css and .html changes that look like comment fixes but change
 # the page: 16/**/px (two CSS tokens, the rule dropped) read as 16px, and a new <!-- --> in an empty <nav> (a node:
-# the Board sees a first child and draws no tabs). Each change here is staged beside a test file in a fresh repo and
-# given to commentsonly().
+# the Board sees a first child and draws no tabs). Each change here is staged beside a test file (but notest, staged
+# alone) in a fresh repo and given to commentsonly().
 t_bugcommentsyntax() {
   local r=$T/$CASE/r got=''
   mkdir -p "$r" && git -C "$r" init -q && git -C "$r" config user.email t@example.com && git -C "$r" config user.name t \
@@ -159,9 +159,10 @@ t_bugcommentsyntax() {
   printf '%s\n' "cat <<'E'" '# STANDING YES' 'E' > "$r/rules.sh"
   printf '%s\n' 'ok();' > "$r/a.test.js"
   git -C "$r" add -A && git -C "$r" commit -qm main || fail "the fixture commit"
-  # <name> <file> <sed script>: the file changed so and a.test.js changed, staged; notes "<name>=<0 when comments only>".
+  # <name> <file> <sed script> [notest]: the file changed so and, unless notest, a.test.js changed, staged; notes
+  # "<name>=<0 when comments only>".
   try() {
-    sed -i "$3" "$r/$2" && echo 'ok(1);' >> "$r/a.test.js" && git -C "$r" add -A || fail "staging $1"
+    sed -i "$3" "$r/$2" && { [ "${4-}" = notest ] || echo 'ok(1);' >> "$r/a.test.js"; } && git -C "$r" add -A || fail "staging $1"
     # shellcheck disable=SC2034 # TESTRX and TESTRUNNERS are read by testpaths(), loaded below
     got+=" $1=$( . "$SRC/lib/portable.sh"; TESTRX='\.test\.' TESTRUNNERS=''
       eval "$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/testrun.sh")"
@@ -169,6 +170,8 @@ t_bugcommentsyntax() {
     git -C "$r" reset -q --hard
   }
   try js app.js 's|x is two|x is one|'
+  # #713: the same comment fix with no test file changed is not comments only (1), so bugproof() does not let it skip.
+  try notest app.js 's|x is two|x is one|' notest
   try wrap app.js 's|^draw();|/*\n&\n*/|'
   try template app.js 's|^// b|// c|'
   try jsblank app.js 's|x is two|x is one|; 1s|$|\n|'
@@ -181,7 +184,7 @@ t_bugcommentsyntax() {
   try blocklsep app.js $'s|return |return /*\xe2\x80\xa8*/ |'
   try blockcr app.js $'s|return |return /*\r*/ |'
   try linepsep app.js $'s|x is two|x is two\xe2\x80\xa9draw();|'
-  [ "$got" = ' js=0 wrap=1 template=1 jsblank=0 jstoken=1 csstoken=1 htmlnode=1 heredoc=1 blocklsep=1 blockcr=1 linepsep=1' ] \
+  [ "$got" = ' js=0 notest=1 wrap=1 template=1 jsblank=0 jstoken=1 csstoken=1 htmlnode=1 heredoc=1 blocklsep=1 blockcr=1 linepsep=1' ] \
     || fail "commentsonly() does not tell js comment fixes (0) from code changes (1): $got"
 }
 
@@ -226,18 +229,21 @@ t_bugfilecommand() {
 # #711. Bug it catches: the guides said every card with a test file and no test.fileCommand stops at its test step,
 # but a bug card with a fix cannot run its bug-card check (bugproof() exit 2; t_wideoffnolist checks that stop), and
 # card() blocks it at Build, while a test-only or comments-only bug card skips the check and stops at its test step.
+# #713. Bug it catches: they said so of comments in any file, but commentsonly() takes only JavaScript and TypeScript
+# files (t_bugcommentsyntax: a # line in a .sh file is a fix), so a bug card that changes a shell comment stops at Build.
+# Nor did they say a test file must change too (t_bugcommentsyntax notest: a js comment fix alone is a fix).
 # The pages and the schema have no behaviour to run, so their text is read.
 t_bugnofilecmd() {
   local p
   for p in conveyor/README.md docs/configuration.md; do
     tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qiE 'a bug card with a test file and a fix stops earlier, at (its )?Build' \
       || fail "$p does not say a bug card with a fix and no test.fileCommand stops at Build"
-    tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qiE 'a bug card whose change is only test files, or only comments in other files, has no check to run,? and( it)? stops at its test step' \
-      || fail "$p does not say a test-only or comments-only bug card stops at its test step"
+    tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qiE 'a bug card whose change is only test files, or test files and only comments in other `\.js`, `\.mjs`, `\.cjs`, `\.ts`, `\.mts` or `\.cts` files, has no check to run,? and( it)? stops at its test step\. A comment change with no test file in the change, or in any other file, such as a `\.sh` or `\.py` file, is a fix, and that card stops at Build' \
+      || fail "$p does not say only a JavaScript or TypeScript comments-only bug card with a test file stops at its test step"
   done
   jq -r .properties.test.properties.fileCommand.description "$SRC/schema/pack.schema.json" \
-    | grep -qF 'a bug card with a fix (a change of more than test files and comments) at Build' \
-    || fail "the pack schema's test.fileCommand does not say only a bug card with a fix stops at Build"
+    | grep -qF 'a bug card with a fix (any change but test files alone, or test files with comments in .js, .mjs, .cjs, .ts, .mts and .cts files; a comment change with no test file, or in a .sh or .py file, is a fix) at Build' \
+    || fail "the pack schema's test.fileCommand does not say a comment change with no test file or in a .sh or .py file makes a bug card with a fix"
 }
 
 # A bug card of #7 whose build writes <card> into the product file <file>, which holds <main> on main: its fix and its

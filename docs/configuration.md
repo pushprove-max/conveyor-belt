@@ -165,8 +165,9 @@ that the file timed out. A file without that line has the time limit of the card
 
 If the pack has no `test.fileCommand`, a card with a test file to run stops at its test step, and Needs you shows
 the reason. A bug card with a test file and a fix stops earlier, at its Build step, because its check cannot run that
-file on main's code. A bug card whose change is only test files, or only comments in other files, has no check to run,
-and it stops at its test step. The reason names the setting. `conveyor.sh doctor` shows a `warning:` line for such a pack.
+file on main's code. A bug card whose change is only test files, or test files and only comments in other `.js`,
+`.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` files, has no check to run, and it stops at its test step. A comment change
+with no test file in the change, or in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. The reason names the setting. `conveyor.sh doctor` shows a `warning:` line for such a pack.
 
 A card runs the test files that its change adds or changes, as `tests.patterns` finds them. A shared helper or a test
 runner is not a test file here.

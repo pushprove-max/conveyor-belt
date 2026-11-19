@@ -535,8 +535,9 @@ time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file 
 and every process it started, and the file fails. With no `test.fileCommand`, a card with a test file to run stops at
 its test step under Needs you, and the reason names `test.fileCommand`. A bug card with a test file and a fix stops earlier,
 at Build: its bug-card check cannot run, and the card is blocked with that reason (Bug cards: the new tests fail
-without the fix). A bug card whose change is only test files, or only comments in other files, has no check to run and
-stops at its test step. A card with no test file to run passes its
+without the fix). A bug card whose change is only test files, or test files and only comments in other `.js`, `.mjs`,
+`.cjs`, `.ts`, `.mts` or `.cts` files, has no check to run and stops at its test step. A comment change with no test
+file in the change, or in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. A card with no test file to run passes its
 test step. [Which tests a card
 runs](../docs/configuration.md#which-tests-a-card-runs) says which files are on the list.
 The list is the test files the card's change adds or changes (`"by": "own"`; a shared helper is none). Of a test file
