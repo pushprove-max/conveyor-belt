@@ -114,13 +114,13 @@ field, or when you go to another browser tab. Click **Reload** to load the new v
 A reload keeps these, in this browser tab only, until you close the tab or someone signs in again in any tab of
 this browser:
 
-- how many rows each list shows after **Show 5 more** or **Show all**, for each project that **Show** picks and for
-  every project,
+- how many rows each list shows after a **Show N more** button (**Show 5 more**, **Show 10 more** or
+  **Show 100 more**) or **Show all**, for each project that **Show** picks and for every project,
 - an answer, a condition or a reason (**Why not**) that you typed in Needs you and did not send,
 - the text in the Board's filter, for each project.
 
-After **Show 5 more**, the cursor goes to the first new row. If that row is in a closed group, the cursor goes to the
-heading of that group.
+After any **Show N more** button, the cursor goes to the first new row. If that row is in a closed group, the
+cursor goes to the heading of that group.
 
 **Show**, in the machine bar, picks the project that every tab shows.
 
