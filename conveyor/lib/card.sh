@@ -110,10 +110,52 @@ redbrief() { # <card> <issue> <branch>
   red=$(redissue "$1") && [ "$red" != "$issue" ] || return 0
   sprompt=${sprompt/"$(issuepart "$issue")"/"$(issuepart "$red")"}; issue=$red
 }
+# The sessions' and the reviewer's prompt (plan section 10, the reviewer gets the same text): the brief with the
+# rules after the header, before the issue. Each session and review is handed it with its own part after it.
+cardprompt() { # <card> <header> <rules> <brief>
+  local rhead="Conveyor card $1. $2"$'\n\n'
+  printf '%s' "$rhead"$'# Rules\n\n'"$3"$'\n\n'"${4#"$rhead"}"
+}
+# The prompts of the sessions after the build, each the card's prompt (cardprompt()) with its own part after it: a fix
+# of review findings, a fix of the changed tests (the last 200 lines of their output), and a rebuild or a port onto main.
+fixprompt() { # <card prompt> <the findings, each led by its id, and what follows them>
+  printf '%s' "$1"$'\n\n'"$FIX"$'\n'"$2"
+}
+testfixprompt() { # <card prompt> <worktree> <the test run's exit>
+  printf '%s' "$1"$'\n\n# The changed tests fail (exit '"$3"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$2.test" 2>/dev/null | tr -d '\000')"
+}
+rebaseprompt() { # <card prompt> <worktree> <the conflict message> <the commit its patch was made against> [port]
+  local p=''; [ -z "${5:-}" ] || p=$'\nOne review of this port alone follows: change nothing else.'
+  printf '%s' "$1"$'\n\n'"$REBASE$p"$'\n\n## The conflict message\n'"$3"$'\n\n## The card\'s patch\nThe file '"$2.patch"$', made against commit '"$4"$'.'
+}
+# What a review is shown after the card's prompt, beside the diff: the card's commit trailers, the D<n> lines of the
+# last checked reply, and the proof of a bug or speed card's tests (<its heading>, then the lines of <worktree>.unfixed).
+reviewseen() { # <worktree> <the proof's heading>
+  local m
+  m=$(trailerview "$1") || return 1
+  [ ! -s "$1.donewhen" ] || m+=$'\n\n'"$DONEWHENREVIEW"$'\n'"$(<"$1.donewhen")"
+  [ ! -s "$1.unfixed" ] || m+=$'\n\n'"$2"$'\n'"$(<"$1.unfixed")"
+  printf '%s' "$m"
+}
+# The commit message of a card of an issue: its subject from the pack's type label (fix, else feat) and area prefix
+# (its first area label, else product), then its Closes and card lines.
+cardsubject() { # <card> <issue json>
+  jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title) (#\(.number))\n\nCloses #\(.number)\nConveyor card \($c)"' <<<"$2"
+}
+# A failed (or held) test step's line, past its common fields: the run's record (testrec()), its reason (the exit, and
+# the timeout with the file still running when there was one), its failures (testfails()), the last 60 lines of its
+# output (its tail, each line whole), its first-run marks (firstrun()), the verdicts of what ran again on main
+# (verdicts()) and its carried part (carriedrec()).
+failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts json> <carried json>
+  tail -n 60 "$1.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$1" "$2" "$3") --slurpfile f <(printf '%s' "$4") --arg rc "$2" --slurpfile r <(firstrun "$1") --slurpfile v <(printf '%s' "$5") --slurpfile o <(printf '%s' "$6") \
+    '$x[0] as $x | $f[0] as $f | $r[0] as $r | $v[0] as $v | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {
+       reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
+     + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v'
+}
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
-  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules rhead sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
+  local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
@@ -296,10 +338,7 @@ card() { # <card> <issue> [<branch> <tip>]
   [ "$old" = '[]' ] || rv+=$'\n\n'${KINDS//'<kinds>'/"$(jq -r 'join(", ")' <<<"$old")"}
   more=$(trailerbrief "$wt") || { block "$c" "$n" "$wt" "brief: the engine could not read the commit trailers of the project pack"; return; }
   b+=$'\n\n'"$more"
-  # The sessions' and the reviewer's prompt (plan section 10, the reviewer gets the same text): the brief with
-  # the rules after the header, before the issue.
-  rhead="Conveyor card $c. $hdr"$'\n\n'
-  sprompt=$rhead$'# Rules\n\n'"$rules"$'\n\n'"${b#"$rhead"}"
+  sprompt=$(cardprompt "$c" "$hdr" "$rules" "$b")
   d=$(jq -r '.body // ""' <<<"$issue" | sed -nE 's/^Follow-up depth: ([0-9]+)[[:space:]]*$/\1/p' | head -n 1)
   [ ${#d} -le 3 ] && d=$((10#${d:-0})) || d=''
   record "$c" "$n" brief ok "$([ -z "$d" ] && echo '{}' || echo "{\"depth\":$d}")"
@@ -385,7 +424,7 @@ card() { # <card> <issue> [<branch> <tip>]
       sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
     fi
   fi
-  msg=$(jq -r --arg c "$c" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title) (#\(.number))\n\nCloses #\(.number)\nConveyor card \($c)"' <<<"$issue")
+  msg=$(cardsubject "$c" "$issue")
   # A branch that names no issue lands under its own first commit's subject, which names no issue to close.
   [ "$n" != 0 ] || [ -z "$br" ] || msg=$(jq -r --arg c "$c" --arg b "$br" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$issue")
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
@@ -424,9 +463,8 @@ card() { # <card> <issue> [<branch> <tip>]
       fi
       began "$c" "$n" review
       # The review sees the card's commit trailers beside the diff, and the D<n> lines of the last checked reply.
-      t="the engine could not read the commit trailers of the card"; more=$(trailerview "$wt") \
-        && { [ ! -s "$wt.donewhen" ] || more+=$'\n\n'"$DONEWHENREVIEW"$'\n'"$(<"$wt.donewhen")"; } || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
-      [ ! -s "$wt.unfixed" ] || more+=$'\n\n'"$(if [ -n "$sk" ]; then echo "$sk"; elif [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)"$'\n'"$(<"$wt.unfixed")"
+      more=$(reviewseen "$wt" "$(if [ -n "$sk" ]; then echo "$sk"; elif [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)") \
+        || { block "$c" "$n" "$wt" "review $pass: the engine could not read the commit trailers of the card"; return; }
       # What this review reads, kept on its line: the staged change, the main commit and what it is shown beside the
       # diff (seen: the trailers and D<n> lines above). A review due on the same three as the card's last review is
       # that review again (reusable()), with no review session. Not the one review of a port, which reads the port's
@@ -504,7 +542,7 @@ card() { # <card> <issue> [<branch> <tip>]
       # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
       # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
       ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$FIX"$'\n'"$fl$more" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
+      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
       checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
       # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
       mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
@@ -730,10 +768,7 @@ card() { # <card> <issue> [<branch> <tip>]
         # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: its test line is `held`,
         # not `fail` (the card's test step is not counted as failed), and it waits for the machine hold (below).
         held=''; jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$t" >/dev/null && held=machine
-        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$wt" "$rc" "$sec") --slurpfile f <(printf '%s' "${out:-null}") --arg rc "$rc" --slurpfile r <(firstrun "$wt") --slurpfile v <(printf '%s' "$t") --slurpfile o <(printf '%s' "$cr") \
-          '$x[0] as $x | $f[0] as $f | $r[0] as $r | $v[0] as $v | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {
-             reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
-           + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v')"
+        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr")"
         testrulespass > /dev/null
         # Main is red: every failure the run again left fails on main too. The card waits in its test step, holding no
         # files (no fix session, no block) until main changes; then it is fitted onto main and tested again, as a card
@@ -794,7 +829,7 @@ card() { # <card> <issue> [<branch> <tip>]
           [ -z "$tfix" ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
           tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
           # On the testFix seat (seat(): the builder's unless the control record sets testFix).
-          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# The changed tests fail (exit '"$rc"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$wt.test" 2>/dev/null | tr -d '\000')" fix testFix) \
+          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc")" fix testFix) \
             || { block "$c" "$n" "$wt" "fix: $t"; return; }
           checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
           continue 2
@@ -896,7 +931,7 @@ card() { # <card> <issue> [<branch> <tip>]
       err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
         || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the rebuild:${err:0:300}]"; return; }
       began "$c" "$n" rebase
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$REBASE"$'\n\n## The conflict message\n'"$why"$'\n\n## The card\'s patch\nThe file '"$wt.patch"$', made against commit '"$old"$'.' rebase) || {
+      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(rebaseprompt "$sprompt" "$wt" "$why" "$old")" rebase) || {
         # The reviewed change goes back into the worktree, in place of the half-made rebuild, so block keeps it.
         git -C "$wt" reset -q --hard "$old" 2>/dev/null && git -C "$wt" clean -fdq 2>/dev/null && git -C "$wt" apply --index "$wt.patch" 2>/dev/null \
           || t="${t%%$'\n'*} [the engine could not put the reviewed change back in the worktree. The kept patch is what the failed rebuild left]$([[ $t != *$'\n'* ]] || printf '\n%s' "${t#*$'\n'}")"
@@ -920,7 +955,7 @@ card() { # <card> <issue> [<branch> <tip>]
       err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
         || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the port:${err:0:300}]"; return; }
       began "$c" "$n" rebase
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$REBASE"$'\nOne review of this port alone follows: change nothing else.\n\n## The conflict message\n'"$why"$'\n\n## The card\'s patch\nThe file '"$wt.patch"$', made against commit '"$old"$'.' rebase) || {
+      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(rebaseprompt "$sprompt" "$wt" "$why" "$old" port)" rebase) || {
         git -C "$wt" reset -q --hard "$old" 2>/dev/null && git -C "$wt" clean -fdq 2>/dev/null && git -C "$wt" apply --index "$wt.patch" 2>/dev/null \
           || t="${t%%$'\n'*} [the engine could not put the reviewed change back in the worktree. The kept patch is what the failed port left]$([[ $t != *$'\n'* ]] || printf '\n%s' "${t#*$'\n'}")"
         block "$c" "$n" "$wt" "rebase: $t"; return; }
