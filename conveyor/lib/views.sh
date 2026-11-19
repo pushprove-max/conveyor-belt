@@ -234,14 +234,22 @@ proofs() {
 # The output of each card's test run and of the run again of its failed tests on main (testrun.sh verdicts(), in
 # $CARDS/mainrun/<card>, whose live record is mainrun/<card>.live), as one object by card: the newest of the card's .test
 # file's write time and that live record's last and progress. Health counts it as the output of a card in its test step:
-# while main's run runs, the card's own live record is gone and the card writes no line.
+# while main's run runs, the card's own live record is gone and the card writes no line. One jq reads all the live
+# records (each one line) and the .test times; with neither file, it is {} with no program started.
 testouts() {
-  local f c t
-  { for f in "$CARDS"/mainrun/*.live; do c=${f##*/}; c=${c%.live}; [[ $c == *.* ]] || [ ! -e "$f" ] \
-      || jq -r --arg c "$c" '[$c, ([.last, .progress] | map(strings | fromdate) | max)] | @tsv' "$f" 2>/dev/null; done
-    while read -r t f; do c=${f##*/}; c=${c%.test}; [[ $c == *.* ]] || printf '%s\t%s\n' "$c" "$t"; done < <(p_mtimes "$CARDS"/*.test)
-  } | jq -Rn '[inputs | split("\t") | select(length == 2 and (.[1] | test("^[0-9]+$"))) | {key: .[0], value: (.[1] | tonumber)}]
-    | group_by(.key) | map({key: .[0].key, value: (map(.value) | max | todate)}) | from_entries'
+  local f c t o='' m=() s=("$CARDS"/*.test)
+  for f in "$CARDS"/mainrun/*.live; do c=${f##*/}; c=${c%.live}; [[ $c == *.* ]] || [ ! -e "$f" ] || m+=("$f"); done
+  if [ -e "${s[0]}" ]; then
+    while read -r t f; do c=${f##*/}; c=${c%.test}; [[ $c == *.* ]] || o+=$c$'\t'$t$'\n'; done < <(p_mtimes "${s[@]}")
+  fi
+  [ -n "$o" ] || [ ${#m[@]} -gt 0 ] || { echo '{}'; return 0; }
+  # A live record that is gone, half written or holds no time gives no entry, and takes no other card's with it.
+  o=$(jq -cRn --arg t "$o" '[(inputs | input_filename as $f | try ({key: ($f | sub(".*/"; "") | rtrimstr(".live")),
+        value: (fromjson | [.last, .progress] | map(strings | fromdate) | max)}) catch empty),
+      ($t | splits("\n") | split("\t") | select(length == 2 and (.[1] | test("^[0-9]+$"))) | {key: .[0], value: (.[1] | tonumber)})]
+    | map(select(.value | type == "number")) | group_by(.key) | map({key: .[0].key, value: (map(.value) | max | todate)}) | from_entries' \
+    "${m[@]}" < /dev/null 2>/dev/null)
+  echo "${o:-{\}}"
 }
 aways() { # each card that gave way (giveway()): {to: the issue it gave way to, fixing: for the fix of its failed tests}, as one object by card
   local f c o=''
