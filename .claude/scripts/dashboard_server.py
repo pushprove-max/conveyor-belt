@@ -268,15 +268,35 @@ PING = float(os.environ.get('CONVEYOR_DASHBOARD_PING') or 15)
 MAX_FOLLOWERS = 20
 
 
+class Events:
+    """One feed version's events as the bytes sent: each is encoded by the first follower that sends it and kept for
+    every other follower of that version."""
+
+    def __init__(self, data):
+        self.data, self.done, self.lock = data, {}, threading.Lock()
+
+    def event(self, kind, key=None):
+        """The snapshot, a panel's event (key: its id) or the updated event, encoded once."""
+        with self.lock:
+            if (kind, key) not in self.done:
+                d = self.data
+                body = (d if kind == 'snapshot' else
+                        {'id': key, 'part': d['panels'][key], 'updatedAt': d.get('updatedAt')} if kind == 'panel' else
+                        {'updatedAt': d.get('updatedAt')})
+                self.done[(kind, key)] = ('event: %s\ndata: %s\n\n' % (kind, json.dumps(body, separators=(',', ':')))).encode()
+            return self.done[(kind, key)]
+
+
 class Feed:
     """data.js as the page's live feed: one thread looks at the file every 0.2 s and, when it changed, reads it whole;
     every /events client waits on the one condition for a newer version. Each panel's text (sorted keys), which a
-    client compares to find the panels that changed, is worked out here once a version, not once a client."""
+    client compares to find the panels that changed, is worked out here once a version, not once a client; so is each
+    event a client sends (Events)."""
 
     def __init__(self, directory):
         self.path = os.path.join(directory, 'data.js')
         self.cond = threading.Condition()
-        self.version, self.data, self.texts, self.seen = 0, None, None, None
+        self.version, self.data, self.texts, self.events, self.seen = 0, None, None, None, None
         self.followers = 0
 
     def look(self):
@@ -297,7 +317,7 @@ class Feed:
             return
         texts = {k: json.dumps(v, sort_keys=True) for k, v in data['panels'].items()}
         with self.cond:
-            self.seen, self.data, self.texts, self.version = key, data, texts, self.version + 1
+            self.seen, self.data, self.texts, self.events, self.version = key, data, texts, Events(data), self.version + 1
             self.cond.notify_all()
 
     def run(self):
@@ -306,11 +326,11 @@ class Feed:
             time.sleep(0.2)
 
     def wait(self, version, timeout):
-        """(version, data, texts): the newest, once it is newer than `version` or `timeout` seconds have gone; texts
-        holds each panel's text, as look() worked it out."""
+        """(version, data, texts, events): the newest, once it is newer than `version` or `timeout` seconds have gone;
+        texts holds each panel's text, as look() worked it out, and events its Events."""
         with self.cond:
             self.cond.wait_for(lambda: self.version != version, timeout)
-            return self.version, self.data, self.texts
+            return self.version, self.data, self.texts, self.events
 
 
 FEED = [None]
@@ -774,13 +794,48 @@ def sha(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def read_store():
-    try:
-        with open(AUTH) as f:
+def load_store():
+    """The store as the file holds it now, a new dict each call ({} for one of another shape); OSError when the file
+    cannot be read."""
+    with open(AUTH) as f:
+        try:
             store = json.load(f)
-        return store if isinstance(store, dict) else {}
-    except (OSError, ValueError):
+        except ValueError:
+            return {}
+    return store if isinstance(store, dict) else {}
+
+
+def parse_store():
+    """load_store, with {} for a store that cannot be read."""
+    try:
+        return load_store()
+    except OSError:
         return {}
+
+
+# The store as last parsed, kept in memory: ((mtime_ns, size, ino) of the file, the store). change_store writes a new
+# file and renames it over the old one, so each change has a new inode and is parsed again on the next read. A read
+# that fails is never kept: a mode change leaves the key as it was, and the next request must try the file again.
+STORE = [None, None]
+STORE_LOCK = threading.Lock()
+
+
+def read_store():
+    """The store, parsed again only when its file changed. The one dict is shared by every request: read it, never
+    change it (change_store parses its own copy)."""
+    try:
+        st = os.stat(AUTH)
+        key = (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        return {}
+    with STORE_LOCK:
+        if STORE[0] != key:
+            try:
+                STORE[:] = [key, load_store()]
+            except OSError:
+                STORE[:] = [None, None]
+                return {}
+        return STORE[1]
 
 
 def change_store(fn):
@@ -789,7 +844,7 @@ def change_store(fn):
     os.makedirs(os.path.dirname(AUTH), mode=0o700, exist_ok=True)
     with os.fdopen(os.open(AUTH + '.lock', os.O_CREAT | os.O_RDWR, 0o600)) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        store = read_store()
+        store = parse_store()
         if not isinstance(store.get('users'), dict):
             store['users'] = {}
         if not isinstance(store.get('setups'), dict):
@@ -1330,8 +1385,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def authed(self, store=None):
         """The logged-in user's name, or None. A live session (unexpired, of a user still in the store, made under that
         user's current epoch, and its device, if any, still trusted) or a trusted device cookie that has not outlived
-        DEVICE_TTL; with neither, LOCAL for a request from this device (this_device). The store is read per request,
-        so a revoke, a new password, a role change, a removed user or the setting turned off takes effect on the next
+        DEVICE_TTL; with neither, LOCAL for a request from this device (this_device). The store is looked at per request
+        (read_store parses it again once its file changed), so a revoke, a new password, a role change, a removed user
+        or the setting turned off takes effect on the next
         one; store, as change_store holds it, checks again under its lock. Only a call that reads the store itself
         records a trusted device's use (device_used takes that lock, so a store passed in may be held under it)."""
         touch = store is None
@@ -2070,19 +2126,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Connection', 'close')  # a stream with no Content-Length ends with its connection
             self.end_headers()
 
-            def send(kind, data):
-                self.wfile.write(('event: %s\ndata: %s\n\n' % (kind, json.dumps(data, separators=(',', ':')))).encode())
+            def send(kind, key=None):
+                self.wfile.write(events.event(kind, key))  # encoded once a version for every follower
                 self.wfile.flush()
 
             feed.look()  # data.js as it is now, not as it was at the last look
-            version, data, texts = feed.wait(None, 0)
+            version, data, texts, events = feed.wait(None, 0)
             parts = None  # what this page has (each panel's text, the feed's): nothing until its snapshot
             checked = time.monotonic()
             while True:
                 if data is not None and parts is None:
-                    send('snapshot', data)
+                    send('snapshot')
                     parts = texts
-                v, data, texts = feed.wait(version, PING)
+                v, data, texts, events = feed.wait(version, PING)
                 # The login is checked each PING whether or not data flows: changes coming faster than PING must not
                 # keep a logged-out or revoked page following.
                 if v == version or data is None or time.monotonic() - checked >= PING:
@@ -2098,9 +2154,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     continue  # its first data: the snapshot, above
                 changed = [k for k in texts if parts.get(k) != texts[k]]
                 for k in changed:
-                    send('panel', {'id': k, 'part': data['panels'][k], 'updatedAt': data.get('updatedAt')})
+                    send('panel', k)
                 if not changed:
-                    send('updated', {'updatedAt': data.get('updatedAt')})
+                    send('updated')
                 parts = texts
         except (OSError, ssl.SSLError, ValueError):
             return  # the page went away

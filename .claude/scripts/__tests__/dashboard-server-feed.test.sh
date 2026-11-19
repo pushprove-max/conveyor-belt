@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# The page server's work for each open page (issue 566), by function: GET /events, GET /history, GET /work, GET /older and GET /donewhen called on a
-# stand-in request, with no server, socket or login. Every open page did again work one could do for all: each /events
+# The page server's work for each open page (issue 566), by function: GET /events, GET /history, GET /work, GET /older, GET /donewhen and the login check
+# called on a stand-in request, with no server or socket. Every open page did again work one could do for all: each /events
 # connection serialised every panel of data.js (about 1.1 MB) on each update, and each GET /history started bash,
 # every 60 s a page, though dashboard.sh kept the answer for 60 s.
 set -euo pipefail
@@ -61,10 +61,12 @@ def data_js(n, a):
     with open(os.path.join(T, 'data.js'), 'w') as f:
         f.write('window.DASH = %s;\n' % json.dumps({'updatedAt': 't%d' % n, 'panels': {'a': {'n': a}, 'b': {'n': 'same' * n}}}))
 data_js(1, 1)
-serialised, real_dumps = [], json.dumps
+serialised, encoded, real_dumps = [], [], json.dumps
 def dumps(obj, *a, **k):
     if k.get('sort_keys'):
         serialised.append(obj)
+    elif k.get('separators') == (',', ':'):  # an event's data, as a page is sent it
+        encoded.append(obj)
     return real_dumps(obj, *a, **k)
 ds.json.dumps = dumps
 ds.PING = 0.1  # a closed page is found at its next ping
@@ -88,6 +90,42 @@ check(all(p.events() == ['event: snapshot', 'event: panel', 'event: panel'] for 
       'events: each page gets its snapshot, then a panel event for each changed panel: %r' % [p.events() for p in pages])
 check(len(serialised) == 4, 'events_serialise_each_panel_once_a_version: two pages, two versions, two panels must be '
       '4 serialisations, not one set a page: %d' % len(serialised))
+# #549. Bug: each follower encoded its own copy of the snapshot (all of data.js) and of each panel event. Two pages: one
+# snapshot of version 1 and two panel events of version 2 are 3 encodings for both, not 6.
+check(len(encoded) == 3, 'events_encode_each_event_once_a_version: two pages, a snapshot and two panel events must be '
+      '3 encodings, not one set a page: %d' % len(encoded))
+
+# #549. Bug: every logged-in request parsed the login store again, though it had not changed. Ten requests with a
+# session parse it once; a store changed as change_store changes it (a new file) is parsed again, and its change is seen.
+parsed, real_load = [], json.load
+def load(f, *a, **k):
+    if getattr(f, 'name', None) == ds.AUTH:
+        parsed.append(f.name)
+    return real_load(f, *a, **k)
+ds.json.load = load
+ds.change_store(lambda s: s.update(epoch=1, users={'ann': {'role': 'member', 'epoch': 1}}, noLoginHere=False))
+ds.SESSIONS[ds.sha('tok')] = {'exp': time.time() + 60, 'epoch': 1, 'device': None, 'user': 'ann'}
+asker = Page()
+asker.headers = {'Cookie': 'pp_session=tok'}
+asker.this_device = lambda store: ds.Handler.this_device(asker, store)  # off in this store: no socket is looked at
+parsed.clear()
+names = [ds.Handler.authed(asker) for _ in range(10)]
+check(names == ['ann'] * 10 and len(parsed) == 1,
+      'login_store_parsed_once_while_unchanged: ten logged-in requests, one parse: %r, %d parses' % (names, len(parsed)))
+ds.change_store(lambda s: ds.bump(s, s['users']['ann']))  # a new epoch ends ann's session
+parsed.clear()
+check(ds.Handler.authed(asker) is None and len(parsed) == 1,
+      'login_store_read_again_once_changed: the changed store is parsed and ends the session: %d parses' % len(parsed))
+# #549 E1. Bug: a read that failed was kept as {} (no noLoginHere: this device logged in as admin) under a key a mode
+# change leaves as it was, so the store, once readable again, was never read. Root reads a mode-000 file: not run as root.
+if os.geteuid() != 0:
+    ds.STORE[:] = [None, None]
+    os.chmod(ds.AUTH, 0o000)
+    unreadable = ds.read_store()
+    os.chmod(ds.AUTH, 0o600)
+    check(unreadable == {} and ds.read_store().get('noLoginHere') is False,
+          'login_store_failed_read_not_kept: once readable again the store is read: %r' % ds.read_store())
+ds.json.load = real_load
 
 # D2. Bug: each GET /history started bash, every 60 s for each open page, though dashboard.sh --history only printed
 # its copy of the last minute. A fresh copy is served from the file and starts no process; an old one runs the script.
