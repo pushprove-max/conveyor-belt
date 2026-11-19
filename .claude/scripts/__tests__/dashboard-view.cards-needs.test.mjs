@@ -178,7 +178,8 @@ test('Declined: the findings newest first with who and why; "File as issue", con
   deliver(w, data);
   const rows = () => Array.from(panel(w, 'declined').querySelectorAll('.rows > .row'));
   assert.deepEqual(rows().map((r) => r.querySelector('.title').textContent), ['[P2] c.txt:3 a nit', '[P1] b.txt:2 no mark here'], 'newest first, as the collector gives them');
-  assert.deepEqual(rows().map((r) => r.querySelector('.reason').textContent), ['Why: not worth a card', 'Why: its proof needs a stub built to misbehave']);
+  assert.deepEqual(rows().map((r) => [r.querySelector('.reason .why-label').textContent, r.querySelector('.reason .why-text').textContent]),
+    [['Why the owner declined it', 'not worth a card'], ['Why the judge declined it', 'its proof needs a stub built to misbehave']], 'who declined it, then why');
   assert.match(rows()[0].textContent, /declined by the owner/);
   const b = rows()[1].querySelector('button[data-act="build"]');
   assert.equal(b.textContent, 'File as issue', 'it says what it does: it files an issue, it builds nothing now');
@@ -233,7 +234,9 @@ test("a review step says what the judge made of it, in flight and landed, and on
   assert.deepEqual(said(row.querySelector('.reviews')), LINES, 'each finished review of a card in flight');
   assert.deepEqual(Array.from(row.querySelectorAll('.tl-item'), (li) => said(li).join('')), SAID, 'each review step of its timeline');
   const landed = panel(w, 'landed').querySelector('.rows > li');
-  assert.deepEqual(said(landed.querySelector('.row-meta + .row-meta')), LINES, 'each review of a landed card');
+  // Its reviews line (its rollout lines stand between it and the first line).
+  const reviewed = Array.from(landed.querySelectorAll(':scope > .row-meta')).find((p) => p.textContent.startsWith('Review 1:'));
+  assert.deepEqual(said(reviewed), LINES, 'each review of a landed card');
   assert.doesNotMatch(panel(w, 'belt').textContent + panel(w, 'landed').textContent, /judge did not run|judge call failed|review had no finding/,
     'a review the judge did not read says nothing of the judge');
   assert.deepEqual(Array.from(landed.querySelectorAll('.tl-item'), (li) => said(li).join('')), SAID, 'each review step of a landed card');
