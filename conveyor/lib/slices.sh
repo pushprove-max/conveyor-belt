@@ -315,11 +315,15 @@ umbrellas() { # <open issues, a json list>
     | group_by(.issue)[] | last | select(all(.split.filed[]; IN($landed[]))) | "split \(.issue) \(.split.filed | map("#\(.)") | join(", "))"' < <(turncards) 2>/dev/null)
 }
 # The issues given attached to <parent> as its GitHub sub-issues (its parts): GitHub takes each one's id, not its
-# number. Prints why and fails at the first that cannot be attached; those before it stay attached.
+# number. The id is read through graphql (privacy.test.sh's ghwrite refuses a REST call outside gh_write in lib/)
+# as fullDatabaseId, a BigInt that GitHub sends as a string: databaseId is a 32-bit Int, and an id over 2147483647
+# does not fit it. Prints why and fails at the first that cannot be attached; those before it stay attached.
 attachparts() { # <parent> <issue>...
   local p=$1 n id out; shift
   for n; do
-    id=$(gh api "repos/{owner}/{repo}/issues/$n" 2>/dev/null | jq -er '.id | numbers' 2>/dev/null) || { echo "#$n could not be read"; return 1; }
+    id=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$n" -f query='query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) { issue(number: $number) { fullDatabaseId } } }' 2>/dev/null \
+      | jq -er '.data.repository.issue.fullDatabaseId | strings | select(test("^[0-9]+$"))' 2>/dev/null) || { echo "#$n could not be read"; return 1; }
     out=$(gh_write api "repos/{owner}/{repo}/issues/$p/sub_issues" -X POST -F "sub_issue_id=$id" 2>&1 >/dev/null) \
       || { echo "#$n could not be attached to #$p as its sub-issue: ${out:0:300}"; return 1; }
   done

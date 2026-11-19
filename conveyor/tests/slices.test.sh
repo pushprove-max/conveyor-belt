@@ -84,6 +84,8 @@ t_sliceson() {
     || fail "a slice's body does not name its parent, the items it covers, its own Done-when items or the slice it depends on: $(jq -r .body "$STUB/filed")"
   [ "$(jq -c .held "$ST/control.json")" = '[7]' ] || fail "the umbrella was not held, or its released parent's slices were held: $(jq -c .held "$ST/control.json")"
   # Bug caught (#648): the slices were not made sub-issues of the issue they split, so GitHub did not group them under it.
+  # Bug caught (#733): the id was read as graphql's databaseId, a 32-bit Int that a real id (the stub's, over
+  # 2147483647) does not fit, so no slice was attached.
   [ "$(cat "$STUB/subs" 2>/dev/null)" = $'7 100101\n7 100102' ] && grep -q 'are its sub-issues' "$STUB/comments" \
     || fail "the slices were not attached as sub-issues of #7, or its comment does not say so: $(cat "$STUB/subs" 2>/dev/null) $(cat "$STUB/comments")"
   grep -q 'D1 (first): #100101' "$STUB/comments" && grep -q 'D3 (third): #100102' "$STUB/comments" || fail "the umbrella's comment does not name the slice of each Done-when item: $(cat "$STUB/comments")"

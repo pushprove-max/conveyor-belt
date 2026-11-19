@@ -216,7 +216,9 @@ t_ghwrite() {
     fi
   done
   [ -z "$out" ] || fail "a GitHub write outside gh_write: $out"
-  for f in 'gh --repo owner/repo issue comment 7 --body x' 'gh -R o/r pr edit 1' 'gh --repo o/r api repos/o/r/issues'; do
+  # The last: a REST read of an issue, as attachparts() made before it read the issue's id through graphql (#733).
+  for f in 'gh --repo owner/repo issue comment 7 --body x' 'gh -R o/r pr edit 1' 'gh --repo o/r api repos/o/r/issues' \
+    'id=$(gh api "repos/{owner}/{repo}/issues/$n" 2>/dev/null | jq -er .id)'; do
     { grep -qE "$w" <<<"$f" || grep -qE "${g}api" <<<"$f"; } || fail "the guard misses: $f"
   done
 }

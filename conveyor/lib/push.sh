@@ -384,7 +384,7 @@ prsync() {
 # control record's prMerge, else the pack's push.prMerge. Fails when either cannot be read.
 prmergerule() { local d x; packget push.prMerge d && x=$(ctl 2>/dev/null) && x=$(jq -er --arg d "$d" '.prMerge // $d' <<<"$x" 2>/dev/null) && echo "$x"; }
 # The merge of the open pull request from LANDING, by <who> (button, release or idle), under the push lock (no push
-# goes to LANDING during it): `gh pr merge --merge`, a merge commit, so main here takes origin's default branch as it is
+# goes to LANDING during it): GitHub's merge with --merge, a merge commit, so main here takes origin's default branch as it is
 # then (prmain()). The issues of the cards in it (those whose pushed line names it) that GitHub still shows open are
 # closed, each with an issue line, and $LANDPR says merged: the next push opens a new pull request (landpr()). A merge
 # GitHub refuses (checks, conflicts) leaves the pull request open, and $LANDPR's merge gives GitHub's reason. Exit 2: no
