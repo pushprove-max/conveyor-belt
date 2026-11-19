@@ -2,9 +2,11 @@
 // Issue 407, from the Board's user-experience audit: Needs you is the one home for what needs the owner, every
 // button that changes real work follows one guard rule, every action shows its result at once, a blocked card leads
 // with why it failed, and a push failing while it is tried again is said under Needs you's tick. Each case names the
-// bug it catches. Shared setup: dashboard-view.helpers.mjs.
+// bug it catches. Shared setup: dashboard-view.helpers.mjs. A page loads only the panels its case reads (boot's
+// `list`): it then evaluates and draws fewer panel scripts than a page of every panel; the every-tab cases load each
+// tab's own.
 import assert from 'node:assert/strict';
-import { boot, panel, deliver, next, settle, full, trackOf, counts, board, loopP, bcard, act, note, record, rulesP, clone, cases, pickProject, P } from './dashboard-view.helpers.mjs';
+import { boot, panel, deliver, next, settle, full, trackOf, counts, board, loopP, bcard, act, note, record, rulesP, clone, cases, pickProject, P, LIST, TAB } from './dashboard-view.helpers.mjs';
 const test = cases(import.meta.url);
 
 const blockedRow = (w, card = 'c2-13') => panel(w, 'needs').querySelector(`li[data-key="blocked:${card}"]`);
@@ -15,7 +17,7 @@ const lines = (li) => Array.from(li.children).slice(1).map((x) => (x.tagName ===
 // in "Every step" or behind "Show output", or raw tool output cut off after about 90 letters before the part that says
 // what broke; and the advice was a command ("conveyor.sh retry 12") beside the Retry button.
 test('Needs you: a blocked card leads with why it failed in one sentence and its first failing test; the rest is one click below', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full();
   const tests = trackOf('+++!..', '', {
     records: [{ name: 'tests failed', state: 'failed', sec: 90, failures: { of: 41, files: [{ file: 'web/pay.test.ts', cases: [{ name: 'pays once', line: 'FAIL [pays once]: expected 1, got 2' }, { name: 'refunds', line: 'FAIL [refunds]: expected 0, got 1' }] }], timeout: null } }],
@@ -57,7 +59,7 @@ test('Needs you: a blocked card leads with why it failed in one sentence and its
 // Bug #472: a blocked card showed "Review asked for changes twice" and kept the unresolved finding behind a tap. The
 // finding is shown with its level, linked place, claim and proof; a reason over 12 lines shows 12 and "Show all".
 test('Needs you: a review block shows its unresolved finding, and a long reason shows 12 lines and Show all', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full(), b = d.panels.needs.data.cards.blocked, since = b[0].since;
   b[0].reason = 'the fix for [P1] [E1] conveyor/lib/card.sh:52 The loop never stops. Proof: it spins on `x` did not hold after 1 round';
   b.push({ repo: 'sample', card: 'c5-16', issue: 16, title: 'T16', url: `${P}/16`, since, reason: Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') });
@@ -78,7 +80,7 @@ test('Needs you: a review block shows its unresolved finding, and a long reason 
 // its next step and buttons, so the owner scrolled to act on each card. The first finding, the next step and Retry
 // come first; the other findings are in one closed <details> under them, which a new part leaves as the owner set it.
 test('Needs you: a blocked card shows its first finding, next step and Retry before one <details> with the other findings, kept open through a new part', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full();
   d.panels.needs.data.cards.blocked[0].reason = 'the fix for [P1] a.sh:1 First wrong. Proof: p1 holds. The long rest of the proof.\n[P2] b.sh:2 Second wrong. Proof: p2\n[P2] c.sh:3 Third wrong. Proof: p3 did not hold after 1 round';
   deliver(w, d);
@@ -107,7 +109,7 @@ test('Needs you: a blocked card shows its first finding, next step and Retry bef
 // the fix and nothing on the Board fixes anything first. Each kind's last line names its step; the review block's
 // finding holds words of other kinds ("sign-in", "depends on"), which do not change its kind.
 test('Needs you: a blocked card\'s last line names the step its kind of block takes', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full(), b = d.panels.needs.data.cards.blocked, since = b[0].since;
   const add = (card, issue, reason) => b.push({ repo: 'sample', card, issue, title: `T${issue}`, url: `${P}/${issue}`, since, reason });
   b.length = 0;
@@ -141,7 +143,7 @@ test('Needs you: a blocked card\'s last line names the step its kind of block ta
 // it can take long after a retry). Its own card in the retried records shows it waiting, with no Retry; an issue whose
 // earlier card was retried and whose newer card blocked again stays Blocked.
 test('Needs you: a blocked card its host gave back shows "Retried, waiting for its turn" and no Retry', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full(), n = d.panels.needs.data;
   n.cards.blocked.push({ repo: 'sample', card: 'c5-14', issue: 14, title: 'Again', url: `${P}/14`, since: n.cards.blocked[0].since, reason: 'tests failed twice' });
   n.retried = [{ repo: 'sample', card: 'c2-13', issue: 13 }, { repo: 'sample', card: 'c4-14', issue: 14 }];
@@ -163,13 +165,13 @@ test('Needs you and Control: a blocked card leads with why it stopped, not with 
     records: [{ name: 'tests failed', state: 'failed', sec: 90, failures: { of: 41, files: [{ file: 'web/pay.test.ts', cases: [{ name: 'pays once', line: '' }] }], timeout: null } },
       { name: 'stopped', state: 'failed', sec: 5, why: 'fix: the session ended with no commit.' }],
   });
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full();
   Object.assign(d.panels.needs.data.cards.blocked[0], { reason: 'fix: the session ended with no commit.', track });
   deliver(w, d);
   assert.equal(lines(blockedRow(w))[0], 'fix: the session ended with no commit.', 'the fix that failed is the cause');
   // Control's column, from the Board's own part: the same sentence as Needs you, from its track.
-  const c = boot({ tab: 'control' });
+  const c = boot({ tab: 'control', list: ['board'] });
   const e = full();
   Object.assign(e.panels.board.data.blocked[0], { reason: 'tests: the changed tests failed again after their one fix round (exit 1); nothing landed.', track: { ...track, records: track.records.slice(0, 1) } });
   deliver(c, e);
@@ -181,12 +183,12 @@ test('Needs you and Control: a blocked card leads with why it stopped, not with 
 test('Needs you and Control: a review session that failed after an earlier NO-GO leads with its own failure', () => {
   const reason = 'review 2: review failed (exit 3; 124 is the 900s timeout)\nerror: the model refused';
   const blocked = { reason, track: trackOf('+!....', ''), reviews: [{ round: 1, verdict: 'NO-GO', counts: counts(0, 1, 0, 0) }] };
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full();
   Object.assign(d.panels.needs.data.cards.blocked[0], blocked);
   deliver(w, d);
   assert.equal(lines(blockedRow(w))[0], 'review 2: review failed (exit 3; 124 is the 900s timeout)');
-  const c = boot({ tab: 'control' });
+  const c = boot({ tab: 'control', list: ['board'] });
   const e = full();
   Object.assign(e.panels.board.data.blocked[0], blocked);
   deliver(c, e);
@@ -196,7 +198,7 @@ test('Needs you and Control: a review session that failed after an earlier NO-GO
 // Bug: raw tool output was the headline, cut at the card's edge ("Push failed: exit 1 (124 is t…" on a phone) before
 // the part that says what broke. A reason with no known shape leads with its first sentence, cut at a word.
 test('Needs you: a long reason with no known shape leads with its first sentence, cut at a word, and shows the rest without a tap', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = full();
   const long = `build: the session ended with no commit ${'and it said nothing more about the files it read '.repeat(4)}before it stopped. It ran 41 minutes.`;
   Object.assign(d.panels.needs.data.cards.blocked[0], { reason: long });
@@ -214,7 +216,7 @@ test('Needs you: with nothing to answer, a push failing while it is retried is s
     Object.assign(d.panels.needs.data, { cards: { waiting: [], blocked: [], before: [], pipeline: [] }, tests: [], engines: [], decisions: [] });
     return d;
   };
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   const d = quiet();
   d.panels.needs.data.retrying = [{ repo: 'sample', card: 'c4-65', issue: 65, title: 'Pay page', url: null, fix: 69 }];
   deliver(w, d);
@@ -233,7 +235,7 @@ test('Needs you: with nothing to answer, a push failing while it is retried is s
 // others said "with the next snapshot" or "at the next reading". Each now acts on one click; its line says "in about a
 // minute" and has Undo, which sends the opposite change once.
 test('the Board: Hold, Queue, Move and Pause act on one click, and the line that says so has Undo', async () => {
-  const w = boot({ tab: 'control' });
+  const w = boot({ tab: 'control', list: ['board'] });
   const d = full();
   deliver(w, d);
   // at: the panel the action was done in, whose line has its Undo.
@@ -284,7 +286,7 @@ test('the Board and Rules: Undo pressed after another project is picked goes to 
   };
   // The one project picker, Show in the machine head (issue 408).
   const pick = (w) => pickProject(w, 'widgetshop');
-  const w = boot({ tab: 'control' });
+  const w = boot({ tab: 'control', list: ['machine', 'board'] });
   deliver(w, two());
   act(bcard(w, 21), 'hold').click();
   await settle();
@@ -293,7 +295,7 @@ test('the Board and Rules: Undo pressed after another project is picked goes to 
   act(board(w), 'undo').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'release', args: ['21'], repo: 'sample' } }]);
-  const r = boot({ tab: 'rules' });
+  const r = boot({ tab: 'rules', list: ['machine', 'rules'] });
   deliver(r, two());
   act(rulesP(r), 'judge-on').click();
   await settle();
@@ -316,7 +318,7 @@ test('the Board and Rules: Undo pressed after another project is picked goes to 
 
 // Bug: a project's Pause said "The page shows it at the next reading" and could not be taken back from the line.
 test('the machine: a project paused here says "in about a minute", and Undo resumes it', async () => {
-  const w = boot({ tab: 'control' });
+  const w = boot({ tab: 'control', list: ['machine'] });
   deliver(w, full());
   const sec = () => panel(w, 'machine').querySelector('.project[data-project="sample"]');
   act(sec(), 'pause').click();
@@ -331,13 +333,14 @@ test('the machine: a project paused here says "in about a minute", and Undo resu
 
 // Bug: five labels sent an issue to the queue (Release, Build this, Queue again, Queue all, Build anyway) and "Build
 // this" in Declined meant "file this finding as an issue". The visible words now say Queue for every one, and File as
-// issue for the finding; none of the old words is on any tab.
-test('every tab: one word, Queue, for an issue joining the queue, and File as issue in Declined', async () => {
-  const d = full();
-  d.panels.needs.data.cards.pipeline = [{ repo: 'sample', issue: 41, title: 'a slow gate', cost: 'not assessed', parent: 30, since: d.panels.needs.data.cards.waiting[0].since, url: null }];
-  d.panels.rules.data.control = { ...d.panels.rules.data.control, depGuard: false };
-  for (const tab of ['overview', 'control', 'rules']) {
-    const w = boot({ tab });
+// issue for the finding; none of the old words is on any tab. One case a tab, each loading only its tab's panels (the
+// grid's buttons are the same as with every panel loaded). Each case is its own test() line, as the Test step counts
+// cases by those lines (.conveyor/test-changed.sh filecases()).
+const queueWords = (tab) => async () => {
+    const d = full();
+    d.panels.needs.data.cards.pipeline = [{ repo: 'sample', issue: 41, title: 'a slow gate', cost: 'not assessed', parent: 30, since: d.panels.needs.data.cards.waiting[0].since, url: null }];
+    d.panels.rules.data.control = { ...d.panels.rules.data.control, depGuard: false };
+    const w = boot({ tab, list: LIST.filter((id) => TAB(id) === tab) });
     deliver(w, d);
     if (tab === 'rules') { const open = act(panel(w, 'rules-produce'), 'waits-open'); if (open && !open.disabled) open.click(); await settle(); }
     // The Release panel's "Release <version>" button makes a project release, and the Merge PR rule's "Release" choice
@@ -347,5 +350,7 @@ test('every tab: one word, Queue, for an issue joining the queue, and File as is
     if (tab === 'overview') assert.ok(words.includes('Queue') && words.includes('File as issue'), `${tab}: ${words.join(' | ')}`);
     if (tab === 'control') assert.ok(words.includes('Queue'), `${tab}: ${words.join(' | ')}`);
     if (tab === 'rules') assert.ok(words.includes('Queue all') && words.includes('Queue anyway'), `${tab}: ${words.join(' | ')}`);
-  }
-});
+};
+test('every tab (overview): one word, Queue, for an issue joining the queue, and File as issue in Declined', queueWords('overview'));
+test('every tab (control): one word, Queue, for an issue joining the queue', queueWords('control'));
+test('every tab (rules): one word, Queue, for an issue joining the queue', queueWords('rules'));
