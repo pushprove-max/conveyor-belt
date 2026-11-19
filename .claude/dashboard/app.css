@@ -17,6 +17,8 @@
   --ok: #0e6537; --ok-bg: #e0f3e8; --warn: #804400; --warn-bg: #fcefd6; --bad: #a8201a; --bad-bg: #fde6e4;
   --info: #2a4fcf; --info-bg: #e5ebfd; --quiet: #4a5262; --quiet-bg: #eceef3;
   --shadow: 0 1px 2px rgba(20, 23, 31, .06), 0 6px 20px rgba(20, 23, 31, .06);
+  /* A declined P1 finding's badge, the same in both themes. */
+  --p1: #c2410c; --on-p1: #ffffff;
   /* The charts' series, in this order, never cycled; each mark has a legend or a label beside it. */
   --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
   /* Belt 3D's floor is in the Board's dark colours in both themes. */
@@ -474,7 +476,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .why-label { display: block; color: var(--why); }
 .why-line { display: block; margin-top: 2px; }
 /* Code and file paths, in a reason and in a finding: monospace, italic and in the accent colour of the theme. */
-.why-code { padding: 0 3px; border-radius: 3px; background: var(--surface-2); font-family: var(--mono); font-size: 0.95em;
+.why-code { padding: 0 3px; border-radius: 3px; background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-sm);
   font-style: italic; font-weight: 500; color: var(--accent); }
 /* A declined finding: a head line (the level as a coloured badge, the file and line), the claim in bold on its own
    line, then the proof under a small label, a sentence a line. Its own class names: the review rows of Show output
@@ -483,7 +485,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .declined-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
 .declined-level { padding: 0 6px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); background: var(--surface-2); }
 .declined-level[data-level="P0"] { color: var(--bad); background: var(--bad-bg); }
-.declined-level[data-level="P1"] { color: #fff; background: #c2410c; }
+.declined-level[data-level="P1"] { color: var(--on-p1); background: var(--p1); }
 .declined-level[data-level="P2"] { color: var(--warn); background: var(--warn-bg); }
 .declined-ids { color: var(--muted); font-size: var(--fs-xs); }
 .declined-claim { display: block; margin-top: 2px; font-weight: 650; }

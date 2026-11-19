@@ -32,6 +32,7 @@
   ],
   "conveyor/schema/pack.schema.json": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -44,6 +45,7 @@
   ],
   "docs/configuration.md": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -137,6 +139,7 @@
   ],
   "conveyor/README.md": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/conveyor.test.sh": [
@@ -147,10 +150,12 @@
   ],
   "conveyor/jq/rows.jq": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/jq/track.jq": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/claim.sh": [
@@ -161,6 +166,7 @@
   ],
   "conveyor/lib/prompts.sh": [
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -182,6 +188,7 @@
   "conveyor/lib/testrun.sh": [
     ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
     "conveyor/tests/opencode.test.sh",
@@ -322,7 +329,8 @@
     ".claude/scripts/__tests__/dashboard-view.needs.test.mjs"
   ],
   "conveyor/tests/narrow.test.sh": [
-    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs"
+    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
   ],
   "conveyor/foreman/foreman.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
