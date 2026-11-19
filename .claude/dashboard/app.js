@@ -1235,6 +1235,7 @@
   function change(fn, message) {
     const was = `${prefs.time} ${prefs.date}`;
     flip(() => { fn(); applyLayout(); });
+    refit();  // a new Density changes the tiles' padding and figures: the head is fitted again
     save();
     // A new Time or Date shows at once: each panel's times are written when it is drawn, so every panel is drawn again
     // (the other tabs' when they are opened), with the head and its clock.
@@ -1864,7 +1865,8 @@
   // Draws one panel from its own part. A part equal to the one drawn last leaves the panel untouched, but a panel
   // with same(body, data, ctx) is told that part came again (the Board weighs a snapshot by when it was begun,
   // so one equal to a snapshot it turned away is still news to it). A panel that throws shows its own error and takes
-  // no other panel with it.
+  // no other panel with it. It does not cut the panel to its length: each caller runs arrange() or arrangeSoon() after
+  // it, which cuts every panel of the tab in one read pass and one write pass (a cut here laid the page out once a panel).
   function draw(p, part) {
     // A panel with older entries is drawn whole when a newer history has come, or when it is time to read it again.
     if (typeof p.mod.older === 'function' && (p.hist !== histVer || histDue())) p.json = undefined;
@@ -1894,7 +1896,6 @@
       p.note.setAttribute('role', 'status');
       p.note.append(unread(`The Board could not read ${mod.title} just now, so it shows what it read last. If this continues, press Restart the Board's feed, below.`, raw), restartHere());
       p.body.prepend(p.note);
-      clip(p);
       if (mod.id !== 'health') faultsChanged();
       return;
     }
@@ -1925,7 +1926,6 @@
     retitle(p.body);
     p.state = state;
     p.el.dataset.state = state;
-    clip(p);
     if (mod.id !== 'health') faultsChanged();
   }
 
@@ -2037,10 +2037,12 @@
     headView = { box, tiles, nums: new Map() };
     drawHead();
   }
+  let drawingHead = false;
   function drawHead() {
     if (!headView) return;
     const parts = (last && last.panels) || {};
     const part = (id) => { const x = parts[id]; return x && typeof x === 'object' && !x.error && x.data && typeof x.data === 'object' ? x.data : null; };
+    drawingHead = true;
     headView.tiles.forEach((t) => {
       let r;
       try { r = t.spec.read(part, { money }) || {}; } catch (e) { r = {}; }
@@ -2049,7 +2051,8 @@
       const text = known ? fmt(r.value) : DASH;
       if (headView.nums.get(t.spec.key) !== (known ? r.value : null) || t.value.textContent === '') {
         // The fit below measures the figure the count starts from; one that lands wider is fitted again when it lands.
-        t.value.replaceChildren(counter(headView.nums, t.spec.key, known ? r.value : null, (v) => (num(v) ? fmt(v) : DASH), fitHead));
+        // With no motion the count lands at once, before the other tiles are written: the fit at the end measures it.
+        t.value.replaceChildren(counter(headView.nums, t.spec.key, known ? r.value : null, (v) => (num(v) ? fmt(v) : DASH), () => { if (!drawingHead) refit(); }));
       }
       t.sub.textContent = known && r.sub ? ` ${r.sub}` : '';
       t.sub.hidden = !t.sub.textContent;
@@ -2068,7 +2071,8 @@
       else if (!t.gap.hidden) t.gap.textContent = t.words;
       t.a.title = `${t.spec.label}: ${text}${known && r.sub ? ` ${r.sub}` : ''}${known ? '' : ` (${r.dash ? r.dash.toLowerCase() : 'not read'})`}${words ? `. ${words}` : ''}`;
     });
-    fitHead();
+    drawingHead = false;
+    refit();
     drawMachine(part);
     drawOverlays(part);
   }
@@ -2103,12 +2107,20 @@
   // When the bar is too narrow for every tile, tiles go by their drop, lowest first; one with none always shows, and
   // the tiles never wrap: the ones that always show are the least room the tiles take. The head line is a grid row
   // that never wraps (app.css), so that least room widens the tiles' column; it never moves them to a line of their own.
+  // What a fit measures: each tile's text and which of its parts are hidden, the Restart button beside them, the density
+  // and the window's width (fitHead() itself hides whole tiles, so those are left out).
+  const fitKey = () => [window.innerWidth, prefs.density, byId('restart') ? byId('restart').hidden : '', ...headView.tiles.map((t) => `${t.a.textContent}|${Array.from(t.a.querySelectorAll('*'), (e) => (e.hidden ? 1 : 0)).join('')}`)].join('\n');
+  // A fit lays the head out and measures it: drawHead() and a figure that lands fit it again only when that changed.
+  let headQueued = false;  // a drawTabs() and drawHead() wait for the next frame (headSoon())
+  function refit() { if (headView && headView.fitted !== fitKey()) fitHead(); }
   function fitHead() {
     if (!headView) return;
     const box = headView.box, tiles = headView.tiles;
+    headView.fitted = null;
     tiles.forEach((t) => { t.a.hidden = false; });
     box.style.minWidth = '';
-    if (!box.clientWidth) return;  // not laid out (hidden, or no layout at all)
+    if (!box.clientWidth) return;  // not laid out (hidden, or no layout at all): fitted at the next drawHead()
+    headView.fitted = fitKey();
     const width = new Map(tiles.map((t) => [t, t.a.getBoundingClientRect().width || 0]));
     const sum = (list) => list.reduce((s, t) => s + width.get(t), 0);
     box.style.minWidth = `${Math.ceil(sum(tiles.filter((t) => !t.spec.drop)))}px`;
@@ -2153,7 +2165,8 @@
     if (el.dataset.word !== word) { el.dataset.word = word; el.replaceChildren(chip(word, tone)); }
     // The restart is in the head only while the mark says the feed has a fault; else it is in the Health panel.
     const rs = byId('restart'), fault = FEED_FAULTS.includes(word);
-    if (rs.hidden === fault) { rs.hidden = !fault; fitHead(); }
+    // The button takes room in the head line: a head draw queued for this frame fits it then, after its tiles.
+    if (rs.hidden === fault) { rs.hidden = !fault; if (!headQueued) refit(); }
     up.textContent = updatedAt === null ? 'never' : `${ago(age)} ago`;
     const banner = byId('banner');
     const text = faultSaid(word, age);
@@ -2208,18 +2221,29 @@
     if (known) {
       const ids = idsOf(tab).filter((id) => partOf(id) === msg.id);
       if (ids.length) { ids.forEach((id) => draw(panels.get(id), msg.part)); arrangeSoon(); }
-      drawTabs();
-      drawHead();
+      headSoon();
     }
     status();
   }
-  // The feed opened or closed: a panel that says how live it is (Health) is drawn again from the part it has.
+  // The server sends one event a changed part of a version: the tabs and the head are drawn once a frame, after them all.
+  function headSoon() {
+    if (headQueued) return;
+    headQueued = true;
+    const run = () => { headQueued = false; drawTabs(); drawHead(); };
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(run); else run();
+  }
+  // The feed opened or closed: the panel that says how live it is (Health, the one panel that reads ctx.feed()) is
+  // drawn again from the part it has; the others are left as they are.
   function feedChanged(open) {
     if (feedOpen === open) return;
     feedOpen = open;
     if (doc.hidden) return;  // shownAgain() draws every panel again
-    if (loaded) panels.forEach((p, id) => { p.json = undefined; if (tabOf(id) === tab) draw(p, last.panels[partOf(id)]); });
-    if (loaded) arrangeSoon();
+    const hp = panels.get('health');
+    if (!loaded || !hp) return;
+    hp.json = undefined;  // on the other tab, it is drawn anew when that tab opens
+    if (tabOf('health') !== tab) return;
+    draw(hp, last.panels[partOf('health')]);
+    arrangeSoon();
   }
   // The page shown again: drawn once from what it kept while hidden.
   function shownAgain() {

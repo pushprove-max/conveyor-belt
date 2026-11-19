@@ -332,6 +332,8 @@ test('the head tiles move with the live feed, counting with motion on and at onc
   part.data.cards.todayUsd = 6.25;
   w.frames.length = 0;
   w.sources[0].emit('panel', { id: 'cost', part, updatedAt: iso(T0) });
+  // The head is drawn at the next frame, once for all the events of the version (issue 498): the count starts there.
+  for (const f of w.frames.splice(0)) f();
   assert.equal(fig(w, 'today'), '$4.25', 'the count starts from the value shown');
   w.clock += 400;
   while (w.frames.length) w.frames.shift()();

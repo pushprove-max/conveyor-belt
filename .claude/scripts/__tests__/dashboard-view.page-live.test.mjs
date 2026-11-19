@@ -376,7 +376,7 @@ test('health stops saying Live when the live feed stops writing, with no new dat
   assert.match(text(), /Data.*0 s old.*the live feed stopped/);
 });
 
-test('the live feed: a change to a panel of the other tab is kept and drawn when that tab opens; its count on the tab moves at once', () => {
+test('the live feed: a change to a panel of the other tab is kept and drawn when that tab opens; its count on the tab moves at the next frame', () => {
   const w = boot({ feed: true });
   const es = w.sources[0];
   es.readyState = 0; es.emit('error'); // the feed opens after a first failed try: the page is drawn from data.js meanwhile
@@ -386,6 +386,8 @@ test('the live feed: a change to a panel of the other tab is kept and drawn when
   part.data.state = 'paused';
   es.emit('panel', { id: 'rules', part, updatedAt: iso(T0) });
   assert.equal(panel(w, 'rules'), null, 'the Rules panel is not drawn on Overview');
+  // The tabs are drawn once a frame, after every event of the version (issue 498).
+  for (const f of w.frames.splice(0)) f();
   assert.equal(w.document.getElementById('tab-rules').querySelector('.tab-count').textContent, '· 1', 'Rules counts the pause');
   w.document.getElementById('tab-rules').click();
   assert.equal(state(w, 'rules'), 'ready');
