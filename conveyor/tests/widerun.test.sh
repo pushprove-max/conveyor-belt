@@ -49,7 +49,7 @@ t_wideofffile() {
 t_wideoffnolist() {
   wideproof none
   [ ! -e "$STUB/ran" ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the proof run ran a test, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"))"
-  head -n 1 "$T/$CASE/unfixed" | grep -qxF "a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file" \
+  head -n 1 "$T/$CASE/unfixed" | grep -qxF "a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file" \
     || fail "the check's result does not begin with the reason: $(cat "$T/$CASE/unfixed")"
 }
 

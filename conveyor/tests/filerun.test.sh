@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 60
+# Engine cases (#376, #351 scenarios 11 and 12): Conveyor's own per-file runner (lib/filerun.sh), which a card's run
+# gives each test file when the pack sets no test.fileCommand. Each case calls filerun.sh on a fixture project whose
+# runner is a stub on PATH that records the folder it ran in and its arguments: no real toolchain is needed. Each
+# fixture's package is in a folder of its own, as in a workspace or monorepo, so each case also shows the file run from
+# its package. A filter of the run's list that names no case of the file (`conveyor-no-case`) reaches the runner as
+# a filter of that case, which runs none, never as a run of the whole file or suite.
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+# The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# The fixture project $T/$CASE/p (FRP, its real path) with the files <path>=<text>..., and a stub of each runner in
+# $T/$CASE/bin: each adds `<runner> <the folder it ran in, from the project: /...>|<its arguments>` to $T/$CASE/got.
+frsetup() { # <path>=<text>...
+  local r x
+  mkdir -p "$T/$CASE/p" "$T/$CASE/bin" && FRP=$(cd "$T/$CASE/p" && pwd -P) || fail "the fixture could not be made"
+  for r in npx bun node pytest go cargo rspec bundle; do
+    printf '%s\n' '#!/usr/bin/env bash' "d=\$(pwd -P); d=\${d#$(printf %q "$FRP")}; echo \"$r \${d:-/}|\$*\" >> $(printf %q "$T/$CASE/got")" > "$T/$CASE/bin/$r" \
+      && chmod +x "$T/$CASE/bin/$r" || fail "the stub $r could not be made"
+  done
+  for x; do mkdir -p "$FRP/$(dirname "${x%%=*}")" && printf '%s\n' "${x#*=}" > "$FRP/${x%%=*}" || fail "the fixture file ${x%%=*} could not be made"; done
+}
+# filerun.sh on <file> in the fixture project, with the run's list holding <lines> (CONVEYOR_TEST_RERUN; none when
+# empty) and the pack's report <args> before the file: what the stubs recorded in FRGOT, its exit in FRRC, its output
+# in $T/$CASE/out.
+fr() { # <file> [list lines] [args...]
+  local l=''
+  rm -f "$T/$CASE/got"; [ -z "${2:-}" ] || { printf '%s\n' "$2" > "$T/$CASE/rerun" && l=$T/$CASE/rerun; }
+  (cd "$FRP" && PATH="$T/$CASE/bin:$PATH" CONVEYOR_TEST_RERUN=$l exec bash "$SRC/lib/filerun.sh" "${@:3}" "$1") > "$T/$CASE/out" 2>&1; FRRC=$?
+  FRGOT=$(cat "$T/$CASE/got" 2>/dev/null)
+}
+# The run of <file> alone gives <whole>, and with a filter that names no case of it, <none>, each the line its stub
+# recorded: one run, of that file (or package) only, from its package.
+frcheck() { # <file> <whole> <none>
+  fr "$1"; [ "$FRRC" = 0 ] && [ "$FRGOT" = "$2" ] || fail "$1 did not run alone from its package (exit $FRRC): got [$FRGOT], want [$2]: $(cat "$T/$CASE/out")"
+  fr "$1" "$(printf 'fail\t%s\tconveyor-no-case' "$1")"
+  [ "$FRRC" = 0 ] && [ "$FRGOT" = "$3" ] || fail "$1 with a filter that names no case did not give the runner a filter of that case (exit $FRRC): got [$FRGOT], want [$3]"
+}
+
+# Bug it catches: with no test.fileCommand, a Node test file in a workspace ran from the checkout (where its package's
+# own setup is not read), ran with other files, or a filter that names nothing ran the whole file. A path that is no
+# file runs nothing and fails, so a list that names a gone file never widens to a run of everything.
+t_filerunnode() {
+  frsetup 'package.json={"private": true, "workspaces": ["packages/*"]}' 'packages/web/package.json={"name": "web"}' 'packages/web/a.test.js=x' 'packages/web/ab.test.js=x'
+  frcheck packages/web/a.test.js 'node /packages/web|--test a.test.js' 'node /packages/web|--test --test-name-pattern=(^| )(conveyor-no-case)$ a.test.js'
+  # A failed case, as the run names it (its own name, with no suite): its pattern matches it whole, at the end of the
+  # name the runner matches (its suites' names first), its special characters taken as text. Bug it catches: a case
+  # under a suite matched nothing, so the run again of a failed case ran none and passed.
+  fr packages/web/a.test.js "$(printf 'fail\tpackages/web/a.test.js\tadds (1+1)')"
+  [ "$FRGOT" = 'node /packages/web|--test --test-name-pattern=(^| )(adds \(1\+1\))$ a.test.js' ] || fail "a failed case's filter is not its name whole, at the end: [$FRGOT]"
+  fr packages/web/gone.test.js
+  [ "$FRRC" = 2 ] && [ -z "$FRGOT" ] && grep -qxF 'filerun: packages/web/gone.test.js: no such test file' "$T/$CASE/out" \
+    || fail "a path that is no file ran, or did not fail naming it (exit $FRRC): [$FRGOT] $(cat "$T/$CASE/out")"
+}
+
+# Bug it catches: a vitest package ran its file under node --test, or by a name vitest reads as part of a path (which
+# runs every file whose path holds it). vitest is given the file's whole path.
+t_filerunvitest() {
+  frsetup 'packages/ui/package.json={"devDependencies": {"vitest": "1"}}' 'packages/ui/src/b.test.ts=x'
+  frcheck packages/ui/src/b.test.ts "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts" \
+    "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts -t (^| )(conveyor-no-case)\$"
+}
+
+# Bug it catches: a jest file of a workspace whose jest is listed at the checkout's root ran under node --test, or by a
+# pattern jest matches against other paths too: --runTestsByPath runs that path only.
+t_filerunjest() {
+  frsetup 'package.json={"devDependencies": {"jest": "29"}}' 'packages/api/package.json={"name": "api"}' 'packages/api/c.test.js=x'
+  frcheck packages/api/c.test.js 'npx /packages/api|--no jest --runTestsByPath c.test.js' \
+    'npx /packages/api|--no jest --runTestsByPath c.test.js -t (^| )(conveyor-no-case)$'
+  # The report args setup gives jest under an npm script (reportguess()) start with npm's `--`. Bug it catches (E1 of
+  # #376's review): that `--` reached jest, which then read --runTestsByPath and -t as no options, so the run's filter
+  # and its exact path were lost.
+  fr packages/api/c.test.js '' -- --json --outputFile=r.json
+  [ "$FRGOT" = 'npx /packages/api|--no jest --json --outputFile=r.json --runTestsByPath c.test.js' ] \
+    || fail "npm's -- before the report args reached jest, or the args were lost (exit $FRRC): [$FRGOT]"
+}
+
+# Bug it catches: a bun project's file ran under node, or by a name bun reads as a filter (any path holding it): ./
+# makes it a path.
+t_filerunbun() {
+  frsetup 'packages/b/package.json={"name": "b"}' 'packages/b/bun.lock=x' 'packages/b/d.test.ts=x'
+  frcheck packages/b/d.test.ts 'bun /packages/b|test ./d.test.ts' 'bun /packages/b|test ./d.test.ts -t (^| )(conveyor-no-case)$'
+}
+
+# Bug it catches: a Python file ran from the checkout, outside its project, or a filter ran its whole file: the
+# node id <file>::<case> names one case, and pytest runs nothing when there is no such case.
+t_filerunpytest() {
+  frsetup 'svc/pyproject.toml=x' 'svc/tests/test_x.py=x'
+  frcheck svc/tests/test_x.py 'pytest /svc|tests/test_x.py' 'pytest /svc|tests/test_x.py::conveyor-no-case'
+}
+
+# Bug it catches: go test ran the whole module (./...) or from outside it: it runs the file's package only, from the
+# module (go.mod), and a file at the module's top runs its package `.`.
+t_filerungo() {
+  frsetup 'mod/go.mod=module example.com/m' 'mod/pkg/x_test.go=x' 'mod/y_test.go=x'
+  frcheck mod/pkg/x_test.go 'go /mod|test -count=1 ./pkg' 'go /mod|test -count=1 -run ^(conveyor-no-case)$ ./pkg'
+  fr mod/y_test.go; [ "$FRGOT" = 'go /mod|test -count=1 .' ] || fail "a test file at the module's top did not run its package . (exit $FRRC): [$FRGOT]"
+}
+
+# Bug it catches: cargo test ran every test target, or from outside the crate of a workspace: it runs the file's test
+# target only, from its crate; a .rs file that is no test target runs nothing and fails, saying why.
+t_fileruncargo() {
+  frsetup 'Cargo.toml=[workspace]' 'crates/c/Cargo.toml=[package]' 'crates/c/tests/e2e.rs=x' 'crates/c/src/lib.rs=x'
+  frcheck crates/c/tests/e2e.rs 'cargo /crates/c|test --test e2e' 'cargo /crates/c|test --test e2e -- --exact conveyor-no-case'
+  fr crates/c/src/lib.rs
+  [ "$FRRC" = 2 ] && [ -z "$FRGOT" ] && grep -qxF 'filerun: crates/c/src/lib.rs: cargo test runs test targets, and it is no tests/<name>.rs file of its crate' "$T/$CASE/out" \
+    || fail "a .rs file that is no test target ran, or did not fail saying why (exit $FRRC): [$FRGOT] $(cat "$T/$CASE/out")"
+}
+
+# Bug it catches: an RSpec file ran without its bundle, or from outside its app: with a Gemfile it runs through bundle
+# exec from the app's folder.
+t_filerunrspec() {
+  frsetup 'app/Gemfile=x' 'app/spec/m_spec.rb=x'
+  frcheck app/spec/m_spec.rb 'bundle /app|exec rspec spec/m_spec.rb' 'bundle /app|exec rspec -e conveyor-no-case spec/m_spec.rb'
+}

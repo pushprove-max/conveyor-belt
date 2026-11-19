@@ -547,9 +547,11 @@ SHARED='the new test and the fix are in the same lines of <file>; bugproof canno
 # and the rest names the setting that fixes it.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NARROW='a card runs each of its test files alone, and <why>; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
-# The <why> of a card's run, or of a run of its files, when the pack sets no test.fileCommand (tests(), listcmd()).
-# shellcheck disable=SC2034 # used in lib/testrun.sh
-NOFILECMD='the pack sets no test.fileCommand, so no test file can run'
+# The <why> of a card's run, or of a run of its files, when the pack sets no test.fileCommand and Conveyor's own runner
+# (lib/filerun.sh) cannot run <file>, one of its files, for <reason> (ownrunner(), lib/testrun.sh); and of doctor's
+# warning, <file> one of the project's test files (narrowwarn(), lib/setup.sh).
+# shellcheck disable=SC2034 # used in lib/testrun.sh and lib/setup.sh
+NORUNNER='the pack sets no test.fileCommand, and Conveyor cannot run <file> itself: <reason>'
 # What a card's test step says when no test file is linked to its change (listcmd()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'

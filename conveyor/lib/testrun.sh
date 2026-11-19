@@ -370,8 +370,9 @@ cacheoff() { # <worktree>
 # The field test.fileCommand runs one test file: the run (filecmd()) gives it each file its list names `fail`, each
 # in a process of its own. A card never runs the suite command (test.command): its own run (no field) and every run
 # of a card's files (the fix round's run again, the bug-card check, the run on main, the main-red check, the proofs,
-# the mutation check and the test actions: test.fileCommand alone) are per file. With no test.fileCommand set, such
-# a run with a test file to run does not run and fails with <worktree>.stop naming it (NOFILECMD); a card's run
+# the mutation check and the test actions: test.fileCommand alone) are per file. With no test.fileCommand set, each
+# file runs with Conveyor's own runner (ownrunner(): lib/filerun.sh); when that has no runner for one of the files to
+# run, the run does not run and fails with <worktree>.stop naming test.fileCommand and that file (NORUNNER); a card's run
 # linked to no test file runs nothing and passes, as with it set. Only the suite runs (test.full: the full test
 # suite, Push landed's and the release's; test.main: the whole test on main) run a suite command.
 # A card's run (not alone) gives test.fileCommand the tests its change touches (listcmd()), and <worktree>.testlist
@@ -390,7 +391,8 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && checkskept "$1" && packget "${2:-test.fileCommand}" cmd && slot_pool; } 2>"$1.test" || return 1
   if [ "${2:-}" = test.fileCommand ]; then
-    [ -n "$cmd" ] || { narrowstop "$NOFILECMD" > "$1.stop"; cat "$1.stop" > "$1.test"; return 1; }
+    [ -n "$cmd" ] || cmd=$(mapfile -t l < <(awk -F'\t' '$1 == "fail" && $2 != "" && !s[$2]++ { print $2 }' "$1.rerun" 2>/dev/null)
+      ownrunner "$1" "${l[@]}") || { narrowstop "$cmd" > "$1.stop"; cat "$1.stop" > "$1.test"; return 1; }
     cmd=$(filecmd "$cmd")
   fi
   # A card's run and the full test suite (fulltest(), release-prep's relsuite()) ask for the runner's report: setup
@@ -512,7 +514,8 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 # test runner the change touches, RUNNERFIX, which is on no list: #350). <worktree>.testlist says which: {mode:
 # "changed", files: <count>, by: "own", "map" or "name", age: the commits the made test map is behind (only with
 # one)}. A list of none runs nothing (LISTNONE set; the list, {mode: "changed", files: 0, by, why}, says so). With no
-# test.fileCommand set, nothing runs, <worktree>.stop says why (NOFILECMD) and it fails. TEST_GIVEN is how many files
+# test.fileCommand set, Conveyor's own runner runs each file (ownrunner()); when it has none for one of them, nothing
+# runs, <worktree>.stop says why (NORUNNER) and it fails. TEST_GIVEN is how many files
 # it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
 # before each file's path.
 listcmd() { # <worktree> [report args]
@@ -560,7 +563,7 @@ listcmd() { # <worktree> [report args]
     + ([$rn | split("\n")[] | select(. != "") | {file: ., why: $rf}] | if . == [] then {} else {notTests: .} end)' > "$1.testlist" || return 1
   [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
   packget test.fileCommand fc || return 1
-  [ -n "$fc" ] || { narrowstop "$NOFILECMD" > "$1.stop"; return 1; }
+  [ -n "$fc" ] || fc=$(ownrunner "$1" "${fs[@]}") || { narrowstop "$fc" > "$1.stop"; return 1; }
   LISTCMD=$(filecmd "$fc${2:+ $2}" files); TEST_FILES=$(printf '%s\n' "${fs[@]}"); TEST_GIVEN=${#fs[@]}
 }
 # Of the test files <file>... linked to a card's change (testsel() narrow: listcmd(); and those of the bug-card check,
@@ -914,7 +917,7 @@ repairholder() {
 }
 # The repair lane's judgement of a card (repairlane()), in the shape of redproof(): the files of the machine hold run
 # in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.repair, each named `fail` in
-# the run's list, each alone through the pack's test.fileCommand: first without the card's change, where they must
+# the run's list, each alone through the pack's test.fileCommand (else Conveyor's own runner: ownrunner()): first without the card's change, where they must
 # fail, then with it staged, where they must pass. The run without the change must fail with a control its logs
 # (testfails()) name failed or out of time: a run that fails for another reason, such as test files the change adds
 # that this commit lacks, proves nothing. Then the card's changed tests run in its own worktree (each alone, as its
@@ -926,7 +929,7 @@ repairproof() { # <card> <worktree>
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.fileCommand cmd 2>/dev/null; then REPAIRED="the pack's test.fileCommand could not be read"
-  elif [ -z "$cmd" ]; then REPAIRED=$(narrowstop "$NOFILECMD")
+  elif [ -z "$cmd" ] && ! cmd=$(mapfile -t fl < <(jq -r '.[]' <<<"$cj"); ownrunner "$2" "${fl[@]}"); then REPAIRED=$(narrowstop "$cmd")
   elif cmd=$(filecmd "$cmd") && sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
@@ -1084,6 +1087,18 @@ filecmd() { # <the pack's test.fileCommand> [files]
     '  elif [ $x = 124 ] && [ "$n" != 0 ]; then echo "conveyor: $f timed out: it ran past its time limit, $n s, and it was stopped there"; to=124' \
     '  else echo "-- FAIL $f" | tee -a "$l"; r=1; fi' \
     'done' 'exit ${to:-$r}'
+}
+# The command a run of the test files <file>... in <worktree> gives each of them (filecmd()) when the pack sets no
+# test.fileCommand (tests(), listcmd(), repairproof()): Conveyor's own runner, lib/filerun.sh, which runs a file with
+# its language's runner from its package. Fails when that has no runner for one of them, printing the reason a run
+# stops with (NORUNNER), which names the first such file.
+ownrunner() { # <worktree> <file>...
+  local w=$1 f r why; shift
+  for f; do
+    r=$(cd "$w" && bash "$HERE/lib/filerun.sh" --which "$f" 2>&1) && continue
+    why=${NORUNNER//'<file>'/"$f"}; printf '%s\n' "${why//'<reason>'/"$r"}"; return 1
+  done
+  printf 'bash %q\n' "$HERE/lib/filerun.sh"
 }
 # The awk program that prints a test file's own time limit: the number of its `# timeout: <seconds>` line in the
 # comments the file starts with (as the engine's runner reads it for its cases), words after the number (a note) left
@@ -1319,8 +1334,8 @@ bugproof() { # <card> <worktree> <issue json>
     BUGWHY=${SHARED//'<file>'/"$sh"}; printf '%s.\nIts inline tests were not run on main'"'"'s code.\n' "${BUGWHY^}" > "$2.unfixed"; return 1
   fi
   [ ${#fs[@]} != 0 ] || { [ -n "${TESTGLOBS:-}" ] || names 2>/dev/null; BUGWHY=${NOTEST//'<patterns>'/"${TESTGLOBS:-}"}; }
-  # test.fileCommand runs each test file alone, whatever its language, as the list names it; with none set, the run
-  # stops (tests(): <worktree>.stop, NOFILECMD).
+  # test.fileCommand runs each test file alone, whatever its language, as the list names it; with none set, Conveyor's
+  # own runner does (ownrunner()), and with none for a file, the run stops (tests(): <worktree>.stop, NORUNNER).
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \

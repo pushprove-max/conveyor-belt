@@ -355,7 +355,7 @@ t_setupfresh() {
   # check call, which are information, not a check; and the one warning a fresh pack is meant to get: setup sets no
   # test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
   ! grep -vE '^(ok|builder|reviewer): |^conveyor: checking .* with one call \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
-    | grep -qvxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file' \
+    | grep -qvxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file' \
     && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
     || fail "doctor after setup printed a line that is not ok:, a seat's route or check progress, or the test.list warning, or did not say the terms file is optional: $out"
 }

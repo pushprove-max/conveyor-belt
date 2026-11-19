@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases (#293, #351): a card never runs the whole suite. Its run gives each test file of its list to
-# test.fileCommand alone and never runs test.command (tests(): listcmd(), watch()); with no test.fileCommand it stops,
-# naming it. The release's run is not changed by it.
+# test.fileCommand alone and never runs test.command (tests(): listcmd(), watch()); with no test.fileCommand, Conveyor's
+# own runner runs each file (lib/filerun.sh), and with none for a file it stops, naming the setting. The release's run
+# is not changed by it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -40,14 +41,15 @@ narrowrun() { # <change> [field] [fix]
 }
 
 # #351 scenario 1. Bug it catches: a card whose pack has no way to run one test file ran the whole suite (test.command
-# with no list). With no test.list and no test.fileCommand (a language with no known runner), the whole card is
-# blocked at its test step, under Needs you, with a reason that names test.fileCommand, and the test command never ran.
+# with no list). With no test.list and no test.fileCommand, and a test file Conveyor's own runner cannot run (a .js
+# file that no package.json holds: #376), the whole card is blocked at its test step, under Needs you, with a reason
+# that names test.fileCommand and that file, and the test command never ran.
 t_narrowblock() {
   setup "[$(issue 7 2026-01-01)]"
   printf '%s\n' 'pwd >> "$STUB/got"' > "$STUB/suite-cmd"; tune 'del(.test.list, .test.fileCommand) | .test.command = "bash \"$STUB/suite-cmd\""'
   echo 'mkdir -p lib && echo x > lib/new.test.js && echo two >> a.txt' > "$STUB/build"; echo "$GO" > "$STUB/review.1"
   loop run > /dev/null
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'test: a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'test: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run lib/new.test.js itself: no package.json holds it; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
     || fail "the card was not blocked at its test step naming test.fileCommand: $(st 'select(.step == "blocked")')"
   [ ! -e "$STUB/got" ] || fail "the test command ran: $(cat "$STUB/got")"
 }
@@ -181,14 +183,21 @@ t_narrowrelease() {
 }
 
 # Bug it catches: a pack whose cards all stop at their test step with nothing said before. Doctor warns of a pack with
-# no test.fileCommand, though it sets test.list (a card no longer gives test.command a list), and not once it sets one.
+# no test.fileCommand, though it sets test.list (a card no longer gives test.command a list), whose test file a.test.sh
+# Conveyor's own runner cannot run, naming it; and not once it sets one. Bug it catches (E3 of #376's review): doctor
+# also told a project whose test files the own runner runs (a Node package's lib/n.test.js, as in t_narrowownrunner)
+# that no test file could run.
 t_narrowdoctor() {
   setup '[]'; tune 'del(.test.fileCommand) | .test.list = "args"'
   ( export CONVEYOR_MAIN=$R; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/doctor.sh")" || exit 1
-    narrowwarn > "$T/$CASE/none"; tune '.test.fileCommand = "bash"'; narrowwarn > "$T/$CASE/fc" ) \
+    narrowwarn > "$T/$CASE/none"
+    git -C "$R" rm -q a.test.sh && mkdir -p "$R/lib" && echo '{"name": "p"}' > "$R/package.json" && echo x > "$R/lib/n.test.js" \
+      && git -C "$R" add package.json lib/n.test.js || exit 1
+    narrowwarn > "$T/$CASE/own"; tune '.test.fileCommand = "bash"'; narrowwarn > "$T/$CASE/fc" ) \
     > "$T/$CASE/run.out" 2>&1 || fail "the warning failed to run: $(cat "$T/$CASE/run.out")"
-  grep -qxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file' "$T/$CASE/none" \
-    || fail "doctor did not warn of a pack with no test.fileCommand: $(cat "$T/$CASE/none" "$T/$CASE/run.out")"
+  grep -qxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file' "$T/$CASE/none" \
+    || fail "doctor did not warn of a pack with no test.fileCommand and a test file with no runner: $(cat "$T/$CASE/none" "$T/$CASE/run.out")"
+  [ ! -s "$T/$CASE/own" ] || fail "doctor warned of a project whose test files Conveyor's own runner runs: $(cat "$T/$CASE/own")"
   [ ! -s "$T/$CASE/fc" ] || fail "doctor warned with test.fileCommand set: $(cat "$T/$CASE/fc")"
 }
 
@@ -369,6 +378,19 @@ t_narrowfilemode() {
   narrowrun 'echo two >> a.txt'
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:a.test.sh|file:a.test.sh' ] \
     || fail "the card did not run a.test.sh alone through test.fileCommand (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+}
+# #376, #351 scenario 1. Bug it catches: with no test.fileCommand, a card whose test file has a runner Conveyor knows
+# stopped at its test step. Main is a Node package (package.json), and the card adds lib/n.test.js: its test step runs
+# that file alone with Conveyor's own runner, node --test (a stub node on PATH adds its arguments to $STUB/got), and
+# never the test command.
+t_narrowownrunner() {
+  setup '[]'; gotcmd
+  echo '{"name": "p"}' > "$R/package.json" && git -C "$R" add package.json && git -C "$R" commit -qm package \
+    && printf '%s\n' '#!/usr/bin/env bash' 'echo "node:$*" >> "$STUB/got"' > "$STUB/node" && chmod +x "$STUB/node" || fail "the Node package could not be made"
+  tune 'del(.test.fileCommand)'
+  narrowrun 'mkdir -p lib && echo x > lib/n.test.js'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'node:--test lib/n.test.js' ] \
+    || fail "the card did not run lib/n.test.js alone with node --test (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.test" 2>&1)"
 }
 # The issue: each per-file process has the file's own time limit, and is ended with everything it started. Bug it
 # catches: a test file that hangs held the card's whole run, and a process it started ran on after the run. a.test.sh

@@ -98,7 +98,7 @@ t_alonefails() {
 # test.fileCommand the card is refused, its reason naming test.fileCommand, and nothing runs.
 t_alonenolist() {
   alonerun "$UNMARK" nofile
-  [ "$RC" != 0 ] && [ "$WHY" = "a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file" ] \
+  [ "$RC" != 0 ] && [ "$WHY" = "a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run w.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file" ] \
     || fail "a pack with no test.fileCommand passed, or its reason does not name it: $RC $WHY"
   [ ! -e "$STUB/alone-args" ] || fail "a test ran though the file cannot be run alone"
 }

@@ -163,11 +163,14 @@ A test file can set its own time limit with a line `# timeout: <seconds>` among 
 the number are a note. Past that limit, Conveyor stops the file and every process that it started, and the output says
 that the file timed out. A file without that line has the time limit of the card's test run (`testTimeout`).
 
-If the pack has no `test.fileCommand`, a card with a test file to run stops at its test step, and Needs you shows
-the reason. A bug card with a test file and a fix stops earlier, at its Build step, because its check cannot run that
+If the pack has no `test.fileCommand`, Conveyor runs each test file with the runner of its language, from the folder
+of the package that holds the file: `node --test`, vitest, jest or `bun test` under a `package.json`, `pytest`, `go
+test` for the package of a `_test.go` file, `cargo test` for a `tests/<name>.rs` file, and `rspec`. If Conveyor has no
+runner for a test file of a card, the card stops at its test step, and Needs you shows the reason. A bug card with a test file and a fix stops earlier, at its Build step, because its check cannot run that
 file on main's code. A bug card whose change is only test files, or test files and only comments in other `.js`,
 `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` files, has no check to run, and it stops at its test step. A comment change
-with no test file in the change, or in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. The reason names the setting. `conveyor.sh doctor` shows a `warning:` line for such a pack.
+with no test file in the change, or in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. The reason names the setting. If the pack has no `test.fileCommand` and Conveyor has no runner for one of the
+project's test files, `conveyor.sh doctor` shows a `warning:` line that names that file.
 
 A card runs the test files that its change adds or changes, as `tests.patterns` finds them. A shared helper or a test
 runner is not a test file here.

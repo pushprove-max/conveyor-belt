@@ -735,13 +735,23 @@ filehint() {
   echo "conveyor: the test files run alone as plain scripts (\`$g <file>\`); set test.fileCommand to \"$g\" in .conveyor/project.json, so a card runs each of its test files alone"
 }
 # Doctor's warning of a pack whose cards cannot run their test files (listcmd(), lib/testrun.sh): a card runs each
-# alone through test.fileCommand, and the pack does not set it, so every card whose change is linked to a test file
-# stops at its test step (a bug card with a fix at Build, bugproof(): a comment change with no test file in the change,
-# or in a file that is not JavaScript or TypeScript, is a fix, commentsonly()).
+# alone through test.fileCommand, else, when the pack does not set it, through Conveyor's own runner (lib/filerun.sh),
+# so with neither for one of the project's test files (testpaths()), a card whose change is linked to it stops at its
+# test step (a bug card with a fix at Build, bugproof(): a comment change with no test file in the change, or in a file
+# that is not JavaScript or TypeScript, is a fix, commentsonly()). It names the first such file (NORUNNER). Of the test
+# files of one kind (their ending) in one folder, which have one runner, only the first is asked.
 narrowwarn() {
-  local fc
+  local fc f k r why
+  local -A seen=()
   packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] || return 0
-  echo "warning: ${NARROW//'<why>'/"$NOFILECMD"}"
+  while IFS= read -r f; do
+    k=.; [[ $f != */* ]] || k=${f%/*}
+    case $f in *_test.go|*_spec.rb) k+=/_${f##*_} ;; *.*) k+=/.${f##*.} ;; *) k=$f ;; esac
+    [ -z "${seen[$k]:-}" ] || continue; seen[$k]=1
+    r=$(cd "$MAIN" && bash "$HERE/lib/filerun.sh" --which "$f" 2>&1) && continue
+    why=${NORUNNER//'<file>'/"$f"}; why=${why//'<reason>'/"$r"}; echo "warning: ${NARROW//'<why>'/"$why"}"
+    return 0
+  done < <(git -C "$MAIN" -c core.quotePath=false ls-files 2>/dev/null | testpaths)
 }
 doctor() {
   local bad=0 p e t c h f

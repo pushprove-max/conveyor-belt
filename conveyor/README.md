@@ -532,8 +532,10 @@ of its list alone, one process a file, through `test.fileCommand`: the card's te
 failure, the bug-card check, the run on main, the main-red check, the checks of Fix hollow cases, Fix the waiting,
 Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
 time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file runs past it, Conveyor stops the file
-and every process it started, and the file fails. With no `test.fileCommand`, a card with a test file to run stops at
-its test step under Needs you, and the reason names `test.fileCommand`. A bug card with a test file and a fix stops earlier,
+and every process it started, and the file fails. With no `test.fileCommand`, Conveyor runs each file with the runner
+of its language, from the folder of its package (`conveyor/lib/filerun.sh`: Node, pytest, Go, Cargo and RSpec). When
+it has no runner for a file to run, the card stops at its test step under Needs you, and the reason names
+`test.fileCommand` and the file. A bug card with a test file and a fix stops earlier,
 at Build: its bug-card check cannot run, and the card is blocked with that reason (Bug cards: the new tests fail
 without the fix). A bug card whose change is only test files, or test files and only comments in other `.js`, `.mjs`,
 `.cjs`, `.ts`, `.mts` or `.cts` files, has no check to run and stops at its test step. A comment change with no test
@@ -972,7 +974,7 @@ the commit the card was built on (`cards/mainrun/<card>.unfixed`), each file alo
 session once, told "the new tests pass without the fix, so they do not prove it" (its second `build` line has that
 reason), and the check runs again; when it still does not hold, the card is blocked with that reason, with no review.
 When the change adds or changes no test file, the reason is "no test file found in the change (patterns: <the
-patterns>); set tests.patterns in .conveyor/project.json" in its place. When the pack sets no `test.fileCommand`, the check does not run: the card is blocked with a reason that names
+patterns>); set tests.patterns in .conveyor/project.json" in its place. When the pack sets no `test.fileCommand` and Conveyor has no runner of its own for one of those files, the check does not run: the card is blocked with a reason that names
 `test.fileCommand`, with no second build session and no review. When the project's test files run alone as plain
 scripts, setup suggests `node`, `bash` or `python3` as `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
 file that failed (a runner that stops the run with no test failing proves nothing). Each test file keeps its own time
