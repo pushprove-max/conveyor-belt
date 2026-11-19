@@ -532,6 +532,9 @@
       return l;
     };
     tools.append(choose('a'), choose('b'), button('Compare', 'btn-primary', 'compare', 'Compare A and B', () => {
+      // A click while an action is out is refused before anything changes: the request in flight keeps its ask, so its
+      // reply is still read; with none (another action is out) the refusal gets an ask of its own to be shown by.
+      if (B.busy) { B.cmp.ask = B.cmp.ask || `compare-${B.cmp.n += 1}-${B.cmp.a}-${B.cmp.b}`; say(B.cmp.ask, 'Wait for the answer to the last action.', 'warn'); return; }
       dropCmp(); B.cmp.all = false;
       const ask = `compare-${B.cmp.n += 1}-${B.cmp.a}-${B.cmp.b}`;
       B.cmp.ask = ask;

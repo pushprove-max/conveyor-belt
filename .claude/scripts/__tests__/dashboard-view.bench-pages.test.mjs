@@ -160,6 +160,21 @@ test('Compare: two arms of the runs selected, the flipped tasks with where they 
   choose(w, 'cmp-a', EB);
   assert.equal(said(), null, 'no answer beside a pair whose results were dropped');
   assert.equal(bp(w).querySelector('.bench-compare .bench-headline'), null);
+  // Bug it guards (#651): a second click while "Sending…" was refused by send, but the click had already taken a new
+  // ask, so the first request's reply was dropped and Compare showed no results.
+  let answer;
+  w.reply = new Promise((res) => { answer = res; });
+  act(bp(w), 'compare').click();
+  assert.equal(text(said()), 'Sending…');
+  act(bp(w), 'compare').click();
+  assert.equal(text(said()), 'Wait for the answer to the last action.');
+  assert.equal(w.posts.splice(0).length, 1, 'the second click sends nothing');
+  // A reply swe_diff can give: with no task flipped, both arms resolved the same tasks.
+  answer(BH.reply(JSON.stringify({ a: { version: A, totals: { resolved: 11 } }, b: { version: B2, totals: { resolved: 11 } }, tasks: 20, flipped: [] })));
+  await settle();
+  assert.equal(text(said()), 'Compared.');
+  assert.equal(text(bp(w).querySelector('.bench-compare .bench-headline')),
+    `On the 20 tasks both ran: ${A} resolved 11, ${B2} 11. 0 tasks flipped to ${A}, 0 the other way, 11 resolved by both, 9 by neither.`, 'the first reply is shown');
 });
 
 // Bug it guards: Start offered Conveyor or Claude alone only, with no arm's preflight state, so an arm that cannot run
