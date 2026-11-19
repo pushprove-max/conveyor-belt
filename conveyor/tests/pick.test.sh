@@ -88,12 +88,16 @@ t_emptyrelease() {
   out=$(CONVEYOR_SKIP='["backlog","dormant","ux-change"]' loop snapshot --fresh | jq -c '[(.queue.next | map(.issue) | sort), (.open.held | map(.issue))]')
   [ "$out" = '[[1,2,3],[4,5]]' ] || fail "a released backlog, dormant or ux-change issue is not next, or an awaiting-deploy one is not held: $out"
 }
-# The qualifying issue listed after the first 1,000 open ones, a case of its own beside t_empty. The 1,000 are made
-# from one issue in one jq, not one jq each (that took about 2 s).
-t_emptyfar() {
+# The open issues of t_emptyfar and t_emptyfarrun: 1,000 awaiting-deploy ones, then #1001, the one that qualifies. The
+# 1,000 are made from one issue in one jq, not one jq each (that took about 2 s).
+farsetup() {
   setup "[$(issue 1001 2026-01-01 P1)]"
   jq -c --argjson t "$(issue 0 2026-01-01 awaiting-deploy)" '[range(1; 1001) as $n | $t | .number = $n | .title = "title \($n)" | .body = "body of \($n)"] + .' \
     "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
+}
+# The qualifying issue listed after the first 1,000 open ones, a case of its own beside t_empty.
+t_emptyfar() {
+  farsetup
   [ "$(jq -c '[length, .[0].number, .[999].number, .[1000].number, (.[:1000] | all(.labels == [{name: "awaiting-deploy"}]))]' "$STUB/issues.json")" = '[1001,1,1000,1001,true]' ] \
     || fail "the 1,000 awaiting-deploy issues were not listed before the qualifying one"
   # The open issues as a pick asks GitHub (the gh stub, which gives only as many as asked for) for them, then the dry pick on that list.
@@ -102,6 +106,17 @@ t_emptyfar() {
     || fail "the open issues could not be listed: $(cat "$T/$CASE/err")"
   out=$(loop pick --dry --issues "$T/$CASE/asked.json" --state "$ST")
   [ "$out" = 1001 ] || fail "the qualifying issue past the first 1,000 was not picked: $out ($(jq length "$T/$CASE/asked.json") issues listed)"
+}
+# Bug: t_emptyfar asks for the pages and picks dry, apart; a live turn of the loop (run(), lib/run.sh) that asks for
+# one page only, or drops issues between asking and picking, never records #1001. A real `run` is used, as only the
+# loop's own turn joins the asking to the pick and the card; it stops at the worktree, its setup failing.
+t_emptyfarrun() {
+  farsetup
+  tune '.worktree.setup = "exit 3"'
+  out=$(loop run 1 2>&1) || fail "the run exited non-zero: $out"
+  [ "$(st 'select(.step == "picked" or .step == "worktree") | .issue' | paste -sd' ' -)" = '1001 1001' ] \
+    && st 'select(.step == "blocked") | .reason' | grep -q '^worktree: the engine could not link the dependencies of the main checkout: worktree.setup (exit 3) failed' \
+    || fail "the loop did not record #1001, past the first 1,000 open issues, or did not stop at the worktree setup: $out $(st tojson)"
 }
 
 # Bug: an area:prism issue with the verification integrity label or milestone is never picked, and shows as
