@@ -25,7 +25,12 @@
 # at a time, when unset; parallel runs several at once through the machine's test slots (conveyor/lib/slots.sh, the
 # library CONVEYOR_TEST_SLOTS names, else the checkout's), below. It is this run's: a test file that runs a suite of
 # its own runs it in its default mode.
+# In parallel mode it starts its files longest first, by CONVEYOR_SUITE_RECORD (release-prep's suite record,
+# suiteruns.jsonl: suiterec() of conveyor/lib/testrun.sh): each file's `sec` in the newest run of the record (its
+# last line that is a run), not in older runs. Files that run did not time start before every timed file, as their time is not known;
+# ties keep the suite's order, and so does every file when the record cannot be read. Serial mode keeps the suite's order.
 MODE=${CONVEYOR_SUITE_MODE:-serial}; unset CONVEYOR_SUITE_MODE
+RECORD=${CONVEYOR_SUITE_RECORD:-}; unset CONVEYOR_SUITE_RECORD
 case $MODE in serial | parallel) ;; *) echo "test-full: CONVEYOR_SUITE_MODE is '$MODE', not serial or parallel; nothing run" >&2; exit 2 ;; esac
 rc=0
 tmp=$(mktemp -d) || exit 1
@@ -113,6 +118,14 @@ SLOTS=${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}
 # shellcheck source=/dev/null
 . "$SLOTS" && slot_pool || { echo "test-full: the test slots ($SLOTS) could not be read; nothing run" >&2; exit 1; }
 declare -A job=()
+# Longest first (above): an order the record cannot give (no jq, or a count that is not the files') keeps the suite's.
+# jq's sort is stable, so ties keep the suite's order.
+if [ ${#files[@]} -gt 0 ] && o=$(printf '%s\n' "${files[@]}" | jq -rRn --slurpfile r <(jq -cR 'fromjson? | objects | .files | objects' "$RECORD" 2>/dev/null) '
+    ($r[-1] // {} | with_entries(select(.value | objects | .sec | numbers) | .value |= .sec)) as $t
+    | [inputs] | sort_by(if $t[.] == null then [0, 0] else [1, -$t[.]] end) | .[]') \
+  && [ "$(grep -c '' <<<"$o")" = ${#files[@]} ]; then
+  mapfile -t files <<<"$o"
+fi
 # The case names <file log> (a file's own log folder) holds, copied into <run log>: each name alone, as another file's
 # copy may make the same folder of the run's log at the same time. Fails when one could not be copied.
 casecopy() { # <file log> <run log>

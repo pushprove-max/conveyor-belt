@@ -319,8 +319,9 @@ relsuite() { # <command name> <commit>
   # main as the suite starts: a card that lands while it runs moves it (the record's moved).
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
   relrec --arg s "$sha" --arg m "$m0" --arg md "$RELMODE" '.sha = $s | .mode = $md | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'
-  # The suite's command is told the run's mode (RELMODE), the whole run's and a rerun of some files alike.
-  export CONVEYOR_SUITE_MODE=$RELMODE
+  # The suite's command is told the run's mode (RELMODE), the whole run's and a rerun of some files alike, and the
+  # suite record (SUITERUNS), whose times order its files in parallel mode.
+  export CONVEYOR_SUITE_MODE=$RELMODE CONVEYOR_SUITE_RECORD=$SUITERUNS
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }

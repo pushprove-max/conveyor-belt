@@ -41,6 +41,10 @@ atonce() {
 t_relparallel() {
   local RUN out wt=$T/$CASE/cards/release/wt f
   modesetup
+  # Bug: the suite was not told the suite record, so it started its files in list order, the longest last. The record
+  # times f4 and f3 longest: they start first.
+  mkdir -p "$ST" && jq -cn '{time: "2026-11-01T00:00:00Z", how: "release", sha: "", files: {"t/f1.test.sh": {result: "ok", sec: 1, cpu: 1},
+    "t/f2.test.sh": {result: "ok", sec: 2, cpu: 2}, "t/f3.test.sh": {result: "ok", sec: 30, cpu: 30}, "t/f4.test.sh": {result: "ok", sec: 40, cpu: 40}}}' > "$ST/suiteruns.jsonl"
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-run prep 1.1.0 --parallel 2>&1) || fail "release-run prep --parallel did not start the run: $out"
   # release-run starts release-prep in the background and returns: its record is where the run's end shows.
   relwait "the run did not end" '.ended != null'
@@ -48,6 +52,9 @@ t_relparallel() {
   for f in 1 2 3 4; do grep -qxF -- "-- ok t/f$f.test.sh" "$wt.test" || fail "the suite's output has no result line of t/f$f.test.sh: $(cat "$wt.test")"; done
   # Two exactly: files ran at once, and never more than the pool's two slots.
   [ "$(atonce)" = 2 ] || fail "the four files did not run two at once on a pool of two slots: $(cat "$STUB/times")"
+  # The two started first, in either order, as both start at once.
+  [ "$(tr , . < "$STUB/times" | awk '$2 == "start"' | sort -k3,3g | head -2 | awk '{ print $1 }' | sort | paste -sd' ' -)" = "t/f3.test.sh t/f4.test.sh" ] \
+    || fail "the two files the suite record times longest did not start first: $(cat "$STUB/times")"
   # Bug: a scheduler that kept to two files at once but took no slot for each (no slot_take, slot_mine, slot_free)
   # still passed the checks above: its files all ran on the run's own slot, beside each other, while other cards took
   # the slots and cores the run used. Each file starts on a slot of the pool, and no two files at once on the same one.
