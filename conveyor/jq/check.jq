@@ -130,8 +130,10 @@ def ok: . as $r | (keys - known) == need
         # the verdict and why, the slices of a split, the issues filed for them and whether they started held (On), the
         # answer that broke the rules.
         # A card's pick (modelpick(), lib/modelpick.sh), on each of its lines from the pick on: its group, the
-        # builder chosen, by whom, whether it is a trial, and the rule's setting.
-        and (.pick == null or (.pick | type == "object" and keys == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
+        # builder chosen, by whom, whether it is a trial, and the rule's setting; on a trial card, the pipeline files its
+        # change touches (trialflag()), when there are any.
+        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
+          and (.pipeline == null or (.trial and (.pipeline | type == "array" and length > 0 and all(type == "string"))))
           and (.choice | type == "object" and keys == ["effort", "model"] and (.model | type == "string") and (.effort == null or (.effort | type == "string")))
           and (.by | IN("owner", "auto")) and (.trial | type == "boolean") and (.mode | IN("shadow", "on"))))
         and ((.step == "split") == (.split != null))

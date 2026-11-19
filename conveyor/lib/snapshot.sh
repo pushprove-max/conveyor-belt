@@ -205,7 +205,8 @@
 #   A card restarted is one row, of its newest run: runs (how many), its usd those of every run's steps. picks: the
 #   cards the rule Pick settings picked, on any day, one row a group and builder choice ({group, model, effort,
 #   cards, landed, usd, firstTry, reviews, open}; a card's earlier runs count with it; usd null when a step of them
-#   has no price).
+#   has no price). trials: {dropped: [{group, model, effort, cards}], flagged: [{card, issue, group, files}]}, the
+#   groups whose trial challenger two blocked trial cards dropped, and the trial cards whose change touches pipeline files.
 # A day is this machine's local day (day names today). Dollars are list prices from the one price table
 # (dashboard_limit.py, `cards`; the pack's prices win over its rows), at the models that ran the step (its session's result, else the model its line
 # names), never at the models in force now: a step whose line names no model is unpriced. A step that table cannot
@@ -892,7 +893,14 @@ snapshot() (
            | map(.[0].pick as $p | map(select((.step | IN("landed", "closed")) and .x.blockedAt == null)) as $l
              | {group: $p.group, model: $p.choice.model, effort: $p.choice.effort, cards: length, landed: ($l | length), usd: ([.[].runSteps[]] | usd),
                 firstTry: ($l | map(select(.metrics.runs == 1)) | length), reviews: ($l | map(.runReviews) | add // 0),
-                open: (map(select((.x.retried | not) and (.result == "" or .step == "blocked"))) | length)}))}),
+                open: (map(select((.x.retried | not) and (.result == "" or .step == "blocked"))) | length)})),
+         # The trials of the rule Pick settings (picktrial(), lib/modelpick.sh), of every card on any day: dropped, a
+         # group whose challenger two blocked trial cards dropped, with the challenger and those cards; flagged, a trial
+         # card whose change touches pipeline files (pick.pipeline, trialflag()), with those files.
+         # A card whose issue was closed while it was blocked (x.blockedAt) still counts: picktrial() counts its blocked line.
+         trials: {dropped: ([$all[0][] | select((.step == "blocked" or .x.blockedAt != null) and .x.pick.trial == true)] | group_by(.x.pick.group)
+             | map(select(map(.card) | unique | length >= 2) | {group: .[0].x.pick.group, model: .[0].x.pick.choice.model, effort: .[0].x.pick.choice.effort, cards: (map(.card) | unique)})),
+           flagged: [$all[0][] | select(.x.pick.trial == true and (.x.pick.pipeline | type == "array")) | {card, issue, group: .x.pick.group, files: .x.pick.pipeline}]}}),
        metrics: {
          today: totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) == $day)]; [$smp[] | select((.time | day) == $day)]; [$pu[] | select((.time | day) == $day)]; $every; $waits; $t0d; $nowt),
          week: totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) >= $since)]; [$smp[] | select((.time | day) >= $since)]; [$pu[] | select((.time | day) >= $since)]; $every; $waits; $t0w; $nowt),

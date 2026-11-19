@@ -610,7 +610,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     "cards": [{"card": "c3-801", "issue": 801, "title": "Rebuild the dashboard", "state": "on the belt", "today": 1.25, "week": 1.25},
       {"card": "c0-6", "issue": 6, "title": "Landed days ago", "state": "landed", "today": 0, "week": 6.25},
       {"card": "c2-13", "issue": 13, "title": "Broken", "state": "blocked", "today": 2.5, "week": null}],
-    "picks": [{"group": "small docs", "model": "claude-x", "effort": "medium", "cards": 2, "landed": 1, "usd": 5, "firstTry": 0, "reviews": 2, "open": 0}]}}')
+    "picks": [{"group": "small docs", "model": "claude-x", "effort": "medium", "cards": 2, "landed": 1, "usd": 5, "firstTry": 0, "reviews": 2, "open": 0}],
+    "trials": {"dropped": [{"group": "small docs", "model": "claude-y", "effort": "medium", "cards": ["c1-5", "c1-10"]}], "flagged": [{"card": "c1-15", "issue": 15, "group": "small code", "files": ["ci/deploy.sh"]}]}}}')
 C=$(snap '{"belt": [{"card": "c4-5", "issue": 5, "title": "Plugin thing", "step": "build", "review": null, "of": 3, "stepAt": "'"$(ago 60)"'", "model": "claude-x", "tokens": {"claude": 1, "codex": 0}, "usd": 0.25}],
   "queue": {"next": [{"issue": 9, "title": "CD next", "priority": "P3", "followup": false, "retried": true}]},
   "open": {"count": 3, "split": {"queued": 1, "you": 1, "labelOrRule": 0, "belt": 1}, "held": [{"issue": 10, "title": "CD held", "priority": "P3", "followup": false, "labels": [], "created": null, "parent": null, "reasons": [{"kind": "you"}]}]},
@@ -1115,6 +1116,9 @@ q '.panels.cost.data.cards.perCard | map([.repo, .issue, .state, .todayUsd, .wee
 q '.panels.cost.data.cards.perCard | (.[1] | .url == "'"$PU"'/6" and .title == "Landed days ago") and (.[3].url == "'"$CU"'/4") and (.[0] | keys) == ["card", "issue", "repo", "runs", "state", "title", "todayUsd", "url", "weekUsd"]' "a per-card cost row names its repo and links to that repo's issue"
 # Bug: the rule Pick settings' rows of each record did not reach the Cost panel, or lost which project they are of.
 q '.panels.cost.data.cards.picks | map([.repo, .group, .usd]) == [["sample", "small docs", 5], ["widgetshop", "small code", null]]' "each record's pick rows reach the Cost panel with its repo"
+# Bug: a dropped challenger or a flagged trial card did not reach the Cost panel, lost its project, or a record from
+# before trials (widgetshop's) hid the other record's.
+q '.panels.cost.data.cards.trials | (.dropped | map([.repo, .group, .cards])) == [["sample", "small docs", ["c1-5", "c1-10"]]] and (.flagged | map([.repo, .issue, .files])) == [["sample", 15, ["ci/deploy.sh"]]]' "each record's trials reach the Cost panel with its repo"
 # The figures are the priced steps'; how many each leaves out is summed over the records, and the steps are
 # listed with why. A record from before it named them leaves the list unknown, never empty.
 q '.panels.cost.data.cards | .todayLeftOut == 0 and .weekLeftOut == 0 and .perLandedLeftOut == 0 and .unpriced == null' "no record gives the steps left out"

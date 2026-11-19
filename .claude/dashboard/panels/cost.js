@@ -5,7 +5,8 @@
 // one row with runs, its dollars every run's] | null when the
 // host gave no such rows, todayLeftOut, weekLeftOut, perLandedLeftOut, unpriced: [{repo, card, issue, step, time, why}],
 // picks: [the rule Pick settings' cards, one row a group and builder choice: {repo, group, model, effort, cards, landed,
-// usd (null when a step has no price), firstTry, reviews, open}] | null};
+// usd (null when a step has no price), firstTry, reviews, open}] | null, trials: {dropped: [{repo, group, model, effort,
+// cards}], flagged: [{repo, card, issue, group, files}]} (none from an older host)};
 // sessions is every session on this machine ({todayUsd, weekUsd}). The three figures are the priced steps' dollars,
 // and the steps they leave out are listed with why; a host from before that gives null for a figure with an
 // unpriced step, shown as "not priced". A card's own sum with an unpriced step in it is null, never a part sum.
@@ -113,6 +114,23 @@ window.DASH_APP.panel({
         const wrap = h('div', 'tests-scroll'); // one column wide: the table scrolls across
         wrap.append(t);
         out.push(h('h3', 'group-title', 'Pick settings, by group and builder'), wrap);
+      }
+      // The rule's trials: each group whose challenger two blocked trial cards dropped, and each trial card whose change
+      // touches pipeline files its issue does not name.
+      const trials = c.trials || {}, dropped = Array.isArray(trials.dropped) ? trials.dropped : [], flagged = Array.isArray(trials.flagged) ? trials.flagged : [];
+      if (dropped.length || flagged.length) {
+        const ul = h('ul', 'trials');
+        dropped.forEach((x) => {
+          const li = h('li', 'row', `${x.repo}: no more trials in ${x.group}. Two trial cards on ${ctx.modelName(x.model)}${x.effort ? ` ${x.effort}` : ''} were blocked (${x.cards.join(', ')}), so cards in this group build on the default builder.`);
+          li.dataset.dropped = x.group;
+          ul.append(li);
+        });
+        flagged.forEach((x) => {
+          const li = h('li', 'row', `${x.repo} #${x.issue}: this trial card changes pipeline files that its issue does not name: ${x.files.join(', ')}. Its review and judge use the defaults.`);
+          li.dataset.flagged = x.card;
+          ul.append(li);
+        });
+        out.push(h('h3', 'group-title', 'Pick settings trials'), ul);
       }
     } else out.push(ctx.unread(`The Board could not read the card costs, so it shows none. ${ctx.retry}`, d.cardsError), ctx.restartButton());
     if (d.sessions) {

@@ -619,6 +619,17 @@ keptshots() { # <kept folder of the earlier card> <earlier card> <kept folder> <
   cp -R "$1/shots" "$3/shots" && b=$(git hash-object -- "$3/$4.patch") \
     && jq -c --arg p "$b" '.patch = $p' "$1/shots/shots.json" > "$3/shots/shots.json" || rm -rf "$3/shots"
 }
+# <worktree>: on a trial card (lib/modelpick.sh), puts on its pick (PICK) the pipeline files (the pack's pipelineFiles,
+# or files under one: onpipeline(), lib/followups.sh) its staged change touches, as pipeline, so its lines from then on
+# carry them and the Board flags the card; an eligible issue names none, so each is one the issue did not name. card()
+# calls it on each pass, before the review, and block() on the change it keeps: it is here, beside block(), so a
+# command that blocks a card outside card() (`retry` and `shut`, through unstick(), lib/run.sh) flags it too.
+trialflag() {
+  local pipe f files=()
+  [ -n "${PICK:-}" ] && jq -e .trial <<<"$PICK" >/dev/null 2>&1 && packget pipelineFiles pipe || return 0
+  while IFS= read -r f; do [ -z "$(onpipeline "$f" <<<"$pipe")" ] || files+=("$f"); done < <(git -C "$1" diff --cached --no-renames --name-only 2>/dev/null)
+  PICK=$(jq -c 'if $ARGS.positional == [] then del(.pipeline) else .pipeline = $ARGS.positional end' --args "${files[@]}" <<<"$PICK") || :
+}
 clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
@@ -656,6 +667,8 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   if [[ $reason != worktree:* || $reason == "$NODEPS"* ]] && [ -d "$3" ]; then
     git -C "$3" add -A 2>/dev/null && { git -C "$3" diff --cached --quiet 2>/dev/null; d=$?; } || d=2
     [ $d = 2 ] || size=$(diffsize "$3")
+    # A trial card blocked before its review flags the pipeline files of its kept change too (trialflag(), above).
+    [ $d != 1 ] || trialflag "$3"
     # The files it changed, the first 200 ("Needs you" lists them on demand; a line stays small, so the
     # snapshot reads the whole list from the kept patch while there is one).
     [ $d != 1 ] || named=$(git -C "$3" diff --cached --name-only --no-renames 2>/dev/null | head -n 200 | jq -Rcs 'split("\n") | map(select(. != "") | .[0:300])' 2>/dev/null) || named=null

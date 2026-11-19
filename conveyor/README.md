@@ -53,7 +53,8 @@ its own, and the Board's Rules tab sets them in its Judge row.
 - `pick`: the rule Pick settings, `off`, `shadow` or `on` (`conveyor.sh control rules pick=<off|shadow|on>`). After
   the split check and before the build, code puts each card in a group and records the builder that the rule
   chooses for it, as `pick` on each step line of the card from then on, up to its end. The choice is the project's builder, or the
-  card's own builder when you set it (`control card`). In Shadow and On, the card builds on its builder as before
+  card's own builder when you set it (`control card`). In Shadow, the card builds on its builder as before. In On,
+  1 small card in 5 that names no pipeline file is a trial on Sonnet 5.5 at medium effort
   ([Pick settings](../docs/configuration.md#pick-settings)).
 
 Every rule is on by default, except `push` and `visible`, which are off, `split`, which is `shadow`, and `pick`, which is `off`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule

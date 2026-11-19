@@ -303,16 +303,44 @@ its own pick. Fix cards that have no issue get no pick. Code puts the card in a 
 - **pipeline**, **docs** or **code**: pipeline when the issue names a path in `pipelineFiles`. Else docs when it has
   the label `documentation`, or when each path that it names is a Markdown file or a file under `docs/`. Else code.
 
-The group is the two words, for example "small docs". The choice is the project's builder (Builder on the Rules tab).
+The group is the two words, for example "small docs". The choice is the project's builder (Builder on the Rules tab),
+or the challenger on a trial (below).
 When you set the builder of a card (`conveyor.sh control card <issue> builder <model>`), the choice is your setting,
 and the pick says that you chose it. Each step line of the card from then on, up to its end, has a `pick` field:
 `group`, `choice` (model and effort), `by` (`owner` or `auto`), `trial` and `mode`. A card that starts again for the same issue, after a retry
 or a stop, keeps the pick that the issue had.
 
 - **Off**: Conveyor records no pick.
-- **Shadow** and **On**: Conveyor records the pick, and the card builds on its builder as before.
+- **Shadow**: Conveyor records the pick, and the card builds on its builder as before.
+- **On**: Conveyor records the pick, and some cards are trials.
 
-The Cost panel on the Board shows a table of the picked cards, one row for each group and builder.
+### Trials
+
+With the rule On, a trial card builds on the challenger, Sonnet 5.5 at medium effort (`claude-sonnet-5-5`), and its
+pick has `trial: true`. All other cards build on the project's builder. Its review and judge use the project's
+settings.
+
+- **Eligible cards**: a card is eligible when its group is "small docs" or "small code". The issue is small and names
+  no path in `pipelineFiles`. A card whose builder you set is not eligible. When you set the builder of a trial
+  card's issue (`control card`) while the card runs, each later step of the card that uses the builder uses yours. The
+  other steps keep their own settings.
+- **Share**: 1 eligible card in 5 is a trial: the card of an issue whose number is a multiple of 5.
+- **One at a time**: when a trial card is in progress, the next eligible card builds on the project's builder.
+- **Retry**: when a trial card is blocked, its retry builds on the project's builder. This is true for a retry by
+  `review-retry` and for a retry that you start. The rule does not retry a card itself.
+- **Drop**: when two trial cards of a group are blocked, the group has no more trials. The next eligible card of
+  that group builds on the project's builder, also when its issue is in the share. The blocked lines of the two cards
+  in the card records are the record of the drop.
+- **No challenger**: there are no trials when the project's builder is the challenger, or when `models.allowed` in
+  `.conveyor/project.json` does not allow the challenger for the builder. There is also no trial when the Claude
+  account of the challenger is at the weekly limit guard.
+
+When the change of a trial card touches a path in `pipelineFiles`, the `pick` field also has `pipeline`: those paths.
+The issue of a trial card names no such path.
+
+The Cost panel on the Board shows a table of the picked cards, one row for each group and builder. Under the table,
+**Pick settings trials** shows each group that has no more trials, with the two blocked cards. It also shows each trial
+card whose change touches a path in `pipelineFiles`, with those paths.
 
 ## The project's checks
 

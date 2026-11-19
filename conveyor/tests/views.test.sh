@@ -106,7 +106,7 @@ t_snapshot() { snapshotstart
     = '[5,{"claude":"claude-sonnet-5-5","codex":"gpt-6.1-sol"},[7],[8],[10],false,true,true]' ] || fail "health: $(q .health)"
   # The time, free disk and GitHub read (ghRead: with no feed, the call's own time) are read again by each call.
   [ "$(q '.health | del(.time, .diskFreeKb, .ghRead)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb, .ghRead)')" ] || fail "health is not the health record"
-  [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[]}' ] || fail "cost: $(q .cost)"
+  [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[]}}' ] || fail "cost: $(q .cost)"
   # Per card, the 7 days: a card landed on an earlier day (11) and the blocked ones (7, 8) are rows; one with no step
   # ended (1, 2) or last worked on before the 7 days (12) is not. The rows add up to the totals.
   [ "$(q '.cost.cards | map("\(.issue) \(.state) \(.today) \(.week)") | sort | join(", ")')" \
@@ -203,7 +203,7 @@ t_snapshotlate() { latestart
   loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"; # what the snapshot had said when health read the free disk (df), in the build: gh is asked before the build begins
   out=$(df() { { grep -c "made anew" "$STUB/err" || :; } >> "$STUB/said"; command df "$@"; }; export -f df; loop snapshot --fresh 2>"$STUB/err") || fail "snapshot after a retry exited non-zero"; [ "$(sort -u "$STUB/said")" = 1 ] || fail "the snapshot after a retry rewrote the card records did not say it is made anew before health's long work, so a reader that stops it waits with no reason (#282): $(tr '\n' ' ' < "$STUB/said"), $(cat "$STUB/err")"
   [ "$(q '[(.cost | del(.cards)), .needsYou.blocked, (.health.blocked | length), ([.belt[], .landed[]] | map(.card) | index("c8")), (.cost.cards[] | select(.card == "c8") | [.state, .today, .week])]')" \
-    = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[]},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
+    = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[]}},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
   # The rest of a landed card's track. Cards 10 and 5 landed and are not at origin: both are on the belt, pushing.
   [ "$(after)" = '[["c10","push",14,"pushing","nt","n",null],["c5","push",14,"pushing","nt","n",null]]' ] || fail "two landed cards waiting for their push: $(after)"
 }

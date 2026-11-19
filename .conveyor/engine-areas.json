@@ -480,6 +480,7 @@
 {"area": "control", "test": "modelpick.test.sh"}
 {"area": "snapshot", "test": "modelpick.test.sh"}
 {"area": "record", "test": "modelpick.test.sh"}
+{"area": "push", "test": "modelpick.test.sh"}
 {"area": "slices", "test": "slices.test.sh"}
 {"area": "slices", "test": "parts.test.sh"}
 {"area": "cmd-parts", "file": "conveyor/commands/parts.sh"}

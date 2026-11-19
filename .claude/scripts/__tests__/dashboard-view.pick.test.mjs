@@ -50,3 +50,18 @@ test("Cost: the Pick settings table divides each group's spend by its landed car
   assert.deepEqual(row('small docs').slice(1), ['small docs', 'claude-sonnet-5-5 medium', '3', '$5.00', '50%', '2.00', '1']);
   assert.deepEqual(row('small code').slice(3, 8), ['2', 'unknown: a step has no price', '100%', '1.00', '1']);
 });
+
+// Bugs this guards (#828): a group whose trial challenger was dropped after two blocked trial cards, or a trial card
+// whose change touches pipeline files its issue does not name, was not shown to the owner.
+test('Cost: Pick settings trials shows each dropped challenger and each flagged trial card', () => {
+  const w = boot();
+  const d = full();
+  d.panels.cost.data.cards.trials = {
+    dropped: [{ repo: 'sample', group: 'small docs', model: 'claude-sonnet-5-5', effort: 'medium', cards: ['c1-5', 'c1-10'] }],
+    flagged: [{ repo: 'sample', card: 'c1-15', issue: 15, group: 'small code', files: ['ci/deploy.sh'] }],
+  };
+  deliver(w, d);
+  const p = panel(w, 'cost');
+  assert.match(p.querySelector('ul.trials li[data-dropped="small docs"]').textContent, /no more trials in small docs.*c1-5, c1-10.*default builder/);
+  assert.match(p.querySelector('ul.trials li[data-flagged="c1-15"]').textContent, /#15: .*pipeline files .*ci\/deploy\.sh\. Its review and judge use the defaults/);
+});

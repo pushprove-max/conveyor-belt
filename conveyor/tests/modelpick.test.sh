@@ -57,6 +57,91 @@ t_pickowner() {
     || fail "the pick of a card the owner set the builder of is not by owner on m2 high, or the card's builder moved: $(cat "$T/$CASE/run.out")"
 }
 
+# Bugs caught (#828): with pick=on an eligible card whose issue number is in the 1-in-5 share did not build on the
+# challenger (claude-sonnet-5-5 medium) with trial: true, or its review moved off the project's reviewer; a trial card
+# whose change touches a pipeline file its issue does not name was not flagged on its lines and in the snapshot. A
+# whole card (see the top): only a card shows that the trial reaches the build session's seat, and the flag its lines.
+# Issue 10 names docs/guide.md (small docs); the build changes a.txt, a pipeline file here.
+t_picktrial() {
+  setup "[$(issue 10 2026-01-01 | jq -c '.body = "Fix a typo in docs/guide.md."')]"; echo "$GO" > "$STUB/review.1"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .pipelineFiles = ["a.txt"]'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  loop run 1 >/dev/null
+  [ "$(st 'select(.step == "build") | "\(.model) \(.effort) \(.pick.trial) \(.pick.choice | tojson)"')" = 'claude-sonnet-5-5 medium true {"model":"claude-sonnet-5-5","effort":"medium"}' ] \
+    || fail "the trial card did not build on the challenger: $(st 'select(.step == "build")')"
+  [ "$(st 'select(.step == "review") | "\(.model) \(.pick.pipeline | tojson)"')" = 'x ["a.txt"]' ] \
+    || fail "the trial card's review left the project's reviewer, or its pick does not flag a.txt: $(st 'select(.step == "review")')"
+  [ "$(loop snapshot | jq -c '.cost.trials.flagged | map([.issue, .group, .files])')" = '[[10,"small docs",["a.txt"]]]' ] \
+    || fail "the snapshot does not flag the trial card: $(loop snapshot | jq -c .cost.trials)"
+  recok "$ST/cards.jsonl" "a trial card"
+}
+
+# Bugs caught (#828): a second eligible card in the share took the trial while one was in flight; a card out of the
+# share, a pipeline one or a large one took it; a blocked trial card's retry built on the challenger again; two
+# blocked trial cards of a group did not drop its challenger (the next card of the group in the share), the drop
+# reached another group, or the snapshot did not list it. One fixture; each card is picked as card() picks it (pk),
+# after its picked line, and prints its group, trial, the pick's builder and the builder seat() gives it. Issues 15,
+# 35 and 40 are small code, 20, 11, 45 and 55 small docs, 25 pipeline and 30 large.
+# Also caught: c1-15's filed line (its follow-ups, filed before it lands) freed the trial for c1-20; once c1-35's
+# issue was closed while it was blocked (shut()), the snapshot no longer listed the drop the rule still applies; a
+# builder the owner set for #45 during its trial was replaced by the challenger; c1-45, its process gone before any
+# review and blocked by `shut 45` (which did not load trialflag()) on a change to b.txt, a pipeline file the fixture
+# tracks (it leaves conveyor/ out), was not flagged; c1-55 took the trial while the challenger's account
+# was at the weekly limit guard.
+t_picktrialrules() {
+  local code docs
+  code=$(for n in 15 35 40; do issue $n 2026-01-01 | jq -c '.body = "Change src/a.js."'; done | paste -sd, -)
+  docs=$(for n in 20 11 45 55; do issue $n 2026-01-01 | jq -c '.body = "Fix a typo in docs/guide.md."'; done | paste -sd, -)
+  setup "[$code,$docs,$(issue 25 2026-01-01 | jq -c '.body = "Change conveyor/lib/run.sh."'),$(issue 30 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"')]"
+  tune '.split.doneWhen = 3 | .pipelineFiles = ["conveyor/lib/", "b.txt"] | .models.allowed.claude += ["claude-sonnet-5-5", "m2"]'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  cat > "$T/$CASE/pk.sh" <<'EOF'
+m=0
+tl() { # <card> <issue> <step> [<pick>] [<more fields>]: a line of the card, a minute after the one before
+  jq -cn --arg c "$1" --argjson n "$2" --arg s "$3" --argjson p "${4:-null}" --argjson x "${5:-null}" --arg t "$(printf '2026-11-01T00:%02d:00Z' "$m")" \
+    '{card: $c, issue: $n, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: (if $s == "blocked" then "blocked" else "ok" end), sha: "", reason: ""}
+      + if $s == "picked" then {title: "T"} else {pick: $p} end + ($x // {})' >> "$STATE"
+  m=$((m + 1))
+}
+pk() { # <card> <issue> [<step>]: picked as card() picks it; then a line of that step with its pick
+  tl "$1" "$2" picked; SEATCARD=$2 PICK='' PICKSEAT=''
+  modelpick "$1" "$2" 2>/dev/null
+  echo "$1 $(jq -r '"\(.group) \(.trial) \(.choice.model)"' <<<"$PICK") $(seat builder | jq -r .model)"
+  [ -z "${3:-}" ] || tl "$1" "$2" "$3" "$PICK"
+}
+held() { jq -c --arg c "$1" 'select(.card == $c and .step == "worktree") | .pick' "$STATE"; } # <card>: its pick
+pk c1-15 15 worktree; tl c1-15 15 filed "$(held c1-15)"; pk c1-20 20; pk c1-11 11; pk c1-25 25; pk c1-30 30
+tl c1-15 15 blocked "$(held c1-15)"; pk c2-15 15
+pk c1-35 35 worktree; tl c1-35 35 blocked "$(held c1-35)"; shut '[35]' >/dev/null
+pk c1-40 40; pk c1-45 45
+loop control card 45 builder m2 high >/dev/null; echo "owner $(SEATCARD=45 seat builder | jq -r .model)"
+git -C "$R" worktree add -q --detach "$CARDS/c1-45" && echo x > "$CARDS/c1-45/b.txt"
+# Its process gone before any review: `shut 45` blocks it (unstick(), lib/run.sh), run as its own command, so the
+# block has only the files that command loads, not card()'s.
+sh -c : & d=$!; wait "$d"; tl c1-45 45 worktree "$PICK" "{\"pid\": $d, \"started\": \"x\"}"
+loop shut 45 >/dev/null 2>&1
+jq -cn '{time: (now | todate), pct: 95}' >> "${STATE%/*}/limit.jsonl"; loop control guard 90 >/dev/null; pk c1-55 55
+EOF
+  fx_in ". '$T/$CASE/pk.sh'"
+  [ "$(cat "$T/$CASE/run.out")" = 'c1-15 small code true claude-sonnet-5-5 claude-sonnet-5-5
+c1-20 small docs false m m
+c1-11 small docs false m m
+c1-25 small pipeline false m m
+c1-30 large code false m m
+c2-15 small code false m m
+c1-35 small code true claude-sonnet-5-5 claude-sonnet-5-5
+c1-40 small code false m m
+c1-45 small docs true claude-sonnet-5-5 claude-sonnet-5-5
+owner m2
+c1-55 small docs false m m' ] || fail "the trials of the cards picked: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.card == "c1-45" and .step == "blocked") | .pick.pipeline | tojson')" = '["b.txt"]' ] \
+    || fail "the trial card blocked before its review does not flag its pipeline file: $(st 'select(.card == "c1-45")')"
+  [ "$(loop snapshot | jq -c '.cost.trials.flagged | map(.card)')" = '["c1-45"]' ] \
+    || fail "the snapshot does not flag the trial card blocked before its review: $(loop snapshot | jq -c .cost.trials)"
+  [ "$(loop snapshot | jq -c '.cost.trials.dropped')" = '[{"group":"small code","model":"claude-sonnet-5-5","effort":"medium","cards":["c1-15","c1-35"]}]' ] \
+    || fail "the snapshot does not list the dropped challenger of small code: $(loop snapshot | jq -c .cost.trials)"
+}
+
 # Bug caught: a card that starts again for the same issue was picked again, so a restart could move it to another
 # group or choice. The issue's earlier card (blocked) holds a pick of another group and builder than this issue now
 # gets; the new card keeps that pick, with the rule's setting as it is now.

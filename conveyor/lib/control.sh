@@ -170,6 +170,9 @@ FIXSEAT='def fixseat($c; $k; $b): ($c // {})[$k] as $o
 declare -gA SEAT_V=(); SEAT_K=''
 seat() { # <builder|reviewer|judge|fix|testFix> [the control record, when the caller has read it]
   local a c=${2:-} x CTL_V n=${SEATCARD:-}; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
+  # A trial card (PICKSEAT, card()'s: picktrial(), lib/modelpick.sh) builds on the rule's challenger, as if the record
+  # set it for the issue's builder, until the owner sets one for the issue (that always wins); its other seats are the record's.
+  [ -z "${PICKSEAT:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEAT" '.cards[$n].builder //= $p' <<<"$c") || return 1
   # A record with no key "<issue>" keeps no seats for the card: the project's, worked out (and kept) once for all cards.
   [[ $c == *"\"$n\":"* ]] || n=''
   modelsallowed a || return 1
