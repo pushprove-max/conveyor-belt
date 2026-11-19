@@ -1306,7 +1306,9 @@ echo v1 > "$PUSHER/.claude/scripts/dashboard_server.py"; echo v1 > "$PUSHER/READ
 pg add -A; pg commit -q -m base; pg push -q origin main
 git clone -q "$ORIG" "$UP"
 stub systemctl 'echo "$*" >> "'"$T"'/systemctl-calls"'
-upd() {
+# upd runs with no fetch stamp, so each run fetches; updkeep keeps the stamp the last run wrote.
+upd() { rm -f "$OUT/cache/update-fetched"; updkeep; }
+updkeep() {
   : > "$T/systemctl-calls"
   env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$UP" CONVEYOR_WORKSPACES="$WS" \
     CONVEYOR_SCRATCH="$SCR" CONVEYOR_DASHBOARD_DIR="$OUT" timeout 60 bash "$DASH" --update 2>> "$T/update.log"
@@ -1345,6 +1347,28 @@ upd || fail "--update exited non-zero on the restart retry: $(cat "$T/update.log
 [ "$(git -C "$UP" rev-parse HEAD)" = "$(pg rev-parse HEAD)" ] || fail "the retry run must still bring a later move forward"
 grep -qxF -- '--user --no-block restart dashboard.service' "$T/systemctl-calls" || fail "the next run must retry a failed restart: $(cat "$T/systemctl-calls")"
 uq '.error == null and .moved.restart == true and (.moved | has("restartFailed") | not)' "a retried restart clears the failure"
+# origin main is fetched at most every 5 minutes, by a stamp (issue 513): each 60 s cycle fetching put a network call
+# in every cycle. A stub git counts the fetches and runs git for the rest. Two runs a minute apart fetch once, the
+# second using what the first got; a run after the stamp is 5 minutes old fetches again.
+stub git 'case " $* " in *" fetch "*) echo fetch >> "'"$T"'/fetches" ;; esac; exec "'"$(command -v git)"'" "$@"'
+rm -f "$OUT/cache/update-fetched"; : > "$T/fetches"
+echo doc3 > "$PUSHER/doc.txt"; pg commit -q -am "doc only 3"; pg push -q origin main
+updkeep || fail "--update exited non-zero: $(cat "$T/update.log")"
+[ "$(wc -l < "$T/fetches")" -eq 1 ] && [ "$(git -C "$UP" rev-parse HEAD)" = "$(pg rev-parse HEAD)" ] || fail "a run with no stamp must fetch and move: $(wc -l < "$T/fetches") fetch(es)"
+# The first run wrote the stamp; the test only ages that stamp, so a run that writes none fails here.
+stamped() { at=$(cat "$OUT/cache/update-fetched" 2>/dev/null) && [[ $at =~ ^[0-9]+$ ]] && [ $(($(date +%s) - at)) -lt 30 ]; }
+stamped || fail "a run that fetches must write the fetch stamp: '$(cat "$OUT/cache/update-fetched" 2>&1)'"
+echo $((at - 60)) > "$OUT/cache/update-fetched"
+here=$(git -C "$UP" rev-parse HEAD)
+echo doc4 > "$PUSHER/doc.txt"; pg commit -q -am "doc only 4"; pg push -q origin main
+updkeep || fail "--update exited non-zero: $(cat "$T/update.log")"
+[ "$(wc -l < "$T/fetches")" -eq 1 ] && [ "$(git -C "$UP" rev-parse HEAD)" = "$here" ] || fail "a run a minute after the last fetch must not fetch, and stays where that fetch got it: $(wc -l < "$T/fetches") fetch(es)"
+uq '.error == null' "a run with no fetch is not an error"
+at=$(cat "$OUT/cache/update-fetched"); echo $((at - 240)) > "$OUT/cache/update-fetched"
+updkeep || fail "--update exited non-zero: $(cat "$T/update.log")"
+[ "$(wc -l < "$T/fetches")" -eq 2 ] && [ "$(git -C "$UP" rev-parse HEAD)" = "$(pg rev-parse HEAD)" ] || fail "a run after the stamp is 5 minutes old must fetch again and move: $(wc -l < "$T/fetches") fetch(es)"
+stamped || fail "a run that fetches again must write a new stamp"
+rm -f "$BIN/git"
 # A fast-forward that would overwrite a changed file: git refuses, and the reason is reported, autostash set or not.
 git -C "$UP" config merge.autoStash true
 echo v3 > "$PUSHER/README"; pg commit -q -am "readme"; pg push -q origin main

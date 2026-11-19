@@ -1319,7 +1319,8 @@ restart() {
 # read afresh by each cycle or request, so a change to it needs no restart.
 RESTART_FILES=(.claude/scripts/dashboard.sh .claude/scripts/dashboard_server.py .claude/scripts/dashboard_stream.py
   conveyor/host.json)
-# update -- brings the main checkout forward to origin/main, by a fast-forward only, and restarts the service
+# update -- brings the main checkout forward to origin/main (fetched at most every FETCH_EVERY seconds: fetch_main),
+# by a fast-forward only, and restarts the service
 # when one of RESTART_FILES changed. A checkout on another branch, with a merge in progress or with commits
 # origin/main does not have is left as it is; a fast-forward that would overwrite a changed file is git's to refuse,
 # with autostash off, so a changed file is never merged into the new code.
@@ -1334,7 +1335,7 @@ update() {
   br=$(git -C "$m" symbolic-ref -q --short HEAD 2>/dev/null) || br=''
   if [ "$br" != main ]; then err="the checkout is on ${br:-a detached HEAD}, not main; it is left as it is"
   elif git -C "$m" rev-parse -q --verify MERGE_HEAD >/dev/null; then err="a merge is in progress in the checkout; it is left as it is"
-  elif ! out=$(timeout 120 git -C "$m" fetch -q origin main 2>&1); then err="origin/main could not be fetched: $({ grep -m 1 '^fatal:' <<<"$out" || tail -n 1 <<<"$out"; } | cut -c1-200)"
+  elif ! out=$(fetch_main "$m" 2>&1); then err="origin/main could not be fetched: $({ grep -m 1 '^fatal:' <<<"$out" || tail -n 1 <<<"$out"; } | cut -c1-200)"
   elif ! n=$(git -C "$m" rev-list --count origin/main..main 2>&1); then err="origin/main could not be compared: $(tail -n 1 <<<"$n" | cut -c1-200)"
   elif [ "$n" -gt 0 ]; then err="main has $n commit(s) that origin/main does not; it is left as it is"
   elif [ "$(git -C "$m" rev-list --count main..origin/main)" -gt 0 ]; then
@@ -1353,6 +1354,17 @@ update() {
   restart && return 0
   write_update "the checkout moved to new code, but the restart failed; the dashboard still runs the old code" "$(jq -c '.restartFailed = true' <<<"$moved")"
   return 1
+}
+# fetch_main <checkout> -- fetches origin main at most every FETCH_EVERY seconds: $CACHE/update-fetched holds the time
+# of the last fetch that worked, and a run before it is that old uses what that fetch got. A failed fetch writes no
+# stamp, so the next run tries again; a stamp from the future (a clock set back) is taken as old.
+FETCH_EVERY=300
+fetch_main() {
+  local now at
+  now=$(date +%s); at=$(cat "$CACHE/update-fetched" 2>/dev/null) || at=''
+  [[ $at =~ ^[0-9]+$ ]] && [ "$at" -le "$now" ] && [ $((now - at)) -lt $FETCH_EVERY ] && return 0
+  timeout 120 git -C "$1" fetch -q origin main || return 1
+  mkdir -p "$CACHE" && echo "$now" > "$CACHE/update-fetched"
 }
 # write_update <error> <moved> -- update.json, written whole.
 write_update() {
