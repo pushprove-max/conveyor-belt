@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { STORE, T0, $, boot, panel, deliver, next, full, saved, clone, issuesP, cases, iso, trackOf } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
+const SENT = 'conveyor-board-time-sent';  // app.js TIME_SENT_KEY: set once this browser has sent a Time
 
 const pick = (w, name, value) => {
   const r = $(w, `#customize input[name="choice-${name}"][value="${value}"]`);
@@ -44,18 +45,25 @@ test('a card\'s start and the head\'s clock follow Customize\'s Time and Date, a
 test('a kept Time is sent when the Board opens, and the Time Restore puts back is sent too', () => {
   const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }) } });
   assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour' } }], 'sent on opening, with no click');
+  // Issue 559. Bug it catches: the send not recorded, so every later visit sends the kept Time again (review E4).
+  assert.equal(w.localStorage.getItem(SENT), '1', 'the send is recorded in this browser');
   w.document.getElementById('customize-open').click();
   w.document.getElementById('restore-layout').click();
   assert.deepEqual(w.posts.slice(1), [{ url: 'time', body: { time: '12-hour' } }], 'Restore sends 12-hour');
 });
 
-// Bug it catches (review E4): each visit sent the kept Time again, so a browser whose only change was Density (which
-// saves the default 12-hour) or one that set a Time earlier undid the Time set later in another browser.
-test('a browser that has sent a Time, or kept only the default, sends nothing when the Board opens', () => {
-  const sentBefore = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }), 'conveyor-board-time-sent': '1' } });
-  assert.deepEqual(sentBefore.posts, [], 'a Time sent on an earlier visit is not sent again');
-  const densityOnly = boot({ store: { [STORE]: JSON.stringify({ density: 'compact', time: '12-hour' }) } });
-  assert.deepEqual(densityOnly.posts, [], 'the default Time that a Density change saved is not sent');
+// Bug it catches (review E4): each visit sent the kept Time again, so a browser that set a Time earlier undid the Time
+// set later in another browser. The marker is the one the case above sees written.
+test('a browser that has sent a Time sends nothing when the Board opens again', () => {
+  const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }), [SENT]: '1' } });
+  assert.deepEqual(w.posts, [], 'a Time sent on an earlier visit is not sent again');
+});
+
+// Bug it catches (review E4): a browser whose only change was Density (which saves the default 12-hour) sent that
+// default and undid the Time set later in another browser.
+test('a browser that kept only the default Time sends nothing when the Board opens', () => {
+  const w = boot({ store: { [STORE]: JSON.stringify({ density: 'compact', time: '12-hour' }) } });
+  assert.deepEqual(w.posts, [], 'the default Time that a Density change saved is not sent');
 });
 
 // The metrics panel's days are dates in the kept Date: 9 November with dd/mm/yyyy is 09/11/2026. Bug it catches: a
