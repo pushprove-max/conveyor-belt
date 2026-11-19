@@ -195,7 +195,8 @@ EOF
 # (test.map: a path) in area lines, as .conveyor/engine-areas.json holds them, is read: a case file named by its name
 # is the tracked test file of that name, and an area whose tests are "all" is shared. One that names a case file
 # there is none of fails the read, saying which (the area-map check).
-t_testmaparea() {
+# WHOLESUITE: the per-file fixture's own a.test.sh would be a second tracked a.test.sh, so the name would not resolve.
+t_testmaparea() { local -x WHOLESUITE=true
   setup '[]'
   mapeng 'mapbuild "$R"'; grep -qxF "conveyor: no test map: its language has no coverage tool the test map knows (Node, Python, Go, Rust or Ruby); a card's tests are found by name" "$T/$CASE/eng.out" \
     || fail "a project with no known tool was not told: $(cat "$T/$CASE/eng.out")"
