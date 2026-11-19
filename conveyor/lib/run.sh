@@ -317,7 +317,7 @@ run() { # [max-cards] [serve]
   if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
   while :; do
     stdbkeeps # the turn's readers, and the cards it starts, find the records kept until they change (lib/records.sh)
-    [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || { pusher=''; rm -f "$PUSHING"; }
+    pushended
     # The script a `serve` restarts on, once no push runs: the pinned commit's install, or the checkout's own (its
     # new code); no push starts then, as the restart would wait for it (the new loop makes the push).
     new=''; if [ -z "$pusher" ] && [ -n "$serve" ] && stale; then
