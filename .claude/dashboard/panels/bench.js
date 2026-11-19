@@ -103,7 +103,7 @@
   }
   // Each action's answer stays beside its own control until that action is used again: a redraw keeps it, another
   // action's answer does not replace it, and an answer given for one project does not show on another's page. A key
-  // names the action and what it acts on (stop-<run>, export-<run>, compare-<a>-<b>, check-<arm>), so an answer about
+  // names the action and what it acts on (stop-<run>, export-<run>, compare-<n>-<a>-<b>, check-<arm>), so an answer about
   // one run, pair or selection does not show beside the control for another. `more` keeps facts the answer needs later.
   const saidKey = (key, repo) => `${repo === undefined ? B.repo : repo}\n${key}`;
   function say(key, text, tone, repo, more) { B.said.set(saidKey(key, repo), { ...more, text, tone: tone || 'quiet' }); draw(); }
