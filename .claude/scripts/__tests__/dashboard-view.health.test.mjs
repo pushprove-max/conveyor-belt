@@ -3,6 +3,7 @@
 // rows that are fine folded into "N checks fine"; a row's raw output under "Show output". Shared setup:
 // dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { T0, iso, clone, boot, panel, deliver, tick, full, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -244,6 +245,10 @@ test('Health: an account that only repairs says fix, not build and fix', () => {
   const w = page('health');
   deliver(w, data);
   assert.match(dd(w, 'Usage limit').textContent, /^Fine40% of the 7-day limit usedaccount repairs, noreply-a@example\.com: fix$/);
+  // Issue 707: a `fix: 'fix'` entry in USES draws the same text as the `USES[s] || s` fallback, so no rendered behaviour
+  // can tell it apart; only the source can. The row above proves the fallback still says "fix" without it.
+  const src = readFileSync(new URL('../../dashboard/panels/health.js', import.meta.url), 'utf8');
+  assert.match(src, /const USES = \{ build: 'build and fix', review: 'reviews' \};/, 'USES maps only the uses it renames');
 });
 
 // Issue 151. Bug: on a machine whose every role runs on an API route (billed per token, no subscription), Health warned
