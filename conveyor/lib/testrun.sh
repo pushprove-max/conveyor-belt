@@ -2859,11 +2859,13 @@ dwfields() { # <card> <worktree> <step> <the Done-when check, or ""> <jq filter>
 }
 # The tree of a worktree's files as they are, staged, unstaged and untracked (not ignored), written through a copy of
 # its index so its own index is left as it is: the key of treecheck()'s kept result and the tree asks() compares.
+# The copy keeps the index's time (cp -p): git reads a file staged in the second the index was written as possibly
+# changed only by that time, so a plain copy (a new time) let a same-size rewrite in that second count as unchanged.
 # Fails, printing nothing, when it cannot be written.
 treeof() { # <worktree>
   local i t r
   i=$(mktemp) || return 1
-  cp "$(git -C "$1" rev-parse --path-format=absolute --git-path index)" "$i" 2>/dev/null || rm -f "$i"
+  cp -p "$(git -C "$1" rev-parse --path-format=absolute --git-path index)" "$i" 2>/dev/null || rm -f "$i"
   t=$(GIT_INDEX_FILE=$i git -C "$1" add -A 2>/dev/null && GIT_INDEX_FILE=$i git -C "$1" write-tree 2>/dev/null); r=$?
   rm -f "$i"; [ $r = 0 ] && [ -n "$t" ] && printf '%s\n' "$t"
 }

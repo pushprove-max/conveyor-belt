@@ -105,3 +105,22 @@ t_checknone() {
   out=$( (STATE=$T/$CASE/cards.jsonl; . "$SRC/lib/testrun.sh" || exit 3; packget() { printf -v "$2" '%s' ''; }; treecheck "$W") 2>&1); rc=$?
   [ $rc = 0 ] && [ -z "$out" ] && [ ! -e "$W.checks" ] || fail "with no test.checkCommand, the checks did not pass silently and keep nothing: exit $rc, '$out', $(ls "$W.checks" 2>&1)"
 }
+
+# Bug (#786, checkblock red now and then): treeof() copied the index with a new time, so git trusted the stat of a file
+# staged in the same second as a same-size rewrite of it, and gave the old tree: the checks after a fix session reused
+# the build's kept failure, and asks() could read a fix as no change.
+t_checkracy() {
+  W=$T/$CASE/w; mkdir -p "$W" && git -C "$W" init -q || fail "the worktree"
+  local i s
+  # Stage a.txt and rewrite it, same size, inside one second (up to three tries), then let that second end.
+  for ((i = 0; i < 3; i++)); do
+    until [ "${EPOCHREALTIME: -6}" -lt 300000 ]; do sleep 0.05; done # sleep: the clock must reach the start of a second
+    s=${EPOCHREALTIME%%[.,]*}
+    echo 1 > "$W/a.txt" && git -C "$W" add -A && echo 2 > "$W/a.txt" || fail "the files"
+    [ "${EPOCHREALTIME%%[.,]*}" != "$s" ] || break
+  done
+  until [ "${EPOCHREALTIME%%[.,]*}" != "$s" ]; do sleep 0.05; done # sleep: the second the index was written must end
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh
+  t=$( (STATE=$T/$CASE/cards.jsonl; . "$SRC/lib/testrun.sh" || exit 3; treeof "$W") 2>&1)
+  [ "$t" = "$(git -C "$W" add -A && git -C "$W" write-tree)" ] || fail "treeof() gave the tree from before a same-second, same-size rewrite: '$t'"
+}

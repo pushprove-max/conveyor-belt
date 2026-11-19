@@ -151,4 +151,20 @@ PATH=$T/bin:$PATH one kept hooks/h.test.sh > /dev/null
 [ "$(calls)" = 3 ] && [ "$(cat "$T/rc")" = 1 ] && grep -q 'their result is kept' "$T/out" && grep -q '^conveyor/x.sh:2:1: warning: stub' "$T/out" \
   || no "a one-file run of the tree the loop checked ran the checks again, or lost their failure: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"): $(cat "$T/out")"
 
+# Issue 786: treekey() copied the index with a new time, so git trusted the stat of a file staged in the second the
+# index was written, and a same-size rewrite in that second kept the old key: the run reused the kept result of the
+# tree before a fix. x.sh is written and staged as the kept tree has it and rewritten, same size, in one second (up to
+# three tries).
+for ((i = 0; i < 3; i++)); do
+  until [ "${EPOCHREALTIME: -6}" -lt 300000 ]; do sleep 0.05; done # sleep: the clock must reach the start of a second
+  s=${EPOCHREALTIME%%[.,]*}
+  if ! { printf 'one\ntwo\nthree\nfour\n' > "$R/conveyor/x.sh" && git -C "$R" add conveyor/x.sh \
+    && printf 'one\ntwo\nthree\nfive\n' > "$R/conveyor/x.sh"; }; then no "the rewrite of x.sh"; fi
+  [ "${EPOCHREALTIME%%[.,]*}" != "$s" ] || break
+done
+until [ "${EPOCHREALTIME%%[.,]*}" != "$s" ]; do sleep 0.05; done # sleep: the second the index was written must end
+PATH=$T/bin:$PATH one kept hooks/h.test.sh > /dev/null
+[ "$(calls)" = 4 ] && [ "$(cat "$T/rc")" = 1 ] \
+  || no "a one-file run after a same-second, same-size rewrite reused the kept checks of the tree before it: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"): $(cat "$T/out")"
+
 [ $fails = 0 ] && echo "ok - test-changed runs one given test file alone" || exit 1

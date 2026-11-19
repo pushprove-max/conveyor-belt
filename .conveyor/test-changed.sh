@@ -370,7 +370,7 @@ return $rc
 treekey() {
   local ix h t r
   h=$(git rev-parse HEAD 2>/dev/null) && ix=$(mktemp) || return 1
-  cp "$(git rev-parse --git-path index)" "$ix" 2>/dev/null || rm -f "$ix"
+  cp -p "$(git rev-parse --git-path index)" "$ix" 2>/dev/null || rm -f "$ix" # -p: as treeof() (conveyor/lib/testrun.sh), so a same-second rewrite is not read as unchanged
   t=$(GIT_INDEX_FILE=$ix git add -A 2>/dev/null && GIT_INDEX_FILE=$ix git write-tree 2>/dev/null); r=$?
   rm -f "$ix"; [ $r = 0 ] && [ -n "$t" ] && echo "$h-$t"
 }
