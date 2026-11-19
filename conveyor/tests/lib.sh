@@ -114,9 +114,9 @@ tuned() { # <jq filter> <command...>
 # The control record, the only home of the cap and the two seats' models: as setup seeds it (seed), or with one
 # seat's model changed and its effort kept (seatset). The judge off, visible changes waiting for the owner's yes and
 # a push after each landing are set here, not left to control-defaults.json (judge on, visible off, push off): a case
-# turns them as it needs. So is the rule Whole suite in a card, on (its default is off): the cases of a card's test
-# step test a run that may be the whole suite only in a case with `local -x WHOLESUITE=true`; by default it is off, as
-# setup's per-file fixture (filemode()) has it. The rule Split large
+# turns them as it needs. So is the rule Whole suite in a card: off, as its default and setup's per-file fixture
+# (filemode()) have it, and on only in a case with `local -x WHOLESUITE=true`, where the cases of a card's test step
+# test a run that may be the whole suite. The rule Split large
 # issues is off (its default is shadow): a card's lines are those of today's cards; its cases (slices.test.sh) turn it on.
 seed() {
   local whole=false; [ "${WHOLESUITE:-}" != true ] || whole=true
