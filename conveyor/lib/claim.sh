@@ -38,14 +38,18 @@
 # and have not yet claimed the files, and stays away. Its claims keep its count of give-ways (gave). The card that
 # claims the files of one that gave way is named on it (to: its issue), for the Board and its live record (watch()).
 claim() { # <card> <worktree> <the card's pid>; under the lock
-  local mine others o c w ord passed fit gave away for='[]' apart='[]' notready=0 unready='[]' stk t ms=null rdy='{}'
-  ord=$(ctl 2>/dev/null) && ord=$(jq -c .order <<<"$ord") || ord='[]'
-  away=$(jq -c 'select(.away == true) | {away, for: (.for // [] | arrays), to: (.to // null), fixing: (.fixing == true)}' "$2.claim" 2>/dev/null) && [ -n "$away" ] || away='{"for": []}'
+  local mine others o c w ord cl away for='[]' apart='[]' notready=0 unready='' stk t ms=null rdy=''
+  # The control record whole: the jq below reads its order (#595).
+  ord=$(ctl 2>/dev/null) || ord='{"order": []}'
+  # The files of its change, and its claim's give-way (away; none when it did not give way), from one jq (#595).
+  { cl=$(<"$2.claim"); } 2>/dev/null || cl=''
+  mine=$(git -C "$2" diff --cached --name-only --no-renames -z | jq -rRsc --arg cl "$cl" 'split("\u0000") | map(select(. != "" and (endswith(".md") | not))),
+    ([$cl | try fromjson catch null | objects | select(.away == true) | {away, for: (.for // [] | arrays), to: (.to // null), fixing: (.fixing == true)}] | first // "")') || return 1
+  away='{"for": []}'; [[ $mine != *$'\n'* ]] || { away=${mine#*$'\n'}; mine=${mine%%$'\n'*}; }
   # This runs every turn of a wait (settle()), so it starts no program whose answer is known (#532): a card not away
   # waits for no card it gave way to (for), and with no other card's live claim nothing below changes what it waits on.
   [ "$away" = '{"for": []}' ] \
     || for=$(for o in $(jq -r '.for[]' <<<"$away"); do [ ! -d "$CARDS/$o" ] || ! ready "$CARDS/$o" || printf '%s\n' "$o"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
-  mine=$(git -C "$2" diff --cached --name-only --no-renames -z | jq -Rsc 'split("\u0000") | map(select(. != "" and (endswith(".md") | not)))') || return 1
   # Each live claim, the card's own pid read with it: "<pid> <claim>". Not of a card stacked on this one (its worktree on
   # the stack's base, stackto()): it lands after this one, so this one never waits on it.
   others=$(for o in "$CARDS"/*.claim; do
@@ -64,29 +68,32 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
     # it lands only after it, so it waits on it still; but not on that card away for a fix round (giveway()): for the
     # fix of its failed tests (fixing), or, once its own tests passed on the change it holds (testedhere()), for the
     # fix of its review's findings (fix; the owner, 2026-11-17). It is fitted onto main alone then, and lands.
-    stk=$(jq -r --arg h "$(git -C "$2" rev-parse HEAD 2>/dev/null)" 'select(.base == $h) | .on' "$2.stack" 2>/dev/null) || stk=''
+    stk=''; [ ! -e "$2.stack" ] || stk=$(jq -r --arg h "$(git -C "$2" rev-parse HEAD 2>/dev/null)" 'select(.base == $h) | .on' "$2.stack" 2>/dev/null) || stk=''
     if [ -n "$stk" ]; then
       t=false; ! jq -e --arg s "$stk" 'any(.[]; .card == $s and .away == true and .fix == true)' <<<"$others" >/dev/null || ! testedhere "$2" || t=true
       apart=$(jq -c --arg s "$stk" 'map(select(. != $s))' <<<"$apart") \
         && others=$(jq -c --arg s "$stk" --argjson t "$t" 'map(select(.card != $s or .away != true or (.fixing != true and (.fix != true or ($t | not)))))' <<<"$others") || return 1
     fi
-    [ "$apart" = '[]' ] || others=$(jq -c --argjson a "$apart" 'map(select(.card | IN($a[]) | not))' <<<"$others") || return 1
     ready "$2" || notready=1
-    if jq -e --argjson m "$mine" 'any(.[]; .away == true and .back != true and (.paths - (.paths - $m)) != [])' <<<"$others" >/dev/null && [ $notready = 1 ]; then
-      others=$(jq -c 'map(if .away != true then . elif .back != true then .held = true else empty end)' <<<"$others")
-    else others=$(jq -c 'map(select(.away != true))' <<<"$others"); fi
-    # Ready, it does not wait behind a waiting card that shares its files and is not ready (it may wait on a card away).
-    [ $notready = 1 ] || unready=$(jq -r --argjson m "$mine" '.[] | select(.held != true and (.paths - (.paths - $m)) != []) | .card' <<<"$others" \
-      | while IFS= read -r o; do [ ! -d "$CARDS/$o" ] || ready "$CARDS/$o" || printf '%s\n' "$o"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
-    # When its tests passed (ms, readysince(); null when they have not or its change no longer fits main), and those of
-    # each card that shares its files (rdy: {card: since}), for which goes first.
+    # One jq (#595) for the three steps, its first line: the cards whose change applies with this one left out; then,
+    # when this card is not ready and a card away (not back) shares its files, each card away and not back held, and
+    # those back left out; else every card away left out. Then each card left that shares its files, "<held> <card>".
+    # Ready, it does not wait behind a waiting card that shares its files and is not ready (it may wait on a card away):
+    # unready, one a line. When the tests of each passed (rdy: "<card>\t<since>" lines, readysince()), for which goes first.
+    { IFS= read -r others && while read -r t o; do
+        [ $notready = 1 ] || [ "$t" = true ] || [ ! -d "$CARDS/$o" ] || ready "$CARDS/$o" || unready+=$o$'\n'
+        ! t=$(readysince "$CARDS/$o") || rdy+=$o$'\t'$t$'\n'
+      done; } < <(jq -rc --argjson a "$apart" --argjson m "$mine" --argjson n "$notready" 'map(select(.card | IN($a[]) | not))
+      | if $n == 1 and any(.[]; .away == true and .back != true and (.paths - (.paths - $m)) != []) then map(if .away != true then . elif .back != true then .held = true else empty end)
+        else map(select(.away != true)) end
+      | ., (.[] | select((.paths - (.paths - $m)) != []) | "\(.held == true) \(.card)")' <<<"$others")
+    [ -n "$others" ] || return 1
+    # When its own tests passed (ms, readysince(); null when they have not or its change no longer fits main).
     [ $notready = 1 ] || ms=$(readysince "$2") || ms=null
-    rdy=$(jq -r --argjson m "$mine" '.[] | select((.paths - (.paths - $m)) != []) | .card' <<<"$others" \
-      | while IFS= read -r o; do ! t=$(readysince "$CARDS/$o") || printf '%s\t%s\n' "$o" "$t"; done \
-      | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}') || return 1
   fi
-  w=$(stdb ask lines cards | jq -cn --argjson mine "$mine" --argjson o "$others" --arg me "$1" --argjson ord "$ord" --argjson for "$for" --argjson un "$unready" --argjson ms "$ms" --argjson rdy "$rdy" \
-      '[inputs] as $all | [$all[] | select(.step == "picked")] as $p | ($p | map(.card)) as $order | ($ord | length) as $n
+  w=$(stdb ask lines cards | jq -cn --argjson mine "$mine" --argjson o "$others" --arg me "$1" --argjson ord "$ord" --argjson for "$for" --arg un "$unready" --argjson ms "$ms" --arg rdy "$rdy" \
+      '($un | split("\n") | map(select(. != ""))) as $un | ($rdy | split("\n") | map(select(. != "") | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}) as $rdy
+      | $ord.order as $ord | [inputs] as $all | [$all[] | select(.step == "picked")] as $p | ($p | map(.card)) as $order | ($ord | length) as $n
       | [$all[] | select(.step | IN("landed", "closed", "blocked")) | .card] as $ended
       | def at($c): $order | index($c) // -1;
         def rank($c): ($p | map(select(.card == $c)) | first | .issue) as $i | ($ord | index($i)) // $n;
@@ -112,11 +119,13 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
        done
        w='' ;;
   esac
-  passed=$(jq -c '.passed == true' "$2.claim" 2>/dev/null) || passed=false
-  fit=$(jq -c '.passed == true and .fit == true' "$2.claim" 2>/dev/null) || fit=false
-  gave=$(jq -c '.gave // 0 | numbers' "$2.claim" 2>/dev/null) && [ -n "$gave" ] || gave=0
-  jq -cn --argjson p "$3" --argjson m "$mine" --argjson h "$([ -z "$w" ] && echo true || echo false)" --argjson was "$passed" --argjson f "$fit" --argjson g "$gave" --argjson a "$away" \
-    '{pid: $p, paths: $m, held: $h, gave: $g} + if $h then {was: ($was and ($f | not))} else {passed: $was} + (if $f then {fit: true} else {} end) + (($a | select(.away) | . + {back: true}) // {}) end' > "$2.claim.new" && mv -f "$2.cpatch.new" "$2.cpatch" && mv -f "$2.claim.new" "$2.claim" || return 1
+  # The claim kept so far, read once (#595): whether it was passed (passed), as a ready card only (fit), and its gave;
+  # none of them when it is not one JSON object.
+  { cl=$(<"$2.claim"); } 2>/dev/null || cl=''
+  jq -cn --argjson p "$3" --argjson m "$mine" --argjson h "$([ -z "$w" ] && echo true || echo false)" --arg cl "$cl" --argjson a "$away" \
+    '([$cl | try fromjson catch null | objects] | first // {}) as $c | ($c.passed == true) as $was | ($was and $c.fit == true) as $f
+    | ([$c.gave // 0 | numbers] | first // 0) as $g
+    | {pid: $p, paths: $m, held: $h, gave: $g} + if $h then {was: ($was and ($f | not))} else {passed: $was} + (if $f then {fit: true} else {} end) + (($a | select(.away) | . + {back: true}) // {}) end' > "$2.claim.new" && mv -f "$2.cpatch.new" "$2.cpatch" && mv -f "$2.claim.new" "$2.claim" || return 1
   if [ -z "$w" ] && [[ ${1##*-} =~ ^[0-9]+$ ]]; then
     for o in "$CARDS"/*.claim; do
       c=${o##*/}
@@ -356,7 +365,7 @@ stackto() { # <card> <worktree> <claim()'s wait> <issue json>
 # and sec say how), else 0. Each merge here (a clean three-way one, a union one, or the session's) sets parsecheck:
 # card() then checks that the merged files parse (parses()) before any test runs.
 settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to begin> <issue json>; sets card()'s caught, trc, sec, waitsec, behind and parsecheck
-  local me=$BASHPID w waited='' ws wb old err t moved=0 away b out id mt cf tf ix docs dp onto stk
+  local me=$BASHPID w waited='' ws wb old err t moved=0 away b bl bf bt bs bp out id mt cf tf ix docs dp onto stk
   ! jq -e '.away == true and (.to | type) == "number"' "$3.claim" >/dev/null 2>&1 || caught=''
   while :; do
     # In a wait, what the card has waited is brought up to date each time round, the last one of the wait too: a wait
@@ -376,11 +385,14 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # Taken into a batch (gather()): it waits for the card that took it, which lands it (3) or finds it breaks the
     # batch's tests (4). A batch whose card is gone takes it no more.
     if [ -e "$3.batch" ]; then
-      b=$(jq -c objects "$3.batch" 2>/dev/null) || b='{}'
-      ! jq -e .landed <<<"$b" >/dev/null 2>&1 || { rm -f "$3.idle"; return 3; }
+      # Its fields from one read (#595): whether landed and fail are set, fail's value, sec and pid; none set and pid 0
+      # when it is not one JSON object.
+      IFS=$'\x1f' read -r bl bf bt bs bp < <(jq -r 'objects | [(.landed | . != null and . != false), (.fail | . != null and . != false), (.fail | tostring), (.sec // 0 | tostring), (.pid // 0 | tostring)] | join("\u001f")' "$3.batch" 2>/dev/null) \
+        || { bl=false bf=false bp=0; }
+      [ "$bl" != true ] || { rm -f "$3.idle"; return 3; }
       # That run was the batch card's: its wait and run are not known here (testrec()).
-      ! jq -e .fail <<<"$b" >/dev/null 2>&1 || { trc=$(jq -r .fail <<<"$b"); sec=$(jq -r '.sec // 0' <<<"$b"); TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; return 4; }
-      if kill -0 "$(jq -r '.pid // 0' <<<"$b")" 2>/dev/null; then [ -n "$w" ] || { : > "$3.idle"; sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
+      [ "$bf" != true ] || { trc=$bt; sec=$bs; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; return 4; }
+      if kill -0 "$bp" 2>/dev/null; then [ -n "$w" ] || { : > "$3.idle"; sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
     fi
     # Told to wait, it is stacked on that card instead when it can be (stackto()): fitted below onto the stack's base
     # (onto), not main, and reviewed there; not while a batch holds it.
@@ -392,13 +404,16 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # Each wait begins with its start line, one after a session of this call too (a card that kept its claim through
       # the session that brought it onto main): `health` counts a wait whose start line is the card's last.
       [ -n "$waited" ] || { waited=$(date -u +%FT%TZ); ws=$SECONDS; wb=$waitsec
-        began "$1" "$2" "$5"; echo "conveyor: card $1 waits on card $(jq -r .on <<<"$w"), which changes the same files: $(jq -r '.paths | join(", ")' <<<"$w")"; }
+        began "$1" "$2" "$5"; echo "conveyor: card $1 waits on card $(jq -r '"\(.on), which changes the same files: \(.paths | join(", "))"' <<<"$w")"; }
       # The live record names the card it waits on now: one `retry` gives back is picked first, past the cap (urgent).
       # It names too (waited) what the card waited before this wait (before: the seconds of its waits that ended) and
       # every card it has waited on, in order (behind), so `health` can say when all its waits together pass WAIT_LIMIT.
-      behind=$(jq -c --argjson w "$w" 'if index($w.on) then . else . + [$w.on] end' <<<"$behind" 2>/dev/null) || behind='[]'
-      jq -cn --argjson w "$w" --arg at "$waited" --arg s "$5" --argjson wb "$wb" --argjson bh "$behind" '{step: $s, at: $at, last: (now | todate), turns: 0, waits: $w, waited: {before: $wb, behind: $bh},
-        action: "waiting on card \($w.on), which changes the same files: \($w.paths | join(", "))"}' > "$3.live.tmp" 2>/dev/null && mv -f "$3.live.tmp" "$3.live"
+      # One jq for both (#595): the list on its first line, then the live record; a list that does not read is none.
+      t=''; { IFS= read -r behind && IFS= read -r t; } < <(jq -cn --argjson w "$w" --arg at "$waited" --arg s "$5" --argjson wb "$wb" --arg bh "$behind" '
+        ([$bh | try fromjson catch null | arrays] | first // [] | if index($w.on) then . else . + [$w.on] end) as $bh
+        | $bh, {step: $s, at: $at, last: (now | todate), turns: 0, waits: $w, waited: {before: $wb, behind: $bh},
+        action: "waiting on card \($w.on), which changes the same files: \($w.paths | join(", "))"}' 2>/dev/null) || behind='[]'
+      [ -z "$t" ] || { printf '%s\n' "$t" > "$3.live.tmp" && mv -f "$3.live.tmp" "$3.live"; } 2>/dev/null
       # Waiting after a GO (<worktree>.ready), with batches on, it runs its own product checks and changed tests,
       # holding nothing: only a card whose own tests passed is ready, so no batch lands a card that fails alone. Its
       # checks failing block it, as at its turn; its tests failing send it to its fix (4). Not one merged onto main
@@ -541,12 +556,15 @@ testedhere() { jq -e --arg p "$(cardpatch "$1")" '.tested == true and $p != "" a
 # worktree is lent to its batch (<worktree>.lent, batch(), rebatch()), the change it holds is its own (bpid()), not the
 # batch's the worktree has then: else a later ready card would go past it there, and land() would refuse the batch.
 readysince() { # <worktree>
-  local s h
-  s=$(jq -e 'select(.tested == true) | .since | numbers' "$1.ready" 2>/dev/null) || return 1
+  local s p h r
+  # One read of <worktree>.ready (#595): its since and the patch-id its tests passed on, then that patch-id is matched.
+  r=$(jq -er 'select(.tested == true and (.since | type) == "number") | "\(.patch | strings // "")\t\(.since)"' "$1.ready" 2>/dev/null) || return 1
+  p=${r%%$'\t'*} s=${r#*$'\t'}
+  [ -n "$p" ] || return 1
   if [ -s "$1.lent" ]; then
-    h=$(<"$1.lent") && jq -e --arg p "$(bpid "$1")" '$p != "" and .patch == $p' "$1.ready" >/dev/null 2>&1 || return 1
-  else h=$(git -C "$1" rev-parse HEAD 2>/dev/null) && testedhere "$1" || return 1; fi
-  ! jq -e --arg h "$h" '.base == $h' "$1.stack" >/dev/null 2>&1 && printf '%s\n' "$s"
+    h=$(<"$1.lent") && [ "$(bpid "$1")" = "$p" ] || return 1
+  else h=$(git -C "$1" rev-parse HEAD 2>/dev/null) && [ "$(cardpatch "$1")" = "$p" ] || return 1; fi
+  { [ ! -e "$1.stack" ] || ! jq -e --arg h "$h" '.base == $h' "$1.stack" >/dev/null 2>&1; } && printf '%s\n' "$s"
 }
 # The test files that the staged change at <worktree> and the change main made from <the commit its tests ran on> to
 # the worktree's HEAD both touch, one a line; fails when there are none, or when HEAD is that commit or none is given.
@@ -590,15 +608,18 @@ unshare() { # <worktree> <sharedtests() of it>
     { print } END { for (x in s) { print "fail\t" x; d[x] = 1 } for (x in d) if (!(x in f)) print "shared\t" x }' "$1.rerun" > "$1.rerun.new" && mv -f "$1.rerun.new" "$1.rerun"
 }
 gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batch's cards in order, one a line (nothing when it takes none), each other one marked taken (<worktree>.batch)
-  local max ord o r x m all d
+  local max ord o r x s m all d bc=()
   packget landBatch max && [ "$max" -gt 1 ] && jq -e '.tested == true and .alone != true' "$2.ready" >/dev/null 2>&1 || return 0
   ord=$(ctl 2>/dev/null) && ord=$(jq -c .order <<<"$ord") || ord='[]'
   o=$(for r in "$CARDS"/*.claim; do
       [ -e "$r" ] && [ "$r" != "$2.claim" ] || continue
-      r=${r%.claim}; x=$(jq -c objects "$r.ready" 2>/dev/null) || x=''
-      r=$(jq -c --arg c "${r##*/}" --argjson x "${x:-null}" --argjson t "$([ -e "$r.batch" ] && echo true || echo false)" --arg s "$(jq -r '.on // empty' "$r.stack" 2>/dev/null)" \
-        'select((.pid | type) == "number" and (.paths | type) == "array") | . + {card: $c, ready: $x, taken: $t, stack: $s}' "$r.claim" 2>/dev/null) || continue
-      [ -z "$r" ] || ! kill -0 "$(jq -r .pid <<<"$r")" 2>/dev/null || printf '%s\n' "$r"
+      # One jq a card (#595): its claim, with its <worktree>.ready (null when it is not one JSON object) and the card its
+      # <worktree>.stack is on ("" when none), as "<pid> <claim>".
+      r=${r%.claim}; { x=$(<"$r.ready"); } 2>/dev/null || x=''; { s=$(<"$r.stack"); } 2>/dev/null || s=''
+      r=$(jq -r --arg c "${r##*/}" --arg x "$x" --argjson t "$([ -e "$r.batch" ] && echo true || echo false)" --arg s "$s" \
+        '([$x | try fromjson catch null | objects] | first) as $x | ([$s | try fromjson catch null | .on? // empty | if type == "string" then . else tojson end] | first // "") as $s
+        | select((.pid | type) == "number" and (.paths | type) == "array") | "\(.pid) \(. + {card: $c, ready: $x, taken: $t, stack: $s} | tojson)"' "$r.claim" 2>/dev/null) || continue
+      [ -z "$r" ] || ! kill -0 "${r%% *}" 2>/dev/null || printf '%s\n' "${r#* }"
     done | jq -sc .) && x=$(jq -c --arg c "$1" --slurpfile r "$2.ready" '{card: $c, paths, ready: $r[0]}' "$2.claim") || return 1
   all=$(stdb ask lines cards | jq -cn --argjson o "$o" --argjson me "$x" --argjson ord "$ord" --argjson max "$max" '
       def meets($a; $b): ($a - ($a - $b)) != [];
@@ -613,20 +634,20 @@ gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batc
       | select(.b != []) | ([$me] + .b) as $in
       | {paths: (.p | unique), cards: ($in | sort_by([(.stack as $s | $in | any(.card == $s)), rank, .ready.since]) | map(.card))}') || return 1
   [ -n "$all" ] || return 0
-  jq -c --argjson p "$(jq -c .paths <<<"$all")" '.paths = $p' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim" || return 1
+  jq -c --argjson a "$all" '.paths = $a.paths' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim" && mapfile -t bc < <(jq -r '.cards[]' <<<"$all") || return 1
   # The change that claim keeps is now the batch's: each card's staged change on main, in the batch's order, so a card
   # whose change applies with the whole batch does not wait on it (together()). A card whose change does not apply on
   # those before it is left out, as the batch's test run leaves it out (batch()).
   d=$(mktemp -d) || return 1
   GIT_INDEX_FILE=$d/index git read-tree "refs/heads/$BRANCH" 2>/dev/null || x=''
-  for m in $(jq -r '.cards[]' <<<"$all"); do
+  for m in "${bc[@]}"; do
     [ -n "$x" ] && git -C "$CARDS/$m" diff --cached --binary --no-renames > "$d/patch" 2>/dev/null || { x=''; break; }
     GIT_INDEX_FILE=$d/index git apply --cached "$d/patch" 2>/dev/null || :
   done
   [ -n "$x" ] && GIT_INDEX_FILE=$d/index git diff --cached --binary --no-renames "refs/heads/$BRANCH" > "$2.cpatch.new" 2>/dev/null && mv -f "$2.cpatch.new" "$2.cpatch" \
     || rm -f "$2.cpatch" "$2.cpatch.new"
   rm -rf "$d"
-  for m in $(jq -r '.cards[]' <<<"$all"); do
+  for m in "${bc[@]}"; do
     [ "$m" = "$1" ] || jq -cn --arg b "$1" --argjson p "$3" '{by: $b, pid: $p}' > "$CARDS/$m.batch" || continue
     echo "$m"
   done
@@ -676,17 +697,23 @@ bpid() { # <worktree>
   rm -f "$i"; [ -z "${p:-}" ] || printf '%s\n' "${p%% *}"; return $r
 }
 batchkeep() { # <card> <worktree> <the run's cards>
-  local c=$1 wt=$2 m w ps
+  local c=$1 wt=$2 m w ps r t a=()
   shift 2
+  # One jq for all the run's cards (#595): each card's name, patch-id, <worktree>.ready and .bpass as their text, and
+  # how many paths its change has, then those paths; a file that is not one JSON object is none (null).
   for m in "$@"; do
     w=$CARDS/$m; [ "$m" != "$c" ] || w=$wt
     mapfile -d '' ps < <(git apply --numstat -z "$w.bpatch" 2>/dev/null); ps=("${ps[@]#*$'\t'*$'\t'}")
-    jq -cn --arg c "$m" --arg p "$(bpid "$w")" --argjson r "$(jq -ce objects "$w.ready" 2>/dev/null || echo null)" \
-      --argjson t "$(jq -ce objects "$w.bpass" 2>/dev/null || echo null)" '{card: $c, patch: $p, ready: $r, bpass: $t, paths: $ARGS.positional}' --args "${ps[@]}" || return 1
-  done | jq -cs '
+    { r=$(<"$w.ready"); } 2>/dev/null || r=''; { t=$(<"$w.bpass"); } 2>/dev/null || t=''
+    a+=("$m" "$(bpid "$w")" "$r" "$t" "${#ps[@]}" "${ps[@]}")
+  done
+  jq -cn '
+    def obj: [try fromjson catch null | objects] | first;
+    def cards: if . == [] then empty else (.[4] | tonumber) as $n
+      | {card: .[0], patch: .[1], ready: (.[2] | obj), bpass: (.[3] | obj), paths: .[5:5 + $n]}, (.[5 + $n:] | cards) end;
     def file: split("\t")[0];
     def meets($u; $v): ($u | file) == ($v | file) and ($u == $v or ($u | contains("\t") | not) or ($v | contains("\t") | not));
-    . as $all
+    [$ARGS.positional | cards] as $all
     | [[$all[].bpass | select((.cards | type) == "object" and (.units | type) == "array")] | unique | .[] | . as $r
        | select(all($all[]; ($r.cards[.card] // .patch) == .patch))] as $rs
     | [$all[] | . as $m | {card, paths,
@@ -705,7 +732,7 @@ batchkeep() { # <card> <worktree> <the run's cards>
            as $e ({}; .[$e.k] = ([.[$e.k] // 0, $e.v] | max))) as $wt
          | [$keep | group_by(file)[] | [(.[] | select(contains("\t") | not) | $wt[.] // 0), (map(select(contains("\t")) | $wt[.] // 0) | add // 0)] | max]
          | add // 0),
-       all: ($ch == [] and ($keep | length) == ($units | length))}'
+       all: ($ch == [] and ($keep | length) == ($units | length))}' --args "${a[@]}"
 }
 # The list a batch run is given (CONVEYOR_TEST_RERUN, tests()): what batchkeep() keeps, as `pass` (a whole file) and
 # `ok` (a case) lines, and its `changed` files. A file every unit of which it keeps is one `pass` line, not its cases'
@@ -729,18 +756,21 @@ batchlist() { # <worktree> <batchkeep() of the run>
 # its own passes (<worktree>.ready, still on its change) have, else, when none has it, each card with no own passes,
 # else every card, as the run's combined change selected it.
 batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
-  local c=$1 wt=$2 u=$3 n=$4 m w x
+  local c=$1 wt=$2 u=$3 n=$4 m w x r a=()
   shift 4
-  x=$(for m in "$@"; do w=$CARDS/$m; [ "$m" != "$c" ] || w=$wt
-      jq -cn --arg c "$m" --arg p "$(bpid "$w")" --argjson r "$(jq -ce objects "$w.ready" 2>/dev/null || echo null)" '{card: $c, patch: $p, ready: $r}'; done \
-    | jq -cs --argjson u "$u" --argjson n "$n" '
+  # One jq for all the run's cards (#595): each card's name, patch-id and <worktree>.ready as its text (none, null, when
+  # it is not one JSON object).
+  for m in "$@"; do w=$CARDS/$m; [ "$m" != "$c" ] || w=$wt
+    { r=$(<"$w.ready"); } 2>/dev/null || r=''; a+=("$m" "$(bpid "$w")" "$r"); done
+  x=$(jq -cn --argjson u "$u" --argjson n "$n" '
       def file: split("\t")[0];
       def meets($a; $b): ($a | file) == ($b | file) and ($a == $b or ($a | contains("\t") | not) or ($b | contains("\t") | not));
-      [.[] | . as $m | {card, own: (.ready | if (type) == "object" and .tested == true and $m.patch != "" and .patch == $m.patch and (.units | type) == "array" then .units else null end)}] as $ms
+      [$ARGS.positional as $a | range(0; $a | length; 3) | {card: $a[.], patch: $a[. + 1], ready: ([$a[. + 2] | try fromjson catch null | objects] | first)}]
+      | [.[] | . as $m | {card, own: (.ready | if (type) == "object" and .tested == true and $m.patch != "" and .patch == $m.patch and (.units | type) == "array" then .units else null end)}] as $ms
       | [$u[] | . as $x | [$ms[] | select(any(.own[]?; meets(.; $x))) | .card] as $o
          | (if $o != [] then $o else [$ms[] | select(.own == null) | .card] | if . != [] then . else [$ms[].card] end end)[] | {card: ., unit: $x}] as $e
       | {cards: (map({(.card): .patch}) | add), units: $u, cases: $n,
-         by: (reduce $ms[].card as $c ({}; .[$c] = [$e[] | select(.card == $c) | .unit]))}') || return 0
+         by: (reduce $ms[].card as $c ({}; .[$c] = [$e[] | select(.card == $c) | .unit]))}' --args "${a[@]}") || return 0
   for m in "$@"; do w=$CARDS/$m; [ "$m" != "$c" ] || w=$wt; printf '%s\n' "$x" > "$w.bpass"; done
 }
 # The batch's one test run, in the card's worktree: each card's patch on the ones before, in the batch's order. Which

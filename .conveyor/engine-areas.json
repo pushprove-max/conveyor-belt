@@ -612,6 +612,7 @@
 {"area": "card", "test": "recwriters.test.sh"}
 {"area": "card", "test": "rollout.test.sh"}
 {"area": "claim", "test": "recwriters.test.sh"}
+{"area": "claim", "test": "stdbcalls.test.sh"}
 {"area": "push", "test": "recwriters.test.sh"}
 {"area": "testrun", "test": "recwriters.test.sh"}
 {"area": "testrun", "test": "rollout.test.sh"}

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the answers of the state store (stdb, lib/records.sh) kept while their files are unchanged, and how many
-# times the loop calls the store in one batch run.
+# times the loop calls the store, and jq, in one batch run.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -98,4 +98,28 @@ t_stdbpipe() {
   ) > "$s/out" 2> "$s/err"
   [ ! -s "$s/out" ] || fail "an early-closing reader got another result: $(cat "$s/out")"
   [ ! -s "$s/err" ] || fail "an early-closing reader of the card records left this on stderr: $(head -c 400 "$s/err")"
+}
+
+# Each jq and each state store call is a program start. Two cards (#7, #8) land as one batch, with the fixture of
+# batchreuse.test.sh (reusesetup). A stub jq counts each of the engine's calls (not those of the fixture's own stub
+# scripts, which poll: a jq started by a script under $STUB), a stub python3 each call to state.py; each then runs the
+# real one. On main before issue 595 this run made 760 or more of them (700 to 712 jq and 60 or 61 state store calls in
+# three runs, without the 3 jq calls of this case's own landing checks): the batch path read a file once a field (the card's claim in claim(), its batch mark in settle(), its
+# ready mark in readysince()), and the run's cards one by one, each with its own jq (batchkeep(), batchpass(),
+# gather()). Bug it catches: those reads made one by one again.
+BATCHCALLS_WAS=760
+t_batchcalls() {
+  reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test'
+  local py jqp n by; py=$(command -v python3); jqp=$(command -v jq)
+  printf '#!/usr/bin/env bash\ncase ${2:-} in */state.py) echo stdb >> "$STUB/calls" ;; esac\nexec %q "$@"\n' "$py" > "$STUB/python3"
+  # The parent's command line: /proc on Linux, ps on macOS.
+  printf '%s\nexec %q "$@"\n' '#!/usr/bin/env bash
+if [ -r "/proc/$PPID/cmdline" ]; then mapfile -d "" a < "/proc/$PPID/cmdline"; a="${a[*]}"; else a=$(ps -o args= -p "$PPID"); fi
+case $a in *"$STUB"/*) ;; *) echo jq >> "$STUB/calls" ;; esac' "$jqp" > "$STUB/jq"
+  chmod +x "$STUB/python3" "$STUB/jq"
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  # Count before the checks below: their jq calls are the test's, not the engine's.
+  n=$(wc -l < "$STUB/calls"); by=$(sort "$STUB/calls" | uniq -c | tr -s ' \n' ' ')
+  landedtogether "$(cardof 8) $(cardof 7)" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
+  [ "$n" -lt "$BATCHCALLS_WAS" ] || fail "one batch run of two cards made $n jq and state store calls, not fewer than the $BATCHCALLS_WAS before issue 595: $by"
 }
