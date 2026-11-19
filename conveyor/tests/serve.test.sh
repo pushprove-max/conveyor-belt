@@ -156,6 +156,10 @@ EOF
   add() { jq -c ". + [$(issue "$1" 2026-01-01)]" "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"; }
   mainat() { git -C "$R" rev-parse refs/heads/main; }; originat() { git -C "$O" rev-parse refs/heads/main; }
   handfix() { echo "$1" > "$R/fix.txt"; git -C "$R" add fix.txt; git -C "$R" commit -qm "$1"; } # <text>: a fix landed on main by hand: main moves
+  # What is left in the cards folder (a push worktree, say), less what the per-file fixture (lib.sh filemode()) brings
+  # there: the <card>.testlist each landed card leaves (tidy() does not remove it), and the mutate folder of the idle
+  # mutation checks (lib/mutate.sh) that `serve` runs on its test file a.test.sh.
+  left() { local f; for f in "$T/$CASE/cards"/*; do [ -e "$f" ] && [[ $f != *.testlist && $f != */mutate ]] && echo "${f##*/}"; done; }
   landed7() { st "select(.issue == $1 and .step == \"landed\") | .card"; }; fails() { st 'select(.step == "push" and .result == "fail") | .card' | wc -l; }
 }
 
@@ -187,8 +191,8 @@ t_serve() {
   # The retry timer is 600 s here, so only the next landing brings the next try; it fails too, under that card.
   turns 2; [ "$(fails)" = 1 ] || fail "a failed push was tried again before the next landing or the retry time"
   add 9; till '[ "$(fails)" = 2 ]' || fail "the failed push was not tried again after the next landing: $(cat "$S/cards.jsonl")"
-  [ "$(st 'select(.step == "push") | .card' | tail -n 1)" = "$(landed7 9)" ] && [ -n "$(landed7 9)" ] && [ -z "$(ls "$T/$CASE/cards")" ] \
-    || fail "the second push line is not under the card that landed next, or the push worktree is left: $(ls "$T/$CASE/cards")"
+  [ "$(st 'select(.step == "push") | .card' | tail -n 1)" = "$(landed7 9)" ] && [ -n "$(landed7 9)" ] && [ -z "$(left)" ] \
+    || fail "the second push line is not under the card that landed next, or the push worktree is left: $(left)"
   # Bug: a push that failed its check was run again every pushRetry on the same commit, where it fails the same way.
   # After a restart the push is still owed, but it failed its check on the commit main is at: it is not tried again,
   # at once or on the timer (2 s here), while main stays there.
@@ -249,8 +253,8 @@ t_serverun() {
     || fail "a push that failed its check was run again on the same main: $out"
   # A fix lands on main: the next run pushes as usual.
   handfix 'the fast checks pass'; loop run > /dev/null 2>&1 || fail "a run with only an owed push to make failed once main moved"
-  [ "$(originat)" = "$(mainat)" ] && [ "$(tail -n 1 "$STUB/pushes")" = "$(mainat)" ] && [ "$(fails)" = 1 ] && [ -z "$(ls "$T/$CASE/cards")" ] \
-    || fail "the next run did not push the owed landing through the pre-push check once main moved"
+  [ "$(originat)" = "$(mainat)" ] && [ "$(tail -n 1 "$STUB/pushes")" = "$(mainat)" ] && [ "$(fails)" = 1 ] && [ -z "$(left)" ] \
+    || fail "the next run did not push the owed landing through the pre-push check once main moved, or left $(left)"
   loopend
 }
 
