@@ -23,11 +23,12 @@ uc_line() { # <worktree>
   jq -c --slurpfile l "$T/$CASE/line.jsonl" "$(<"$SRC/jq/track.jq") {x: {log: \$l}} | track(null; null) | .records[] | select(.name == \"tests passed\") | .coverage" -n
 }
 
-# A card's worktree $T/$CASE/wt on main, whose test command is <command> and whose coverage report is the folder
-# coverage: main has src/a.js of 3 lines, and the card's staged change adds lines 4 to 7 of it and a test file.
+# A card's worktree $T/$CASE/wt on main, whose test.fileCommand is <command> (a card's run gives it each test file,
+# #374) and whose coverage report is the folder coverage: main has src/a.js of 3 lines, and the card's staged change
+# adds lines 4 to 7 of it and a test file.
 uc_card() { # <command>
   local w=$T/$CASE/wt
-  setup '[]'; tune --arg c "$1" '.test.coverage = {format: "lcov", path: "coverage"} | .test.command = $c'
+  setup '[]'; tune --arg c "$1" '.test.coverage = {format: "lcov", path: "coverage"} | .test.fileCommand = $c'
   mkdir -p "$R/src" && printf 'a\nb\nc\n' > "$R/src/a.js" && git -C "$R" add -A && git -C "$R" commit -qm src \
     || fail "main's source file"
   git -C "$R" worktree add -q --detach "$w" && mkdir -p "$w/t" || fail "the card's worktree"
@@ -41,7 +42,7 @@ uc_card() { # <command>
 # would say 4 of 6.
 t_uncoveredlcov() {
   local w=$T/$CASE/wt rs=$T/$CASE/reports out
-  uc_card "mkdir -p coverage && cp $(printf %q "$rs")/*.info coverage/"; mkdir -p "$rs" || fail "the reports' folder"
+  uc_card "mkdir -p coverage && cp $(printf %q "$rs")/*.info coverage/ && test -f"; mkdir -p "$rs" || fail "the reports' folder"
   printf 'TN:\nSF:%s\nDA:1,1\nDA:4,2\nDA:5,0\nDA:6,0\nend_of_record\n' "$w/src/a.js" > "$rs/lcov.info"
   printf 'SF:src/a.js\nDA:4,1\nDA:5,0\nDA:6,0\nend_of_record\n' > "$rs/more.info"
   out=$(uc_line "$w")
@@ -56,11 +57,10 @@ t_uncoveredrerun() {
   local w=$T/$CASE/wt s=$T/$CASE/run.sh out
   uc_card "bash $(printf %q "$s")"
   cat > "$s" <<'EOF'
-n=$(( $(cat ../n 2>/dev/null || echo 0) + 1 )); echo "$n" > ../n; L=$CONVEYOR_TEST_LOG/run.log; h=0
-mkdir -p coverage; echo '== t/a.test.js'; echo '== t/a.test.js' >> "$L"; [ "$n" != 1 ] || h=1
-printf 'SF:src/a.js\nDA:4,1\nDA:5,%s\nDA:6,0\nend_of_record\n' "$h" > coverage/lcov.info
-if [ "$n" = 1 ]; then echo 'FAIL [flaky]: wrong'; echo '-- FAIL t/a.test.js' >> "$L"; exit 1; fi
-echo 'ok flaky'; echo '-- ok t/a.test.js' >> "$L"
+n=$(( $(cat ../n 2>/dev/null || echo 0) + 1 )); echo "$n" > ../n; h=0; [ "$n" != 1 ] || h=1
+mkdir -p coverage; printf 'SF:src/a.js\nDA:4,1\nDA:5,%s\nDA:6,0\nend_of_record\n' "$h" > coverage/lcov.info
+if [ "$n" = 1 ]; then echo 'FAIL [flaky]: wrong'; exit 1; fi
+echo 'ok flaky'
 EOF
   out=$(uc_line "$w")
   [ "$(cat "$T/$CASE/n" 2>/dev/null)" = 2 ] || fail "the card's run did not run its failed test again: $(cat "$w.test")"
