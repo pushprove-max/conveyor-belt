@@ -90,7 +90,8 @@ t_packnewer() {
   grep -qxF "conveyor pack: $R/.conveyor/project.json: this Conveyor (commit $O) does not know .tests: the pack is for newer Conveyor, commit $B; run conveyor.sh install-service in $R to start the machine's Conveyor on the project's commit" <<<"$out" \
     || fail "the old engine did not name the field and the project's commit: $out"
   # Its doctor stopped at its own pack check, telling the user to correct a pack that is right, with no commit to run.
-  out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$V/$O/conveyor/conveyor.sh" doctor 2>&1) && fail "the old engine's doctor passed a pack with a field it does not know: $out"
+  # Doctor runs in the project's checkout, as a user runs it: from a directory that is not in a git checkout it stops at its git-checkout check.
+  out=$(cd "$R" && CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$V/$O/conveyor/conveyor.sh" doctor 2>&1) && fail "the old engine's doctor passed a pack with a field it does not know: $out"
   grep -qxF "missing: a pack this Conveyor reads: this Conveyor (commit $O) does not know .tests: the pack is for newer Conveyor, commit $B; fix: run conveyor.sh install-service in $R to start the machine's Conveyor on the project's commit" <<<"$out" \
     || fail "the old engine's doctor did not name the field and the commit to run: $out"
   # A pack that pins that very engine: the field is a mistake in the pack, not a newer pack.
@@ -98,7 +99,7 @@ t_packnewer() {
   grep -q '.tests: not a field of the schema' <<<"$out" && ! grep -q 'does not know' <<<"$out" || fail "a field the pinned engine does not know was called a newer pack's: $out"
   "$STUB/fakeloop" "$O"
   [ "$(loop health | jq -c .serviceOld)" = "{\"commit\":\"$O\",\"refused\":\".tests\",\"project\":\"$B\"}" ] || fail "health did not say the machine's Conveyor refuses the pack: $(loop health | jq -c .serviceOld)"
-  out=$(loop doctor 2>&1)
+  out=$(cd "$R" && loop doctor 2>&1)
   grep -qxF "missing: the machine's Conveyor reading this project's pack: it runs Conveyor commit $O, whose check refuses the pack (.tests), so it does not serve the project; fix: run conveyor.sh install-service in $R, which starts it again on the project's commit $B" <<<"$out" \
     || fail "doctor did not say the machine's Conveyor refuses the pack: $out"
 }
