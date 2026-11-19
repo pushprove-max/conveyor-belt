@@ -57,6 +57,9 @@
   const noiseOf = (n) => Math.min(Math.ceil(Math.sqrt(2 * n)), n);
   const noiseSaid = (n) => (noiseOf(n) >= n ? `With ${plural(n, 'task')} only a total break shows: a difference under ${n} is within the noise.`
     : `With ${n} tasks a difference under ${noiseOf(n)} tasks is within the noise.`);
+  // An arm graded on all n tasks. Only such arms can be set against the noise: a task not run (or not done) has no
+  // grade, so that arm's count of resolved is not of the same tasks as another arm's.
+  const gradedAll = (c, n) => n > 0 && num(c.done) === n && num(c.notRun) === 0;
   const tokens = (t) => (num(t) === null ? '–' : t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1e3 ? `${Math.round(t / 1e3)}k` : String(t));
   const took = (m) => { if (num(m) === null) return '–'; const r = Math.round(m); return r < 60 ? `${r} min` : `${Math.floor(r / 60)} h${r % 60 ? ` ${String(r % 60).padStart(2, '0')} min` : ''}`; };
   const COST = '–';  // a benchmark run keeps no cost (see the head of this file)
@@ -215,7 +218,7 @@
     if (!cols.length) return s;
     const head = h('p', 'bench-headline'), [a] = cols, other = cols.slice(1).sort((x, y) => (num(y.resolved) || 0) - (num(x.resolved) || 0))[0];
     head.append(`${colName(a)} resolved `, h('span', 'ok', `${a.resolved} of ${n}`), other ? `; ${colName(other)} ${other.resolved} of ${n}.` : '.');
-    const versus = cols[1] ? ` ${colName(cols[0])} against ${colName(cols[1])} (${cols[0].resolved} against ${cols[1].resolved}) is ${Math.abs(cols[0].resolved - cols[1].resolved) < noiseOf(n) ? 'not a difference' : 'past the noise'}.` : '';
+    const versus = cols[1] ? ` ${colName(cols[0])} against ${colName(cols[1])} (${cols[0].resolved} against ${cols[1].resolved}) is ${!gradedAll(cols[0], n) || !gradedAll(cols[1], n) ? 'not compared: not every task was graded for both' : Math.abs(cols[0].resolved - cols[1].resolved) < noiseOf(n) ? 'not a difference' : 'past the noise'}.` : '';
     head.append(' ', h('span', 'board-from', `${noiseSaid(n)}${versus}`));
     s.append(head, bars(cols, n), legend(n));
     const figs = h('div', 'figures bench-figures');
@@ -288,7 +291,7 @@
         const [word, tone] = STATE[r.state] || [String(r.state || 'not read'), 'quiet'];
         const state = h('td'), n = num(r.n) || 0, res = cols.map((c) => num(c.resolved) || 0), notRun = cols.reduce((x, c) => x + (num(c.notRun) || 0), 0);
         const spread = res.length > 1 ? Math.max(...res) - Math.min(...res) : null;
-        state.append(B.ctx.chip(word, tone), [notRun ? ` ${plural(notRun, 'task')} not run` : '', r.state === 'done' && spread !== null && spread < noiseOf(n) ? ` within the noise${noiseOf(n) >= n ? `: only a total break shows at ${n}` : ` (${noiseOf(n)})`}` : ''].join(''));
+        state.append(B.ctx.chip(word, tone), [notRun ? ` ${plural(notRun, 'task')} not run` : '', r.state === 'done' && spread !== null && cols.every((c) => gradedAll(c, n)) && spread < noiseOf(n) ? ` within the noise${noiseOf(n) >= n ? `: only a total break shows at ${n}` : ` (${noiseOf(n)})`}` : ''].join(''));
         const cells = [h('td'), h('td'), h('td', null, B.ctx.when(r.started)), h('td', 'r', String(n)), h('td', 'bench-arms-cell', cols.map(colName).join(' · ')), h('td', 'r', res.join(' · ')),
           h('td', 'r', sum('sessions') === null ? '–' : String(sum('sessions'))), h('td', 'r', tokens(sum('tokens'))), h('td', 'r', took(sum('minutes'))), h('td', 'r', COST), state];
         cells[0].append(box); cells[1].append(link);

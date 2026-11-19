@@ -32,7 +32,7 @@ test('Overview: the newest run per arm with its noise, every run in History, the
   assert.deepEqual(Array.from(bp(w).querySelector('.bench-figures .figure').children, text), ['–', 'Conveyor 1.5.0: 13 sessions · 15.3M tokens · 1 h 42 min', 'cost: not kept yet']);
   assert.match(text(bp(w).querySelector('.bench-care')), /1 task not run for Codex alone \(gpt-6\.2-sol\): .*\(not counted as failed\)/);
   const rows = Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => Array.from(r.children).slice(1).map(text));
-  assert.deepEqual(rows, [[NEW, '10:00 AM', '5', 'Conveyor 1.5.0 · Claude alone (claude-opus-5-5) · Codex alone (gpt-6.2-sol)', '4 · 2 · 2', '22', '24.4M', '2 h 50 min', '–', 'Done 1 task not run within the noise (4)'],
+  assert.deepEqual(rows, [[NEW, '10:00 AM', '5', 'Conveyor 1.5.0 · Claude alone (claude-opus-5-5) · Codex alone (gpt-6.2-sol)', '4 · 2 · 2', '22', '24.4M', '2 h 50 min', '–', 'Done 1 task not run'],
     [OLD, '11/08/2026, 11:00 AM', '20', 'Conveyor 1.4.0', '8', '30', '40.0M', '4 h 20 min', '–', 'Stopped at the usage guard']], 'every run, newest first');
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arms tr'), (r) => [text(r.children[0]), ...Array.from(r.children[1].children, text)]),
     [['Ready', '3'], ['Preflight failing', '1', 'Claude with Superpowers: it did not fire: its output shows no use of its method'], ['Not checked', '1', 'Claude with Chisle'],
@@ -43,6 +43,21 @@ test('Overview: the newest run per arm with its noise, every run in History, the
     ['2 runs selected', 'Up to 6. Runs of different n get their own panel on the infographic.', 'Compare', 'Generate infographic', 'Clear']);
   act(bp(w), 'sel-clear').click();
   assert.equal(bp(w).querySelector('.bench-selbar'), null);
+});
+
+// Bug it guards (#540): arms with no shared grade were set against the noise. In a one-task run where the first arm
+// resolved the task and the second did not run it, the headline said 1 against 0 was past the noise, and History
+// read its counts the same way. A count of resolved is set against the noise only when every arm was graded on all n.
+test('Overview: arms not graded on the same tasks are not compared against the noise, in Newest run or History', async () => {
+  const w = boot({ tab: 'bench' });
+  const [c, s] = BH.hist().runs[0].cols, one = { ...BH.hist().runs[0], n: 1, cols: [{ ...c, done: 1, resolved: 1, notRun: 0 }, { ...s, done: 1, resolved: 0, notRun: 1 }] };
+  const solo = { ...one, id: 'r20261109T140000-3', cols: [{ ...s, done: 1, resolved: 0, notRun: 1 }, { ...c, done: 1, resolved: 0, notRun: 0 }] };
+  BH.open(w, { body: () => ({ ...BH.hist(), runs: [one, solo] }) });
+  await settle();
+  assert.equal(text(bp(w).querySelector('.bench-headline')), 'Conveyor 1.5.0 resolved 1 of 1; Claude alone (claude-opus-5-5) 0 of 1. With 1 task only a total break shows: a difference under 1 is within the noise.'
+    + ' Conveyor 1.5.0 against Claude alone (claude-opus-5-5) (1 against 0) is not compared: not every task was graded for both.');
+  // The second run's spread is 0, under its noise of 1: without the check History called it within the noise.
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => text(r.lastElementChild)), ['Done 1 task not run', 'Done 1 task not run']);
 });
 
 // Bug it guards: a run in progress showed one bar for all arms, so an arm far behind the others could not be seen;
