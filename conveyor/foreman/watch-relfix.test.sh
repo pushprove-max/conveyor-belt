@@ -60,7 +60,11 @@ owe() { # <repo> <push rule>: the fix's commit is owed a push, the control recor
 }
 fixture owed "$(red '[{"issue": 753, "state": "landed"}]')" && owe owed true
 check 'landed fixes owed a push with the push rule on give no wake' nope poll owed
-fixture pushoff "$(red '[{"issue": 753, "state": "landed"}]')" && owe pushoff false
+# Land as main set on the control record over a pack's pr, Merge PR button on both: a watcher that read the pack's
+# Land as past the control record's would ask for a merge here.
+fixture pushoff "$(red '[{"issue": 753, "state": "landed"}]')" && owe pushoff false \
+  && jq -c '.control += {landAs: "main", prMerge: "button"} | .packLandAs = "pr" | .packPrMerge = "button"' "$T/pushoff.json" > "$T/pushoff.new" \
+  && mv "$T/pushoff.new" "$T/pushoff.json"
 check 'landed fixes owed a push with the push rule off wake' poll pushoff
 check 'the wake says the owner must push' \
   has pushoff 'did not start again: the landed commits are not pushed, and the rule Push when a card lands is off: press Push landed'
