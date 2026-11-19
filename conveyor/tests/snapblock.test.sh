@@ -72,7 +72,10 @@ EOF
   # the records, and lets the rewrite go on only when the snapshot waits for the lock of its copy (waits) or has ended
   # without waiting (done).
   line() { printf '{"card":"c1","issue":5,"step":"%s","time":"%s","tokens":{"claude":0,"codex":0},"result":"%s","sha":"","reason":"%s","repo":"r"}\n' "$@"; }
-  line picked 2026-11-06T00:00:00Z ok '' >> "$ST/cards.jsonl"; line blocked 2026-11-06T00:10:00Z blocked 'build: failed' >> "$ST/cards.jsonl"
+  # The card ran 10 days ago, in the snapshot's prev week (13 to 7 days before today) in any time zone: the snapshot
+  # below runs on the real clock, so a fixed date leaves that week as the days pass and prev counts no card.
+  ago=$(date -u -d '10 days ago' +%F)
+  line picked "${ago}T12:00:00Z" ok '' >> "$ST/cards.jsonl"; line blocked "${ago}T12:10:00Z" blocked 'build: failed' >> "$ST/cards.jsonl"
   { printf '#!/usr/bin/env bash\nreal=%q; snap() { CONVEYOR_MAIN=%q CONVEYOR_CARDS=%q bash %q snapshot --fresh; }\n' "$(command -v python3)" "$R" "$T/$CASE/cards" "$SRC/conveyor.sh"; cat <<'EOF'; } > "$STUB/python3"; chmod +x "$STUB/python3"
 if [[ " $* " == *' rewrite cards '* ]] && [ -p "$STUB/race" ]; then
   : > "$STUB/racing"; ( snap > "$STUB/mid" 2>/dev/null; echo done > "$STUB/race" ) 5>&- 9>&- > /dev/null &
