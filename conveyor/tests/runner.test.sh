@@ -13,17 +13,16 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Main holds the test runner scripts/run-tests.mjs, tests/runner.test.mjs (whose text names the runner) and
-# tests/other.test.mjs; tests.patterns match all three. The test command is $STUB/list-cmd running the runner
-# (`bash "$STUB/list-cmd" scripts/run-tests.mjs`, as `node scripts/run-tests.mjs` would), which adds its arguments and
-# CONVEYOR_TEST_FILES to $STUB/got, a line a run; test.list is env and the rule Whole suite in a card is off.
+# tests/other.test.mjs; tests.patterns match all three. The test command is $STUB/suite-cmd running the runner
+# (`bash "$STUB/suite-cmd" scripts/run-tests.mjs`, as `node scripts/run-tests.mjs` would), which adds `suite` to
+# $STUB/got; test.fileCommand ($STUB/one) adds `one:<the file it was given>` there, a line a run.
 rnsetup() {
   setup '[]'
   mkdir -p "$R/scripts" "$R/tests" && echo '// runs every test file given none' > "$R/scripts/run-tests.mjs" \
     && echo '// checks ../scripts/run-tests.mjs' > "$R/tests/runner.test.mjs" && echo x > "$R/tests/other.test.mjs" \
     && git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
-  printf '%s\n' 'printf "args:%s|env:%s\n" "$*" "$(printf %s "${CONVEYOR_TEST_FILES:-}" | tr "\n" " ")" >> "$STUB/got"' > "$STUB/list-cmd"
-  tune '.tests.patterns = ["*.test.mjs", "scripts/*.mjs"] | .test.list = "env" | .test.command = "bash \"$STUB/list-cmd\" scripts/run-tests.mjs"'
-  jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule could not be turned off"
+  echo 'echo suite >> "$STUB/got"' > "$STUB/suite-cmd"; printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"
+  tune '.tests.patterns = ["*.test.mjs", "scripts/*.mjs"] | .test.command = "bash \"$STUB/suite-cmd\" scripts/run-tests.mjs" | .test.fileCommand = "bash \"$STUB/one\""'
 }
 # Card c7's test step, tests() as card() runs it (with <field>, as the release's runs call it), on a change (a shell
 # edit staged in its worktree on main): its exit in $T/$CASE/rc, its test line's fields (testrec()) in c7.rec.
@@ -36,13 +35,14 @@ rnrun() { # <change> [field]
     || fail "the test step could not be run: $(cat "$T/$CASE/run.out")"
 }
 
-# D1, D2, D4. Bug it catches: a card that changed the test runner, a file tests.patterns match, put it on its list as
-# a test and ran it alone, and given no list it ran the whole suite. The card runs the runner with its own test alone
-# (the test file that names it), and its test line names the runner as no test, with the reason.
+# D1, D2, D4, #351 scenario 4. Bug it catches: a card that changed the test runner, a file tests.patterns match, put
+# it on its list as a test and ran it alone, and given no list it ran the whole suite. The card runs the runner's own
+# test alone (the test file that names it), never the runner, and its test line names the runner as no test, with
+# the reason.
 t_runnerown() {
   rnsetup
   rnrun 'echo "// faster" >> scripts/run-tests.mjs'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:scripts/run-tests.mjs|env:tests/runner.test.mjs' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'one:tests/runner.test.mjs' ] \
     || fail "the card did not run the runner's own test alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -c .list.notTests "$T/$CASE/cards/c7.rec")" = '[{"file":"scripts/run-tests.mjs","why":"the test runner, not a test"}]' ] \
     || fail "the test line does not name the runner as no test: $(cat "$T/$CASE/cards/c7.rec")"
@@ -55,26 +55,14 @@ t_runnerown() {
 t_runnerstop() {
   rnsetup
   printf '%s\n' 'set -m; sleep 300 & echo $! > "$STUB/child"; set +m' 'for i in 1 2 3; do echo "-- ok t$i.test.mjs" >> "$CONVEYOR_TEST_LOG/inner"; done; sleep 30' > "$STUB/one" # sleep: a long run, which the stop cuts
-  tune '.test.list = "none" | .test.fileCommand = "bash \"$STUB/one\""'
+  tune '.test.fileCommand = "bash \"$STUB/one\""'
   local s=$SECONDS c
   rnrun 'echo y >> tests/other.test.mjs'
   [ $((SECONDS - s)) -lt 20 ] && [ "$(cat "$T/$CASE/rc")" != 0 ] || fail "the run was not stopped (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s): $(cat "$T/$CASE/run.out")"
-  grep -qE '^the rule Whole suite in a card is off, and the test command, given 1 test file\(s\), reported [23] test files: tests/other\.test\.mjs, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' "$T/$CASE/cards/c7.stop" \
+  grep -qE '^a card runs each of its test files alone, and the test command, given 1 test file\(s\), reported [23] test files: tests/other\.test\.mjs, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' "$T/$CASE/cards/c7.stop" \
     || fail "the stop does not name the file that ran the rest: $(cat "$T/$CASE/cards/c7.stop" "$T/$CASE/run.out" 2>&1)"
   c=$(cat "$STUB/child" 2>/dev/null) && [ -n "$c" ] || fail "the file's child never started"
   wait_until '! kill -0 "$c" 2>/dev/null' || { kill "$c"; fail "a process the run started in a group of its own was not ended"; }
-}
-
-# D3. Bug it catches: the stop ended a test command that picks one test of its own for the change, as a project's
-# selector of the changed tests does (this repository's .conveyor/test-changed.sh adds its map's own test), so such a
-# card could never pass its test step. Given tests/other.test.mjs, a change of one file, the command reports 2 test
-# files, one more than its list: it runs to its end and passes.
-t_runneradds() {
-  rnsetup
-  printf '%s\n' 'echo "TESTRUN files=2" >> "$CONVEYOR_TEST_LOG/run"; sleep 3; echo done > "$STUB/got"' > "$STUB/list-cmd" # sleep: the run goes on past watch()'s looks, which may not stop it
-  rnrun 'echo y >> tests/other.test.mjs'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'done' ] && [ ! -e "$T/$CASE/cards/c7.stop" ] \
-    || fail "the command's own pick was stopped (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/cards/c7.stop" "$T/$CASE/run.out" 2>&1)"
 }
 
 # D3. Bug it catches: a change to the project's own test map (test.map, areas as .conveyor/engine-areas.json holds
@@ -86,7 +74,7 @@ t_runnermap() {
     '{"area": "b", "test": "tests/other.test.mjs"}' > "$R/areas.json" && git -C "$R" add -A && git -C "$R" commit -qm map || fail "main's map could not be committed"
   tune '.test.map = "areas.json"'
   rnrun 'jq -c "if .file then .area = \"b\" else . end" areas.json > m.new && mv m.new areas.json'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:scripts/run-tests.mjs|env:tests/other.test.mjs tests/runner.test.mjs' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/other.test.mjs\none:tests/runner.test.mjs' ] \
     || fail "the map's change was not given the tests of both areas (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
@@ -136,7 +124,7 @@ t_runnerdrop() {
 # case runs under its own file; a case with no file of its own is left off, the log naming the runner; a list left
 # with nothing to run does not run test.command at all, which given no list would run its whole selection.
 t_runnerred() {
-  rdsetup '.test.command = "bash \"$STUB/cmd\" conveyor/conveyor.test.sh"'
+  rdsetup '.test.command = "bash conveyor/conveyor.test.sh" | .test.fileCommand = "bash \"$STUB/cmd\""'
   printf '%s\n' 'cat "$CONVEYOR_TEST_RERUN" >> "$STUB/got"; echo end >> "$STUB/got"' > "$STUB/cmd"
   local wt=$T/$CASE/cards/c7 r='{"file": "conveyor/conveyor.test.sh", "files": ["conveyor/tests/a.test.sh"], "name": "x", "case": "x"}'
   local n='{"file": "conveyor/conveyor.test.sh", "files": [], "name": "y", "case": "y"}'
@@ -147,14 +135,24 @@ t_runnerred() {
     || fail "the test log does not name the dropped runner: $(cat "$T/$CASE/both" "$wt.test" 2>&1)"
 }
 
+# E2 of #374's review. Bug it catches: the proof of a main-red fix (redrun()) writes a `fail` line for each failing
+# case, and test.fileCommand started the same file once for each line. Two cases of one file: the file starts once.
+t_runnerredonce() {
+  rdsetup '.test.fileCommand = "bash \"$STUB/one\""'
+  printf '%s\n' 'echo "$1" >> "$STUB/got"; cp "$CONVEYOR_TEST_RERUN" "$STUB/list"' > "$STUB/one"
+  local wt=$T/$CASE/cards/c7 x='{"file": "conveyor/tests/a.test.sh", "files": [], "name": "x", "case": "x"}'
+  rdrun "redrun \"\$wt\" '[$x, ${x//x\"/y\"}]' > /dev/null"
+  [ "$(grep -c $'^fail\tconveyor/tests/a.test.sh\t' "$STUB/list")" = 2 ] && [ "$(cat "$STUB/got" 2>&1)" = conveyor/tests/a.test.sh ] \
+    || fail "the file of two failing cases did not start once: $(cat "$STUB/got" "$STUB/list" "$T/$CASE/run.out" 2>&1)"
+}
+
 # Bug it catches: the list the map and the links give a card's run (testsel()) named the runner (here named only by
 # test.full) beside an area file, and the command was given it. The command is given the area file alone, and the
 # run's output is to name the runner (RUNOFF, which tests() prints).
 t_runnerlist() {
-  rdsetup '.test.full = "bash conveyor/conveyor.test.sh" | .test.list = "env"'
-  jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule could not be turned off"
+  rdsetup '.test.full = "bash conveyor/conveyor.test.sh"'
   rdrun 'testsel() { printf "%s\n" "{\"by\": \"map\"}" conveyor/conveyor.test.sh conveyor/tests/a.test.sh; }
-    RUNOFF=; listcmd "$wt" "bash run" && printf "%s|%s|%s\n" "$TEST_GIVEN" "$TEST_FILES" "$RUNOFF" > "$T/$CASE/got"'
+    RUNOFF=; listcmd "$wt" && printf "%s|%s|%s\n" "$TEST_GIVEN" "$TEST_FILES" "$RUNOFF" > "$T/$CASE/got"'
   [ "$(cat "$T/$CASE/got" 2>&1)" = "1|conveyor/tests/a.test.sh|conveyor/conveyor.test.sh" ] \
     || fail "the map's list kept the runner: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
 }

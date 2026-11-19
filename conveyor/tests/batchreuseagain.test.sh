@@ -19,7 +19,6 @@
 # check holds #8 before its tests until #9 waits, ready. Every case of #8 passed on its own change, and of #9 on its
 # own, none selected by both, so the batch runs no case.
 t_batchreuseagain() {
-  local -x WHOLESUITE=true
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]" 'b.txt s.test' 'x.txt x.test' 'y.txt y.test' 'z.txt z.test'
   printf '%s\n' '! grep -q "(#8)" "$1" || [ -e "$STUB/refused" ] || { : > "$STUB/refused"; echo "not #8 yet"; exit 1; }' | sed "s|\$STUB|$STUB|g" > "$R/.git/hooks/commit-msg"
   chmod +x "$R/.git/hooks/commit-msg"
@@ -50,8 +49,9 @@ EOF
   grep -q "card $c9 is stacked on card $c8" <<<"$out" || fail "#9 was not stacked on #8, whose change it overlaps: $out"
   # The own runs of #8 and #7, the batch's run of s1, #7's run alone on the same main (issue 460: it keeps the passes
   # of the batch's run, x1 and x2, whose x.txt is as it was, and runs s1 again, as b.txt, which #8 changed too, differs),
-  # #9's own run, and none for the batch of #8 and #9.
-  [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1,7 s1,9 z1 z2," ] || fail "a run for the batch formed again, or not one run of s1 for the first batch: $(runs): $out"
+  # #9's own run, #8's run again of s1 on main as #7 left it (#7 landed b.txt, which selects s.test.sh, #8's test file
+  # too: sharedtests(), lib/claim.sh), and none for the batch of #8 and #9.
+  [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1,7 s1,9 z1 z2,8 s1," ] || fail "a run for the batch formed again, or not one run of s1 for the first batch: $(runs): $out"
   [ "$(st 'select(.step == "landed") | "\(.issue) \(.batch)"' | head -n 1)" = "7 null" ] || fail "#7 did not land alone first: $(st 'select(.step == "landed")')"
   [ "$(st 'select(.step == "landed" and .issue != 7) | .batch | sort | join(" ")' | sort -u)" = "$(printf '%s\n' "$c8" "$c9" | sort | tr '\n' ' ' | sed 's/ $//')" ] \
     || fail "#8 and #9 did not land as one batch: $(st 'select(.step == "landed")')"

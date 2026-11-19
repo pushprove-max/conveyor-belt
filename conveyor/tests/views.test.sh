@@ -290,17 +290,15 @@ if [ "$(wc -l < "$STUB/reviews")" = 1 ]; then
   while [ -d "$STUB" ] && [ ! -e "$STUB/go1" ]; do sleep 0.1; done
 fi
 EOF
-  # The test run is the default runner's: nothing of a file in its own output but the web half's count; each half
-  # writes its lines to a log of its own in the folder CONVEYOR_TEST_LOG names, the web half's in vitest's colours.
-  # A log of this worktree written anywhere else (where the runner once wrote) is not this run's.
+  # The test run starts the three test files the links give a.txt, each alone (test.fileCommand), and holds in the
+  # last, c.test.sh, until $STUB/go2. A log of this worktree written anywhere else (where a runner once wrote) is not
+  # this run's (testcount.test.sh reads runners' own logs).
   export TMPDIR=$STUB/tmp; mkdir -p "$TMPDIR/conveyor"
+  echo x > "$R/b.test.sh"; echo x > "$R/c.test.sh"; git -C "$R" add b.test.sh c.test.sh
+  linkset '{"a.txt": ["a.test.sh", "b.test.sh", "c.test.sh"]}'
   cat > "$STUB/test-cmd" <<'EOF'
-L=$CONVEYOR_TEST_LOG
 printf 'TESTRUN files=7 root=%s\n-- ok   other.test.ts 0s\n' "$PWD" > "$TMPDIR/conveyor/test-changed-other.log"
-echo "test-changed: 3 root test file(s) selected from 2 changed file(s)"; echo "test-changed: 2 web test file(s) selected"
-printf 'TESTRUN files=3 root=%s\n...\n-- ok   a.test.ts 0s\n' "$PWD" > "$L/test-changed-new.log"
-printf 'TESTRUN files=? root=%s\n\n \033[32m\342\234\223\033[39m e2e/x.test.ts \033[2m(\033[22m\033[2m3 tests\033[22m\033[2m)\033[22m\033[32m 5\033[2mms\033[22m\033[39m\n' "$PWD" > "$L/test-changed-web-new.log"
-while [ -d "$STUB" ] && [ ! -e "$STUB/go2" ]; do sleep 0.1; done; echo "-- FAIL b.test.ts 0s" >> "$L/test-changed-new.log"
+[ "$CONVEYOR_TEST_FILE" != c.test.sh ] || while [ -d "$STUB" ] && [ ! -e "$STUB/go2" ]; do sleep 0.1; done
 EOF
   snap() { loop snapshot --fresh 2>/dev/null | jq -c "$1"; }
   # A snapshot is taken again only once the card's records, live record or review session file changed (one every 0.2 s
@@ -334,8 +332,8 @@ t_livereview() { livestart emit go
   [ "$(seen '.belt[0] | [.reading, .tokens.claude, .usd > 0, (.live.lastOutputAt | fromdate > 0)]')" = '[true,35,true,true]' ] || fail "the reading of a running review: $(seen '.belt[0]')"
   kill $run; wait $run; : # the run is held here: what it would do next is the next case's
 }
-t_live() { local -x WHOLESUITE=true; livestart emit go go1 # the old fixture: the run is test.command's, a whole-suite runner with its own logs
-  until_is '.belt[0].track.files' '{"run":2,"of":5}'
+t_live() { livestart emit go go1
+  until_is '.belt[0].track.files | {run, of, now: .now.file}' '{"run":2,"of":3,"now":"c.test.sh"}'
   [ -z "$(find "$CODEX_HOME/sessions" -type f)" ] || fail "the session file of a review that ended is left: $(find "$CODEX_HOME/sessions" -type f)"
   [ "$(seen '.belt[0] | [.track.label, .track.detailAt, (.reviews | map([.round, .verdict, .fixed, (.counts | tojson)]))]')" \
     = '["tests",11,[[1,"NO-GO",true,"{\"P0\":1,\"P1\":1,\"P2\":40,\"P3\":1}"],[2,"NO-GO",true,"{\"P0\":0,\"P1\":1,\"P2\":0,\"P3\":0}"],[3,"NO-GO",false,"{\"P0\":0,\"P1\":1,\"P2\":0,\"P3\":0}"]]]' ] \

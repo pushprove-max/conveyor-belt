@@ -162,12 +162,11 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
               + (.now as $f | if $f == null then {} elif $st.files.now.file == $f then {now: $st.files.now} else {now: {file: $f, at: (now | todate)}} end)),
             tests: (.cases as $n | if $n == null then null else {done: $dn.done, of: $n, failed: $dn.failed} end), last: ($t | todate), cases: $cs}' 2>/dev/null) \
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
-      # A run given TEST_GIVEN test files (the rule Whole suite in a card off: a card's run and the bug-card check,
-      # tests(), bugrun(); never the full test suite) that reports more (the files it says it selected, or those it
-      # ran) than those and the TEST_ADDS a test command may pick for the change itself (tests()) is ended at once,
-      # every process under it (#350: a card never runs the whole suite): <worktree>.wide holds that count.
+      # A run given TEST_GIVEN test files (a card's run and the bug-card check, tests(), bugrun(); never the full test
+      # suite) that reports more (the files it says it selected, or those it ran) than those is ended at once, every
+      # process under it (#350: a card never runs the whole suite): <worktree>.wide holds that count.
       if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run + (.files.over // 0), .files.of // 0] | max' <<<"$st" 2>/dev/null) \
-        && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt $((TEST_GIVEN + ${TEST_ADDS:-0})) ]; then
+        && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt "$TEST_GIVEN" ]; then
         echo "$wn" > "$wt.wide"; endall "$pid"
       fi
       continue

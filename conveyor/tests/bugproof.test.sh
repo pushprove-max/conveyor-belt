@@ -61,36 +61,20 @@ t_bugpasses() {
   loop check || fail "the record check refuses a build line with the reason"
 }
 
-# Bug it catches: a run on main that fails only because its runner stopped it (its own check refused the run, as an
-# area map without the card's new test file does) is taken for a test that fails without the fix. Here the runner's
-# log says a.test.sh ran and passed, and the runner exits 1: the card goes back to its build, told no test failed.
-t_bugrunner() {
-  local -x WHOLESUITE=true # The old fixture: the runner's own exit and log are test.command's (test.fileCommand's failure names the file).
-  MAINRUN='echo "== a.test.sh" > "$CONVEYOR_TEST_LOG/r"; bash a.test.sh && echo "-- ok a.test.sh" >> "$CONVEYOR_TEST_LOG/r"; exit 1' \
-    bugcard 'grep -qx one a.txt' bug
-  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|the new tests pass without the fix, so they do not prove it|" ] \
-    && grep -q '^The run failed there (exit 1), but no test failed in it' "$STUB/brief" \
-    || fail "a runner's own failure on main was taken for the new test failing: $(st 'select(.step == "build")'; tail -n 20 "$STUB/brief")"
-  # D2 of #69: the file ran and passed there, so it is no "no result" run: it is blocked as passing without the fix.
-  [ "$(grep -c '/cards/mainrun/' "$STUB/mainran")" = 2 ] && [ "$(st 'select(.step == "blocked") | .reason')" = "build: the new tests pass without the fix, so they do not prove it" ] \
-    || fail "a run on main whose file ran and passed was not blocked as passing without the fix: $(st 'select(.step == "blocked")'; cat "$STUB/mainran")"
-}
-
 # Bug it catches: the proof run had no time limit for one hung test, so a new test that waits for what the unfixed
 # code never writes held its card until stopped by hand. Here it hangs on main's code; its file's `# timeout: 2` line
-# stops the run there, far before the run's own limit (testTimeout 15 s, the limit a file with no such line has, as in
+# stops the file there, far before the run's own limit (testTimeout 15 s, the limit a file with no such line has, as in
 # t_bughungdefault): the run's output and the review name a.test.sh as timed out at 2 s, not 15 s, it counts as failing
 # without the fix, and the card lands after one build.
 t_bughung() {
-  TUNE='.tunables.testTimeout = 15' MAINRUN='echo "== a.test.sh" > "$CONVEYOR_TEST_LOG/r"; bash a.test.sh && echo "-- ok a.test.sh" >> "$CONVEYOR_TEST_LOG/r"' \
-    bugcard $'# timeout: 2\nuntil grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
-  hungsaid 2
+  TUNE='.tunables.testTimeout = 15' bugcard $'# timeout: 2\nuntil grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
+  hungsaid 2 'it was stopped there' 124 # 124: a file past its own limit ends the run as timed out (filecmd())
 }
-# The checks of t_bughung and t_bughungdefault: the review is shown a.test.sh timed out at <seconds>, counted as
-# failing without the fix, and the card lands after one build.
-hungsaid() { # <seconds>
-  grep -qxF "conveyor: a.test.sh timed out: it ran past its time limit, $1 s, and the run was stopped there" "$STUB/asked" \
-    && grep -q '^The run failed there (exit 124): at least one fails without the fix' "$STUB/asked" \
+# The checks of t_bughung and t_bughungdefault: the review is shown a.test.sh timed out at <seconds> (the output's
+# line ends `and <stop>`; the run's exit <exit>), counted as failing without the fix, and the card lands after one build.
+hungsaid() { # <seconds> <stop> <exit>
+  grep -qxF "conveyor: a.test.sh timed out: it ran past its time limit, $1 s, and $2" "$STUB/asked" \
+    && grep -q "^The run failed there (exit $3): at least one fails without the fix" "$STUB/asked" \
     && grep -qxF "a.test.sh timed out: it ran past its time limit, $1 s, and was stopped. A test that hangs without the fix counts as failing without it." "$STUB/asked" \
     || fail "the proof run was not stopped at the hung file's limit, naming it, and counted as failing: $(grep -A 40 '# The bug-card check' "$STUB/asked" 2>&1 | head -40)"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
@@ -101,24 +85,8 @@ hungsaid() { # <seconds>
 # 4 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
 # build. The file is named as timed out at the testTimeout limit and counts as failing without the fix.
 t_bughungdefault() {
-  TUNE='.tunables.testTimeout = 4' MAINRUN='echo "== a.test.sh" > "$CONVEYOR_TEST_LOG/r"; bash a.test.sh && echo "-- ok a.test.sh" >> "$CONVEYOR_TEST_LOG/r"' \
-    bugcard 'until grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
-  hungsaid 4
-}
-
-# D1 of #69. Bug it catches: a run on main whose runner exits 1 and gives no result for the card's test file (its logs
-# name another file only, as a runner whose part for that file was unavailable) is taken for "the new tests pass
-# without the fix", and the card goes back to its build for a fault no build can mend. It runs once more on main, no
-# build session follows, and the card is blocked with the "gave no result" reason and the runner's last lines.
-t_bugnoresult() {
-  local -x WHOLESUITE=true # The old fixture: the runner's own exit and log are test.command's (test.fileCommand's failure names the file).
-  MAINRUN='printf "== o.test.sh\n-- ok o.test.sh\n" > "$CONVEYOR_TEST_LOG/r"; echo "Tests unavailable"; exit 1' \
-    bugcard 'grep -qx one a.txt' bug
-  [ "$(grep -c '/cards/mainrun/' "$STUB/mainran")" = 2 ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
-    && [ -z "$(st 'select(.step == "build") | .reason // empty')" ] \
-    || fail "a run on main with no result for the test file was not run once more, or went back to build: $(st 'select(.step == "build")'; cat "$STUB/mainran")"
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the proof run on main gave no result for a.test.sh: Tests unavailable' ] && [ ! -e "$STUB/asked" ] \
-    || fail "the card was not blocked with the no-result reason before review: $(st 'select(.step | IN("review", "blocked"))')"
+  TUNE='.tunables.testTimeout = 4' bugcard 'until grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
+  hungsaid 4 'the run was stopped there' 124
 }
 
 # Bug it catches: a runner that runs another file's cases logs them under its own name (the engine's runner,
@@ -219,8 +187,8 @@ t_bugcommentsyntax() {
 
 # Bug it catches: a bug card that adds no test at all goes to review unchecked; or (#137) it is told and blocked with
 # "the new tests pass without the fix", though no test ran. It goes back to its build, then is blocked, each time
-# told no test file was found and the patterns that looked (the default, as the pack sets none); its only runs on
-# main are of its whole change (does it select a test? Here it does: its run is not "nothing selected").
+# told no test file was found and the patterns that looked (the default, as the pack sets none); it runs nothing on
+# main (does it select a test? Here it does: the links give its a.txt the test file a.test.sh).
 t_bugnotest() {
   bugcard '' bug
   local why; why="no test file found in the change (patterns: $(jq -r '.properties.tests.properties.patterns.default | join(", ")' "$SRC/schema/pack.schema.json")); set tests.patterns in .conveyor/project.json"
@@ -228,7 +196,7 @@ t_bugnotest() {
     && grep -qF "No test file found in the change (patterns: __tests__/, " "$STUB/brief" || fail "a bug card with no test did not go back to its build, told so: $(st 'select(.step == "build")')"
   [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: $why" ] && ! grep -q 'pass without the fix' "$STUB/brief" \
     || fail "a bug card with no test was not blocked with the no-test reason alone: $(st 'select(.step == "blocked")')"
-  [ "$(grep -v '/cards/mainrun/' "$STUB/mainran" | sort -u)" = a.txt ] || fail "a card with no test file ran other than its whole change on main: $(cat "$STUB/mainran" 2>&1)"
+  [ ! -e "$STUB/mainran" ] || fail "a card with no test file ran a test on main: $(cat "$STUB/mainran")"
   [ -z "$(st 'select(.step == "bugproof")')" ] || fail "a code change with no test was let skip the check: $(st 'select(.step == "bugproof")')"
 }
 
@@ -241,20 +209,6 @@ t_bugpatterns() {
     || fail "the run on main was not of the card's src/test-a.mjs alone, or the card went back to build: $(cat "$STUB/mainran" 2>&1)"
   grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
     || fail "the card whose test fails on main was not reviewed as proven and landed: $(st 'select(.step | IN("blocked", "landed"))')"
-}
-
-# #137. Bug it catches: test files the test command does not run when given them alone (its run selects none) were
-# reported as "the new tests pass without the fix", and the card went back to a build that cannot change the pack.
-# Here the command runs a test only when the change's code is staged: the card is blocked at once, told the files
-# were found but not run, and to set test.fileCommand.
-t_bugnotalone() {
-  local -x WHOLESUITE=true # The old fixture: the case is of a pack with no test.fileCommand, which its reason names; the fixture sets one.
-  MAINRUN='if git diff --cached --name-only | grep -qx a.txt; then bash a.test.sh; else echo "TESTRUN files=0 of=1" >> "$CONVEYOR_TEST_LOG/r"; fi' \
-    bugcard 'grep -qx one a.txt' bug
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/asked" ] \
-    && [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'build: test files were found in the change, but the test command, given them, selected none of them, so they did not run without the fix; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
-    && ! st 'select(.step == "blocked") | .reason' | grep -q 'pass without the fix' \
-    || fail "test files the command did not run were not reported as such: $(st 'select(.step | IN("build", "blocked", "review"))')"
 }
 
 # #137. Bug it catches: a pack whose test command cannot run one file alone has no way to run a change's test files.
@@ -347,14 +301,14 @@ EOF
   loop run >/dev/null || fail "run exited non-zero"
 }
 
-# D1. Bug it catches: a comment-only bug card selects no test, so it was blocked as "the new tests pass without the
-# fix", though the test file its issue's Done-when names fails on main's comment. That file runs alone with the fix
-# (passes) and without it (fails): one build session, the review is told so, and the card lands.
+# D1. Bug it catches: a comment-only bug card selects no test (no test file is linked to s.sh), so it was blocked as
+# "the new tests pass without the fix", though the test file its issue's Done-when names fails on main's comment. That
+# file runs alone with the fix (passes) and without it (fails), and nothing else runs on main: one build session, the
+# review is told so, and the card lands.
 t_bugcomment() {
-  local -x WHOLESUITE=true # The old fixture: the change is first given to test.command, a runner that selects no file for it (files=0).
   commentcard '! grep -q old s.sh' $'body\n\n## Done when\nw.test.sh fails on main and passes with the fix.'
-  [ "$(cat "$STUB/mainran" 2>&1)" = $'staged: s.sh fix: 1 ran: 0\nstaged: s.sh fix: 1 ran: 1\nstaged: fix: 0 ran: 1' ] \
-    || fail "the change was not asked for its tests, then the named test run with the fix and without it: $(cat "$STUB/mainran" 2>&1)"
+  [ "$(cat "$STUB/mainran" 2>&1)" = $'staged: s.sh fix: 1 ran: 1\nstaged: fix: 0 ran: 1' ] \
+    || fail "the named test did not run alone with the fix and without it: $(cat "$STUB/mainran" 2>&1)"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -q '^They pass with the fix, and the run without it failed (exit 1)' "$STUB/asked" \
     || fail "a comment-only card proved by its named test went back to build, or the review was not told: $(st 'select(.step == "build")'; cat "$STUB/asked" 2>&1)"
   [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
@@ -382,7 +336,7 @@ t_bugcommentfixfails() {
 # or goes on with no word of why. One build, a bugproof line (skipped) saying why, the review told, and it lands.
 t_bugcommentnamed() {
   commentcard 'false' $'body\n\n## Done when\nThe comment says new.'
-  [ "$(st 'select(.step == "bugproof") | "\(.result): \(.reason)"')" = "skipped: the change selects no test (every changed line is a comment, or it touches no code the test command knows), and the issue's Done-when names no test file" ] \
+  [ "$(st 'select(.step == "bugproof") | "\(.result): \(.reason)"')" = "skipped: the change selects no test (no test file is linked to the files it touches), and the issue's Done-when names no test file" ] \
     || fail "the card's record does not say the check was skipped and why: $(st 'select(.step == "bugproof")')"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -q '^The bug-card check was skipped: ' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
     || fail "a comment-only card naming no test did not go on to review and land: $(st 'select(.step | IN("build", "blocked", "landed"))')"
@@ -480,11 +434,11 @@ optmain() { # <cpu of f> [<cpu of f1> <cpu of f2>]
   for c in 9 10 11; do
     jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
   done
+  # Run once for each file, as test.fileCommand runs it: the file is CONVEYOR_TEST_FILE.
   cat > "$STUB/mainrun-cmd" <<'EOF'
-while IFS=$'\t' read -r k f; do
-  [ "$k" = fail ] || continue; [[ $PWD == *.cases ]] || echo "$f: $(cat "$f" 2>/dev/null)" >> "$STUB/mainran"; printf '== %s\nok one\nok two\n' "$f"
-  printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
-done < "$CONVEYOR_TEST_RERUN"
+f=$CONVEYOR_TEST_FILE
+[[ $PWD == *.cases ]] || echo "$f: $(cat "$f" 2>/dev/null)" >> "$STUB/mainran"; printf '== %s\nok one\nok two\n' "$f"
+printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
 EOF
 }
 

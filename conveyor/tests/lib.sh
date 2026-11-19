@@ -114,14 +114,11 @@ tuned() { # <jq filter> <command...>
 # The control record, the only home of the cap and the two seats' models: as setup seeds it (seed), or with one
 # seat's model changed and its effort kept (seatset). The judge off, visible changes waiting for the owner's yes and
 # a push after each landing are set here, not left to control-defaults.json (judge on, visible off, push off): a case
-# turns them as it needs. So is the rule Whole suite in a card: off, as its default and setup's per-file fixture
-# (filemode()) have it, and on only in a case with `local -x WHOLESUITE=true`, where the cases of a card's test step
-# test a run that may be the whole suite. The rule Split large
+# turns them as it needs. The rule Split large
 # issues is off (its default is shadow): a card's lines are those of today's cards; its cases (slices.test.sh) turn it on.
 seed() {
-  local whole=false; [ "${WHOLESUITE:-}" != true ] || whole=true
   mkdir -p "$ST"
-  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"wholeSuite":'"$whole"',"split":"off","never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
+  echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"split":"off","never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
     > "$ST/control.json"
 }
 # The loop's turns, for a check that something did not happen: a case waits for turns the loop takes, not for seconds
@@ -167,17 +164,15 @@ setup() { # <issues json>: a fresh main repo, the three stubs, one billing and o
   jq --arg l "$STUB/rulings" '.test.command = "case $PWD in */mainrun/*) [ ! -f \"$STUB/mainrun-cmd\" ] || . \"$STUB/mainrun-cmd\" ;; *) . \"$STUB/test-cmd\" ;; esac" | .test.survey = false | .rulings.log = $l | .owner.name = "Dana" | .landBatch = 1
       | .models.allowed.claude += ["m"] | .models.allowed.codex += ["x"] | .tunables += {live: 0.2, closeWait: 0, reviewPause: 0}' \
     "$SRC/lib/test-pack.json" > "$R/.conveyor/project.json"
-  [ "${WHOLESUITE:-}" = true ] || filemode
+  filemode
   seed
   echo "$1" > "$STUB/issues.json"; PATH=$STUB:$PATH
 }
-# The per-file fixture, every case's: main commits a.txt's stub test file a.test.sh and .conveyor/test-links.json
-# linking a.txt to it, and pushes them; the pack's test.fileCommand is the stub $STUB/file-cmd (the test command setup
-# gives: $STUB/mainrun-cmd on main, else $STUB/test-cmd); seed turns the rule Whole suite in a card off, and test.command
-# is that stub too. push.check is false, so a landing runs no linked test before its push (a case of that check turns it on). So a card that changes a.txt runs a.test.sh alone, through test.fileCommand.
-# A case that sets `local -x WHOLESUITE=true` before its setup (-x, so shellcheck does not take it for unused) has none
-# of this: no test file, no links, no test.fileCommand, push.check as the pack has it, the rule on and the stub test.command
-# of setup's pack. A linked file would make a landing run it again where the case expects to reuse a pass.
+# The per-file fixture, every case's, as a card runs each test file alone (tests(), lib/testrun.sh): main commits
+# a.txt's stub test file a.test.sh and .conveyor/test-links.json linking a.txt to it, and pushes them; the pack's
+# test.fileCommand is the stub $STUB/file-cmd (the test command setup gives: $STUB/mainrun-cmd on main, else
+# $STUB/test-cmd), and test.command is that stub too. push.check is false, so a landing runs no linked test before its
+# push (a case of that check turns it on). So a card that changes a.txt runs a.test.sh alone, through test.fileCommand.
 filemode() {
   echo 'case $PWD in */mainrun/*) [ ! -f "$STUB/mainrun-cmd" ] || . "$STUB/mainrun-cmd" ;; *) . "$STUB/test-cmd" ;; esac' > "$STUB/file-cmd"
   echo '# The stub test file of a.txt: the pack'"'"'s test.fileCommand runs $STUB/file-cmd for it.' > "$R/a.test.sh"

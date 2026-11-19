@@ -41,10 +41,6 @@ its own, and the Board's Rules tab sets them in its Judge row.
   not picked without one. Off, no card or issue waits for that line: the build brief and the review do not ask for it,
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
-- `wholeSuite`: whether a card's test step may run the whole suite (Whole suite in a card). Off, a card runs only
-  the test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run
-  before each push, and the whole suite runs only in a release
-  ([Which tests a card runs](../docs/configuration.md#whole-suite-in-a-card)). On, a card runs its tests as before.
 - `split`: the rule Split large issues, `off`, `shadow` or `on` (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
@@ -55,7 +51,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   card's `grown` line. On files the slices, drops their files from the change in one fix session, and goes on
   ([Split large issues](../docs/configuration.md#split-large-issues)).
 
-Every rule is on by default, except `push`, `visible` and `wholeSuite`, which are off, and `split`, which is `shadow`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push` and `visible`, which are off, and `split`, which is `shadow`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule at its default.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's
@@ -365,7 +361,7 @@ A card whose tests already passed on what it holds, while it waited to land, is 
 `pass` with `reused: true` and no run. No passing output is kept. The Board's card shows the Test step's time as
 its wait and its run.
 
-A card's test step runs the pack's `test.command` in its worktree. A run that ends with cases that did not pass (they
+A card's test step runs each test file of its list alone through the pack's `test.fileCommand`, in its worktree. A run that ends with cases that did not pass (they
 failed, or never finished because the run was killed or timed out) runs once more, straight away and on the same test
 slot, for those cases alone: the cases that passed are not run again. Only when a case still does not pass does the
 card go to its fix session; a card whose re-run passes goes on with no fix session. A fix session that leaves the
@@ -406,9 +402,8 @@ result starts the count again.
 
 Before a failure goes to the fix session, what still did not pass after the run again runs on main (a fix session cannot repair main or the
 machine): in a worktree of main's commit as it is now, on a test
-slot, with the pack's `test.command`, its `CONVEYOR_TEST_RERUN` list naming every other file of the card's runs as
-passed and, of each failing file, its failing cases (a file that failed naming no case, or ran out of time, as a
-`fail` line with no case: the command runs it whole, since nothing else selects it on main's clean tree). Each
+slot, each failing file alone through the pack's `test.fileCommand`, its `CONVEYOR_TEST_RERUN` list naming every
+other file of the card's runs as passed. Each
 failure gets a verdict:
 
 - **main**: the same case failed on main too (a timeout or a kill there says nothing of the case), an input of its
@@ -532,36 +527,33 @@ may have broken. Files and cases are read from the logs the command writes to th
 
 ### The list of tests a card's run is given
 
-With the pack's `test.list` set, each run of a card's `test.command` (not `test.full`, `test.main` or a run of
-named failed cases alone) is given the test files its change touches, as arguments (`args`), in place of `{files}`
-(`placeholder`), in `CONVEYOR_TEST_FILES`, one path a line (`env`), or as the packages and test targets of `go test`
-and `cargo test` (`runner`); [Which tests a card
-runs](../docs/configuration.md#which-tests-a-card-runs) says which files. A change that touches shared setup or
-config, or a file with no test found for it, `none`, `args` with a command that already names the tests its runner
-runs (such as `node --test checks/*.js`), and `runner` with a test file its runner cannot be given alone (such as a
-helper module), give no list: the command runs the whole suite. The live
-record and the test line hold `list`: `{"mode": "changed", "files": <count>, "by": "map" or "name", "age": <commits>}`
-(`age`, the commits the made test map is behind, only with one) or `{"mode": "whole", "why": "..."}`. The Board shows
-it with the test step (`changed: 7 files (map) · map 12 commits old`, `changed: 7 files (by name)`,
-`whole suite: <why>`); `/units` shows `changed: 7 files` or `whole suite`.
-All of this holds while the rule `wholeSuite` is on. Off (the default), a card's run never gets `mode: "whole"`: it
-runs the test files its change adds or changes (`"by": "own"`; a shared helper is none). Of a test file main has, it
-runs only the cases (`t_<case>() {` to its `}` line, with the comment lines above it) that hold a line the change adds
-or changes; a file whose change touches a line outside every case (a helper or setup), a new file, and a file with no
-such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>` line each; a
-command that does not read it runs each file whole. The list then has `cases`, `[{"file", "case"}]`, and a `why`,
-`the card ran <n> changed cases of <m> test files`, which the output and the Board's step show. A change with none runs at
-most 5 of the test files the test map and the links give its files, those that failed most recently first, and its
-output says so; one with none of those runs nothing and passes, its list `{"mode": "changed", "files": 0, ..., "why":
-"..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that says the run
-before the push runs them all. The Board shows this note with the step. Before each push, the loop runs the test
-files the test map and the links give each landing since the last push, each alone, once a commit; a file that fails
-is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that broke it, and holds
-the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)), unless the push check is off (`push.check`,
-`conveyor.sh control push-check`). A list the command cannot be given runs through `test.fileCommand`, one file at a time, or, with no `test.fileCommand`, the card is blocked at its
-test step with a reason that names `test.list` and `test.fileCommand`. A run that reports more than ten test files for
-each it is given is stopped, and the card is blocked the same way; so is the bug-card check's run of `test.command`
-([Whole suite in a card](../docs/configuration.md#whole-suite-in-a-card)).
+A card never runs the suite command (`test.command`, `test.full`). Each run of a card's tests runs each test file
+of its list alone, one process a file, through `test.fileCommand`: the card's test step, the run again after a
+failure, the bug-card check, the run on main, the main-red check, the checks of Fix hollow cases, Fix the waiting,
+Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
+time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file runs past it, Conveyor stops the file
+and every process it started, and the file fails. With no `test.fileCommand`, a card with a test file to run stops at
+its test step under Needs you, and the reason names `test.fileCommand`. A card with no test file to run passes its
+test step. [Which tests a card
+runs](../docs/configuration.md#which-tests-a-card-runs) says which files are on the list.
+The list is the test files the card's change adds or changes (`"by": "own"`; a shared helper is none). Of a test file
+main has, it runs only the cases (`t_<case>() {` to its `}` line, with the comment lines above it) that hold a line
+the change adds or changes; a file whose change touches a line outside every case (a helper or setup), a new file,
+and a file with no such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>`
+line each; a command that does not read it runs each file whole. The list then has `cases`, `[{"file", "case"}]`, and
+a `why`, `the card ran <n> changed cases of <m> test files`, which the output and the Board's step show. A change with
+none runs at most 5 of the test files the test map and the links give its files, those that failed most recently
+first, and its output says so; one with none of those runs nothing and passes, its list `{"mode": "changed", "files":
+0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
+says the run before the push runs them all. The Board shows this note with the step. The live record and the test
+line hold `list`: `{"mode": "changed", "files": <count>, "by": "own", "map" or "name", "age": <commits>}` (`age`, the
+commits the made test map is behind, only with one). The Board shows it with the test step (`changed: 7 files (map)
+· map 12 commits old`, `changed: 7 files (by name)`); `/units` shows `changed: 7 files`. Before each push, the loop
+runs the test files the test map and the links give each landing since the last push, each alone, once a commit; a
+file that fails is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that
+broke it, and holds the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)), unless the push check is off
+(`push.check`, `conveyor.sh control push-check`). A run that reports more test files than it was given is stopped,
+and the card is blocked with a reason that names the file that ran the rest.
 The test map (`lib/testmap.sh`, [The test map](../docs/configuration.md#the-test-map)) is read before the names: the
 tests it says cover a changed file are its tests, and a file more than half the mapped tests read runs the whole
 suite. A card's run that passes maps the test files its change adds that the map lacks; the whole test on main and
@@ -742,8 +734,9 @@ and the test files of main's checkout, and holds:
 
 - `settings`: the pack's `slowIssues`, `slower` (`{share, runs, minRuns}`), `files` (each file's own
   settings, as the pack holds them), `report` (the pack's `test.report`, null with none: the runner a Wall only
-  file's status names) and `cpuTime` (Record CPU time: `{file, was, command}`, the one test file the test command
-  runs and the command wrapped in `conveyor/tools/testtime.sh`, which `conveyor.sh test-settings cpu-time <file>` saves;
+  file's status names) and `cpuTime` (Record CPU time: `{file, was, command, fileCommand}`, the one test file the test
+  command runs and the command wrapped in `conveyor/tools/testtime.sh`, with `test.fileCommand` wrapped too when it is
+  set, which `conveyor.sh test-settings cpu-time <file>` saves;
   or `{why}`, why no wrapper applies);
 - `suite`: the newest whole-suite run on record, `{time, cpu}`, `cpu` the CPU seconds of its files added up (null
   when none has any); null with no whole-suite run. A `wholeOnly` file's status gives it as what a change to it costs;
@@ -970,19 +963,14 @@ its count and the issue filed for it; the Board's Health panel draws them as its
 A card whose issue has the pack's type label (`labels.type`, a bug) is checked after its build and before its review:
 the test files its change adds or changes (paths the pack's `tests.patterns` match, [How test files are
 found](../docs/configuration.md#how-test-files-are-found)) run on main's code without the fix, alone, in a worktree of
-the commit the card was built on (`cards/mainrun/<card>.unfixed`), with the pack's `test.command`, or each file with
-`test.fileCommand` when the pack sets it. At least one must fail there. When all pass, the card goes back to its build
+the commit the card was built on (`cards/mainrun/<card>.unfixed`), each file alone through the pack's
+`test.fileCommand`. At least one must fail there. When all pass, the card goes back to its build
 session once, told "the new tests pass without the fix, so they do not prove it" (its second `build` line has that
 reason), and the check runs again; when it still does not hold, the card is blocked with that reason, with no review.
 When the change adds or changes no test file, the reason is "no test file found in the change (patterns: <the
-patterns>); set tests.patterns in .conveyor/project.json" in its place. When the command, given the test files,
-selects none of them, they did not run: the card is blocked with a reason that says so and names `test.fileCommand`,
-with no second build session and no review. When the command, given the test files, runs far more test files (more
-than ten for each file it gets, as the live record's `files.run` counts them), the check's result says so and names
-the fix: set `test.fileCommand`, with `node`, `bash` or `python3` when every test file runs alone as such a plain
-script. The card also gets a `bugproof` line (result `wide`) with `wide: {given, ran, command}`. `doctor` prints a
-`warning:` line from the newest such line while the pack sets no `test.fileCommand` and its `test.command` is that
-command. Setup prints the same value as a suggestion when the pack has no `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
+patterns>); set tests.patterns in .conveyor/project.json" in its place. When the pack sets no `test.fileCommand`, the check does not run: the card is blocked with a reason that names
+`test.fileCommand`, with no second build session and no review. When the project's test files run alone as plain
+scripts, setup suggests `node`, `bash` or `python3` as `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
 file that failed (a runner that stops the run with no test failing proves nothing). Each test file keeps its own time
 limit there, its `# timeout: <seconds>` line among the comments it starts with; a file with no such line has the
 `testTimeout` setting's. When the runner's logs show a file begun and not ended past its limit, the run is stopped,
@@ -1004,8 +992,8 @@ A change with any other product file, such as a `.css`, `.html`, `.sh` or `.py` 
 checked as above.
 
 A change that selects no test of its own is checked another way. This is a change where every changed line is a
-comment, or one that touches no code the `test.command` knows: that command, run on main's code with the whole change
-staged, selects nothing. The check then runs the test files that the issue's `## Done when` section names, alone, on
+comment, or one that touches no file linked to a test: the test map and the links give it no test file on main's
+code with the whole change staged. The check then runs the test files that the issue's `## Done when` section names, alone, on
 main's code with the fix and without it. At least one must fail without the fix, and they must pass with it. When
 the issue names no test file, the card goes on to review with no check. Its `bugproof` line (result `skipped`) and
 the result the review sees say why. The review reads that change as it reads any other.
@@ -1013,7 +1001,7 @@ the result the review sees say why. The review reads that change as it reads any
 A bug card that speeds up one test file is checked another way too. This is an issue whose title starts "Speed up the
 test file", as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing named, else
 the title's next word. Such a change keeps what the file tests, so its tests pass on main's code, and no test must fail
-there. The file runs alone, with the change, on a test slot, with the pack's `test.command`. It must pass, and its CPU
+there. The file runs alone, with the change, on a test slot, through the pack's `test.fileCommand`. It must pass, and its CPU
 seconds must be lower than the median of its recent runs: the runs on the issue's "Last runs, newest first" line, as
 the Tests page writes it. The Tests page writes `none` on that line when the file has no runs, and `— CPU s` for a
 run with a clock time only. When the issue has no such line, or the line gives no CPU seconds, the check uses the
@@ -1078,7 +1066,7 @@ cards that it retried.
 
 ## The whole test on main
 
-A card's test step runs the pack's `test.command`: the tests of what the card touched. The whole test on main runs
+A card's test step runs the tests of what the card touched, each file alone through `test.fileCommand`. The whole test on main runs
 only for a project whose pack names it, as `test.main`; a pack that names none has none. The loop (`serve`) runs it on
 the default branch, on the same test slots and beside the cards, so no card waits on it: at most once an hour, and
 only when the branch has moved since its last run. With `test.mainAt` set in the pack (a time of day, `"HH:MM"`, in
@@ -1249,11 +1237,11 @@ limit applies to every action: the pack's `tunables.testActionTimeout`, 900 seco
 past it is ended, and its record says timed out.
 
 `conveyor.sh testaction run <test file>` times one test file now, with no card: is it slow, or was the machine busy?
-It is an engine command, not a session, so it needs no Tests seat. It runs the file alone with the pack's
-`test.command`, on main as it is at the ask, in a worktree of that commit (removed when the run ends), on one of the
+It is an engine command, not a session, so it needs no Tests seat. It runs the file alone through the pack's
+`test.fileCommand`, on main as it is at the ask, in a worktree of that commit (removed when the run ends), on one of the
 machine's test slots: it waits for a slot as a card's test step does, and holds one slot while it runs, so cards wait
-on it no more than on a second card. The command's `CONVEYOR_TEST_RERUN` list names the file alone, as a `fail` line
-with no case: on main's clean tree the command runs that file and no other. A path that is not a test file of main
+on it no more than on a second card. The run's `CONVEYOR_TEST_RERUN` list names the file alone, as a `fail` line
+with no case: `test.fileCommand` runs that file and no other. A path that is not a test file of main
 (a file whose own name has `.test.` or `.spec.` in it; a helper or fixture in a `__tests__` folder is not one) is
 refused (exit 2), and nothing runs. The
 command returns the action's id once the run has started, or once it is queued. Its `<id>.txt` is the command's output, written as the
@@ -1296,12 +1284,10 @@ cards either; each has a check of its own, and the review is shown its result:
   checked as an Optimize delete: the review names a `COVERED-BY` line for each of its cases.
 - Make it run alone, "Make the test file <file> run alone", for a file `test.files` marks `wholeOnly`: the pack as
   the change leaves it (main's own when the project does not track `.conveyor/project.json`) must no longer mark the
-  file `wholeOnly`. Then the file runs alone with the change, on a test slot, given to the test command as the pack's
-  `test.list` says: at its end (`args`), in place of `{files}` (`placeholder`), in `CONVEYOR_TEST_FILES` (`env`), or
-  as its package or test target (`runner`). It must pass, and the run's log lines or its runner's report must name
-  it. A change that removes the file runs the test files it adds or changes in its place. The card is blocked when
-  the mark stays, when `test.list` is not set or cannot give the file alone, or when the run fails or does not run
-  the file.
+  file `wholeOnly`. Then the file runs alone with the change, on a test slot, through `test.fileCommand`. It must
+  pass, and the run's log lines or its runner's report must name it. A change that removes the file runs the test
+  files it adds or changes in its place. The card is blocked when the mark stays, when the pack sets no
+  `test.fileCommand`, or when the run fails or does not run the file.
 
 The checks of Fix hollow cases, Fix the waiting, Delete it and Make it run alone run again before each later review when a fix or rebase
 session changed the card. When a check no longer holds, the card is blocked with its reason.
@@ -1333,8 +1319,8 @@ check:
   TypeScript, with no parser and no added dependency. A source of another kind is recorded as not mutated.
 - It runs in a copy of main's commit (a worktree under the cards folder, removed when the check stops or ends). It
   first runs the test file with no mutant. A test file that fails then says nothing about its mutants: the check
-  ends failed. Then, for each mutant, it changes that one line, runs the test file alone with the pack's
-  `test.command` on a test slot, and puts the line back. No other test file runs with it, so only that file can
+  ends failed. Then, for each mutant, it changes that one line, runs the test file alone through the pack's
+  `test.fileCommand` on a test slot, and puts the line back. No other test file runs with it, so only that file can
   catch the mutant. The result is killed (the test file failed), survived (it passed) or no result (it timed out, or
   did not run).
 

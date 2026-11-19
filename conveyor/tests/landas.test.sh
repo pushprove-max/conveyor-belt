@@ -222,7 +222,6 @@ t_prrefused() {
 # push alone would not run), each alone on its head; or it merged when the rule was set to button during that run
 # (the rule and the belt were read only before it); or it never merged once the belt was empty and that run passed.
 t_pridle() {
-  local -x WHOLESUITE=true
   local sha
   setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
   printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; [ ! -e "$STUB/during" ] || { bash "$STUB/during"; rm -f "$STUB/during"; }' \

@@ -37,14 +37,17 @@ t_waitlong() {
 # the waits of a card that waited behind one card after another never added up. #8 (a.txt, b.txt) waits on #7
 # (a.txt), which lands during #8's first look-again pause (3 s here); #8 then gives way for the session that brings
 # it onto main, #9 (b.txt) takes the turn and holds b.txt in its tests ($STUB/go9), and #8 waits again, on #9: that
-# wait's live record counts the first wait whole, and health adds it to the second.
+# wait's live record counts the first wait whole, and health adds it to the second. #9 is in the control record's
+# order: #8, whose tests pass after that session, would else go past it (a ready card lands first, claim()).
 t_waitsum() {
-  local -x WHOLESUITE=true # The old fixture: #8 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
-  tune '.tunables.live = 3'
+  tune '.tunables.live = 3'; jq -c '.order = [9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  # #9's change, b.txt alone, runs a test file too: its tests hold b.txt. #7's test is its own seven.test.sh, so its
+  # landing shares no test file with #8 (a shared one runs again first: merge.test.sh).
+  linkset '{"b.txt": ["a.test.sh"]}'
   cat > "$STUB/build" <<'EOF'
 case $PWD in
-  *-7) echo seven >> a.txt ;;
+  *-7) echo seven >> a.txt; echo x > seven.test.sh ;;
   *-8) if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then
       while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ] && ! jq -e .held ../*-9.claim >/dev/null 2>&1; do sleep 0.1; done
       printf 'one\nseven\neight\n' > a.txt; echo eight >> b.txt
@@ -90,13 +93,15 @@ EOF
 # again to land: ready, it goes past #8, whose tests have not passed on its change (a ready card lands first: claim()),
 # and #8's change, which no longer applies, is brought onto main by its one rebuild (# Landing conflict).
 t_waitkept() {
-  local -x WHOLESUITE=true # The old fixture: #8 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in $(seq 8); do echo "$GO" > "$STUB/review.$i"; done
   tune '.tunables.waitLimitMin = 1'
-  echo one > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"; git -C "$R" push -q origin main
+  echo one > "$R/b.txt"; git -C "$R" add b.txt
+  # #9's change, b.txt alone, runs a test file too: its tests hold b.txt. #7's test is its own seven.test.sh, so its
+  # landing shares no test file with #8 (a shared one runs again first: merge.test.sh).
+  linkset '{"b.txt": ["a.test.sh"]}'
   cat > "$STUB/build" <<'EOF'
 case $PWD in
-  *-7) echo seven >> a.txt ;;
+  *-7) echo seven >> a.txt; echo x > seven.test.sh ;;
   *-8) if grep -qE '^# (Main moved|Landing conflict): apply the same change' "$STUB/brief"; then
       while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ] && ! jq -e .held ../*-9.claim >/dev/null 2>&1; do sleep 0.1; done
       printf 'one\nseven\neight\n' > a.txt; echo eight >> b.txt

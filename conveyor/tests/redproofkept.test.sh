@@ -23,7 +23,8 @@ t_redproofkept() {
   r=$(st 'select(.step == "blocked") | .reason'); t=$(st 'select(.step == "blocked") | .tail')
   [[ $r == "build: The run on main's code at "*" with the change gave no result for \`a.test: one\`, so it proves nothing either way. The whole output of that run is kept in $k." ]] \
     || fail "the block reason does not name the kept output file: $r"
-  [ ! -e "$T/$CASE/cards/mainrun/cfix.unfixed" ] && grep -qx '== a.test' "$k" && [ "$(tail -n 1 "$k")" = '== c.test' ] \
+  # Each file runs alone (filecmd()): the output ends with the run's own end of c.test.
+  [ ! -e "$T/$CASE/cards/mainrun/cfix.unfixed" ] && grep -qx '== a.test' "$k" && [ "$(tail -n 1 "$k")" = '-- ok c.test' ] \
     || fail "the run's worktree is still there, or its output was not kept in $k: $(cat "$k" 2>&1)"
   [[ $t == *"The end of that run's output:"$'\n```\n'"$(tail -n 40 "$k")"$'\n```'* ]] || fail "the blocked line does not quote the end of the kept output: $t"
 }

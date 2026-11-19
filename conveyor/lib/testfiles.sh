@@ -504,7 +504,8 @@ except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.
 #   slow-mark <file> <reason>    test.files.<file>.slowOnPurpose: the reason, one line that is not blank, for a file
 #                                main's checkout tracks
 #   slow-mark-clear <file>       that mark taken off
-#   cpu-time <file>              test.command made the one cpuplan() gives for that file (Record CPU time, #190)
+#   cpu-time <file>              test.command made the one cpuplan() gives for that file (Record CPU time, #190), and
+#                                test.fileCommand its wrapped one, when it gives one
 # A file with no setting left is taken out of test.files (packset()).
 TESTSET_USAGE='usage: conveyor.sh test-settings slow-issues <true | false> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file>'
 testsettings() { # <what> [<file>] [<value>]
@@ -530,7 +531,7 @@ testsettings() { # <what> [<file>] [<value>]
     slow-issues) packset --argjson v "$2" '.test.slowIssues = $v' ;;
     slow-mark) packset --arg f "$2" --arg v "$r" '.test.files[$f].slowOnPurpose = $v' ;;
     slow-mark-clear) packset --arg f "$2" 'if .test.files[$f] == null then . else del(.test.files[$f].slowOnPurpose) end' ;;
-    cpu-time) packset --arg c "$(jq -r '.command' <<<"$p")" '.test.command = $c' ;;
+    cpu-time) packset --arg c "$(jq -r '.command' <<<"$p")" --arg fc "$(jq -r '.fileCommand // ""' <<<"$p")" '.test.command = $c | if $fc == "" then . else .test.fileCommand = $fc end' ;;
   esac
 }
 # Record CPU time (#190): how the pack's test command can give a Wall only file's CPU seconds, as JSON. No runner's
@@ -538,13 +539,14 @@ testsettings() { # <what> [<file>] [<value>]
 # conveyor/tools/testtime.sh times one command as one file's run, so it applies when the test command runs one test
 # file and nothing else: the command is given no list (test.list not set, or none), is one plain command (no ; & | < >
 # $ ` quote or bracket), and of its words exactly one names a path of main's checkout, a test file. Then it prints
-# {file, was, command}: the command wrapped in testtime.sh (its path in CONVEYOR_TEST_TIME, testonce()), its output
+# {file, was, command, fileCommand}: the command wrapped in testtime.sh (its path in CONVEYOR_TEST_TIME, testonce()),
+# and test.fileCommand so wrapped when the pack sets it (it too must be one plain command), its output
 # as before and its `TESTRUN sec` line put in the run's log, where the run reads it. The wrapper is a shell function
 # called last, so the words a run adds at the command's end (the runner's report args, reportask()) go to the test
 # command. Else {why}: why neither applies.
 cpuplan() {
-  local cmd lm w ws=() ps=() q
-  packget test.command cmd test.list lm || return 1
+  local cmd lm fc w ws=() ps=() q
+  packget test.command cmd test.list lm test.fileCommand fc || return 1
   local no='No report option gives CPU time: a runner'"'"'s report gives clock seconds only. The wrapper conveyor/tools/testtime.sh does not apply either:'
   local how='wrap each test file'"'"'s run with it in your test script (conveyor/README.md, Test file times).'
   if [[ $cmd == *testtime.sh* || $cmd == *CONVEYOR_TEST_TIME* ]]; then jq -cn --arg w "The test command already runs conveyor/tools/testtime.sh, and its runs give no CPU seconds for this file: check that the wrapper names this file." '{why: $w}'; return 0; fi
@@ -558,9 +560,17 @@ cpuplan() {
   if [ ${#ps[@]} != 1 ] || [ ! -f "$MAIN/${ps[0]}" ] || [ -z "$(printf '%s\n' "${ps[0]}" | TESTRUNNERS='' testpaths)" ]; then
     jq -cn --arg w "$no the test command runs more than one test file, or a folder or script, and one wrapper around it gives one time for all of them: $how" '{why: $w}'; return 0
   fi
+  # A card runs each test file through test.fileCommand (filecmd(), lib/testrun.sh): it is wrapped too, each run timed
+  # as the file the run gives it (CONVEYOR_TEST_FILE), so a card's run of the file records its CPU seconds.
+  [ -z "$fc" ] || [[ $fc != *[\;\&\|\<\>\$\`\"\'\(\)\{\}\\]* && $fc != *$'\n'* && $fc != *testtime.sh* ]] \
+    || { jq -cn --arg w "$no test.fileCommand, which a card runs each test file with, is not one plain command, so Conveyor cannot wrap it safely: $how" '{why: $w}'; return 0; }
   q=$(printf %q "${ps[0]}")
-  jq -cn --arg f "${ps[0]}" --arg was "$cmd" --arg c "conveyor_cputime() { local o r; o=\$(mktemp); \"\$CONVEYOR_TEST_TIME\" $q -- $cmd \"\$@\" > \"\$o\" 2>&1; r=\$?; cat \"\$o\"; grep '^TESTRUN sec' \"\$o\" >> \"\$CONVEYOR_TEST_LOG/cputime\"; rm -f \"\$o\"; return \$r; }; conveyor_cputime" \
-    '{file: $f, was: $was, command: $c}'
+  jq -cn --arg f "${ps[0]}" --arg was "$cmd" --arg c "$(cputwrap "$q" "$cmd")" --arg fc "${fc:+$(cputwrap '"$CONVEYOR_TEST_FILE"' "$fc")}" \
+    '{file: $f, was: $was, command: $c} + if $fc == "" then {} else {fileCommand: $fc} end'
+}
+# <command> wrapped in conveyor/tools/testtime.sh, timed as the test file <file> (a word for the shell).
+cputwrap() { # <file> <command>
+  printf '%s' "conveyor_cputime() { local o r; o=\$(mktemp); \"\$CONVEYOR_TEST_TIME\" $1 -- $2 \"\$@\" > \"\$o\" 2>&1; r=\$?; cat \"\$o\"; grep '^TESTRUN sec' \"\$o\" >> \"\$CONVEYOR_TEST_LOG/cputime\"; rm -f \"\$o\"; return \$r; }; conveyor_cputime"
 }
 # The pack in main's checkout changed by a jq filter, checked against the schema and then saved whole by one rename;
 # a pack that does not read or whose change fails the check is left as it was. One writer at a time (a lock in the

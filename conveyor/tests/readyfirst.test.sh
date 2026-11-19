@@ -95,11 +95,10 @@ EOF
 # #8 lands while #7 is in its tests. #7 is then fitted onto main with #8's change (it applies there): it is not
 # reviewed again, and it runs again only s.test, the one of its listed test files that #8's landing touched, not x.test.
 t_readyfirst() {
-  local -x WHOLESUITE=true
   rfsetup
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/during" ] && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
-    || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
+    || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,) $(st 'select(.step == "blocked") | .reason')"
   [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1," ] || fail "#7 did not run again only s.test, which #8's landing touched: $(runs): $out"
   [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "7 GO,8 GO," ] && [ -z "$(st 'select(.step == "fix") | .issue')" ] \
     || fail "#7 was reviewed again or brought onto main by a session, though its change applied there: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
@@ -111,7 +110,6 @@ t_readyfirst() {
 # fit nobody reviewed. #7 and #8 both change line 20 of a.txt: #8 lands first, a session brings #7 onto main, and #7
 # is reviewed again there, then tested and landed.
 t_readyclash() {
-  local -x WHOLESUITE=true
   rfsetup
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Landing conflict' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fit.${PWD##*-}"; sed -i 20s/.*/seven/ a.txt; echo x > x.txt

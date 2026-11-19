@@ -151,58 +151,19 @@ lines of its own, then retry the card.
 
 ## Which tests a card runs
 
-A card's test run can get the list of the test files that its change touches. The pack's `test.list` tells how
-your test command (`test.command`) takes the list:
+A card never runs the whole suite. It runs each of its test files alone with the pack's `test.fileCommand`. Conveyor
+adds the path of the file at the end of the command. The whole suite (`test.full`) runs when you click Push landed or
+Run full test suite on the Control tab, and in a release. The whole test on main runs `test.main`.
 
-- `args`: each path is added at the end of the command, for example `npm test` followed by the paths. If the command
-  already names its test files, for example `node --test checks/*.js`, it gets no list and runs the whole suite. Use
-  `placeholder` for such a command.
-- `placeholder`: the paths go where `{files}` is in the command, for example `"command": "npx jest {files} --ci"`.
-- `env`: an environment variable holds the paths, one on each line. [conveyor/README.md](../conveyor/README.md#the-list-of-tests-a-cards-run-is-given)
-  gives its name.
-- `runner`: for `go test` and `cargo test`, which take packages and test targets, not files. With `go test`, the
-  folder of each `*_test.go` file goes where `./...` is in the command, for example `go test ./cart ./tax`. With
-  `cargo test`, each `tests/<name>.rs` file adds `--test <name>` after `cargo test`. If the list holds another file,
-  for example a helper module or a test module inside a source file, the card runs the whole suite.
-- `none`: your command cannot take a list. Each card runs the whole suite.
+A test file can set its own time limit with a line `# timeout: <seconds>` among the comments at its top. Words after
+the number are a note. Past that limit, Conveyor stops the file and every process that it started, and the output says
+that the file timed out. A file without that line has the time limit of the card's test run (`testTimeout`).
 
-Without `test.list`, your command gets no list. Use this when your command selects the tests itself.
+If the pack has no `test.fileCommand`, a card with a test file to run stops at its test step, and Needs you shows
+the reason. The reason names the setting. `conveyor.sh doctor` shows a `warning:` line for such a pack.
 
-The list holds:
-
-- each test file that the change adds or changes;
-- for each other changed file, the test files that `.conveyor/test-links.json` links to it, if your project has that
-  file (`{"<file>": ["<test file>", ...]}`), and the test files that the [test map](#the-test-map) says cover that
-  file;
-- if neither gives a test, the test files whose name holds the name of that file, from the nearest folders. For example, a change to
-  `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
-
-A change to a document (`.md`, `.txt`, `.rst`) adds only the test files that `.conveyor/test-links.json` links to it
-or that the test map says cover it. With the rule [Whole suite in a card](#whole-suite-in-a-card) on, it adds no
-test. A document is never on the list, even when it is in a test folder. When the change touches one of the files below, the
-command gets no list and runs the whole suite:
-
-- a file that the test map marks as shared: more than half of the mapped tests read it;
-- a file at the root of the repository, such as `package.json`, if the test map does not cover it;
-- a config file (`.json`, `.yaml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.lock`, or a name with `config`), if the test
-  map does not cover it;
-- a shared test file: a helper, setup, fixture or mock file, or a file in a folder of that name;
-- a file that has no test that Conveyor can find.
-
-A link in `.conveyor/test-links.json` wins over these rules, but not over a file that the test map marks as shared. `test.full` is not changed: it always runs the whole
-suite. The Board shows the mode of a card's test run and how its tests were found: `changed: 7 files (map)`,
-`changed: 7 files (by name)` or `whole suite: <why>`. With a made test map, it adds the age of the map, for example
-`map 12 commits old`. `/units` shows `changed: 7 files` or `whole suite`.
-
-### Whole suite in a card
-
-The rule **Whole suite in a card** on the Rules tab sets if a card can run the whole suite. It is Off by default.
-`conveyor.sh control rules wholeSuite=on` or `wholeSuite=off` also sets it. With the rule On, a card runs its tests
-as this section says above.
-
-With the rule Off, a card never runs the whole suite. The whole suite runs only in a release. The rule does not
-change the runs of a release or of the full test suite. A card runs only the test files that its change adds or
-changes, as `tests.patterns` finds them. A shared helper or a test runner is not a test file here.
+A card runs the test files that its change adds or changes, as `tests.patterns` finds them. A shared helper or a test
+runner is not a test file here.
 
 Of a test file that is on main, the card runs only the test cases that the change adds or changes. A case is a
 `t_<case>() {` line, the comment lines above it, and the lines to its closing `}`. Conveyor gives these cases to
@@ -211,10 +172,21 @@ file runs whole when the change touches a line outside all cases, such as a help
 when no changed case is found in it. The card's test step says "the card ran 3 changed cases of 3 test files", and
 the Board shows this note with the step.
 
-If the change adds or changes no test file, the card runs 5 of the test files that the test map and
-`.conveyor/test-links.json` link to the changed files. The files that failed most recently in a test step run first,
-then the others in the order of the test map. The card's test step says this, and the Board shows the note with the
-step. If no test file is linked to the change, the card runs no test. The card's test line says so.
+If the change adds or changes no test file, the card runs 5 of the test files linked to the changed files:
+
+- the test files that `.conveyor/test-links.json` links to a changed file, if your project has that file
+  (`{"<file>": ["<test file>", ...]}`), and the test files that the [test map](#the-test-map) says cover it;
+- if neither gives a test, the test files whose name holds the name of that file, from the nearest folders. For
+  example, a change to `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
+
+A change to a document (`.md`, `.txt`, `.rst`) adds only the test files that `.conveyor/test-links.json` links to it
+or that the test map says cover it. A document is never on the list, even when it is in a test folder. The files that
+failed most recently in a test step run first, then the others in the order of the test map. The card's test step
+says this, and the Board shows the note with the step. If no test file is linked to the change, the card runs no
+test. The card's test line says so.
+
+When a run fails, the card runs again only the files that did not pass. After a fix session that changed the card's
+change, every file of its list runs again.
 
 Before each push, Conveyor runs the test files that the test map and `.conveyor/test-links.json` link to the
 landings since the last push. Each file runs alone. If a file fails, Conveyor finds the landing that broke it, files
@@ -227,16 +199,16 @@ sets it in the control record, and that value wins over the pack's.
 The check of a bug card on main's code runs at most `test.cardFiles` test files (in `.conveyor/project.json`). If
 more are linked, the files that failed most recently in a test step run first.
 
-A card can give its test files to your command only through `test.list`. If the pack has no `test.list`, has `none`,
-or has a list form that the command cannot take, the card runs each test file alone with `test.fileCommand`. If the
-pack sets neither, the card stops at its test step, and Needs you shows the reason. The reason names the settings that
-fix it. `conveyor.sh doctor` shows a `warning:` line for a pack that sets neither `test.list` nor `test.fileCommand`.
+The run before a push and the test map can run one test file with `test.command` when the pack has no
+`test.fileCommand`. The pack's `test.list` tells how `test.command` takes the file:
 
-A command can ignore the list that it gets. A `test.command` can also add test files of its own for the change: it
-can report one more test file for each file that the change touches. If a card's run reports more test files than
-that, Conveyor stops the run at once, with every process that the run started. The card stops at its test step with
-a reason of the same kind. When `test.fileCommand` runs the files, the reason names the file that ran the others. The
-check of a bug card on main's code follows the same rule. The full suite of a release has no such limit.
+- `args`: the path is added at the end of the command, for example `npm test` followed by the path. If the command
+  already names its test files, for example `node --test checks/*.js`, use `placeholder`.
+- `placeholder`: the path goes where `{files}` is in the command, for example `"command": "npx jest {files} --ci"`.
+
+A test file's run can report more test files than it was given. Then Conveyor stops the run at once, with every
+process that the run started. The card stops at its test step, and the reason names the file that ran the others.
+The check of a bug card on main's code follows the same rule. The full suite of a release has no such limit.
 
 ## Split large issues
 
@@ -314,7 +286,7 @@ Without `test.checkCommand`, Conveyor runs no such checks.
 ## The test map
 
 The test map tells which test files cover which source files. With it, a card runs the tests that cover its change,
-not only the tests with a matching name. The map works only with `test.list` set.
+not only the tests with a matching name.
 
 Setup makes the map. It runs your whole suite once with the coverage tool of your language, and it asks you first:
 
@@ -357,16 +329,15 @@ The map stays current in these ways:
   A Go, Rust or Ruby run cannot collect coverage in this way. For these languages, if the run passes, Conveyor runs
   the tests a second time with the tool that setup uses, and makes the map from that run.
 - A source file that the map does not cover gets its tests by name. If no test has a matching name, the card runs
-  the whole suite and the Board says why.
+  no test for that file.
 
 To turn the map off, set `test.map` to `off` in the pack. Cards then find their tests by name. To use a map that your
 project keeps, set `test.map` to its path from the root of the repository. Conveyor reads it in each card's worktree
 and does not make it again. The file can be a JSON object (`{"<source file>": ["<test file>", ...]}`) or lines of
 areas in the form of this project's `.conveyor/engine-areas.json`. A test file named without a folder is the tracked
-test file of that name. The files of an area whose tests are `"all"` run the whole suite. When the rule Whole suite
-in a card is off, a card that changes this map runs the tests of each source file whose tests the change changes:
-the tests that the map gave the file before
-and the tests that it gives the file now.
+test file of that name. A card does not run the whole suite for the files of an area whose tests are `"all"`. A card
+that changes this map runs the tests of each source file whose tests the change changes: the tests that the map gave
+the file before and the tests that it gives the file now.
 
 ## The host file
 
@@ -404,8 +375,7 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
 - the usage at which no new card starts,
 - the builder, reviewer and judge, each a CLI, a model and an effort, and the ones an issue has of its own ([Settings
   for one card](#settings-for-one-card)),
-- the rules: P0 to P3, follow-ups, push, visible changes, whole suite in a card, split large issues and the
-  dependency guard,
+- the rules: P0 to P3, follow-ups, push, visible changes, split large issues and the dependency guard,
 - where new issues start,
 - Land as: `main` or `pr` (`conveyor.sh control land-as main|pr`, or Land as on the Rules tab; [Land
   as](#land-as)),

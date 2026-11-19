@@ -308,14 +308,6 @@ with the project. Each change has Undo.
 will see stops until its issue has a `Visible change approved:` line. Off, the tab says "off: visible changes land
 without your yes".
 
-**Whole suite in a card** is a switch per project, Off by default. Off, a card runs only the test files that it adds
-or changes. A card that changes no test file runs 5 of the test files linked to its change. The test files linked to
-the landings run before each push, and the whole suite runs only in a release. The tab says "off: a card runs only the
-test files it adds or changes (with none, 5 linked to its change), the test files linked to the landings run before
-each push, and the whole suite runs only in a release". While **Test before a push** is Off, that line does not
-name the run before a push. On, a card runs the whole suite when it cannot find the tests of
-its change ([Whole suite in a card](configuration.md#whole-suite-in-a-card)).
-
 **Land as** is **Main** or **Pull request**. Until you set it, it shows the pack's `push.landAs`. Main pushes the
 landed cards to the default branch. Pull request pushes them to the branch `conveyor/landing`, and one pull request
 from there collects them until you merge it. The tab then says "one pull request from conveyor/landing collects the
@@ -330,7 +322,7 @@ linked to its cards must pass first ([Merge PR](configuration.md#merge-pr)).
 landings since the last push, and a file that fails holds the push. Off, a push runs no test first, and the tab says
 "off: a push runs no test first". The switch shows the pack's `push.check` (on in a new project) until you change it
 here. Your change goes in the control record and wins over the pack
-([Which tests a card runs](configuration.md#whole-suite-in-a-card)).
+([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
 
 **Split large issues** has three settings per project: Off, Shadow and On. Shadow is the default. Shadow records what
 the Judge would split a large issue into, and builds the issue whole. The tab says "shadow: the verdict is recorded,
@@ -496,8 +488,8 @@ issue number, as a link, and the issue title.
   command gives the count when it prints `TESTRUN cases=N`, and names each case as it ends with an empty file in
   `cases/ok` or `cases/failed` of its test log folder (`conveyor/README.md`, The test step). With no case count, the
   card shows its test files, "3 of 6 test files". Each test file counts once. If the run ran more test files than it
-  selected, the card shows the extra files after the count, "86 of 86 test files · 15 more files than selected". When
-  the pack sets `test.list`, the text starts with the list that the run got: "changed: 7 files", or "whole suite" ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
+  selected, the card shows the extra files after the count, "86 of 86 test files · 15 more files than selected". The
+  text starts with the list that the run got: "changed: 7 files" ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
 - A bug card shows "Proof run" on the Build step while its new tests run on main without its fix, with its test files
   run, "297 of 1161 test files". While all the test slots are in use, it shows "waiting for a test slot". No review
   runs then.
@@ -535,7 +527,8 @@ runner from the pack's `test.report`. With no `test.report`, the clock time came
 command with no CPU seconds. CPU seconds come from a `TESTRUN sec` line that `conveyor/tools/testtime.sh` prints.
 When your test command runs only this one test file, is one plain command and gets no test list (`test.list` not set,
 or `none`), the row has **Record CPU time**. It shows your test command now and the same command wrapped in the
-helper. Click **Save the test command** to save it in the pack's `test.command`. Only an admin can save it. The next
+helper. Click **Save the test command** to save it in the pack's `test.command`. Conveyor also wraps the pack's
+`test.fileCommand`, the command a card runs each test file with, when it is one plain command. Only an admin can save it. The next
 run of the file records its CPU seconds, and Wall only goes away. In all other cases the row says why no action can
 apply, and shows none. Then wrap each test file's run with the helper in your test script (`conveyor/README.md`, Test
 file times).
@@ -545,7 +538,7 @@ only by a whole-suite run. The status gives the CPU seconds of the newest whole-
 its row and click **Make it run alone**. The issue asks a card to make the file run by itself, or to move what it runs
 into test files that the runner can list, and to keep what it tests. Before the card goes to review, Conveyor checks
 two things. The pack must no longer mark the file `wholeOnly`. The file must pass when it runs alone with the change,
-on a test slot, and Conveyor gives it to the test command as the pack's `test.list` says. When the change removes
+on a test slot, through the pack's `test.fileCommand`. When the change removes
 the file, Conveyor runs the test files that the change adds or changes. When a check fails, the card is blocked, and
 the reason says why. After the card lands, the row no longer shows Whole suite only, and a card's Test step can run
 the file.

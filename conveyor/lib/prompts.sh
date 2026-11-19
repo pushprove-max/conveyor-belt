@@ -214,12 +214,6 @@ tunables() {
 yesrule() { # [the control record, when the caller has read it]
   [ "$(jq -r '.rules.visible' <<<"${1:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]
 }
-# May a card run the whole suite? The control record's rule "Whole suite in a card" (rules.wholeSuite), off by default
-# (lib/control-defaults.json), and off when the record cannot be read: a card's run (listcmd(), lib/testrun.sh) and
-# its bug-card check (bugproof()) never run the whole suite then. The release's runs (test.full, test.main) do not read it.
-wholerule() {
-  [ "$(ctl 2>/dev/null | jq -r '.rules.wholeSuite' 2>/dev/null)" = true ]
-}
 # The fixed header of a brief; its dependencies sentence names the pack's linkFromMain, and is left out when that is
 # empty. Its last lines, on the owner's yes to a visible change, are left out with "off" (yesrule()).
 header() { # [off]
@@ -539,7 +533,7 @@ line gives that is not in the worktree: judge whether that line'"'"'s evidence s
 # The bug-card check (bugproof(), card()): the reasons a bug card goes back to its build session or is blocked (UNFIXED
 # only when its test files ran without the fix; NOTEST when the change has none, <patterns> the pack's tests.patterns;
 # SHARED when its only new tests are inline tests that share lines with the fix in <file>;
-# NOTALONE when the test command ran none of them; NOTBACK when main's code could not be put back for the run), what
+# NOTBACK when main's code could not be put back for the run), what
 # that session is told after the brief (<why>: the reason; the check's result follows it), and what the review is told
 # before that result.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
@@ -548,39 +542,32 @@ UNFIXED='the new tests pass without the fix, so they do not prove it'
 NOTEST='no test file found in the change (patterns: <patterns>); set tests.patterns in .conveyor/project.json'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 SHARED='the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone'
+# Why a card's test run, or its bug-card check, did not run or was stopped (narrowstop(), lib/testrun.sh): a card
+# runs each of its test files alone, through test.fileCommand, and never the suite command; <why> says what happened,
+# and the rest names the setting that fixes it.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
-NOTALONE='test files were found in the change, but the test command, given them, selected none of them, so they did not run without the fix; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
-# What the check's result and doctor say of a test command that, given <n> test files, ran <ran> (widewhy(), lib/issues.sh).
-# shellcheck disable=SC2034 # used in lib/issues.sh
-WIDE='the test command, given <n> test file(s), ran <ran> test files: it runs test files it is not given, so the bug-card check runs all of them; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
-# Why a card's test run, or its bug-card check, did not run or was stopped while the rule "Whole suite in a card"
-# (rules.wholeSuite) is off (narrowstop(), lib/testrun.sh): <why> says what happened, and the rest names the settings
-# that fix it.
+NARROW='a card runs each of its test files alone, and <why>; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
+# The <why> of a card's run, or of a run of its files, when the pack sets no test.fileCommand (tests(), listcmd()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
-NARROW='the rule Whole suite in a card is off, and <why>; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file'
-# Why the bug-card check was stopped when, with that rule off, the test command was run with no list of test files to
-# find whether the change selects a test of its own (bugproof(), lib/testrun.sh), and reported <ran> test files, more
-# than the <n> that the test map and its links give the change and one for each file it touches (TEST_ADDS, tests()). test.list and test.fileCommand do not change this run.
-# shellcheck disable=SC2034 # used in lib/testrun.sh
-NARROWALONE='The rule Whole suite in a card is off. The test command ran with no list of test files, to find if the change selects a test of its own. It reported <ran> test files. That is more than the <n> test file(s) that the test map and .conveyor/test-links.json link to the change, with one more for each file that the change touches, so the run was stopped. To continue, turn on the rule Whole suite in a card on the Rules tab. Or link the changed files in .conveyor/test-links.json to the test files that the test command selects for them.'
-# What a card's test step says when, with that rule off, no test file is linked to its change (listcmd()).
+NOFILECMD='the pack sets no test.fileCommand, so no test file can run'
+# What a card's test step says when no test file is linked to its change (listcmd()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'
-# What a card's test step says when, with that rule off, its change adds or changes no test file, so it runs <n> of
+# What a card's test step says when its change adds or changes no test file, so it runs <n> of
 # the <all> test files linked to its change, at most CARDLINKED (the owner, 2026-11-18: listcmd(),
 # testcap()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 CARDLINKED=5
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 LINKED='the change adds or changes no test file, so the card ran <n> of the <all> test files linked to it, those that failed most recently first. The run before the push runs all of them.'
-# What a card's test step says when, with that rule off, it ran only the <n> cases its change adds or changes of <m>
+# What a card's test step says when it ran only the <n> cases its change adds or changes of <m>
 # of its own test files (listcmd(), owncases(): #414), with OWNWHOLE when <w> of them ran whole; <s> is "s" for a
 # count over 1.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 OWNCASES='the card ran <n> changed case<s> of <m> test file<s>'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 OWNWHOLE=', and <w> test file<s> whole'
-# What the bug-card check says when, with that rule off, more test files are linked to its change than the pack's
+# What the bug-card check says when more test files are linked to its change than the pack's
 # test.cardFiles (testcap()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 CAPPED='<left> of the <all> test files linked to the change did not run, as a card runs at most <max> (test.cardFiles), those that failed most recently first. The release'"'"'s whole-suite run covers them.'
@@ -654,7 +641,7 @@ ALONEREVIEW='# The Make it run alone check
 This issue makes one test file that only whole-suite runs ran (wholeOnly in the pack) run by itself, or moves what it
 runs into test files the runner can list, and keeps what it tests. After the build, the pack must no longer mark the
 file wholeOnly, and the file (or the test files the change adds in place of a file it removes) was run alone through
-the pack'"'"'s test.list, with the change, on a test slot: it must pass. Judge whether the change keeps every check the
+the pack'"'"'s test.fileCommand, with the change, on a test slot: it must pass. Judge whether the change keeps every check the
 file ran: a check dropped so that the file can run alone is a finding. Its result:'
 # What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
 # REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings

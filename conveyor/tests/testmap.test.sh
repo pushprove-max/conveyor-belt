@@ -17,12 +17,11 @@ mapeng() { # <command>
     names || exit 1; eval "$1" ) > "$T/$CASE/eng.out" 2>&1
 }
 # Main as a Node project: src/a.js and src/b.js, each read by its own test (test/a.test.js, test/b.test.js), and
-# src/util.js, a helper every test reads, test/c.test.js too. A file runs alone with node --test (test.fileCommand);
-# the pack's test command is $STUB/list-cmd, which writes the arguments it was given to $STUB/got (test.list args).
+# src/util.js, a helper every test reads, test/c.test.js too. A file runs alone with node --test (test.fileCommand),
+# as the map's run takes it; the pack's test command is $STUB/list-cmd (test.list args).
 nodemain() {
   local t
-  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on, so a change to a file most tests share runs the whole suite.
-  setup '[]'
+  setup '[]'; git -C "$R" rm -q a.test.sh || fail "the fixture's a.test.sh"
   mkdir -p "$R/src" "$R/test" && echo '{"name": "fixture"}' > "$R/package.json" || fail "the fixture"
   for t in a b; do echo "module.exports = () => '$t';" > "$R/src/$t.js"; done
   echo 'module.exports = (x) => x;' > "$R/src/util.js"
@@ -32,10 +31,16 @@ nodemain() {
   echo 'printf "%s\n" "$*" > "$STUB/got"' > "$STUB/list-cmd"
   tune '.test.list = "args" | .test.command = "bash \"$STUB/list-cmd\"" | .test.fileCommand = "node --test"'
 }
-# Card c7's test step, its own tests() as card() runs it, on <change> (a shell edit staged in its worktree on main);
-# its test line's list in $T/$CASE/list.
-maprun() { # <change>
+# The card's test.fileCommand: $STUB/one, which adds the file it was given to $STUB/got, a line a run, and runs it
+# with node --test, as the map's own runs do.
+maprec() {
+  rm -f "$STUB/got"; printf '%s\n' 'echo "$1" >> "$STUB/got"; exec node --test "$@"' > "$STUB/one"; tune '.test.fileCommand = "bash \"$STUB/one\""'
+}
+# Card c7's test step, its own tests() as card() runs it, on <change> (a shell edit staged in its worktree on main),
+# through maprec's test.fileCommand, or <file command> when given; its test line's list in $T/$CASE/list.
+maprun() { # <change> [<file command>]
   local wt=$T/$CASE/cards/c7
+  if [ -n "${2:-}" ]; then tune --arg f "$2" '.test.fileCommand = $f'; else maprec; fi
   git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && eval "$1") && git -C "$wt" add -A || fail "the card's change could not be staged"
   mapeng 'tests "'"$wt"'" && testrec "'"$wt"'" 0 0 | jq -c .list > "'"$T/$CASE/list"'"' || fail "the test step failed: $(cat "$T/$CASE/eng.out")"
 }
@@ -75,12 +80,13 @@ t_testmapnode() {
 }
 
 # Bug it catches: a change to a helper that every test reads ran only the tests named after it (none), or a few, so a
-# break in most tests landed unseen. The map marks it shared by most tests: the whole suite runs, and says why.
+# break in most tests landed unseen. The map marks it shared by most tests: every test the map says reads it runs,
+# each alone (a card never runs the whole suite).
 t_testmapshared() {
   nodemain; nodemap
   maprun 'echo "// more" >> src/util.js'
-  [ -z "$(cat "$STUB/got")" ] || fail "a change to the shared helper was given a list: $(cat "$STUB/got")"
-  [ "$(cat "$T/$CASE/list")" = '{"mode":"whole","why":"src/util.js: shared by most tests (map)"}' ] || fail "the whole suite's why is not the map's: $(cat "$T/$CASE/list")"
+  [ "$(cat "$STUB/got")" = $'test/a.test.js\ntest/b.test.js\ntest/c.test.js' ] || fail "a change to the shared helper did not run each test that reads it alone: $(cat "$STUB/got")"
+  [ "$(cat "$T/$CASE/list")" = '{"mode":"changed","files":3,"by":"map","age":0}' ] || fail "the test line does not say the map chose: $(cat "$T/$CASE/list")"
 }
 
 # Main as nodemain with the map, and .conveyor/test-links.json linking src/util.js and src/a.js to test/c.test.js.
@@ -90,17 +96,17 @@ linkmain() {
     && git -C "$R" add -f .conveyor/test-links.json && git -C "$R" commit -qm links || fail "the links could not be committed"
 }
 # Bug it catches: a link to the shared helper returned its one linked test before the map's shared check, so a break
-# in most tests landed unseen. The map's shared check holds, links or not: the whole suite runs.
+# in most tests landed unseen. The map's shared check holds, links or not: every test that reads it runs.
 t_testmaplinkshared() {
   linkmain
   maprun 'echo "// more" >> src/util.js'
-  [ "$(cat "$T/$CASE/list")" = '{"mode":"whole","why":"src/util.js: shared by most tests (map)"}' ] || fail "a link to the shared helper ran only its linked test: $(cat "$T/$CASE/list") $(cat "$STUB/got")"
+  [ "$(cat "$STUB/got")" = $'test/a.test.js\ntest/b.test.js\ntest/c.test.js' ] || fail "a link to the shared helper ran only its linked test: $(cat "$T/$CASE/list") $(cat "$STUB/got")"
 }
 # Bug it catches: a link to src/a.js replaced the tests the map says cover it, so test/a.test.js did not run. Both run.
 t_testmaplinkcover() {
   linkmain
   maprun 'echo "// more" >> src/a.js'
-  [ "$(cat "$STUB/got")" = 'test/a.test.js test/c.test.js' ] || fail "the linked and the covering tests did not both run: $(cat "$STUB/got")"
+  [ "$(cat "$STUB/got")" = $'test/a.test.js\ntest/c.test.js' ] || fail "the linked and the covering tests did not both run: $(cat "$STUB/got")"
   jq -e '.by == "map"' "$T/$CASE/list" >/dev/null || fail "the list does not say the map found its tests: $(cat "$T/$CASE/list")"
 }
 
@@ -109,7 +115,8 @@ t_testmaplinkcover() {
 t_testmapnew() {
   nodemain; nodemap
   maprun "printf \"const t = require('node:test'); const b = require('../src/b.js');\\nt('d', () => b());\\n\" > test/d.test.js"
-  [ "$(cat "$STUB/got")" = test/d.test.js ] || fail "the new test was not run: $(cat "$STUB/got")"
+  # The first line is the test step's run; the map's run of the new file (mapnew()) goes through test.fileCommand too.
+  [ "$(head -n 1 "$STUB/got")" = test/d.test.js ] || fail "the new test was not run: $(cat "$STUB/got")"
   mapis '.sources["src/b.js"] == ["test/b.test.js", "test/d.test.js"] and (.tests | index("test/d.test.js"))' "the new test is not in the map after its first run"
   grep -qF 'conveyor: test map: mapped test/d.test.js on its first run' "$T/$CASE/cards/c7.test" || fail "the run did not say it mapped the new test: $(cat "$T/$CASE/cards/c7.test")"
 }
@@ -120,7 +127,7 @@ t_testmapnew() {
 # a map over 2 MB: the change to src/a.js runs test/a.test.js, by the map.
 t_testmapbig() {
   local wt=$T/$CASE/cards/c7
-  nodemain
+  nodemain; maprec
   jq -n --arg c "$(git -C "$R" rev-parse HEAD)" '{commit: $c, language: "node", tests: ["test/a.test.js", "test/b.test.js", "test/c.test.js"],
     sources: ({"src/a.js": ["test/a.test.js"]} + ([range(40000) | {key: "src/generated/module/folder/file-\(.).js", value: ["test/b.test.js"]}] | from_entries))}' \
     > "$R/.conveyor/test-map.json" && [ "$(wc -c < "$R/.conveyor/test-map.json")" -gt 2097152 ] || fail "the map over 2 MB could not be written"
@@ -186,7 +193,7 @@ EOF
   [ "$(cat "$STUB/cov-run")" = '-m pytest -q --verbosity=0' ] || fail "coverage did not run the test command's pytest, at a verbosity that names its test files: $(cat "$STUB/cov-run")"
   jq -e '.done == 1 and .of == 2' "$STUB/cov-prog" > /dev/null || fail "the run did not count the test file its output named while it ran: $(cat "$STUB/cov-prog")"
   mapis '.sources == {"src/calc.py": ["tests/test_calc.py"], "src/util.py": ["tests/test_calc.py", "tests/test_other.py"]} and .language == "python"' "the contexts did not map to their test files"
-  maprun 'echo y >> src/calc.py'
+  maprun 'echo y >> src/calc.py' 'pytest -q'
   [ "$(cat "$STUB/got")" = '-q tests/test_calc.py' ] || fail "a change to src/calc.py did not run tests/test_calc.py alone: $(cat "$STUB/got")"
   [ "$(jq -r .by "$T/$CASE/list")" = map ] || fail "the test line does not say the map chose: $(cat "$T/$CASE/list")"
 }
@@ -196,9 +203,9 @@ EOF
 # (test.map: a path) in area lines, as .conveyor/engine-areas.json holds them, is read: a case file named by its name
 # is the tracked test file of that name, and an area whose tests are "all" is shared. One that names a case file
 # there is none of fails the read, saying which (the area-map check).
-# WHOLESUITE: the per-file fixture's own a.test.sh would be a second tracked a.test.sh, so the name would not resolve.
-t_testmaparea() { local -x WHOLESUITE=true
-  setup '[]'
+# The per-file fixture's own a.test.sh goes: it would be a second tracked a.test.sh, so the name would not resolve.
+t_testmaparea() {
+  setup '[]'; git -C "$R" rm -q a.test.sh || fail "the fixture's a.test.sh"
   mapeng 'mapbuild "$R"'; grep -qxF "conveyor: no test map: its language has no coverage tool the test map knows (Node, Python, Go, Rust or Ruby); a card's tests are found by name" "$T/$CASE/eng.out" \
     || fail "a project with no known tool was not told: $(cat "$T/$CASE/eng.out")"
   mkdir -p "$R/lib" "$R/tests" && for f in lib/a.sh lib/b.sh lib/core.sh tests/a.test.sh tests/b.test.sh; do echo x > "$R/$f"; done
@@ -218,10 +225,10 @@ t_testmaparea() { local -x WHOLESUITE=true
 # <tools> (space-separated) each written from <script>, the map made (mapbuild()), and its sources must be <want>.
 stubmap() { # <tools> <script> <want> <files>...
   local f t s=$2 w=$3 ts; read -ra ts <<<"$1"; shift 3
-  # The old fixture, for the Ruby case: mapone() runs a spec file through test.fileCommand when the pack has one, so the
-  # per-file fixture's would run in place of the rspec stub. Go and Rust run go test and cargo llvm-cov directly.
-  local -x WHOLESUITE=true
-  setup '[]'
+  # No test.fileCommand, for the Ruby case: mapone() runs a spec file through it when the pack has one, so the
+  # per-file fixture's would run in place of the rspec stub. Go and Rust run go test and cargo llvm-cov directly. No
+  # a.test.sh either: the fixture's is no file of these languages.
+  setup '[]'; tune 'del(.test.fileCommand)'; git -C "$R" rm -q a.test.sh || fail "the fixture's a.test.sh"
   for f in "$@"; do mkdir -p "$R/$(dirname "$f")" && echo x > "$R/$f"; done
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
   for t in "${ts[@]}"; do printf '#!/usr/bin/env bash\n%s\n' "$s" > "$STUB/$t" && chmod +x "$STUB/$t" || fail "the stub $t"; done

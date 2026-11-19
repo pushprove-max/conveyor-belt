@@ -16,11 +16,11 @@ nine() { seq 9 | sed 's/^/l/' > "$R/a.txt"; git -C "$R" commit -qam "a.txt of ni
 # Bug (the owner, 2026-11-13: 24 rebuild sessions in a day): a card whose change no longer applied plainly to a main
 # that moved went to a rebuild session, a new review and its tests again, though main changed other lines of the file.
 # #7 changes l4; during its tests main changes l6. Its change merges three-way onto main with no conflict: it lands with
-# no rebuild session, no second review and no second test run, both lines in main.
+# no rebuild session, no second review and no second test run, both lines in main. No link gives a.txt a test file, so
+# main's change shares none with #7's, whose test is its own seven.test.sh (a shared one runs again: t_mergesharedtests).
 t_mergeclean() {
-  local -x WHOLESUITE=true # The old fixture: #7 lands on a main that changed a.txt too.
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; nine
-  echo "sed -i 's/^l4\$/seven/' a.txt" > "$STUB/build"
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; nine; linkset '{}'
+  echo "sed -i 's/^l4\$/seven/' a.txt; echo x > seven.test.sh" > "$STUB/build"
   echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l6\$/main6/" "$R/a.txt"; git -C "$R" commit -qam "main moves"; }' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/moved" ] || fail "main did not move during the card's tests"
@@ -51,14 +51,14 @@ t_mergeconflict() {
 # Bug: two cards that changed different parts of one file waited one behind the other whenever their changes did not
 # apply together plainly, though they merge three-way with no conflict. #7 changes l4 and #8 l6: both hold a.txt at
 # once (#7's tests end only once #8 holds it, or after 30 s), and neither waits. #8's tests end only once #7 landed;
-# #8 is then merged onto main with no session and no second review, on the tests it passed.
+# #8 is then merged onto main with no session and no second review, on the tests it passed. No link gives a.txt a test
+# file: each card's test is its own (seven.test.sh, eight.test.sh), so #7's landing shares none with #8.
 t_mergetogether() {
-  local -x WHOLESUITE=true # The old fixture: #8 lands on a main that changed a.txt too.
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; nine
+  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; nine; linkset '{}'
   cat > "$STUB/build" <<'EOF'
 case $PWD in
-  *-7) sed -i 's/^l4$/seven/' a.txt ;;
-  *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; sleep 0.1; done; sed -i 's/^l6$/eight/' a.txt ;;
+  *-7) sed -i 's/^l4$/seven/' a.txt; echo x > seven.test.sh ;;
+  *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; sleep 0.1; done; sed -i 's/^l6$/eight/' a.txt; echo x > eight.test.sh ;;
 esac
 EOF
   cat > "$STUB/review-cmd" <<'EOF'
@@ -73,7 +73,7 @@ case $PWD in
 esac
 EOF
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(jq -sc 'map([.held, .paths])' "$STUB/claims" 2>/dev/null)" = '[[true,["a.txt"]],[true,["a.txt"]]]' ] && ! grep -q "waits on card" <<<"$out" \
+  [ "$(jq -sc 'map([.held, .paths])' "$STUB/claims" 2>/dev/null)" = '[[true,["a.txt","seven.test.sh"]],[true,["a.txt","eight.test.sh"]]]' ] && ! grep -q "waits on card" <<<"$out" \
     || fail "#8 waited on #7, whose change merges with its own: $(cat "$STUB/claims" 2>/dev/null) $out"
   [ -z "$(st 'select(.step | IN("rebase", "fix")) | .step')" ] || fail "a session brought a change onto main though it merges: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(st "select(.issue == 8 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test test landed " ] \
@@ -249,15 +249,13 @@ EOF
 # Bug (#334: two cards that each added a row to one panel passed their tests alone, and its test file failed on main
 # once both landed): a card whose change still applied to a main that moved landed on the tests it passed before, though
 # the card landed meanwhile touched a test file of its own. #7 changes lib/panel.sh and #8 lib/rows.sh, both tested by
-# lib/view.test.sh, which fails with both changes. No name or map links that file to them: only the project's test
-# command selects it, so the shared file is found from what each card's run ran (its log), not from testsel(). #8's
-# tests pass before #7 lands; at its landing that test file runs again on main with #7's change, fails, and #8 goes to
-# its fix: it does not land red.
+# lib/view.test.sh, which fails with both changes: the test links give that file to both. #8's tests pass before #7
+# lands; at its landing that test file runs again on main with #7's change, fails, and #8 goes to its fix: it does not
+# land red.
 t_mergesharedtests() {
-  local -x WHOLESUITE=true # The old fixture: the shared file is found from the log of test.command, the runner that selects it.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
   mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo rows > "$R/lib/rows.sh"; echo case1 > "$R/lib/view.test.sh"
-  git -C "$R" add lib; git -C "$R" commit -qm "a panel, its rows and their test"
+  git -C "$R" add lib; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
   cat > "$STUB/build" <<'EOF'
 case $PWD in
   *-7) echo seven >> lib/panel.sh ;;
@@ -294,10 +292,9 @@ EOF
 # cards that landed: a commit on main and its landed line. Each run of A's tests logs the file, and the n-th lands the
 # n-th of them.
 sharedonce() { # [conflict]
-  local -x WHOLESUITE=true # The old fixture (both cases): the shared file is found from the log of test.command, the runner that selects it.
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo case1 > "$R/lib/view.test.sh"
-  git -C "$R" add lib; git -C "$R" commit -qm "a panel and its test"
+  git -C "$R" add lib; linkset '{"lib/panel.sh": ["lib/view.test.sh"]}' # A's change runs lib/view.test.sh
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^panelC\$/panelC seven/' lib/panel.sh; else sed -i 's/^panel\$/seven/' lib/panel.sh; fi" > "$STUB/build"
   [ -z "${1:-}" ] || : > "$STUB/conflict"
   cat >> "$STUB/test-cmd" <<'EOF'

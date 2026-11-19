@@ -11,9 +11,10 @@
 
 # Card #5's test line, of a card that landed, recorded main's s.test at 6 CPU s (times): card #8 edits it to take
 # <seconds> and <CPU seconds>. The pack has the old test.fileBudget of 5, which no file is held to now (#349),
-# test.slowIssues true, which files nothing now (#519), and the test rules' switch off.
+# test.slowIssues true, which files nothing now (#519), and the test rules' switch off. The links give s.test the stub
+# test file a.test.sh, whose run times it, so a card that changes s.test alone runs a test file.
 budgetedit() { # <seconds> <CPU seconds>
-  budgetsetup '6 6'; tune '.test.fileBudget = 5 | .test.slowIssues = true'
+  budgetsetup '6 6'; tune '.test.fileBudget = 5 | .test.slowIssues = true'; linkset '{"a.txt": ["a.test.sh"], "s.test": ["a.test.sh"]}'
   { jq -cn '{card: "c0-5", issue: 5, step: "test", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "pass", sha: "", reason: "",
       times: {"s.test": 6}}'; landed 5; } >> "$ST/cards.jsonl"
   echo "echo $1 $2 >> s.test" > "$STUB/build"
@@ -28,7 +29,6 @@ budgetedit() { # <seconds> <CPU seconds>
 # With the test rules' switch on, a rule of the old measure budget matches nothing, and a rule of 2 card runs in a row
 # whose clock time is over their CPU seconds files one issue by #7's run, after its test step.
 t_budgetkept() {
-  local -x WHOLESUITE=true # The old fixture: #8 changes s.test alone, which no test file is linked to, so the per-file fixture runs no test for it.
   budgetedit 9 6.5
   [ "$(reviews 8)" = "GO " ] || fail "an already slow file went to the review: $(reviews 8)"
   [ "$(slowof 8)" = null ] || fail "#8's test line flags the file over a CPU budget: $(slowof 8)"

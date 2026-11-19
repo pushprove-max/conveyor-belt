@@ -12,7 +12,6 @@
     "followups": true,
     "push": false,
     "visible": false,
-    "wholeSuite": false,
     "split": "shadow",
     "never": []
   },

@@ -695,9 +695,9 @@ card() { # <card> <issue> [<branch> <tip>]
           || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
         rm -f "$wt.lent" # its worktree holds its own change again (batch())
       fi
-      # The rule Whole suite in a card off, its run did not run, or was stopped, as it would have run more than the
-      # tests of its change (tests(): <worktree>.stop): no run on main and no fix session, as a session cannot change
-      # the pack. The card is blocked with that reason, which names the setting that fixes it.
+      # Its run did not run (no test.fileCommand), or was stopped, as it would have run more than the tests of its
+      # change (tests(): <worktree>.stop): no run on main and no fix session, as a session cannot change the pack.
+      # The card is blocked with that reason, which names the setting that fixes it.
       [ ! -s "$wt.stop" ] || { block "$c" "$n" "$wt" "test: $(<"$wt.stop")"; return; }
       voidrun "$wt" "$rc" > /dev/null || voids=0 # a run with a result, a pass too, starts the count of runs with none again
       if [ $rc != 0 ]; then

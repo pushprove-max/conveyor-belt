@@ -16,7 +16,6 @@
 # with both in it, on their changes unchanged since, and every other case on its own card's change: the run again
 # runs no case. Bug it catches: a batch run again ran the cases its last run had passed for the same cards.
 t_batchreusemoved() {
-  local -x WHOLESUITE=true
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'b.txt s.test' 'x.txt x.test' 'y.txt y.test'
   echo 'grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; (cd "$R" && echo other > other.txt && git add other.txt && git commit -qm "another file"); }; :' >> "$STUB/test-cmd"
   printf '%s\n' '! git cat-file -e "$2:other.txt" 2>/dev/null || ! git show "$2:a.txt" | grep -qx eight || [ -e "$STUB/flaked" ] || { : > "$STUB/flaked"; echo "fails once"; exit 1; }' > "$STUB/once"
@@ -51,7 +50,9 @@ t_batchsharedmoved() {
   # #8 changes after its own run, so the batch's run runs its cases (a run of none would not start the test command),
   # and only those: checked below.
   echo 'd=$(echo ../*-8); echo more >> "$d/y.txt"; git -C "$d" add -A' > "$STUB/held-then"
-  echo 'grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; echo moved >> "$STUB/runs"; (cd "$R" && echo main >> lib/other.sh && git commit -qam "main changes the other source"); }; :' >> "$STUB/test-cmd"
+  # Main moves at the batch's run of y.test.sh, once its cases are on the run's line: a later file's run adds its
+  # cases to the last line of $STUB/runs (reusesetup), which `moved` would be.
+  echo '[ "${CONVEYOR_TEST_FILE:-}" = y.test.sh ] && grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; echo moved >> "$STUB/runs"; (cd "$R" && echo main >> lib/other.sh && git commit -qam "main changes the other source"); }; :' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
   grep -q "card $c7: cards landed during its batch's run touch its test files too, so the batch is tested again: lib/mine-other.test.sh on main as it is now" <<<"$out" \

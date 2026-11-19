@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases (#293): the rule Whole suite in a card (rules.wholeSuite) off, as it is by default: a card's run never
-# runs the whole suite (tests(): listcmd(), watch()), and the release's run is not changed by it. The rule on, a card
-# runs as before: the cases of testlist.test.sh, whose fixture seeds it on (lib.sh seed()).
+# Engine cases (#293, #351): a card never runs the whole suite. Its run gives each test file of its list to
+# test.fileCommand alone and never runs test.command (tests(): listcmd(), watch()); with no test.fileCommand it stops,
+# naming it. The release's run is not changed by it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -11,21 +11,19 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# The rule Whole suite in a card off in the control record (the fixture's seed turns it on).
-wholeoff() {
-  jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule could not be turned off"
-}
 # Main holds lib/cartsum.js and its test lib/cartsum.test.js, lib/tax.test.js and a shared test helper
-# (test/helpers.js). The pack's test.list is <mode>, its command $STUB/list-cmd, which adds the arguments it was given
-# and CONVEYOR_TEST_FILES to $STUB/got, a line a run; the rule is off.
-narrowsetup() { # <test.list>
+# (test/helpers.js). The pack's test.fileCommand is $STUB/one, which adds `one:<the file it was given>` to $STUB/got,
+# a line a run; its test.command (args as test.list) is $STUB/suite-cmd, which adds the arguments it was given and
+# CONVEYOR_TEST_FILES to $STUB/got the same way, so a run of the suite command shows there (not $STUB/list-cmd, which
+# the gh stub runs for its issue list: lib.sh).
+narrowsetup() {
   local f
   setup '[]'
   for f in lib/cartsum.js lib/cartsum.test.js lib/tax.test.js test/helpers.js; do mkdir -p "$R/${f%/*}" && echo x > "$R/$f"; done
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
-  printf '%s\n' 'printf "args:%s|env:%s\n" "$*" "$(printf %s "${CONVEYOR_TEST_FILES:-}" | tr "\n" " ")" >> "$STUB/got"' > "$STUB/list-cmd"
-  tune --arg l "$1" '.test.list = $l | .test.command = "bash \"$STUB/list-cmd\""'
-  wholeoff
+  printf '%s\n' 'printf "args:%s|env:%s\n" "$*" "$(printf %s "${CONVEYOR_TEST_FILES:-}" | tr "\n" " ")" >> "$STUB/got"' > "$STUB/suite-cmd"
+  printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"
+  tune '.test.list = "args" | .test.command = "bash \"$STUB/suite-cmd\"" | .test.fileCommand = "bash \"$STUB/one\""'
 }
 # Card c7's test step, its own tests() as card() runs it (with <field>, as the release's runs call it), on a change (a
 # shell edit staged in its worktree on main): its exit in $T/$CASE/rc, its test line's fields (testrec()) in c7.rec.
@@ -41,37 +39,34 @@ narrowrun() { # <change> [field] [fix]
     || fail "the test step could not be run: $(cat "$T/$CASE/run.out")"
 }
 
-# D1. Bug it catches: a card whose change touches a shared helper ran the whole suite (no list), however the rule was
-# set. A pack with no test.list cannot give the command the card's tests: with no test.fileCommand, the whole card is
-# blocked at its test step with a reason that names both settings, and the command never ran.
+# #351 scenario 1. Bug it catches: a card whose pack has no way to run one test file ran the whole suite (test.command
+# with no list). With no test.list and no test.fileCommand (a language with no known runner), the whole card is
+# blocked at its test step, under Needs you, with a reason that names test.fileCommand, and the test command never ran.
 t_narrowblock() {
-  setup "[$(issue 7 2026-01-01)]"; wholeoff
-  printf '%s\n' 'pwd >> "$STUB/got"' > "$STUB/list-cmd"; tune 'del(.test.list, .test.fileCommand) | .test.command = "bash \"$STUB/list-cmd\""'
+  setup "[$(issue 7 2026-01-01)]"
+  printf '%s\n' 'pwd >> "$STUB/got"' > "$STUB/suite-cmd"; tune 'del(.test.list, .test.fileCommand) | .test.command = "bash \"$STUB/suite-cmd\""'
   echo 'mkdir -p lib && echo x > lib/new.test.js && echo two >> a.txt' > "$STUB/build"; echo "$GO" > "$STUB/review.1"
   loop run > /dev/null
-  st 'select(.step == "blocked") | .reason' | grep -qF 'test: the rule Whole suite in a card is off, and the test command cannot be given the card'"'"'s 1 test file(s): test.list is not set, so the test command takes no list; set test.list in .conveyor/project.json' \
-    && st 'select(.step == "blocked") | .reason' | grep -qF 'or set test.fileCommand to a command that runs one test file' \
-    || fail "the card was not blocked at its test step naming test.list and test.fileCommand: $(st 'select(.step == "blocked")')"
-  # The card's own run, in its worktree; a run on main's checkout is not the card's.
-  ! grep -qF "$T/$CASE/cards/" "$STUB/got" 2>/dev/null || fail "the test command ran in the card's worktree: $(cat "$STUB/got")"
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'test: a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
+    || fail "the card was not blocked at its test step naming test.fileCommand: $(st 'select(.step == "blocked")')"
+  [ ! -e "$STUB/got" ] || fail "the test command ran: $(cat "$STUB/got")"
 }
 
-# D1. Bug it catches: test.list none (the command takes no list) ran every test file. With test.fileCommand set, the
-# change to a shared helper (which the rule on runs the whole suite for: t_testlisthelper) and to lib/cartsum.js runs
-# only lib/cartsum.test.js, alone, through test.fileCommand; the test command is not run.
+# D1, #351 scenario 5. Bug it catches: a change to a shared helper ran every test file. The change to a shared helper
+# and to lib/cartsum.js runs only lib/cartsum.test.js, the file linked to it by name, alone, through
+# test.fileCommand; the test command is not run.
 t_narrowfiles() {
-  narrowsetup none
-  printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"; tune '.test.fileCommand = "bash \"$STUB/one\""'
+  narrowsetup
   narrowrun 'echo y >> test/helpers.js; echo y >> lib/cartsum.js'
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'one:lib/cartsum.test.js' ] \
     || fail "the card did not run its one linked test file alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -c .list "$T/$CASE/cards/c7.rec")" = '{"mode":"changed","files":1,"by":"name"}' ] || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
-# Bug it catches: a change linked to no test file (a source with no test found for it) ran the whole suite. It runs
-# nothing and passes, and its output and test line say that the release's run covers it.
+# #351 scenario 6. Bug it catches: a change linked to no test file (a source with no test found for it) ran the whole
+# suite. It runs nothing, neither command, and passes, and its output and test line say that the release's run covers it.
 t_narrownone() {
-  narrowsetup args
+  narrowsetup
   narrowrun 'echo x > lib/other.js'
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ ! -e "$STUB/got" ] || fail "a change with no linked test ran the command, or failed: $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   grep -qF "the release's whole-suite run covers this change" "$T/$CASE/cards/c7.test" \
@@ -81,15 +76,15 @@ t_narrownone() {
 
 # Bug it catches: a change to a document alone ran no test, though .conveyor/test-links.json links the document to a
 # test file (a page whose text a test reads), or the pack's test map (test.map) maps it to one. It runs both test
-# files, given to the command.
+# files, each alone.
 t_narrowdocs() {
-  narrowsetup args
+  narrowsetup
   tune '.test.map = ".conveyor/map.json"'
   mkdir -p "$R/docs" && echo x > "$R/docs/guide.md" && git -C "$R" add -A && git -C "$R" commit -qm docs || fail "main's page could not be committed"
   # The fixture ignores .conveyor/: the links and the map are the worktree's, and not part of the change.
   narrowrun 'mkdir -p .conveyor && echo '"'"'{"docs/guide.md": ["lib/tax.test.js"]}'"'"' > .conveyor/test-links.json \
     && echo '"'"'{"docs/guide.md": ["lib/cartsum.test.js"]}'"'"' > .conveyor/map.json && echo y >> docs/guide.md'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:lib/cartsum.test.js lib/tax.test.js|env:' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js' ] \
     || fail "the document's linked and mapped test files were not run (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
@@ -97,8 +92,8 @@ t_narrowdocs() {
 # tests landed with that file not run again. lib/cartsum.js is linked to two test files; lib/tax.test.js fails, then a
 # fix changes lib/cartsum.js: the run after it runs both files again.
 t_narrowfixrun() {
-  narrowsetup none
-  printf '%s\n' 'echo "one:$1" >> "$STUB/got"; [ "$1" != lib/tax.test.js ] || [ -e "$STUB/fixed" ]' > "$STUB/one"; tune '.test.fileCommand = "bash \"$STUB/one\""'
+  narrowsetup
+  printf '%s\n' 'echo "one:$1" >> "$STUB/got"; [ "$1" != lib/tax.test.js ] || [ -e "$STUB/fixed" ]' > "$STUB/one"
   # The fixture ignores .conveyor/: the links are the worktree's, and not part of the change.
   narrowrun 'mkdir -p .conveyor && echo '"'"'{"lib/cartsum.js": ["lib/cartsum.test.js", "lib/tax.test.js"]}'"'"' > .conveyor/test-links.json && echo y >> lib/cartsum.js' \
     '' 'rm -f "$STUB/got"; touch "$STUB/fixed"; echo z >> lib/cartsum.js'
@@ -106,41 +101,95 @@ t_narrowfixrun() {
     || fail "the run after the fix did not run both linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
-# D1. Bug it catches: a test command that ignores the list it is given (npm test running every file) ran all of them,
-# 45 minutes a card. Given lib/cartsum.test.js, it reports 40 test files: the run is stopped at once, not run again,
-# and fails with a reason (<worktree>.stop, which card() blocks with) naming the counts and the settings.
-t_narrowwide() {
-  narrowsetup args
-  printf '%s\n' 'echo "TESTRUN files=40" >> "$CONVEYOR_TEST_LOG/run"; echo ran >> "$STUB/got"; sleep 30' > "$STUB/list-cmd" # sleep: a long run, which the stop cuts
-  local s=$SECONDS
-  narrowrun 'echo y >> lib/cartsum.js'
-  [ $((SECONDS - s)) -lt 20 ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(cat "$STUB/got")" = ran ] \
-    || fail "the run was not stopped, or ran again (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-  grep -qF 'the rule Whole suite in a card is off, and the test command, given 1 test file(s), reported 40 test files: it runs test files it is not given, so its run was stopped; set test.list' "$T/$CASE/cards/c7.stop" \
-    || fail "the stop does not say why: $(cat "$T/$CASE/cards/c7.stop" "$T/$CASE/run.out" 2>&1)"
+# D1, #351 scenario 7, after a fix round. Bug it catches: the run after a fix session that left the change as it was
+# started every file of the card's list again, or the suite command. lib/cartsum.js is linked to two test files, and
+# lib/tax.test.js fails until the fix: the run after the fix starts lib/tax.test.js alone, through test.fileCommand
+# (the file it is given), and lib/cartsum.test.js, which passed, does not start.
+t_narrowfixsame() {
+  narrowsetup
+  printf '%s\n' 'echo "one:$1" >> "$STUB/got"; [ "$1" != lib/tax.test.js ] || [ -e "$STUB/fixed" ]' > "$STUB/one"
+  # The fixture ignores .conveyor/: the links are the worktree's, and not part of the change.
+  narrowrun 'mkdir -p .conveyor && echo '"'"'{"lib/cartsum.js": ["lib/cartsum.test.js", "lib/tax.test.js"]}'"'"' > .conveyor/test-links.json && echo y >> lib/cartsum.js' \
+    '' 'rm -f "$STUB/got"; touch "$STUB/fixed"'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'one:lib/tax.test.js' ] \
+    || fail "the run after the fix did not start the failed file alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
-# D1. Bug it catches: the rule off narrowed the release's run too. tests() with test.full, as the full test suite and
-# release-prep run it, on a change to a shared helper, runs the whole suite (no list) and is not stopped.
+# #351 scenario 7. Bug it catches: the run again after a failure ran every file of the card's list, or the suite
+# command. lib/cartsum.js is linked to two test files, and lib/tax.test.js fails its first run only: the run again
+# runs lib/tax.test.js alone, through test.fileCommand, and the step passes.
+t_narrowrerun() {
+  narrowsetup
+  printf '%s\n' 'echo "one:$1" >> "$STUB/got"; [ "$1" != lib/tax.test.js ] || [ -e "$STUB/once" ] || { touch "$STUB/once"; exit 1; }' > "$STUB/one"
+  # The fixture ignores .conveyor/: the links are the worktree's, and not part of the change.
+  narrowrun 'mkdir -p .conveyor && echo '"'"'{"lib/cartsum.js": ["lib/cartsum.test.js", "lib/tax.test.js"]}'"'"' > .conveyor/test-links.json && echo y >> lib/cartsum.js'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js\none:lib/tax.test.js' ] \
+    || fail "the run again did not run the failed file alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+}
+
+# #351 scenario 2, and its stub that must never be called. Bug it catches: a card ran the suite command, which ignores
+# the list it is given (npm test running every file, 45 minutes a card). test.command and test.full are a stub that
+# runs every file and records `suite`; a whole card whose change touches lib/cartsum.js runs lib/cartsum.test.js alone
+# through test.fileCommand, lands, and neither suite command ever started.
+# #351 scenario 10 too. Bug it catches: a card built or refreshed the test map, a whole-suite run under coverage, which
+# only the owner starts (setup, the Board). Main is a Node project (package.json, so the map's tool is there) whose
+# made map is due (made under another test command): the card leaves the map as it was and starts no build of it.
+t_narrowsuite() {
+  local m
+  narrowsetup; echo '{}' > "$R/package.json"; git -C "$R" add package.json && git -C "$R" commit -qm node && git -C "$R" push -q origin main || fail "main's files could not be pushed"
+  m=$R/.conveyor/test-map.json
+  jq -n --arg s "$(git -C "$R" rev-parse HEAD)" '{commit: $s, command: "an older test command", language: "node", made: "2026-01-01T00:00:00Z", seconds: 1,
+    tests: ["lib/cartsum.test.js"], sources: {"lib/cartsum.js": ["lib/cartsum.test.js"]}}' > "$m" && cp "$m" "$STUB/map.before" || fail "the test map could not be written"
+  echo "[$(issue 7 2026-01-01)]" > "$STUB/issues.json"
+  printf '%s\n' 'echo "suite:$PWD" >> "$STUB/got"; echo "TESTRUN files=40" >> "$CONVEYOR_TEST_LOG/run"' > "$STUB/suite-cmd"
+  tune '.test.full = .test.command'
+  echo 'echo y >> lib/cartsum.js' > "$STUB/build"; echo "$GO" > "$STUB/review.1"
+  loop run > /dev/null
+  st 'select(.step == "landed") | .card' | grep -q . || fail "the card did not land: $(st 'select(.step == "blocked" or .step == "test")')"
+  [ "$(cat "$STUB/got" 2>&1)" = 'one:lib/cartsum.test.js' ] || fail "the card's run started a suite command, or not its one file alone: $(cat "$STUB/got" 2>&1)"
+  cmp -s "$m" "$STUB/map.before" && [ ! -e "$R/.conveyor/test-map.run.json" ] && [ ! -e "$R/.conveyor/test-map.build.json" ] \
+    || fail "the card built or refreshed the test map: $(ls "$R/.conveyor"; cat "$m")"
+}
+
+# #351 scenario 9. Bug it catches: the main-red check (verdicts(): a card's failures run on main) ran the suite
+# command, given the failing cases, which ran every test file. The card's run failed two cases of
+# lib/cartsum.test.js and lib/tax.test.js naming no case: main runs each of the two files once, alone, through
+# test.fileCommand, and nothing else.
+t_narrowmainred() {
+  local wt=$T/$CASE/cards/c7
+  narrowsetup
+  git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && echo y >> lib/cartsum.js) && git -C "$wt" add -A || fail "the card's change could not be staged"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
+    names || exit 1
+    # shellcheck disable=SC2034 # TEST_WAIT, TEST_RUN and TEST_FREE are read by verdicts(), defined by the eval
+    TEST_WAIT=0 TEST_RUN=0 TEST_FREE=0
+    verdicts c7 "$wt" '{"files":[{"file":"lib/cartsum.test.js","cases":[{"name":"adds"},{"name":"rounds"}]},{"file":"lib/tax.test.js","cases":[]}]}' || : ) \
+    > "$T/$CASE/run.out" 2>&1 || fail "the check on main could not be run: $(cat "$T/$CASE/run.out")"
+  [ "$(sort "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js' ] \
+    || fail "main did not run each failing file once, alone, and nothing else: $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+}
+
+# D1. Bug it catches: narrowing a card's run narrowed the release's run too. tests() with test.full, as the full test
+# suite and release-prep run it, on a change to a shared helper, runs the whole suite (no list) and is not stopped.
 t_narrowrelease() {
-  narrowsetup args
-  tune '.test.full = "bash \"$STUB/list-cmd\""'
+  narrowsetup
+  tune '.test.full = "bash \"$STUB/suite-cmd\""'
   narrowrun 'echo y >> test/helpers.js' test.full
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got")" = 'args:|env:' ] && [ ! -e "$T/$CASE/cards/c7.stop" ] \
     || fail "the release's run was not the whole suite: $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
 # Bug it catches: a pack whose cards all stop at their test step with nothing said before. Doctor warns of a pack with
-# neither test.list nor test.fileCommand while the rule is off, and not once the pack sets one of them or the rule is on.
+# no test.fileCommand, though it sets test.list (a card no longer gives test.command a list), and not once it sets one.
 t_narrowdoctor() {
-  setup '[]'; wholeoff; tune 'del(.test.list, .test.fileCommand)'
+  setup '[]'; tune 'del(.test.fileCommand) | .test.list = "args"'
   ( export CONVEYOR_MAIN=$R; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/doctor.sh")" || exit 1
-    narrowwarn > "$T/$CASE/neither"; tune '.test.fileCommand = "bash"'; narrowwarn > "$T/$CASE/fc"
-    tune 'del(.test.fileCommand)'; jq -c '.rules.wholeSuite = true' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" && narrowwarn > "$T/$CASE/on" ) \
+    narrowwarn > "$T/$CASE/none"; tune '.test.fileCommand = "bash"'; narrowwarn > "$T/$CASE/fc" ) \
     > "$T/$CASE/run.out" 2>&1 || fail "the warning failed to run: $(cat "$T/$CASE/run.out")"
-  grep -q '^warning: the rule Whole suite in a card is off, and the pack sets neither test.list nor test.fileCommand' "$T/$CASE/neither" \
-    || fail "doctor did not warn of a pack with neither: $(cat "$T/$CASE/neither" "$T/$CASE/run.out")"
-  [ ! -s "$T/$CASE/fc" ] && [ ! -s "$T/$CASE/on" ] || fail "doctor warned with test.fileCommand set, or the rule on: $(cat "$T/$CASE/fc" "$T/$CASE/on")"
+  grep -qxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file' "$T/$CASE/none" \
+    || fail "doctor did not warn of a pack with no test.fileCommand: $(cat "$T/$CASE/none" "$T/$CASE/run.out")"
+  [ ! -s "$T/$CASE/fc" ] || fail "doctor warned with test.fileCommand set: $(cat "$T/$CASE/fc")"
 }
 
 # #311, #384. Main holds <n> test files, t001.test.js to t<n>.test.js, which the card's change, an edit of <source>
@@ -149,8 +198,7 @@ t_narrowdoctor() {
 # The records hold the test lines <line>... first.
 caprun() { # <n> <source> [<more>] [<line>...]
   local i f fs=() s=$2 m=${3:-}
-  narrowsetup none
-  printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"; tune '.test.fileCommand = "bash \"$STUB/one\""'
+  narrowsetup
   [ $# -lt 4 ] || printf '%s\n' "${@:4}" >> "$ST/cards.jsonl"
   mkdir -p "$R/${s%/*}" && echo x > "$R/$s"
   for ((i = 1; i <= $1; i++)); do printf -v f 't%03d.test.js' "$i"; fs+=("$f"); echo x > "$R/$f"; done
@@ -191,12 +239,11 @@ t_narrowownsetup() {
 # staged and tested as narrowrun() does; ownedit <file> <ERE> <text> puts <text> for <ERE> in each line of <file>.
 ownrun() { # <change>
   local x
-  narrowsetup none
+  narrowsetup
   cat > "$STUB/one" <<'EOF'
 c=$(printf '%s\n' "${CONVEYOR_TEST_CASES:-}" | awk -F'\t' -v f="$1" '$1 == f {print $2}' | paste -sd, -)
 echo "one:$1|$c" >> "$STUB/got"
 EOF
-  tune '.test.fileCommand = "bash \"$STUB/one\""'
   mkdir -p "$R/tests"
   for x in a b c; do
     printf '%s\n' "h$x() { echo $x; }" '' "# $x one." "t_${x}one() {" '  echo 1' '  echo one; }' '' "# $x two." "t_${x}two() {" "  : '{\"x\":1}" "{\"y\":2}'" '  echo 2' '}' > "$R/tests/$x.test.sh"
@@ -265,13 +312,14 @@ t_narrowcapunder() {
     || fail "a run under the limit names files left out: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
-# D3. Bug it catches: the bug card's proof run on main gave the command every test file of the change, past the
-# limit. With test.cardFiles 2, a change adding three test files gives it two, the one that failed most recently
-# first, and the check's result says one was left out.
+# D3, #351 scenario 8. Bug it catches: the bug card's proof run on main gave the suite command every test file of the
+# change, past the limit. With test.cardFiles 2, a change to three test files runs two on main, each alone through
+# test.fileCommand (one process a file, each given its own path), the one that failed most recently first, and the
+# check's result says one was left out.
 t_narrowcapproof() {
-  local wt=$T/$CASE/cards/c7; local -x WHOLESUITE=true
-  setup '[]'; wholeoff; tune '.test.list = "env" | .test.cardFiles = 2'
-  printf '%s\n' 'printf %s "$CONVEYOR_TEST_FILES" > "$STUB/given"; exit 1' > "$STUB/mainrun-cmd"
+  local wt=$T/$CASE/cards/c7
+  setup '[]'; tune '.test.cardFiles = 2'
+  printf '%s\n' 'echo "$CONVEYOR_TEST_FILE" >> "$STUB/given"; exit 1' > "$STUB/mainrun-cmd"
   echo '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"d.test.sh","cases":[]}],"timeout":null}}' >> "$ST/cards.jsonl"
   git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" \
     && for f in a c d; do printf '%s\n' '#!/usr/bin/env bash' 'grep -qx two a.txt' > "$wt/$f.test.sh"; done && git -C "$wt" add -A || fail "the card's change could not be staged"
@@ -279,36 +327,36 @@ t_narrowcapproof() {
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     names || exit 1; bugproof c7 "$wt" '{"number":7}'; cp "$wt.unfixed" "$T/$CASE/unfixed" ) > "$T/$CASE/run.out" 2>&1 \
     || fail "the check failed to run: $(cat "$T/$CASE/run.out")"
-  [ "$(cat "$STUB/given" 2>&1)" = $'d.test.sh\na.test.sh' ] || fail "the proof run was not given the two files, d.test.sh first: $(cat "$STUB/given" "$T/$CASE/run.out" 2>&1)"
+  [ "$(cat "$STUB/given" 2>&1)" = $'d.test.sh\na.test.sh' ] || fail "the proof run did not run the two files alone, d.test.sh first: $(cat "$STUB/given" "$T/$CASE/run.out" 2>&1)"
   grep -qF '1 of the 3 test files linked to the change did not run, as a card runs at most 2 (test.cardFiles)' "$T/$CASE/unfixed" && ! grep -qx -- '- c.test.sh' "$T/$CASE/unfixed" \
     || fail "the check's result does not say one file was left out: $(cat "$T/$CASE/unfixed")"
 }
 
-# Card c7's list of tests (listcmd()) with the rule off, on a pack changed by <filter>, when testsel() fails as jq does
-# on a test map over the argument limit (#344): its stop reason in $T/$CASE/stop.
+# Card c7's list of tests (listcmd()), on a pack changed by <filter>, when testsel() fails as jq does on a test map
+# over the argument limit (#344): its stop reason in $T/$CASE/stop.
 listfail() { # <pack filter>
   local wt=$T/$CASE/cards/c7
-  narrowsetup none; tune "$1"
+  narrowsetup; tune "$1"
   git -C "$R" worktree add -q --detach "$wt" || fail "the card's worktree could not be made"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     names || exit 1
     testsel() { echo 'jq: Argument list too long'; return 1; }
-    ! listcmd "$wt" 'bash run' ) > "$T/$CASE/run.out" 2>&1 && cp "$wt.stop" "$T/$CASE/stop" \
+    ! listcmd "$wt" ) > "$T/$CASE/run.out" 2>&1 && cp "$wt.stop" "$T/$CASE/stop" \
     || fail "the list did not fail with a stop reason: $(cat "$T/$CASE/run.out")"
 }
 # Bug it catches (#344): a list of tests that could not be made stopped the card with a reason that told the owner to
 # set test.fileCommand, which the pack had set. With it set, the reason says what failed and names no setting.
 t_narrowlistfail() {
   listfail '.test.fileCommand = "bash one"'
-  [ "$(cat "$T/$CASE/stop")" = "the rule Whole suite in a card is off, and the list of the card's tests could not be made: jq: Argument list too long" ] \
+  [ "$(cat "$T/$CASE/stop")" = "a card runs each of its test files alone, and the list of the card's tests could not be made: jq: Argument list too long" ] \
     || fail "the reason does not say what failed, or names a setting the pack has: $(cat "$T/$CASE/stop")"
 }
-# Bug it catches: with test.fileCommand not set, the reason stopped naming the settings that let a card run its files.
+# Bug it catches: with test.fileCommand not set, the reason stopped naming the setting that lets a card run its files.
 t_narrowlistfailset() {
   listfail 'del(.test.fileCommand)'
-  grep -qF "could not be made: jq: Argument list too long; set test.list" "$T/$CASE/stop" && grep -qF 'or set test.fileCommand to a command that runs one test file' "$T/$CASE/stop" \
-    || fail "the reason with no test.fileCommand does not say what failed and name the settings: $(cat "$T/$CASE/stop")"
+  grep -qF "could not be made: jq: Argument list too long; set test.fileCommand in .conveyor/project.json to a command that runs one test file" "$T/$CASE/stop" \
+    || fail "the reason with no test.fileCommand does not say what failed and name the setting: $(cat "$T/$CASE/stop")"
 }
 
 # The stub test command and file command, as setup gives them, made to add the arguments a run was given and its
@@ -322,14 +370,28 @@ t_narrowfilemode() {
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:a.test.sh|file:a.test.sh' ] \
     || fail "the card did not run a.test.sh alone through test.fileCommand (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
-# Bug it catches (#484): the per-file fixture left a case that asks for the whole suite on it. With WHOLESUITE=true, the
-# rule Whole suite in a card is on, and the card's run is the stub test.command with no list.
-t_narrowfilemodeoff() {
-  # Cleared: a one-file run of this test file (test.fileCommand) exports CONVEYOR_TEST_FILE, which would reach the stub.
-  local -x CONVEYOR_TEST_FILE='' WHOLESUITE=true
-  setup '[]'; gotcmd
-  [ "$(jq .rules.wholeSuite "$ST/control.json")" = true ] || fail "the rule Whole suite in a card is not on: $(cat "$ST/control.json")"
-  narrowrun 'echo two >> a.txt'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:|file:' ] \
-    || fail "the card's run was not the test command with no list (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+# The issue: each per-file process has the file's own time limit, and is ended with everything it started. Bug it
+# catches: a test file that hangs held the card's whole run, and a process it started ran on after the run. a.test.sh
+# says `# timeout: 2`, and its run starts a child in the background and hangs: each of its two runs (the first, and the
+# run again of the file that failed) ends in about 2 s, a.test.sh fails as timed out, its child is gone, and b.test.sh,
+# next on the list, still runs.
+t_narrowfiletimeout() {
+  local c
+  setup '[]'
+  printf '%s\n' 'echo "one:$CONVEYOR_TEST_FILE" >> "$STUB/got"' '[ "$CONVEYOR_TEST_FILE" = a.test.sh ] || exit 0' \
+    '(sleep 300; echo leaked >> "$STUB/got") & echo $! > "$STUB/child"; sleep 300' > "$STUB/test-cmd" # sleep: a hang, which the limit cuts
+  local s=$SECONDS
+  # The line ends with a note, as `# timeout: 300 -- about 193s run alone` does. Bug it catches (E9 of #374's review): a
+  # limit with words after it was not read, and the file had the run's limit alone.
+  narrowrun 'printf "%s\n" "# timeout: 2 -- a note after the limit" > a.test.sh && echo y > b.test.sh'
+  [ $((SECONDS - s)) -lt 30 ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:a.test.sh\none:b.test.sh\none:a.test.sh' ] \
+    || fail "the hanging file was not stopped at its limit, or the next file did not run (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  # E3 of #374's review. Bug it catches: the timed-out file was logged as a failed file and the run exited 1, so the
+  # check on main counted a timeout there as main's failure, and the mutation check and the Board's Run action, which
+  # read exit 124 as timed out, took it for a failure. The run exits 124, and its log leaves the file begun, not failed.
+  [ "$(cat "$T/$CASE/rc")" = 124 ] && grep -qxF 'conveyor: a.test.sh timed out: it ran past its time limit, 2 s, and it was stopped there' "$T/$CASE/cards/c7.test" \
+    && ! grep -qxF -- '-- FAIL a.test.sh' "$T/$CASE/cards/c7.test" \
+    || fail "the run did not exit 124, or its output does not say a.test.sh timed out, or names it as failed (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/cards/c7.test")"
+  c=$(cat "$STUB/child" 2>/dev/null) && [ -n "$c" ] || fail "the file's child never started"
+  wait_until '! kill -0 "$c" 2>/dev/null' || { kill "$c"; fail "a process the timed-out file started was not ended"; }
 }

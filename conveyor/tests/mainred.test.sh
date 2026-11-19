@@ -22,9 +22,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # line with no case), runs it, and the file gets the verdict main and goes to the fix card too, so the card waits, not fixes.
 # One card for both: a second card run cost this file about 40% of its CPU seconds (#467).
 t_mainred() {
-  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
   rerunsetup '1 fail flaky' '1 bare three' '2 fail flaky' '2 bare three' '3 fail flaky' '3 bare three' '4 fail flaky' '4 bare three' \
-    'main fail flaky' 'main bare three'
+    'main fail flaky' 'main bare three'; rerunfiles
   local lp c b waiting='grep -qs "waiting for main to change: c.test, b.test: flaky fail on main" "$T/$CASE/cards/"*.live'
   mkdir -p "$R/cases"; echo 't_flaky() { :; }' > "$R/cases/b.test.sh"; git -C "$R" add cases; git -C "$R" commit -qm "the case's file"; b=$(git -C "$R" log -1 --format=%h)
   echo runner > "$R/b.test"; git -C "$R" add b.test; git -C "$R" commit -qm "the runner"
@@ -37,8 +36,9 @@ t_mainred() {
   # times its wake from; without it the wait never wakes the Foreman.
   [ "$(loop snapshot --fresh 2>/dev/null | jq -r --arg c "$c" '.belt[] | select(.card == $c) | .live.at')" = "$(jq -r .at "$T/$CASE/cards/$c.live")" ] \
     || fail "the snapshot does not give when the wait for main began: $(loop snapshot --fresh 2>/dev/null | jq -c --arg c "$c" '.belt[] | select(.card == $c) | .live')"
-  [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:c.test|fail:b.test:flaky|" ] && [ "$(ran main)" = "flaky three" ] \
-    || fail "main's run was not told to run the failing case alone and the file that failed naming no case whole: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
+  # Each failing file runs on main once, whole, through test.fileCommand, whether it names a case or none.
+  [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:c.test|fail:b.test|" ] && [ "$(ran main)" = "three flaky" ] \
+    || fail "main's run was not told to run each failing file once, whole: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
   [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "[\"fail\",[{\"case\":\"c.test\",\"verdict\":\"main\"},{\"case\":\"b.test: flaky\",\"verdict\":\"main\"}],\"$(git -C "$R" rev-parse HEAD)\"]" ] \
     || fail "the test line does not give the case's and the file's verdicts and main's run: $(tline 1 tojson)"
   tline 1 '.mainRun.sec' | grep -qE '^[0-9]+$' || fail "the test line does not give the seconds main's run took: $(tline 1 .mainRun)"
@@ -78,8 +78,7 @@ t_mainred() {
 # run of the case passes and the failure is the card's. Bug it catches: the card went to a fix session and tested
 # again on M1, without main's fix. It is brought onto M2 first, the failed case runs again there and passes: no fix.
 t_mainfixed() {
-  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing case alone (verdicts()), not its file whole.
-  rerunsetup '1 fail flaky' '2 fail flaky'
+  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
   local m2
   echo '[ "$n" != 2 ] || { echo fixed > "$R/fix.txt"; git -C "$R" add fix.txt; git -C "$R" commit -qm "main fixes flaky"; git -C "$R" rev-parse HEAD > "$STUB/m2"; }
 [ "$n" != 3 ] || git rev-parse HEAD > "$STUB/head.3"' > "$STUB/pre"
@@ -117,17 +116,17 @@ caughtland() { # what the run after main's second move must show
 }
 # Main moved during the run (its run of the case passes: the failure is the card's).
 t_mainfixedcaught() {
-  local -x WHOLESUITE=true # The old fixture: #7 lands on a main that changed a.txt too.
   caughtsetup; : > "$STUB/move2"
   loop run 1 > /dev/null || fail "run exited non-zero"
   caughtland
 }
 # Main fails the case too: the card waits for main to change, and main changes the same line. Its landed line's
 # waitSec counts that wait (at least the 1 s slept here). Bug it catches: the drift watch (bench/drift.sh) had no
-# minutes a card waited for main, as no line recorded them.
+# minutes a card waited for main, as no line recorded them. Each test file runs alone (rerunfiles). Bug it catches
+# too (#374): a.test, which passed in run 1 and failed in run 2, kept its `pass` line beside its `fail` line, and the
+# run again (3) skipped it, ran no file and "passed on re-run", so the case never ran on main.
 t_mainredcaught() {
-  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing case alone (verdicts()), not its file whole.
-  caughtsetup 'main fail one'
+  caughtsetup 'main fail one'; rerunfiles
   local lp
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until 'grep -qs "waiting for main to change" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' || fail "the card did not wait for main: $(cat "$STUB/run.out")"
@@ -354,6 +353,8 @@ t_mainredretry() {
 # fix session straight after that review: the brief was read once, or only at the head of each round, so the fix
 # session after the review that saw the case added never heard of it. Issue 615: a case with a test link that joins
 # during the card's last test run lands its link; with no redbrief() before the landing, its link was never staged.
+# Bug it catches too (#374): its runs write no log of their own, and each file run alone (filecmd()) gave no result
+# for its named case, so the fix card was blocked; such a file's exit is the result of its cases (redrun()).
 t_mainredland() {
   setup "[$(issue 7 2026-01-01)]"
   printf '%s\n' $'[P1] a.txt:1 wrong word\nUSER-VISIBLE: no\nVERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
@@ -392,16 +393,21 @@ redsetup() { # <ok.txt on main, or nothing>
   local s; s=$(git -C "$R" rev-parse HEAD)
   eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s" || fail "the cases were not recorded"
 }
-# redsetup's fixture and run on main, with no entry in the main-red record.
+# redsetup's fixture and run on main, with no entry in the main-red record. Run alone on a file (CONVEYOR_TEST_FILE,
+# test.fileCommand), the runner runs that file's lines alone; a line naming no case runs the cases the file defines
+# (its `t_<case>() {` lines), as a runner given a whole file does, or the file as one when it defines none.
 redrunner() { # <ok.txt on main, or nothing>
   setup "[$(issue 7 2026-01-01)]"
   [ -z "$1" ] || { printf '%s\n' "$1" > "$R/ok.txt"; git -C "$R" add ok.txt; git -C "$R" commit -qm "ok.txt"; }
   printf '%s\n' 'cp "$CONVEYOR_TEST_RERUN" "$STUB/redlist"; L=$CONVEYOR_TEST_LOG/r; rc=0' \
     'while IFS=$'"'"'\t'"'"' read -r k f c; do' \
-    '  [ "$k" = fail ] || continue; echo "== $f" | tee -a "$L"' \
-    '  if grep -qx "${c:-$f}" ok.txt 2>/dev/null; then [ -z "$c" ] || echo "ok $c"; echo "-- ok $f" >> "$L"' \
-    '  elif [ -n "$c" ] && grep -qx "gone:$c" ok.txt 2>/dev/null; then echo "-- ok $f" >> "$L"' \
-    '  else echo "FAIL [${c:-$f}]: broken"; echo "-- FAIL $f" >> "$L"; rc=1; fi' \
+    '  [ "$k" = fail ] && { [ -z "${CONVEYOR_TEST_FILE:-}" ] || [ "$f" = "$CONVEYOR_TEST_FILE" ]; } || continue; echo "== $f" | tee -a "$L"' \
+    '  cs=("$c"); [ -n "$c" ] || mapfile -t cs < <(sed -n "s/^t_\([a-z0-9_-]*\)() {.*/\1/p" "$f" 2>/dev/null); [ ${#cs[@]} != 0 ] || cs=(""); r=ok' \
+    '  for c in "${cs[@]}"; do' \
+    '    if grep -qx "${c:-$f}" ok.txt 2>/dev/null; then [ -z "$c" ] || echo "ok $c"' \
+    '    elif [ -n "$c" ] && grep -qx "gone:$c" ok.txt 2>/dev/null; then :' \
+    '    else echo "FAIL [${c:-$f}]: broken"; r=FAIL; rc=1; fi' \
+    '  done; echo "-- $r $f" >> "$L"' \
     'done < "$CONVEYOR_TEST_RERUN"' 'exit $rc' > "$STUB/mainrun-cmd"
 }
 # The check alone (bugproof(), which calls redproof()) on a fix card cfix whose worktree holds <ok.txt> staged: its
@@ -454,7 +460,6 @@ t_redproofgreen() {
 # - a.test: one, a real failure on main: main's, and the only case in the main-red record. Bug it catches: a file the
 #   card only edits was taken for its own, so a case failing on main too never ran there and went to the card.
 t_mainredowncard() {
-  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
   redrunner c.test
   local w=$T/$CASE/cards/c7 out
   echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
@@ -465,7 +470,7 @@ t_mainredowncard() {
   jq -e 'any(.[]; .case == "n.test: two" and .verdict == "card")' <<<"$out" >/dev/null && ! grep -q $'^fail\tn.test' "$STUB/redlist" \
     || fail "the failure of the card's own new test file ran on main or was not the card's: $out: $(cat "$STUB/redlist")"
   jq -e 'any(.[]; .case == "c.test" and .verdict == "card")' <<<"$out" >/dev/null || fail "a time-out that passes on main was not the card's: $out"
-  jq -e 'any(.[]; .case == "a.test: one" and .verdict == "main")' <<<"$out" >/dev/null && grep -qx $'fail\ta.test\tone' "$STUB/redlist" \
+  jq -e 'any(.[]; .case == "a.test: one" and .verdict == "main")' <<<"$out" >/dev/null && grep -qx $'fail\ta.test' "$STUB/redlist" \
     || fail "a case that fails on main, in a file the card edits, did not run there or was not main's: $out: $(cat "$STUB/redlist")"
   [ "$(jq -c '[.reds[].cases[].case]' "$ST/mainred.json")" = '["a.test: one"]' ] \
     || fail "the main-red record does not hold only the case that fails on main: $(cat "$ST/mainred.json" 2>&1)"
@@ -494,17 +499,16 @@ t_mainreddoc() {
 # Bug it catches (#344): verdicts() gave the failed cases and their verdicts to jq as arguments, which Linux refuses
 # over 128 KiB ("Argument list too long"): with many failures, they did not run on main and the card lost every
 # verdict. Card c7's last run fails 300 cases of a.test, each with a long name (about 150 KB); all pass on main, so
-# main runs them and each is the card's.
+# main runs a.test, whole, once, and each case is the card's.
 t_mainredbigverdicts() {
-  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
   local w=$T/$CASE/cards/c7 out
   redrunner "$(for i in $(seq 300); do printf 'case-%03d-%0480d\n' "$i" 0; done)"
-  echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
+  sed 's/.*/t_&() { :; }/' "$R/ok.txt" > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
     && git -C "$R" worktree add -q --detach "$w" && echo '# a comment' >> "$w/a.test" && git -C "$w" add a.test || fail "the card's worktree could not be made"
   jq -cR '{name: ., line: 1}' "$R/ok.txt" | jq -cs '{files: [{file: "a.test", cases: .}]}' > "$STUB/fails"
   out=$(eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" "$(cat "$STUB/fails")" | jq -c "[(.verdicts | length), ([.verdicts[].verdict] | unique), (.mainRun | type)]"' 2>&1) \
     || fail "verdicts failed: ${out:0:300}"
-  [ "$out" = '[300,["card"],"object"]' ] && [ "$(grep -c $'^fail\ta.test\t' "$STUB/redlist")" = 300 ] \
+  [ "$out" = '[300,["card"],"object"]' ] && [ "$(grep -c $'^fail\ta.test$' "$STUB/redlist")" = 1 ] \
     || fail "the many failures did not run on main or lost their verdicts: ${out:0:300}"
 }
 

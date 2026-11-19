@@ -14,11 +14,13 @@
 # (its change then waits on #7's), #9's only once #8 is ready. A product check holds #7 before its own tests until #8
 # waits, ready, at its claim, so #7's batch takes it; $STUB/held-then, when there is one, runs once there. That check
 # gives up once #8 is gone (it held its files beside #7 and landed, or was blocked), failing the case, not hanging it.
-# The test command selects the test files $STUB/map names for the files the change touches (`<file> <test file>`),
-# each of the cases $STUB/cases gives it (`<test file> <case>...`), and does what CONVEYOR_TEST_RERUN asks: a file
+# Each test file $STUB/map names for a file (`<file> <test file>`) is a file of main, <test file>.sh (or the name,
+# when it ends in .sh), linked to that file: a card runs each alone, through test.fileCommand (#374). Its run runs
+# the cases $STUB/cases gives the test file (`<test file> <case>...`), and does what CONVEYOR_TEST_RERUN asks: a file
 # listed `pass` does not run, a case listed `ok` does not run (unless its file is named in $STUB/whole: a file
 # whose cases cannot run apart, which honours only `pass`, as closure.test.sh does), and a file a `changed` line
-# selects runs whole. Each run writes a line to $STUB/runs, `<card> <cases it ran>`, and its log says how many cases ran and how many it kept.
+# selects runs whole. Each card run writes a line to $STUB/runs, `<card> <cases its files ran>` (a run of no file
+# writes none), and each file's log says how many cases ran and how many it kept.
 # The cards are in the control record's order list in the order they become ready (#8, #9, #7), as batch.test.sh's
 # batchsetup says: so #8 waits on #7, as ordered cards never go past each other.
 reusesetup() { # <issues json> <map lines>...
@@ -26,6 +28,12 @@ reusesetup() { # <issues json> <map lines>...
   jq -c '.order = [8, 9, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   seq 20 > "$R/a.txt"; seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qam "a longer a.txt, and b.txt"
   printf '%s\n' "$@" > "$STUB/map"; printf '%s\n' 's.test s1' 'x.test x1 x2' 'y.test y1 y2' 'z.test z1 z2' > "$STUB/cases"
+  local s t l='{}'
+  while read -r s t; do
+    [[ $t == *.sh ]] || t=$t.sh; mkdir -p "$R/$(dirname "$t")" && echo x > "$R/$t" && git -C "$R" add "$t" || fail "main's test file $t"
+    l=$(jq -c --arg s "$s" --arg t "$t" '.[$s] += [$t]' <<<"$l")
+  done < "$STUB/map"
+  linkset "$l"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt b.txt; echo x > x.txt ;; *-8) echo eight | tee -a a.txt >> b.txt; echo y > y.txt ;; *) sed -i 10s/.*/nine/ a.txt; echo z > z.txt ;; esac' > "$STUB/build"
   cat > "$STUB/review-cmd" <<'EOF'
 n=${PWD##*-}
@@ -41,24 +49,20 @@ case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
 EOF
   tune --arg h "$STUB/hold" '.checks = [$h]'
   cat > "$STUB/test-cmd" <<'EOF'
-L=$CONVEYOR_TEST_LOG/run.log; RR=${CONVEYOR_TEST_RERUN:-/dev/null}
-echo x >> "$STUB/tests"
+L=$CONVEYOR_TEST_LOG/run.log; RR=${CONVEYOR_TEST_RERUN:-/dev/null}; f=$CONVEYOR_TEST_FILE
+[ "${CONVEYOR_TEST_N:-1}" != 1 ] || echo x >> "$STUB/tests"
 tf() { while read -r f; do awk -v f="$f" '$1 == f {print $2}' "$STUB/map"; done | sort -u; } # changed files on stdin: their test files
 fresh=$(awk -F'\t' '$1 == "changed" {print $2}' "$RR" | tf)
+t=$(awk -v f="$f" '$2 == f || $2 ".sh" == f {print $2; exit}' "$STUB/map") # the map's name of the file
 ran=''; k=0; kept=0
-for t in $({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | tf); do
-  cs=$(awk -v t="$t" '$1 == t { for (i = 2; i <= NF; i++) print $i }' "$STUB/cases")
-  if ! grep -qxF "$t" <<<"$fresh"; then
-    if grep -qxF "pass	$t" "$RR"; then kept=$((kept + $(wc -w <<<"$cs"))); continue; fi
-    all=$cs; grep -qxF "$t" "$STUB/whole" 2>/dev/null || cs=$(grep -vxFf <(awk -F'\t' -v f="$t" '$1 == "ok" && $2 == f {print $3}' "$RR") <<<"$cs")
-    kept=$((kept + $(wc -w <<<"$all") - $(wc -w <<<"$cs")))
-  fi
-  [ -n "$cs" ] || continue
-  echo "== $t"; echo "== $t" >> "$L"
-  for c in $cs; do echo "ok $c"; ran="$ran $c"; k=$((k + 1)); done
-  echo "-- ok $t" >> "$L"
-done
-echo "${PWD##*-}$ran" >> "$STUB/runs"
+cs=$(awk -v t="$t" '$1 == t { for (i = 2; i <= NF; i++) print $i }' "$STUB/cases")
+if ! grep -qxF "$t" <<<"$fresh"; then
+  if grep -qxF "pass	$f" "$RR"; then kept=$(wc -w <<<"$cs"); cs=
+  else all=$cs; grep -qxF "$t" "$STUB/whole" 2>/dev/null || cs=$(grep -vxFf <(awk -F'\t' -v f="$f" '$1 == "ok" && $2 == f {print $3}' "$RR") <<<"$cs")
+    kept=$(($(wc -w <<<"$all") - $(wc -w <<<"$cs"))); fi
+fi
+for c in $cs; do echo "ok $c"; ran="$ran $c"; k=$((k + 1)); done
+f=${f%%"$f"}; if [ "${CONVEYOR_TEST_N:-1}" = 1 ]; then echo "${PWD##*-}$ran" >> "$STUB/runs"; else sed -i "\$ s/\$/$ran/" "$STUB/runs"; fi
 echo "TESTRUN cases=$k" >> "$L"; [ "$RR" = /dev/null ] || echo "TESTRUN kept=$kept" >> "$L"
 EOF
 }
@@ -72,7 +76,6 @@ landedtogether() { [ "$(st 'select(.step == "landed") | .batch | join(" ")' | so
 # and the seven passes were kept. #7's x.txt selects two whole files, w.test's three cases and x.test's two: the count
 # keeps all five, not four (five shared evenly between the two files, rounded down, lost one).
 t_batchreusenone() {
-  local -x WHOLESUITE=true
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt w.test' 'x.txt x.test' 'y.txt y.test'
   echo 'w.test w1 w2 w3' >> "$STUB/cases"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"

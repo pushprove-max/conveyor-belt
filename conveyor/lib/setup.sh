@@ -30,10 +30,10 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # The question "Set the pack's tests.patterns?": answered by --test-patterns yes|no, and asked (exit 2, nothing written)
 # while the pack sets no tests.patterns and the default misses tracked files that read as tests (testoffer()), naming
 # the globs and how many tracked files they match; yes writes them as the pack's tests.patterns.
-# The question "Set the pack's test.list?": answered by --test-list yes|no, and asked (exit 2, nothing written) while
-# the pack sets no test.list and the test command runs a runner listguess() knows, naming it; yes writes what
-# listguess() offers (args, or runner for go test and cargo test, which take packages and test targets, not files) as
-# the pack's test.list.
+# The question "Set the pack's test.fileCommand?": answered by --file-command yes|no, and asked (exit 2, nothing
+# written) while the pack sets no test.fileCommand and the test command runs a runner listguess() knows that takes test
+# files as arguments (args), naming it; yes writes the test command as the pack's test.fileCommand, which a card runs
+# each of its test files alone with, the file's path at its end (filecmd(), lib/testrun.sh).
 # The question "Make the test map?": answered by --test-map yes|no, and asked (exit 2, nothing written) while the pack
 # sets no test.map, there is no made map and the project's language has a coverage tool the map knows (lib/testmap.sh
 # maptool()), naming the tool and what the run may cost (mapcost()); yes runs the whole suite under coverage and
@@ -66,7 +66,7 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
   local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw=''
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
@@ -77,7 +77,7 @@ setup() { # as SETUP_USAGE
     case $1 in --owner) owner=${2-} ;; --product) prods+=("${2-}") ;; --test) test=${2-} ;;
       --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
       --test-patterns) tpa=${2-}; [[ $tpa == yes || $tpa == no ]] || { set -- x; break; } ;;
-      --test-list) tla=${2-}; [[ $tla == yes || $tla == no ]] || { set -- x; break; } ;;
+      --file-command) tla=${2-}; [[ $tla == yes || $tla == no ]] || { set -- x; break; } ;;
       --test-map) tma=${2-}; [[ $tma == yes || $tma == no ]] || { set -- x; break; } ;;
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
@@ -122,17 +122,15 @@ setup() { # as SETUP_USAGE
       need+=("--test-patterns <yes or no: the default test-file patterns miss $((tn - n)) tracked files that read as tests; set the pack's tests.patterns to $(jq -r 'join(", ")' <<<"$tp"), which match $tn tracked files?>")
     fi
   fi
-  # How the test command takes the list of a card's tests, while the pack sets no test.list and the command runs a
-  # runner listguess() knows: asked, naming the runner; yes writes what it offers.
-  if [ "$tla" != no ] && ! jq -e '.test.list' "$PACK" >/dev/null 2>&1; then
+  # The command a card runs each of its test files alone with, while the pack sets no test.fileCommand and the test
+  # command runs a runner listguess() knows that takes test files as arguments: asked, naming the runner; yes writes
+  # the test command as it. A runner of packages or test targets (go test, cargo test) runs no one file so: not asked.
+  if [ "$tla" != no ] && ! jq -e '.test.fileCommand | strings | select(. != "")' "$PACK" >/dev/null 2>&1; then
     x=$test; [ ! -e "$PACK" ] || packget test.command x 2>/dev/null || x=''
     [ -z "$x" ] || tl=$(listguess "$x") || tl=''
+    [ "${tl%% *}" = args ] || tl=''
     if [ -n "$tl" ] && [ -z "$tla" ]; then
-      if [ "${tl%% *}" = args ]; then
-        need+=("--test-list <yes or no: the test command runs ${tl#* }, which takes test files as arguments; set the pack's test.list to args, so a card's test run is given only the tests its change touches?>")
-      else
-        need+=("--test-list <yes or no: the test command runs ${tl#* }, which takes packages or test targets, not test files; set the pack's test.list to runner, so a card's test run is given only the packages or test targets of the tests its change touches?>")
-      fi
+      need+=("--file-command <yes or no: the test command runs ${tl#* }, which takes test files as arguments; set the pack's test.fileCommand to the test command, so a card runs each of its test files alone through it?>")
     fi
   fi
   # The test map, while the pack sets no test.map and there is none (lib/testmap.sh): asked, naming the coverage tool
@@ -195,9 +193,9 @@ setup() { # as SETUP_USAGE
     echo "conveyor: wrote the pack's tests.patterns: $(jq -r 'join(", ")' <<<"$tp") ($(testcount "$tp") tracked files)"
   fi
   if [ "$tla" = yes ] && [ -n "$tl" ]; then
-    jq --arg l "${tl%% *}" '.test.list = $l' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
-      || { rm -f "$PACK.new"; echo "conveyor: the pack's test.list could not be written" >&2; return 1; }
-    echo "conveyor: wrote the pack's test.list: ${tl%% *} (the test command runs ${tl#* })"
+    jq '.test.fileCommand = .test.command' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
+      || { rm -f "$PACK.new"; echo "conveyor: the pack's test.fileCommand could not be written" >&2; return 1; }
+    echo "conveyor: wrote the pack's test.fileCommand: $(jq -r '.test.command' "$PACK") (the test command runs ${tl#* }), which a card runs each of its test files alone with"
   fi
   # Yes runs the whole suite under coverage now and writes the map, saying what it mapped and how long it took; a run
   # that fails says so, and the cards' tests are found by name. No writes test.map off, so it is not asked again.
@@ -485,9 +483,9 @@ testoffer() { # <test command>
   d=$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA") && mapfile -t g < <(testguess "$1" "$d") || return 1
   [ ${#g[@]} = 0 ] || jq -cn --argjson d "$d" '$d + $ARGS.positional' --args "${g[@]}"
 }
-# The test.list setup offers for a test command (setup()), and the runner it runs, as one line `<mode> <runner>`
-# (testrunner(), in main): nothing for a runner it does not know, or for a command that already names the test files
-# its runner runs, which paths added at its end would not narrow.
+# How a test command takes test files, and the runner it runs, as one line `<mode> <runner>` (testrunner(), in main;
+# setup() offers the command as test.fileCommand for args): nothing for a runner it does not know, or for a command
+# that already names the test files its runner runs, which paths added at its end would not narrow.
 listguess() { # <test command>
   local g
   g=$(testrunner "$1" "$MAIN") || return 0
@@ -729,28 +727,19 @@ doctordeps() {
 # but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
 # which says how to get a newer one. The project's checks need jq and git; without either they are named as not checked.
 # Setup's suggestion of a test.fileCommand, while the pack sets none and the project's test files run alone as plain
-# scripts (fileguess()): a bug card's check then runs each of its test files alone, never test.command's whole suite.
+# scripts (fileguess()): a card runs each of its test files alone through it, and stops at its test step without it.
 filehint() {
   local fc g
   packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] && g=$(fileguess "$MAIN") && [ -n "$g" ] || return 0
-  echo "conveyor: the test files run alone as plain scripts (\`$g <file>\`); set test.fileCommand to \"$g\" in .conveyor/project.json, so a bug card's check runs each of its test files alone"
+  echo "conveyor: the test files run alone as plain scripts (\`$g <file>\`); set test.fileCommand to \"$g\" in .conveyor/project.json, so a card runs each of its test files alone"
 }
-# Doctor's warning of a test command that runs test files it is not given (WIDE, widewhy()): the newest bugproof line
-# with result wide, while the pack sets no test.fileCommand and its test.command is still the one that line names.
-widewarn() {
-  local fc c e
-  packget test.fileCommand fc test.command c 2>/dev/null && [ -z "$fc" ] || return 0
-  e=$(stdb ask lines cards 2>/dev/null | jq -rRn --arg c "$c" '[inputs | fromjson? | objects | select(.step == "bugproof" and .result == "wide")] | last
-    | select(. != null and .wide.command == $c) | "\(.wide.given) \(.wide.ran)"' 2>/dev/null) && [ -n "$e" ] || return 0
-  echo "warning: $(widewhy "${e% *}" "${e#* }" "$MAIN")"
-}
-# Doctor's warning of a pack whose cards cannot be narrowed to the test files of their change while the rule Whole
-# suite in a card is off (wholerule(); listcmd(), lib/testrun.sh): it sets neither test.list nor test.fileCommand, so
-# every card whose change is linked to a test file stops at its test step.
+# Doctor's warning of a pack whose cards cannot run their test files (listcmd(), lib/testrun.sh): a card runs each
+# alone through test.fileCommand, and the pack does not set it, so every card whose change is linked to a test file
+# stops at its test step.
 narrowwarn() {
-  local lm fc
-  ! wholerule && packget test.list lm test.fileCommand fc 2>/dev/null && [ -z "$lm$fc" ] || return 0
-  echo "warning: the rule Whole suite in a card is off, and the pack sets neither test.list nor test.fileCommand, so a card whose change has tests stops at its test step; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file"
+  local fc
+  packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] || return 0
+  echo "warning: ${NARROW//'<why>'/"$NOFILECMD"}"
 }
 doctor() {
   local bad=0 p e t c h f
@@ -961,7 +950,6 @@ doctor() {
       (.test.files | objects | to_entries[] | select(.value | objects | has("budget")) | "test.files.\(.key).budget"),
       (.test.rules.list | arrays | .[] | objects | select(.measure == "budget") | "the test rule \(.name // "")")] | join(", ")' "$PACK" 2>/dev/null) || t=''
   [ -z "$t" ] || echo "note: no test file has a CPU budget, so the pack's budget settings are ignored: $t; take them out of $PACK"
-  widewarn
   narrowwarn
   if packget privacy.mode e && [ "$e" = public ]; then
     if t=$(termsfile); then ok "the terms file $t"

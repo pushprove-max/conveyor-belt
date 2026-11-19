@@ -80,8 +80,8 @@ right-aligned and the title is what gives way.
   the width. From the live feed, while a step runs, a dim line follows: what it is doing now, its turns and the
   seconds since its last output (`now Bash: npm test · 3 turns · last output 6s ago`). The Test step runs no model,
   so in place of its turns it shows how far the tests are: `142 of 205 tests · 2 failed · last output 23s ago`; while
-  the feed gives no test count, the test files run (`3 of 6 test files`); with neither, only its last output. When
-  the pack sets `test.list`, the list that the run got comes first: `changed: 7 files` or `whole suite`.
+  the feed gives no test count, the test files run (`3 of 6 test files`); with neither, only its last output. The
+  list that the run got comes first: `changed: 7 files`.
 - **QUEUE**: `next 5 of 9`: the next five, numbered, the title cut to fit, the priority right-aligned (with
   `follow-up` and `retried`); the issues that wait on another; then the held-back line.
 - **BUILT, WAITING FOR YOUR PROD DEPLOY**: the open issues labelled `awaiting-deploy`, which the loop never picks,

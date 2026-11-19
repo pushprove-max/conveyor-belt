@@ -277,11 +277,11 @@ tarun() { # <the record> <worktree> <prompt>
   tadrop "$wt"
   taqueue # the next queued action, now that this one has ended
 }
-# `testaction run <test file>` (README.md, Test actions): the file alone, run now with the pack's test.command, on main
+# `testaction run <test file>` (README.md, Test actions): the file alone, run now through the pack's test.fileCommand, on main
 # as it is at the ask, in a worktree of that commit ($CARDS/testactions/<id>, removed when the run ends), on one of the
 # machine's test slots, waited for as a card's test step waits for one (tests()). It is no session: it needs no seat.
-# The command's CONVEYOR_TEST_RERUN list names the file alone, a `fail` line with no case: on main's clean tree the
-# command runs that file whole and nothing else. A path that is not a test file of main (a file whose own name has
+# The run's CONVEYOR_TEST_RERUN list names the file alone, a `fail` line with no case: test.fileCommand runs that file
+# whole and nothing else (with none set, the run fails naming it). A path that is not a test file of main (a file whose own name has
 # `.test.` or `.spec.`; a helper in a __tests__ folder is not one) is refused (exit 2), and nothing runs. Its record in $TESTACTS/<id>.json, as a session's: {id, action: "run", file, project, commit, start,
 # end, state (queued, running, done, stopped, failed or timed out), load (the machine's 1-minute load at the ask), limit
 # (TEST_TIMEOUT, the seconds the test run may run once it has its slot, as a card's test step), result (pass
@@ -339,7 +339,7 @@ tarunfile() { # <the record> <worktree>
   ( x=$({ git -C "$MAIN" worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) \
       || { printf 'the copy of %s it runs in could not be made: %s\n' "$BRANCH" "${x:0:300}" > "$wt.test"; exit 1; }
     printf 'fail\t%s\n' "$t" > "$wt.rerun"
-    tests "$wt" test.command alone; x=$?
+    tests "$wt" test.fileCommand alone; x=$?
     printf '%s\t%s\t%s\n' "$x" "$TEST_WAIT" "$TEST_RUN" > "$wt.res" ) & tp=$!
   [ -n "$stopped" ] || wait "$tp"
   if [ -n "$stopped" ]; then

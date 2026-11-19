@@ -295,7 +295,6 @@ t_gonebuild() {
 # lost with its worktree), or is not told it passed. Its run is given `pass a.test` and runs b.test alone, as any run
 # again after a run cut short does. The build is the same edit each time, so the change tested is the same.
 t_gonetest() {
-  local -x WHOLESUITE=true # The old fixture: it tests test.command itself, the whole-suite run's log ($CONVEYOR_TEST_LOG) and its rerun list.
   local lp c1 out
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"

@@ -8,10 +8,6 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-# A case with `local -x WHOLESUITE=true` keeps the whole-suite fixture, not the per-file one (lib.sh, filemode()): its
-# card lands on a main where the other card or main itself changed a.txt too, so a linked a.test.sh would run there again (it has none);
-# heldpass's and t_givewayfixalone's checks that nothing is left fail on the <card>.testlist a landed card leaves in
-# the cards folder (tidy() does not remove it).
 
 # Two cards overlap on a.txt: #7 appends to it and changes its line 8, #8 (built once #7 holds a.txt, or with
 # $STUB/late once #7 gave way) changes its first line and line 8 too, so the two changes do not apply together and #8
@@ -59,9 +55,8 @@ GWLANDED='while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"land
   ls -d ../*-8 >/dev/null 2>&1 || break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done'
 
 # #8 landed first, then #7 from the new main, never both holding a.txt at once, and nothing is left. #7 ran its tests
-# after the rebase on a main without #8: fitted onto #8's main unchanged, it lands on those tests, with no second run
-# (the owner, 2026-11-13: tests are not run again only because main moved). That landing's own test line says it
-# reused the pass (the owner, 2026-11-13: a reused pass left only a start line).
+# after the rebase on a main without #8; fitted onto #8's main, which changed a.txt, it runs a.test.sh, the test file
+# linked to a.txt, once more there (#447: a test file a landed card touched runs again once), and lands.
 gwlanded() {
   [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
@@ -70,8 +65,8 @@ gwlanded() {
     || fail "#7 did not land on the new main, after #8 and main's own change: $(cat "$R/a.txt")"
   [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test test landed " ] \
     || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  [ "$(st 'select(.issue == 7 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false false true " ] \
-    || fail "#7's landing on the tests it ran after the rebase does not say it reused them: $(st 'select(.issue == 7 and .step == "test")')"
+  grep -q "card $(st 'select(.issue == 7 and .step == "picked") | .card'): cards landed since its tests ran touch its test files too, so they run again on main as it is now: a.test.sh" <<<"$out" \
+    || fail "#7's landing did not run a.test.sh once more on #8's main: $out"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or claim is left: $(ls "$T/$CASE/cards")"
 }
 
@@ -81,7 +76,6 @@ gwlanded() {
 # meanwhile, and #7 then goes on from the new main, runs its tests there still holding nothing, and lands. Never two
 # cards hold a.txt at once.
 t_giveway() {
-  local -x WHOLESUITE=true
   gwsetup "$GWLANDED"; : > "$STUB/snapit"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
@@ -100,7 +94,6 @@ t_giveway() {
 # rebase waited the whole session. #8 is built only once #7 has given way, with no card waiting: #8 lands during #7's
 # rebase, and #7 names it.
 t_givewaylate() {
-  local -x WHOLESUITE=true
   gwsetup "$GWLANDED"; : > "$STUB/late"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(jq -c '[.held, .away, .gave, .to]' "$STUB/rebaseclaim" 2>/dev/null)" = '[false,true,1,8]' ] \
@@ -114,7 +107,6 @@ t_givewaylate() {
 # still. #8 then runs its tests holding a.txt (with batches off, a waiting card runs none), and #7, ready, goes past it
 # and lands first (a ready card lands first, the owner, 2026-11-18): #8's landing's rebuild brings it onto #7's main.
 t_givewayback() {
-  local -x WHOLESUITE=true
   gwsetup 'sed -i 8s/.*/seven-8/ a.txt'
   cat > "$STUB/back" <<'EOF'
 p=$(jq .pid ../*-8.claim); while kill -STOP "$p" 2>/dev/null; do pgrep -P "$p" -x sleep >/dev/null && break; kill -CONT "$p"; sleep 0.05; done
@@ -182,7 +174,6 @@ t_heldlandmove() { heldmove land; }
 # It catches a card that runs its whole test run again each time main moves under it: with 10 to 20 minute runs and
 # several landings an hour, it holds its files run after run while finished cards wait on it.
 heldpass() { # <test|land>
-  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01)]"; tune '.landBatch = 8'; echo "$GO" > "$STUB/review.1"; echo "$1" > "$STUB/bmove"
   printf '%s\n' 'echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt" && rm -f "$STUB/bmove"' > "$STUB/addb"
   echo '[ "$(cat "$STUB/bmove" 2>/dev/null)" != test ] || . "$STUB/addb"; : > "$STUB/tested"' >> "$STUB/test-cmd"
@@ -206,7 +197,6 @@ t_heldlandpass() { heldpass land; }
 # before give-ways) while #8 waits, and lands first. Never two cards hold a.txt at once. #7's rebase keeps its change
 # to line 8, so #8 overlaps it throughout and is brought onto main by one session after it.
 t_givewaykeep() {
-  local -x WHOLESUITE=true
   gwsetup 'sed -i 8s/.*/seven-8/ a.txt'; echo '{"gave": 3}' > "$STUB/seed"; : > "$STUB/snapit"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
@@ -296,7 +286,6 @@ EOF
 # control record's order list, #8 then #7: ordered cards never go past each other, so #8 does not go past #7 once its
 # own tests pass, and is stacked on it (not in it, a ready card lands first: readyfirst.test.sh).
 t_givewayfix() {
-  local -x WHOLESUITE=true
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
   jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   # #7's first tests end once #8 waits stacked and red, or once #8 took another path: tested (not stacked, or its tests
@@ -321,9 +310,10 @@ t_givewayfix() {
   [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ ! -e "$R/broken" ] || fail "main does not hold both changes, #7's as fixed: $(cat "$R/a.txt"; ls "$R")"
   [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test test landed " ] \
     || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  [ "$(st 'select(.issue == 7 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false false true " ] \
-    || fail "#7's landing on the tests it ran after its fix does not say it reused them: $(st 'select(.issue == 7 and .step == "test")')"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
+  # #8 changed a.txt: #7's landing runs a.test.sh, the test file linked to it, once more there (#447).
+  grep -q "card $c7: cards landed since its tests ran touch its test files too, so they run again on main as it is now: a.test.sh" <<<"$out" \
+    || fail "#7's landing did not run a.test.sh once more on #8's main: $out"
   grep -q "card $c8 is stacked on card $c7" <<<"$out" && grep -q "card $c8: its checks or tests failed on main with the change of card $c7" <<<"$out" \
     || fail "#8 was not stacked on #7, or its tests there did not fail on #7's change: $out"
   [ "$(st 'select(.issue == 8 and .step == "fix") | .reason' | cut -c1-14 | tr '\n' ,)" = "stacked on car,main moved sin," ] \
@@ -335,7 +325,6 @@ t_givewayfix() {
 # With no ready card waiting, the fix of failed tests goes as it always did: #7's failed run goes once more, fails again,
 # and #7 alone is fixed, reviewed, tested once more and lands, and its live record and the Board name no card that went in front.
 t_givewayfixalone() {
-  local -x WHOLESUITE=true
   gwfixsetup "[$(issue 7 2026-01-01)]"
   # The fix session says a line, then goes on once the live record has taken it up (last): the look that read the line
   # looked at the claim first, where a give-way that must not come would have shown.
@@ -356,7 +345,6 @@ t_givewayfixalone() {
 # #8, stacked on it, is fitted onto main alone and lands during it. Bug it catches: #7 kept its claim through that run,
 # so #8 waited on it until the run ended (its run here then gives up at once, and #8 lands after it, not during it).
 t_givewaymoved() {
-  local -x WHOLESUITE=true
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 6 7 8; do echo "$GO" > "$STUB/review.$i"; done
   jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break

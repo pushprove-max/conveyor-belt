@@ -147,6 +147,22 @@ t_reportargs() {
   out=$(rp_page) || fail "the run's times could not be read: $out"
   [ "$(tail -n 1 <<<"$out")" = '{"src/a.test.js":[1.5,null]}' ] || fail "the Tests page does not show the time of Conveyor's report file: $out"
 }
+# E1 of #374's review. Bug caught: a card's run, each test file alone through test.fileCommand, added the report's args
+# after the run's own last word, `exit $r`, and a run that passed failed with "exit: too many arguments"; and one
+# report file for all the files' runs kept the last file's times alone. Each file's run is given the args before its
+# path, with a report file of its own (<worktree>.report.<n>): the run passes, and both files' seconds are read.
+t_reportfiles() {
+  rp_main '{"runner": "jest", "format": "jest-json", "args": "--report <file>"}' src/a.test.js src/b.test.js
+  printf '%s\n' '[ "$1" = --report ] || exit 4' \
+    'printf "{\"testResults\": [{\"name\": \"%s/%s\", \"perfStats\": {\"runtime\": 1500}}]}\n" "$PWD" "$3" > "$2"' > "$STUB/rep"
+  tune '.test.fileCommand = "bash \"$STUB/rep\""'
+  local w=$T/$CASE/wt out
+  echo y >> "$w/src/a.test.js"; echo y >> "$w/src/b.test.js"; git -C "$w" add src || fail "the card's change could not be staged"
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && names && tests "$w" && cat "$w.reported" ) 2>&1 ) \
+    || fail "the card's run with the report's args failed: $out $(cat "$w.test" 2>/dev/null)"
+  [ "$(grep -cE $'^TESTRUN sec\tsrc/[ab]\\.test\\.js\t1\\.5' <<<"$out")" = 2 ] || fail "the report of each file's run was not read: $out"
+}
 # Bug caught (#164): the full test suite (test.full, which setup gives the card's command; release-prep's suite too)
 # was not asked for the runner's report, so its run, an `npm test` of node --test for one, recorded no file times. The
 # run of test.full (tests()) adds test.report's args with Conveyor's file, and the suite's record (suiterec()) has the

@@ -22,15 +22,14 @@ recsteps() { # <what wrote them> <step>...
   for s in "${@:2}"; do grep -qxF "$s" <<<"$have" || fail "$1 wrote no $s line, so its fields went unchecked: $(tr '\n' ' ' <<<"$have")"; done
 }
 
-# A whole card of the loop, with a NO-GO review, a fix and the GO after it, its changed tests (test.list none: the
-# test line's list is the whole suite and why) and its landing and push: each line it writes, with the fields each
+# A whole card of the loop, with a NO-GO review, a fix and the GO after it, its changed tests (the test line's list:
+# the test file linked to its change, run alone) and its landing and push: each line it writes, with the fields each
 # writer adds (picked's title and created, worktree's pid and account, a session's model, effort and usage, a review's
 # counts and visible, the test line's list, selected and why, landed's diff and product, pushed's head), checks.
 # The records start with a line of a field the check does not know: it is set aside, named with its line and field,
 # and the loop still picks and lands the card (the loop did not stop for it).
 t_recloop() {
-  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on, so the test line's list is the whole suite.
-  setup "[$(issue 7 2026-01-01)]"; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; tune '.test.list = "none"'
+  setup "[$(issue 7 2026-01-01)]"; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   good='{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}'
   printf '%s\n' "$good" "${good/\"reason\":\"\"/\"reason\":\"\",\"later\":1}" > "$ST/cards.jsonl"
   out=$(loop run --only 7 1 2>&1) || fail "the loop stopped on a line with a field the check does not know: $out"
@@ -40,7 +39,7 @@ t_recloop() {
   [ "$(st 'select(.issue == 7 and .step == "picked") | .issue')" = 7 ] || fail "the loop did not pick #7 after the line was set aside: $out"
   loop health | jq -e '.quarantined == [{line: 2, field: "later", time: .quarantined[0].time}]' > /dev/null || fail "health does not name the line set aside: $(loop health)"
   recsteps "a card of the loop" picked worktree brief start build review fix test landed pushed
-  [ "$(st 'select(.issue == 7 and .step == "test") | .list.mode')" = whole ] || fail "the test line has no list of the whole suite: $(st 'select(.step == "test")')"
+  [ "$(st 'select(.issue == 7 and .step == "test") | .list.mode')" = changed ] || fail "the test line has no list of the changed tests: $(st 'select(.step == "test")')"
   recok "$ST/cards.jsonl" "a card of the loop"
 }
 
@@ -86,12 +85,11 @@ t_reclist() {
 }
 
 # The writers no card above reaches, each called as the engine calls it, on one card whose change speeds up f.test.sh:
-# its test line with no test.list set (testrec() with no list), the speed-up check's bugproof line with its speed
+# its test line, whose list is its own changed test file (testrec()), the speed-up check's bugproof line with its speed
 # (speedproof(): 10 CPU s on record, 4 now), a push its pre-push hook refuses (push(): kind check, naming the check) and
 # the closed line of a card main already fixes (closed()).
 t_recother() {
   local wt=$T/$CASE/cards/c7 c
-  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on and no test.list, so the test line has no list.
   setup '[]'
   echo slow > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' || fail "main's file"
   for c in 9 10 11; do
@@ -107,7 +105,7 @@ t_recother() {
     speedproof c7 "$wt" '{"number":7}' f.test.sh || exit 1
     push c7 7; closed c7 7 "$wt" 'ALREADY-DONE: f.test.sh is fast' ) > "$T/$CASE/run.out" 2>&1 || fail "a writer failed: $(cat "$T/$CASE/run.out")"
   recsteps "the other writers" test bugproof push closed
-  [ "$(st 'select(.step == "test") | has("list")')" = false ] || fail "the test line has a list with no test.list set: $(st 'select(.step == "test")')"
+  [ "$(st 'select(.step == "test") | .list | tojson')" = '{"mode":"changed","files":1,"by":"own"}' ] || fail "the test line's list is not the card's own test file: $(st 'select(.step == "test")')"
   [ "$(st 'select(.step == "bugproof") | .speed | tojson')" = '{"file":"f.test.sh","before":10,"after":4,"fix":"sped up","into":[]}' ] \
     || fail "the bugproof line has no speed with both CPU numbers: $(st 'select(.step == "bugproof")')"
   [ "$(st 'select(.step == "push") | [.result, .kind, .check] | join(" ")')" = 'fail check fast-checks' ] || fail "the push line has no kind and check: $(st 'select(.step == "push")')"

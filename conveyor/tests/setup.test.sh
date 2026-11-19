@@ -247,17 +247,18 @@ t_setuptestpatterns() {
     || fail "setup --test-patterns yes did not write the patterns: $out"
 }
 # #147. Bug: a project whose test command is a plain `npm test` (here jest, by its package.json script) ran its whole
-# suite on every card, and setup did not say the command could take the list of a card's tests. It names the runner and
-# asks before changing anything; yes writes test.list args.
+# suite on every card, and setup did not say the command could run one test file. It names the runner and asks before
+# changing anything; yes writes the test command as test.fileCommand, which a card runs each test file with (#374: the
+# question offered test.list, which no card's run reads, and the cards stopped at their test step).
 t_setuptestlist() {
   local X out was; setupdone
   echo '{"scripts": {"test": "jest --ci"}}' > "$S/package.json"
   jq '.test.command = "npm test"' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
   was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
-    && grep -qF -- "--test-list <yes or no: the test command runs jest, which takes test files as arguments; set the pack's test.list to args," <<<"$out" \
-    || fail "setup did not ask to set test.list for jest before changing anything: $out"
-  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-list yes --test-map no 2>&1) && jq -e '.test.list == "args"' "$S/.conveyor/project.json" >/dev/null \
-    || fail "setup --test-list yes did not write test.list args: $out"
+    && grep -qF -- "--file-command <yes or no: the test command runs jest, which takes test files as arguments; set the pack's test.fileCommand to the test command," <<<"$out" \
+    || fail "setup did not ask to set test.fileCommand for jest before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --file-command yes --test-map no 2>&1) && jq -e '.test.fileCommand == "npm test"' "$S/.conveyor/project.json" >/dev/null \
+    || fail "setup --file-command yes did not write test.fileCommand: $out"
   # #152. Bug: setup did not find how to read the runner's report, so no card recorded test times unless the owner
   # changed the test command. Jest (an npm script) with no report option: the pack's test.report has Conveyor add the
   # option after `--` at each run, and setup says so.
@@ -335,7 +336,7 @@ t_setuplaneoldpack() {
 # terms file though it is optional. On a machine with no host file and no Conveyor but the plugin copy setup runs
 # from ($D, as the plugin's own folder), setup with its answers writes the host file with the project as a record and
 # the pack, and doctor then prints no fault, with no terms file anywhere: only ok: lines, each seat's route and check
-# progress, and the one warning that the new pack sets neither test.list nor test.fileCommand.
+# progress, and the one warning that the new pack sets no test.fileCommand.
 t_setupfresh() {
   local X out; sample; X=$D/conveyor/conveyor.sh; rm "$XDG_CONFIG_HOME/conveyor/host.json" "$T/$CASE/terms"
   # A service whose conveyor.sh is there is no missing piece (as in t_doctor).
@@ -348,9 +349,9 @@ t_setupfresh() {
   boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:) and the progress line of each seat's
   # check call, which are information, not a check; and the one warning a fresh pack is meant to get: setup sets no
-  # test.list or test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
+  # test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
   ! grep -vE '^(ok|builder|reviewer): |^conveyor: checking .* with one call \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
-    | grep -qvxF 'warning: the rule Whole suite in a card is off, and the pack sets neither test.list nor test.fileCommand, so a card whose change has tests stops at its test step; set test.list in .conveyor/project.json to the form the test command takes a list of test files in (args, placeholder with {files}, env or runner), or set test.fileCommand to a command that runs one test file' \
+    | grep -qvxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, so no test file can run; set test.fileCommand in .conveyor/project.json to a command that runs one test file' \
     && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
     || fail "doctor after setup printed a line that is not ok:, a seat's route or check progress, or the test.list warning, or did not say the terms file is optional: $out"
 }

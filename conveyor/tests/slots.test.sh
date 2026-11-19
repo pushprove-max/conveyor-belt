@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-# t_slots, t_slotclock and t_slotwholeclock set WHOLESUITE=true: they test the test command itself.
+cardchange() { git -C "$R" worktree add -q --detach "$1" && echo x >> "$1/a.txt" && git -C "$1" add a.txt; } # <worktree>: made, a.txt changed and staged, so its run starts a.test.sh alone (t_slots, t_slotclock, t_slotwholeclock: they test the test command itself)
 
 # A pool of the case's own, of <n> slots: the host file's testSlots, in a folder no other case shares (testSlotsDir).
 slotpool() { # <n>
@@ -37,12 +37,12 @@ teststep() { # <w>: exits as tests() returns
 # workers without a slot each gets no core beyond its own, with a core kept for the user too (reserveCores; issue
 # 239: the run was started on all the cores left, taskset -c, after it was pinned, and saw them all).
 t_slots() {
-  local w i p=() h; local -x WHOLESUITE=true
+  local w i p=() h
   slotpool 2; setup "[]"
   h=$XDG_CONFIG_HOME/conveyor/host.json
   ! command -v taskset >/dev/null || [ "$(nproc --all)" -lt 3 ] || { jq '.reserveCores = 1' "$h" > "$h.new" && mv -f "$h.new" "$h"; } \
     || fail "the host file could not keep a core"
-  for i in 7 8 9; do git -C "$R" worktree add -q --detach "$T/$CASE/cards/c$i" || fail "the worktree of c$i could not be made"; done
+  for i in 7 8 9; do cardchange "$T/$CASE/cards/c$i" || fail "the worktree of c$i could not be made"; done
   # A worker counts the workers going as it starts. The first two runs' workers stay until a card is seen waiting
   # for a slot, so two runs are going at once whatever the machine's load.
   mkdir "$STUB/going"
@@ -166,13 +166,13 @@ t_slothome() {
 # testrec.test.sh's t_testrecwait, a card of its own that waited 1 s.
 t_slotclock() {
   local h k b real w=$T/$CASE/cards/c7 now rc l; real=$(command -v timeout)
-  local -x WHOLESUITE=true; slotpool 1; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 3'
-  git -C "$R" worktree add -q --detach "$w" || fail "the worktree could not be made"
+  slotpool 1; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 3'
+  cardchange "$w" || fail "the worktree could not be made"
   mkdir -p "$ST"; now=$(date -u +%FT%TZ)
   printf '%s\n' picked worktree deps brief start:build build start:review review:GO start:test | jq -cR --arg t "$now" 'split(":") as [$s, $x]
     | {card:"c7",issue:7,step:$s,time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
       + if $s == "start" then {of: $x} elif $x then {result: $x} else {} end' > "$ST/cards.jsonl"
-  echo 'echo x >> "$STUB/tests"; printf "TESTRUN files=2 of=5\nTESTRUN cases=3 of=9\n" > "$CONVEYOR_TEST_LOG/r.log"' > "$STUB/test-cmd"
+  echo 'echo x >> "$STUB/tests"; printf "TESTRUN cases=3 of=9\n" > "$CONVEYOR_TEST_LOG/r.log"' > "$STUB/test-cmd"
   printf '%s\n' '#!/usr/bin/env bash' "[ \"\$1 \$3\" = '--kill-after=30 bash' ] || exec '$real' \"\$@\"" \
     'if [ -e "$STUB/freed" ]; then echo "$2"; else echo "started before the slot was let go"; fi >> "$STUB/clock"; shift 2; exec "$@"' > "$STUB/timeout"
   chmod +x "$STUB/timeout"; b=$STUB/brew; mkdir -p "$b/bin"; ln -s "$STUB/timeout" "$b/bin/gtimeout"
@@ -197,7 +197,7 @@ t_slotclock() {
   l=$(jq -c '{card: "c7", issue: 7, step: "test", result: "pass", reason: "", sha: "", time: "2026-01-01T00:00:00Z", tokens: {claude: 0, codex: 0}} + .' "$w.rec") \
     || fail "the run left no test line's fields: $out"
   jq -e '(.wait | type) == "number" and .wait >= 4 and (.run | type) == "number"
-      and .wait + .run <= .sec + 1 and .selected == {files: 2, filesOf: 5, cases: 3, casesOf: 9, kept: null} and .ended == "passed" and .slotsFree == 0' <<<"$l" >/dev/null \
+      and .wait + .run <= .sec + 1 and .selected == {files: 1, filesOf: null, cases: 3, casesOf: 9, kept: null} and .ended == "passed" and .slotsFree == 0' <<<"$l" >/dev/null \
     || fail "the test line does not hold the wait and the run apart, what was selected, how it ended and the slots free: $l"
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" <<<"$l")" ] || fail "the record check refuses the test line: $l"
 }
@@ -210,10 +210,10 @@ t_slotclock() {
 # runs' (slot_whole; wholerun, t_slotwhole below). This case and t_slotclock, each mostly a hold past a timeout, are
 # near the file's top so the runner starts them among its first: this one was its last, and the file's time was its.
 t_slotwholeclock() {
-  local d=$T/$CASE h rc; local -x WHOLESUITE=true
+  local d=$T/$CASE h rc
   slotpool 3; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT
   setup "[]"; mkdir -p "$d"; tune '.tunables.testTimeout = 3'
-  git -C "$R" worktree add -q --detach "$d/cards/c7" || fail "the worktree could not be made"
+  cardchange "$d/cards/c7" || fail "the worktree could not be made"
   echo '. "$CONVEYOR_TEST_SLOTS"; slot_pool && slot_whole && echo x >> "$STUB/tests"' > "$STUB/test-cmd"
   wholerun A; wholerun B
   wait_until "[ -e '$d/A.on' ] && [ -e '$d/B.on' ]" || fail "two whole-suite runs did not both get a turn"
@@ -281,7 +281,9 @@ t_slotcores() {
 # A test command may leave a process running that closed every descriptor it inherited (a program that starts another
 # so: Python's subprocess), the slot's among them: the slot then came back when the command ended, and the next card's
 # tests ran beside that process, on its core. With a pool of 1, a card's test command leaves such a process: the card
-# lands without waiting for it, the slot stays taken while it lives, and is free once it has ended. That process
+# lands without waiting for it, the slot stays taken while it lives, and is free once it has ended. Bug it catches too
+# (#374): the card's run of a.test.sh, in a process group of its own (filecmd()), left it outside the group the slot
+# was kept for, and the slot came back at once. That process
 # lives until the case kills it, and push is off: a push takes a slot (push.sh), so the loop's push waited for the
 # process, and the case found it ended (one of 60 s) or never ended (one that lives on).
 t_slotleft() {

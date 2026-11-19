@@ -363,16 +363,9 @@ fileguess() { # <checkout>
     *) false ;;
   esac && echo "$k"
 }
-# The reason a test command that, given <n> test files, ran <ran> (WIDE) is named: with the test.fileCommand that fits
-# the test files of <checkout> when they run alone as plain scripts (fileguess()).
-widewhy() { # <n> <ran> <checkout>
-  local w=${WIDE//'<n>'/"$1"} g
-  g=$(fileguess "$3") || g=''
-  printf '%s%s\n' "${w//'<ran>'/"$2"}" "${g:+, such as \"$g\", as the test files run alone as plain scripts (\`$g <file>\`)}"
-}
 # The runner a test command starts, and how it takes a list of test files, as one line `<mode> <runner>`: args for a
 # runner that takes test files as arguments (node --test, vitest, jest, mocha, pytest, rspec), runner for one that
-# takes packages or test targets, not files (go test, cargo test: runnercmd(), lib/testrun.sh); `named <runner> <word>` when the command already names what an
+# takes packages or test targets, not files (go test, cargo test); `named <runner> <word>` when the command already names what an
 # args runner runs (<word>: a glob, a path with a /, or a file or folder in <folder>), as `node --test checks/*.js`
 # does, so paths added at its end would not narrow it. Nothing for a runner it does not know. A command that runs a
 # package.json script (npm, yarn, pnpm or bun: `npm test`, `npm run <name>`) is read as that script, in <folder>.

@@ -14,7 +14,7 @@
 TSID=0b7c2a4e-1f3d-4c5b-9a8e-6d2f1e3c4b5a
 tsrun() { # [transcript]
   setup "[$(issue 10 2026-01-04)]"
-  jq -c '.rules.push = false | .rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"
+  jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"
   echo "$GO" > "$STUB/review.1"
   [ -z "${1:-}" ] || printf '%s\n' "$1" > "$STUB/transcript"
   cat > "$STUB/claude" <<EOF

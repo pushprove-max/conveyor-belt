@@ -31,11 +31,12 @@ rerunsetup() {
   printf '%s\n' "$@" > "$STUB/plan"
   cat > "$STUB/test-cmd" <<'EOF'
 L=$CONVEYOR_TEST_LOG/run.log; RR=${CONVEYOR_TEST_RERUN:-/dev/null}
-case $PWD in */mainrun/*) n=main ;; *) n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n" ;; esac
+p=; [ ! -e "$STUB/perfile" ] || p=1
+case $PWD in */mainrun/*) n=main ;; *) n=$(cat "$STUB/n" 2>/dev/null || echo 0); [ -n "$p" ] && [ "${CONVEYOR_TEST_N:-1}" != 1 ] || { n=$((n + 1)); echo "$n" > "$STUB/n"; } ;; esac
 [ "$RR" = /dev/null ] || cp "$RR" "$STUB/rerun.$n"
 [ ! -f "$STUB/pre" ] || . "$STUB/pre"
-rc=0; k=0
-for f in a.test b.test c.test; do
+rc=0; k=0; fs="a.test b.test c.test"; of=4; [ -z "$p" ] || { fs=$CONVEYOR_TEST_FILE; of=$(sed -n "s/^$fs //p" "$STUB/cases" | wc -w); }
+for f in $fs; do
   fr=; fc=; dn=; w=
   while read -r kind ch; do
     m=$(awk -v c="$ch" '$1 == c {print $2}' "$STUB/map"); r="main changed $ch"; [ "$kind" = main ] || r="the card changed $ch"
@@ -66,10 +67,19 @@ for f in a.test b.test c.test; do
   done
   echo "-- $r $f" >> "$L"; [ $r = ok ] || rc=1
 done
-echo "TESTRUN cases=$k of=4" >> "$L"; [ "$RR" = /dev/null ] || echo "TESTRUN kept=$((4 - k))" >> "$L"
+echo "TESTRUN cases=$k of=$of" >> "$L"; [ "$RR" = /dev/null ] || echo "TESTRUN kept=$((of - k))" >> "$L"
 exit $rc
 EOF
   echo '. "$STUB/test-cmd"' > "$STUB/mainrun-cmd"
+}
+# rerunsetup's main as a card runs it (#374: each test file alone, through test.fileCommand): a.test, b.test and c.test
+# are files of main, test files by the pack's tests.patterns, each linked to a.txt (the build's file), and the stub
+# runs only the file the run gives it (CONVEYOR_TEST_FILE), its cases' count of its own (of), a run being counted
+# ($STUB/n) at its first file (CONVEYOR_TEST_N). Without it the stub runs the three files at each call.
+rerunfiles() {
+  local f
+  for f in a.test b.test c.test; do echo "$f" > "$R/$f"; done; git -C "$R" add a.test b.test c.test || fail "main's test files could not be staged"
+  tune '.tests.patterns = ["*.test", "*.test.*"]'; linkset '{"a.txt": ["a.test", "b.test", "c.test"]}'; : > "$STUB/perfile"
 }
 ran() { sed -n "s/^$1 //p" "$STUB/ran" | tr '\n' ' ' | sed 's/ $//'; } # <run>: the cases it ran
 # A card's test steps without the card: its worktree $T/$CASE/cards/c7 on main, its change staged, and the engine's
@@ -97,8 +107,7 @@ tline() { st 'select(.step == "test") | tojson' | sed -n "$1p" | jq -r "$2"; } #
 # made no edit. A failing case runs once more, alone, before any fix session; when it passes there is none, and the
 # card's test line says it passed on re-run and which case had failed, never a plain pass.
 t_rerunpass() {
-  local -x WHOLESUITE=true # The old fixture: the run again is test.command's, given the failed case alone (test.fileCommand runs a file whole).
-  rerunsetup '1 fail flaky'
+  rerunsetup '1 fail flaky'; rerunfiles
   # The run again's live record, once watch() has written it (#433).
   # shellcheck disable=SC2016 # expanded where the test command sources it
   echo '[ "$n" != 2 ] || { v=${CONVEYOR_TEST_LOG%.testlog}.live; i=0; until jq -e .before "$v" > /dev/null 2>&1 || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; cp "$v" "$STUB/live.2"; }' > "$STUB/pre" # sleep: the stub test command's own poll, run where wait.sh is not loaded
@@ -136,8 +145,7 @@ t_rerunpass() {
 # which passed and which no changed file selects, is kept as passed (the owner, 2026-11-13: #325 had one failing case
 # of its selection, and after its fix the whole selection would have run again).
 t_rerunfail() {
-  local -x WHOLESUITE=true # The old fixture: the run again and main's run are test.command's, given the failed case alone (verdicts()).
-  rerunsetup '1 fail flaky' '2 fail flaky'
+  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
   local m1; m1=$(git -C "$R" rev-parse HEAD)
   loop run 1 > /dev/null || fail "run exited non-zero"
   [ "$(ran 2)" = flaky ] || fail "the run again did not run the failed case alone: $(ran 2)"
@@ -150,8 +158,9 @@ t_rerunfail() {
   [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "not a build and one fix session: $(cat "$STUB/sessions")"
   [ "$(tline 1 '[.rerun.exit, (.rerun.failures.files | map(.file)), (.failures.files | map("\(.file):\(.cases | map(.name) | join(","))"))] | tojson')" = '[1,["b.test"],["b.test:flaky"]]' ] \
     || fail "the failed line does not keep both runs: $(tline 1 tojson)"
-  # Before the fix, the case ran on main (verdicts()), alone, and passed there: the card's to fix, and no P0.
-  [ "$(ran main)" = flaky ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.main" | tr '\t\n' ':|')" = "b.test:flaky|" ] \
+  # Before the fix, the case's file ran on main (verdicts()), alone and whole, and passed there: the card's to fix, and
+  # no P0.
+  [ "$(ran main)" = flaky ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.main" | tr '\t\n' ':|')" = "b.test|" ] \
     || fail "the failing case was not run alone on main: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
   [ "$(tline 1 '[.verdicts, (.mainRun | keys)] | tojson')" = '[[{"case":"b.test: flaky","verdict":"card"}],["exit","sec","sha"]]' ] \
     || fail "the failed line does not say the case passed on main: $(tline 1 tojson)"
@@ -282,7 +291,6 @@ EOF
 # A merge in doubt (the session that brought the change onto main edited it outside the conflicts: here b.txt beside
 # the conflict in a.txt) runs the whole selection, and refuses nothing: the merge may have broken what passed before.
 t_rerunmergedoubt() {
-  local -x WHOLESUITE=true # The old fixture: #7 lands on a main that changed a.txt too.
   rerunsetup
   echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i.bak 's/^main1\$/seven/' a.txt; rm -f a.txt.bak; echo b > b.txt; else sed -i.bak 's/^l1\$/seven/' a.txt; rm -f a.txt.bak; fi" > "$STUB/build"
@@ -298,7 +306,6 @@ t_rerunmergedoubt() {
 # which selects c.test. The rebuild session brings #7 onto main, and the run after it keeps the passes of the first:
 # a.test (main changed its a.txt) and c.test run, b.test, which nothing main changed selects, does not.
 t_rerunrebuilt() {
-  local -x WHOLESUITE=true # The old fixture: #7 lands on a main that changed a.txt too.
   rerunsetup
   echo 'y.txt c.test' >> "$STUB/map"
   echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"

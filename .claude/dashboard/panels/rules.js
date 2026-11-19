@@ -14,8 +14,7 @@
 // record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR (Button, Release or
 // Idle, the record's prMerge or else the pack's; disabled the same way for a record with no prMerge), Test before a push (On or Off: the
 // record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
-// Off; disabled the same way for a record with no rules.visible), Whole suite in a card (On or Off; disabled the same
-// way for a record with no rules.wholeSuite), Split large issues (Off, Shadow or On; disabled the same way for a
+// Off; disabled the same way for a record with no rules.visible), Split large issues (Off, Shadow or On; disabled the same way for a
 // record with no rules.split), Cores kept for you (shown,
 // not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores), one row a standing kind of
@@ -273,7 +272,7 @@
   // A change in words, for the head.
   function words(action, args) {
     const a = list(args);
-    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'wholeSuite' ? 'Whole suite in a card' : k === 'split' ? 'Split large issues' : k} ${o}`; }).join(', ');
+    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'split' ? 'Split large issues' : k} ${o}`; }).join(', ');
     if (action === 'cap') return a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`;
     if (action === 'guard') return a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`;
     if (action === 'model' || action === 'reviewer') return `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
@@ -311,7 +310,7 @@
         const never = list(r.rules.never).filter((y) => y !== key);
         r.rules.never = o === 'off' ? never.concat([key]) : never;
       });
-      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'wholeSuite' || k === 'split' ? k : 'build'];
+      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'split' ? k : 'build'];
     }
     if (action === 'cap' || action === 'guard') { r[action] = a[0] === 'off' ? null : Number(a[0]); return [r, action]; }
     if (action === 'judge' && (a[0] === 'on' || a[0] === 'off')) { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
@@ -980,15 +979,6 @@
     yOn.disabled = yOff.disabled = !yesKnown;
     el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
       yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
-    // Whole suite in a card: Off (the default; a record without it reads as Off) runs only the test files a card's
-    // change adds or changes (with none, 5 linked to it), the linked files before each push (while Test before a push
-    // is On), and the whole suite only in a release; On lets a card run the whole suite when its tests cannot be found.
-    const wholeOn = r.wholeSuite === true, wholeKnown = typeof r.wholeSuite === 'boolean';
-    const wOn = choice('On', 'whole-suite-on', 'Whole suite in a card: on', wholeOn, () => { if (!wholeOn) send('rules', ['wholeSuite=on'], null, ['rules', ['wholeSuite=off']]); });
-    const wOff = choice('Off', 'whole-suite-off', 'Whole suite in a card: off', !wholeOn, () => { if (wholeOn) send('rules', ['wholeSuite=off'], null, ['rules', ['wholeSuite=on']]); });
-    wOn.disabled = wOff.disabled = !wholeKnown;
-    el.append(row('wholeSuite', 'Whole suite in a card', 'a card may run every test file when it cannot find the tests of its change',
-      wOn, wOff, wholeKnown ? offLine(wholeOn, `a card runs only the test files it adds or changes (with none, 5 linked to its change)${checkOn ? ', the test files linked to the landings run before each push,' : ''} and the whole suite runs only in a release`) : newer(wholeKnown)));
     // Split large issues: Shadow (the default) records what the Judge would split a large issue into, and builds it
     // whole; On files the slices as follow-ups and holds the issue as their umbrella; Off checks nothing. An engine whose
     // record has no rules.split is sent none of them. Undo sends the setting it had.
@@ -1983,7 +1973,7 @@
   // with /conveyor-belt:setup: neither is asked here.
   const ONBOARD = [
     ['What to build', ['build', 'never', 'split']],
-    ['Landing', ['land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite']],
+    ['Landing', ['land-as', 'push', 'push-check', 'dep-guard', 'start']],
     ['Models', ['builder', 'reviewer', 'judge', 'account', 'review-account']],
     ['Limits', ['cap', 'guard']],
     ['Your yes', ['visible']],
@@ -1993,7 +1983,7 @@
   // A rule the project's engine has: one whose switch is drawn disabled for an older engine (rules()) is not asked.
   function onbHas(k, c) {
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
-    if (k === 'push' || k === 'visible' || k === 'wholeSuite') return typeof r[k] === 'boolean';
+    if (k === 'push' || k === 'visible') return typeof r[k] === 'boolean';
     if (k === 'split') return ['off', 'shadow', 'on'].includes(r.split);
     if (k === 'dep-guard') return typeof c.depGuard === 'boolean';
     if (k === 'land-as') return Object.prototype.hasOwnProperty.call(c, 'landAs');
@@ -2023,7 +2013,7 @@
       for (let i = 0; i < n.length; i += 10) steps.push(['rules', n.slice(i, i + 10).map((a) => `${a}=on`)]);
       return ['none', steps, at({}, { never: [] })];
     }
-    if (k === 'push' || k === 'visible' || k === 'wholeSuite') return ['Off', [['rules', [`${k}=off`]]], at({}, { [k]: false })];
+    if (k === 'push' || k === 'visible') return ['Off', [['rules', [`${k}=off`]]], at({}, { [k]: false })];
     // Split large issues: shadow, as control-defaults.json has it.
     if (k === 'split') return ['Shadow', [['rules', ['split=shadow']]], at({}, { split: 'shadow' })];
     if (k === 'dep-guard') return ['On', [['dep-guard', ['on']]], at({ depGuard: true })];

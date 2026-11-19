@@ -22,11 +22,11 @@ const pick = (w, a, value) => { const s = act(box(w), a); s.value = value; s.dis
 // over the fixture's.
 function snap(onboarded = null, over = {}, part = {}) {
   const d = full(), c = d.panels.rules.data.control;
-  d.panels.rules.data.control = { ...c, rules: { ...c.rules, push: false, visible: false, wholeSuite: false }, landAs: null, onboarded, ...over };
+  d.panels.rules.data.control = { ...c, rules: { ...c.rules, push: false, visible: false }, landAs: null, onboarded, ...over };
   Object.assign(d.panels.rules.data, { repoUrl: 'https://github.com/example/sample-project', packLandAs: 'pr', pushCheck: true }, part);
   return d;
 }
-const ALL = ['build', 'never', 'land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite', 'builder', 'reviewer', 'judge', 'account', 'review-account', 'cap', 'guard', 'visible'];
+const ALL = ['build', 'never', 'land-as', 'push', 'push-check', 'dep-guard', 'start', 'builder', 'reviewer', 'judge', 'account', 'review-account', 'cap', 'guard', 'visible'];
 
 // What a page keeps for the next visit: localStorage, sessionStorage and cookies.
 const kept = (w) => JSON.stringify([w.localStorage, w.sessionStorage].map((st) => Array.from({ length: st.length }, (_, i) => [st.key(i), st.getItem(st.key(i))]).sort())
@@ -49,7 +49,7 @@ test('Setup: a project with no onboarded opens the modal; Later closes it for th
   assert.deepEqual(Array.from(box(w).querySelectorAll('.onboard-step'), (s) => s.textContent), ['1. What to build', '2. Landing', '3. Models', '4. Limits', '5. Your yes']);
   assert.equal(step(w), '1. What to build');
   assert.deepEqual(asked(w), ['build', 'never']);
-  assert.equal(count(w), '0 of 16 rules set');
+  assert.equal(count(w), '0 of 15 rules set');
   assert.ok(w.document.activeElement && dlg.contains(w.document.activeElement), 'the focus is in the modal');
   assert.equal(line(w).hidden, false);
   assert.match(line(w).textContent, /Conveyor is not set up for this repository yet/);
@@ -69,7 +69,7 @@ test('Setup: a project with no onboarded opens the modal; Later closes it for th
 // sent nothing, a value in force that is not the default showed as preselected, and a choice made by keyboard left
 // the focus outside the modal. Each choice is the Rules tab's command (P0_OFF, which the Rules tab's own case below
 // checks the tab sends).
-const stepSnap = () => snap(null, { rules: { ...CONTROL.rules, push: true, visible: false, wholeSuite: false } });
+const stepSnap = () => snap(null, { rules: { ...CONTROL.rules, push: true, visible: false } });
 const P0_OFF = [{ action: 'rules', args: ['P0=off'], repo: 'sample' }];
 test('Setup: a rule is set only once saved; a preselected default sends it; each choice sends the Rules tab\'s command', async () => {
   const w = boot();
@@ -77,7 +77,7 @@ test('Setup: a rule is set only once saved; a preselected default sends it; each
   // Bug: clicking the selected P0 turned it off, though a click on the selected choice keeps the default.
   assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'sample' }],
     'the selected P0 keeps the Build default');
-  assert.equal(count(w), '1 of 16 rules set');
+  assert.equal(count(w), '1 of 15 rules set');
   assert.equal(pressed(w, 'rule-P0'), 'true');
   assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), P0_OFF, 'once set, P0 off is the command the Rules tab sends');
   // Add with an empty field sends nothing: Never build is not set.
@@ -94,7 +94,7 @@ test('Setup: a rule is set only once saved; a preselected default sends it; each
   assert.equal(nextB(w).disabled, false);
   nextB(w).click();
   assert.equal(step(w), '2. Landing');
-  assert.deepEqual(asked(w), ['land-as', 'push', 'push-check', 'dep-guard', 'start', 'wholeSuite']);
+  assert.deepEqual(asked(w), ['land-as', 'push', 'push-check', 'dep-guard', 'start']);
   // Bug: Land as and Test before a push, rules added after the setup was first built, went unasked. Their default is
   // the pack's value (here one pull request), and the preselected choice sends it.
   assert.equal(act(box(w), 'onboard-default-land-as').textContent, 'default: Pull request');
@@ -109,7 +109,6 @@ test('Setup: a rule is set only once saved; a preselected default sends it; each
   assert.equal(pressed(w, 'start-queue'), 'true');
   assert.deepEqual(await sent(w, () => act(box(w), 'start-queue').click()), [{ action: 'start', args: ['queue'], repo: 'sample' }]);
   assert.equal(isSet(w, 'start'), 'true');
-  assert.deepEqual(await sent(w, () => act(box(w), 'whole-suite-off').click()), [{ action: 'rules', args: ['wholeSuite=off'], repo: 'sample' }]);
   // By keyboard: the focus stays in the modal while the change is out, and comes back to the control after it.
   const dlg = box(w).querySelector('[role="dialog"]');
   act(box(w), 'push-on').focus();
@@ -123,7 +122,7 @@ test('Setup: a rule is set only once saved; a preselected default sends it; each
   act(line(w), 'onboard-open').click();
   assert.equal(act(box(w), 'onboard-default-dep-guard').textContent, 'default: On');
   assert.deepEqual(await sent(w, () => act(box(w), 'onboard-default-dep-guard').click()), [{ action: 'dep-guard', args: ['on'], repo: 'sample' }]);
-  assert.equal(count(w), '8 of 16 rules set');
+  assert.equal(count(w), '7 of 15 rules set');
 });
 
 // Bug (issue 402): Next stayed disabled until every rule of the step was set, so a user who took the defaults of Build
@@ -140,7 +139,7 @@ test('Setup: Next with Build and Never build unset writes both defaults and show
     { action: 'rules', args: ['area:infra=on'], repo: 'sample' }],
     'the defaults of both, as their default: buttons send them');
   assert.equal(step(w), '2. Landing');
-  assert.equal(count(w), '2 of 16 rules set');
+  assert.equal(count(w), '2 of 15 rules set');
 });
 
 // Bug (issue 402): Finish stayed disabled with a rule of the last step unset. It writes that rule's default, then
@@ -150,7 +149,7 @@ test('Setup: Finish with a rule unset writes its default and closes the dialog',
   deliver(w, snap({ at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'visible') }));
   assert.equal(nextB(w).textContent, 'Finish');
   assert.equal(nextB(w).disabled, false, 'Finish is on with Visible changes unset');
-  const done = record({ rules: { ...CONTROL.rules, push: false, visible: false, wholeSuite: false }, onboarded: { at: '2026-11-09T17:00:00.000Z', rules: ALL } });
+  const done = record({ rules: { ...CONTROL.rules, push: false, visible: false }, onboarded: { at: '2026-11-09T17:00:00.000Z', rules: ALL } });
   // The host's answer to onboarded is the record that says so; the default before it is answered as sent.
   Object.defineProperty(w, 'reply', { configurable: true, get: () => (w.posts.at(-1).body.action === 'onboarded' ? done : null) });
   assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'rules', args: ['visible=off'], repo: 'sample' },
@@ -211,10 +210,10 @@ test('Setup: Finish writes onboarded and the modal stops opening', async () => {
     if (i < 4) { assert.equal(nextB(w).textContent, 'Next'); nextB(w).click(); }
   }
   assert.equal(step(w), '5. Your yes');
-  assert.equal(count(w), '16 of 16 rules set');
+  assert.equal(count(w), '15 of 15 rules set');
   assert.equal(nextB(w).textContent, 'Finish');
   const on = { at: '2026-11-09T17:00:00.000Z', rules: ALL };
-  w.reply = record({ rules: { ...CONTROL.rules, push: false, visible: false, wholeSuite: false }, onboarded: on });
+  w.reply = record({ rules: { ...CONTROL.rules, push: false, visible: false }, onboarded: on });
   assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'onboarded', args: ALL, repo: 'sample' }]);
   await settle();
   assert.ok(!shown(w), 'the modal closes');

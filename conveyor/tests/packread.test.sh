@@ -15,10 +15,9 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # pack a card broke, even only past a NUL byte, or a schema that changed under a running engine so the pack no longer
 # meets it, still passes at the next read.
 # Each card's build changes the pack or the schema after the run has read and checked both (names()); the card's
-# test command or its commit trailers, read after the build, are the next read. Each kind of change is a case of its
+# test run (test.fileCommand) or its commit trailers, read after the build, are the next read. Each kind of change is a case of its
 # own, on an engine copy of its own (packread_start), so they run side by side.
 packread_start() { # <issue>: a main with that one issue, the engine copied to $E (eng), the good pack kept
-  local -x WHOLESUITE=true # The old fixture: the per-file one runs a.test.sh through test.fileCommand, so an edit to test.command is never run.
   setup "[$(issue "$1" 2026-01-01)]"
   E=$T/$CASE/eng; mkdir -p "$E"; cp -r "$SRC"/* "$E/"; rm -rf "$E/state"; ln -s "$SRC/../.claude" "$T/$CASE/.claude"
   eng() { CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$E/conveyor.sh" "$@"; }
@@ -31,11 +30,11 @@ t_packread() {
   # starts no program (packall read every field with the check), so the reads counted are those runs alone.
   printf '#!/usr/bin/env bash\ncase "$*" in *"JSON documents, not one"*) echo >> "$STUB/checks" ;; *"not a field of the schema"*) echo >> "$STUB/reads" ;; esac\nexec %q "$@"\n' \
     "$(command -v jq)" > "$STUB/jq" && chmod +x "$STUB/jq"
-  # An edited pack, longer than one argument may be: its new test command runs. The text is checked once per
-  # process that reads it, not at every read.
-  echo 'echo two >> a.txt; { printf "%131072s" ""; jq ".test.command = \"echo edited > \\\"\$STUB/edited\\\"\"" "$STUB/pack.good"; } > "$STUB/p.new" && mv "$STUB/p.new" "'"$P"'"' > "$STUB/build"
+  # An edited pack, longer than one argument may be: its new test.fileCommand runs a.test.sh, the test file linked to
+  # a.txt. The text is checked once per process that reads it, not at every read.
+  echo 'echo two >> a.txt; { printf "%131072s" ""; jq ".test.fileCommand =\"echo edited > \\\"\$STUB/edited\\\"\"" "$STUB/pack.good"; } > "$STUB/p.new" && mv "$STUB/p.new" "'"$P"'"' > "$STUB/build"
   eng run 1 >/dev/null 2>&1 || fail "run exited non-zero: $(st .)"
-  [ -e "$STUB/edited" ] && [ ! -e "$STUB/tests" ] || fail "the pack a card edited was not seen at the next read: the old test command ran"
+  [ -e "$STUB/edited" ] && [ ! -e "$STUB/tests" ] || fail "the pack a card edited was not seen at the next read: the old test.fileCommand ran"
   [ -n "$(st 'select(.issue == 7 and .step == "landed")')" ] || fail "the card with the edited pack did not land: $(st 'select(.issue == 7)')"
   c=$(wc -l < "$STUB/checks") r=$(wc -l < "$STUB/reads"); rm "$STUB/jq"
   # This run reads the pack 39 times (main before #379, which ran jq at every read, counted them): checked at each,

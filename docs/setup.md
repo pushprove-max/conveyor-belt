@@ -98,11 +98,11 @@ asks if it can write them in the pack as `tests.patterns` (`--test-patterns yes|
 
 Setup also finds the test runner that your test command starts. For `npm test` and the other package scripts, it
 reads the script in `package.json`. For node --test, vitest, jest, mocha, pytest and rspec, it asks if it can set
-`test.list` to `args`. Then a card's test run gets only the tests that its change touches
-([Which tests a card runs](configuration.md#which-tests-a-card-runs)). If the command already names its test files, for example
-`node --test checks/*.js`, setup does not ask. For go test and cargo test, it asks if it can
-set `test.list` to `runner`. These runners take packages and test targets, not test files, so a card's test run gets
-the packages or test targets of the tests that its change touches. The answer is `--test-list yes|no`. If your pack already sets `test.list`, setup does not ask.
+`test.fileCommand` to your test command. A card runs each of its test files alone with that command, the file's path
+at its end ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). If the command already names its test
+files, for example `node --test checks/*.js`, setup does not ask. Go test and cargo test take packages and test
+targets, not test files, so setup does not ask for them. The answer is `--file-command yes|no`. If your pack already
+sets `test.fileCommand`, setup does not ask.
 
 Setup then offers to make the test map ([The test map](configuration.md#the-test-map)). The map tells which test
 files cover which source files, so a card runs only the tests that cover its change. To make it, setup runs your
@@ -222,7 +222,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--test-list yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

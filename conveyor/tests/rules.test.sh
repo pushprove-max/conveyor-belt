@@ -114,7 +114,6 @@ t_packrules() {
 # more than one; a card whose tests fail twice lands, or files follow-ups; a card landing on the last review's NO-GO
 # skips the tests, or files its follow-ups before they have passed; a test run leaves no line in the records.
 t_tests() {
-  local -x WHOLESUITE=true # The old fixture: the fix session is handed the last 200 lines of test.command's own output.
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01) <(issue 10 2026-04-01) <(issue 11 2026-05-01))"
   mkdir -p "$R/node_modules/dep" "$R/web/node_modules/wdep" "$R/infra" "$R/cache/deps/cdep"; echo '{}' | tee "$R/package.json" "$R/web/package.json" > "$R/infra/package.json"
   # Bug: a link whose parent folder the worktree does not have (cache/ is main's alone) failed.
@@ -136,13 +135,15 @@ t_tests() {
   grep -qF 'linked from the main checkout: node_modules, infra/node_modules, packages/sample-node/node_modules, web/node_modules, cache/deps.' "$STUB/brief" && grep -q 'the loop runs the changed tests itself' "$STUB/brief" || fail "the brief does not say the dependencies are there and the loop runs the tests"
   loop check || fail "the record check refuses a test line"; count "1 1 1"
   # Tests fail once (the second run and its run again, tests()): one fix session handed the last 200 lines of the output, one review, a second run, landed.
+  # The run of a.test.sh, the file linked to a.txt, adds its own lines after the stub's (`-- FAIL a.test.sh`:
+  # filecmd()), so the last 200 lines start at out line 104.
   echo 'echo two >> a.txt' > "$STUB/build"
   echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 2|3) seq 300 | sed "s/^/out line /"; echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1 ;; esac' > "$STUB/test-cmd"
   loop run 1 >/dev/null || fail "second run exited non-zero"
   [ "$(tl 8)" = "picked worktree deps brief start build start review start test start fix start review start test start landed pushed issue " ] || fail "steps of a card whose tests fail once: $(tl 8)"
   [ "$(st 'select(.issue == 8 and .step == "test") | .result' | tr '\n' ' ')" = "fail pass " ] && st 'select(.issue == 8 and .step == "test" and .result == "fail") | .tail' | grep -q 'FAIL widget.test.ts' \
     || fail "test lines of a card whose tests fail once: $(st 'select(.issue == 8 and .step == "test")')"
-  grep -qx 'FAIL widget.test.ts' "$STUB/brief" && grep -qx 'out line 102' "$STUB/brief" && ! grep -qx 'out line 101' "$STUB/brief" && grep -q '^# Issue #8:' "$STUB/brief" \
+  grep -qx 'FAIL widget.test.ts' "$STUB/brief" && grep -qx 'out line 104' "$STUB/brief" && ! grep -qx 'out line 103' "$STUB/brief" && grep -q '^# Issue #8:' "$STUB/brief" \
     || fail "the fix session was not handed the issue and the last 200 lines of the test output"
   [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] || fail "the card did not land after its tests passed"; count "3 3 4"
   # Tests fail twice: blocked with the output, nothing landed, the output kept. The line's reason is one sentence;
@@ -155,7 +156,9 @@ t_tests() {
   [ "$(tl 9)" = "picked worktree deps brief start build start review start test start fix start review start test blocked " ] || fail "steps of a card whose tests fail twice: $(tl 9)"
   [ "$(st 'select(.issue == 9 and .step == "blocked") | .reason')" = "the changed tests failed again after their one fix round (exit 1); nothing landed." ] \
     || fail "the blocked reason is not the one sentence: $(st 'select(.issue == 9 and .step == "blocked") | .reason')"
-  [ "$(st 'select(.issue == 9 and .step == "blocked") | .tail | split("\n") | [length, (.[0] | length), .[-1], (.[-3] == .[-2] and (.[-2] | startswith("FAIL 000") and length == 3005))] | join("|")')" = "60|3005|FAIL gadget.test.ts: expected 2|true" ] \
+  # After the stub's lines come the run's own: a.test.sh's end (`-- FAIL a.test.sh`: filecmd()) and the note of the
+  # linked files it ran (LINKED).
+  [ "$(st 'select(.issue == 9 and .step == "blocked") | .tail | split("\n") | [length, (.[0] | length), .[-3], .[-2], (.[-1] | startswith("conveyor: the change adds or changes no test file")), (.[-5] == .[-4] and (.[-4] | startswith("FAIL 000") and length == 3005))] | join("|")')" = "60|3005|FAIL gadget.test.ts: expected 2|-- FAIL a.test.sh|true|true" ] \
     || fail "the blocked line's tail is not the last 60 lines of the test output: $(st 'select(.issue == 9 and .step == "blocked") | .tail')"
   loop check || fail "the record check refuses a blocked line with a tail"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a card whose tests failed twice landed, left main dirty or left its worktree"
@@ -183,51 +186,53 @@ t_tests() {
 # named a passing file as failed. Files run in the log's order: a `== ` line that goes back is a test's own, and a
 # FAIL line a passing file prints is no failure.
 t_testfails() {
-  local -x WHOLESUITE=true # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
-  setup "$(jq -cs . <(issue 7 2026-01-01))"
+  local f; setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  for f in tests/a.test.sh conveyor/conveyor.test.sh tests/b.test.sh tests/c.test.sh tests/d.test.mjs tests/e.test.sh tests/slow.test.sh tests/z.test.sh; do
+    mkdir -p "$R/${f%/*}" && echo x > "$R/$f"; done
+  git -C "$R" add -f tests conveyor && git -C "$R" commit -qm "the test files" || fail "main's test files could not be committed" # -f: the fixture ignores conveyor/
+  # Each file runs alone, as the worktree's links (the fixture ignores .conveyor/) give a.txt: the build's four, the fix's five.
+  cat > "$STUB/build" <<'EOF'
+echo two >> a.txt; mkdir -p .conveyor
+if grep -q '^# The changed tests fail' "$STUB/brief"; then echo '{"a.txt": ["tests/a.test.sh", "tests/d.test.mjs", "tests/e.test.sh", "tests/slow.test.sh", "tests/z.test.sh"]}'
+else echo '{"a.txt": ["tests/a.test.sh", "conveyor/conveyor.test.sh", "tests/b.test.sh", "tests/c.test.sh"]}'; fi > .conveyor/test-links.json
+EOF
   # The first run: two of four files fail, one case each, one with a line over 200 characters and a second FAIL line,
-  # after a `== ` line of its own that is no file of the run.
-  # The run after the fix: a TAP file fails (its TODO case does not), a file fails naming no case, and it is still in
-  # its fourth file when its time (2 s) is up.
+  # after a `== ` line of its own that is no file of the run. The run after the fix: a TAP file fails (its TODO case
+  # does not), a file fails naming no case, and it is still in its fourth file of five when its time (2 s) is up. Each
+  # failed test line is its run again's, of the files that did not pass (of: two, then four: z.test.sh never began).
   cat > "$STUB/test-cmd" <<'EOF'
-[ -n "${CONVEYOR_TEST_RERUN:-}" ] && ! grep -q '^changed' "$CONVEYOR_TEST_RERUN" || echo x >> "$STUB/tests" # a run again (tests()) is the run it repeats; a run after a fix (its list names the files the fix changed) is not
-L=$CONVEYOR_TEST_LOG/run.log
-begin() { echo "== $1${2:+ $2}"; echo "== $1" >> "$L"; }
-end() { echo "-- $1 $2" >> "$L"; }
-if [ "$(wc -l < "$STUB/tests")" = 1 ]; then
-  begin tests/a.test.sh; echo "ok alpha"; end ok tests/a.test.sh
-  begin conveyor/conveyor.test.sh "(cases: lane views)"; echo "ok lane"; echo "== diagnostic"
-  echo "FAIL [views]: the snapshot lacks $(printf 'word %.0s' $(seq 60))end"; echo "FAIL [views]: a second line"
-  echo "conveyor: left 2 stubs running"; end FAIL conveyor/conveyor.test.sh
-  begin tests/b.test.sh; echo "== tests/a.test.sh"; echo "FAIL [beta]: expected 2, got 3"; echo "ok gamma"; end FAIL tests/b.test.sh
-  begin tests/c.test.sh; echo "FAIL [own]: words a passing test prints"; echo "ok delta"; end ok tests/c.test.sh; exit 1
-fi
-echo "TESTRUN files=5" >> "$L"
-begin tests/a.test.sh; echo "ok alpha"; end ok tests/a.test.sh
-begin tests/d.test.mjs; echo "not ok 1 - rejects invalid input"; echo "ok 2 - fine"; echo "not ok 3 - later # TODO"; end FAIL tests/d.test.mjs
-begin tests/e.test.sh; echo "e.test.sh: line 3: syntax error"; end FAIL tests/e.test.sh
-begin tests/slow.test.sh; echo "ok one"; kill -ALRM "$PPID"; sleep 30 # sleep: a test file that hangs, cut as at testTimeout (rerun.test.sh)
+case $CONVEYOR_TEST_FILE in
+  tests/a.test.sh) echo "ok alpha" ;;
+  conveyor/conveyor.test.sh) echo "ok lane"; echo "== diagnostic"
+    echo "FAIL [views]: the snapshot lacks $(printf 'word %.0s' $(seq 60))end"; echo "FAIL [views]: a second line"
+    echo "conveyor: left 2 stubs running"; exit 1 ;;
+  tests/b.test.sh) echo "== tests/a.test.sh"; echo "FAIL [beta]: expected 2, got 3"; echo "ok gamma"; exit 1 ;;
+  tests/c.test.sh) echo "FAIL [own]: words a passing test prints"; echo "ok delta" ;;
+  tests/d.test.mjs) echo "not ok 1 - rejects invalid input"; echo "ok 2 - fine"; echo "not ok 3 - later # TODO"; exit 1 ;;
+  tests/e.test.sh) echo "e.test.sh: line 3: syntax error"; exit 1 ;;
+  tests/slow.test.sh) echo "ok one"; sleep 30 ;; # sleep: a test file that hangs, cut by the run's clock at testTimeout
+esac
 EOF
   tuned '.tunables.testTimeout = 2' loop run 1 > /dev/null || fail "run exited non-zero"
   f() { st 'select(.step == "test" and .result == "fail") | tojson' | sed -n "$1p" | jq -r "$2"; }
   [ "$(st 'select(.step == "test") | .result' | tr '\n' ' ')" = "fail fail " ] || fail "not two failed test runs: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(f 1 '.failures | [.of, .timeout, (.files | map([.file, (.cases | map(.name) | join(","))] | join(":")) | join(" "))] | tojson')" \
-    = '[4,null,"conveyor/conveyor.test.sh:views tests/b.test.sh:beta"]' ] || fail "the failing files and cases are not exactly the two that failed: $(f 1 '.failures | tojson')"
+    = '[2,null,"conveyor/conveyor.test.sh:views tests/b.test.sh:beta"]' ] || fail "the failing files and cases are not exactly the two that failed: $(f 1 '.failures | tojson')"
   [ "$(f 1 '.failures.files[1].cases[0].line')" = "FAIL [beta]: expected 2, got 3" ] || fail "a case's line is not its first FAIL line: $(f 1 '.failures | tojson')"
   [ "$(f 1 '.failures.files[0].cases[0].line | [(length <= 200 and length > 190), startswith("FAIL [views]: the snapshot lacks word"), endswith(" word")] | tojson')" = '[true,true,true]' ] \
     || fail "a long first line is not cut to 200 characters at a word: $(f 1 '.failures.files[0].cases[0].line')"
   f 1 '.failures | tojson' | grep -q 'ok \|alpha\|left 2 stubs\|second line\|diagnostic' && fail "a passing file, an ok line, a warning, a later FAIL line or a test's own == line is among the failures: $(f 1 '.failures | tojson')"
   # The exit is said as it was: a note on 124 beside an exit 1 reads as a timeout that never happened.
   [ "$(f 1 .reason)" = "exit 1" ] || fail "the reason of a run that exited 1: $(f 1 .reason)"
-  [ "$(f 1 '.tail | split("\n") | [.[0], .[7], .[-1]] | join("|")')" = "== tests/a.test.sh|conveyor: left 2 stubs running|ok delta" ] || fail "the tail is not the output, a line a line: $(f 1 .tail)"
-  [ "$(f 2 '.failures | [.of, .timeout] | tojson')" = '[5,{"sec":2,"file":"tests/slow.test.sh"}]' ] || fail "a run that timed out does not say so and name the file still running, of the files selected: $(f 2 '.failures | tojson')"
+  [ "$(f 1 '.tail | split("\n") | [.[0], .[5], .[10]] | join("|")')" = "== conveyor/conveyor.test.sh|conveyor: left 2 stubs running|ok gamma" ] || fail "the tail is not the output, a line a line: $(f 1 .tail)"
+  [ "$(f 2 '.failures | [.of, .timeout] | tojson')" = '[4,{"sec":2,"file":"tests/slow.test.sh"}]' ] || fail "a run that timed out does not say so and name the file still running, of the files selected: $(f 2 '.failures | tojson')"
   [ "$(f 2 '.failures.files | tojson')" = '[{"file":"tests/d.test.mjs","cases":[{"name":"rejects invalid input","line":"not ok 1 - rejects invalid input"}]},{"file":"tests/e.test.sh","cases":[]}]' ] \
     || fail "a file that failed with a TAP line, or with no case line at all, is not listed: $(f 2 '.failures.files | tojson')"
   [ "$(f 2 .reason)" = "exit 124: timed out after 2s in tests/slow.test.sh" ] || fail "the reason of a run that timed out: $(f 2 .reason)"
   loop check || fail "the record check refuses a failed test line with its failures"
   # The Board reads them from the card's steps: each failed run with its failures and its output.
-  [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed") | [.why, (.failures.files | length), .failures.timeout.file, (.output | test("ok alpha"))])')" \
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed") | [.why, (.failures.files | length), .failures.timeout.file, (.output | test("FAIL \\[beta\\]|not ok 1 "))])')" \
     = '[["exit 1",2,null,true],["exit 124: timed out after 2s in tests/slow.test.sh",2,"tests/slow.test.sh",true]]' ] \
     || fail "the card's steps lack a failed run's failures or output: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
 }

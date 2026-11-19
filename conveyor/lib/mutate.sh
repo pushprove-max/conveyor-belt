@@ -4,8 +4,8 @@
 # files of its queue one after another while the machine is idle. A card's own steps never run one.
 # One check: the source files the test file covers (mutsources()), up to MUTMAX mutants of them, one line each
 # (jq/mutants.jq), picked at random with a seed it records (mutsample()), each applied in a worktree of main's commit
-# ($CARDS/mutate/<id>, removed when the check stops or ends) and the test file run alone there with the pack's
-# test.command on a test slot (mutone()): killed (it failed), survived (it passed) or no result (it timed out, or did
+# ($CARDS/mutate/<id>, removed when the check stops or ends) and the test file run alone there through the pack's
+# test.fileCommand on a test slot (mutone()): killed (it failed), survived (it passed) or no result (it timed out, or did
 # not run). The file is first run with no mutant: a file that fails so says nothing of its mutants, and the check
 # ends failed. A source of a kind the rules do not read (not shell, JavaScript or TypeScript) is not mutated.
 # A mutant starts only when no card of this project is in its build or test step, no test run of any project on the
@@ -87,7 +87,7 @@ mutone() { # <worktree> <file>
       | while IFS= read -r x; do [[ $x != "$2" && ${x##*/} =~ \.(test|spec)\. ]] || continue; printf 'pass\t%s\n' "$x"; done; } > "$wt.rerun" \
     && rm -f "$wt.res" || { MUT_RES=noresult; return; }
   # shellcheck disable=SC2034 # MUT_RUN is read by tests() in lib/testrun.sh
-  ( MUT_RUN=1; tests "$wt" test.command alone; x=$?; printf '%s\t%s\n' "$x" "$TEST_RUN" > "$wt.res" ) & tp=$!
+  ( MUT_RUN=1; tests "$wt" test.fileCommand alone; x=$?; printf '%s\t%s\n' "$x" "$TEST_RUN" > "$wt.res" ) & tp=$!
   while kill -0 "$tp" 2>/dev/null; do
     if MUT_WHY=$(mutheld test); then taend "$tp"; wait "$tp" 2>/dev/null; MUT_RES=stopped; return; fi
     sleep 0.2
