@@ -497,6 +497,21 @@ atorigin() { # <sha>
   done
   return 1
 }
+# The commit release-prep's suite runs on (commands/release-prep.sh), after the remote's branch and tags are fetched:
+# the remote's head of the pack's branch; with Land as pr and Merge PR release (prmergerule()), the head of LANDING
+# while that holds a commit the branch lacks, as `release` merges that pull request before it tags. Fails when the
+# remote's branch cannot be read.
+relhead() {
+  local sha out
+  git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
+    && sha=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}") || return 1
+  if [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ] \
+    && git fetch -q "$REMOTE" "+refs/heads/$LANDING:refs/remotes/$REMOTE/$LANDING" < /dev/null 2>/dev/null \
+    && out=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$LANDING^{commit}") && ! git merge-base --is-ancestor "$out" "$sha"; then
+    sha=$out
+  fi
+  echo "$sha"
+}
 # The push that is owed, as "<card> <issue> <sha>" of the last landing: its commit is in main and not at origin.
 # None while the control record's rule "Push when a card lands" is off (rules.push: land only): the landed commits
 # wait for the Board's Push landed (fulltest()) or Push now (pushnow()). A record that does not read keeps the push on.

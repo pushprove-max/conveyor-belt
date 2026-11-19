@@ -85,6 +85,19 @@ that commit. When `main` on GitHub has a commit that
 `conveyor/landing` does not have, the release stops before the merge. When GitHub refuses the merge, the release
 stops with GitHub's reason, and the pull request stays open.
 
+## Fix cards of a failed suite
+
+When the suite of step 4 fails, file one fix card for each failure. Put the line `Release fix: <version>` in the body
+of each fix card. The Foreman does this for you when the `release-check` kind of standing yes is on.
+
+`conveyor.sh serve` reads these cards again after each wait of the `tunables.idle` setting in the pack. It reads only
+the issues filed after the failed suite ended. The record of the run (`release/run.json` in the cards folder) lists
+them under `fixes`, each with its state: `open`, `landed`, or `closed` (closed with no landed card). When each fix
+card has landed, its commit is in the commit that step 4 tests, and no card is on the belt, Conveyor runs
+`conveyor.sh release-run prep <version>` itself, one time. With Land as `pr` and the rule Merge PR set to `button` or
+`idle`, step 4 tests `main` on GitHub, so this waits until the pull request is merged. The record of the new run says `by: "fixes landed"`. The run uses the passes of the earlier suite, as step 4 does. A
+fix card that was closed with no landed card stops this. Then run step 4 again yourself.
+
 ## A release over a failed suite
 
 Use this only when the owner says so, and only when the failures are not in the code that you release. An example is

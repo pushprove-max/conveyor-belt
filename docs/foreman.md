@@ -199,7 +199,9 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   only finishes or corrects that card's own change. Conveyor does this itself for a follow-up on a pipeline file: when
   the finding names only files of its parent card's change and no word of `auto.reserved`, the follow-up is not held.
 - `release-check`: a check fails in a release you asked for, such as a false privacy hit or a red test file. The
-  Foreman files one fix card for it. When the fix lands, the release goes on.
+  Foreman files one fix card for each failure, with the line `Release fix: <version>` in its body. When the fix
+  lands, the release goes on. After a failed suite, Conveyor runs the suite again itself when each fix card has landed
+  ([Fix cards of a failed suite](releases.md#fix-cards-of-a-failed-suite)).
 - `fixed-block`: a fix that landed removed the cause of a blocked card. The Foreman adds `Depends on: #<fix>` to the
   card's issue and runs `conveyor.sh retry <issue> --fresh`.
 - `review-retry`: the review blocked a card, because the fix for a finding did not hold after its fix rounds. The

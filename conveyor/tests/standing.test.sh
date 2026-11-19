@@ -39,6 +39,16 @@ t_standing() {
     || fail "a kind that is off logged an act, or was not turned off: $(cat "$CONVEYOR_RULING_LOG") $(jq -c .auto "$R/.conveyor/project.json")"
 }
 
+# Bug (#758): the Foreman filed a red release run's fix cards with no line the engine reads, so nothing knew they were
+# that run's fixes and release-prep never started again once they landed (relfixes(), lib/fulltest.sh).
+t_standingrelfix() {
+  local out; setup '[]'
+  tune '.auto.standing = ["release-check"]'
+  out=$(cd "$R" && loop auto standing) || fail "auto standing failed: $out"
+  grep -F -- '- release-check: ' <<<"$out" | grep -qF 'with the line `Release fix: <version>` in its body' \
+    || fail "release-check does not tell the Foreman to write the Release fix line in each fix card: $out"
+}
+
 # A card's worktree beside main, its change to the pipeline file a.txt staged, and its NO-GO review with three findings
 # on a.txt: one names only a.txt, one names lib/b.sh too (another pipeline file, not in the change), and one names only
 # a.txt but holds "security", a word of the default auto.reserved. followups()

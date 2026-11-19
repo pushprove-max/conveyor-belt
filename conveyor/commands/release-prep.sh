@@ -60,7 +60,9 @@
 # (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree, and
 # the processes that carry its mark, `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
 # and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
-# commits: {by, commits}, else null)}. A release after a passed release-prep of the same
+# commits: {by, commits}, else null), by (what started the run when the owner did not: "fixes landed", else null)}; a
+# failed release-prep's record also gets fixes (its fix cards, each {issue, state}: open, landed or closed) and
+# restarted (when release-prep started again on them), relfixes() (lib/fulltest.sh). A release after a passed release-prep of the same
 # version keeps that run's suite (sha, done, failed, cases, alone, moved, reused, since); one after a failed release-prep of
 # it keeps that suite too, its files and timedout, and makes red of it; one after a refused release of it keeps that
 # one's (all but moved), and its red.
@@ -171,8 +173,9 @@ relstart() { # <command name> <version>
   [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, done, failed, cases, moved, reused, alone: (.alone // [])}
     elif .step == "release-prep" and .state == "failed" then {since, sha, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
     elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
-  jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null} + $w' > "$RELRUN.new" \
+  # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
+  jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
@@ -182,7 +185,7 @@ relstart() { # <command name> <version>
     while kill -0 "$CONVEYOR_RELEASE_RUN" 2>/dev/null; do sleep 1; done # sleep: the watcher's pause between two checks
     relreap "$$" "$CONVEYOR_RELEASE_RUN" "$BASHPID" ) < /dev/null > /dev/null 2>&1 &
   trap 'relreap $$ "$CONVEYOR_RELEASE_RUN"' EXIT; trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
-  unset CONVEYOR_RELEASE_PID # the suite's own commands are no part of this run's record
+  unset CONVEYOR_RELEASE_PID CONVEYOR_RELEASE_BY # the suite's own commands are no part of this run's record
 }
 # The processes of a release run, one a line: <pid> and those under it, and each that carries the run's <mark>
 # (CONVEYOR_RELEASE_RUN=<mark> in its environment, relstart()), which a process group or session of its own, or a
@@ -345,16 +348,11 @@ releaseprep() { # <version>
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
   relstart release-prep "$v"
-  # The commit `release` releases is the remote's head of the branch, and the tags are the remote's.
-  git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
-    && sha=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}") || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
-  # Merge PR release (prmergerule(), lib/push.sh): the cards wait in the pull request of Land as pr, which `release`
-  # merges before it tags, so the suite runs on the head of LANDING while that holds a commit the default branch lacks.
-  if [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ] \
-    && git fetch -q "$REMOTE" "+refs/heads/$LANDING:refs/remotes/$REMOTE/$LANDING" < /dev/null 2>/dev/null \
-    && out=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$LANDING^{commit}") && ! git merge-base --is-ancestor "$out" "$sha"; then
-    sha=$out; echo "conveyor: release-prep: the suite runs on $REMOTE/$LANDING (${sha:0:12}), which release merges before it tags"
-  fi
+  # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
+  # release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
+  sha=$(relhead) || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
+  [ "$sha" = "$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}")" ] \
+    || echo "conveyor: release-prep: the suite runs on $REMOTE/$LANDING (${sha:0:12}), which release merges before it tags"
   last=$(lasttag)
   # `release` releases the remote's head and reads the status of that commit, so the suite runs only on a head that
   # holds the notes, in the notes style: a status posted on another commit is on one the release does not use.

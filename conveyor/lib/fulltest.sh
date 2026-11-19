@@ -385,3 +385,43 @@ $2" >/dev/null 2>&1; then jq -cn --argjson n "$n" '{issue: $n, reused: true}'
     || { jq -cn --arg r "${out:0:300}" '{issue: null, reused: false, why: ("its issue could not be filed: " + $r)}'; return; }
   jq -cn --argjson n "$n" '{issue: $n, reused: false}'
 }
+# The fix cards of a red release run: the issues whose body has the line `Release fix: <version>` for the version of
+# the failed release-prep in $CARDS/release/run.json (commands/release-prep.sh), filed after that run ended. The
+# record's fixes lists them by number, each with its state: landed (a card of it landed), open, or closed (closed with
+# no landed card). When there is at least one, each one has landed and no card in the card records is open, it starts
+# `release-run prep <version>` (its record's by: "fixes landed") once: the red record's restarted says when. A fix
+# closed with no landed card holds the run, and fixes names it. So does a landed fix whose commit is not yet in the
+# commit release-prep would run the suite on (relhead(), lib/push.sh: the remote's head, or that of LANDING with Merge PR
+# release): a push still owed, or a pull request of Land as pr not merged. The record is read, and the issues and
+# card records with it, before the release lock is taken; the record is written only while this holds that lock, and
+# only when the record is still that red run's. The lock is then let go, and `release-run prep` takes it as from the
+# Board. The loop (`serve`) calls it once every IDLE seconds, a job beside the cards.
+relfixes() {
+  local f=$CARDS/release/run.json r v e s is cs fx busy lk go='' sha hd
+  r=$(jq -ce 'select(.kind == "release" and .step == "release-prep" and .state == "failed" and (.ended | type) == "string" and .restarted == null)' "$f" 2>/dev/null) || return 0
+  v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") || return 1
+  is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null) \
+    && cs=$(stdb ask lines cards 2>/dev/null) \
+    && fx=$(jq -c --arg v "$v" --arg e "$e" --slurpfile c <(printf '%s' "$cs") '($c | map(select(.step == "landed") | .issue)) as $landed
+      | [.[] | select(.createdAt > $e and ((.body // "") | test("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)")))
+        | {issue: .number, state: (if .number | IN($landed[]) then "landed" elif .state == "OPEN" then "open" else "closed" end)}] | sort_by(.issue)' <<<"$is") \
+    && busy=$(printf '%s' "$cs" | jq -s 'map(select(.step | IN("push", "pushed", "issue", "bugproof") | not)) | group_by(.card)
+      | any(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")) | not)') \
+    || { echo "conveyor: the fix cards of release $v's failed suite could not be read (gh issue list, or the card records)" >&2; return 1; }
+  # A landed fix whose commit the suite would not run on yet holds the run: busy. Asked only when nothing else holds
+  # it, as relhead() fetches; a remote that cannot be read holds it too.
+  if [ "$busy" = false ] && jq -e 'length > 0 and all(.[]; .state == "landed")' <<<"$fx" > /dev/null; then
+    hd=$(relhead 2>/dev/null) || busy=true
+    while IFS= read -r sha; do [ -n "$hd" ] && [ -n "$sha" ] && git merge-base --is-ancestor "$sha" "$hd" 2>/dev/null || busy=true
+    done < <(printf '%s' "$cs" | jq -r --argjson x "$fx" '($x | map(.issue)) as $l | select(.step == "landed" and (.issue | IN($l[]))) | .sha // ""')
+  fi
+  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || return 1
+  flock -n "$lk" || { exec {lk}>&-; return 0; }
+  go=$(jq -c --arg s "$s" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" 'select(.since == $s and .state == "failed" and .restarted == null)
+    | .fixes = $x | if $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
+    && [ -n "$go" ] && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f" || go=''
+  exec {lk}>&-
+  [ -n "$(jq -r '.restarted // empty' <<<"${go:-null}")" ] || return 0
+  echo "conveyor: each fix card of release $v's failed suite has landed ($(jq -r 'map("#\(.issue)") | join(", ")' <<<"$fx")): release-prep $v starts again" >&2
+  CONVEYOR_RELEASE_BY='fixes landed' bash "$HERE/conveyor.sh" release-run prep "$v" < /dev/null
+}

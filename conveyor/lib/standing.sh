@@ -46,7 +46,7 @@ EOF
     case $k in
       asked-fix) echo "- asked-fix: the owner reports a problem or asks for a fix. File the issue, then release it at once (\`$1 control release <issue>\`)." ;;
       review-followup) echo "- review-followup: a follow-up filed from the review of a card the owner approved. Release it when it only finishes or corrects that card's own change. The engine itself does not hold, and logs, a follow-up whose finding names only files of its parent card's change and no word of auto.reserved: tell the owner of each one in one line too." ;;
-      release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File one fix card and release it; when it lands, go on with the release." ;;
+      release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File one fix card for each failure, with the line \`Release fix: <version>\` in its body, and release it. For a red test file, the engine starts \`$1 release-run prep <version>\` itself once every fix card has landed; for any other check, go on with the release when the fix lands." ;;
       fixed-block) echo "- fixed-block: a card is blocked, and a fix that landed removed the cause. Add \`Depends on: #<fix>\` to the card's issue, then run \`$1 retry <issue> --fresh\`." ;;
       review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` for it itself and logs the act, so you get no wake for it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card says why its retry failed: act on that reason." ;;
     esac
