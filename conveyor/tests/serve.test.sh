@@ -12,8 +12,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The end of the loops a case started, waited for: [pid] (a loop the case started in the background) is ended with a
 # TERM, as an owner ends one, then the case waits until that process is gone and the loop's run lock is free. The
 # loop's cards and its push hold that lock too (fd 8: run(), lib/run.sh) and end on their own a while after the loop's
-# own process: a loop started before then is refused ("a loop is already running here"), and on a busy machine the
-# case failed so ([serve]: the run after a serve that servefor ended, whose push still ran). With no pid (the case's
+# own process: a loop started before then is refused ("a loop is already running here"). With no pid (the case's
 # loops ran in the foreground), only the lock is waited for. Called before a case starts its next loop, and at its end.
 loopend() { # [pid]
   [ -z "${1:-}" ] || { kill "$1" 2>/dev/null; wait "$1" 2>/dev/null; }
