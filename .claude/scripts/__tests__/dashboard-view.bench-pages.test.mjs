@@ -242,7 +242,7 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
 // could be ticked and a click on one did nothing. Ticking an arm not ready sends its preflight (as Check does), shows
 // it being checked, picks it once the arms read again show it Ready, and clears it when its preflight comes back
 // failed; a Not offered arm's box stays disabled.
-test('Start: ticking an arm not ready runs its preflight and picks it once it passes; one that fails is cleared; Not offered stays off', async () => {
+test('Start: ticking an arm not ready runs its preflight and picks it once it succeeds; one that fails is cleared; Not offered stays off', async () => {
   const w = await opened();
   act(bp(w), 'to-start').click();
   const arm = (a) => bp(w).querySelector(`.bench-arm[data-arm="${a}"]`);

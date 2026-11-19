@@ -375,7 +375,7 @@ test('Needs you: a held pipeline change has Queue (one click, with Undo) and Clo
 
   // A refusal, of either button, is shown on the entry; the entry stays and both buttons can be pressed again (Close
   // is pressed after Queue's refusal, on the same entry; each refusal has its own text, so a note left from Queue's
-  // does not pass for Close's).
+  // is not taken for Close's).
   const r = boot();
   deliver(r, held());
   for (const k of ['release', 'close']) {

@@ -685,7 +685,7 @@
         box.addEventListener('change', () => {
           if (!box.checked) { B.start.arms.delete(a.name); B.start.checking.delete(a.name); draw(); return; }
           if (ready) { B.start.arms.add(a.name); draw(); return; }
-          // Not ready: the box sends the arm's preflight, as its Check button does, and picks the arm once it passes.
+          // Not ready: the box sends the arm's preflight, as its Check button does, and picks the arm once it succeeds.
           if (B.busy) { box.checked = false; say(`check-${a.name}`, 'Wait for the answer to the last action.', 'warn'); return; }
           B.start.checking.set(a.name, atOf(a)); B.start.arms.add(a.name);
           send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null,

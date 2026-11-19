@@ -354,5 +354,11 @@
   ],
   "docs/foreman.md": [
     ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/waiter.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/waiter.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ]
 }
