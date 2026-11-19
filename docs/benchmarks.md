@@ -70,7 +70,8 @@ The run records its settings in its line in the run history. `conveyor.sh bench 
 <arm>...` runs the preflights with the same settings.
 
 When a run has recorded its start, it prints `conveyor: run <run ID> started`. A run that reuses the kept result of
-each of its tasks does not print this line. Before its first task, it prints the
+each of its tasks does not print this line. It prints `conveyor: run <run ID> ended` as its last line, when it has
+recorded its end. Before its first task, it prints the
 sessions it usually takes and the worst case, and the minutes it is expected to take. A run does not start while the usage guard (`conveyor.sh control guard`, in [the control
 record](configuration.md#the-control-record)) is reached, and it stops before the next task when the guard is reached
 during the run. The guard reads the Claude account, so it does not stop an arm that does not use the Claude login.

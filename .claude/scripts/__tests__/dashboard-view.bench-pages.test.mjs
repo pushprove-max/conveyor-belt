@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Benchmarks tab's other pages (#326, the owner's approved mockup: run.html, compare.html, start.html,
 // infographic.html): a run's tasks by arm with one task opened and Export figures; Compare of two arms with the flipped
-// tasks; Start a run with the cost before Start and only the arms whose preflight passed, and its arm editor (#641:
+// tasks; Start a run with the cost before Start and only the arms whose preflight passed (#642: its run settings, the
+// estimate of each arm ticked, Start held for an arm being checked, and the receipt that opens the run), and its arm editor (#641:
 // a Conveyor or agent arm saved as a revision, listed again after a reload, and its checks); the infographic of the runs
 // selected, whose notes a title cannot remove. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
@@ -245,12 +246,13 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   const plan = () => Array.from(bp(w).querySelectorAll('.bench-plan tr[data-arm]'), cells);
   // Bug it guards (#326): the cost was a dash everywhere. Each session is priced at the arm's mean session dollars
   // (Conveyor's $1.25: 50 usual sessions $62.50, 160 worst $200.00).
-  assert.deepEqual(plan(), [['Conveyor', '50', '160', '400', '$62.50 · worst $200.00']], '20 tasks of Conveyor on main: none reused');
+  assert.deepEqual(plan(), [['Conveyor', '0 of 20', '50', '160', '400', '$62.50 · worst $200.00', 'Not reached']], '20 tasks of Conveyor on main: none reused');
   assert.equal(text(bp(w).querySelector('.bench-arm[data-arm="conveyor"] .bench-cost')), '50 sessions (worst 160) · 400 min · $62.50');
   act(bp(w), 'preset-5').click();
   pick(w, 'arm-solo');
   choose(w, 'start-engine', 'v1.2.0');
-  assert.deepEqual(plan(), [['Conveyor', '5', '16', '40', '$6.25 · worst $20.00'], ['Claude alone', '0', '0', '0', '$0.00 · worst $0.00']], 'the tasks each arm ran on v1.2.0 are reused at no cost');
+  assert.deepEqual(plan(), [['Conveyor', '3 of 5', '5', '16', '40', '$6.25 · worst $20.00', 'Not reached'], ['Claude alone', '5 of 5', '0', '0', '0', '$0.00 · worst $0.00', 'Not reached']],
+    'the tasks each arm ran on v1.2.0 are reused at no cost');
   const total = () => Array.from(bp(w).querySelectorAll('.bench-before .figure')[2].children, text);
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-before .figure .num'), (n) => n.textContent), ['5', '0.7 h', '$6.25']);
   assert.deepEqual(total(), ['$6.25', 'At list prices. Up to $20.00.']);
@@ -274,11 +276,13 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   await settle();
   assert.equal(act(bp(w), 'start').disabled, true);
   assert.equal(text(bp(w).querySelector('.bench-why')), 'The usage guard is reached for Claude alone: no run starts while it stands.');
+  assert.deepEqual(plan().map((r) => [r[0], r[6]]), [['Conveyor', 'Not reached'], ['Claude alone', 'Reached']], 'each arm says the guard that holds it');
   pick(w, 'arm-conveyor'); pick(w, 'arm-solo'); pick(w, 'arm-codex-sol');
   assert.equal(act(bp(w), 'start').disabled, false);
   // An arm with no priced session of its model (Codex here) has no cost, and no total stands for part of one.
-  assert.deepEqual(plan().map((r) => r[4]), ['–']);
-  assert.deepEqual(total(), ['–', 'At list prices. Not priced: Codex alone (gpt-6.2-sol).']);
+  // Bug it guards (#642): the guard that can hold each arm was not shown; Codex alone uses no Claude login.
+  assert.deepEqual(plan().map((r) => [r[5], r[6]]), [['–', 'None: no Claude login']]);
+  assert.deepEqual(total(), ['–', 'Total cost unknown. No price data for Codex alone (gpt-6.2-sol).']);
   act(bp(w), 'start').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '5', '--arm', 'codex-sol']]);
   await settle();
@@ -295,6 +299,11 @@ test('Start: ticking an arm not ready runs its preflight and picks it once it su
   const state = (a) => [arm(a).querySelector('input').checked, arm(a).querySelector('.chip').textContent];
   assert.equal(act(bp(w), 'arm-openhands').disabled, true, 'a Not offered arm cannot be ticked');
   pick(w, 'arm-conveyor');
+  // Bug it guards (#632): with no arm picked the estimate still showed a table head with no row and "$0.00".
+  const est = () => bp(w).querySelector('.bench-before');
+  assert.equal(est().querySelector('.bench-plan, th, .figure'), null, 'no estimate table, head or figure');
+  assert.ok(!est().textContent.includes('$'), est().textContent);
+  assert.equal(text(est().querySelector('.bench-no-estimate')), 'Choose an arm to see the estimate.');
   w.reply = BH.reply('conveyor: the arms\' preflights started');
   pick(w, 'arm-chisle');
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'chisle']]);
@@ -304,11 +313,8 @@ test('Start: ticking an arm not ready runs its preflight and picks it once it su
   await settle();
   assert.deepEqual(['chisle', 'superpowers'].map(state), [[true, 'Checking its preflight…'], [true, 'Checking its preflight…']]);
   assert.equal(act(bp(w), 'start').disabled, true, 'no picked arm is Ready yet');
-  // Bug it guards (#632): with no arm picked the estimate still showed a table head with no row and "$0.00".
-  const est = bp(w).querySelector('.bench-before');
-  assert.equal(est.querySelector('.bench-plan, th, .figure'), null, 'no estimate table, head or figure');
-  assert.ok(!est.textContent.includes('$'), est.textContent);
-  assert.equal(text(est.querySelector('.bench-no-estimate')), 'Choose an arm to see the estimate.');
+  assert.equal(est().querySelector('.bench-plan, th, .figure'), null, 'no estimate while the arms picked are being checked');
+  assert.equal(text(est().querySelector('.bench-no-estimate')), 'Waiting for the check of Claude with Superpowers, Claude with Chisle. The estimate and Start wait for them.');
   const now = (a) => ({ chisle: { state: 'ready', at: '2026-11-19T06:20:00Z' }, superpowers: { state: 'failed', why: 'it is not logged in', at: '2026-11-19T06:20:00Z' } })[a.name];
   w.benchBody = () => { const x = BH.hist(); return { ...x, arms: x.arms.map((a) => ({ ...a, ...now(a) })) }; };
   act(bp(w), 'arms-again').click();
@@ -317,6 +323,111 @@ test('Start: ticking an arm not ready runs its preflight and picks it once it su
   assert.match(text(arm('superpowers')), /it is not logged in/);
   assert.equal(act(bp(w), 'start').disabled, false);
   assert.equal(text(act(bp(w), 'start')), 'Start · 1 arm on 20 tasks');
+});
+
+// Bug it guards (#642): with one arm ready and another ticked while its check ran, Start was on and sent the ready arm
+// alone, and the estimate read as the whole run. Start sends each arm ticked or none: it waits for the check, and for
+// an arm ticked that is no longer ready.
+test('Start: an arm ticked while its check runs, or no longer ready, holds Start and the estimate; then Start sends each arm shown', async () => {
+  const w = await opened();
+  act(bp(w), 'to-start').click();
+  const why = () => text(bp(w).querySelector('.bench-before .bench-why'));
+  const read = async (now) => { w.benchBody = (url) => (/&run=/.test(url) ? BH.run() : { ...BH.hist(), arms: BH.hist().arms.map((a) => ({ ...a, ...now[a.name] })) }); act(bp(w), 'arms-again').click(); await settle(); };
+  w.reply = BH.reply('chisle: checking k-r20261119T130000-1');
+  pick(w, 'arm-chisle');
+  w.posts.splice(0);
+  await settle();
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arm input:checked'), (b) => b.dataset.act), ['arm-conveyor', 'arm-chisle']);
+  assert.deepEqual([act(bp(w), 'start').disabled, why()], [true, 'Start waits for the check of Claude with Chisle.']);
+  assert.equal(bp(w).querySelector('.bench-before .figure, .bench-plan'), null, 'no total that leaves the arm out');
+  const chisle = { state: 'ready', at: '2026-11-19T06:20:00Z' };
+  await read({ chisle, conveyor: { state: 'expired' } });
+  assert.deepEqual([act(bp(w), 'start').disabled, why(), act(bp(w), 'arm-conveyor').checked], [true, 'Start waits for Conveyor, not ready.', true], 'an arm ticked is never dropped unseen');
+  assert.equal(text(bp(w).querySelector('.bench-no-estimate')), 'Conveyor is not ready: check it, or untick it. The estimate and Start wait for it.');
+  await read({ chisle });
+  const rows = Array.from(bp(w).querySelectorAll('.bench-plan tr[data-arm]'), (r) => r.dataset.arm);
+  assert.deepEqual([rows, text(act(bp(w), 'start'))], [['conveyor', 'chisle'], 'Start · 2 arms on 20 tasks']);
+  act(bp(w), 'start').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '20', ...rows.flatMap((a) => ['--arm', a]), '--engine', 'main']]);
+  await settle();
+});
+
+// Bugs it guards (#642): Start had no run settings: the task order and each container's limits were swe.json's alone,
+// with no word that they apply to every arm; a result kept on other settings counted as reused; and an arm with no
+// price made the total unknown even when it reused each task and ran no session.
+test('Start: the run settings every arm shares show their defaults, refuse a value that does not read, and are sent only when changed', async () => {
+  const w = boot({ tab: 'bench' });
+  const x = BH.hist(), body = { ...x, set: { ...x.set, seed: 'conveyor-swe-1' }, limits: { cpus: 4, memory: '8g', taskTimeout: 14400 }, keys: x.keys.concat({ key: 'codex-sol', at: [0, 1, 2, 3, 4] }) };
+  BH.open(w, { body: (url) => (/&run=/.test(url) ? BH.run() : body) });
+  await settle();
+  act(bp(w), 'to-start').click();
+  assert.deepEqual(['revision', 'seed', 'cpus', 'memory', 'taskTimeout'].map((k) => act(bp(w), `set-${k}`).value), [x.set.revision, 'conveyor-swe-1', '4', '8g', '14400']);
+  assert.match(text(bp(w).querySelector('.bench-settings > .board-from')), /^These apply to every arm: /);
+  assert.deepEqual(['memory', 'taskTimeout'].map((k) => text(act(bp(w), `set-${k}`).nextElementSibling).replace(/^.* Default/, 'Default')), ['Default: 8g.', 'Default: 14400.']);
+  // Bug it guards (#642 review E1): a refresh while a setting was typed (no change yet) put back the value last
+  // changed, so the text typed was lost, and its caret with it.
+  const seed = act(bp(w), 'set-seed');
+  seed.focus(); seed.value = 'my-se ed'; seed.setSelectionRange(5, 5); seed.dispatchEvent(new w.Event('input'));
+  const moved = full();
+  moved.panels.bench.data.bench.versions.push({ name: 'v1.3.0', commit: 'c'.repeat(40) });  // an update the panel draws
+  next(w, moved);
+  await settle();
+  const typed =act(bp(w), 'set-seed');
+  assert.notEqual(typed, seed, 'the refresh drew the field again');
+  assert.deepEqual([typed.value, w.document.activeElement === typed, typed.selectionStart], ['my-se ed', true, 5], 'the text typed, its focus and caret survive a refresh');
+  choose(w, 'set-seed', 'conveyor-swe-1');
+  const plan =() => Array.from(bp(w).querySelectorAll('.bench-plan tr[data-arm]'), cells);
+  const total = () => Array.from(bp(w).querySelectorAll('.bench-before .figure')[2].children, text);
+  act(bp(w), 'preset-5').click(); pick(w, 'arm-solo'); pick(w, 'arm-codex-sol');
+  assert.deepEqual(plan().map((r) => [r[1], r[5]]), [['0 of 5', '$16.25 · worst $50.00'], ['5 of 5', '$0.00 · worst $0.00'], ['5 of 5', '$0.00 · worst $0.00']]);
+  assert.deepEqual(total(), ['$16.25', 'At list prices. Up to $50.00.'], 'an arm with no price that runs no session leaves the total known');
+  choose(w, 'set-memory', '256m');
+  assert.equal(text(bp(w).querySelector('[data-why="memory"]')), 'Type <n>m or <n>g, 512m or more.');
+  assert.deepEqual([act(bp(w), 'start').disabled, text(bp(w).querySelector('.bench-before .bench-why'))], [true, 'A run setting does not read: correct it beside its field.']);
+  choose(w, 'set-memory', '4g'); choose(w, 'set-seed', 'my-seed');
+  assert.equal(bp(w).querySelector('[data-why]'), null);
+  // Results kept on the default settings are not this run's: reuse is not known and each task is counted.
+  assert.deepEqual(plan().map((r) => [r[1], r[2]]), [['not known', '13'], ['not known', '5'], ['not known', '5']]);
+  assert.deepEqual(total(), ['–', 'Total cost unknown. No price data for Codex alone (gpt-6.2-sol).']);
+  assert.match(text(bp(w).querySelector('.bench-arm[data-arm="solo"]').parentElement.querySelector('.bench-stale')), /^Checked on the default run settings\./);
+  act(bp(w), 'start').click();
+  const [sent] = w.posts.splice(0).map((p) => p.body.args);
+  assert.deepEqual([sent.slice(0, -1), JSON.parse(sent.at(-1))], [['run', '5', '--arm', 'conveyor', '--arm', 'solo', '--arm', 'codex-sol', '--engine', 'main', '--settings'], { seed: 'my-seed', memory: '4g' }]);
+  await settle();
+  // A default typed back, or a field left blank, is no change: no settings are sent and the reuse is known again.
+  choose(w, 'set-memory', '8g'); choose(w, 'set-seed', '');
+  assert.deepEqual([plan().map((r) => r[1]), bp(w).querySelector('.bench-stale')], [['0 of 5', '5 of 5', '5 of 5'], null]);
+  act(bp(w), 'start').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '5', '--arm', 'conveyor', '--arm', 'solo', '--arm', 'codex-sol', '--engine', 'main']]);
+  await settle();
+});
+
+// Bug it guards (#642): Start's answer named the run it started, but nothing opened it, and a run that reused each
+// task's result ended with no way to its results. The receipt stays beside Start and opens its own run (not the
+// newest); a run that ended before its answer opens at once.
+test('Start: the receipt opens its own run and stays beside Start; a run that ended at once opens its results', async () => {
+  const R1 = 'r20261119T130000-77', R2 = 'r20261119T131000-78';
+  const w = boot({ tab: 'bench' });
+  BH.open(w, { body: (url) => { const m = /&run=([^&]+)/.exec(url); return m ? { run: { ...BH.hist().runs[0], id: decodeURIComponent(m[1]) }, tasks: [] } : BH.hist(); } });
+  await settle();
+  act(bp(w), 'to-start').click();
+  const said = () => text(bp(w).querySelector('[data-said="start"]'));
+  w.reply = BH.reply(`conveyor: run ${R1} started`);
+  act(bp(w), 'start').click();
+  await settle();
+  act(bp(w), 'preset-5').click();
+  assert.equal(said(), `Run ${R1} started. Watch run`);
+  act(bp(w), 'watch-run').click();
+  await settle();
+  assert.equal(heads(w)[0], `Run ${R1}`);
+  act(bp(w), 'page-start').click();
+  assert.equal(said(), `Run ${R1} started. Watch run`, 'the receipt stays in the draft');
+  w.reply = BH.reply(`1/5 ${BH.TASKS[0]}: resolved (reused)\nResolved 5 of 5 with Conveyor; not run: 0.\nconveyor: run ${R2} ended`);
+  act(bp(w), 'start').click();
+  await settle();
+  assert.equal(heads(w)[0], `Run ${R2}`, 'the run that ended opens at once');
+  act(bp(w), 'page-start').click();
+  assert.equal(said(), `Run ${R2} ended: it reused the saved result of each task. Open its results`);
 });
 
 // Bug it guards (#632): every action's answer went to one line at the foot of the page, so a Check showed nothing

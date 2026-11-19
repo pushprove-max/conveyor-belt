@@ -771,20 +771,39 @@ shows the totals of both, how many tasks flipped each way, and whether the diffe
 flipped task shows where the two went apart, the facts read from the records, and, beside them, a short reading
 written by one model call from those facts only. No task runs again.
 
-**Start a run** sets the number of tasks (1, 5, 20, 50, or any number up to 500), the Conveyor version, and the arms.
+**Start a run** sets the number of tasks (1, 5, 20, 50, or any number up to 500), the Conveyor version, the run
+settings and the arms. **Run settings** apply to every arm: the dataset revision, the seed of the task order, and the
+CPUs, memory and time limit of each task's container. Each field shows its default, from `conveyor/bench/swe.json`. A
+blank field takes its default. A value that does not read shows why beside its field, and **Start** stays off until you
+correct it. The preflight command has a fixed time limit of its own, and the official harness always grades.
 You can pick only an arm whose preflight passed. An arm that is not checked yet or that changed has **Check**. An arm
 that failed, or whose last pass expired, has **Check again**. Each runs the arm's preflight on the build machine. While
 the check runs, the arm shows **Checking** and the step that the check is at, and the page reads the arms again every
 few seconds until the check ends. The answer to a check shows inside its arm: sending, the reason when it is refused, or the
 ID of the check once the build machine has recorded it. When the check ends, it says that the check passed, or that it
-failed and why. The answer to **Start** is the ID of the run once the build machine has recorded it, or the reason when
-the build machine refuses the run. A run whose tasks all have kept results gives no ID: its answer is its result, when the run ends.
-The build machine refuses a check or a run that names a saved arm it does not have. Before you click **Start**,
-the page shows the usual and worst-case sessions, the minutes and the cost of each arm, for the tasks it did not run
-on that version before. With no arm picked, it says "Choose an arm to see the estimate." and shows no figures. The cost is an estimate at list prices: each session costs the mean of this project's own
-priced card sessions, or of those on the arm's model when the arm has a model. An arm with no priced session of its
-model shows "–" for cost, and then the page shows no total. **Start** is off while the usage guard holds back an arm
-you picked.
+failed and why. A check runs a session of its own, which the estimate does not count. The arms' checks are read on
+the default run settings. When you change a run setting, each arm that you picked says so, and the run checks it again
+on your settings before its first task.
+
+The answer to **Start** is the ID of the run once the build machine has recorded it, with **Watch run**, which opens
+that run. The answer stays beside **Start** until you click **Start** again. When the build machine refuses the run,
+the answer is the reason. A run whose tasks all have kept results ends before it answers: the page opens its results,
+and the answer has **Open its results**. The build machine refuses a check or a run that names a saved arm it does not
+have.
+
+Before you click **Start**, the page shows a row for each arm that you picked, in the order that the run takes them.
+Each row shows the tasks that the arm already ran on that version and settings, which are reused at no cost, and the
+usual and worst-case sessions, the minutes and the cost of the other tasks. It also shows the usage guard that can
+hold the arm back: reached, not reached, or none for an arm that uses no Claude login. With run settings changed, the
+reused tasks show as "not known", and the estimate counts each task. With no arm picked, the page says "Choose an arm
+to see the estimate." and shows no figures. While an arm that you picked is being checked, or is no longer ready, the
+page names that arm and shows no estimate, and **Start** stays off. **Start** never starts a run without an arm that
+you picked. It sends the number of tasks, each arm that you picked, the version and each run setting that you changed.
+
+The cost is an estimate at list prices: each session costs the mean of this project's own priced card sessions, or of
+those on the arm's model when the arm has a model. An arm with no priced session of its model shows "–" for cost, and
+the total says "Total cost unknown." and names that arm. An arm that reuses every task costs $0.00. **Start** is off
+while the usage guard holds back an arm you picked.
 
 You can make your own arm on **Start a run**. **New Conveyor arm** opens a name field, a rules picker and five seats:
 Builder, Reviewer, Judge, Fix and Test repair. Each seat shows the CLI, model and effort that will run. A seat starts

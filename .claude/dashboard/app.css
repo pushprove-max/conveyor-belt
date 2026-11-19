@@ -844,6 +844,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench-seg .btn { border-radius: 0; }
 .bench-seg .btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 .bench-n { flex: none; width: 7rem; }
+/* Run settings (Start a run): one row a setting, the field beside its label, why it does not read beside the field. */
+.bench-settings { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); }
+.bench-settings .bench-row > .board-label { flex: none; min-width: 9rem; }
+.bench-settings .field.mono { width: 26rem; max-width: 100%; }
+.bench-set-why, .bench-stale { margin: 0; }
 .bench-armgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: var(--sp-2); }
 .bench-arm { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-2); align-items: start; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .bench-arm.off { opacity: .7; }

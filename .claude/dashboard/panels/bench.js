@@ -18,11 +18,14 @@
 //   Compare: two arms or versions of the runs ticked (else the run open, else the newest), sent as `bench swe diff
 //     <A> <B> --json`: the tasks that flipped, where the two went apart, the facts read from the records and, beside
 //     them, the model's reading.
-//   Start a run: n (the presets, or any n), the Conveyor version, the arms (only those whose preflight passed can be
-//     picked; ticking one not checked, changed or failed runs its preflight, and picks it once the arms read again
-//     show it ready) and, before Start, each arm's usual and worst-case sessions, minutes
-//     and cost for the tasks it has not run yet (each session at perTask.session, the mean dollars of this project's
-//     own priced sessions). Start is off while the usage guard holds an arm picked back. New Conveyor arm, New agent
+//   Start a run: n (the presets, or any n), the Conveyor version, the run settings every arm shares (`--settings`: the
+//     dataset revision, the order seed and each container's limits, each shown with its default), the arms (only
+//     those whose preflight passed can be picked; ticking one not checked, changed or failed runs its preflight, and
+//     picks it once the arms read again show it ready) and, before Start, each arm's tasks reused, usual and
+//     worst-case sessions, minutes, cost for the tasks it has not run yet (each session at perTask.session, the mean
+//     dollars of this project's own priced sessions) and the usage guard that can hold it. Start sends each arm ticked
+//     or none: it is off while one is being checked or not ready, and while the usage guard holds an arm picked back.
+//     Its answer, the run's receipt, opens that run (Watch run), or opens it at once when it has ended. New Conveyor arm, New agent
 //     arm and an arm's Edit a copy open the arm editor (a Conveyor arm's rules and five seats, or an agent arm's CLI,
 //     model, effort and method), whose Save arm keeps a new revision on the build machine (`bench swe arms save`); the
 //     saved revisions are listed under Saved arms, each its own arm with its own check, by its revision ID.
@@ -46,7 +49,7 @@
     task: null,         // the task opened on the run page
     sel: [],            // the runs ticked, in the order ticked
     older: false,       // History shows every run, not the newest 20
-    start: { n: 20, arms: new Set(['conveyor']), engine: 'main', commit: '', checking: new Map() },
+    start: { n: 20, arms: new Set(['conveyor']), engine: 'main', commit: '', checking: new Map(), set: {} },  // set: each run setting typed (runSet)
     cmp: { a: '', b: '', data: null, text: null, all: false, ask: null, n: 0 },
     edit: null,         // the arm editor's form while it is open (blank, copyOf), else null
     title: IG_TITLE,
@@ -617,10 +620,53 @@
     expired: ['Check expired', 'warn'], 'not offered': ['Not offered', 'quiet'] };
   const versionsOf = () => list(obj(B.d && B.d.bench) && B.d.bench.versions).filter((v) => obj(v) && typeof v.name === 'string');
   function engineOf() { return B.start.engine === 'commit' ? B.start.commit : B.start.engine; }
+  // ---- Run settings: the task set and the limits every arm of the run shares (`--settings`, swe_settings). Each is
+  // its key, its label, what it sets, why a value typed does not read (null when it reads, as swe_settings checks its
+  // shape; the build machine still refuses more CPUs or memory than it has) and the value sent. ----
+  const SETTINGS = [
+    ['revision', 'Dataset revision', 'The dataset revision the tasks and their grade are read from.', (v) => (/^[0-9a-f]{40}$/.test(v) ? null : 'Type the full 40-character commit ID.'), String],
+    ['seed', 'Order seed', 'The seed that puts the tasks in order.', (v) => (v.length <= 80 && !/[\u0000-\u001f\u007f]/.test(v) ? null : 'Type 1 to 80 characters, with no control character.'), String],
+    ['cpus', 'CPUs', 'The CPUs of each task\'s container.', (v) => (/^[0-9]*\.?[0-9]+$/.test(v) && Number(v) > 0 ? null : 'Type a number above 0.'), Number],
+    ['memory', 'Memory', 'The memory of each task\'s container, such as 600m or 4g.', (v) => { const m = /^([1-9][0-9]{0,6})([mg])$/.exec(v); return m && Number(m[1]) * (m[2] === 'g' ? 1024 : 1) >= 512 ? null : 'Type <n>m or <n>g, 512m or more.'; }, String],
+    ['taskTimeout', 'Time limit', 'Seconds. The install of an arm and its run on one task can each take this long.', (v) => (/^[0-9]+$/.test(v) && Number(v) >= 60 && Number(v) <= 86400 ? null : 'Type a whole number of seconds from 60 to 86400.'), Number]];
+  const setDefaults = () => ({ ...(obj(hist() && hist().set) || {}), ...(obj(hist() && hist().limits) || {}) });
+  // The settings Start sends: each one typed that is not its default (a blank field is its default), or null while one
+  // does not read. {} when each is its default: Start then sends no settings.
+  function runSet() {
+    const d = setDefaults(), out = {};
+    for (const [k, , , why, as] of SETTINGS) {
+      const v = B.start.set[k] === undefined ? undefined : B.start.set[k].trim();
+      if (v === undefined || v === '' || (d[k] !== undefined && v === String(d[k]))) continue;
+      if (why(v)) return null;
+      out[k] = as(v);
+    }
+    return out;
+  }
+  const setChanged = () => { const s = runSet(); return !s || Object.keys(s).length > 0; };
+  function settingsPart() {
+    const d = setDefaults(), box = h('div', 'bench-settings');
+    box.append(h('p', 'board-label', 'Run settings'),
+      h('p', 'board-from', `These apply to every arm: the tasks of ${d.dataset || 'SWE-bench Verified'} in the order of the seed, and the limits of each task's container. A blank field takes its default. The preflight command has a fixed time limit of its own, and the official harness always grades.`));
+    SETTINGS.forEach(([k, label, what, why]) => {
+      const row = h('div', 'bench-row'), f = h('input', k === 'revision' ? 'field mono' : 'field'), v = B.start.set[k], no = v && v.trim() ? why(v.trim()) : null;
+      f.value = v === undefined ? String(d[k] === undefined ? '' : d[k]) : v; f.dataset.act = `set-${k}`; f.setAttribute('aria-label', label);
+      if (no) f.setAttribute('aria-invalid', 'true');
+      // Each key typed is kept in the draft at once, so a redraw while it is typed (an update, a check's answer) puts
+      // the text back as it was; change reads it and redraws.
+      f.addEventListener('input', () => { B.start.set[k] = f.value; });
+      f.addEventListener('change', () => { B.start.set[k] = f.value.trim(); draw(); });
+      row.append(h('span', 'board-label', label), f, h('span', 'board-from', `${what}${d[k] === undefined ? '' : ` Default: ${d[k]}.`}`));
+      if (no) { const p = h('span', 'warn-note bench-set-why', no); p.dataset.why = k; row.append(p); }
+      box.append(row);
+    });
+    return box;
+  }
   // The tasks of the first n the arm has run on the version picked are reused: only the rest cost. Not for main: the
-  // run reads main again, and it may have moved past the commit listed.
+  // run reads main again, and it may have moved past the commit listed. null (not known) with run settings changed:
+  // the results keys and the task order read are those of the default settings.
   function reused(a) {
     const n = B.start.n;
+    if (setChanged()) return null;
     let key = a.key;
     if (a.kind === 'conveyor') {
       const e = engineOf(), v = versionsOf().find((x) => x.name === e);
@@ -631,11 +677,12 @@
     return k ? list(k.at).filter((i) => Number.isInteger(i) && i < n).length : 0;
   }
   function plan(a) {
-    const p = obj(a.perTask) || { usual: 1, worst: 1, minutes: 10 }, todo = B.start.n - reused(a);
+    const p = obj(a.perTask) || { usual: 1, worst: 1, minutes: 10 }, re = reused(a), todo = B.start.n - (re || 0);
     const usual = Math.ceil(todo * (num(p.usual) || 0)), worst = todo * (num(p.worst) || 0), one = num(p.session);
     // The dollars: each session at the mean list price of this project's own priced sessions (swe_pertask's session);
-    // null when there are none to take it from.
-    return { todo, usual, worst, minutes: todo * (num(p.minutes) || 0), usd: one === null ? null : usual * one, worstUsd: one === null ? null : worst * one };
+    // null when there are none to take it from, unless every task is reused: no session runs, at $0.00.
+    const usd = (k) => (todo === 0 ? 0 : one === null ? null : k * one);
+    return { reused: re, todo, usual, worst, minutes: todo * (num(p.minutes) || 0), usd: usd(usual), worstUsd: usd(worst) };
   }
   function startPage() {
     const s = section('bench-start', 'Start a run', null, 'SWE-bench Verified run through each arm, graded by the official harness.'), bench = obj(B.d && B.d.bench) || {};
@@ -672,6 +719,7 @@
       saidAt('versions'), h('span', 'board-from', 'The version is the one every Conveyor arm of the run builds with.'));
     s.append(row, vrow);
     if (!hist()) return [s, reading('the arms')];
+    s.append(settingsPart());
     return [s, armPick(), ...(B.edit ? [editor()] : []), before()];
   }
   // An arm ticked while not ready waits in B.start.checking (name -> its check time then) for its preflight: picked once
@@ -687,8 +735,8 @@
   function armPick() {
     const arms = armsOf();
     settleChecks(arms);
-    const picked = arms.filter((a) => a.state === 'ready' && B.start.arms.has(a.name));
-    const s = section('bench-arm-pick', 'Arms', `${picked.length} picked`, 'An arm can be picked once its preflight succeeds: installed, logged in, and it runs one trivial task headless. Ticking an arm not ready runs its preflight.');
+    const picked = arms.filter((a) => a.state !== 'not offered' && B.start.arms.has(a.name));
+    const s = section('bench-arm-pick', 'Arms', `${picked.length} picked`, 'An arm can be picked once its preflight succeeds: installed, logged in, and it runs one trivial task headless. Ticking an arm not ready runs its preflight. A check runs a session of its own, which the estimate does not count.');
     GROUPS.forEach((g) => {
       // Saved arms by name, each name's newest revision first.
       const these = arms.filter((a) => armGroup(a) === g)
@@ -700,7 +748,8 @@
         const ready = a.state === 'ready', offered = a.state !== 'not offered', checking = !ready && B.start.checking.has(a.name);
         const lab = h('label', ready ? 'bench-arm' : 'bench-arm off'), box = h('input'), text = h('span');
         lab.dataset.arm = a.name;
-        box.type = 'checkbox'; box.checked = (ready && B.start.arms.has(a.name)) || checking; box.disabled = !offered; box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
+        // A box shows what Start sends: an arm ticked stays ticked whatever its state, and Start waits for it to be ready.
+        box.type = 'checkbox'; box.checked = offered && B.start.arms.has(a.name); box.disabled = !offered; box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
         box.addEventListener('change', () => {
           if (!box.checked) { B.start.arms.delete(a.name); B.start.checking.delete(a.name); draw(); return; }
           if (ready) { B.start.arms.add(a.name); draw(); return; }
@@ -725,6 +774,8 @@
           cell.append(button(a.state === 'failed' || a.state === 'expired' ? 'Check again' : 'Check', 'btn-quiet btn-sm', `check-${a.name}`, `Run the preflight of ${a.label}`,
             () => send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, () => readHist(true), null, { at: atOf(a) })));
         }
+        // Its pass was on the default run settings (the arms' states are read on them): the run checks it again first.
+        if (ready && B.start.arms.has(a.name) && setChanged()) cell.append(h('p', 'warn-note bench-stale', 'Checked on the default run settings. The run checks it again on yours before its first task.'));
         if (obj(a.spec)) cell.append(button('Edit a copy', 'btn-quiet btn-sm', `copy-${a.name}`, `Edit a copy of ${a.label}`, () => openEdit(copyOf(a))));
         // The answer to this arm's check (its box or its Check button) shows in the arm, not at the foot of the page. Once
         // the arms are read again, a check the host took is answered by the arm's state: passed when the arm reads ready,
@@ -938,43 +989,74 @@
     s.append(save, saidAt('save-arm'));
     return s;
   }
+  // A run's receipt in Start's answer: `conveyor: run <id> started` once the run is recorded, or `... ended` as the last
+  // line of a run that reused each task's saved result and so ended before it answered.
+  const RECEIPT = /^conveyor: run (r[0-9]{8}T[0-9]{6}-[0-9]+) (started|ended)$/m;
+  const openRun = (id) => { B.open = id; B.task = null; B.page = 'run'; };
+  const names = (as) => as.map((a) => a.label).join(', ');
   function before() {
-    const arms = armsOf().filter((a) => a.state === 'ready' && B.start.arms.has(a.name)), n = B.start.n, s = section('bench-before', 'Before you start');
-    const plans = arms.map((a) => [a, plan(a)]), sum = (k) => plans.reduce((x, [, p]) => x + p[k], 0), g = obj(hist().guard) || {};
+    const n = B.start.n, s = section('bench-before', 'Before you start'), g = obj(hist().guard) || {}, set = runSet();
+    // The arms ticked, in the order the run takes them. Start sends each of them or none: while one is being checked
+    // or is not ready, there is no estimate (a total without it would read as the whole) and Start waits.
+    const chosen = armsOf().filter((a) => a.state !== 'not offered' && B.start.arms.has(a.name));
+    const waiting = chosen.filter((a) => a.state === 'checking' || (a.state !== 'ready' && B.start.checking.has(a.name)));
+    const unready = chosen.filter((a) => a.state !== 'ready' && !waiting.includes(a));
+    const plans = waiting.length || unready.length ? [] : chosen.map((a) => [a, plan(a)]), sum = (k) => plans.reduce((x, [, p]) => x + p[k], 0);
     // Each figure is its number and one whole caption, as block elements with spaces between, so they never run
-    // together as words. With no arm picked there is no estimate: no figures, no table head with no row under it.
+    // together as words. With no estimate there are no figures and no table head with no row under it.
     const figs = h('div', 'figures'), fig = (v, caption) => { const f = h('div', 'figure'); f.append(h('div', 'num', v), ' ', h('div', 'figure-label', caption)); return f; };
-    if (!plans.length) s.append(h('p', 'board-from bench-no-estimate', 'Choose an arm to see the estimate.'));
+    const them = (k) => (k > 1 ? 'them' : 'it');
+    const wait = waiting.length ? `Waiting for the check of ${names(waiting)}.` : unready.length ? `${names(unready)} ${unready.length > 1 ? 'are' : 'is'} not ready: check ${them(unready.length)}, or untick ${them(unready.length)}.` : null;
+    if (!chosen.length) s.append(h('p', 'board-from bench-no-estimate', 'Choose an arm to see the estimate.'));
+    else if (wait) s.append(h('p', 'board-from bench-no-estimate', `${wait} The estimate and Start wait for ${them(waiting.length + unready.length)}.`));
     else {
-      // A total that leaves an arm out would read as the whole cost: with one arm not priced, the total is not shown.
+      // A total that leaves an arm out would read as the whole cost: with one arm not priced, the total is unknown.
       const unpriced = plans.filter(([, p]) => p.usd === null).map(([a]) => a.label);
       figs.append(fig(String(sum('usual')), `Usually ${plural(sum('usual'), 'session')}. Up to ${plural(sum('worst'), 'session')}.`),
         fig(`${(sum('minutes') / 60).toFixed(1)} h`, 'Of session time. The arms build one task at a time.'),
-        unpriced.length ? fig(COST, `At list prices. Not priced: ${unpriced.join(', ')}.`) : fig(B.ctx.money(sum('usd')), `At list prices. Up to ${B.ctx.money(sum('worstUsd'))}.`));
+        unpriced.length ? fig(COST, `Total cost unknown. No price data for ${unpriced.join(', ')}.`) : fig(B.ctx.money(sum('usd')), `At list prices. Up to ${B.ctx.money(sum('worstUsd'))}.`));
+      // Each arm's row: the tasks reused at no cost, its sessions, minutes and cost for the rest, and the usage guard
+      // that can hold it (swe_guards: none for an arm with no Claude login).
       const t = h('table', 'tests-table bench-plan'), hr = h('tr');
-      ['Arm', 'Usual', 'Worst', 'Minutes', 'Cost'].forEach((x, i) => hr.append(h('th', i ? 'r' : null, x)));
+      ['Arm', 'Reused', 'Usual', 'Worst', 'Minutes', 'Cost', 'Usage guard'].forEach((x, i) => hr.append(h('th', i && i < 6 ? 'r' : null, x)));
       t.append(hr);
-      plans.forEach(([a, p]) => { const tr = h('tr'); tr.dataset.arm = a.name; tr.append(h('td', null, a.label), h('td', 'r', String(p.usual)), h('td', 'r', String(p.worst)), h('td', 'r', String(p.minutes)),
-        h('td', 'r', p.usd === null ? COST : `${B.ctx.money(p.usd)} · worst ${B.ctx.money(p.worstUsd)}`)); t.append(tr); });
-      const re = plans.filter(([, p]) => p.todo < n).map(([a, p]) => `${a.label} ${n - p.todo}`);
+      plans.forEach(([a, p]) => {
+        const tr = h('tr'); tr.dataset.arm = a.name;
+        tr.append(h('td', null, a.label), h('td', 'r', p.reused === null ? 'not known' : `${p.reused} of ${n}`), h('td', 'r', String(p.usual)), h('td', 'r', String(p.worst)), h('td', 'r', String(p.minutes)),
+          h('td', 'r', p.usd === null ? COST : `${B.ctx.money(p.usd)} · worst ${B.ctx.money(p.worstUsd)}`), h('td', null, !a.guard ? 'None: no Claude login' : g[a.guard] === true ? 'Reached' : 'Not reached'));
+        t.append(tr);
+      });
       s.append(figs, t);
-      if (re.length) s.append(h('p', 'board-from', `Already run on this version and reused at no cost: ${re.join(', ')} of the ${n} tasks.`));
+      if (plans.some(([, p]) => p.reused === null)) s.append(h('p', 'board-from', 'With run settings changed, the Board cannot tell which results the run reuses: the estimate counts each task.'));
       s.append(h('p', 'board-from', 'A cost is an estimate: each session at the mean list price of this project\'s own card sessions, those of the arm\'s model for an arm with one.'));
     }
     s.append(h('p', 'warn-note', 'A run does not start while a login is at the usage guard, and it stops there. Done tasks are kept.'),
-      h('p', 'info-note', 'Each task runs in its own Docker container, from the same image, with the same time and session limits for every arm. Logins are copied in at start only.'));
-    const held = arms.filter((a) => a.guard && g[a.guard] === true), l = live(), e = engineOf(), conv = arms.some((a) => a.kind === 'conveyor');
+      h('p', 'info-note', 'Each task runs in its own Docker container, from the same image, with the same run settings for every arm. Logins are copied in at start only.'));
+    const held = chosen.filter((a) => a.guard && g[a.guard] === true), l = live(), e = engineOf(), conv = chosen.some((a) => a.kind === 'conveyor');
     const why = l && l.state === 'running' ? 'A run is going: stop it on the Overview, or wait for its end.'
-      : !arms.length ? null
-        : held.length ? `The usage guard is reached for ${held.map((a) => a.label).join(', ')}: no run starts while it stands.`
-          : conv && B.start.engine === 'commit' && !/^[0-9a-f]{40}$/.test(e) ? 'A commit is named by its full 40-character id.' : null;
-    const startBtn = button(`Start · ${plural(arms.length, 'arm')} on ${plural(n, 'task')}`, 'btn-primary', 'start', `Start: ${plural(arms.length, 'arm')} on ${plural(n, 'task')}`, () => {
-      const args = ['run', String(n)].concat(...arms.map((a) => ['--arm', a.name]), conv ? ['--engine', e] : []);
-      send('start', args, (t) => `Started: ${t.replace(/^conveyor: /, '')}`, () => readHist(true));
+      : !chosen.length ? null
+        : waiting.length ? `Start waits for the check of ${names(waiting)}.`
+          : unready.length ? `Start waits for ${names(unready)}, not ready.`
+            : held.length ? `The usage guard is reached for ${names(held)}: no run starts while it stands.`
+              : !set ? 'A run setting does not read: correct it beside its field.'
+                : conv && B.start.engine === 'commit' && !/^[0-9a-f]{40}$/.test(e) ? 'A commit is named by its full 40-character id.' : null;
+    const startBtn = button(`Start · ${plural(chosen.length, 'arm')} on ${plural(n, 'task')}`, 'btn-primary', 'start', `Start: ${plural(chosen.length, 'arm')} on ${plural(n, 'task')}`, () => {
+      // What the page shows, and nothing else: n, each arm ticked, the version (for a Conveyor arm) and each setting changed.
+      const args = ['run', String(n)].concat(...chosen.map((a) => ['--arm', a.name]), conv ? ['--engine', e] : [], Object.keys(set).length ? ['--settings', JSON.stringify(set)] : []);
+      const more = {};  // the receipt's run, kept with the answer (beside Start until the next Start)
+      send('start', args, (t) => {
+        const m = RECEIPT.exec(t);
+        if (!m) return t.replace(/^conveyor: /, '');
+        Object.assign(more, { run: m[1], ended: m[2] === 'ended' });
+        return m[2] === 'ended' ? `Run ${m[1]} ended: it reused the saved result of each task.` : `Run ${m[1]} started.`;
+      }, (t) => { readHist(true); const m = RECEIPT.exec(t); if (m && m[2] === 'ended') openRun(m[1]); }, null, more);
     });
-    startBtn.disabled = Boolean(why) || !arms.length || B.busy;
+    startBtn.disabled = Boolean(why) || !chosen.length || B.busy;
     if (why) { const no = h('p', 'warn-note bench-why', why); no.setAttribute('role', 'alert'); s.append(no); }
-    s.append(startBtn, saidAt('start'));
+    // The receipt opens its own run, by its ID (not the newest), whether it goes on or has ended.
+    const rc = B.said.get(saidKey('start')), said = saidAt('start');
+    if (said && rc && rc.run) said.append(' ', button(rc.ended ? 'Open its results' : 'Watch run', 'btn-sm', 'watch-run', `Open the run ${rc.run}`, () => { openRun(rc.run); draw(); }));
+    s.append(startBtn, said);
     return s;
   }
 
@@ -1112,6 +1194,8 @@
     if (B.d.repo === null) { el.replaceChildren(B.ctx.state('empty', 'No benchmarks to show', 'Conveyor did not run on this project on the build machine yet. Pick a project under Show, above the tabs.')); return; }
     readHist(false);
     const a = document.activeElement && el.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement.dataset.act : null;
+    // The caret of a text field being typed in, put back with its focus (a number field has none).
+    const at = a && typeof document.activeElement.selectionStart === 'number' ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     const root = h('div', B.sel.length && B.page === 'overview' ? 'bench bench-has-selbar' : 'bench');
     root.append(pages());
     if (B.page === 'overview') {
@@ -1124,7 +1208,7 @@
     el.replaceChildren(root);
     const keep = B.keep || a;
     B.keep = null;
-    if (keep) { const k = Array.from(el.querySelectorAll('[data-act]')).find((x) => x.dataset.act === keep); if (k) k.focus({ preventScroll: true }); }
+    if (keep) { const k = Array.from(el.querySelectorAll('[data-act]')).find((x) => x.dataset.act === keep); if (k) { k.focus({ preventScroll: true }); if (at && keep === a && typeof k.selectionStart === 'number') k.setSelectionRange(...at); } }
   }
   function render(el, d, ctx) {
     const view = ctx.project(d);

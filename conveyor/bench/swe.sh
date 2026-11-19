@@ -235,7 +235,8 @@ swe_lines() {
 # settings (swe_reskey; null for a conveyor arm, whose key ends with its engine's commit: keyPrefix and the commit)
 # and its sessions, minutes and a session's dollars (swe_pertask); keys, each results key with the places of its tasks
 # in the pinned order (a run reuses them); guard, whether the usage guard
-# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set;
+# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set, and
+# limits, each task container's, of swe.json (the defaults the Board's Run settings show);
 # choices, the models and efforts a saved arm may choose (swe_choices; null when the pack does not read).
 # The arms are the host arms and then each saved revision (swe_armsave; one whose recipe is gone is left out), each
 # with revision ({id, name, at, recipe}; null for a host arm), spec (the choices the Board's arm form starts a copy
@@ -277,7 +278,7 @@ swe_history() {
   swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson ch "$ch" --argjson df "$df" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
     --slurpfile order <(jq -c .id "$(swe_list "$(swe_set .revision)" "$(swe_set .seed)")" 2>/dev/null) --argjson set "$SWE_SET" "$SWE_RUNSUM"'
     ($res | map({key: "\(.key)/\(.task)", value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
-    | {set: ($set | {dataset, revision, seed}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df,
+    | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df,
        runs: (sort_by(.started // "") | reverse | map(runsum($R))),
        keys: ($res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort)}))}'
 }
@@ -569,7 +570,7 @@ swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] 
 # tasks. Each arm is picked only once its preflight passed (swe_ready) and, for a conveyor arm, the area rule files
 # its cards of these tasks read are there (swe_taskrules).
 swe_run() { # <n> <engine> <arm>...
-  local n=$1 eng0=$2 tf all i t id r x a l left gc='' ga='' why ctxs=() specs=() plan='[]' ra tag SWE_TASK=''
+  local n=$1 eng0=$2 tf all i t id r x a l left rid gc='' ga='' why ctxs=() specs=() plan='[]' ra tag SWE_TASK=''
   shift 2
   mkdir -p "$SWE_DIR" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7 || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
   for x; do a=$(swe_arm "$x") || { echo "conveyor: no arm $x: \`conveyor.sh bench swe arms\` lists them" >&2; return 2; }
@@ -602,7 +603,7 @@ swe_run() { # <n> <engine> <arm>...
        done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []}')"
   swe_board; swe_event 'Run started'
   # The run's receipt, once its record is written: the Board's Start answers it. A run that reuses the saved result
-  # of each of its tasks prints none, so Start waits for its end and answers its result.
+  # of each of its tasks prints none, so Start waits for its end and answers its result, whose last line names it.
   left=''; for x in "${ctxs[@]}"; do swe_use "$x"
     while IFS= read -r id; do swe_reused "$id" || { left=1; break; }; done < <(head -n "$n" "$tf" | jq -r .id); [ -z "$left" ] || break; done
   [ -z "$left" ] || echo "conveyor: run $SWE_RUN started"
@@ -643,7 +644,10 @@ swe_run() { # <n> <engine> <arm>...
   done
   jq -r --argjson n "$n" --slurpfile l "$SWE_DIR/live.json" "$SWE_NAMES"'.[].c | . as $c | [$l[0].tasks[] | select(.arm == $c.arm)] as $t
     | "Resolved \($t | map(select(.result == "resolved")) | length) of \($n) with \(runname); not run: \($t | map(select(.result | startswith("not run"))) | length)."' <<<"$plan"
-  swe_end 'done'
+  rid=$SWE_RUN; swe_end 'done'
+  # A run that reused each task's saved result printed no receipt: its last line names it once its end is recorded,
+  # so the Board's Start opens its results.
+  [ -n "$left" ] || echo "conveyor: run $rid ended"
 }
 swe_tree() { local k; echo "$1"; for k in $(pgrep -P "$1"); do swe_tree "$k"; done; } # <pid>: it and every process under it
 swe_stop() {

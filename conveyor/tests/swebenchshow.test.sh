@@ -18,6 +18,8 @@ t_sweshow() {
   swe; local o i
   o=$(loop bench swe history 2>&1) || fail "history fails before the first run, so Start offers no arm: $(head -c 300 <<<"$o")"
   [ "$(jq -c '[.runs, (.arms | length > 0)]' <<<"$o")" = '[[],true]' ] || fail "history before the first run has not its arms and no runs: $(head -c 300 <<<"$o")"
+  # Bug (#642): history gave no limits, so the Board's Run settings could not show the defaults a run takes.
+  [ "$(jq -c .limits <<<"$o")" = "$(jq -c '{cpus: .limits.cpus, memory: .limits.memory, taskTimeout}' "$SRC/bench/swe.json")" ] || fail "history has not swe.json's limits: $(jq -c .limits <<<"$o")"
   for i in stub-a/false stub-b/true; do mkdir -p "$B/results/${i%/*}" && jq -nc --arg a "${i%/*}" --argjson r "${i#*/}" \
       '{task: "proj__a-1", arm: $a, key: $a, label: $a, resolved: $r, fired: true, sessions: 1, tokens: 3, minutes: 1, steps: []}' > "$B/results/${i%/*}/proj__a-1.json" || fail "a result could not be written"; done
   # No live.json here (no run in progress): show and history read runs.jsonl alone. The priced file is as
@@ -190,6 +192,8 @@ t_swereuse() {
   # Bug (#640): a run that reused every result printed its receipt, so the Board's Start answered the receipt and not
   # the result. It prints none: Start waits for its end and answers its result.
   ! grep -q '^conveyor: run .* started$' <<<"$o" && grep -q '^Resolved 1 of 1 with ' <<<"$o" || fail "the run of reused results printed a receipt, or no result: $o"
+  # Bug (#642): that answer named no run, so the Board's Start could not open the results of a run that had ended.
+  [ "$(tail -n 1 <<<"$o")" = "conveyor: run $(tail -n 1 "$B/runs.jsonl" | jq -r 'select(.state == "done") | .id') ended" ] || fail "the run of reused results did not end by naming its recorded run: $o"
   jq -c '.model.effort = "high"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
   o=$(loop bench swe 1 2>&1) && grep -q "^1/1 $first: resolved$" <<<"$o" || fail "a run on another builder effort returned the former result: $o"
 }
