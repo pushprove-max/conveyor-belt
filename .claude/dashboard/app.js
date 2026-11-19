@@ -2288,7 +2288,9 @@
     if (alive !== null && now() - aliveSeenAt > ALIVE_MS) { word = 'Feed stopped'; tone = 'bad'; }
     else if (!loaded) { if (failedLoads) { word = 'No data'; tone = 'bad'; } }
     else if (age === null || age > STALE_MS || failedLoads > 1) { word = 'Stale'; tone = 'warn'; }
-    else { word = 'Live'; tone = 'ok'; }
+    // Live only while the feed sends each change; fresh data read from data.js at each refresh is Polling.
+    else if (feedOpen) { word = 'Live'; tone = 'ok'; }
+    else { word = 'Polling'; tone = 'ok'; }
     if (el.dataset.word !== word) { el.dataset.word = word; el.replaceChildren(chip(word, tone)); }
     // The restart is in the head only while the mark says the feed has a fault; else it is in the Health panel.
     const rs = byId('restart'), fault = FEED_FAULTS.includes(word);
@@ -2326,6 +2328,7 @@
     loaded = true; failedLoads = 0;
     last = { updatedAt: data.updatedAt, panels: Object.assign({}, data.panels) };
     updatedAt = parse(data.updatedAt);
+    title();
     if (doc.hidden) return;
     if (grid) grid.setAttribute('aria-busy', 'false');
     // Only the tab in view is drawn; the other's panels are drawn from this data when it is opened.
@@ -2334,6 +2337,14 @@
     drawHead();
     arrange();
     status();
+  }
+  // The Board's browser-tab title has the Overview tab's count of cards stopped for you ("Overview · 2"), so a tab in
+  // the background shows it too. The account page (no grid) keeps its own title.
+  function title() {
+    if (!grid) return;
+    const k = attention('overview');
+    const t = k > 0 ? `(${k}) Conveyor Board` : 'Conveyor Board';
+    if (doc.title !== t) doc.title = t;  // the same title set again is still a change to the page
   }
   // One panel's new part from the live feed: the panels drawn from it are drawn again, and no other (a panel of the
   // other tab is kept for when that tab opens). A page with the head alone (account.html) has no panels: it keeps the change of
@@ -2345,6 +2356,7 @@
     const known = typeof msg.id === 'string'
       && (panels.has(msg.id) || (!grid && Object.prototype.hasOwnProperty.call(last.panels, msg.id)));
     if (known) last.panels[msg.id] = msg.part;
+    title();
     if (doc.hidden) return;
     if (known) {
       const ids = idsOf(tab).filter((id) => partOf(id) === msg.id);
@@ -2367,6 +2379,7 @@
     if (feedOpen === open) return;
     feedOpen = open;
     if (doc.hidden) return;  // shownAgain() draws every panel again
+    status();  // Live or Polling
     const hp = panels.get('health');
     if (!loaded || !hp) return;
     hp.json = undefined;  // on the other tab, it is drawn anew when that tab opens

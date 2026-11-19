@@ -57,7 +57,8 @@ serves the Board, because its requests come from a loopback address. An admin se
 ## Tabs and panels
 
 - **Overview**: the panels Needs you, On the belt, Queue, Landed today, Release, Declined, Health, Lanes, Cost and Metrics. The
-  tab shows the count of cards stopped for you, "Overview · 4".
+  tab shows the count of cards stopped for you, "Overview · 4". The browser tab's title shows the same count,
+  "(4) Conveyor Board", also while the page is in a background tab. With no card stopped, the title is "Conveyor Board".
 - **3D View**: the belt drawn as a conveyor line, each card on the track of its step (`conveyor/README.md`, Belt 3D).
 - **Control**: the panels **Projects and Foremen**, **Loop**, **Push landed and full test suite** and **Board**. Loop
   has the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit bar, and
@@ -101,6 +102,13 @@ Customize also sets how the Board writes times and dates, in this browser:
 
 All the Board's times and dates use these settings, the Account page and the Belt 3D clock too. A change shows at once.
 The `/units` pane on the Board's machine also uses the last **Time** you set.
+
+The status mark in the head tells you how new the data is:
+
+- **Live**: the Board's feed is open and sends each change as it happens.
+- **Polling**: the feed is not open, and the page reads the Board's data again at each refresh. **Updated** shows the
+  age of the data.
+- **Stale**, **No data** or **Feed stopped**: the page does not get new data. A line under the head tells you what to do.
 
 **Restart the Board's feed** is in each place that tells you to press it:
 

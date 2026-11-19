@@ -33,13 +33,13 @@ function unbacked(w) {
 }
 
 // The bug: Belt failed while the mark said Live, and its text sent the owner to a button that was not shown.
-test('a panel that could not read its data while the mark says Live has its own restart, and pressing it restarts in place', async () => {
+test('a panel that could not read its data while the mark says Polling has its own restart, and pressing it restarts in place', async () => {
   const w = boot();
   const data = full();
   data.panels.belt = { error: 'buildhost did not answer: timed out', data: null };
   deliver(w, data);
-  assert.equal(w.document.getElementById('status').textContent, 'Live');
-  assert.equal(w.document.getElementById('restart').hidden, true, 'the head shows no restart while Live');
+  assert.equal(w.document.getElementById('status').textContent, 'Polling');
+  assert.equal(w.document.getElementById('restart').hidden, true, 'the head shows no restart while Polling');
   assert.equal(state(w, 'belt'), 'error');
   assert.match(panel(w, 'belt').textContent, /press Restart the Board's feed in this panel\./);
   const [b] = restartIn(w, 'belt');

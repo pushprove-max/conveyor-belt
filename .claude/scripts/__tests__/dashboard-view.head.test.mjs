@@ -160,7 +160,7 @@ test('the account page has the Board\'s head: the name, the tiles, the status ma
   const { JSDOM, VirtualConsole } = createRequire(import.meta.url)('jsdom');
   const w = new JSDOM(page, { url: 'https://dash.test/account.html', runScripts: 'outside-only', virtualConsole: new VirtualConsole() }).window;
   w.setInterval = () => 0;
-  w.Date.now = () => T0;  // the snapshot's time: it is live
+  w.Date.now = () => T0;  // the snapshot's time: it is fresh
   w.matchMedia = () => ({ matches: false, addEventListener() {} });
   w.fetch = () => new Promise(() => {});
   Object.defineProperty(w.document, 'hidden', { get: () => false });  // jsdom's page is hidden: this one is in view
@@ -172,8 +172,9 @@ test('the account page has the Board\'s head: the name, the tiles, the status ma
   assert.equal(w.document.getElementById('status').textContent, 'Loading', 'the status mark');
   w.DASH = full();
   w.document.head.querySelector('script[src^="data.js"]').dispatchEvent(new w.Event('load'));
-  assert.equal(w.document.getElementById('status').textContent, 'Live');
+  assert.equal(w.document.getElementById('status').textContent, 'Polling');
   assert.equal(w.document.querySelector('#stats .stat[data-stat="needs"] .stat-value').textContent, '2', 'drawn from the Board\'s data');
+  assert.equal(w.document.title, 'Conveyor: account and users', 'the Board\'s count is not put in the account page\'s title');
   assert.equal(w.document.querySelector('.top-actions [aria-current="page"]').textContent, 'Account');
   assert.equal(w.location.search, '', 'the account page\'s address is left as it is');
 });

@@ -158,12 +158,12 @@ test('the loader adds one file per listed panel and starts the page once each ha
 });
 
 // ---- the top bar: is this live ----
-test('the status says whether the data is live, stale or missing', () => {
+test('the status says whether the data is fresh, stale or missing', () => {
   const w = boot();
   const word = () => w.document.getElementById('status').textContent;
   assert.equal(word(), 'Loading');
   deliver(w, full());
-  assert.equal(word(), 'Live');
+  assert.equal(word(), 'Polling', 'fresh data from data.js, with no feed');
   assert.equal(w.document.getElementById('updated').textContent, 'under a minute ago');
   tick(w, 400000);
   assert.equal(word(), 'Stale', 'a snapshot over five minutes old is stale');
@@ -194,7 +194,7 @@ test('a first load that fails says so in every panel; a later one keeps the last
   for (const id of RULES_IDS) assert.equal(state(w, id), 'error', `${id} is not left as a skeleton`);
   w.document.getElementById('tab-overview').click();
   next(w, full());
-  assert.equal(w.document.getElementById('status').textContent, 'Live');
+  assert.equal(w.document.getElementById('status').textContent, 'Polling');
   assert.equal(w.document.getElementById('banner').hidden, true);
   for (const id of OVERVIEW) assert.equal(state(w, id), 'ready');
   for (let i = 0; i < 2; i += 1) { refresh(w); pending(w, 'data.js').dispatchEvent(new w.Event('error')); }
@@ -213,7 +213,7 @@ test('a heartbeat that stops is a stopped collector, and a changed page reloads 
   await settle();  // the page's history read is answered: no request in flight
   beat(T0, 'v1');
   tick(w, 30000);
-  assert.equal(w.document.getElementById('status').textContent, 'Live');
+  assert.equal(w.document.getElementById('status').textContent, 'Polling');
   refresh(w);
   beat(T0, 'v1');
   deliver(w, full());
