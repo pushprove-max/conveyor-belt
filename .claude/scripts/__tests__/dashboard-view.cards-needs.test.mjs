@@ -2,10 +2,11 @@
 // The dashboard page's cards: the rest of Needs you (an answer names its card's repository, a whole test failing on
 // main, a plugin commit not taken, an issue waiting for the yes, a held pipeline change), Declined, a review's judge
 // line, a card passed on re-run and a slow-test note. Shared setup: dashboard-view.helpers.mjs.
+// Its cases run one after another in one thread, not in cases()'s workers: each worker loads jsdom and warms its code
+// again, and for these 13 cases that cost about twice the CPU of one thread (#586).
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, cases, openEvery } from './dashboard-view.helpers.mjs';
-
-const test = cases(import.meta.url);
+import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, openEvery } from './dashboard-view.helpers.mjs';
 
 // Needs you lists the cards of every record, so the answer carries the card's repository with its number.
 // Bug: only the number was sent, and the host acted on main's issue of that number: approving another repository's
@@ -148,24 +149,22 @@ test('Needs you: an issue waiting for the yes before its build shows its section
   assert.deepEqual(d.posts.splice(0), [{ url: 'control', body: { action: 'decline', args: ['14', 'not now'], repo: 'sample' } }]);
   assert.match(drow.querySelector('.yes .answer-note').textContent, /^Declined: your reason is on the issue\. #14 leaves Needs you in about a minute\. It stays held, and Conveyor does not build it\. To build it, queue it on the Board/);
   // None: the group is hidden. Not read: it says so, never nothing.
-  const none = boot();
-  deliver(none, full());
-  assert.equal(panel(none, 'needs').querySelector('[data-group="before"]').hidden, true);
-  const unread = boot();
+  // Each on the next data of the first page, as the owner's page gets them.
+  next(w, full());
+  assert.equal(panel(w, 'needs').querySelector('[data-group="before"]').hidden, true);
   const u = full();
   u.panels.needs.data.cards.before = null;
-  deliver(unread, u);
-  const ug = panel(unread, 'needs').querySelector('[data-group="before"]');
+  next(w, u);
+  const ug = panel(w, 'needs').querySelector('[data-group="before"]');
   assert.equal(ug.hidden, false);
   assert.match(ug.querySelector('.warn-note').textContent, /The Board could not read the issues that wait for your yes/);
   // Not read, with nothing else waiting: still not "Nothing needs you".
-  const bare = boot();
   const b = full();
   Object.assign(b.panels.needs.data.cards, { before: null, waiting: [], blocked: [] });
   b.panels.needs.data.decisions = [];
-  deliver(bare, b);
-  assert.doesNotMatch(panel(bare, 'needs').textContent, /Nothing needs you/);
-  assert.match(panel(bare, 'needs').querySelector('[data-group="before"] .warn-note').textContent, /The Board could not read the issues that wait for your yes/);
+  next(w, b);
+  assert.doesNotMatch(panel(w, 'needs').textContent, /Nothing needs you/);
+  assert.match(panel(w, 'needs').querySelector('[data-group="before"] .warn-note').textContent, /The Board could not read the issues that wait for your yes/);
 });
 
 // Bugs: the Declined panel lists the findings in another order than the collector's newest first, or without who
@@ -303,9 +302,8 @@ test('Needs you: a follow-up held because it changes a pipeline file shows its c
   assert.match(row.querySelector('.hint').textContent, /^A follow-up of #30 that changes how Conveyor builds, reviews.*Conveyor does not build it until you choose Queue\.$/);
   assert.equal(count(), was + 1, 'it counts as one thing that needs the owner');
   // None, or a snapshot from before the list: the group is hidden.
-  const none = boot();
-  deliver(none, full());
-  assert.equal(panel(none, 'needs').querySelector('[data-group="pipeline"]').hidden, true);
+  next(w, full());
+  assert.equal(panel(w, 'needs').querySelector('[data-group="pipeline"]').hidden, true);
 });
 
 // Bug (#617): the Board and the Foreman watcher kept two lists of the kinds of Needs you, so a kind on one could be
@@ -375,20 +373,23 @@ test('Needs you: a held pipeline change has Queue (one click, with Undo) and Clo
   assert.deepEqual(c.posts.splice(0), [{ url: 'control', body: { action: 'close', args: ['41'], repo: 'sample' } }]);
   assert.match(note(c), /^Closed: #41 leaves Needs you in about a minute\./);
 
-  // A refusal, of either button, is shown on the entry; the entry stays and both buttons can be pressed again.
+  // A refusal, of either button, is shown on the entry; the entry stays and both buttons can be pressed again (Close
+  // is pressed after Queue's refusal, on the same entry; each refusal has its own text, so a note left from Queue's
+  // does not pass for Close's).
+  const r = boot();
+  deliver(r, held());
   for (const k of ['release', 'close']) {
-    const r = boot();
-    deliver(r, held());
-    r.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: privacy: the check could not be made; nothing posted') };
+    const refused = `conveyor: privacy: the check could not be made; nothing posted (${k})`;
+    r.reply = { ok: false, status: 409, text: () => Promise.resolve(refused) };
     btn(r, k).click();
     if (k === 'close') btn(r, k).click();
     await settle();
-    assert.equal(r.posts.length, 1, k);
-    assert.equal(note(r), 'Not done: conveyor: privacy: the check could not be made; nothing posted', k);
+    assert.deepEqual(r.posts.splice(0).map((p) => p.body.action), [k]);
+    assert.equal(note(r), `Not done: ${refused}`, k);
     assert.deepEqual([btn(r, 'release').disabled, btn(r, 'close').disabled], [false, false], `${k}: refused, both can be pressed again`);
     next(r, held());
     assert.ok(row(r), `${k}: the entry stays while the snapshot still lists it`);
-    assert.equal(note(r), 'Not done: conveyor: privacy: the check could not be made; nothing posted', `${k}: the refusal stays on the entry`);
+    assert.equal(note(r), `Not done: ${refused}`, `${k}: the refusal stays on the entry`);
   }
 });
 
