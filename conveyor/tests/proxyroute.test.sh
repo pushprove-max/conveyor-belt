@@ -30,33 +30,51 @@ echo "$ANTHROPIC_BASE_URL ${ANTHROPIC_AUTH_TOKEN:-}" >> "$STUB/routes"
 echo two >> a.txt
 EOT
 }
+# <commands>, run in the engine shell as `conveyor.sh run` makes it, with no loop run (a loop run paid for the pick,
+# the worktree, the tests and the landing these cases do not check); their output is in $T/$CASE/out.
+pxeng() {
+  mkdir -p "$T/$CASE/cards"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && eval "$1" ) > "$T/$CASE/out" 2>&1
+}
+# A card worktree of issue 7 (named as pick() names a card), its build session called alone as card() calls it, and,
+# when the session fails, the card blocked as card() blocks it: the session's fields, or its reason, in
+# $T/$CASE/build, its exit in $T/$CASE/rc. The commands after it run in the same shell.
+PXBUILD='w=$CARDS/c20260101T000000-r-7 && git -C "$MAIN" worktree add -q --detach "$w" && { t=$(session "$w" go); rc=$?
+  printf "%s\n" "$t" > "$CARDS/../build"; echo $rc > "$CARDS/../rc"; [ $rc = 0 ] || block "${w##*/}" 7 "$w" "build: $t"; }'
+pxbuilt() { [ "$(cat "$T/$CASE/rc" 2>/dev/null)" = "$1" ] || fail "the build session did not end with exit $1: $(cat "$T/$CASE/build" "$T/$CASE/out" 2>&1)"; } # <exit>
+# The blocked line of issue 7.
+pxblocked() { st 'select(.issue == 7 and .step == "blocked")'; }
 
 # Bug: on a fresh machine whose subscription login had expired, every card was blocked within a second, while a local
 # API proxy ran beside it. With the proxy set as the fallback, the same build runs again at once through it, with the
-# key from the variable it names, and the card lands; its build line, and the Board's timeline of it, say it ran
-# through the proxy, and health shows the subscription expired and the proxy working.
+# key from the variable it names; its fields say it ran through the proxy, the routes record the subscription expired
+# and the proxy working, health shows that with the proxy's URL and its fallback mode, and the Board's timeline of a
+# build line on the proxy says so.
 t_proxyfallback() {
   pxsetup; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, keyEnv: "PROXY_KEY", roles: {builder: "fallback", reviewer: "fallback"}}'
-  PROXY_KEY=px-secret loop run >/dev/null 2>&1
+  # The card's picked, build and landed lines, its build line of the session's own fields, for the Board's timeline.
+  PROXY_KEY=px-secret pxeng "$PXBUILD"' && record "${w##*/}" 7 picked ok && record "${w##*/}" 7 build ok "$t" && record "${w##*/}" 7 landed ok "{\"sha\": \"abc\", \"product\": false}"'; pxbuilt 0
   [ "$(cat "$STUB/routes")" = "subscription"$'\n'"$PXURL px-secret" ] || fail "the build did not run again through the proxy, with its key: $(cat "$STUB/routes")"
-  [ "$(st 'select(.issue == 7) | .step' | grep -c '^landed$')" = 1 ] || fail "the card did not land: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
-  # Issue 135: a sign-in failure the fallback route got past does not pause the loop.
-  [ "$(jq -c '[.mode, .signin]' "$ST/control.json")" = '["run",null]' ] || fail "a sign-in failure with a working fallback paused the loop: $(cat "$ST/control.json")"
-  [ "$(st 'select(.issue == 7 and .step == "build") | .route')" = proxy ] || fail "the build line does not say it ran through the proxy: $(st 'select(.issue == 7 and .step == "build")')"
-  [ "$(loop snapshot --fresh | jq -r '.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "build") | .route')" = proxy ] \
-    || fail "the Board's timeline of the build does not say the proxy: $(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .metrics.timeline')"
+  [ "$(jq -r .route "$T/$CASE/build")" = proxy ] || fail "the build's fields do not say it ran through the proxy: $(cat "$T/$CASE/build")"
+  [ "$(jq -c '[.subscription.state, .proxy.state]' "$ST/routes.json")" = '["expired","works"]' ] || fail "the routes do not record the subscription expired and the proxy working: $(cat "$ST/routes.json")"
   [ "$(loop health | jq -c '.routes | [.subscription.state, .proxy.state, .proxy.baseUrl, .proxy.route]')" = "[\"expired\",\"works\",\"$PXURL\",\"fallback\"]" ] \
     || fail "health does not show the subscription expired and the proxy working: $(loop health | jq -c .routes)"
+  # Issue 135: a sign-in failure the fallback route got past does not pause the loop.
+  [ "$({ cat "$ST/control.json" 2>/dev/null || echo '{}'; } | jq -c '[.mode // "run", .signin]')" = '["run",null]' ] || fail "a sign-in failure with a working fallback paused the loop: $(cat "$ST/control.json")"
+  local s; s=$(loop snapshot --fresh)
+  [ "$(jq -r '.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "build") | .route' <<<"$s")" = proxy ] \
+    || fail "the Board's timeline of the build does not say the proxy: $(jq -c '.landed[] | select(.issue == 7) | .metrics.timeline' <<<"$s")"
 }
 # With no proxy set, the build is blocked with the login as its cause, and runs nowhere else; health shows the proxy
 # not set.
 t_proxynone() {
   pxsetup
-  loop run >/dev/null 2>&1
+  pxeng "$PXBUILD"; pxbuilt 1
   [ "$(sort -u "$STUB/routes")" = subscription ] || fail "a build with no proxy set ran on another route: $(cat "$STUB/routes")"
-  st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -qF "build: Claude Code's own sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume" \
-    || fail "the build is not blocked with the login as its cause: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
-  st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'OAuth session expired and could not be refreshed' || fail "the blocked line lost the CLI's words: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
+  pxblocked | jq -r .reason | grep -qF "build: Claude Code's own sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume" \
+    || fail "the build is not blocked with the login as its cause: $(pxblocked | jq -r .reason) $(cat "$T/$CASE/out")"
+  pxblocked | jq -r .tail | grep -qxF 'OAuth session expired and could not be refreshed' || fail "the blocked line lost the CLI's words: $(pxblocked | jq -r .tail)"
   [ "$(loop health | jq -c '.routes | [.subscription.state, .proxy.state]')" = '["expired","not set"]' ] || fail "health does not show the proxy not set: $(loop health | jq -c .routes)"
 }
 # Issue 135. Bug: an expired Claude sign-in blocked 19 cards in five minutes: each build failed in a second with
@@ -65,31 +83,34 @@ t_proxynone() {
 # no second card is picked, and a resume puts the card back.
 t_signinpause() {
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; tune '.tunables.apiPause = 0'
-  loop control cap 1 >/dev/null || fail "the cap was not set"
   # The field report's own last line.
   cat > "$STUB/build" <<'EOT'
 case "$*" in *bypassPermissions*) ;; *) exit 1 ;; esac
 echo '{"type":"result","subtype":"success","is_error":true,"error":"authentication_failed","result":"Failed to authenticate: OAuth session expired and could not be refreshed","num_turns":1,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}'; exit 1
 EOT
-  loop run >/dev/null 2>&1
+  # The pick that follows, given the open issues as asked() gives them, prints the card it picks.
+  pxeng "$PXBUILD"' && echo "picked: $(pick "" "" "$(cat "$STUB/issues.json")")"'; pxbuilt 1
   local why="build: Claude Code's own sign-in expired; run claude /login (or set up the proxy route), then conveyor.sh control resume" out
-  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "build: Claude Code's own sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume" ] \
-    || fail "the card is not blocked naming the sign-in and what to run: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
+  [ "$(pxblocked | jq -r .reason)" = "build: Claude Code's own sign-in expired (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume" ] \
+    || fail "the card is not blocked naming the sign-in and what to run: $(pxblocked | jq -r .reason) $(cat "$T/$CASE/out")"
   [ "$(jq -c '[.mode, .signin]' "$ST/control.json")" = "$(jq -cn --arg w "$why" '["pause", $w]')" ] || fail "the loop did not pause itself with the reason: $(cat "$ST/control.json")"
   [ "$(loop health | jq -c '[.state, .reason]')" = "$(jq -cn --arg w "$why" '["paused", $w]')" ] || fail "health does not say paused with the reason: $(loop health | jq -c '[.state, .reason]')"
-  [ -z "$(st 'select(.issue == 8)')" ] || fail "a second card was picked after the sign-in failure: $(st 'select(.issue == 8) | .step' | tr '\n' ,)"
+  [ "$(tail -n 1 "$T/$CASE/out")" = "picked: " ] && [ -z "$(st 'select(.issue == 8)')" ] || fail "a second card was picked after the sign-in failure: $(cat "$T/$CASE/out")"
   # Resumed: the record runs again, still prints as one record, and the blocked card is put back.
   out=$(loop control resume 2>/dev/null) && jq -e '.mode == "run" and .signin == null' <<<"$out" >/dev/null || fail "control resume did not resume: $out"
   [ "$(jq -r 'select(.step == "blocked") | .issue' "$ST/retried.jsonl" 2>/dev/null)" = 7 ] && [ -z "$(st 'select(.issue == 7)')" ] \
     || fail "the resume did not put the blocked card back: $(cat "$ST/retried.jsonl" 2>&1)"
+  # The same pick, resumed, takes the card put back: the pick above took none for the pause alone.
+  pxeng 'pick "" "" "$(cat "$STUB/issues.json")"'
+  [[ $(tail -n 1 "$T/$CASE/out") == c*-7\ 7\ * ]] || fail "the pick after the resume did not take the card put back: $(cat "$T/$CASE/out")"
 }
 # Both routes failing: the card is blocked naming the subscription's cause and the proxy's, with the words of each.
 t_proxyboth() {
   pxsetup; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, roles: {builder: "fallback"}}'; touch "$STUB/proxybad"
-  loop run >/dev/null 2>&1
+  pxeng "$PXBUILD"; pxbuilt 1
   # A proxy named with no key variable is given a stand-in token, so the expired login is not tried again through it.
-  [ "$(head -n 2 "$STUB/routes")" = "subscription"$'\n'"$PXURL no-key" ] || fail "the build did not run again through the proxy: $(cat "$STUB/routes")"
-  b=$(st 'select(.issue == 7 and .step == "blocked")')
+  [ "$(cat "$STUB/routes")" = "subscription"$'\n'"$PXURL no-key" ] || fail "the build did not run again through the proxy: $(cat "$STUB/routes")"
+  local b; b=$(pxblocked)
   # Issue 184: the proxy's refusal names the proxy at its base URL, never a sign-in to it.
   jq -r .reason <<<"$b" | grep -q "^build: on the subscription login, Claude Code's own sign-in expired (exit 1): .*; through the proxy, the proxy at $PXURL refused the call (exit 1): check the proxy and the key it is sent (conveyor.sh doctor makes one call through it), then " \
     || fail "the blocked line does not name both causes: $(jq -r .reason <<<"$b")"
@@ -113,11 +134,13 @@ echo "${ANTHROPIC_BASE_URL:-subscription} ${ANTHROPIC_AUTH_TOKEN:-}" >> "$STUB/r
 [ -n "${ANTHROPIC_BASE_URL:-}" ] || { echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed","num_turns":1}'; exit 1; }
 jq -cn --arg r "$GO" '{type: "result", is_error: false, result: $r, num_turns: 2, usage: {input_tokens: 100, cache_creation_input_tokens: 50, cache_read_input_tokens: 1000, output_tokens: 7}}'
 EOF
-  export GO; loop run >/dev/null 2>&1
+  # The review call alone (review(), which card() reaches through reviewed()) of the build's staged change; its fields
+  # in $T/$CASE/review.
+  export GO; pxeng "$PXBUILD"' && git -C "$w" add -A && r=$(review "$w" brief) && printf "%s\n" "$r" > "$CARDS/../review"'; pxbuilt 0
   [ "$(cat "$STUB/builds")" = "$PXURL" ] || fail "the builder, set to the proxy, did not run through it: $(cat "$STUB/builds")"
-  [ "$(cat "$STUB/reviews")" = "subscription "$'\n'"$PXURL no-key" ] || fail "the review did not run again through the proxy: $(cat "$STUB/reviews")"
-  [ "$(st 'select(.issue == 7 and (.step | IN("build", "review", "landed"))) | "\(.step) \(.route // "")"' | tr '\n' ,)" = 'build proxy,review proxy,landed ,' ] \
-    || fail "the card did not land with its build and its review through the proxy: $(st 'select(.issue == 7) | [.step, .route, .reason] | join(" ")' | tr '\n' ,)"
+  [ "$(cat "$STUB/reviews")" = "subscription "$'\n'"$PXURL no-key" ] || fail "the review did not run again through the proxy: $(cat "$STUB/reviews") $(cat "$T/$CASE/out")"
+  [ "$(jq -r .route "$T/$CASE/build") $(jq -r .route "$T/$CASE/review" 2>&1)" = 'proxy proxy' ] \
+    || fail "the build's and the review's fields do not both say the proxy: $(cat "$T/$CASE/build" "$T/$CASE/review" 2>&1)"
 }
 # Bug: after a session worked through the proxy, the proxy stopped; the next session failed on the connection, which
 # is no login cause, and Health still showed the proxy working. Any stop before work through the proxy shows it failing.
@@ -125,12 +148,13 @@ t_proxydown() {
   pxsetup; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, roles: {builder: "proxy", reviewer: "proxy"}}'
   mkdir -p "$ST" && echo '{"proxy": {"state": "works", "at": "2026-01-01T00:00:00Z"}}' > "$ST/routes.json"
   echo 'echo "API Error: Unable to connect to API (ECONNREFUSED)" >&2; exit 1' > "$STUB/build"
-  loop run >/dev/null 2>&1
-  [ "$(st 'select(.issue == 7) | .step' | tail -n 1)" = blocked ] || fail "the build did not stop: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")')"
+  pxeng "$PXBUILD"; pxbuilt 1
+  [ "$(jq -r .proxy.state "$ST/routes.json")" = fails ] || fail "the routes still record a stopped proxy working: $(cat "$ST/routes.json")"
   [ "$(loop health | jq -r '.routes.proxy.state')" = fails ] || fail "health still shows a stopped proxy working: $(loop health | jq -c .routes)"
 }
 # Codex takes its route through its own provider settings: a Codex reviewer whose own login fails, with the host
-# file's codexProxy as the reviewer's fallback, runs again at once given that proxy as its provider, and the card lands.
+# file's codexProxy as the reviewer's fallback, runs again at once given that proxy as its provider, and its fields
+# say so.
 t_proxycodex() {
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n --arg b "$PXURL/v1" '{codexProxy: {baseUrl: $b, keyEnv: "CODEX_PROXY_KEY", roles: {reviewer: "fallback"}}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0'
@@ -143,10 +167,12 @@ cat > /dev/null
 [ "$(tail -n 1 "$STUB/reviews")" != subscription ] || { echo '{"type":"turn.failed","error":{"message":"401 Unauthorized: not logged in, run codex login"}}'; exit 1; }
 cat "$STUB/review.1" > "$out"; echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
 EOF
-  loop run >/dev/null 2>&1
+  # The review call alone (review(), which card() reaches through reviewed()) of a card's worktree; its fields in
+  # $T/$CASE/review.
+  pxeng 'w=$CARDS/c20260101T000000-r-7 && git -C "$MAIN" worktree add -q --detach "$w" && r=$(review "$w" brief) && printf "%s\n" "$r" > "$CARDS/../review"' \
+    || fail "the Codex review failed: $(cat "$T/$CASE/out")"
   [ "$(cat "$STUB/reviews")" = "subscription"$'\n'"proxy base_url = \"$PXURL/v1\"" ] || fail "the Codex review did not run again with the proxy as its provider: $(cat "$STUB/reviews")"
-  [ "$(st 'select(.issue == 7 and (.step | IN("review", "landed"))) | "\(.step) \(.route // "")"' | tr '\n' ,)" = 'review proxy,landed ,' ] \
-    || fail "the card did not land with its review through the proxy: $(st 'select(.issue == 7) | [.step, .route, .reason] | join(" ")' | tr '\n' ,)"
+  [ "$(jq -r .route "$T/$CASE/review")" = proxy ] || fail "the review's fields do not say it ran through the proxy: $(cat "$T/$CASE/review")"
 }
 
 # Issue 184. Bug: with a proxy route that needs no key (no key variable, none found), a session and a route check
@@ -225,9 +251,7 @@ cat > /dev/null; echo "${ANTHROPIC_BASE_URL:-subscription}" >> "$STUB/routes"
 [ -n "${ANTHROPIC_BASE_URL:-}" ] || { echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed","num_turns":1}'; exit 1; }
 echo '{"type":"result","is_error":false,"result":"F1 DECLINE: wrong","num_turns":1,"usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":2}}'
 EOF
-  chmod +x "$STUB/claude"; mkdir -p "$T/$CASE/cards"
-  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && eval "$1" ) > "$T/$CASE/out" 2>&1
+  chmod +x "$STUB/claude"; pxeng "$1"
 }
 pxtwice() { [ "$(cat "$STUB/routes" 2>/dev/null)" = "subscription"$'\n'"$PXURL" ] || fail "$1 did not run again through the proxy once its login failed: $(cat "$STUB/routes" 2>&1) $(cat "$T/$CASE/out")"; } # <what>
 
