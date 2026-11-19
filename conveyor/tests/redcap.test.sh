@@ -20,14 +20,16 @@ t_redcap() {
   setup "$(jq -cs . <(issue 1 2026-01-01 P1) <(issue 5 2026-01-05 P1))"
   echo "$GO" > "$STUB/review.1"; mkdir -p "$T/$CASE/cards"; loop control cap 1 >/dev/null || fail "cap 1 was refused"
   tune '.tunables.poll = 1'; watchturns
-  # A fix card (its worktree ends -0) is labelled as a P0 bug: the first (its card id in building.0) proves its fix as
-  # provenbug does, in each of its sessions; the second fails its build at once. Any other build holds until let go
-  # (go<n>), then fails.
-  echo 'bash a.test.sh' > "$STUB/mainrun-cmd"
+  # A fix card (its worktree ends -0) is labelled as a P0 bug: the first (its card id in building.0) adds a line to
+  # a.txt, and main's red case (the run on main, mainrun-cmd) holds that a.txt has that line, so it fails on main's code
+  # without the change and passes with it (redproof()); the second fails its build at once. Any other build holds until
+  # let go (go<n>), then fails. The case reads a.txt, not a.test.sh: main has its own stub a.test.sh (filemode), which
+  # passes without the change, so the card would close as main no longer red.
+  echo "[ \$(wc -l < a.txt) -ge $(($(wc -l < "$R/a.txt") + 1)) ]" > "$STUB/mainrun-cmd"
   echo 'n=${PWD##*-}; if [ "$n" = 0 ] && [ -e "$STUB/building.0" ] && [ "$(cat "$STUB/building.0")" != "${PWD##*/}" ]; then : > "$STUB/building.0b"; exit 1; fi
 [ "$n" != 0 ] || [ -e "$STUB/building.0" ] || echo "${PWD##*/}" > "$STUB/building.0"; : >> "$STUB/building.$n"
 while [ -d "$STUB" ] && [ ! -e "$STUB/go$n" ]; do sleep 0.1; done; [ "$n" = 0 ] || exit 1
-echo two >> a.txt; echo "[ \$(wc -l < a.txt) -ge '"$(($(wc -l < "$R/a.txt") + 1))"' ]" > a.test.sh' > "$STUB/build"
+echo two >> a.txt' > "$STUB/build"
   ( loop run > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until '[ -e "$STUB/building.1" ]' 'cat "$STUB/run.out"' || fail "#1 did not start: $(cat "$STUB/run.out")"
   jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", cases: [{case: "a.test: one", file: "a.test", by: "c1", files: [], last: ""}], card: null},
