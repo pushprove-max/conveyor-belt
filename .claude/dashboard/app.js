@@ -1503,6 +1503,8 @@
         const fill = at.h * ROW_PX - gap;
         p.el.style.minHeight = fill > p.natural + 1 ? `${fill}px` : '';
       });
+      // An open tip follows its item to where this draw put it.
+      if (tipAt && tipAt.isConnected) placeTip(tipAt);
     } finally { arranging = false; }
   }
   // Once a frame, when a panel's content changed its height.
@@ -1583,7 +1585,7 @@
   // feed never draws again a part that does not change: so each read, whether it came or failed, sets a timer that
   // HISTORY_MS later reads it again while such a panel is on the tab in view and the page is shown; and such a panel
   // the page draws when the last read is HISTORY_MS old (the tab or the page shown again after the timer found those
-  // panels hidden) is drawn whole, which reads it again too.
+  // panels hidden) is drawn again, which reads it again too.
   const HISTORY_MS = 60000;
   let hist = null, histText = null, histAt = null, histVer = 0, histTimer = null;
   const histCan = () => /^https?:$/.test(window.location.protocol) && typeof window.fetch === 'function';
@@ -1741,12 +1743,16 @@
     const box = tipBox();
     box.textContent = el.dataset.tip;
     box.hidden = false;
-    // Under the item, inside the window's width.
-    const r = el.getBoundingClientRect(), room = doc.documentElement.clientWidth;
-    box.style.left = `${Math.max(8, Math.min(r.left, room - box.offsetWidth - 8)) + window.scrollX}px`;
-    box.style.top = `${r.bottom + 4 + window.scrollY}px`;
+    placeTip(el);
     el.setAttribute('aria-describedby', box.id);
     tipAt = el;
+  }
+  // Under the item, inside the window's width. arrange() places it again, as a draw can move a kept item (a new row
+  // above it).
+  function placeTip(el) {
+    const box = tipBox(), r = el.getBoundingClientRect(), room = doc.documentElement.clientWidth;
+    box.style.left = `${Math.max(8, Math.min(r.left, room - box.offsetWidth - 8)) + window.scrollX}px`;
+    box.style.top = `${r.bottom + 4 + window.scrollY}px`;
   }
   function wireTips() {
     doc.addEventListener('click', (e) => {
@@ -1942,18 +1948,20 @@
   // no other panel with it. It does not cut the panel to its length: each caller runs arrange() or arrangeSoon() after
   // it, which cuts every panel of the tab in one read round and one write round (a cut here laid the page out once a panel).
   function draw(p, part) {
-    // A panel with older entries is drawn whole when a newer history has come, or when it is time to read it again.
-    if (typeof p.mod.older === 'function' && (p.hist !== histVer || histDue())) p.json = undefined;
+    // A panel with older entries is drawn again when a newer history has come, or when it is time to read it again;
+    // not whole (ctx.whole), so a panel that draws its rows with ctx.list keeps the rows that did not change.
+    const older = typeof p.mod.older === 'function' && (p.hist !== histVer || histDue());
     p.hist = histVer;
     // The model names (modelName) are part of what a panel shows: a new alias or name draws it again.
     const names = namesKey(), json = JSON.stringify(part === undefined ? null : part) + names;
-    if (p.json === json) {
+    if (p.json === json && !older) {
       if (p.state === 'ready' && !p.note && typeof p.mod.same === 'function') {
         try { p.mod.same(p.body, shownData(p.mod, part.data), p.ctx); } catch (e) { /* the next part that differs draws the panel whole */ }
       }
       return;
     }
-    // Drawn whole (ctx.whole): asked for (redrawAll, ctx.redraw), or the model names changed, whatever else changed too.
+    // Drawn whole (ctx.whole): the first draw, asked for (redrawAll, ctx.redraw), or the model names changed, whatever
+    // else changed too.
     p.whole = p.json === undefined || p.names !== names;
     p.json = json; p.names = names;
     p.renders += 1;

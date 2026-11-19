@@ -47,10 +47,16 @@ window.DASH_APP.panel({
       li.append(ctx.tag(repo), h('span', null, `${t.accepted} ${t.accepted === 1 ? 'finding' : 'findings'} accepted, ${t.declined} declined, ${t.fixes} ${t.fixes === 1 ? 'fix round' : 'fix rounds'}`));
       totals.append(li);
     });
-    const ul = h('ul', 'rows');
+    // The rows are kept by card (ctx.list): a new part keeps the row of each card it still has, with its focus and
+    // an open tip, and draws again only a card that changed (every card when the panel is drawn whole, ctx.whole).
+    const ul = el.querySelector(':scope > ul.rows') || h('ul', 'rows');
+    const keyOf = (c) => `${c.repo}/${c.card}`;
     // The collector gives them newest first.
-    const row = (c) => {
-      const li = h('li', 'row');
+    const fill = (li, c) => {
+      const json = JSON.stringify(c);
+      if (li.json === json && !ctx.whole) return;
+      li.json = json;
+      const parts = [];
       const head = h('div', 'row-main');
       // The push and the close of the issue are the card's last step: "pushing" while it runs. With push off no step
       // runs (track.at null) and the track's label says what it waits for: "Landed, waiting for Push landed".
@@ -69,10 +75,10 @@ window.DASH_APP.panel({
       meta.append(ctx.tag(c.repo),h('span', null, c.start ? `started ${ctx.when(c.start)}` : 'start not read'), took ? ctx.earlierTip(h('span', null, `${took} overall`), c.earlier) : h('span', null, 'overall time not read'),
         h('span', null, `landed ${ctx.clock(c.time)}`), h('span', null, `${c.reviews} ${c.reviews === 1 ? 'review' : 'reviews'}`), h('span', 'num', ctx.money(c.usd)));
       if (Array.isArray(c.followups) && c.followups.length) meta.append(h('span', null, `follow-ups ${c.followups.map((n) => `#${n}`).join(' ')}`));
-      li.append(head, meta);
+      parts.push(head, meta);
       // Its rollout actions, beside its push state: what an operator must do, in order, to deploy it. No finding.
       (Array.isArray(c.rollout) ? c.rollout : []).forEach((r) => {
-        if (r && typeof r.action === 'string') li.append(h('p', 'row-meta', `Before deploy: ${r.action}. Without it: ${r.fails}. At ${r.place}`));
+        if (r && typeof r.action === 'string') parts.push(h('p', 'row-meta', `Before deploy: ${r.action}. Without it: ${r.fails}. At ${r.place}`));
       });
       // Its reviews in order (a review recorded with no counts shows its verdict alone); a card that landed on a NO-GO
       // says how many findings became follow-ups.
@@ -87,13 +93,14 @@ window.DASH_APP.panel({
           if (j) line.append(j);
         });
         if (left) line.append(h('span', null, `${left} became ${left === 1 ? 'a follow-up' : 'follow-ups'}`));
-        li.append(line);
+        parts.push(line);
       }
-      // The rows are drawn anew: the card's "Every step" drawn before (still in the panel) keeps it open through a redraw.
+      // A changed card's row is drawn anew: its "Every step" drawn before (still in the panel) keeps it open.
       const was = Array.from(el.querySelectorAll('details.track-detail')).find((x) => x.dataset.card === c.card);
-      if (c.track && (Array.isArray(c.track.records) || Array.isArray(c.track.detail))) li.append(ctx.trackDetail(c.track, c.card, was, c.earlier, ctx.text.repoOf(c), c.repo));
-      return li;
+      if (c.track && (Array.isArray(c.track.records) || Array.isArray(c.track.detail))) parts.push(ctx.trackDetail(c.track, c.card, was, c.earlier, ctx.text.repoOf(c), c.repo));
+      li.replaceChildren(...parts);
     };
+    const rows = (box, cs) => ctx.list(box, cs, keyOf, () => h('li', 'row'), fill);
     // The cards of one batch (batch: the cards that landed together, in one repo) are one landing: one row that
     // lists them, each with its own row inside. The list pages by landing, so a batch is never cut short.
     const landings = [];
@@ -104,14 +111,20 @@ window.DASH_APP.panel({
       if (!batches.has(k)) { batches.set(k, []); landings.push(batches.get(k)); }
       batches.get(k).push(c);
     });
+    // A landing of one card is that card's row; a batch is one row keyed by its cards, with their rows kept inside it.
+    const alone = (cs) => !Array.isArray(cs[0].batch) || cs[0].batch.length < 2;
+    const landingKey = (cs) => (alone(cs) ? keyOf(cs[0]) : `batch ${JSON.stringify([cs[0].repo, cs[0].batch])}`);
     const landing = (cs) => {
-      if (!Array.isArray(cs[0].batch) || cs[0].batch.length < 2) return row(cs[0]);
-      const inner = h('ul', 'rows');
+      if (alone(cs)) return h('li', 'row');
       const li = h('li', 'row batch');
-      li.append(h('div', 'row-main', `One landing of ${cs[0].batch.length} cards`), inner);
-      inner.append(...cs.map(row));
+      li.append(h('div', 'row-main', `One landing of ${cs[0].batch.length} cards`), h('ul', 'rows'));
       return li;
     };
-    el.replaceChildren(sum, totals, ul, ctx.more('cards', landings, (ls) => ul.replaceChildren(...ls.map(landing))));
+    const show = (ls) => ctx.list(ul, ls, landingKey, landing, (li, cs) => (alone(cs) ? fill(li, cs[0]) : rows(li.lastChild, cs)));
+    const box = ctx.more('cards', landings, show);
+    // The list stays in the panel while what is around it is drawn again, so a row in it keeps its focus.
+    const out = [sum, totals, ul, box];
+    Array.from(el.childNodes).forEach((n) => { if (!out.includes(n)) n.remove(); });
+    out.forEach((n, i) => { if (el.children[i] !== n) el.insertBefore(n, el.children[i] || null); });
   },
 });

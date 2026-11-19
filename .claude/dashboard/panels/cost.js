@@ -70,23 +70,27 @@ window.DASH_APP.panel({
       } else if (c.unpricedSteps) out.push(h('p', 'warn-note', `${c.unpricedSteps} ${c.unpricedSteps === 1 ? 'step has' : 'steps have'} no price, so the Board does not show a total that includes one.`));
       if (!c.perCard) out.push(h('p', 'warn-note', `${ctx.machine === 'the build machine' ? 'The build machine' : 'Conveyor'} did not give costs per card.`));
       else if (c.perCard.length) {
-        const ul = h('ul', 'rows compact');
+        // The rows are kept by project and card (ctx.list): a new part keeps the row of each card it still has, with its
+        // focus, and draws again only a card that changed (every card when the panel is drawn whole, ctx.whole).
+        const ul = el.querySelector(':scope > ul.per-card') || h('ul', 'rows compact per-card');
         const chips = { 'on the belt': ['On the belt', 'info'], landed: ['Landed', 'quiet'], closed: ['Already fixed', 'quiet'], blocked: ['Blocked', 'warn'], retried: ['Retried', 'quiet'] };
-        const row = (x) => {
-          const li = h('li', 'row'), head = h('div', 'row-main');
+        const fill = (li, x) => {
+          const json = JSON.stringify(x);
+          if (li.json === json && !ctx.whole) return;
+          li.json = json;
+          const head = h('div', 'row-main');
           const chip = chips[x.state] || [String(x.state || 'Unknown'), 'quiet'];
           head.append(ctx.tag(x.repo), ctx.issueLink(x), h('span', 'title', x.title || 'untitled'), ctx.chip(chip[0], chip[1]));
           // A restarted card is one row: its dollars are every run's.
           if (typeof x.runs === 'number' && x.runs > 1) head.append(h('span', null, `${x.runs} runs`));
           head.append(h('span', 'num', `${ctx.money(x.todayUsd)} today`), h('span', 'num', `${ctx.money(x.weekUsd)} in 7 days`));
-          li.append(head);
-          return li;
+          li.replaceChildren(head);
         };
         // The costliest in the 7 days first; one not priced last. Sorted by project, the costliest first in each project.
         const usd = (x) => (typeof x.weekUsd === 'number' && Number.isFinite(x.weekUsd) ? x.weekUsd : -Infinity);
         const apart = ctx.sorted();
         const byCost = c.perCard.slice().sort((a, b) => (apart && a.repo !== b.repo ? (a.repo < b.repo ? -1 : 1) : usd(b) - usd(a)));
-        out.push(h('h3', 'group-title', 'Per card, last 7 days'), ul, ctx.more('per-card', byCost, (xs) => ul.replaceChildren(...xs.map(row))));
+        out.push(h('h3', 'group-title', 'Per card, last 7 days'), ul, ctx.more('per-card', byCost, (xs) => ctx.list(ul, xs, (x) => `${x.repo}/${x.card}`, () => h('li', 'row'), fill)));
       }
     } else out.push(ctx.unread(`The Board could not read the card costs, so it shows none. ${ctx.retry}`, d.cardsError), ctx.restartButton());
     if (d.sessions) {
@@ -95,6 +99,8 @@ window.DASH_APP.panel({
         h('span', null, s.todayComplete ? ' today, ' : ' today (the Board did not read every request), '), ctx.number('s-week', s.weekUsd, ctx.money), h('span', null, ' this limit week.'));
       out.push(p);
     } else out.push(ctx.unread('The Board could not read the cost of every session on this machine. It reads it again in about a minute.', d.sessionsError));
-    el.replaceChildren(...out);
+    // The per-card list stays in the panel while what is around it is drawn again, so a row in it keeps its focus.
+    Array.from(el.childNodes).forEach((n) => { if (!out.includes(n)) n.remove(); });
+    out.forEach((n, i) => { if (el.children[i] !== n) el.insertBefore(n, el.children[i] || null); });
   },
 });
