@@ -18,7 +18,7 @@ const ACTION = {
   'login.js': ["byId(on ? 'login-code-input' : 'login-secret')", '(user.value ? secret : user)', 'secret', 'input', 'input', "byId('login-code-input')"],
   'panels/metrics.js': ['again'],
   'panels/needs.js': ['acts[k].field'],
-  'panels/rules.js': ['again'],
+  'panels/rules.js': ['again', 'all[all.length - 1]', 'all[0]'],
   'panels/tests.js': ['items[(at + step + items.length) % items.length]'],
 };
 
