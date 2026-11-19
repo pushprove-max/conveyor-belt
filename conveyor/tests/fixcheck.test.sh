@@ -130,6 +130,58 @@ t_hollowjsold() {
   grep -qF "each now on the declined list: the name's belt (no-assert)" "$FXWT.unfixed" || fail "the old case is not declined: $(cat "$FXWT.unfixed")"
 }
 
+# Bug it catches (#606): a case ran to the line before the next start line, so a change to the setup of a later case
+# (HOLDS, after an old case's closing line) read as a change of the old case and blocked the card on it.
+t_hollowsetup() {
+  FXWT=; hollowrun "sed -i -e '1s/{}/{ assert.ok(a); }/' -e \"5s/'a'/'b'/\" -e '6s/{}/{ assert.ok(HOLDS[0]); }/' h.test.mjs" 'Done.' \
+    $'HOLLOW: old | text-only | it only reads the source\nHOLLOW-CHECK: done' \
+    h.test.mjs $'test(\'one\', () => {});\ntest(\'old\', () => {\n  assert.ok(src.includes(\'x\'));\n});\nconst HOLDS = [\'a\'];\ntest(\'two\', () => {});'
+  [ "$RC" = 0 ] || fail "a change to the setup after an old hollow case blocked the card on that case: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF 'each now on the declined list: old (text-only)' "$FXWT.unfixed" || fail "the old case is not declined: $(cat "$FXWT.unfixed")"
+}
+
+# Bug it catches (#606): the same in Python, whose case has no closing line: it ends before the next line of code that
+# is not indented past its def, so a change to a module value after it is in no case.
+t_hollowpysetup() {
+  FXWT=; hollowrun "sed -i -e '2s/pass/assert f()/' -e '5s/1/2/' -e '7s/pass/assert h() == LIMIT/' h_test.py" 'Done.' \
+    $'HOLLOW: test_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h_test.py $'def test_one():\n    pass\ndef test_old():\n    pass\nLIMIT = 1\ndef test_two():\n    pass'
+  [ "$RC" = 0 ] || fail "a change to a module value after an old hollow Python case blocked the card on that case: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF 'each now on the declined list: test_old (no-assert)' "$FXWT.unfixed" || fail "the old case is not declined: $(cat "$FXWT.unfixed")"
+}
+
+# Bug it catches (#606 review): a line of a heredoc at the left edge that ends in a bracket (a JSON record, or the
+# close of a function after a case pattern `x)` that a bracket count reads as a close) ended the case, so a change
+# after it was in no case and a changed case still hollow was declined.
+t_hollowfixture() {
+  FXWT=; hollowrun "sed -i '11s/:/: changed/' h.test.sh" 'Done.' \
+    $'HOLLOW: t_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h.test.sh $'t_one() { true; }\nt_old() {\n  cat > r <<\'EOF\'\n{"a":1}\nf() {\n  case $1 in\n    x) : ;;\n  esac\n}\nEOF\n  :\n}\nt_two() { grep -q x f; }'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h.test.sh: t_old (no-assert): it asserts nothing" ] \
+    || fail "a changed case still hollow passed when fixture text in it ended in a bracket: $RC $WHY"
+}
+
+# Bug it catches (#606 review): in JavaScript a bracket in a regular expression (/a[^{]*b/) kept the old case open to
+# the next case, so a change to HOLDS after it blocked the card on it; and a line `});` at the left edge in a template
+# string ended the case mid, so a change after it was in no case and mid, changed and still hollow, was declined.
+t_hollowjsfixture() {
+  FXWT=; hollowrun "sed -i -e \"5s/'a'/'b'/\" -e '10s/trim()/trim(1)/' h.test.mjs" 'Done.' \
+    $'HOLLOW: old | text-only | it only reads the source\nHOLLOW: mid | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h.test.mjs $'test(\'one\', () => {});\ntest(\'old\', () => {\n  assert.match(css, /a[^{]*b/);\n});\nconst HOLDS = [\'a\'];\ntest(\'mid\', () => {\n  const s = `x\n});\n`;\n  s.trim();\n});\ntest(\'two\', () => {});'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h.test.mjs: mid (no-assert): it asserts nothing" ] \
+    || fail "the hollow check did not hold mid alone (a regular expression or a template string misread): $RC $WHY"
+}
+
+# Bug it catches (#606 review): in Python a comment or a docstring line at the left edge ended the case, so a change
+# after it was in no case and a changed case still hollow was declined.
+t_hollowpyfixture() {
+  FXWT=; hollowrun "sed -i '8s/pass/x = 1/' h_test.py" 'Done.' \
+    $'HOLLOW: test_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h_test.py $'def test_one():\n    pass\ndef test_old():\n# a note at the left edge\n    s = """\nLIMIT = 1\n"""\n    pass\ndef test_two():\n    pass'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h_test.py: test_old (no-assert): it asserts nothing" ] \
+    || fail "a changed Python case still hollow passed when a comment or docstring in it was at the left edge: $RC $WHY"
+}
+
 # Bug it catches (#584 review): with every case start line put in a comment the file had no case left, so its whole
 # text was read, and the names in the comments passed as kept cases with no COVERED-BY line.
 t_hollowcommented() {

@@ -1924,12 +1924,50 @@ HOLLOWFIX='Fix the hollow cases of the test file ' MAKERUN='Make the test file '
 # deleted case with no COVERED-BY line), and fails then.
 HOLLOWDONE='HOLLOW-CHECK: done'
 # The rows hollowproof() reads a test file by (after TESTEDIT_TABLE): the test edits' table and Python (a case starts
-# `def test`), each with the lines that are a note and not code (note: blank or a comment); row($f) is the row of file
-# $f, or null. plain drops the escapes of a line (name\'s to name's), so a case title is read as it shows.
-HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end)}]
-    + [{ext: ["py"], case: "^\\s*(async\\s+)?def\\s+test", note: "^\\s*(#|$)"}];
+# `def test`), each with the lines that are a note and not code (note: blank or a comment) and the line that closes a
+# case (close: a line that ends in a closing bracket, at most as far in as its start line, and that does not start
+# inside a string, a heredoc or a comment; null for Python, whose case ends before the next line of code, not a comment
+# nor in a triple-quoted string, at most as far in as its start line); row($f) is the row of file $f, or null. plain
+# drops the escapes of a line (name\'s to name's), so a case title is read as it shows. ind is how far in a line is;
+# tq is the triple quotes in a line. shin and jsin read an array of lines of shell or JavaScript and give, for each, true
+# when it starts inside text: a quoted string or a heredoc (shell), or a template string, a block comment or a code part
+# ${...} of a template (JavaScript; a ' or " string ends with its line). A regular expression is read as code.
+HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end),
+      close: "[)\\]}]\\s*;?\\s*$", sh: any(.ext[]; . == "sh")}]
+    + [{ext: ["py"], case: "^\\s*(async\\s+)?def\\s+test", note: "^\\s*(#|$)", close: null}];
   def row($f): (($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x | first(cases[] | select(any(.ext[]; . == $x))) // null;
-  def plain: gsub("\\\\(?<c>.)"; .c);'
+  def plain: gsub("\\\\(?<c>.)"; .c);
+  def ind: match("^\\s*").length;
+  def tq: [scan("\"\"\"|\u0027\u0027\u0027")] | length;
+  def shin: foreach .[] as $l ({s: [], h: null, t: false, in: false};
+      if .h then .in = true | if (if .t then $l | sub("^\t+"; "") else $l end) == .h then .h = null else . end
+      else .in = (.s | length > 0) | .p = null | .x = false
+        | reduce ($l | [scan("\\\\.|\\$\\(|\\$\u0027|\u0027|\"|[()]|<<<|<<-?\\s*[\"\u0027]?[A-Za-z_][A-Za-z0-9_]*[\"\u0027]?|(?<!\\S)#")][]) as $k (.; .s[-1] as $top
+          | if .x then .
+            elif $top == "\u0027" then (if $k | endswith("\u0027") then .s |= .[:-1] else . end)
+            elif $top == "$\u0027" then (if $k == "\u0027" or $k == "$\u0027" then .s |= .[:-1] else . end)
+            elif $top == "\"" then (if $k == "\"" then .s |= .[:-1] elif $k == "$(" then .s += [$k] else . end)
+            elif $k == "#" then .x = true
+            elif $k == "\u0027" or $k == "$\u0027" or $k == "\"" or $k == "$(" then .s += [$k]
+            elif $k == "(" then (if $top then .s += [$k] else . end)
+            elif $k == ")" then (if $top then .s |= .[:-1] else . end)
+            elif ($k | startswith("<<<")) or ($k | startswith("\\")) or .p then .
+            else .p = ($k | sub("^<<-?\\s*[\"\u0027]?"; "") | sub("[\"\u0027]$"; "")) | .t = ($k | startswith("<<-")) end)
+        | .h = .p end; .in);
+  def jsin: foreach .[] as $l ({s: [], in: false};
+      .in = (.s | length > 0) | .x = false
+      | reduce ($l | [scan("\\\\.|`|\u0027|\"|//|/\\*|\\*/|\\$\\{|[{}]")][]) as $k (.; .s[-1] as $top
+          | if .x then .
+            elif $top == "/*" then (if $k == "*/" then .s |= .[:-1] else . end)
+            elif $top == "\u0027" or $top == "\"" then (if $k == $top then .s |= .[:-1] else . end)
+            elif $top == "`" then (if $k == "`" then .s |= .[:-1] elif $k == "${" then .s += ["${"] else . end)
+            elif $k == "//" then .x = true
+            elif $k == "/*" or $k == "`" or $k == "\u0027" or $k == "\"" then .s += [$k]
+            elif $top == null then .
+            elif $k == "{" or $k == "${" then .s += ["{"]
+            elif $k == "}" then .s |= .[:-1]
+            else . end)
+      | .s |= until(length == 0 or (.[-1] | . != "\u0027" and . != "\""); .[:-1]); .in);'
 hollowproof() { # <card> <worktree> <issue json> <test file>
   local wt=$2 f=$4 c x cs starts='' rw kept gone=() uncov=() cov s j why='' found='' old='' sc d
   rm -f "$wt.unfixed"
@@ -1938,12 +1976,24 @@ hollowproof() { # <card> <worktree> <issue json> <test file>
   cs=$(jq -r '.body // ""' <<<"$3" | tatagged HOLLOW "$TAHOLLOW" /dev/stdin 2>/dev/null | jq -r '.[] | objects | .case | gsub("^[`\"\u0027]+|[`\"\u0027]+$"; "")' 2>/dev/null | awk 'NF && !s[$0]++')
   # The lines of the file that start a case (HOLLOW_JQ; the whole file for a language it has no row for), each plain: a
   # case is kept while one of them names it, so its name left in a comment does not keep it, also when no case is left.
-  # Each start line is kept in starts with its line number first (<n><tab><line>); a language with no row has none, as
-  # a line of it is not a case.
+  # Each start line is kept in starts with its line number and the number of the case's last line first
+  # (<n><tab><e><tab><line>); a language with no row has none, as a line of it is not a case. A case ends at its close
+  # line (the row's close; for Python the line before the next line of code at most as far in as its start line), and
+  # at the latest on the line before the next start line, so the code between two cases (a table of values set up for
+  # a later case) is in no case (#606). A line of fixture text in a case (a JSON record in a heredoc, the end of a
+  # template string, a comment or a docstring at the left edge) does not end it, as it starts inside text (shin, jsin,
+  # tq); brackets are not counted, as one in a regular expression or a case pattern closes nothing.
   [ ! -e "$wt/$f" ] || starts=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
-      | if $t == null then "none" else ["row"] + [split("\n") | to_entries[] | select(.value | test($t.case)) | "\(.key + 1)\t\(.value | plain)"] | join("\n") end' "$wt/$f" 2>/dev/null)
+      | if $t == null then "none" else split("\n") as $ls | [range(0; $ls | length) | select($ls[.] | test($t.case))] as $k
+        | (if $t.close == null then [] elif $t.sh then [$ls | shin] else [$ls | jsin] end) as $tx | [$ls[] | tq] as $tq
+        | ["row"] + [range(0; $k | length) as $i | $k[$i] as $a | (if $i + 1 < ($k | length) then $k[$i + 1] else ($ls | length) end) as $z
+          | ($ls[$a] | ind) as $in
+          | (if $t.close then first(range($a; $z) | select(($tx[.] | not) and ($ls[.] | ind) <= $in and ($ls[.] | test($t.close)))) // ($z - 1)
+            else (first(foreach range($a + 1; $z) as $j ({q: $tq[$a]}; {p: .q, q: (.q + $tq[$j])};
+                select(.p % 2 == 0 and ($ls[$j] | test($t.note) | not) and ($ls[$j] | ind) <= $in) | $j)) // $z) - 1 end) as $e
+          | "\($a + 1)\t\($e + 1)\t\($ls[$a] | plain)"] | join("\n") end' "$wt/$f" 2>/dev/null)
   rw=$(head -n 1 <<<"$starts"); starts=$(tail -n +2 <<<"$starts")
-  if [ "$rw" = row ]; then kept=$(cut -f2- <<<"$starts"); else kept=$(sed 's/\\\(.\)/\1/g' "$wt/$f" 2>/dev/null); fi
+  if [ "$rw" = row ]; then kept=$(cut -f3- <<<"$starts"); else kept=$(sed 's/\\\(.\)/\1/g' "$wt/$f" 2>/dev/null); fi
   while IFS= read -r c; do
     [ -n "$c" ] || continue
     [ -e "$wt/$f" ] && grep -qF -- "$c" <<<"$kept" || gone+=("$c")
@@ -1968,8 +2018,7 @@ hollowproof() { # <card> <worktree> <issue json> <test file>
       # The lines the change added or changed in the file, by their number in the file it leaves; a line that is a note
       # (blank or a comment) changes no case. A deletion is placed at the lines added in its place, or between the two
       # lines round it (<n>.5) when none are, so it changes only a case that holds both; one that deletes a start line
-      # deletes cases, and changes none of the cases kept. A case runs from its start line to the line before the next
-      # start line.
+      # deletes cases, and changes none of the cases kept. A case runs from its start line to its last line (starts).
       d=$(git -C "$wt" diff --cached -U0 HEAD -- "$f" 2>/dev/null | jq -Rsr --arg f "$f" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
           | reduce split("\n")[] as $l ([]; if ($l | test("^@@ ")) then . + [$l | capture("^@@ -[0-9,]+ \\+(?<b>[0-9]+)") | (.b | tonumber) as $b | {b: $b, i: $b, a: [], del: false, s: false}]
               elif length == 0 or $t == null then .
@@ -1981,9 +2030,8 @@ hollowproof() { # <card> <worktree> <issue json> <test file>
       # it, or when no start line names it, so it cannot be placed. Else (old) it is an old case of the file (#584). A
       # name is read plain; one of a single word that no start line holds (TestX.test_y) is read by its last part.
       if ! sc=$(tahollow "$wt.judge" 2>/dev/null | jq -ce --arg s "$starts" --arg c "$cs" --arg d "$d" "$TESTEDIT_TABLE$HOLLOW_JQ"'
-          [$s | split("\n")[] | capture("^(?<n>[0-9]+)\t(?<t>.*)$") | .n |= tonumber] as $st
+          [$s | split("\n")[] | capture("^(?<n>[0-9]+)\t(?<e>[0-9]+)\t(?<t>.*)$") | .n |= tonumber | .e |= tonumber] as $r
           | [$c | split("\n")[] | select(length > 0) | plain] as $named | [$d | split("\n")[] | select(length > 0) | tonumber] as $ch
-          | [range(0; $st | length) as $i | $st[$i] + {e: (if $i + 1 < ($st | length) then $st[$i + 1].n - 1 else infinite end)}] as $r
           | def on($x): [$r[] | select(.t | contains($x))];
             def held($x): (on($x) | if . == [] and ($x | test("^[A-Za-z0-9_.:/-]+$")) then on([$x | splits("[.:/]+") | select(length > 0)] | last // $x) else . end) as $o
               | $o == [] or any($o[]; . as $k | any($named[]; . as $m | $k.t | contains($m)) or any($ch[]; . >= $k.n and . <= $k.e));
