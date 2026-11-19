@@ -60,7 +60,7 @@ has "$got" dashboard-view.cards-needs.test.mjs && has "$got" zz-new.test.mjs \
 
 # A change to a panel's default length: page-panels checks every panel's length through the helpers' list, page-states
 # draws each panel through panelState; neither names the panel in a way the other rules read.
-got=$(listed .claude/dashboard/panels/declined.js 'rows: 6' 'rows: 7'); n=$(grep -c . <<<"$got")
+got=$(listed .claude/dashboard/panels/declined.js 'rows: 5,' 'rows: 6,'); n=$(grep -c . <<<"$got")
 for t in cards-needs declined page-panels page-states; do
   has "$got" "dashboard-view.$t.test.mjs" || no "a change to panels/declined.js does not list dashboard-view.$t.test.mjs: $(tr '\n' ' ' <<<"$got")"
 done
