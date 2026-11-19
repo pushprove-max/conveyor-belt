@@ -81,14 +81,19 @@ test('Board: a new snapshot keeps the focus on a parent row\'s summary and on th
   deliver(w, snap());
   const det = () => row(w, 90);
   det().open = true;
-  const again = () => { const d = snap(); d.panels.board.data.building.at(-1).step = d.panels.board.data.building.at(-1).step === 'tests' ? 'merge' : 'tests'; return d; };
+  // Each snapshot differs from the one before (a part's step changes), so the Board draws the row again each time
+  // rather than skipping an equal snapshot.
+  const steps = ['merge', 'review'];
+  const again = () => { const d = snap(); d.panels.board.data.building.at(-1).step = steps.shift(); return d; };
   const was = det().querySelector('.board-part[data-part="#93"] [data-act="part-card"]');
   was.focus();
   next(w, again());
   assert.notEqual(det().querySelector('.board-part[data-part="#93"] [data-act="part-card"]'), was, 'the row was drawn again');
   assert.equal(w.document.activeElement, det().querySelector('.board-part[data-part="#93"] [data-act="part-card"]'), 'the same part\'s link');
-  det().querySelector('summary').focus();
+  const head = det().querySelector('summary');
+  head.focus();
   next(w, again());
+  assert.notEqual(det().querySelector('summary'), head, 'the row was drawn again');
   assert.equal(w.document.activeElement, det().querySelector('summary'), 'the row\'s summary');
 });
 
