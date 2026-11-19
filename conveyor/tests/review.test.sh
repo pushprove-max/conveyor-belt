@@ -200,6 +200,22 @@ t_privfix() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P0] a.txt:3 flags $HX/bench
 ---" ] || fail "the privacy finding on the card's own line is not found as one, or one on a line the card did not add is: $(cat "$T/$CASE/run.out")"
 }
+# Bug: card() does not join privown() to the fix round: a last-review privacy hit on a line the card added is filed as
+# a follow-up (landing the hit on main), or its fix round is not given, or the hit lands. A loop run: the choice of one
+# more fix round is made inline in card() after its last review, which no engine function exposes alone. The build stub
+# knows its fix session by the file its first session writes; it drops the line only when the fix brief names the hit.
+t_privfixrun() {
+  setup "[$(issue 7 2026-01-01)]"; export HX
+  echo 'if [ -e "$STUB/built" ]; then echo fix >> a.txt; ! grep -qF "$HX/bench" "$STUB/brief" || { grep -vF "$HX/bench" a.txt > a.new; mv a.new a.txt; }
+    else : > "$STUB/built"; printf "two\ncd %s/bench\n" "$HX" >> a.txt; fi' > "$STUB/build"
+  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "review") | .result' | tr '\n' ' ')" = "NO-GO NO-GO NO-GO GO " ] && [ ! -e "$STUB/filed" ] \
+    || fail "the privacy finding on the card's own line did not go to a fix round: $(st 'select(.step == "review") | .result' | tr '\n' ' ') $(cat "$STUB/filed" 2>&1)"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] && ! grep -qF "$HX" "$R/a.txt" && grep -qx fix "$R/a.txt" \
+    || fail "the card did not land the corrected change only: $(cat "$R/a.txt")"
+}
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
 # level on its third NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
@@ -242,6 +258,17 @@ t_declinefail() {
   fx_in 'printf "%s\n" "[P1] a.txt:1 wrong word" | decline c1-7 7 "$FUCAP"'
   [ "$RC" != 0 ] && grep -q '^conveyor: card c1-7: its declined findings could not be written to ' "$T/$CASE/run.out" \
     || fail "a declined list that cannot be written did not fail decline() saying so: exit $RC, $(cat "$T/$CASE/run.out")"
+}
+# Bug: card() ignores decline()'s failure after the landing: the depth-capped card ends landed and clean, and its review
+# goes with its worktree. A loop run: the landing, then decline(), then the block that keeps the review are joined
+# inline in card(), which no engine function exposes alone.
+t_declinefailrun() {
+  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
+  mkdir -p "$ST/declined.jsonl"
+  loop run >/dev/null 2>&1 || fail "run exited non-zero"
+  [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \
+    && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the declined list' || fail "a card whose findings could not be declined did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"
+  k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'wrong word' "$k"/*.review || fail "the review of the findings that could not be declined was not kept: $(ls "$k" 2>&1)"
 }
 
 # The owner approves every change to how the engine builds, reviews, fixes, tests, lands or pushes. Bugs: a leftover
