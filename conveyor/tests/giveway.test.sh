@@ -9,157 +9,146 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Two cards overlap on a.txt: #7 appends to it and changes its line 8, #8 (built once #7 holds a.txt, or with
-# $STUB/late once #7 gave way) changes its first line and line 8 too, so the two changes do not apply together and #8
-# is ready to land whenever main moves. #7's first tests end once #8 waits on it (with
-# $STUB/late at once), and then main's last line changes under #7: its landing conflicts and it needs a rebase. The
-# rebase session of #7 runs $STUB/rebase, then keeps #7's claim (as it is in the first such session), #8's wait record and claim and, with $STUB/snapit (a snapshot costs
-# the case's one core about a second, so only the cases that read it take one), the Board's
-# line for #7, and appends #7's line: line 8 it leaves alone, unless $STUB/rebase changes it again, so #7's change then
-# applies on #8's. A session that brings #8 onto main changes its first line alone. Every test run notes when two cards hold a.txt at once, and keeps #7's claim
-# as it is during its first tests and its tests after the rebase; a run of #7's tests after those keeps its claim and
-# the first line of its a.txt (fitted*), and runs $STUB/fitmove, if there, once.
-gwsetup() { # [a line of the rebase session, before #7's change]
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in $(seq 6); do echo "$GO" > "$STUB/review.$i"; done
-  seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
-  { printf 'SRC=%q\n' "$SRC"; cat <<'EOF'; } > "$STUB/build"
-if grep -q '^# Landing conflict' "$STUB/brief" && [ "${PWD##*-}" = 8 ]; then { echo eight; tail -n +2 a.txt; } > a.new && mv a.new a.txt
-elif grep -q '^# Landing conflict' "$STUB/brief"; then
-  . "$STUB/rebase"
-  [ -e "$STUB/rebaseclaim" ] || cp ../*-7.claim "$STUB/rebaseclaim"; cp ../*-8.live "$STUB/rebaselive8" 2>/dev/null; cp ../*-8.claim "$STUB/rebaseclaim8" 2>/dev/null
-  [ ! -e "$STUB/snapit" ] || CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot --fresh > "$STUB/snap" 2>/dev/null
-  echo seven >> a.txt
-elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then { echo eight; tail -n +2 a.txt; } > a.new && mv a.new a.txt
-else case $PWD in
-  *-7) echo seven >> a.txt; sed -i 8s/.*/seven-8/ a.txt; [ ! -e "$STUB/seed" ] || cp "$STUB/seed" "$PWD.claim" ;;
-  *) w=.held; [ ! -e "$STUB/late" ] || w=.away
-    while [ -d "$STUB" ]; do jq -e "$w" ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done; { echo eight; tail -n +2 a.txt; } > a.new && mv a.new a.txt; sed -i 8s/.*/eight-8/ a.txt ;;
-esac; fi
-EOF
-  printf '%s\n' "${1:-:}" > "$STUB/rebase"
-  cat >> "$STUB/test-cmd" <<'EOF'
-[ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held == true and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
-case $PWD in *-7) if [ ! -e "$STUB/moved" ]; then cp ../*-7.claim "$STUB/firsttestclaim"
-  elif [ ! -e "$STUB/retestclaim" ]; then cp ../*-7.claim "$STUB/retestclaim"
-  else cp ../*-7.claim "$STUB/fittedclaim"; head -n 1 a.txt > "$STUB/fittedfirst"; [ ! -e "$STUB/fitmove" ] || { . "$STUB/fitmove"; rm -f "$STUB/fitmove"; }; fi
-  [ -e "$STUB/moved" ] || { : > "$STUB/moved"
-  [ -e "$STUB/late" ] || while [ -d "$STUB" ]; do jq -e .waits.on ../*-8.live >/dev/null 2>&1 && { cp ../*-8.live "$STUB/waitlive"; break; }; sleep 0.1; done
-  [ ! -e "$STUB/back" ] || . "$STUB/back"
-  { head -n 19 "$R/a.txt"; echo twenty; } > "$STUB/a.new" && mv "$STUB/a.new" "$R/a.txt" && git -C "$R" commit -qam "main changes the last line"; } ;;
-esac
-EOF
+# The fixture of most cases: main's a.txt of 20 lines, and for each card <n> a worktree c<n>-<n> on main with its
+# picked line, in the order given. No loop runs: each case calls the engine's own functions (gweng) on what it seeds.
+gwcards() { # <n>...
+  local n
+  setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in "$@"; do
+    git -C "$R" worktree add -q "$CARDS/c$n-$n" -b "card-$n" main
+    echo "{\"card\":\"c$n-$n\",\"issue\":$n,\"step\":\"picked\",\"time\":\"2026-01-01T00:00:0${n}Z\",\"tokens\":{\"claude\":0,\"codex\":0},\"result\":\"ok\",\"sha\":\"\",\"reason\":\"\",\"repo\":\"main\",\"title\":\"card $n\"}" >> "$ST/cards.jsonl"
+  done
 }
-# The rebase session's wait for #8 to land. It gives up once #8 is gone (blocked: its worktree removed), or when #7
-# kept its claim through the session (it did not give way), where #8 can only wait on #7: the case then fails, not hangs.
-GWLANDED='while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"landed\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break
-  ls -d ../*-8 >/dev/null 2>&1 || break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done'
-
-# #8 landed first, then #7 from the new main, never both holding a.txt at once, and nothing is left. #7 ran its tests
-# after the rebase on a main without #8; fitted onto #8's main, which changed a.txt, it runs a.test.sh, the test file
-# linked to a.txt, once more there (#447: a test file a landed card touched runs again once), and lands.
-gwlanded() {
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
-    || fail "#8, ready, did not land while #7 was being rebased: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "eight seven " ] && [ "$(tail -n 2 "$R/a.txt" | head -n 1)" = twenty ] \
-    || fail "#7 did not land on the new main, after #8 and main's own change: $(cat "$R/a.txt")"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test test landed " ] \
-    || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  grep -q "card $(st 'select(.issue == 7 and .step == "picked") | .card'): cards landed since its tests ran touch its test files too, so they run again on main as it is now: a.test.sh" <<<"$out" \
-    || fail "#7's landing did not run a.test.sh once more on #8's main: $out"
-  [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or claim is left: $(ls "$T/$CASE/cards")"
+gwchg() { (cd "$CARDS/c$1-$1" && sed -i "$2" a.txt && git add -A); } # <n> <sed script>: card <n>'s change to a.txt, staged
+gwclaim() { echo "{\"pid\":$$,\"paths\":[\"a.txt\"],$2}" > "$CARDS/c$1-$1.claim"; } # <n> <the rest of its claim>: alive, on a.txt
+gwc() { jq -c "$2" "$CARDS/c$1-$1.claim"; } # <n> <jq filter>: card <n>'s claim
+# <command...> in main's checkout, with the engine's files sourced as `conveyor.sh run` sources them, on this case's
+# main and cards folder: land(), settle(), claim() and giveway() as the engine runs them, with what they call.
+gweng() {
+  # shellcheck source=/dev/null # the engine's own files, by the list commands/run.sh names
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$CARDS; . "$SRC/conveyor.sh" state-dir > /dev/null || exit 1
+    for l in $(sed -n 's|^\. "\$HERE/lib/\([a-z]*\)\.sh" .*|\1|p' "$SRC/commands/run.sh"); do . "$HERE/lib/$l.sh" || exit 1; done
+    names && cd "$R" && "$@" )
+}
+# A change of #8 that applies only on #7's (line 1 seven): #8 stacked on #7 (stackto()), its worktree on main plus #7's
+# change and its own change after it, red there (stackred). On main alone #8 is not ready (ready()).
+gwstack8() {
+  gwchg 7 1s/.*/seven/
+  (cd "$CARDS/c8-8" && sed -i 1s/.*/seven/ a.txt && git commit -qam "main plus #7's change" && sed -i 1s/.*/seven-eight/ a.txt && git add -A)
+  jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
+  echo '{"issue":8,"stackred":true}' > "$CARDS/c8-8.ready"
+}
+# Main gets b.txt, a file no card touches, as another card's landing in other files moves it.
+gwmainb() { echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt"; }
+# watch() as a fix session of card <n> runs under it, its live record copied to $STUB/live once watch() has taken up
+# the session's one output line: the look that read that line read the claim first. A real process stands for the
+# session, as watch() looks at the claim only between the looks it takes while one runs: no call of a function
+# shows what it writes there. The process polls the live record for that line (10 s at most), then ends.
+gwlive() { # <n>
+  # shellcheck disable=SC2329 # called by gweng
+  gwwatch() {
+    local wt=$CARDS/c$1-$1
+    # shellcheck disable=SC2034 # read by watch(): a look every 0.05 s, and no stall in the case's time
+    LIVE=0.05 STUCK=600
+    echo '{"type":"system"}' > "$wt.out"
+    ( WAIT_CEILING=10 wait_until "jq -e .last '$wt.live' >/dev/null 2>&1" 2>/dev/null; cp "$wt.live" "$STUB/live" ) &
+    watch $! "$wt.out" "$wt.live" fix
+  }
+  gweng gwwatch "$1"
 }
 
 # Bug: a card that took its land turn kept it through a rebase, a new review, a fix and its tests, and every card that
-# shares a file with it waited the whole time (7 ready cards waited 2.5 hours on one). #7 needs a rebase while #8, ready,
-# waits on it: #7 gives way for the rebase (its claim holds nothing, counted, naming #8, shown on the Board), #8 lands
-# meanwhile, and #7 then goes on from the new main, runs its tests there still holding nothing, and lands. Never two
-# cards hold a.txt at once.
+# shares a file with it waited the whole time (7 ready cards waited 2.5 hours on one). #7 holds a.txt and needs a
+# rebase while #8, its change clashing with #7's on line 8, waits: #7 gives way (its claim holds nothing, counted,
+# naming #8 among those it gave way for), #8 then claims a.txt, and #7's claim and the Board name #8.
 t_giveway() {
-  gwsetup "$GWLANDED"; : > "$STUB/snapit"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
-  [ "$(jq -r .waits.on "$STUB/waitlive" 2>/dev/null)" = "$c7" ] || fail "#8 did not wait on #7 to land: $(cat "$STUB/waitlive" 2>/dev/null)"
-  [ "$(jq -c '[.held, .away, .gave, .to]' "$STUB/rebaseclaim" 2>/dev/null)" = '[false,true,1,8]' ] \
-    || fail "#7 did not give way to #8 for its rebase, counted once: $(cat "$STUB/rebaseclaim" 2>/dev/null)"
-  [ "$(jq -c '.belt[] | select(.issue == 7) | .gaveWay' "$STUB/snap" 2>/dev/null)" = 8 ] \
-    || fail "the snapshot does not say #7 gave way to #8: $(jq -c '.belt' "$STUB/snap" 2>/dev/null)"
-  [ "$(jq -c .held "$STUB/firsttestclaim" 2>/dev/null)" = true ] || fail "#7 did not hold a.txt through its first tests: $(cat "$STUB/firsttestclaim" 2>/dev/null)"
-  [ "$(jq -c '[.held, .away]' "$STUB/retestclaim" 2>/dev/null)" = '[false,true]' ] \
-    || fail "#7 held a.txt through its tests after the rebase, before it was ready: $(cat "$STUB/retestclaim" 2>/dev/null)"
-  gwlanded
+  gwcards 7 8; gwchg 7 8s/.*/seven-8/; gwchg 8 '1s/.*/eight/;8s/.*/eight-8/'
+  gwclaim 7 '"held":true,"gave":0'; gwclaim 8 '"held":false,"passed":false'
+  gweng giveway c7-7 "$CARDS/c7-7" && [ "$(gwc 7 '[.held, .away, .gave, .for]')" = '[false,true,1,["c8-8"]]' ] \
+    || fail "#7 did not give way for its rebase to the waiting #8, counted once: $(cat "$CARDS/c7-7.claim")"
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] || fail "#8 did not claim a.txt once #7 gave way: $w $(cat "$CARDS/c8-8.claim")"
+  [ "$(gwc 7 '[.held, .away, .gave, .to]')" = '[false,true,1,8]' ] || fail "#7's claim does not name #8, which took its turn: $(cat "$CARDS/c7-7.claim")"
+  out=$(loop snapshot --fresh 2>/dev/null)
+  [ "$(jq -c '.belt[] | select(.issue == 7) | .gaveWay' <<<"$out" 2>/dev/null)" = 8 ] || fail "the snapshot does not say #7 gave way to #8: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
 }
 
 # Bug: a card gave way only to a card already waiting when it began its rebase, so one that came to land during the
-# rebase waited the whole session. #8 is built only once #7 has given way, with no card waiting: #8 lands during #7's
-# rebase, and #7 names it.
+# rebase waited the whole session. #7 gives way with no card waiting; #8 comes to its claim after that, claims a.txt
+# at once, and #7 names it.
 t_givewaylate() {
-  gwsetup "$GWLANDED"; : > "$STUB/late"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(jq -c '[.held, .away, .gave, .to]' "$STUB/rebaseclaim" 2>/dev/null)" = '[false,true,1,8]' ] \
-    || fail "#7 did not give way for its rebase with no card waiting, or does not name #8: $(cat "$STUB/rebaseclaim" 2>/dev/null)"
-  gwlanded
+  gwcards 7 8; gwchg 7 8s/.*/seven-8/; gwchg 8 '1s/.*/eight/;8s/.*/eight-8/'
+  gwclaim 7 '"held":true,"gave":0'
+  gweng giveway c7-7 "$CARDS/c7-7" && [ "$(gwc 7 '[.held, .away, .gave, .for]')" = '[false,true,1,[]]' ] \
+    || fail "#7 did not give way for its rebase with no card waiting: $(cat "$CARDS/c7-7.claim")"
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] || fail "#8, come during #7's rebase, did not claim a.txt: $w"
+  [ "$(gwc 7 '[.held, .away, .to]')" = '[false,true,8]' ] || fail "#7 does not name #8, which came after it gave way: $(cat "$CARDS/c7-7.claim")"
 }
 
-# Bug: a card that gave way could take its turn back before the card it gave way to looked again. #8 waits on #7 and
-# sleeps between its looks from #7's tests through its whole rebase and review (stopped, $STUB/back): #7, ready again,
-# waits for #8 until #8 has looked again and claimed a.txt. #7's rebase keeps its change to line 8, so it overlaps #8's
-# still. #8 then runs its tests holding a.txt (with batches off, a waiting card runs none), and #7, ready, goes past it
-# and lands first (a ready card lands first, the owner, 2026-11-18): #8's landing's rebuild brings it onto #7's main.
+# Bug: a card that gave way could take its turn back before the card it gave way to looked again. #7 gave way to #8,
+# which waits and has not looked again: #7, back at its claim, waits for #8 and stays away; once #8 holds a.txt, #7
+# waits on it as on any holder; once #8 has landed (its change on main, its landed line, its worktree and claim gone,
+# as land() and clean() leave them), #7 claims a.txt.
 t_givewayback() {
-  gwsetup 'sed -i 8s/.*/seven-8/ a.txt'
-  cat > "$STUB/back" <<'EOF'
-p=$(jq .pid ../*-8.claim); while kill -STOP "$p" 2>/dev/null; do pgrep -P "$p" -x sleep >/dev/null && break; kill -CONT "$p"; sleep 0.05; done
-( while [ -d "$STUB" ]; do jq -e .waits.on ../*-7.live >/dev/null 2>&1 && { cp ../*-7.live "$STUB/backlive"; break; }; sleep 0.1; done; kill -CONT "$p" ) >/dev/null 2>&1 &
-EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
-  [ "$(jq -c '[.held, .away, .gave, .for]' "$STUB/rebaseclaim" 2>/dev/null)" = "[false,true,1,[\"$c8\"]]" ] \
-    || fail "#7 did not give way to the waiting #8: $(cat "$STUB/rebaseclaim" 2>/dev/null)"
-  [ "$(jq -r .waits.on "$STUB/backlive" 2>/dev/null)" = "$c8" ] || fail "#7, ready again, did not wait for #8: $(cat "$STUB/backlive" 2>/dev/null)"
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(sed -n '1p;8p;$p' "$R/a.txt" | tr '\n' ' ')" = "eight seven-8 seven " ] \
-    || fail "#7, ready, did not land first, then #8 on its main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test landed " ] \
-    || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  [ "$(st "select(.issue == 8 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test landed " ] \
-    || fail "#8 was not brought onto #7's main by a session and reviewed and tested there: $(st "select(.issue == 8) | .step" | tr '\n' ' ')"
-  [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or claim is left: $(ls "$T/$CASE/cards")"
+  gwcards 7 8; gwchg 7 8s/.*/seven-8/; gwchg 8 '1s/.*/eight/;8s/.*/eight-8/'
+  gwclaim 7 '"held":false,"away":true,"gave":1,"for":["c8-8"],"to":null'; gwclaim 8 '"held":false,"passed":false'
+  w=$(gweng claim c7-7 "$CARDS/c7-7" $$) && [ "$(jq -r .on <<<"$w")" = c8-8 ] && [ "$(gwc 7 '[.held, .away, .back]')" = '[false,true,true]' ] \
+    || fail "#7 took its turn back before #8, which it gave way to, looked again: $w $(cat "$CARDS/c7-7.claim")"
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] || fail "#8 did not claim a.txt, #7 waiting for it: $w"
+  w=$(gweng claim c7-7 "$CARDS/c7-7" $$) && [ "$(jq -r .on <<<"$w")" = c8-8 ] || fail "#7 did not wait on #8, which holds a.txt: $w"
+  git -C "$CARDS/c8-8" diff --cached | git -C "$R" apply --index && git -C "$R" commit -qm "card 8" || fail "#8's change did not go onto main"
+  echo "{\"card\":\"c8-8\",\"issue\":8,\"step\":\"landed\",\"sha\":\"$(git -C "$R" rev-parse main)\"}" >> "$ST/cards.jsonl"
+  git -C "$R" worktree remove --force "$CARDS/c8-8" && rm -f "$CARDS"/c8-8.* || fail "#8's worktree could not be removed"
+  w=$(gweng claim c7-7 "$CARDS/c7-7" $$) && [ -z "$w" ] && [ "$(gwc 7 '[.held, .away]')" = '[true,null]' ] \
+    || fail "#7 did not claim a.txt once #8 landed: $w $(cat "$CARDS/c7-7.claim")"
 }
 
-# Bug: a card that gave way ran its checks and tests on a main without the card that landed meanwhile; fitted onto
-# that card's main, it landed with no second run, a combination that never passed them. A check forbids #8's first
-# line beside #7's last: #7's checks pass before #8 lands, and run again once #7 is fitted onto #8's main, where they
-# block it, and nothing of #7 lands.
-t_givewaycheck() {
-  gwsetup "$GWLANDED"
-  printf '%s\n' '! { [ "$(head -n 1 a.txt)" = eight ] && [ "$(tail -n 1 a.txt)" = seven ]; } || { echo "eight and seven together"; exit 1; }' > "$STUB/both-check.sh"
-  tune --arg a "$STUB/both-check.sh" '.checks = [$a]'
-  loop run >/dev/null 2>&1
+# The cases below run one card through the real loop (loop run): what they protect is card()'s order of calls on its
+# land step (fit the card onto main as it is now, claim its files again, run its checks again, block or land), and only
+# card() makes those calls; a direct call of settle(), checks() or land() passes with card() skipping one. One card
+# only, with the stub sessions, so no case waits on a second card.
+# #7 (issue 7, every review GO) changes a.txt's last line to seven; its check $STUB/both-check.sh is <check>. With
+# $STUB/broken-build, its build also leaves a file `broken` that fails its tests until its test-fix session removes it.
+gwone() { # <check>
+  setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3 4 5; do echo "$GO" > "$STUB/review.$i"; done
+  seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  printf '%s\n' "$1" > "$STUB/both-check.sh"; tune --arg a "$STUB/both-check.sh" '.checks = [$a]'
+  echo 'if grep -q "^# The changed tests fail" "$STUB/brief"; then rm -f broken; else sed -i 20s/.*/seven/ a.txt; [ ! -e "$STUB/broken-build" ] || : > broken; fi' > "$STUB/build"
+  echo '[ ! -e broken ] || { echo "FAIL broken.test"; exit 1; }' >> "$STUB/test-cmd"
+}
+# Nothing of #7 landed: it is blocked by its check, which printed <failure>, and main does not have its line.
+gwblocked() { # <failure> <what moved main>
   [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "a product check failed; nothing landed." ] \
-    && st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -q 'eight and seven together' \
-    || fail "#7, fitted onto #8's main after its checks, was not checked again there: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 " ] && ! grep -qx seven "$R/a.txt" \
-    || fail "#7 landed a combination its checks never passed: $(cat "$R/a.txt")"
+    && st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -q "$1" \
+    || fail "#7, fitted onto main after $2, was not checked again there: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ -z "$(st 'select(.step == "landed") | .issue')" ] && ! grep -qx seven "$R/a.txt" || fail "#7 landed a combination its checks never passed ($2): $(cat "$R/a.txt")"
 }
-
+# Bug: a card that gave way ran its checks and tests on a main without the card that landed meanwhile; fitted onto
+# that card's main, it landed with no second run, a combination that never passed them. #7's tests fail and it gives
+# way for their fix; during its tests after the fix (its third run, holding nothing), #8's change to the first line
+# lands. A check forbids it beside #7's last line.
+t_givewaycheck() {
+  gwone '! { [ "$(head -n 1 a.txt)" = eight ] && [ "$(tail -n 1 a.txt)" = seven ]; } || { echo "eight and seven together"; exit 1; }'
+  : > "$STUB/broken-build"
+  { echo 'case $PWD in *-7) n=$(($(cat "$STUB/runs7" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/runs7"'
+    echo '  [ $n != 3 ] || { cp "$PWD.claim" "$STUB/awayclaim"; sed -i 1s/.*/eight/ "$R/a.txt"; git -C "$R" commit -qam "card 8"; } ;; esac'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" \
+    && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
+  loop run >/dev/null 2>&1
+  [ "$(jq -c '[.held, .away]' "$STUB/awayclaim" 2>/dev/null)" = '[false,true]' ] || fail "#7 had not given way when main moved: $(cat "$STUB/awayclaim" 2>/dev/null)"
+  gwblocked 'eight and seven together' "#8 landed while #7 was away"
+}
 # A card that never gave way: main gets b.txt (a file #7 does not hold, so no card waits) at the moment $STUB/bmove
 # names: during #7's tests (test) or between its tests and its landing (land, at the limit reading land asks for). A
 # check forbids b.txt beside #7's line: it passes on the main #7's tests ran on, runs again on main with b.txt, and
-# blocks #7 there; nothing of #7 lands.
+# blocks #7 there.
 heldmove() { # <test|land>
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo "$1" > "$STUB/bmove"
+  gwone '! { [ -e b.txt ] && [ "$(tail -n 1 a.txt)" = seven ]; } || { echo "b.txt and seven together"; exit 1; }'
+  echo "$1" > "$STUB/bmove"
   printf '%s\n' 'echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt" && rm -f "$STUB/bmove"' > "$STUB/addb"
   echo '[ "$(cat "$STUB/bmove" 2>/dev/null)" != test ] || . "$STUB/addb"; : > "$STUB/tested"' >> "$STUB/test-cmd"
-  printf '%s\n' '! { [ -e b.txt ] && [ "$(tail -n 1 a.txt)" = two ]; } || { echo "b.txt and two together"; exit 1; }' > "$STUB/both-check.sh"
-  tune --arg a "$STUB/both-check.sh" '.checks = [$a]'
   CONVEYOR_LIMIT_CMD='[ ! -e "$STUB/tested" ] || [ "$(cat "$STUB/bmove" 2>/dev/null)" != land ] || . "$STUB/addb"' loop run >/dev/null 2>&1
   [ ! -e "$STUB/bmove" ] || fail "main never got b.txt ($1): $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "a product check failed; nothing landed." ] \
-    && st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -q 'b.txt and two together' \
-    || fail "#7, whose main moved ($1) after its checks, was not checked again: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ -z "$(st 'select(.step == "landed") | .issue')" ] && [ "$(cat "$R/a.txt")" = one ] \
-    || fail "#7 landed a combination its checks never passed: $(cat "$R/a.txt")"
+  gwblocked 'b.txt and seven together' "main moved ($1)"
 }
 # Bug: main moved during the tests of a card that held its files throughout, and it landed onto that unchecked.
 t_heldtestmove() { heldmove test; }
@@ -167,26 +156,25 @@ t_heldtestmove() { heldmove test; }
 t_heldlandmove() { heldmove land; }
 
 # The owner (2026-11-13): a change that passed its tests and still applies to a main that moved is not tested again.
-# Main gets b.txt, which #7 does not touch, at the moment $STUB/bmove names (as heldmove() does, with no check that
-# fails), as another card's landing in other files moves it: #7 is fitted onto that main with no session and lands
-# there on its one test run (each later test line says it reused that run), with no second review. Batches are on, as
-# in a pack that leaves landBatch at its default.
+# #7's tests pass (tested()) and main gets b.txt, which #7 does not touch, during them (test) or after them (land):
+# settle() fits #7 onto that main with no session and no second review (exit 0, not 2), its tests stand there
+# (testedhere(): card() runs none; readysince(): it is ready), and land() lands it there.
 # It catches a card that runs its whole test run again each time main moves under it: with 10 to 20 minute runs and
 # several landings an hour, it holds its files run after run while finished cards wait on it.
 heldpass() { # <test|land>
-  setup "[$(issue 7 2026-01-01)]"; tune '.landBatch = 8'; echo "$GO" > "$STUB/review.1"; echo "$1" > "$STUB/bmove"
-  printf '%s\n' 'echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt" && rm -f "$STUB/bmove"' > "$STUB/addb"
-  echo '[ "$(cat "$STUB/bmove" 2>/dev/null)" != test ] || . "$STUB/addb"; : > "$STUB/tested"' >> "$STUB/test-cmd"
-  CONVEYOR_LIMIT_CMD='[ ! -e "$STUB/tested" ] || [ "$(cat "$STUB/bmove" 2>/dev/null)" != land ] || . "$STUB/addb"' loop run >/dev/null 2>&1
-  [ ! -e "$STUB/bmove" ] || fail "main never got b.txt ($1): $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(git -C "$R" log -1 --format=%s HEAD~1)" = "main adds b.txt" ] \
-    && [ "$(tr '\n' ' ' < "$R/a.txt")" = "one two " ] && [ -z "$(ls "$T/$CASE/cards")" ] \
-    || fail "#7 did not land on the main that moved ($1): $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(wc -l < "$STUB/tests")" = 1 ] && [ "$(st 'select(.issue == 7 and .step == "test" and .reused != true) | .result')" = pass ] \
-    && [ "$(st 'select(.issue == 7 and .step == "test") | .reused' | tail -n 1)" = true ] \
-    || fail "#7 ran its tests again after main moved ($1) in a file it does not touch: $(wc -l < "$STUB/tests") runs, $(st 'select(.issue == 7 and .step == "test")')"
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ -z "$(st 'select(.step == "fix" or .step == "rebase")')" ] \
-    || fail "#7 was reviewed again or given a session after main moved ($1): $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
+  local rc out
+  gwcards 7; gwchg 7 1s/.*/seven/; gwclaim 7 '"held":true,"gave":0'; echo '{"issue":7}' > "$CARDS/c7-7.ready"
+  [ "$1" = land ] || gwmainb || fail "main did not move"
+  gweng tested "$CARDS/c7-7"
+  [ "$1" != land ] || gwmainb || fail "main did not move"
+  gweng settle c7-7 7 "$CARDS/c7-7" '' land '{}'; rc=$?
+  [ $rc = 0 ] && [ "$(git -C "$CARDS/c7-7" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] \
+    || fail "#7 was not fitted onto the main that moved ($1) with no review again: exit $rc"
+  gweng testedhere "$CARDS/c7-7" && gweng readysince "$CARDS/c7-7" >/dev/null \
+    || fail "#7's tests do not stand on the main that moved ($1) in a file it does not touch: $(cat "$CARDS/c7-7.ready")"
+  out=$(gweng land c7-7 7 "$CARDS/c7-7" "card 7") || fail "#7 did not land on the main that moved ($1): $out"
+  [ "$(git -C "$R" log -1 --format=%s main~1)" = "main adds b.txt" ] && [ "$(head -n 1 "$R/a.txt")" = seven ] && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] \
+    || fail "#7 did not land on the main that moved ($1): $(git -C "$R" log --format=%s -3)"
 }
 # Main moved during the card's tests.
 t_heldtestpass() { heldpass test; }
@@ -194,21 +182,78 @@ t_heldtestpass() { heldpass test; }
 t_heldlandpass() { heldpass land; }
 
 # No card is passed forever: #7, whose claim has given way 3 times already, keeps its turn through its rebase (as
-# before give-ways) while #8 waits, and lands first. Never two cards hold a.txt at once. #7's rebase keeps its change
-# to line 8, so #8 overlaps it throughout and is brought onto main by one session after it.
+# before give-ways) while #8 waits on it.
 t_givewaykeep() {
-  gwsetup 'sed -i 8s/.*/seven-8/ a.txt'; echo '{"gave": 3}' > "$STUB/seed"; : > "$STUB/snapit"
+  gwcards 7 8; gwchg 7 8s/.*/seven-8/; gwchg 8 '1s/.*/eight/;8s/.*/eight-8/'
+  gwclaim 7 '"held":true,"gave":3'; gwclaim 8 '"held":false,"passed":false'
+  ! gweng giveway c7-7 "$CARDS/c7-7" && [ "$(gwc 7 '[.held, .away, .gave]')" = '[true,null,3]' ] \
+    || fail "#7, passed 3 times, did not keep its claim through its rebase: $(cat "$CARDS/c7-7.claim")"
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ "$(jq -r .on <<<"$w")" = c7-7 ] && [ "$(gwc 8 .held)" = false ] \
+    || fail "#8 did not wait on #7, which kept its turn: $w $(cat "$CARDS/c8-8.claim")"
+}
+
+# Bug: a card ready to land waited on a holder through the fix of the holder's failed tests (an hour of fix, review and
+# tests). The owner: "why are other cards waiting for it? can't they go in front". #7 holds a.txt and its tests fail
+# while #8, stacked on it and red there (gwstack8), waits: #7 gives way for the fix (fixing), #8 goes past it (on main
+# alone it is not ready: only a give-way for a fix lets a stacked card go on), and #7's claim, its live record
+# (watch()) and the Board (the snapshot's gaveWay and gaveWayFixing) name #8.
+t_givewayfix() {
+  gwcards 7 8; gwstack8; gwclaim 7 '"held":true,"gave":0'; gwclaim 8 '"held":false,"passed":false'
+  gweng giveway c7-7 "$CARDS/c7-7" fixing && [ "$(gwc 7 '[.held, .away, .gave, .for, .fixing]')" = '[false,true,1,["c8-8"],true]' ] \
+    || fail "#7 did not give way to #8 for the fix of its failed tests: $(cat "$CARDS/c7-7.claim")"
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] \
+    || fail "#8, stacked on #7 and red there, waited on #7 away for the fix of its tests: $w $(cat "$CARDS/c8-8.claim")"
+  [ "$(gwc 7 .to)" = 8 ] || fail "#7's claim does not name #8, which went in front: $(cat "$CARDS/c7-7.claim")"
+  gwlive 7; [ "$(jq -c '[.step, .gaveWay]' "$STUB/live" 2>/dev/null)" = '["fix",8]' ] || fail "#7's live record does not name #8: $(cat "$STUB/live" 2>/dev/null)"
+  out=$(loop snapshot --fresh 2>/dev/null)
+  [ "$(jq -c '.belt[] | select(.issue == 7) | [.gaveWay, .gaveWayFixing]' <<<"$out" 2>/dev/null)" = '[8,true]' ] \
+    || fail "the snapshot does not say #7 gave way to #8 while fixing: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
+}
+
+# With no card waiting, the fix of failed tests goes as it always did: #7 gives way for it, but no card takes its
+# turn, and its claim, its live record and the Board name none.
+t_givewayfixalone() {
+  gwcards 7; gwchg 7 1s/.*/seven/; gwclaim 7 '"held":true,"gave":0'
+  gweng giveway c7-7 "$CARDS/c7-7" fixing && [ "$(gwc 7 '[.away, .fixing, .for, .to]')" = '[true,true,[],null]' ] \
+    || fail "#7's claim names a card for the fix of its failed tests, with none waiting: $(cat "$CARDS/c7-7.claim")"
+  gwlive 7; [ "$(jq -c '[.step, .gaveWay]' "$STUB/live" 2>/dev/null)" = '["fix",null]' ] || fail "#7's live record names a card that went in front: $(cat "$STUB/live" 2>/dev/null)"
+  out=$(loop snapshot --fresh 2>/dev/null)
+  [ "$(jq -c '.belt[] | select(.issue == 7) | [.gaveWay, .gaveWayFixing]' <<<"$out" 2>/dev/null)" = '[null,false]' ] \
+    || fail "the snapshot says #7 gave way to a card: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
+}
+
+# Issue 428, through the real loop as gwone() says why (card()'s calls on its main-moved path): #7's first tests fail
+# and main moves (b.txt) during them, so #7 is fitted onto main (settle()) and what failed runs again there before any
+# fix round; that run's claim is kept ($STUB/fitclaim). Main's pre-commit hook, which land() runs just before it lands,
+# keeps the claim #7 lands on ($STUB/landclaim). Every run of #7 on the moved main <passes|fails>; one that fails is
+# fixed, and #7 lands.
+gwmoved() { # <passes|fails>
+  local out
+  gwone :; [ "$1" = passes ] || : > "$STUB/broken-build"
+  { echo 'case $PWD in *-7) if [ ! -e b.txt ]; then [ -e "$R/b.txt" ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qnm "main moves"; }'
+    echo '  echo "FAIL broken.test"; exit 1; fi; [ -e "$STUB/fitclaim" ] || cp "$PWD.claim" "$STUB/fitclaim" ;; esac'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" \
+    && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
+  printf '#!/bin/sh\nfor c in "%s"/*-7.claim; do [ ! -e "$c" ] || cp "$c" "%s/landclaim"; done\n' "$T/$CASE/cards" "$STUB" > "$R/.git/hooks/pre-commit"
+  chmod +x "$R/.git/hooks/pre-commit"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
-  [ "$(jq -c '[.held, .away, .gave]' "$STUB/rebaseclaim" 2>/dev/null)" = '[true,null,3]' ] \
-    || fail "#7, passed 3 times, did not keep its claim through its rebase: $(cat "$STUB/rebaseclaim" 2>/dev/null)"
-  [ "$(jq -r .waits.on "$STUB/rebaselive8" 2>/dev/null)" = "$c7" ] && [ "$(jq -r .held "$STUB/rebaseclaim8" 2>/dev/null)" = false ] \
-    || fail "#8 did not wait on #7 through #7's rebase: $(cat "$STUB/rebaselive8" "$STUB/rebaseclaim8" 2>/dev/null)"
-  [ "$(jq -c '.belt[] | select(.issue == 7) | .gaveWay' "$STUB/snap" 2>/dev/null)" = null ] || fail "the snapshot says #7 gave way while it kept its turn"
-  [ "$(jq -c .held "$STUB/retestclaim" 2>/dev/null)" = true ] || fail "#7, passed 3 times, did not hold a.txt through its tests after the rebase: $(cat "$STUB/retestclaim" 2>/dev/null)"
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "eight seven " ] \
-    && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#7 did not land first, then #8: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  grep -q "main moved since its commit" <<<"$out" || fail "#7 did not take the main-moved path: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(tail -n 1 "$R/a.txt")" = seven ] && [ -e "$R/b.txt" ] \
+    || fail "#7 did not land on the moved main ($1 there): $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+# Bug it catches: #7 kept its claim through its run on the moved main, so #8, stacked on it, waited until the run ended.
+# card() gives way for that run as for a fix round (fixing), and claim() lets a stacked card past such a claim
+# (t_givewayfix). Here that run fails, and goes to the fix round.
+t_givewaymoved() {
+  gwmoved fails
+  [ "$(jq -c '[.held, .away, .fixing]' "$STUB/fitclaim" 2>/dev/null)" = '[false,true,true]' ] \
+    || fail "#7 held its claim through its tests on the moved main: $(cat "$STUB/fitclaim" 2>/dev/null)"
+}
+# Bug it catches: #7, given way for its run on the moved main, which passes, landed on that claim (held false), as
+# nothing claimed its files again: the land step's claim again (settle()) holds a.txt when land() commits.
+t_givewaymovedpass() {
+  gwmoved passes
+  [ "$(jq -c '[.held, .away]' "$STUB/fitclaim" 2>/dev/null)" = '[false,true]' ] || fail "#7 had not given way for its run on the moved main: $(cat "$STUB/fitclaim" 2>/dev/null)"
+  [ "$(jq -c .held "$STUB/landclaim" 2>/dev/null)" = true ] || fail "#7 landed without claiming its files again: $(cat "$STUB/landclaim" 2>/dev/null)"
 }
 
 # Bug: a ready card waited behind an older waiting card that was not ready, which itself waited on a card away (gave
@@ -241,152 +286,6 @@ t_givewaypast() {
   git -C "$CARDS/c8-8" reset -q --hard main; sed -i 2s/2/eight/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" add -A
   w=$(cd "$R" && STATE=$ST/cards.jsonl BRANCH=main claim c9-9 "$CARDS/c9-9" $$) || fail "claim failed"
   [ "$(jq -r .on <<<"$w")" = c8-8 ] || fail "#9 did not wait for #8, older and ready: $w"
-}
-
-# A card whose tests fail once: #7 changes a.txt's first and last lines and adds `broken`, which fails the tests; the
-# session for that fix runs $STUB/fixing, keeps #7's claim, its live record and a snapshot, then removes `broken` and
-# puts the last line back. #8 appends a line, which does not apply together with #7's change to the last line (a
-# session that brings #8 onto another base appends it there, with no wait). Each run of
-# #7's tests keeps its claim and the last line of its a.txt (testclaim.<n>, testlast.<n>), and the first runs
-# $STUB/firsttest before it fails.
-gwfixsetup() { # <issues json>
-  setup "$1"; tune '.landBatch = 8'; for i in 1 2 3 4 5; do echo "$GO" > "$STUB/review.$i"; done
-  seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
-  { printf 'SRC=%q\n' "$SRC"; cat <<'EOF'; } > "$STUB/build"
-if grep -q '^# The changed tests fail' "$STUB/brief"; then
-  . "$STUB/fixing"
-  cp "$PWD.claim" "$STUB/fixclaim"; cp "$PWD.live" "$STUB/fixlive"; CONVEYOR_MAIN=$R bash "$SRC/conveyor.sh" snapshot --fresh > "$STUB/snap" 2>/dev/null
-  rm -f broken; sed -i 20s/.*/20/ a.txt
-else case $PWD in
-  *-7) sed -i '1s/.*/seven/;20s/.*/seven-20/' a.txt; : > broken ;;
-  *) grep -q '^# Stacked\|^# Main moved' "$STUB/brief" || while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
-    echo eight >> a.txt ;;
-esac; fi
-EOF
-  # A failed run exits 1 and writes no log line of its own: test.fileCommand's runner (filecmd()) logs the file it was
-  # given and its failure. A second name the stub wrote (broken.test), seen by the run's watch before the runner exits
-  # (a loaded machine), stopped the run as one that ran files it was not given (<worktree>.wide): #7 blocked.
-  cat >> "$STUB/test-cmd" <<'EOF'
-[ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held == true and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
-case $PWD in *-7) n=$(($(cat "$STUB/runs7" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/runs7"
-  cp "$PWD.claim" "$STUB/testclaim.$n"; tail -n 1 a.txt > "$STUB/testlast.$n"; [ $n != 1 ] || . "$STUB/firsttest" ;;
-esac
-[ ! -e broken ] || { echo "FAIL broken.test"; exit 1; }
-EOF
-  echo : > "$STUB/firsttest"
-}
-
-# The owner: "why are other cards waiting for it? can't they go in front". #7 holds a.txt and its tests fail while #8,
-# reviewed, waits on it: an hour of fix, review and tests would pass before #8 could land. #8 is stacked on #7 (the
-# owner, 2026-11-17): brought onto main plus #7's change and reviewed there, its tests there fail on #7's `broken`, which
-# is not #8's to fix: it waits on, untested (stackred). #7's tests fail; #7 gives way before its fix session (its
-# claim, its live record and the Board name #8, "while fixing"), and #8, stacked on a card that failed, is brought onto
-# main alone, reviewed and tested there, and lands alone during that session (#7's re-run of its failed tests, which
-# fails again, still holds a.txt). #7, fixed and reviewed, tests holding nothing, claims a.txt again, is brought onto
-# #8's main, tests there and lands: both changes are on main. Never two cards hold a.txt at once. The two are in the
-# control record's order list, #8 then #7: ordered cards never go past each other, so #8 does not go past #7 once its
-# own tests pass, and is stacked on it (not in it, a ready card lands first: readyfirst.test.sh).
-t_givewayfix() {
-  gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
-  jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
-  # #7's first tests end once #8 waits stacked and red, or once #8 took another path: tested (not stacked, or its tests
-  # passed on #7's change) or gone. #7's fix session waits for #8 to land, then for its live record to name #8, unless #7
-  # kept its claim (it did not give way). Each then fails the case below rather than hanging it.
-  echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break
-    jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done' > "$STUB/firsttest"
-  echo "$GWLANDED"'; while [ -d "$STUB" ]; do jq -e .gaveWay "$PWD.live" >/dev/null 2>&1 && break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done' > "$STUB/fixing"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(jq -c .held "$STUB/testclaim.1" 2>/dev/null)" = true ] || fail "#7 did not hold a.txt through its first tests: $(cat "$STUB/testclaim.1" 2>/dev/null)"
-  [ "$(jq -c '[.held, .away, .gave, .to, .fixing]' "$STUB/fixclaim" 2>/dev/null)" = '[false,true,1,8,true]' ] \
-    || fail "#7 did not give way to #8 for the fix of its failed tests: $(cat "$STUB/fixclaim" 2>/dev/null)"
-  [ "$(jq -c '[.step, .gaveWay]' "$STUB/fixlive" 2>/dev/null)" = '["fix",8]' ] || fail "#7's live record does not name #8, which went in front: $(cat "$STUB/fixlive" 2>/dev/null)"
-  [ "$(jq -c '.belt[] | select(.issue == 7) | [.gaveWay, .gaveWayFixing]' "$STUB/snap" 2>/dev/null)" = '[8,true]' ] \
-    || fail "the snapshot does not say #7 gave way to #8 while fixing: $(jq -c '.belt' "$STUB/snap" 2>/dev/null)"
-  [ "$(jq -c .held "$STUB/testclaim.2" 2>/dev/null)" = true ] || fail "#7 did not hold a.txt through the re-run of its failed tests: $(cat "$STUB/testclaim.2" 2>/dev/null)"
-  [ "$(jq -c '[.held, .away]' "$STUB/testclaim.3" 2>/dev/null)" = '[false,true]' ] \
-    || fail "#7 held a.txt through its tests after the fix, before it was ready: $(cat "$STUB/testclaim.3" 2>/dev/null)"
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
-    || fail "#8, ready, did not land while #7 was being fixed: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ ! -e "$R/broken" ] || fail "main does not hold both changes, #7's as fixed: $(cat "$R/a.txt"; ls "$R")"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test test landed " ] \
-    || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
-  # #8 changed a.txt: #7's landing runs a.test.sh, the test file linked to it, once more there (#447).
-  grep -q "card $c7: cards landed since its tests ran touch its test files too, so they run again on main as it is now: a.test.sh" <<<"$out" \
-    || fail "#7's landing did not run a.test.sh once more on #8's main: $out"
-  grep -q "card $c8 is stacked on card $c7" <<<"$out" && grep -q "card $c8: its checks or tests failed on main with the change of card $c7" <<<"$out" \
-    || fail "#8 was not stacked on #7, or its tests there did not fail on #7's change: $out"
-  [ "$(st 'select(.issue == 8 and .step == "fix") | .reason' | cut -c1-14 | tr '\n' ,)" = "stacked on car,main moved sin," ] \
-    && [ -z "$(st 'select(.issue == 8 and .step == "test" and .result == "fail")')" ] && [ "$(st 'select(.issue == 8 and .step == "landed") | .batch')" = null ] \
-    || fail "#8 was not brought onto main alone after its stack, or was sent to a fix for #7's failure, or did not land alone: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or claim is left: $(ls "$T/$CASE/cards")"
-}
-
-# With no ready card waiting, the fix of failed tests goes as it always did: #7's failed run goes once more, fails again,
-# and #7 alone is fixed, reviewed, tested once more and lands, and its live record and the Board name no card that went in front.
-t_givewayfixalone() {
-  gwfixsetup "[$(issue 7 2026-01-01)]"
-  # The fix session says a line, then goes on once the live record has taken it up (last): the look that read the line
-  # looked at the claim first, where a give-way that must not come would have shown.
-  echo 'echo "{\"type\":\"system\"}"; while [ -d "$STUB" ]; do jq -e .last "$PWD.live" >/dev/null 2>&1 && break; sleep 0.1; done' > "$STUB/fixing"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test landed " ] \
-    || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  [ "$(jq -c '[.step, .gaveWay]' "$STUB/fixlive" 2>/dev/null)" = '["fix",null]' ] || fail "#7's live record names a card that went in front: $(cat "$STUB/fixlive" 2>/dev/null)"
-  [ "$(jq -c '.belt[] | select(.issue == 7) | [.gaveWay, .gaveWayFixing]' "$STUB/snap" 2>/dev/null)" = '[null,false]' ] \
-    || fail "the snapshot says #7 gave way to a card: $(jq -c '.belt' "$STUB/snap" 2>/dev/null)"
-  [ "$(cat "$STUB/runs7")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] || fail "#7 was not tested three times (the failed run, its re-run, after the fix) and reviewed twice: $(cat "$STUB/runs7") runs, $(wc -l < "$STUB/reviews") reviews"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 " ] && [ "$(head -n 1 "$R/a.txt")" = seven ] && [ ! -e "$R/broken" ] \
-    && [ -z "$(ls "$T/$CASE/cards")" ] || fail "#7 did not land as fixed, or something is left: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-}
-
-# Issue 428: #7's tests fail and main has moved since its commit (b.txt, added once #8 waits stacked on #7 and red), so
-# #7 is fitted onto main and tested again there before any fix round. #7 gives way for that run, as for a fix round:
-# #8, stacked on it, is fitted onto main alone and lands during it. Bug it catches: #7 kept its claim through that run,
-# so #8 waited on it until the run ended (its run here then gives up at once, and #8 lands after it, not during it).
-t_givewaymoved() {
-  gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 6 7 8; do echo "$GO" > "$STUB/review.$i"; done
-  jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
-  echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break
-    jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done
-    echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main moves"' > "$STUB/firsttest"
-  echo : > "$STUB/fixing"
-  # #7's first run on the moved main (b.txt in its worktree) keeps its claim and waits for #8 to land, unless #7 holds
-  # a.txt; before the rest of the test command, which fails the run on `broken`.
-  { cat <<'EOF'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
-case $PWD in *-7) if [ -e b.txt ] && [ ! -e "$STUB/fitclaim" ]; then cp "$PWD.claim" "$STUB/fitclaim"
-  while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/landedduring"; break; }
-    ls -d ../*-8 >/dev/null 2>&1 || break; ! jq -e ".held == true" "$PWD.claim" >/dev/null 2>&1 || break; sleep 0.1; done
-fi ;; esac
-EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  grep -q "card $(st 'select(.issue == 7 and .step == "picked") | .card'): main moved since its commit" <<<"$out" || fail "#7 did not take the main-moved path: $out"
-  [ "$(jq -c '[.held, .away, .fixing]' "$STUB/fitclaim" 2>/dev/null)" = '[false,true,true]' ] \
-    || fail "#7 held its claim through its tests on the moved main: $(cat "$STUB/fitclaim" 2>/dev/null)"
-  [ -e "$STUB/landedduring" ] || fail "#8 did not land while #7 was tested again on the moved main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ ! -e "$STUB/both" ] || fail "both cards held a.txt at once"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] && [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] \
-    && [ -e "$R/b.txt" ] && [ ! -e "$R/broken" ] && [ -z "$(ls "$T/$CASE/cards")" ] \
-    || fail "#8 then #7 did not land with both changes on main, or something is left: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-}
-
-# Issue 428: #7's tests fail, main moves (b.txt) and #7 gives way for the run on the moved main, which passes; main
-# stays there. Bug it catches: #7 landed on its given-way claim (held false), as nothing claimed its files again.
-t_givewaymovedpass() {
-  gwfixsetup "[$(issue 7 2026-01-01)]"; echo 'sed -i 1s/.*/seven/ a.txt' > "$STUB/build"
-  { cat <<'EOF'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
-case $PWD in *-7) [ -e b.txt ] || { [ -e "$R/b.txt" ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qnm "main moves"; }
-  echo "FAIL broken.test"; exit 1; } ;; esac
-EOF
-  # land() runs main's pre-commit hook just before it lands: the claim #7 lands on.
-  printf '#!/bin/sh\nfor c in "%s"/*-7.claim; do [ ! -e "$c" ] || cp "$c" "%s/landclaim"; done\n' "$T/$CASE/cards" "$STUB" > "$R/.git/hooks/pre-commit"
-  chmod +x "$R/.git/hooks/pre-commit"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  grep -q "main moved since its commit" <<<"$out" || fail "#7 did not take the main-moved path: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(jq -c .held "$STUB/landclaim" 2>/dev/null)" = true ] || fail "#7 landed without claiming its files again: $(cat "$STUB/landclaim" 2>/dev/null)"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(head -n 1 "$R/a.txt")" = seven ] && [ -e "$R/b.txt" ] \
-    || fail "#7 did not land on the moved main: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
 }
 
 # Stacking is bounded (stackto()): a card stacked on a holder whose change kept changing would be ported and reviewed
