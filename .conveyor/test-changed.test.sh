@@ -21,7 +21,9 @@ no() { echo "not ok - $1"; }
 # records which cases it was asked for (ALL when none was named). Each part starts from its own copy of it, as
 # committed ($T/r, its map also in $T/map, read as one object: test-changed.sh --map).
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+# The test lint and the browser check, which every run starts, are empty here: no part checks them, and each run of
+# the real ones is time paid ~100 times a file run (test-lint.test.sh checks that a run runs the lint).
+cp "$HERE/test-changed.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
 cat > "$R/.conveyor/engine-areas.json" <<'EOF'
 {"outside": "conveyor/README.md"}
 {"area": "core", "file": "conveyor/core.sh"}
@@ -39,7 +41,7 @@ lines() {
 (cd "$R" && bash .conveyor/test-changed.sh --map) > "$T/scratch.json" || { echo "not ok - the scratch map could not be read"; exit 1; }
 printf 't_aone() {\n  :\n}\nt_atwo() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"
 printf 't_bone() {\n  :\n}\n' > "$R/conveyor/tests/b.test.sh"
-echo 'echo "${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/../ran"' > "$R/conveyor/conveyor.test.sh"
+echo 'echo "${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "${0%/*}/../ran"' > "$R/conveyor/conveyor.test.sh"
 echo one > "$R/conveyor/core.sh"; echo one > "$R/conveyor/x.sh"; echo one > "$R/conveyor/y.jq"; echo doc > "$R/conveyor/README.md"
 # The runner stub's run of every case file is a meta-runner's (issue 584): a card mode in the pack lets it run whole
 # here, so the parts below see which runs are whole.
@@ -48,7 +50,8 @@ echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 # ran: the cases the runner stub was asked for, its runs' lines sorted and joined (each engine case file runs on its
 # own, side by side, so a selection of two files is two runs, in either order).
-ran() { rm -f "$R/ran"; (cd "$R" && bash .conveyor/test-changed.sh "$@") > "$T/out" 2>&1; echo $? > "$T/rc"; LC_ALL=C sort "$R/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//' | paste -sd' ' -; }
+ranlines() { LC_ALL=C sort "$1" 2>/dev/null | awk '{ gsub(/ +/, " "); sub(/ $/, ""); printf "%s%s", (NR > 1 ? " " : ""), $0 } END { print "" }'; }
+ran() { rm -f "$R/ran"; (cd "$R" && bash .conveyor/test-changed.sh "$@") > "$T/out" 2>&1; echo $? > "$T/rc"; ranlines "$R/ran"; }
 mran2() { ran "$@" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//'; }
 sorted() { tr ' ' '\n' | grep . | sort | tr '\n' ' '; }
 # part <name> [m]: p_<name> in the background, in $T/<name> with its own copy of the scratch repo (R), and with m of
@@ -694,15 +697,16 @@ for p in checkout area selected boardcount shellcount ended realstate filter nam
 # what every case runs through (the dispatcher, the shared setup) still runs the whole. Each part below has its own
 # copy of it (M).
 M=$T/m; mkdir -p "$M/.conveyor" "$M/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/engine-areas.json" "$M/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"
 HMAP=$T/here.json; (cd "$ROOT" && bash .conveyor/test-changed.sh --map) > "$HMAP" || echo "not ok - this checkout's map could not be read"
-jq -r '.areas[].files[]' "$HMAP" | while read -r f; do mkdir -p "$M/${f%/*}"; echo one > "$M/$f"; done
-for c in "$ROOT"/conveyor/tests/*.test.sh; do s=$(basename "$c" .test.sh); printf 't_%s() {\n  :\n}\n' "$s" > "$M/conveyor/tests/$s.test.sh"; done
-echo 'echo "${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/../ran"' > "$M/conveyor/conveyor.test.sh"
+jq -r '.areas[].files[] | split("/")[:-1] | join("/")' "$HMAP" | sort -u | (cd "$M" && xargs mkdir -p)
+jq -r '.areas[].files[]' "$HMAP" | while read -r f; do echo one > "$M/$f"; done
+for c in "$ROOT"/conveyor/tests/*.test.sh; do s=${c##*/}; s=${s%.test.sh}; printf 't_%s() {\n  :\n}\n' "$s" > "$M/conveyor/tests/$s.test.sh"; done
+echo 'echo "${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "${0%/*}/../ran"' > "$M/conveyor/conveyor.test.sh"
 cp "$R/.conveyor/project.json" "$M/.conveyor/"
 echo ran > "$M/.gitignore"
 git -C "$M" init -q && git -C "$M" add -A && git -C "$M" commit -qm init
-mran() { rm -f "$M/ran"; (cd "$M" && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; echo $? > "$T/rc"; LC_ALL=C sort "$M/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//' | paste -sd' ' -; }
+mran() { rm -f "$M/ran"; (cd "$M" && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; echo $? > "$T/rc"; ranlines "$M/ran"; }
 cases=$(ls "$M"/conveyor/tests/*.test.sh | wc -l)
 marea() { # <engine file>; leaves the case files the run ran in mgot
   local f=$1 want got
