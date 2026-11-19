@@ -1031,9 +1031,9 @@ issue: the line "The judge's verdict (...): <verdict>." that the Tests page writ
 issue with no verdict can take any of the changes below, each checked as the list after them says. The change must do
 what the verdict asks, else the card is blocked with a reason that names the verdict:
 
-- speed up: the change keeps the file and adds no test file, and the file must cost less than its recent runs.
-- keep: the change keeps the file and adds no test file, and the file must cost less than its recent runs.
-- stabilise: the change keeps the file and adds no test file. The build's reply ends with one line
+- speed up: the change keeps the file and adds or removes no other test file, and the file must cost less than its recent runs.
+- keep: the change keeps the file and adds or removes no other test file, and the file must cost less than its recent runs.
+- stabilise: the change keeps the file and adds or removes no other test file. The build's reply ends with one line
   `STABILISED: <case> | <its cause> | <how the change removes it>` for each case that the issue names on a `CAUSE:`
   line, or at least one line when the issue names none. A case with no line blocks the card before the run. The file
   must cost no more than its recent runs. The review gets the lines and checks each one against the code.

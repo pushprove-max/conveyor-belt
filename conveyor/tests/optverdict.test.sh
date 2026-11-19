@@ -59,7 +59,8 @@ t_optrecent() {
 # D2. Bug it catches (#568): a "stabilise" card whose file costs what its recent runs cost was blocked as "not faster".
 # Its reply names the cause of relstop and how the change removes it, the case passes and the file takes 22 CPU s, the
 # median of its recent runs: it passes, and the review is shown the reply's line to check against the code. The
-# build's brief asks for that line and names the recent figure.
+# build's brief asks for that line, names the recent figure and tells the build to add or remove no other test file
+# (#613), or a build that merges one in follows the brief and is blocked.
 t_optstable() {
   ovrun stabilise 'echo steady > f.test.sh' 22 "$FIXED"
   [ "$RC" = 0 ] || fail "a stabilise card as dear as its recent runs, with its cause named, was blocked: $WHY"
@@ -67,8 +68,8 @@ t_optstable() {
     && grep -qF 'Check each against the code' "$FXWT.unfixed" || fail "the review is not given the reply's causes to check: $(cat "$FXWT.unfixed")"
   fx_in 'speedbrief c7 "$FXWT" f.test.sh "$ISSUE"'
   grep -qxF 'The test file f.test.sh used 22 CPU s in its recent runs (the median of those this issue lists).' "$T/$CASE/run.out" \
-    && grep -qF 'The verdict of this issue is stabilise. ' "$T/$CASE/run.out" && grep -qF 'STABILISED: <case> | <its cause' "$T/$CASE/run.out" \
-    || fail "the build's brief does not give the recent figure or ask for the STABILISED lines: $(cat "$T/$CASE/run.out")"
+    && grep -qF 'The verdict of this issue is stabilise. The change keeps the file, adds or removes no other test file,' "$T/$CASE/run.out" && grep -qF 'STABILISED: <case> | <its cause' "$T/$CASE/run.out" \
+    || fail "the build's brief does not give the recent figure, keep the other test files (#613) or ask for the STABILISED lines: $(cat "$T/$CASE/run.out")"
 }
 
 # D3. Bug it catches: a "stabilise" card lands with no account of why its flaky case failed, so nothing shows that the
@@ -154,6 +155,19 @@ t_optspeeddelete() {
 # Bug it catches: a "keep" card that adds a test file is checked as a split, with its start-up allowance.
 t_optkeepsplit() {
   ovshape keep 'echo lean > f.test.sh; echo new > h.test.sh' 'the verdict is keep, and the change adds test files: h.test.sh'
+}
+
+# Bug it catches (#613): a "keep" card that merges g.test.sh into the file passes as a keep, held to the file's recent
+# runs alone, though that is the merge the judge did not choose. The build's brief of each verdict this check holds
+# tells the build so, or a build follows the brief and is blocked (the stabilise brief is checked in t_optstable).
+t_optkeepmerge() {
+  local v n
+  ovshape keep 'echo merged > f.test.sh; rm g.test.sh' 'the verdict is keep, and the change removes test files, as a merge does: g.test.sh'
+  for v in 'speed up' keep; do
+    ISSUE=$(ovissue "$v") fx_in 'speedbrief c7 "$FXWT" f.test.sh "$ISSUE"'
+    n=$(grep -cF "The verdict of this issue is $v. The change keeps the file, adds or removes no other test file," "$T/$CASE/run.out")
+    [ "$n" = 1 ] || fail "the $v brief does not tell the build to keep the other test files: $(cat "$T/$CASE/run.out")"
+  done
 }
 
 # Bug it catches: a "delete" card that moves the file's cases into another test file and removes the file passes as a

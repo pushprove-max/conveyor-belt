@@ -1701,9 +1701,9 @@ speedbrief() { # <card> <worktree> <test file> <issue json>
       "The check passes a split only when every case passes and the files'"'"' CPU seconds summed are at most the CPU seconds above plus a start-up allowance of \($a) CPU s (the pack'"'"'s test.splitAllowance, when it cannot be measured) for each file the split adds.",
       if $v == "any" then "This issue names no verdict: a change that keeps the file whole must make it cost less than the CPU seconds above."
       else "The verdict of this issue is \($v). " + {
-        "speed up": "The change keeps the file, adds no test file, and must make it cost less than the CPU seconds above.",
-        keep: "The change keeps the file, adds no test file, and must make it cost less than the CPU seconds above.",
-        stabilise: "The change keeps the file, adds no test file, removes the cause of each of its flaky or failing cases, and must not make it cost more than the CPU seconds above. End your reply with one line \($sl) for each case the issue names on a CAUSE line (at least one when it names none): a case with no such line blocks the card. The review checks each line against the code.",
+        "speed up": "The change keeps the file, adds or removes no other test file, and must make it cost less than the CPU seconds above.",
+        keep: "The change keeps the file, adds or removes no other test file, and must make it cost less than the CPU seconds above.",
+        stabilise: "The change keeps the file, adds or removes no other test file, removes the cause of each of its flaky or failing cases, and must not make it cost more than the CPU seconds above. End your reply with one line \($sl) for each case the issue names on a CAUSE line (at least one when it names none): a case with no such line blocks the card. The review checks each line against the code.",
         split: "The change splits the file: it changes or removes the file and adds test files.",
         merge: "The change merges the file with another test file: it removes one of the two and changes the other, and adds no test file. When the file stays, it must not cost more than the CPU seconds above plus the median on record of each test file merged into it.",
         delete: "The change deletes the file and adds or changes no other test file."}[$v] end'
@@ -1921,7 +1921,7 @@ optproof() { # <card> <worktree> <issue json> <test file>
   # The change does what the issue's verdict asks (optverdict()): a split changes or removes the file and adds test
   # files; a delete removes the file and adds or changes no other test file; a merge removes the file and changes
   # another test file, or changes the file and removes another, and adds none; speed up, keep and stabilise keep the
-  # file and add none. An issue that names no verdict may take any of these shapes.
+  # file and add or remove none. An issue that names no verdict may take any of these shapes.
   v=$(optverdict "$3" any)
   case $v in
     split) if [ ${#add[@]} = 0 ]; then why="the verdict is split, and the change adds no test file"
@@ -1935,7 +1935,8 @@ optproof() { # <card> <worktree> <issue json> <test file>
           || why="the verdict is merge, and the change neither removes the test file $f nor merges another test file into it"
       elif [ ${#into[@]} = 0 ]; then why="the verdict is merge, and the change removes the test file $f without changing another test file"; fi ;;
     'speed up' | keep | stabilise) if [ ! -e "$2/$f" ]; then why="the verdict is $v, and the change removes the test file $f"
-      elif [ ${#add[@]} != 0 ]; then why="the verdict is $v, and the change adds test files: ${add[*]}"; fi ;;
+      elif [ ${#add[@]} != 0 ]; then why="the verdict is $v, and the change adds test files: ${add[*]}"
+      elif [ ${#gone[@]} != 0 ]; then why="the verdict is $v, and the change removes test files, as a merge does: ${gone[*]}"; fi ;;
   esac
   if [ -n "$why" ]; then
     printf '%s\n' "$why" > "$2.unfixed"
