@@ -66,7 +66,10 @@ case $1 in
   tasks) for t in proj__a-1 proj__b-2; do jq -nc --arg t "$t" --arg u "file://$SWE_FX/task.git" --arg b "$(git -C "$SWE_FX/task.git" rev-parse main)" \
       '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", cmd: "true"}'; done > "$4" ;;
   image) while [ -e "$SWE_FX/ihold" ]; do sleep 0.1; done; [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
-  grade) echo "$2 $3 $4" >> "$SWE_FX/graded"
+  # grade: its container named as the harness names it, with the run's ID ($7), held while $SWE_FX/ghold is there
+  # and removed when the grade ends (left when it is killed).
+  grade) echo "$2 $3 $4" >> "$SWE_FX/graded"; mkdir -p "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
+    while [ -e "$SWE_FX/ghold" ]; do sleep 0.1; done; rm -rf "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
     if grep -q fixed "$5" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$4" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
 esac
 EOF
@@ -88,6 +91,7 @@ case $1 in
     n=$1; shift; [ -d "$B/$n" ] || exit 1; [ "$u" != 0 ] || exit 0
     cd "$w" && exec env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u CONVEYOR_MAIN -u CONVEYOR_CARDS -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL GIT_CONFIG_PARAMETERS="'user.useconfigonly'='true'" HOME="$B/$n/home" "${e[@]}" "$@" ;;
   rm) shift; [ "$1" != -f ] || shift; [ -d "$B/$1" ] || exit 1; echo "$1" >> "$SWE_FX/removed"; rm -rf "$B/$1" ;;
+  ps) ls "$B" 2>/dev/null ;; # every container, whatever the filter: the caller picks its own by name
   *) exit 1 ;;
 esac
 EOF
@@ -198,24 +202,6 @@ t_swenotrun() {
   ! compgen -G "$B/results/*-$EB/$first.json" > /dev/null && compgen -G "$B/results/*-$EB/$second.json" > /dev/null || fail "a result was kept for the task not run, or none for the other"
   grep -q "Resolved 0 of 2 .*not run: 1\." <<<"$out" || fail "the run's total does not set the task not run apart: $out"
   [ "$(cat "$SWE_FX/log")" = "B SWE-bench $second" ] || fail "the task with no image was built: $(cat "$SWE_FX/log")"
-}
-
-# Bug: Stop leaves the run, or the engine loop building in its sandbox, running, or writes no end for the run.
-t_swestop() {
-  swe; local p out
-  : > "$SWE_FX/hold"
-  loop bench swe 2 > "$T/$CASE/run.out" 2>&1 &
-  wait_until "[ -s '$SWE_FX/pid' ]" || fail "the task's build did not start"
-  p=$(cat "$SWE_FX/pid")
-  out=$(loop bench swe stop 2>&1) || fail "stop failed: $out"
-  wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
-  wait $! 2>/dev/null
-  [ "$(tail -n 1 "$B/runs.jsonl" | jq -r .state)" = stopped ] || fail "the run's line does not say stopped: $(cat "$B/runs.jsonl" 2>&1)"
-  out=$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" 2>&1) && [ "$(jq -c '[.tasks[].cells[0].state, .run.cost]' <<<"$out")" = '["interrupted","not reached",{"usd":0,"state":"known"}]' ] \
-    || fail "show does not tell the task Stop interrupted from the one never reached (#643), or the task stopped before its card recorded anything reads as an unknown cost, not \$0 (#644): $out"
-  [ ! -d "$B/work" ] && [ -z "$(ls "$B"/results/*-"$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
-  # Bug: Stop killed the docker client only; the trial's container, with the logins copied into it, was left running.
-  [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the stopped trial's container was not removed: $(ls "$SWE_FX/boxes")"
 }
 
 # Bug: --engine builds with main's engine whatever it names, or a release is not taken by its name; results of two
@@ -504,19 +490,6 @@ t_swearmhost() {
   [ "$(cat "$SWE_FX/victim")" = ORIGINAL ] || fail "the host wrote through the arm's link to a file outside the sandbox: $(cat "$SWE_FX/victim")"
 }
 
-# Bug: Stop found no run while an arm's preflight ran, as the run was recorded only after its preflights.
-t_swestoppre() {
-  swe; local out
-  : > "$SWE_FX/phold"
-  loop bench swe 1 --arm stub-slow > "$T/$CASE/run.out" 2>&1 &
-  wait_until "[ -n \"\$(ls '$SWE_FX/boxes' 2>/dev/null)\" ]" || fail "the preflight's container did not start"
-  out=$(loop bench swe stop 2>&1); rm -f "$SWE_FX/phold"
-  [ "$out" = "conveyor: the SWE-bench run is stopped" ] || fail "Stop did not end the run in its preflight: $out"
-  wait $! 2>/dev/null
-  [ "$(tail -n 1 "$B/runs.jsonl" | jq -r .state)" = stopped ] && [ -z "$(ls "$SWE_FX/boxes")" ] \
-    || fail "the stopped run is not recorded, or its preflight's container was left: $(cat "$B/runs.jsonl" 2>&1) $(ls "$SWE_FX/boxes")"
-}
-
 # Bug: a conveyor arm's seats were not given to the engine in its container (it built on the project's seats), or the
 # container's control record named a host account it does not hold.
 t_sweseats() {
@@ -608,12 +581,15 @@ t_sweharness() {
     || fail "the task's test command is not the one run in its own container: $(head -n 1 "$C/list")"
   ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the task list was made"
   echo fixed > "$C/patch"
-  out=$(h grade o/ds rev1 o__p-2 "$C/patch" "$C/grade") && [ "$out" = '{"resolved": true}' ] \
+  out=$(h grade o/ds rev1 o__p-2 "$C/patch" "$C/grade" r1) && [ "$out" = '{"resolved": true}' ] \
     || fail "the grade did not give the official harness the task's own row as a .jsonl file: $out"
+  # Bug (#645): the harness run, and so its container (sweb.eval.<task>.<run id>), did not name the benchmark run, so
+  # a Stop of that run could not find the grading container to remove it.
+  [ -e "$C/grade/conveyor.conveyor-r1-o__p-2.json" ] || fail "the grade's harness run did not carry the benchmark run's ID: $(ls "$C/grade")"
   ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the grade"
-  h grade o/ds rev1 o__p-9 "$C/patch" "$C/grade9" > /dev/null; [ $? = 3 ] || fail "a task missing from the dataset was not reported as one the harness could not run"
+  h grade o/ds rev1 o__p-9 "$C/patch" "$C/grade9" r1 > /dev/null; [ $? = 3 ] || fail "a task missing from the dataset was not reported as one the harness could not run"
   # Bug: `bench swe stop` sends SIGTERM to the grade, which then ended without removing its cache and the row in it.
-  : > "$C/hold"; SWE_HOLD=$C/hold h grade o/ds rev1 o__p-1 "$C/patch" "$C/gradestop" > /dev/null 2>&1 &
+  : > "$C/hold"; SWE_HOLD=$C/hold h grade o/ds rev1 o__p-1 "$C/patch" "$C/gradestop" r1 > /dev/null 2>&1 &
   wait_until "[ -s '$C/hold.pid' ]" || { rm -f "$C/hold"; fail "the stopped grade did not reach the official harness"; }
   kill -TERM "$(cat "$C/hold.pid")"; wait $!; rm -f "$C/hold"
   [ -z "$(ls -A "$C/tmp")" ] && ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a grade stopped with SIGTERM left its cache, with the reference fix and hidden tests, on disk"

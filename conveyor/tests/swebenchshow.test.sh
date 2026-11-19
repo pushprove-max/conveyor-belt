@@ -343,8 +343,8 @@ t_swecost() {
     || fail "the second build's lines were not written"
   wait_until "jq -e '.live.active.cost.usd == 3' '$B/board.json' > /dev/null" || fail "the second build was not priced: $(jq -c .live.active "$B/board.json")"
   o=$(loop bench swe stop 2>&1); rm -f "$SWE_FX/hold"; wait "$p" 2>/dev/null
-  [ "$o" = "conveyor: the SWE-bench run is stopped" ] || fail "Stop did not end the run: $o"
   id=$(tail -n 1 "$B/runs.jsonl" | jq -r .id)
+  [ "$o" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop did not end the run: $o"
   o=$(loop bench swe history 2>&1) && jq -e --arg id "$id" '.runs[] | select(.id == $id) | [.cost, .interrupted.cost] == [{usd: 3, state: "known"}, {usd: 3, state: "known", unpriced: 0}]' <<<"$o" > /dev/null \
     || fail "the stopped run lost its interrupted task's cost, or added the reused task's again: $(jq -c --arg id "$id" '.runs[] | select(.id == $id)' <<<"$o" 2>&1 || echo "$o")"
   # (8) A third run takes the second task again. A first card of it was blocked on a failed build that used 1M input

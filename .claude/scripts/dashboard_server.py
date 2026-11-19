@@ -205,7 +205,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or an alias: `conveyor.sh prices`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
 # or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved and Compare: `conveyor.sh
-# bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings <json>] | stop | versions | arms check
+# bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings <json>] | stop [<run id>] | versions | arms check
 # [--settings <json>] <arm>... | arms save <name> <spec json> | diff <A> <B> [--json]`, an arm being a host arm's name or
 # a saved revision's ID; Start and a check answer their receipt; an admin's alone),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
@@ -336,7 +336,7 @@ DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as co
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
                    'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60,  # testaction and testmap stop wait up to 40 s for the end
-                   'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 30 s for the end
+                   'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 90 s (another Stop, then the run's end)
                    'card': 360}  # Pick for me (card <issue> pick) waits up to conveyor.sh's PICK_TIMEOUT, 300 s, for the judge
 DEPENDS_MAX = 20  # the issues one `control depends` names
 # The condition the owner gives with their yes, or why they say no: one line of plain text.
@@ -634,6 +634,8 @@ def control_ok(body):
     if a == 'bench':  # the Benchmarks tab: Start (n, then --solo, or arms and a version, then the shared settings), Stop, List versions, an arm's preflight, an arm saved, Compare (two versions or results keys)
         if v in (['stop'], ['versions']):
             return True
+        if v[:1] == ['stop']:  # Stop of the run the tab shows, by its id: a late one never stops the run after it
+            return n == 2 and BENCH_RUN.fullmatch(v[1]) is not None
         if v[:1] == ['diff']:
             return n in (3, 4) and all(BENCH_SIDE.fullmatch(x) for x in v[1:3]) and v[3:] in ([], ['--json'])
         if v[:2] == ['arms', 'save']:

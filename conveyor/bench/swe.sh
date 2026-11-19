@@ -9,7 +9,7 @@
 #                                      the arms with their preflight state; check runs those arms' preflights
 #   bench swe arms save <name> <spec>  keeps a saved arm's choices as a new revision and prints its ID (swe_armsave)
 #   bench swe arms show <id>           a saved revision as it was saved
-#   bench swe stop                     ends the run in progress
+#   bench swe stop [<run id>]          ends the run of that ID, or with none the run in progress (swe_stop)
 #   bench swe results [--json]         the results of every arm and version so far, side by side
 #   bench swe history                  every run newest first with each arm's figures, and every arm's state, as JSON
 #                                      (the Board's Benchmarks tab; swe_history says what it holds)
@@ -536,7 +536,7 @@ swe_task() { # <task json>
   # the task is then not run.
   swe_sofar "$(jq -c .cost <<<"$b")"
   if ! jq -e .fired <<<"$b" > /dev/null || [ ! -s "$sb.h/patch" ]; then g='{"resolved":false}'
-  else swe_phase Grading; g=$(swe_h grade "$(swe_set .dataset)" "$(swe_set .revision)" "$id" "$sb.h/patch" "$sb.h/grade" 2>/dev/null); rc=$?
+  else swe_phase Grading; g=$(swe_h grade "$(swe_set .dataset)" "$(swe_set .revision)" "$id" "$sb.h/patch" "$sb.h/grade" "$SWE_RUN" 2>/dev/null); rc=$?
     [ "$rc" = 0 ] && jq -e '.resolved | type == "boolean"' <<<"$g" > /dev/null 2>&1 || {
       if [ "$rc" = 3 ]; then echo "not run: the harness could not fetch or build its image"; else echo "not run: the harness could not grade it (exit $rc)"; fi; return; }
   fi
@@ -547,18 +547,26 @@ swe_task() { # <task json>
   if jq -e .resolved <<<"$g" > /dev/null; then echo resolved; elif jq -e .fired <<<"$b" > /dev/null; then echo unresolved; else echo "unresolved ($(jq -r .why <<<"$b"))"; fi
 }
 # The run's end: its line in runs.jsonl, live.json's state, the containers of its trials and preflights, the
-# sandboxes and the run's copies of the project's files (swe_freeze) gone.
+# sandboxes and the run's copies of the project's files (swe_freeze) gone. The containers removed are the run's own,
+# named with its ID (swe_trial's, and the grading harness's: swe_harness.py's grade): an arms check's, which runs apart from any run, is left. A Stop that comes while the
+# end is written waits for it (SIGTERM ignored until then), so a run that finished first keeps its one end, done.
 swe_end() { # <state>
   [ -n "${SWE_RUN:-}" ] || return 0
+  trap '' TERM INT
   # interrupted: the arm and task a stopped run was on, apart from the tasks it never reached, with the cost of its
   # work so far (swe_sofar; a known $0 when its trial had not started its command): the run's cost counts it.
   local l f; l=$(jq -c --arg s "$1" --arg at "$(swe_now)" '(if $s == "stopped" and (.active.task | type) == "string" then {interrupted: (.active | {arm, task, cost: (.cost // {usd: 0, state: "known", unpriced: 0})})} else {} end) as $i
     | .state = $s | .ended = $at | .current = null | .active = null | .seq = ((.seq // 0) + 1) | .updated = $at | del(.pid) + $i' "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" \
     && printf '%s\n' "$l" >> "$SWE_DIR/runs.jsonl"
   swe_event "Run ${1/guard/stopped by the usage guard}"
-  for f in "$SWE_DIR"/work/*/box "$SWE_DIR"/check/*/box; do [ ! -s "$f" ] || docker rm -f "$(cat "$f")" > /dev/null 2>&1; done
+  for f in "$SWE_DIR"/work/*/box "$SWE_DIR"/check/*/box; do
+    case $(cat "$f" 2>/dev/null) in "conveyor-swe-$SWE_RUN-"?*) docker rm -f "$(cat "$f")" > /dev/null 2>&1 ;; esac
+  done
+  docker ps -a --filter "name=conveyor-$SWE_RUN-" --format '{{.Names}}' 2>/dev/null | while IFS= read -r f; do
+    case $f in "sweb.eval."*".conveyor-$SWE_RUN-"?*) docker rm -f "$f" > /dev/null 2>&1 ;; esac
+  done
   [ ! -d "$SWE_DIR/work" ] || { chmod -R u+w "$SWE_DIR/work"; rm -rf "$SWE_DIR/work"; }
-  rm -rf "$SWE_DIR/frozen"; rm -f "$SWE_DIR/stop"; swe_board; SWE_RUN=
+  rm -rf "$SWE_DIR/frozen"; rm -f "$SWE_DIR/stop"; swe_board; SWE_RUN=; trap - TERM INT
 }
 # Whether the usage guard holds back a run of these kinds of arm: <conveyor> is non-empty when the run has a conveyor
 # arm, <agent> when it has another arm that uses the Claude login (swe_guards).
@@ -572,7 +580,7 @@ swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] 
 swe_run() { # <n> <engine> <arm>...
   local n=$1 eng0=$2 tf all i t id r x a l left rid gc='' ga='' why ctxs=() specs=() plan='[]' ra tag SWE_TASK=''
   shift 2
-  mkdir -p "$SWE_DIR" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7 || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
+  mkdir -p "$SWE_DIR" && swe_lock || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
   for x; do a=$(swe_arm "$x") || { echo "conveyor: no arm $x: \`conveyor.sh bench swe arms\` lists them" >&2; return 2; }
     specs+=("$a"); case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
   ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
@@ -601,13 +609,13 @@ swe_run() { # <n> <engine> <arm>...
     | {id: $id, pid: $pid, arm, key, engine, version, model, arms: ($c | map(.arm)), label: ($c | map(runname) | join(", ")), n: ($n * ($c | length)),
        cols: ($c | map({arm, key, label, kind, engine, version, model})), set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}),
        done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []}')"
+  trap 'swe_stopping; exit 143' TERM INT
   swe_board; swe_event 'Run started'
   # The run's receipt, once its record is written: the Board's Start answers it. A run that reuses the saved result
   # of each of its tasks prints none, so Start waits for its end and answers its result, whose last line names it.
   left=''; for x in "${ctxs[@]}"; do swe_use "$x"
     while IFS= read -r id; do swe_reused "$id" || { left=1; break; }; done < <(head -n "$n" "$tf" | jq -r .id); [ -z "$left" ] || break; done
   [ -z "$left" ] || echo "conveyor: run $SWE_RUN started"
-  trap 'pkill -TERM -P $$ 2>/dev/null; swe_end stopped; exit 143' TERM INT
   for x in "${ctxs[@]}"; do
     swe_use "$x"; swe_phase Checking
     why=''; [ "$SWE_KIND" != conveyor ] || why=$(head -n "$n" "$tf" | swe_taskrules "$SWE_ARMJ")
@@ -624,7 +632,7 @@ swe_run() { # <n> <engine> <arm>...
     t=$(sed -n "${i}p" "$tf"); id=$(jq -r .id <<<"$t")
     for x in "${ctxs[@]}"; do
       swe_use "$x"; tag=''; [ ${#ctxs[@]} = 1 ] || tag=" [$SWE_ARM]"; SWE_TASK=''
-      [ ! -e "$SWE_DIR/stop" ] || { swe_end stopped; return 0; }
+      [ "$(cat "$SWE_DIR/stop" 2>/dev/null)" != "$SWE_RUN" ] || { trap - TERM INT; swe_stopping; return 0; }
       if swe_reused "$id"; then
         r=$(jq -r 'if .resolved then "resolved" else "unresolved" end' "$SWE_DIR/results/$SWE_KEY/$id.json"); echo "$i/$n $id$tag: $r (reused)"
         swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: true}] | .done += 1 | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
@@ -650,14 +658,64 @@ swe_run() { # <n> <engine> <arm>...
   [ -n "$left" ] || echo "conveyor: run $rid ended"
 }
 swe_tree() { local k; echo "$1"; for k in $(pgrep -P "$1"); do swe_tree "$k"; done; } # <pid>: it and every process under it
-swe_stop() {
-  local p; p=$(jq -r 'select(.state == "running") | .pid // empty' "$SWE_DIR/live.json" 2>/dev/null)
-  [ -n "$p" ] && kill -0 "$p" 2>/dev/null || { echo "conveyor: no SWE-bench run is going"; return 0; }
-  local ps; mapfile -t ps < <(swe_tree "$p")
-  : > "$SWE_DIR/stop"; kill -TERM "${ps[@]}" 2>/dev/null
-  local i=0; while kill -0 "$p" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
-  mapfile -t ps < <(swe_tree "$p"); ! kill -0 "$p" 2>/dev/null || kill -KILL "${ps[@]}" 2>/dev/null
-  echo "conveyor: the SWE-bench run is stopped"
+# The run lock, run.lock on fd 7, held by a run for its life. It is taken under the stop lock (swe_stop), and a run
+# that live.json still shows running gets its end first (stopped, with the task it was on; its containers and work
+# removed): with the run lock free, its process has ended with no end written. So while a Stop reads and acts, no run
+# starts, and a late Stop of a run that is gone finds it ended, never the run after it.
+swe_lock() {
+  local s id rc=0; exec {s}>>"$SWE_DIR/stop.lock" || return 1
+  if flock -w 60 "$s" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7; then
+    id=$(jq -r 'select(.state == "running") | .id // empty' "$SWE_DIR/live.json" 2>/dev/null)
+    [ -z "$id" ] || { SWE_RUN=$id; swe_end stopped; }
+  else rc=1; fi
+  exec {s}>&-; return $rc
+}
+# Stop's SIGTERM (or Ctrl-C) to the run going: live.json's stopping (the time Stop reached it) and its event, then
+# the trial's processes ended and the run's end (swe_end), which keeps both.
+swe_stopping() {
+  [ -n "${SWE_RUN:-}" ] || return 0
+  swe_live '.stopping = $_at' > /dev/null; swe_event Stopping; pkill -TERM -P $$ 2>/dev/null; swe_end stopped
+}
+# Stop: ends the run <id> (with none, the run going: `bench swe stop` as typed), and says how it ended. Under the stop
+# lock (swe_lock), as is the run lock's start: the run live.json names is the one this Stop acts on, never one that
+# starts while it acts. A run that is going gets SIGTERM, its process tree with it (swe_stopping records its end), and
+# SIGKILL after 30 s; one whose process is gone with no end written gets its end here. A Stop of a run that ended
+# (the same Stop again, or one sent before the run finished) changes nothing, and a run after it goes on.
+swe_stop() { # [<run id>]
+  local id=${1:-} s p ps i=0 gone='' rc=0
+  mkdir -p "$SWE_DIR" && exec {s}>>"$SWE_DIR/stop.lock" || return 1
+  flock -w 60 "$s" || { exec {s}>&-; echo "conveyor: another Stop is going; read the run's state again" >&2; return 1; }
+  [ -n "$id" ] || id=$(jq -r 'select(.state == "running") | .id // empty' "$SWE_DIR/live.json" 2>/dev/null)
+  if [ -z "$id" ]; then echo "conveyor: no SWE-bench run is going"
+  else
+    # Its process, or "gone" for a running record with none (never 0: kill takes 0 as this Stop's own process group).
+    p=$(jq -r --arg id "$id" 'select(.id == $id and .state == "running") | if (.pid | type) == "number" and .pid > 1 then .pid else "gone" end' "$SWE_DIR/live.json" 2>/dev/null)
+    if [ -n "$p" ]; then
+      if [ "$p" != gone ] && kill -0 "$p" 2>/dev/null; then
+        printf '%s\n' "$id" > "$SWE_DIR/stop"; mapfile -t ps < <(swe_tree "$p"); kill -TERM "${ps[@]}" 2>/dev/null
+        while kill -0 "$p" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+        mapfile -t ps < <(swe_tree "$p"); ! kill -0 "$p" 2>/dev/null || kill -KILL "${ps[@]}" 2>/dev/null
+      else gone=1; fi
+      # A run killed before its end was written (SIGKILL, or a process gone before Stop) gets it here.
+      ! jq -e --arg id "$id" '.id == $id and .state == "running"' "$SWE_DIR/live.json" > /dev/null 2>&1 || { SWE_RUN=$id; swe_end stopped; }
+    fi
+    swe_said "$id" "$gone"; rc=$?
+  fi
+  exec {s}>&-; return $rc
+}
+# What Stop says of the run <id>: how it ended, from live.json when it is that run's, else from its line in runs.jsonl.
+swe_said() { # <run id> <non-empty: its process was gone when Stop came>
+  local s; s=$(jq -r --arg id "$1" 'select(.id == $id) | .state' "$SWE_DIR/live.json" 2>/dev/null)
+  [ -n "$s" ] || s=$(jq -r --arg id "$1" 'select(.id == $id) | .state' "$SWE_DIR/runs.jsonl" 2>/dev/null | tail -n 1)
+  case $s in
+    stopped) if [ -n "$2" ]; then echo "conveyor: run $1 was interrupted: its process had ended. Its end is recorded, its containers are removed, and its finished tasks are kept."
+      else echo "conveyor: run $1 is stopped. Its finished tasks are kept."; fi ;;
+    done) echo "conveyor: run $1 finished before Stop." ;;
+    guard) echo "conveyor: run $1 had stopped at the usage guard before Stop." ;;
+    refused) echo "conveyor: run $1 did not start, before Stop." ;;
+    '') echo "conveyor: no SWE-bench run $1" >&2; return 1 ;;
+    *) echo "conveyor: run $1 did not end: read its state again" >&2; return 1 ;;
+  esac
 }
 # Each key's results, side by side: one line each, then the noise line for the tasks every key ran.
 swe_results() { # [--json]
@@ -760,7 +818,7 @@ swe_main() {
   local n='' eng=main named='' arms=() a k set=''
   swe_settings || return 1
   case ${1:-} in
-    stop) [ $# = 1 ] && { swe_stop; return; } ;;
+    stop) if [ $# = 1 ]; then swe_stop; return; elif [ $# = 2 ] && [[ $2 =~ ^r[0-9]{8}T[0-9]{6}-[0-9]+$ ]]; then swe_stop "$2"; return; fi ;;
     results) [ $# = 1 ] || [ "$*" = 'results --json' ] && { swe_results "${2:-}"; return; } ;;
     history) [ $# = 1 ] && { swe_history; return; } ;;
     show) [ $# = 2 ] && { swe_show "$2"; return; } ;;
@@ -777,7 +835,7 @@ swe_main() {
   if [ -n "$n" ] && [ -n "$named" ]; then
     k=''; for a in "${arms[@]}"; do [ "$(swe_arm "$a" | jq -r .kind)" = agent ] || k=1; done; [ -n "$k" ] || n=''
   fi
-  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] [--settings <json>] | bench swe arms [check [--settings <json>] <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id> | bench swe stop | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
+  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] [--settings <json>] | bench swe arms [check [--settings <json>] <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id> | bench swe stop [<run id>] | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
   swe_settings "$set" || return
   mapfile -t arms < <(printf '%s\n' "${arms[@]}" | awk '!seen[$0]++')
   swe_run "$n" "$eng" "${arms[@]}"

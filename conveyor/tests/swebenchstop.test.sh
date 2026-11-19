@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 120
+# Engine cases: Stop of a SWE-bench run (`conveyor.sh bench swe stop [<run id>]`, bench/swe.sh's swe_stop): in its
+# setup, in a trial and in its grade, of a run whose process is gone, a repeated Stop and a late one. The fixture is
+# swebench.test.sh's swe().
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+
+# An arms check's container, which runs apart from any run: a Stop or a run's end leaves it.
+swecheckbox() {
+  mkdir -p "$SWE_FX/boxes/conveyor-swe-check-other-x" "$B/check/other.h" && echo conveyor-swe-check-other-x > "$B/check/other.h/box" \
+    || fail "the check's container was not made"
+}
+# A run <id> live.json shows going on the first task, whose process is gone with no end written (killed), with its
+# trial's container left.
+swegone() { # <run id>
+  local t; t=$(sweorder | head -n 1)
+  mkdir -p "$B/work/$t.h" "$SWE_FX/boxes/conveyor-swe-$1-conveyor-$t" && echo "conveyor-swe-$1-conveyor-$t" > "$B/work/$t.h/box" \
+    && jq -nc --arg id "$1" --arg t "$t" '{id: $id, pid: 2147483646, arm: "conveyor", arms: ["conveyor"], n: 2, done: 0, resolved: 0, current: $t,
+      active: {arm: "conveyor", task: $t, phase: "Building"}, seq: 3, started: "2026-11-19T00:00:00Z", state: "running", tasks: []}' > "$B/live.json" \
+    || fail "the run whose process is gone was not made"
+}
+
+# Bugs: Stop left the run, or the engine loop building in its sandbox, running, or wrote no end for the run; Stop
+# killed the docker client only, so the trial's container, with the logins copied into it, was left running. (#645)
+# Stop took no run ID, recorded no stopping, and removed an arms check's container with the run's.
+t_swestop() {
+  swe; local p out id
+  : > "$SWE_FX/hold"
+  loop bench swe 2 > "$T/$CASE/run.out" 2>&1 &
+  wait_until "[ -s '$SWE_FX/pid' ]" || fail "the task's build did not start"
+  p=$(cat "$SWE_FX/pid"); id=$(jq -r .id "$B/live.json"); swecheckbox
+  out=$(loop bench swe stop "$id" 2>&1) || fail "stop failed: $out"
+  [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop did not say the run is stopped: $out"
+  wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
+  wait $! 2>/dev/null
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" '.id == $id and .state == "stopped" and (.stopping | type) == "string" and .ended >= .stopping' > /dev/null \
+    && [ "$(jq -sc 'map(.event)[-2:]' "$B/tails/$id.jsonl")" = '["Stopping","Run stopped"]' ] \
+    || fail "the run's line does not say stopped, or the run did not record its stopping before its end: $(tail -n 1 "$B/runs.jsonl") $(cat "$B/tails/$id.jsonl" 2>&1)"
+  out=$(loop bench swe show "$id" 2>&1) && [ "$(jq -c '[.tasks[].cells[0].state, .run.cost]' <<<"$out")" = '["interrupted","not reached",{"usd":0,"state":"known"}]' ] \
+    || fail "show does not tell the task Stop interrupted from the one never reached (#643), or the task stopped before its card recorded anything reads as an unknown cost, not \$0 (#644): $out"
+  [ ! -d "$B/work" ] && [ -z "$(ls "$B"/results/*-"$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
+  [ "$(ls "$SWE_FX/boxes")" = conveyor-swe-check-other-x ] || fail "the stopped trial's container was left, or an arms check's removed: $(ls "$SWE_FX/boxes")"
+}
+
+# Bug (#645): Stop during the grade killed the harness only, so its container (sweb.eval.*) was left running; only
+# the stopped run's grading container is removed, not another run's.
+t_swestopgrade() {
+  swe; local out id other=sweb.eval.proj__a-1.conveyor-r20261119T000000-1-proj__a-1
+  : > "$SWE_FX/ghold"; mkdir -p "$SWE_FX/boxes/$other"
+  loop bench swe 1 --arm stub-a > "$T/$CASE/run.out" 2>&1 &
+  wait_until "ls '$SWE_FX/boxes' | grep -v '^$other\$' | grep -q '^sweb\\.eval\\.'" || fail "the grade's container did not start: $(cat "$T/$CASE/run.out")"
+  id=$(jq -r .id "$B/live.json")
+  out=$(loop bench swe stop "$id" 2>&1); rm -f "$SWE_FX/ghold"
+  [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop did not end the run in its grade: $out"
+  wait $! 2>/dev/null
+  [ "$(ls "$SWE_FX/boxes")" = "$other" ] || fail "the stopped grade's container was left, or another run's removed: $(ls "$SWE_FX/boxes")"
+}
+
+# Bug: Stop found no run while an arm's preflight ran, as the run was recorded only after its preflights.
+t_swestoppre() {
+  swe; local out id
+  : > "$SWE_FX/phold"
+  loop bench swe 1 --arm stub-slow > "$T/$CASE/run.out" 2>&1 &
+  wait_until "[ -n \"\$(ls '$SWE_FX/boxes' 2>/dev/null)\" ]" || fail "the preflight's container did not start"
+  id=$(jq -r .id "$B/live.json")
+  out=$(loop bench swe stop "$id" 2>&1); rm -f "$SWE_FX/phold"
+  [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop did not end the run in its preflight: $out"
+  wait $! 2>/dev/null
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" '.id == $id and .state == "stopped" and (.stopping | type) == "string"' > /dev/null && [ -z "$(ls "$SWE_FX/boxes")" ] \
+    || fail "the stopped run is not recorded with its stopping, or its preflight's container was left: $(cat "$B/runs.jsonl" 2>&1) $(ls "$SWE_FX/boxes")"
+}
+
+# Bugs (#645): a Stop sent for a run that had ended stopped the run started after it, as Stop took no run ID; a second
+# Stop of a stopped run wrote its end again. Run 1 builds the first task; run 2 reuses it and is on the second when a
+# late Stop of run 1 comes, then Stop of run 2 comes twice.
+t_swestopstale() {
+  swe; local first second a b p out
+  { read -r first; read -r second; } < <(sweorder)
+  out=$(loop bench swe 1 2>&1) || fail "the first run failed: $out"
+  a=$(jq -r .id "$B/live.json"); rm -f "$SWE_FX/pid"; : > "$SWE_FX/hold"
+  loop bench swe 2 > "$T/$CASE/run.out" 2>&1 &
+  wait_until "[ -s '$SWE_FX/pid' ]" || fail "the second run's build did not start"
+  p=$(cat "$SWE_FX/pid"); b=$(jq -r .id "$B/live.json")
+  out=$(loop bench swe stop "$a" 2>&1) && [ "$out" = "conveyor: run $a finished before Stop." ] || fail "the late Stop did not say its run had ended: $out"
+  kill -0 "$p" 2>/dev/null && jq -e --arg b "$b" '.id == $b and .state == "running" and .stopping == null' "$B/live.json" > /dev/null \
+    || fail "the late Stop of run 1 stopped run 2: $(cat "$B/live.json")"
+  out=$(loop bench swe stop "$b" 2>&1) && [ "$out" = "conveyor: run $b is stopped. Its finished tasks are kept." ] || fail "Stop did not end run 2: $out"
+  wait $! 2>/dev/null
+  out=$(loop bench swe stop "$b" 2>&1) && [ "$out" = "conveyor: run $b is stopped. Its finished tasks are kept." ] || fail "the second Stop of run 2 failed: $out"
+  [ "$(grep -c "\"$b\"" "$B/runs.jsonl")" = 1 ] && [ "$(jq -sc 'map(select(.event == "Run stopped")) | length' "$B/tails/$b.jsonl")" = 1 ] \
+    || fail "the second Stop wrote run 2's end again: $(cat "$B/runs.jsonl")"
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg f "$first" --arg s "$second" '.tasks == [{id: $f, arm: "conveyor", result: "resolved", reused: true}] and .interrupted.task == $s' > /dev/null \
+    && [ -s "$B/results/$(jq -r .key "$B/live.json")/$first.json" ] || fail "the stopped run lost its finished task: $(tail -n 1 "$B/runs.jsonl")"
+}
+
+# Bug (#645): Stop of a run whose process had gone with no end written said no run was going and left the run shown
+# running, with its trial's container. Its end is recorded and only its own container removed.
+t_swestopgone() {
+  swe; local out id=r20261119T000000-1
+  swegone "$id"; swecheckbox
+  out=$(loop bench swe stop "$id" 2>&1) || fail "stop failed: $out"
+  [ "$out" = "conveyor: run $id was interrupted: its process had ended. Its end is recorded, its containers are removed, and its finished tasks are kept." ] \
+    || fail "Stop did not say the run was interrupted: $out"
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" --arg t "$(sweorder | head -n 1)" '.id == $id and .state == "stopped" and .interrupted.task == $t' > /dev/null \
+    || fail "the run's end was not recorded: $(cat "$B/runs.jsonl" 2>&1)"
+  [ "$(ls "$SWE_FX/boxes")" = conveyor-swe-check-other-x ] || fail "the run's container was left, or an arms check's removed: $(ls "$SWE_FX/boxes")"
+}
+
+# Bug (#645): a run started while live.json still showed a run whose process had gone, so a late Stop of that run,
+# reading it as going, could act on the new run's work. The new run records its end first, under the stop lock.
+t_swestopnext() {
+  swe; local out id=r20261119T000000-1
+  swegone "$id"
+  out=$(loop bench swe 1 2>&1) || fail "the run failed: $out"
+  [ "$(jq -sc --arg id "$id" 'map([.id == $id, .state])' "$B/runs.jsonl")" = '[[true,"stopped"],[false,"done"]]' ] \
+    || fail "the new run did not record the end of the run whose process had gone before its own: $(cat "$B/runs.jsonl")"
+  [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the gone run's container was left: $(ls "$SWE_FX/boxes")"
+}

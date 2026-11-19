@@ -75,7 +75,12 @@ recorded its end. Before its first task, it prints the
 sessions it usually takes and the worst case, and the minutes it is expected to take. A run does not start while the usage guard (`conveyor.sh control guard`, in [the control
 record](configuration.md#the-control-record)) is reached, and it stops before the next task when the guard is reached
 during the run. The guard reads the Claude account, so it does not stop an arm that does not use the Claude login.
-`conveyor.sh bench swe stop` ends a run.
+`conveyor.sh bench swe stop <run ID>` ends that run, in its setup or in a task. Without a run ID, it ends the run that
+goes now. The run records when it started to stop, ends the work of its arm on the task, and records its end. Stop
+removes the run's own containers, the grading container too, and keeps its finished tasks. It does not touch the container of an arms check. A
+second Stop of the same run changes nothing. A Stop for a run that already ended says how it ended, and a newer run
+goes on. When the process of a run has stopped with no end recorded, Stop records the end and removes the run's
+containers. A new run does this too before it starts.
 
 Each task is built in a sandbox of its own: a local clone of the task's repository at its base commit, with the issue
 text as the card's issue. Conveyor builds the task in a Docker container made from the task's own image, with a pack

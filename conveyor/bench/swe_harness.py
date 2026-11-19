@@ -14,9 +14,10 @@ Usage:
       run in a container of its image).
   swe_harness.py image <image>
       fetches the task's image; exit 3 when it cannot be fetched.
-  swe_harness.py grade <dataset> <revision> <id> <patch file> <folder>
+  swe_harness.py grade <dataset> <revision> <id> <patch file> <folder> <run id>
       grades the patch with the official harness (its run_evaluation, its Docker images, FAIL_TO_PASS and
       PASS_TO_PASS) in <folder>, given the task's own dataset row read again; prints {"resolved": true|false};
+      its container is named sweb.eval.<id>.conveyor-<run id>-<id>, which the run's end (swe.sh's swe_end) removes;
       exit 3 when the harness could not run the task (the task is not in the dataset, its image could not be
       fetched or built, or the run erred).
 A dataset row holds the task's reference fix and hidden tests, and a card's sessions have a shell as this same
@@ -100,7 +101,7 @@ def image(name):
     return 0 if subprocess.run(['docker', 'pull', '-q', name], stdout=subprocess.DEVNULL).returncode == 0 else 3
 
 
-def grade(dataset, revision, instance, patch, folder, cache):
+def grade(dataset, revision, instance, patch, folder, run, cache):
     from datasets import load_dataset
     rows = [dict(r) for r in load_dataset(dataset, split='test', revision=revision) if r['instance_id'] == instance]
     if not rows:
@@ -113,7 +114,8 @@ def grade(dataset, revision, instance, patch, folder, cache):
     preds = os.path.join(folder, 'preds.jsonl')
     with open(patch) as p, open(preds, 'w') as f:
         f.write(json.dumps({'instance_id': instance, 'model_name_or_path': 'conveyor', 'model_patch': p.read()}) + '\n')
-    run_id = 'conveyor-' + instance
+    # The harness names its container sweb.eval.<instance>.<run_id>: the run's ID in it lets a Stopped run remove it.
+    run_id = 'conveyor-%s-%s' % (run, instance)
     rc = subprocess.run([sys.executable, '-m', 'swebench.harness.run_evaluation', '--dataset_name', raw, '--predictions_path', preds,
                          '--instance_ids', instance, '--run_id', run_id, '--max_workers', '1', '--namespace', 'swebench'],
                         cwd=folder, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
@@ -136,7 +138,7 @@ def main(a):
         return 1 if w else 0
     if len(a) == 2 and a[0] == 'image':
         return image(a[1])
-    if (len(a) == 4 and a[0] == 'tasks') or (len(a) == 6 and a[0] == 'grade'):
+    if (len(a) == 4 and a[0] == 'tasks') or (len(a) == 7 and a[0] == 'grade'):
         # `bench swe stop` ends the run with SIGTERM: exit through the finally below, so the cache is removed then too.
         for s in (signal.SIGTERM, signal.SIGHUP):
             signal.signal(s, lambda n, _: sys.exit(128 + n))
@@ -145,7 +147,7 @@ def main(a):
             return (tasks(*a[1:]) or 0) if a[0] == 'tasks' else grade(*a[1:], cache)
         finally:
             shutil.rmtree(cache, ignore_errors=True)
-    sys.stderr.write('usage: swe_harness.py check | tasks <dataset> <revision> <out> | image <image> | grade <dataset> <revision> <id> <patch> <folder>\n')
+    sys.stderr.write('usage: swe_harness.py check | tasks <dataset> <revision> <out> | image <image> | grade <dataset> <revision> <id> <patch> <folder> <run id>\n')
     return 2
 
 

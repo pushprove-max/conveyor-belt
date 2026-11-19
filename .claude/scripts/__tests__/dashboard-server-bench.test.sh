@@ -80,6 +80,13 @@ for args in (['run', '5', '--arm', '-x'], ['run', '5', '--arm'], ['run', '5', '-
              ['run', '5', '--engine', 'main', '--arm', 'solo'], ['run', '5'] + ['--arm', 'a'] * 21, ['arms', 'check'], ['arms', 'check', '../x'],
              ['arms', 'check'] + ['a'] * 21, ['arms', 'list'], ['diff', 'a', 'b', '--text'], ['diff', 'a', 'b', '--json', 'x']):
     check('tab_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
+# Bug (#645): Stop named no run, so a Stop sent for a run that had ended stopped the run started after it. The tab's
+# Stop sends the run's id, and the host runs `bench swe stop <id>`; anything else after stop never reaches the host.
+check('stop_takes_a_run_id', ok(['stop', 'r20261119T130010-1234'])
+      and ds.control_script('bench', ['stop', 'r20261119T130010-1234'], MAIN, '2026-11-19').endswith(" bench swe stop r20261119T130010-1234"),
+      ds.control_script('bench', ['stop', 'r20261119T130010-1234'], MAIN, '2026-11-19'))
+for args in (['stop', 'r1'], ['stop', 'r20261119T130010-1;id'], ['stop', '-r20261119T130010-1'], ['stop', 'r20261119T130010-1', 'r20261119T130010-2']):
+    check('stop_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
 # Bug (#640): Start and Check send the shared settings (--settings), a saved arm's revision ID as an arm, and the arm
 # editor saves an arm (arms save <name> <spec>); none was taken. Each JSON field is checked as the engine checks its
 # shape, so a field it would refuse, or one of no size limit, never reaches the host's shell.
