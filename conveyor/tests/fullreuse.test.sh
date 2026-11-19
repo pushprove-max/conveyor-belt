@@ -51,7 +51,8 @@ t_fullreusecmd() {
 # fulltest.sh reuses a green run on the same commit, reruns failed, changed and test.command-selected files, and runs
 # the whole suite after a test setting or a suite command file (not a changed-tests command file) changes.
 # t_fullreusefail runs the reuse on the same commit and the rerun of a changed file; t_fullreusecmd runs the whole
-# suite after .conveyor/test-full.sh changes; t_relreusepick reruns only the changed file after test-changed.sh changes.
+# suite after .conveyor/test-full.sh changes; t_relreusepick reruns only the failed file (t/f1) after the
+# changed-tests command's file (.conveyor/pick.sh) changes.
 # Text check: a doc page has no behaviour to run.
 t_fullreusedoc() {
   local d; d=$(tr '\n' ' ' < "$SRC/../docs/configuration.md")
