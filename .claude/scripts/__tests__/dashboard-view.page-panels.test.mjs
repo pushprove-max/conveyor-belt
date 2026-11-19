@@ -5,7 +5,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { VIEW, read, html, LIST, panelState, PANEL_STATES, CONTROL_IDS, RULES_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases } from './dashboard-view.helpers.mjs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { VIEW, read, html, LIST, panelState, PANEL_STATES, PANEL_DRAWN, CONTROL_IDS, RULES_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases, caseNames } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -94,40 +96,53 @@ test('a panel that throws shows its own error and takes no other panel with it',
 // ---- each panel: data, empty, failed to load; the second half is in dashboard-view.page-states ----
 // One `test(` line a case: .conveyor/test-changed.sh counts a file's cases by those lines, so a case registered in a
 // loop or a helper is left out of the Board's test progress and failure counts.
-test('every panel of the list has its four state cases, each on its own test line, in page-panels or page-states', () => {
+test('every panel of the list has its four state cases, each on its own test line, in page-panels or page-states', async () => {
   const named = new Map();
+  const ran = [];
+  // test-changed.sh's own filecases(), run on each file: it must count every case the file registers.
+  const counter = fileURLToPath(new URL('../../../.conveyor/test-changed.sh', import.meta.url));
   for (const f of ['dashboard-view.page-panels.test.mjs', 'dashboard-view.page-states.test.mjs']) {
-    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
-    for (const [, id, says, key, arg] of src.matchAll(/^test\('([a-z0-9]+): ([a-z ]+)', \(\) => panelState\.([a-z]+)\('([a-z0-9]+)'\)\);$/gm)) {
+    const file = new URL(f, import.meta.url);
+    const names = await caseNames(file.href);
+    ran.push(...names);
+    const counted = execFileSync('bash', ['-c', 'eval "$(grep "^filecases()" "$1")"; filecases "$2"', '_', counter, fileURLToPath(file)], { encoding: 'utf8' });
+    assert.equal(Number(counted), names.length, `${f}: test-changed.sh counts each of its ${names.length} cases`);
+    const src = fs.readFileSync(file, 'utf8');
+    for (const [, id, says, key, arg, drawn] of src.matchAll(/^test\('([a-z0-9]+): ([a-z ]+)', \(\) => assert\.equal\(panelState\.([a-z]+)\('([a-z0-9]+)'\), '([a-z]+)'\)\);$/gm)) {
       assert.equal(PANEL_STATES[key], says, `${f}: "${id}: ${says}" runs the ${key} case`);
       assert.equal(arg, id, `${f}: "${id}: ${says}" runs on ${id}`);
+      assert.equal(drawn, PANEL_DRAWN[key], `${f}: "${id}: ${says}" asserts the state the ${key} case leaves`);
       assert.ok(!named.has(`${id}:${key}`), `${id}: ${says} is named once`);
       named.set(`${id}:${key}`, f);
     }
   }
   assert.deepEqual([...named.keys()].sort(), LIST.flatMap((id) => Object.keys(PANEL_STATES).map((k) => `${id}:${k}`)).sort());
+  // The two files, loaded, register each panel's four cases once between them.
+  for (const id of LIST) for (const says of Object.values(PANEL_STATES)) {
+    assert.equal(ran.filter((n) => n === `${id}: ${says}`).length, 1, `"${id}: ${says}" is registered once`);
+  }
 });
-test('machine: with data', () => panelState.data('machine'));
-test('machine: empty', () => panelState.empty('machine'));
-test('machine: failed to load', () => panelState.failed('machine'));
-test('machine: draws from its own part alone', () => panelState.own('machine'));
-test('board: with data', () => panelState.data('board'));
-test('board: empty', () => panelState.empty('board'));
-test('board: failed to load', () => panelState.failed('board'));
-test('board: draws from its own part alone', () => panelState.own('board'));
-test('rules: with data', () => panelState.data('rules'));
-test('rules: empty', () => panelState.empty('rules'));
-test('rules: failed to load', () => panelState.failed('rules'));
-test('rules: draws from its own part alone', () => panelState.own('rules'));
-test('needs: with data', () => panelState.data('needs'));
-test('needs: empty', () => panelState.empty('needs'));
-test('needs: failed to load', () => panelState.failed('needs'));
-test('needs: draws from its own part alone', () => panelState.own('needs'));
-test('belt: with data', () => panelState.data('belt'));
-test('belt: empty', () => panelState.empty('belt'));
-test('belt: failed to load', () => panelState.failed('belt'));
-test('belt: draws from its own part alone', () => panelState.own('belt'));
-test('belt3d: with data', () => panelState.data('belt3d'));
-test('belt3d: empty', () => panelState.empty('belt3d'));
-test('belt3d: failed to load', () => panelState.failed('belt3d'));
-test('belt3d: draws from its own part alone', () => panelState.own('belt3d'));
+test('machine: with data', () => assert.equal(panelState.data('machine'), 'ready'));
+test('machine: empty', () => assert.equal(panelState.empty('machine'), 'empty'));
+test('machine: failed to load', () => assert.equal(panelState.failed('machine'), 'error'));
+test('machine: draws from its own part alone', () => assert.equal(panelState.own('machine'), 'ready'));
+test('board: with data', () => assert.equal(panelState.data('board'), 'ready'));
+test('board: empty', () => assert.equal(panelState.empty('board'), 'empty'));
+test('board: failed to load', () => assert.equal(panelState.failed('board'), 'error'));
+test('board: draws from its own part alone', () => assert.equal(panelState.own('board'), 'ready'));
+test('rules: with data', () => assert.equal(panelState.data('rules'), 'ready'));
+test('rules: empty', () => assert.equal(panelState.empty('rules'), 'empty'));
+test('rules: failed to load', () => assert.equal(panelState.failed('rules'), 'error'));
+test('rules: draws from its own part alone', () => assert.equal(panelState.own('rules'), 'ready'));
+test('needs: with data', () => assert.equal(panelState.data('needs'), 'ready'));
+test('needs: empty', () => assert.equal(panelState.empty('needs'), 'empty'));
+test('needs: failed to load', () => assert.equal(panelState.failed('needs'), 'error'));
+test('needs: draws from its own part alone', () => assert.equal(panelState.own('needs'), 'ready'));
+test('belt: with data', () => assert.equal(panelState.data('belt'), 'ready'));
+test('belt: empty', () => assert.equal(panelState.empty('belt'), 'empty'));
+test('belt: failed to load', () => assert.equal(panelState.failed('belt'), 'error'));
+test('belt: draws from its own part alone', () => assert.equal(panelState.own('belt'), 'ready'));
+test('belt3d: with data', () => assert.equal(panelState.data('belt3d'), 'ready'));
+test('belt3d: empty', () => assert.equal(panelState.empty('belt3d'), 'empty'));
+test('belt3d: failed to load', () => assert.equal(panelState.failed('belt3d'), 'error'));
+test('belt3d: draws from its own part alone', () => assert.equal(panelState.own('belt3d'), 'ready'));

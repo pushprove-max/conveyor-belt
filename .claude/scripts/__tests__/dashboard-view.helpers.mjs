@@ -58,7 +58,15 @@ export function cases(file) {
     nodeTest(name, () => result);
   };
 }
-if (POOL) {
+// caseNames(file) -- the names of the cases a file registers, in its order, found by loading it as a case's worker
+// does (no case is run).
+export function caseNames(file) {
+  const wk = new Worker(new URL(import.meta.url), { workerData: { dashboardCases: file, listCases: true }, execArgv: [] });
+  return new Promise((res, rej) => { wk.once('message', res); wk.once('error', rej); }).finally(() => wk.terminate());
+}
+if (POOL && workerData.listCases) {
+  import(POOL).then(() => parentPort.postMessage(registered.map((c) => c.name)));
+} else if (POOL) {
   // The worker loads the file, and jsdom with it, while the others start.
   const loaded = import(POOL).then(() => dom());
   loaded.catch(() => {});
@@ -669,9 +677,12 @@ export const shownTiles = (w) => tiles(w).filter((t) => !t.hidden).map((t) => t.
 // the panels in two halves (dashboard-view.page-panels and dashboard-view.page-states), so the runner runs the halves
 // side by side: one file of 56 cases took about 2 s alone (conveyor/tests/speed/board-view.md). The first half is the
 // smaller, as page-panels also holds the panel list's own cases: 29 and 32 cases. Each file names every case on its
-// own line, `test('<id>: <case>', () => panelState.<key>('<id>'))`, for .conveyor/test-changed.sh counts a file's
-// cases by its `test(` lines (filecases()); page-panels checks the two files name all four for every panel of the list.
+// own line, `test('<id>: <case>', () => assert.equal(panelState.<key>('<id>'), '<state>'))`, for
+// .conveyor/test-changed.sh counts a file's cases by its `test(` lines (filecases()); page-panels checks the two files
+// name all four for every panel of the list. Each case returns the state the panel is left in (PANEL_DRAWN), which the
+// line asserts, so the line says what the case proves and is not hollow.
 export const PANEL_STATES = { data: 'with data', empty: 'empty', failed: 'failed to load', own: 'draws from its own part alone' };
+export const PANEL_DRAWN = { data: 'ready', empty: 'empty', failed: 'error', own: 'ready' };
 // What the panels drawn from one part show, together (a part drawn as more than one panel: SPLIT).
 const shown = (w, id) => family(id).map((x) => panel(w, x).textContent).join('\n');
 export const panelState = {
@@ -683,6 +694,7 @@ export const panelState = {
     for (const s of SAYS[id].data) assert.ok(text.includes(s), `${id} shows "${s}": ${text}`);
     assert.equal($(w, `#panel-${id} .panel-count`).textContent, SAYS[id].count);
     for (const x of family(id)) assert.equal(panel(w, x).querySelector('.skeleton'), null, 'the loading skeleton is gone');
+    return state(w, id);
   },
   empty(id) {
     const w = boot({ tab: TAB(id) });
@@ -692,6 +704,7 @@ export const panelState = {
     assert.equal(state(w, id), 'empty');
     assert.ok(panel(w, id).textContent.includes(SAYS[id].empty), panel(w, id).textContent);
     assert.equal(panel(w, id).querySelector('.state-empty svg').getAttribute('aria-hidden'), 'true', 'the empty state pairs its words with an icon');
+    return state(w, id);
   },
   failed(id) {
     const w = boot({ tab: TAB(id) });
@@ -713,12 +726,14 @@ export const panelState = {
     next(w, data);
     assert.equal(state(w, id), 'error');
     assert.match(panel(w, id).textContent, new RegExp(`${id === 'health' ? 'Conveyor' : 'The build machine'} sent nothing for this panel, so the Board cannot show it\\. If this continues, press Restart the Board's feed, below\\.`));
+    return state(w, id);
   },
   own(id) {
     const w = boot({ tab: TAB(id) });
     deliver(w, { updatedAt: iso(T0), panels: { [id]: full().panels[id] } });
     for (const x of family(id)) assert.equal(state(w, x), 'ready', `${x} is drawn`);
     for (const s of SAYS[id].data) assert.ok(shown(w, id).includes(s), `${id} needs no other panel's part to show "${s}"`);
+    return state(w, id);
   },
 };
 
