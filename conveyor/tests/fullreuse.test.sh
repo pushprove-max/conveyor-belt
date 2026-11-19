@@ -46,3 +46,18 @@ t_fullreusecmd() {
   [ "$got" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "a change to .conveyor/test-full.sh did not run every file: '$got'"
   [ "$(ftl 'select(.sha == "'"$B"'") | [.state, .reused]')" = '["passed",null]' ] || fail "a whole suite's line says it reused a run: $(cat "$ST/fulltest.jsonl")"
 }
+
+# Bug (#710): docs/configuration.md said Push landed and Run full test suite run the whole suite on each click, where
+# fulltest.sh reuses a green run on the same commit, reruns failed, changed and test.command-selected files, and runs
+# the whole suite after a test setting or test command file changes. t_fullreusefail runs the reuse on the same
+# commit and the rerun of a changed file; t_fullreusecmd runs the whole suite after .conveyor/test-full.sh changes.
+# Text check: a doc page has no behaviour to run.
+t_fullreusedoc() {
+  local d; d=$(tr '\n' ' ' < "$SRC/../docs/configuration.md")
+  grep -q 'When the suite passed on the same commit, no test runs' <<<"$d" \
+    || fail "docs/configuration.md does not say a suite run on a commit that already passed runs no test"
+  grep -q 'and the files that `test.command` picks for those changes' <<<"$d" \
+    || fail "docs/configuration.md does not say a suite run also reruns the files test.command picks for the changes"
+  grep -q 'or to a file that its test commands name, runs the whole suite' <<<"$d" \
+    || fail "docs/configuration.md does not say a change to a test command file runs the whole suite"
+}

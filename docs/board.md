@@ -382,8 +382,10 @@ suite** runs the suite and pushes nothing. A project with no `test.full` shows b
 
 Push landed, Run full test suite and Release share their results for each commit. When one of them passed on the
 commit, the next runs no test: Push landed pushes at once, and the result says "Reused the green run of <time> on
-<commit>". After a run on an earlier commit, only the files that failed or changed since then run again, and the
-result says "Reran 1 file, reused 2 passed files from <commit>". A change to the test commands runs the whole suite.
+<commit>". After a run on an earlier commit, the files that failed there run again, and so do the files that the
+commits since then add or change, and the files that `test.command` picks for those changes. The result says "Reran 1
+file, reused 2 passed files from <commit>". A change to the `test` settings of the pack, or to a file that its test
+commands name, runs the whole suite ([Releases](releases.md)).
 
 **Push now**, beside Push landed, pushes the landed commits at once, with no full test run. Click it, then click again.
 It pushes main as Conveyor does after each card when the rule is On: through the project's pre-push hook only. If the
@@ -443,8 +445,8 @@ To release from the panel:
 
 - **Draft notes**, **Run suite**, **Run suite again** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
-  of them and stops. Else it runs the suite on the head of `main`: the whole suite, or only the files that failed or
-  changed since an earlier suite run ([Releases](releases.md)). An earlier suite run is a release's, a Run full test
+  of them and stops. Else it runs the suite on the head of `main`: the whole suite, or only some of its files
+  ([Releases](releases.md)). An earlier suite run is a release's, a Run full test
   suite's or a Push landed's. When one of them passed on that same commit, no test runs. Step 2 says which: "Reused
   the green run of <time> on <commit>", "Reran 1 file, reused 2 passed files from <commit>" or "Ran the whole suite".
   These buttons do not release.
