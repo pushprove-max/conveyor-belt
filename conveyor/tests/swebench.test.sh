@@ -41,7 +41,7 @@ rec picked ok; rec build ok
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
 if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
-cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"
+cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"; (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/prompts.sh" && cardrules "$(gh issue view 1)") > "$SWE_FX/rules.seen" 2>&1
 cat "$HOME/.codex/auth.json" > "$SWE_FX/codex.seen" 2>/dev/null || :
 rec review GO '' null 'no findings'; rec test pass '' null 'test output'; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" add -A; git -C "$CONVEYOR_MAIN" commit -qm fix; rec landed ok; gh issue close 1
 EOF
@@ -542,6 +542,16 @@ t_swearmlogin() {
   jq -c '.reviewer = {cli: "claude", model: "m"} | .judgeOn = true | .judge = {cli: "codex", model: "x"}' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
   out=$(loop bench swe arms check conveyor 2>&1)
   grep -q "^conveyor: failed: no codex login on this machine" <<<"$out" || fail "the arm with a Codex judge passed with no Codex login: $out"
+  # Bug: the logins followed the host's judge switch, not the saved arm's policy: an arm that turns the Codex judge off
+  # was refused, and one that turns it on over a host judge that is off was given no Codex login.
+  local off on
+  off=$(loop bench swe arms save 'Judge off' '{"kind":"conveyor","policy":{"judgeOn":false}}' 2>&1) || fail "the arm was not saved: $off"
+  on=$(loop bench swe arms save 'Judge on' '{"kind":"conveyor","policy":{"judgeOn":true}}' 2>&1) || fail "the arm was not saved: $on"
+  out=$(loop bench swe arms check "$off" 2>&1)
+  grep -q "^$off: ready$" <<<"$out" || fail "an arm with its judge off asked for the Codex judge's login: $out"
+  jq -c '.judgeOn = false' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  out=$(loop bench swe arms check "$on" 2>&1)
+  grep -q "^$on: failed: no codex login on this machine" <<<"$out" || fail "an arm that turns the Codex judge on passed with no Codex login: $out"
 }
 
 # Bug: the seats were worked out on this host's models, so on a host with no Codex and a pack that lists no models the

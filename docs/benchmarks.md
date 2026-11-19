@@ -125,8 +125,27 @@ conveyor.sh bench swe arms show arm-0123456789ab
 
 `save` prints the ID of the saved arm, for example `arm-0123456789ab`. Give that ID to `--arm` or to
 `bench swe arms check`, as you give the name of an arm. A Conveyor arm takes the seats `model` (the builder),
-`reviewer` and `judge`. Each seat takes `cli`, `model` and, if you want, `effort`. An agent arm takes `recipe`, `cli`
-(`claude` or `codex`, the CLI that the recipe signs in to) and `model`.
+`reviewer` and `judge`. Each seat takes `cli`, `model` and, if you want, `effort`. A Conveyor arm can also take
+`rules` and `policy`. An agent arm takes `recipe`, `cli` (`claude` or `codex`, the CLI that the recipe signs in to) and `model`.
+
+The `rules` choice sets the rules that the task's card gets:
+
+- `engine`: the core card rules of the engine version only. This is the default.
+- `project`: the core card rules, then your project's `.conveyor/card-rules.md`, then the area rule files that the
+  `areas` setting in `.conveyor/project.json` gives for the paths that the task's issue names. Conveyor copies these
+  files into the sandbox when it sets up the task. If one of them is missing, the arm does not run, and the run tells
+  you which file is missing.
+
+The `policy` choice sets how the task's card treats review findings. It takes any of these keys:
+
+- `judgeOn`: `true` or `false`. Turns the judge on or off, as `conveyor.sh control judge on` and `off` do.
+- `judgeAlways`: a list of finding kinds that the judge always accepts, as `conveyor.sh control judge always` takes
+  them. An empty list means none.
+- `P0`, `P1`, `P2` and `P3`: `true` or `false`, as `conveyor.sh control rules P3=off` and the other priorities do.
+
+A key that you leave out keeps the value of your control record.
+
+The task's card uses the seats of the arm over the seats of your control record. It does not use the seats that your control record keeps for one issue (`conveyor.sh control card`).
 
 When you save the same name again with other choices, you get a new ID. The earlier arm does not change, and
 `bench swe arms show` still shows it. A run keeps the ID of the arm that it used.

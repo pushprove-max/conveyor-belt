@@ -28,9 +28,9 @@
 # task's base commit (fetched from the task's repository, never pushed to), a clone of it as the main checkout, and a
 # gh on PATH that serves the issue text as issue #1 and writes nothing to GitHub. Each arm then builds it in a Docker
 # container of its own (swe_trial): a conveyor arm's engine loop builds that one card (`conveyor.sh run 1`) with a
-# pack made for it (the task's test command, no checks, no follow-ups) and a control record from the project's own
-# (its seats and the arm's, its cap; follow-ups and visible-change asks off, a push after each landing on, to the
-# sandbox's own origin), and its patch is what landed on the sandbox's main (a blocked card's is empty); another
+# pack made for it (the task's test command, no checks, no follow-ups, the rules the arm takes) and a control record
+# from the project's own (its seats and the arm's, its cap, none of its per-issue seats; follow-ups and visible-change
+# asks off, a push after each landing on, to the sandbox's own origin), and its patch is what landed on the sandbox's main (a blocked card's is empty); another
 # arm's command runs on the issue, and its change is the patch. An arm that does not fire is a failed task of it.
 # What is kept, under the state folder's bench/swe: tasks.<revision>.jsonl (the ordered list), results/<key>/<task>.json
 # (key: swe_armkey(); resolved, fired, sessions, tokens, minutes, a card's records) and .patch, preflight/<arm>/<key>.json,

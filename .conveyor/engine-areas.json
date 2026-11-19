@@ -1150,6 +1150,7 @@
 {"area": "bench", "test": "swebench.test.sh"}
 {"area": "bench", "test": "swebenchshow.test.sh"}
 {"area": "bench", "test": "swebenchver.test.sh"}
+{"area": "bench", "test": "cardrules.test.sh"}
 {"area": "busy", "test": "swebench.test.sh"}
 {"area": "snapshot", "test": "swebench.test.sh"}
 {"area": "snapshot", "test": "rollout.test.sh"}

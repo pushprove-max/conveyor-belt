@@ -53,10 +53,15 @@ t_swearmsave() {
     || fail "the edit did not make a new revision: $id2"
   o=$(loop bench swe arms show "$id1" 2>&1) && [ "$(jq -cS .spec <<<"$o")" = "$(jq -cS . <<<"$s1")" ] || fail "the edit changed the earlier revision: $o"
   # Refused, nothing kept: a Codex review model as the builder; a model of another CLI for an agent; a seat effort its
-  # CLI does not take; a command given through the form.
+  # CLI does not take; rules other than engine or project; a review policy the control record cannot hold; a command
+  # given through the form.
   for o in '{"kind":"conveyor","seats":{"model":{"cli":"codex","model":"x"}}}/does not allow "x" on codex for the builder seat' \
       '{"kind":"agent","recipe":"solo","cli":"claude","model":"x"}/does not allow "x" on claude' \
       '{"kind":"conveyor","seats":{"reviewer":{"cli":"codex","model":"x","effort":"max"}}}/codex takes no effort "max"' \
+      '{"kind":"conveyor","rules":"all"}/the rules are engine or project, not "all"' \
+      '{"kind":"conveyor","policy":{"judgeOn":"no"}}/judgeOn and P0 to P3 are true or false' \
+      '{"kind":"conveyor","policy":{"judgeAlways":["-x"]}}/judgeAlways is a list of at most 20 finding kinds, each a word of letters, digits, _ and -' \
+      '{"kind":"conveyor","policy":{"P4":true}}/the policy takes judgeOn, judgeAlways and P0 to P3 only' \
       '{"kind":"agent","recipe":"solo","cli":"claude","model":"m","run":"true"}/takes kind, recipe, cli and model only, not run'; do
     id2=$(loop bench swe arms save bad "${o%%/*}" 2>&1) && fail "a choice the project does not allow was saved: ${o%%/*}"
     grep -qF "${o#*/}; nothing saved" <<<"$id2" || fail "the refusal does not say why: $id2"

@@ -167,3 +167,51 @@ t_ownruns() {
     done
   done
 }
+
+# The benchmark's Conveyor arm on the project's rules (bench/swe_arms.sh, swe_pack), on the SWE-bench fixture of
+# swebench.test.sh (swe): the host arm conveyor-rules takes the seats Codex builds and Claude reviews, the project's
+# judge (on, Codex, always accepting P3) stands, the project keeps other seats for issue 1 (cards), and the pack maps
+# x.py, which the task's issue names, and nomatch/* to area rule files.
+swerulesarm() {
+  swe
+  jq -c '.judgeOn = true | .judgeAlways = ["P3"] | .judge = {cli: "codex", model: "x"} | .cards = {"1": {builder: {model: "m", effort: "low"}, reviewer: {model: "x"}}}' \
+    "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" \
+    && jq '.seats = {model: {cli: "codex", model: "x"}, reviewer: {cli: "claude", model: "m"}} | .rules = "project" | .label = "Conveyor, project rules"' \
+      "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-rules.json" \
+    && mkdir -p "$R/rules" && echo AREA-RULE-X > "$R/rules/x.md" && echo AREA-RULE-OTHER > "$R/rules/other.md" \
+    && tune '.areas = {"x.py": "rules/x.md", "nomatch/*": "rules/other.md"}' || fail "the arm, the control record or the area rules were not set"
+}
+
+# Bug: the benchmark's card did not get what the arm chose. Its sandbox kept the project's per-issue seats (cards), and
+# every task is issue 1 there, so a project's cards["1"] changed the arm's builder and reviewer; and its pack held no
+# project card rules or area rules, so an arm could not run a card on the rules the project's own cards get. The card
+# in the container sees the engine version asked for, the arm's seats, the arm's review policy over the project's, no
+# per-issue seats, and the rules cardrules() gives it there: the core rules, the project's card rules and the area rule
+# its issue names. Bug: a saved arm could not turn the judge off or set the finding priorities, so the host's always
+# stood, and its own judgeAlways list did not replace the host's ["P3"]. The arm is a saved one (the Board's form),
+# Claude builds at high effort and Codex reviews, on the project's rules, with the judge off, P3 findings off and
+# "style" the judge's one always-accepted kind; P2, which it leaves out, is the project's.
+t_swerules() {
+  swerulesarm; local out r id
+  id=$(loop bench swe arms save 'Project rules' '{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"m","effort":"high"},"reviewer":{"cli":"codex","model":"x"}},"rules":"project","policy":{"judgeOn":false,"judgeAlways":["style"],"P3":false}}' 2>&1) \
+    || fail "the arm was not saved: $id"
+  out=$(loop bench swe 1 --arm "$id" --engine v1.0.0 2>&1) || fail "the run failed: $out"
+  [ -s "$SWE_FX/log" ] && ! grep -v '^A ' "$SWE_FX/log" || fail "the card did not run on the engine version asked for: $(cat "$SWE_FX/log")"
+  jq -e '.model == {cli: "claude", model: "m", effort: "high"} and .reviewer == {cli: "codex", model: "x"} and .cards == {}
+    and .judgeOn == false and .rules.P3 == false and .rules.P2 == true and .judgeAlways == ["style"] and .judge.cli == "codex" and .judge.model == "x"' "$SWE_FX/control.seen" > /dev/null \
+    || fail "the card's control record does not hold the arm's seats and its review policy over the project's, or holds the project's cards: $(cat "$SWE_FX/control.seen")"
+  r=$(cat "$SWE_FX/rules.seen")
+  [[ $r == "$(cat "$SRC/rules/card-core.md")"* ]] && [[ $r == *PACK-CARD-RULE* ]] && [[ $r == *AREA-RULE-X* ]] && [[ $r != *AREA-RULE-OTHER* ]] \
+    || fail "the card's rules are not the core rules, the project's card rules and the area rule of x.py alone: $r"
+}
+
+# Bug: an arm that takes the project's rules ran with one of them missing, so its cards built on fewer rules than the
+# arm says. The run is refused, and says which file is missing.
+t_sweruleless() {
+  swerulesarm; local out
+  rm "$R/rules/x.md"
+  out=$(loop bench swe 1 --arm conveyor-rules 2>&1) && fail "the run started with an area rule file missing: $out"
+  grep -qF "the arm conveyor-rules cannot run: its preflight failed: the arm takes the project's rules, and the area rule file rules/x.md its pack maps to x.py is missing" <<<"$out" \
+    || fail "the run was not refused for the missing area rule file: $out"
+  [ ! -e "$SWE_FX/log" ] || fail "a card ran with the area rule file missing: $(cat "$SWE_FX/log")"
+}
