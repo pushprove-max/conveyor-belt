@@ -317,7 +317,8 @@ health() {
   mc=$(mhost); mc=${mc:-null}
   # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved) and the test-slot pool's
   # size on the cores left (null when the pool cannot be read), or why this machine cannot keep cores, for the Rules tab.
-  co=$( { slot_pool && n=$SLOT_N; } >/dev/null 2>&1 || n=null
+  # The pool as the caller read it when SLOTSREAD is set (the snapshot's), else read here.
+  co=$( { [ -n "${SLOTSREAD:-}" ] || slot_pool; } >/dev/null 2>&1 && n=$SLOT_N || n=null
     jq -cn --argjson n "$n" --arg r "$(slot_reserved)" --arg why "$(slot_reserve_why)" \
       '{reserved: ($r | split("\n") | map(select(. != "") | tonumber)), slots: $n, unavailable: (if $why == "" then null else $why end)}') || co=null
   # How the test times are read from the runner's report (the pack's test.report, written by setup), for untimed.

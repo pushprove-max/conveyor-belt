@@ -474,14 +474,15 @@ ROUTES=${STATE%/*}/routes.json
 # limit and account are theirs alone (subroles()): a role on "subscription", or on "fallback" (each of its sessions starts
 # on the login, proxyroute(), even after a login that failed before); every role when no proxy is set.
 routesnow() {
-  local p; p=$(claudeproxy); [ -n "$p" ] || p=null
-  { cat "$ROUTES" 2>/dev/null || echo null; } | jq -c --argjson p "$p" 'if type == "object" then . else {} end
+  local p r; p=$(claudeproxy); [ -n "$p" ] || p=null
+  { r=$(<"$ROUTES"); } 2>/dev/null || r=null
+  jq -c --argjson p "$p" 'if type == "object" then . else {} end
     | ($p | if . == null then null else [.roles // {} | (.builder, .reviewer) | if IN("subscription", "fallback") then . else "proxy" end] end) as $r
     | ["builder", "reviewer"] as $n
     | (if $r == null then $n else [range(2) | select($r[.] != "proxy") | $n[.]] end) as $on
     | {subscription: ((if $r != null and ($r | all(. == "proxy")) then {state: "not used"} else .subscription // {state: "not checked"} end) + {roles: $on}),
        proxy: (if $p == null then {state: "not set"} else (.proxy // {state: "not checked"})
-         + {baseUrl: $p.baseUrl, roles: {builder: $r[0], reviewer: $r[1]}, route: (if $r | any(. == "fallback") then "fallback" else "proxy" end)} end)}' 2>/dev/null || echo null
+         + {baseUrl: $p.baseUrl, roles: {builder: $r[0], reviewer: $r[1]}, route: (if $r | any(. == "fallback") then "fallback" else "proxy" end)} end)}' <<<"$r" 2>/dev/null || echo null
 }
 # The roles whose Claude sessions run on the subscription login now (routesnow()), one a line: the guard reads the
 # usage limit of their accounts alone, as a role on an API route has no usage limit (billed per token).

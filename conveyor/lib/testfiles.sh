@@ -345,14 +345,15 @@ CASESCAN='
   open && !/^[ \t]*(#.*)?$/ { lb = FNR; lz = !inq() && /\}[ \t]*(#.*)?$/ }
   END { shut() }'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
-  local si sh rn mn fs fl sf defs refs cs ru all ln ch hv out nv rp cp
+  # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all ln ch hv out nv rp cp
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
-  testowners
+  [ -n "$defs" ] && [ -n "$refs" ] || testowners
   # The cases each test file of main's checkout defines, by file (the case scan, CASESCAN).
   cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
     | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'

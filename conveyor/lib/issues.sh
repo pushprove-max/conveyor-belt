@@ -415,7 +415,7 @@ ghok() {
   local o rc; GHWHY=
   if [ -n "$GITHUB" ] && [ -e "$GITHUB/gh" ]; then
     GHREAD=$(p_mtimens "$GITHUB/gh")
-    [ "$(cat "$GITHUB/gh" 2>/dev/null)" = true ] && return 0
+    { o=$(<"$GITHUB/gh"); } 2>/dev/null; [ "$o" = true ] && return 0
     GHWHY=$(head -c 300 "$GITHUB/ghwhy" 2>/dev/null); GHWHY=${GHWHY:-the GitHub folder says signed out, with no reason}; return 1
   fi
   GHREAD=${EPOCHREALTIME/[.,]/}; o=$(timeout 20 gh auth token 2>&1); rc=$?
@@ -427,7 +427,7 @@ ghok() {
 }
 # GitHub reached: `gh auth status` checks the token over the network. It fails when GitHub is slow, down or refuses the
 # token; health gives that as ghReached false, never as signed out.
-ghreach() { if [ -n "$GITHUB" ]; then [ "$(cat "$GITHUB/ghreach" 2>/dev/null)" = true ]; else timeout 20 gh auth status >/dev/null 2>&1; fi; }
+ghreach() { local r; if [ -n "$GITHUB" ]; then { r=$(<"$GITHUB/ghreach"); } 2>/dev/null; [ "$r" = true ]; else timeout 20 gh auth status >/dev/null 2>&1; fi; }
 # Every JSON and GraphQL string escape (\uXXXX, \u{X...}, \n, \/ ...) decoded, again on each result until nothing is
 # left to decode; one line per decoding that changed the text. A high and low surrogate \uXXXX pair decodes as the one
 # character it names, as JSON parsers read it; any other code point that is not a character decodes as U+FFFD.

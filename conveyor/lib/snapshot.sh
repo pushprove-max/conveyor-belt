@@ -331,7 +331,7 @@ suites() {
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that
   # ends in between removes it, and one that starts in between writes a new one.
-  m=$(cat "$FULLTEST.running" 2>/dev/null); free=''
+  { m=$(<"$FULLTEST.running"); } 2>/dev/null; free=''
   ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || free=1
   if [ -z "$free" ] && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
     fr=$(jq -c --slurpfile p <(suiteprog "$CARDS/fulltest/wt") '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + (.counts // $p[0])' <<<"$fr")
@@ -425,14 +425,17 @@ snapcopy() { # [<open issues json>]
 JUDGEDLINE='select(. != "") | fromjson | objects | select(.step == "review" or (.step == "picked" and (.mainRed | type) == "string"))
   | {card, step} + if .step == "picked" then {mainRed} else {judge: (.judge | if type == "object" then {accepted, declined} else . end)} end'
 snaprows() { # <records file> <kept> <to>
-  local k size h1 h2 o s n=-1 src=$1
+  local k r cs size h1 h2 o s n=-1 src=$1 rf=$3.rows skip=0
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
   [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$SHUT"; } | cksum) || return 1
-  k=$SNAPROWS_K && size=$(($(wc -c < "$1"))) || return 1
+  # The file's sum and size from one cksum: a file not grown since the summary needs no other program to check it.
+  k=$SNAPROWS_K && r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
   # Read from a copy: a snapshot running beside this one may put a newer summary in its place meanwhile.
   cp -- "$2" "$3.sum" 2>/dev/null || : > "$3.sum"
-  { read -r h1 h2 o s && [ "$h1 $h2" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] && [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; } < "$3.sum" && n=$o
-  if [ "$n" = "$size" ]; then tail -n +2 "$3.sum" > "$3.rows" || return 1
+  { read -r h1 h2 o s && [ "$h1 $h2" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] \
+      && if [ "$o" = "$size" ]; then [ "$s" = "$cs" ]; else [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; fi; } < "$3.sum" && n=$o
+  # Not grown: the rows are the summary's, past its first line.
+  if [ "$n" = "$size" ]; then rf=$3.sum skip=1
   else
     if [ "$n" -lt 0 ] && [ "$size" != 0 ]; then
       if [ -s "$3.sum" ]; then echo "conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer" >&2
@@ -448,9 +451,9 @@ snaprows() { # <records file> <kept> <to>
       src=$3.lines
     fi
     rows "$src" | jq -c '.[]' | cat "$3.kept" - | LC_ALL=C sort -s -t, -k1,1 > "$3.rows" || return 1
-    { printf '%s %s %s\n' "$k" "$size" "$(cksum < "$1" | cut -d' ' -f1)" && cat "$3.rows"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
+    { printf '%s %s %s\n' "$k" "$size" "$cs" && cat "$3.rows"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
   fi
-  awk 'BEGIN {printf "["} NR > 1 {printf ","} {printf "%s", $0} END {print "]"}' "$3.rows" > "$3"
+  awk -v s="$skip" 'BEGIN {printf "["} NR > s + 1 {printf ","} NR > s {printf "%s", $0} END {print "]"}' "$rf" > "$3"
 }
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
@@ -473,6 +476,9 @@ snapshot() (
   # else one bad line stops the snapshot (#290). READ is this snapshot's own copy, so health need not check it again.
   # shellcheck disable=SC2034 # READCHECKED is read by health (lib/views.sh), which conveyor.sh sources beside this file
   check && READCHECKED=1 && snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
+  # The machine's test-slot pool (lib/slots.sh slot_pool) read once, in this shell: health's cores and the slots in
+  # use below read it. SLOTSREAD says it was read.
+  SLOTSREAD=''; ! slot_pool >/dev/null 2>&1 || SLOTSREAD=1
   # shellcheck disable=SC2034 # read by health (lib/views.sh), which conveyor.sh sources beside this file
   h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
   snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
@@ -533,7 +539,7 @@ snapshot() (
   fi
   cr=$(checkrun "$d")
   # The machine's test-slot pool (lib/slots.sh): how many of its slots a test run holds now, of how many.
-  ts=$(slot_pool >/dev/null 2>&1 && printf '{"used":%d,"of":%d}' "$(slot_used)" "$SLOT_N" 2>/dev/null) && [ -n "$ts" ] || ts=null
+  ts=$([ -n "$SLOTSREAD" ] && printf '{"used":%d,"of":%d}' "$(slot_used)" "$SLOT_N" 2>/dev/null) && [ -n "$ts" ] || ts=null
   # The readings of the account the next card will use.
   stdb ask -o "$d/limit" limit "$ACCT" 2>/dev/null || : > "$d/limit"
   # The reading of each account the guard reads for the record, as the guard acts on it (guardaccts).
@@ -563,6 +569,7 @@ snapshot() (
     '.fail | objects | select(.issue == null or $iss[0] == null or (.issue as $n | $iss[0] | any(.number == $n)))' "$MAINTEST" 2>/dev/null) || mt=null
   # The commit of the plugin's main (or newest release) this machine did not take, while the pack follows it (take(), lib/install.sh).
   packget plugin.follow eng && [ -n "$eng" ] && eng=$(jq -ce '.refused | objects | {commit, reason, since}' "$ENGINE" 2>/dev/null) || eng=null
+  # The test owners, read once: testspart, below, reads these too.
   local defs refs
   testowners
   fl=$(jq -ce --slurpfile h "$d/health" --argjson days "$FLAKY_DAYS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$h[0] as $h | '"$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
