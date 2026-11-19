@@ -184,16 +184,16 @@ t_narrowrelease() {
 
 # Bug it catches: a pack whose cards all stop at their test step with nothing said before. Doctor warns of a pack with
 # no test.fileCommand, though it sets test.list (a card no longer gives test.command a list), whose test file a.test.sh
-# Conveyor's own runner cannot run, naming it; and not once it sets one. Bug it catches (E3 of #376's review): doctor
-# also told a project whose test files the own runner runs (a Node package's lib/n.test.js, as in t_narrowownrunner)
-# that no test file could run.
+# Conveyor's own runner cannot run, naming it; and not once it sets one, with a.test.sh still there (#717). Bug it
+# catches (E3 of #376's review): doctor also told a project whose test files the own runner runs (a Node package's
+# lib/n.test.js, as in t_narrowownrunner) that no test file could run.
 t_narrowdoctor() {
   setup '[]'; tune 'del(.test.fileCommand) | .test.list = "args"'
   ( export CONVEYOR_MAIN=$R; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/doctor.sh")" || exit 1
-    narrowwarn > "$T/$CASE/none"
+    narrowwarn > "$T/$CASE/none"; tuned '.test.fileCommand = "bash"' narrowwarn > "$T/$CASE/fc"
     git -C "$R" rm -q a.test.sh && mkdir -p "$R/lib" && echo '{"name": "p"}' > "$R/package.json" && echo x > "$R/lib/n.test.js" \
       && git -C "$R" add package.json lib/n.test.js || exit 1
-    narrowwarn > "$T/$CASE/own"; tune '.test.fileCommand = "bash"'; narrowwarn > "$T/$CASE/fc" ) \
+    narrowwarn > "$T/$CASE/own" ) \
     > "$T/$CASE/run.out" 2>&1 || fail "the warning failed to run: $(cat "$T/$CASE/run.out")"
   grep -qxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file' "$T/$CASE/none" \
     || fail "doctor did not warn of a pack with no test.fileCommand and a test file with no runner: $(cat "$T/$CASE/none" "$T/$CASE/run.out")"
