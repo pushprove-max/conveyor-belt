@@ -46,9 +46,10 @@ setup runs doctor, which checks the setup ([Setup](docs/setup.md#setup)).
 ## The test map
 
 The test map tells which test files cover which source files. Setup makes it with the coverage tool of your language.
-With the map, a card runs only the tests that cover its change, not the whole suite. The test step of each card is
-then much faster. Answer yes when setup offers to make the map. The first map needs one whole run of your suite, and
-setup is the time for that run. To make the map later, run `/conveyor-belt:setup` again. After that, the map stays
+A card never runs the whole suite. It runs each of its test files alone, with `test.fileCommand` or the runner of
+its language ([Configuration](docs/configuration.md)). With the map, a card runs only the tests that cover its change.
+The test step of each card is then much faster. Answer yes when setup offers to make the map. The first map needs
+one whole run of your suite, and setup is the time for that run. To make the map later, run `/conveyor-belt:setup` again. After that, the map stays
 current by itself. A whole run on main makes it again when it is due. A card adds the test files that it adds.
 `/units` shows how far the run is, and then the state of the map
 ([The test map](docs/configuration.md#the-test-map)).
