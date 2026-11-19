@@ -64,10 +64,13 @@ t_stalltwice() {
 }
 
 # Output, a changed file and a new commit each reset the clock: a session that keeps doing one of them is never ended,
-# however long the others stay still (each case's session does one of them alone for twice `stuck`, and the six run
-# side by side). Output that comes less often than the live record is read still counts (it is read before the clock
-# is, or a line 2 s after the last was missed at 3 s), and so does a file git ignores, and a write that keeps an old
-# modification time (`cp -p`), which only the change time shows.
+# however long the others stay still. Each case runs a stub that does one of them alone for at least twice `stuck` (3 s): 6 s,
+# or 8 s for t_stallprogressrare, under
+# the engine's watch() (watched(), below), and checks that watch() returns the stub's own exit and writes no
+# <worktree>.stalled: a reset that is missed ends the stub at about 3 s with that file. Output that comes less often
+# than the live record is read still counts (it is read before the clock is, or a line 2 s after the last was missed at
+# 3 s), and so does a file git ignores, and a write that keeps an old modification time (`cp -p`), which only the
+# change time shows.
 t_stallprogress() {
   progressing <<'EOF'
 for i in $(seq 12); do sleep 0.5; echo '{"type":"system"}'; done # sleep: the pause between two output lines
@@ -80,20 +83,19 @@ EOF
 }
 t_stallprogressfile() {
   progressing <<'EOF'
-for i in $(seq 12); do echo "$i" > progress.txt; sleep 0.5; done; rm progress.txt # sleep: the pause between two file changes
+for i in $(seq 12); do echo "$i" > a.txt; sleep 0.5; done # sleep: the pause between two changes of a tracked file
 EOF
 }
 t_stallprogressignored() {
   progressing <<'EOF'
 echo ignored.txt >> "$(git rev-parse --git-path info/exclude)"
-for i in $(seq 12); do echo "$i" > ignored.txt; sleep 0.5; done; rm ignored.txt # sleep: the pause between two changes of an ignored file
+for i in $(seq 12); do echo "$i" > ignored.txt; sleep 0.5; done # sleep: the pause between two changes of an ignored file
 EOF
 }
 t_stallprogressmtime() {
   progressing <<'EOF'
-cp a.txt "$STUB/a.was"; echo old > "$STUB/old.1"; echo older > "$STUB/old.2"; touch -d 2020-01-01 "$STUB/old.1" "$STUB/old.2"
-for i in $(seq 12); do cp -p "$STUB/old.$((i % 2 + 1))" a.txt; sleep 0.5; done # sleep: the pause between two writes that keep an old modification time
-cat "$STUB/a.was" > a.txt
+d=$(mktemp -d); echo old > "$d/old.1"; echo older > "$d/old.2"; touch -d 2020-01-01 "$d/old.1" "$d/old.2"
+for i in $(seq 12); do cp -p "$d/old.$((i % 2 + 1))" a.txt; sleep 0.5; done; rm -rf "$d" # sleep: the pause between two writes that keep an old modification time
 EOF
 }
 t_stallprogresscommit() {
@@ -101,14 +103,23 @@ t_stallprogresscommit() {
 for i in $(seq 12); do git commit -q --allow-empty -m "step $i"; sleep 0.5; done # sleep: the pause between two commits
 EOF
 }
-progressing() { # stdin: the shell of the build's one kind of progress, twice `stuck` long
-  local p; p=$(cat)
-  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.stuck = 3'; echo "$GO" > "$STUB/review.1"
-  printf '%s\n' 'h=$(git rev-parse HEAD)' "$p" 'git reset -q --soft "$h"; echo two >> a.txt' > "$STUB/build"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a session making progress was ended: $(wc -l < "$STUB/sessions") sessions; $out"
-  [ -z "$(st 'select(.stalls or .firstTry) | .step')" ] || fail "a line counts a stall: $(st 'select(.stalls or .firstTry)')"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.reason)"')"
+progressing() { # stdin: the shell of the build's one kind of progress, at least twice `stuck` long
+  watched build 3 'exit 7'
+  [ "$RC" = 7 ] && [ ! -e "$W.stalled" ] || fail "a session making progress was ended: watch() returned $RC after $TOOK s, stalled: $(cat "$W.stalled" 2>/dev/null)"
+}
+# Runs stdin's shell, then <last shell>, in a fresh worktree (its git folder outside it, as a card's is) under the
+# engine's watch() as step <step>, with STUCK=<stuck> and a live record every 0.2 s (setup's live), its output beside the
+# worktree. Sets W (the worktree), RC (watch()'s exit) and TOOK (its seconds).
+watched() { # <step> <stuck> <last shell>
+  local p s; p=$(cat); W=$T/$CASE/wt
+  git init -q -b main --separate-git-dir "$T/$CASE/git" "$W" && echo one > "$W/a.txt" && git -C "$W" add a.txt \
+    && git -C "$W" commit -qm a || fail "the case's worktree could not be made"
+  printf '%s\n' "$p" "$3" > "$T/$CASE/step.sh"
+  s=$SECONDS
+  ( eval "$(sed -n '/^rollout() {/,/^}/p; /^holds() {/,/^}/p; /^watch() {/,/^}/p' "$SRC/lib/session.sh")"
+    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=$2; (cd "$W" && exec bash "$T/$CASE/step.sh") > "$W.out" 2>&1 < /dev/null &
+    watch $! "$W.out" "$W.live" "$1" ); RC=$?; TOOK=$((SECONDS - s))
 }
 
 # A card waiting by design (here to land, on a same-file card that lands first) is never ended, however long it waits:
@@ -167,23 +178,19 @@ t_stallpause() {
 }
 
 # A Codex review's session file that grows with no new token count read from it is no progress: bytes of a line cut
-# short there moved its size and reset the clock, so a review hung in the middle of a write was never ended.
+# short there moved its size and reset the clock, so a review hung in the middle of a write was never ended. The
+# review's session file grows by a byte each 0.5 s for 15 s under watch() with STUCK=2: watch() ends it within a few
+# seconds and writes <worktree>.stalled with the time its progress stopped.
 t_stallrollout() {
-  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.stuck = 2'; echo "$GO" > "$STUB/review.2"
-  echo 'echo two >> a.txt' > "$STUB/build"
-  export CODEX_HOME=$STUB/codex-home; mkdir -p "$CODEX_HOME/sessions/2026/01/01"
-  cat > "$STUB/review-cmd" <<'EOF'
-if [ "$(wc -l < "$STUB/reviews")" = 1 ]; then
-  echo '{"type":"thread.started","thread_id":"0aa1-b2"}'
-  f=$CODEX_HOME/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
-  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"cached_input_tokens":0,"output_tokens":0}}}}' > "$f"
-  for i in $(seq 120); do printf x >> "$f"; sleep 0.5; done # sleep: the pause between two bytes of a line cut short, ended by the engine
-fi
+  export CODEX_HOME=$T/$CASE/codex-home; mkdir -p "$T/$CASE/codex-home/sessions/2026/01/01"
+  watched review 2 'exit 0' <<'EOF'
+echo '{"type":"thread.started","thread_id":"0aa1-b2"}'
+f=$CODEX_HOME/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
+echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"cached_input_tokens":0,"output_tokens":0}}}}' > "$f"
+for i in $(seq 30); do printf x >> "$f"; sleep 0.5; done # sleep: the pause between two bytes of a line cut short, ended by watch()
 EOF
-  s=$SECONDS; out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ $((SECONDS - s)) -lt 45 ] || fail "a review whose session file grew by part of a line was not ended after stuck seconds: the run took $((SECONDS - s)) s"
-  [ "$(st 'select(.step == "review") | [.result, .stalls, (.firstTry.reason | test("^stalled at review: no progress since 20[0-9-]+T"))] | tostring')" = '["GO",1,true]' ] \
-    || fail "the review was not ended and run once more: $(st 'select(.step == "review")')"
+  [ "$TOOK" -lt 10 ] && [ "$RC" != 0 ] || fail "a review whose session file grew by part of a line was not ended after stuck seconds: watch() returned $RC after $TOOK s"
+  jq -en --arg t "$(cat "$W.stalled" 2>/dev/null)" '$t | fromdate > 0' > /dev/null 2>&1 || fail "the ended review left no time in its .stalled file: $(cat "$W.stalled" 2>/dev/null)"
 }
 
 # Bug (#466): a card whose build line is written and whose next step never starts (here the project's checks hang
