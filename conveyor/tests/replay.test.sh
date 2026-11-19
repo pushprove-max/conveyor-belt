@@ -105,7 +105,15 @@ t_replayjudge() {
 # at the model asked; a model the pack does not allow the judge was replayed.
 t_replayestimate() {
   replaysetup
+  local before; before=$(cd "$ST" && find . -type f | sort)
   fx_in '. "$HERE/lib/replay.sh"; judgecall() { echo called >> "$STUB/judged"; return 1; }; replay judge claude-haiku-5-5 --estimate; replay judge m9 --estimate; echo "rc $?"'
+  # Bug caught (#855): the header of lib/replay.sh said the replay writes only its result line, while an estimate
+  # makes the lock file (and the records' read makes the state database). The estimate's new files are listed from
+  # the run; that the header names each one is read from its text, as a comment's truth has no behaviour to run.
+  [ "$(comm -13 <(echo "$before") <(cd "$ST" && find . -type f | sort) | tr '\n' ' ')" = './replays.jsonl.lock ./state.db ' ] \
+    || fail "the estimate wrote other files than the lock and the state database: $(cd "$ST" && find . -type f | sort | comm -13 <(echo "$before") - | tr '\n' ' ')"
+  local head; head=$(sed -n '/^# SPDX/,/^[^#]/p' "$SRC/lib/replay.sh")
+  grep -q 'REPLAYS\.lock' <<<"$head" && grep -q 'state\.db' <<<"$head" || fail "the header of lib/replay.sh does not name each file an estimate makes"
   head -n 1 "$T/$CASE/run.out" | jq -e '. == {"estimate":true,"model":"claude-haiku-5-5","effort":"medium","reviews":3,"skipped":2,"findings":4,"usd":0.3,"recordedUsd":6}' >/dev/null \
     || fail "the estimate: $(cat "$T/$CASE/run.out")"
   # Bug caught: `conveyor.sh pick replay` (commands/pick.sh) did not reach replay(), which the cases above call

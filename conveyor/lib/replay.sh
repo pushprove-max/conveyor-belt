@@ -2,7 +2,9 @@
 # The judge replay study, run only when the owner asks (`conveyor.sh pick replay judge <model> [<effort>] [--last <n>]
 # [--estimate]`, or the Board's Cost panel): another judge is given the findings the project's judge already ruled on,
 # with their diffs, and its rulings are compared with the recorded ones. No card is touched, no setting is changed and
-# no test runs: the only thing written is the replay's own line in REPLAYS (lib/paths.sh).
+# no test runs: the only things written are the replay's own line in REPLAYS (lib/paths.sh) and the lock file beside
+# it (REPLAYS.lock, which a run or an estimate makes when there is none, to let only one of them run at a time),
+# besides the state database (state.db, state.py), which every read of the records through stdb() brings up to date.
 # The cases are the newest <n> review lines (REPLAY_LAST when --last is not given) of the card records and the
 # retried lines whose judge ruled (judge.accepted and judge.declined, judged(), lib/review.sh; a judge that failed
 # ruled on nothing). A finding of a kind the project always accepts counts as the judge's own answer, which its reason
