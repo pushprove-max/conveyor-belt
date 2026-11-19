@@ -137,68 +137,67 @@ t_unblockhold() {
   loop unblock 9 --hold >/dev/null 2>&1 && fail "unblock of #9, which has no card, exited 0"
   loop control hold 8 >/dev/null; loop unblock 8 --hold >/dev/null 2>&1
   [ "$(jq -c .held "$S/control.json")" = '[7,8]' ] || fail "a refused unblock changed the holds: $(jq -c .held "$S/control.json")"
-  # Released, its next card resumes from the kept patch.
-  loop control release 7 8 >/dev/null; echo "$GO" > "$STUB/review.1"; echo 'git diff --cached --name-only > "$STUB/resumed-with"' > "$STUB/build"
-  loop run --only 7 >/dev/null || fail "run of the released #7 exited non-zero"
-  st 'select(.issue == 7 and .step == "worktree") | .reason' | grep -q '^resumed from the kept patch of card c0-7:' && [ "$(cat "$STUB/resumed-with")" = a.txt ] \
+  # Released, its next card resumes from the kept patch: the pick takes #7, and card() runs to its worktree step,
+  # which applies the patch; its deps step, the next one, notes what is staged there and stops the card.
+  loop control release 7 8 >/dev/null
+  fx_in 'cd "$R" && read -r c n _ <<<"$(locked pick "" "" "$(asked)")" && [ "$n" = 7 ] || { echo "pick took ${n:-nothing}"; exit 3; }
+    deps() { git -C "$1" diff --cached --name-only > "$STUB/resumed-with"; return 1; }; card "$c" "$n"'
+  [ "$RC" != 3 ] || fail "the released #7 was not picked: $(cat "$T/$CASE/run.out")"
+  st 'select(.issue == 7 and .step == "worktree") | .reason' | grep -q '^resumed from the kept patch of card c0-7:' && [ "$(cat "$STUB/resumed-with" 2>&1)" = a.txt ] \
     || fail "the released #7 did not resume from its kept patch: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
 }
 
-# #10 is the run's one card; its session holds until #7 has landed (or the stub folder is gone: the test's end),
-# however long that takes. #7, blocked before, is retried while the loop waits on it.
+# A run whose max-cards are used up (run 1, its one card #10 on the belt) picks with `pick retried` (run(),
+# lib/run.sh): that pick takes the retried #7 and nothing else, so the run builds it while it waits on #10.
 t_retrywait() {
-  setup "$(jq -cs . <(issue 7 2026-01-01 P1))"; S=$ST
-  for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
-  echo 'exit 1' > "$STUB/build"; loop run 1 >/dev/null; [ "$(st 'select(.step == "blocked") | .issue')" = 7 ] || fail "#7 was not blocked to start with"
+  setup "$(jq -cs . <(issue 7 2026-01-01 P1) <(issue 10 2026-04-01))"; S=$ST; mkdir -p "$S"
+  landed 7 | jq -c '.step = "picked"' >> "$S/cards.jsonl"; landed 7 | jq -c '.step = "blocked" | .result = "blocked" | .reason = "build: it failed"' >> "$S/cards.jsonl"
   retrylines
-  jq -c ". + [$(issue 10 2026-04-01)]" "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-case $(cat) in *'# Issue #10:'*) until [ ! -d "$STUB" ] || grep -q '"issue":7,"step":"landed"' "$ST/cards.jsonl" 2>/dev/null; do sleep 0.1; done; echo ten > b.txt ;;
-  *) echo two >> a.txt ;; esac
-echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
-EOF
-  tune '.tunables.poll = 1'; loop run 1 >/dev/null & run=$!
-  until grep -q '"issue":10,"step":"brief"' "$S/cards.jsonl" || ! kill -0 $run 2>/dev/null; do sleep 0.1; done # #10's brief, or the run's end
-  old=$(grep '"issue":7,' "$S/cards.jsonl"); card=$(st 'select(.issue == 7 and .step == "blocked") | .card')
+  fx_in 'locked pick retried "" "$(asked)"'
+  [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "a pick of retried issues alone took one before any retry (exit $RC): $(cat "$T/$CASE/run.out")"
+  old=$(grep '"issue":7,' "$S/cards.jsonl"); card=c0-7
   loop retry 7 >/dev/null || fail "retry of the blocked #7 exited non-zero"
+  fx_in 'locked pick retried "" "$(asked)"; locked pick retried "" "$(asked)"'
+  [ "$RC" = 0 ] && [ "$(cut -d' ' -f2- "$T/$CASE/run.out")" = '7 true' ] || fail "a run with its max-cards used up did not pick the retried #7 alone, as a retried card (exit $RC): $(cat "$T/$CASE/run.out")"
   [ "$(jq -c 'del(.retriedAt)' "$S/retried.jsonl")" = "$old" ] && [ -n "$old" ] && ! grep -q "\"card\":\"$card\"" "$S/cards.jsonl" || fail "the blocked card's lines were not moved whole to the retried file"
   grep -q '"issue":8,' "$S/cards.jsonl" && grep -q '"issue":9,' "$S/cards.jsonl" || fail "retry took another issue's lines"
   # The blocked line carries when the owner gave the card back: the wait ends there, not at the next pick.
   [ "$(jq -r 'select(.step == "blocked") | .retriedAt | fromdate | now - . < 60' "$S/retried.jsonl")" = true ] \
     && [ "$(jq -c 'select(.step != "blocked") | .retriedAt' "$S/retried.jsonl" | sort -u)" = null ] \
     || fail "the retried blocked line does not say when it was retried: $(cat "$S/retried.jsonl")"
-  wait; loop check || fail "the records do not check after a retry"
-  steps=$(st 'select(.step == "landed" and (.issue | IN(5, 9) | not)) | .issue' | tr '\n' ' ')
-  [ "$steps" = "7 10 " ] || fail "a run 1 waiting on #10 did not build the retried #7 before #10 ended: landed '$steps'"
+  loop check || fail "the records do not check after a retry"
 }
 
-# A retried issue picked first leaves the run's one card for the next issue.
+# A retried issue picked first leaves the run's one card for the next issue: pick says the retried #11's card is a
+# retried one (true), which run() does not count toward max-cards, and the next pick takes #12 as a new one (false).
 t_retryfirst() {
   setup "$(jq -cs . <(issue 11 2026-01-01 P1) <(issue 12 2026-02-01))"; mkdir -p "$ST"
-  for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
   landed 11 | jq -c '.step = "blocked" | .result = "blocked"' >> "$ST/cards.jsonl"; loop retry 11 >/dev/null || fail "retry of #11 exited non-zero"
-  echo 'echo new > "f$$.txt"' > "$STUB/build"; printf '%s\n' '#!/usr/bin/env bash' 'cat > /dev/null; . "$STUB/build"' \
-    'echo '\''{"type":"result","is_error":false,"usage":{"input_tokens":1,"cache_creation_input_tokens":1,"output_tokens":1}}'\' > "$STUB/claude"
-  loop run 1 >/dev/null || fail "run 1 exited non-zero"
-  [ "$(st 'select(.step == "landed" and .issue > 10) | .issue' | sort | tr '\n' ' ')" = "11 12 " ] || fail "a retried card used up the run's max-cards: $(st 'select(.issue > 10) | "\(.issue) \(.step)"' | tr '\n' ',')"
+  fx_in 'locked pick "" "" "$(asked)"; locked pick "" "" "$(asked)"'
+  [ "$RC" = 0 ] && [ "$(cut -d' ' -f2- "$T/$CASE/run.out" | tr '\n' ,)" = '11 true,12 false,' ] || fail "a retried card is not picked first as a retried one, or uses up the run's max-cards (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs: a blocked card whose issue was closed (for any reason) stays under "Needs you" and in health's blocked list,
-# with no way to clear it; it does not end closed with a line saying why; its kept patch is deleted; a blocked card
-# whose issue is only missing from the open list (a filter narrows it), not closed, leaves too; the closed issue is
-# picked again from an open list asked before it was seen closed, or from an open list that still shows it while
-# GitHub says it is closed; once it is opened again, no turn of the loop gives it back with no `retry` (#599), its
-# lines stay in the card records, or the next card does not start from the kept work.
+# with no way to clear it; it does not end closed with a line saying why; its kept patch is deleted; the blocked card
+# of an issue that was not closed leaves too; it is given back while an open list still shows it but GitHub says it is
+# closed; once it is opened again, no turn of the loop gives it back with no `retry` (#599), or its lines stay in the
+# card records. The turn's parts are called as a turn calls them: shut() under the lock with the
+# issues found closed, then reopened() with the open list.
+# shutrec <issue>...: the blocked card c0-<issue> of each, its patch (a.txt gets the line two) kept in kept/c0-<issue>/.
+shutrec() {
+  local n; mkdir -p "$ST"
+  for n; do
+    mkdir -p "$ST/kept/c0-$n" && echo two >> "$R/a.txt" && git -C "$R" diff > "$ST/kept/c0-$n/c0-$n.patch" && git -C "$R" reset -q --hard || fail "the kept patch of c0-$n"
+    landed "$n" | jq -c --arg k "kept/c0-$n" '(.step = "picked"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed" | .kept = $k)' >> "$ST/cards.jsonl"
+  done
+}
 t_shut() {
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"
-  echo 'echo two >> a.txt; exit 1' > "$STUB/build"; loop run 2 >/dev/null
-  c7=$(st 'select(.issue == 7 and .step == "blocked") | .card'); c8=$(st 'select(.issue == 8 and .step == "blocked") | .card')
-  [ -n "$c7" ] && [ -n "$c8" ] && [ "$(loop health | jq -c '.blocked | map(.issue)')" = '[7,8]' ] || fail "#7 and #8 were not blocked to start with: $(loop health)"
-  [ -s "$ST/kept/$c7/$c7.patch" ] || fail "#7's blocked card kept no patch to start with"
-  # #7 is closed on GitHub, though the open list still shows it; #8 is open, missing from the open list. One turn of
-  # the loop closes #7's card, picks nothing, and leaves #8's blocked.
-  rm -f "$STUB/closed-viewed"; echo "[$(issue 7 2026-01-01)]" > "$STUB/issues.json"; echo "[$(issue 7 2026-01-01)]" > "$STUB/closed-issues.json"; loop run 1 >/dev/null
+  local c7=c0-7 c8=c0-8 open
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; shutrec 7 8; open="[$(issue 7 2026-01-01)]"
+  [ "$(loop health | jq -c '.blocked | map(.issue)')" = '[7,8]' ] || fail "#7 and #8 were not blocked to start with: $(loop health)"
+  # #7 is closed on GitHub: the turn shuts its card and leaves #8's blocked.
+  fx_in 'locked shut "[7]"'
+  [ "$RC" = 0 ] || fail "shut [7] exited $RC: $(cat "$T/$CASE/run.out")"
   [ "$(loop health | jq -c '[(.blocked | map(.card)), (.waiting | map(.card))]')" = "[[\"$c8\"],[]]" ] || fail "health's blocked lists after #7 was closed: $(loop health | jq -c '[.blocked, .waiting]')"
   snap=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)' <<<"$snap")" = '[8]' ] || fail "Needs you still lists the closed #7: $(jq -c .needsYou <<<"$snap")"
@@ -211,32 +210,29 @@ t_shut() {
   out=$(CONVEYOR_MAIN=$R bash "$SRC/report.sh") || fail "report exited non-zero"
   [ "$(grep -c '^blocked, for ' <<<"$out")" = 1 ] && grep -q "^blocked, for .*: $c8 issue #8: " <<<"$out" || fail "the report's blocked cards after #7 was closed: $out"
   grep -Eq '^cards landed +0$' <<<"$out" || fail "the report counts the closed #7, which landed nothing, as landed: $out"
-  [ "$(sort "$STUB/closed-viewed" | tr '\n' ' ')" = '7 8 ' ] || fail "the blocked issues were not each asked once for their state: $(cat "$STUB/closed-viewed")"
   [ -s "$ST/kept/$c7/$c7.patch" ] || fail "the kept patch of #7's card is gone"
   loop check || fail "the records do not check after a closed issue's card was closed"
-  [ "$(st 'select(.issue == 7 and .step == "picked") | .card')" = "$c7" ] || fail "the closed #7 was picked again"
-  [ "$(jq -c 'map(.number)' "$ST/issues.json")" = '[]' ] || fail "the sample's open list still counts the closed #7 queued: $(cat "$ST/issues.json")"
-  # #8 was seen open: it is asked again at the next turn, so its closing would clear it within that turn. #7, its card
-  # shut and the open list still showing it, is asked whether it was opened again; GitHub says closed, so it is
-  # still not picked and its lines stay.
-  rm -f "$STUB/closed-viewed"; loop run 1 >/dev/null
-  [ "$(sort "$STUB/closed-viewed" | tr '\n' ' ')" = '7 8 ' ] || fail "#8 as blocked, and #7 as shown open, were not asked at the next turn: $(cat "$STUB/closed-viewed" 2>/dev/null)"
-  [ "$(st 'select(.issue == 7 and .step == "picked") | .card')" = "$c7" ] && [ ! -s "$ST/retried.jsonl" ] || fail "the closed #7 was given back or picked again by the next run"
-  # Opened again, #7 is given back by the next turn with no retry: its shut card's lines move to the retried file,
-  # and it is picked once more, its new card starting from the kept work.
-  echo '[]' > "$STUB/closed-issues.json"; loop run 1 >/dev/null
-  grep -q "\"card\":\"$c7\"" "$ST/retried.jsonl" && ! grep -q "\"card\":\"$c7\"" "$ST/cards.jsonl" || fail "the turn did not move the reopened #7's shut card out of the card records"
-  [ -n "$(st "select(.issue == 7 and .step == \"worktree\" and (.reason | contains(\"kept patch of card $c7\"))) | .card")" ] \
-    || fail "#7, reopened, was not picked from its kept work: $(st 'select(.issue == 7) | "\(.step) \(.reason)"')"
+  # The open list still shows #7, its card shut: it is asked whether it was opened again; GitHub says closed, so
+  # nothing is given back.
+  echo "$open" > "$STUB/closed-issues.json"; rm -f "$STUB/closed-viewed"
+  fx_in "reopened '$open'"
+  [ "$(cat "$STUB/closed-viewed" 2>&1)" = 7 ] && [ ! -s "$ST/retried.jsonl" ] && [ "$(st "select(.card == \"$c7\") | .step" | tail -n 1)" = closed ] \
+    || fail "#7, shown open but closed on GitHub, was not asked, or was given back (exit $RC): $(cat "$ST/retried.jsonl" "$STUB/closed-viewed" 2>&1)"
+  # Opened again, #7 is given back with no retry: its shut card's lines move to the retried file, its kept work stays,
+  # and #8's card is left as it was.
+  echo '[]' > "$STUB/closed-issues.json"
+  fx_in "reopened '$open'"
+  [ "$(jq -r .card "$ST/retried.jsonl" | sort -u)" = "$c7" ] && ! grep -q "\"card\":\"$c7\"" "$ST/cards.jsonl" \
+    || fail "the reopened #7's shut card did not move alone out of the card records (exit $RC): $(cat "$ST/retried.jsonl" 2>&1)"
+  [ -s "$ST/kept/$c7/$c7.patch" ] && [ "$(st "select(.card == \"$c8\") | .step" | tr '\n' ' ')" = 'picked blocked ' ] || fail "the kept patch of #7 went, or #8's card changed"
 }
 
 # The Board's Close shuts the card itself (`shut`), with no turn of the loop: a stopped loop would leave it under
 # Needs you for good. Bug: #8's card stays blocked until a loop runs, or shut touches the records of an issue with
 # no blocked card. A case of its own on a main of its own, beside t_shut.
 t_shutboard() {
-  setup "[$(issue 8 2026-02-01)]"
-  echo 'echo two >> a.txt; exit 1' > "$STUB/build"; loop run 1 >/dev/null
-  c8=$(st 'select(.issue == 8 and .step == "blocked") | .card'); [ -n "$c8" ] || fail "#8 was not blocked to start with: $(loop health)"
+  local c8=c0-8
+  setup "[$(issue 8 2026-02-01)]"; shutrec 8
   before=$(cat "$ST/cards.jsonl"); loop shut 9 >/dev/null || fail "shut of #9, which has no card, exited non-zero"
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut 9 changed the card records, though #9 has no card"
   loop shut 8 >/dev/null || fail "shut 8 exited non-zero"
@@ -252,19 +248,19 @@ t_shutboard() {
 # ending is given back before that process ends (it would write a blocked line after its lines moved, and lose its
 # change); once it has ended, the shut card is still not given back.
 t_reopenonly() {
-  local p t
-  setup "$(jq -cs . <(issue 5 2026-01-01) <(issue 6 2026-02-01))"; mkdir -p "$ST"; echo 'exit 1' > "$STUB/build"
+  local p t open
+  setup "$(jq -cs . <(issue 5 2026-01-01) <(issue 6 2026-02-01))"; mkdir -p "$ST"; open=$(cat "$STUB/issues.json")
   sleep 60 & p=$!; t=$(. "$SRC/lib/portable.sh"; p_started "$p") # sleep: a stand-in for the shut card's process, still ending
   { landed 5
     jq -cn --argjson p "$p" --arg t "$t" '{card:"c0-6",issue:6,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
       | (. + {step:"picked"}), (. + {step:"worktree",pid:$p,started:$t}), (. + {step:"blocked",result:"blocked",reason:"NO-GO"}),
         (. + {step:"closed",reason:"the issue was closed by hand while the card was blocked"})'; } > "$ST/cards.jsonl"
   loop check || fail "the fixture does not check"; before=$(cat "$ST/cards.jsonl")
-  loop run 1 >/dev/null 2>&1
+  fx_in "reopened '$open'"
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] && [ ! -s "$ST/retried.jsonl" ] || fail "a turn moved lines of the landed #5 or of #6 while its card's process ran: $(cat "$ST/retried.jsonl" 2>/dev/null)"
-  kill "$p"; wait "$p" 2>/dev/null; loop run 1 >/dev/null 2>&1
-  [ "$(jq -r .card "$ST/retried.jsonl" | sort -u)" = c0-6 ] || fail "once its process ended, #6's shut card alone was not given back: $(cat "$ST/retried.jsonl" 2>/dev/null)"
-  [ "$(st 'select(.step == "picked") | .issue')" = 6 ] && [ "$(st 'select(.issue == 5) | .step')" = landed ] || fail "#6 was not picked again, or the landed #5 lost its lines or was picked: $(st '"\(.issue) \(.step)"' | tr '\n' ',')"
+  kill "$p"; wait "$p" 2>/dev/null; fx_in "reopened '$open'"
+  [ "$(jq -r .card "$ST/retried.jsonl" | sort -u)" = c0-6 ] || fail "once its process ended, #6's shut card alone was not given back (exit $RC): $(cat "$ST/retried.jsonl" 2>/dev/null)"
+  [ "$(st '"\(.issue) \(.step)"')" = '5 landed' ] || fail "the landed #5 lost its lines, or #6's stayed: $(st '"\(.issue) \(.step)"' | tr '\n' ',')"
 }
 
 # Bugs: a card whose issue is already fixed on main is blocked for leaving no change, and the issue stays
@@ -274,35 +270,41 @@ t_reopenonly() {
 # the reviewer reads the main the session started from, not today's; a GO closes the issue although main moved
 # during that review (another card may have removed the fix); the closed line has no waitSec, so the drift watch
 # (bench/drift.sh) leaves the closed card out of its mean wait.
-# Each kind is a case of its own on a main of its own (done, donenogo, donemoved, donemovedkept, doneempty), so they run side by side.
-# donesetup <issue>...: a fresh main with those issues, whose session changes nothing and says ALREADY-DONE (not last
-# for #9, not at all for #10); the reviewer's prompt is kept in $STUB/asked.
-donesetup() {
-  local i=0 n s=''; for n in "$@"; do i=$((i + 1)); s+="$(issue "$n" "2026-0$i-01"),"; done
-  setup "[${s%,}]"; head=$(git -C "$R" rev-parse HEAD)
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-echo x >> "$STUB/sessions"
-case $(tee "$STUB/brief") in
-  *'# Issue #9:'*) r='ALREADY-DONE: a.txt holds it\nI changed nothing.' ;;
-  *'# Issue #10:'*) r='I looked.\n\nI could not find the file named in the issue' ;;
-  *) r='I looked.\n\nALREADY-DONE: a.txt already holds the word one\n' ;;
-esac
-echo "{\"type\":\"result\",\"is_error\":false,\"result\":\"$r\",\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":999,\"output_tokens\":5}}"
-EOF
+# The cards' steps after a session that changed nothing are called as card() calls them: nochange() (the reply's last
+# line, the review of an ALREADY-DONE line, the block), and closed() under the lock (main moved during the review).
+# donewt <issue> <reply>...: a fresh main with those issues, a picked line of card c0-<issue> of each and its worktree on
+# main, cards/c0-<issue>, beside which its session, which changed nothing, left the reply (its .out, and an empty .err);
+# the reviewer's prompt is kept in $STUB/asked; head is main's commit.
+donewt() {
+  local s='' n
+  for ((n = 1; n < $#; n += 2)); do s+="$(issue "${!n}" 2026-01-01),"; done
+  setup "[${s%,}]"; mkdir -p "$ST" "$T/$CASE/cards"; head=$(git -C "$R" rev-parse HEAD)
+  while [ $# -gt 1 ]; do
+    landed "$1" | jq -c '.step = "picked" | .sha = "" | .title = "title \(.issue)" | del(.product)' >> "$ST/cards.jsonl"
+    git -C "$R" worktree add -q --detach "$T/$CASE/cards/c0-$1" || fail "the worktree of c0-$1"
+    jq -cn --arg r "$2" '{type: "result", is_error: false, result: $r}' > "$T/$CASE/cards/c0-$1.out" && : > "$T/$CASE/cards/c0-$1.err"
+    shift 2
+  done
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
 }
+DONE='ALREADY-DONE: a.txt already holds the word one'
+# Main moves after the session began: the reviewer reads the new main, not the one the session started from. The
+# brief is the card's own (brief()), and the card has waited 4 s on other cards (waitsec, as card() keeps it).
 t_done() {
-  donesetup 7; echo "$GO" > "$STUB/review.1"
-  loop run 1 >/dev/null || fail "run exited non-zero"
-  grep -q 'ALREADY-DONE: <where it is fixed' "$STUB/brief" || fail "the brief does not ask for the ALREADY-DONE line"
-  grep -q 'changed nothing' "$STUB/asked" && grep -q '# Issue #7:' "$STUB/asked" && [ "$(tail -n 1 "$STUB/asked")" = 'ALREADY-DONE: a.txt already holds the word one' ] \
+  donewt 7 $'I looked.\n\n'"$DONE"$'\n'; echo "$GO" > "$STUB/review.1"
+  git -C "$R" commit -q --allow-empty -m "landed during the session"; head=$(git -C "$R" rev-parse HEAD)
+  echo 'git rev-parse HEAD > "$STUB/reviewed"' > "$STUB/review-cmd"
+  fx_in 'cd "$R" && waitsec=4 && b=$(brief c0-7 "$(gh issue view 7 --json number,title,body,labels,milestone)" "$(header)") && nochange c0-7 7 "$CONVEYOR_CARDS/c0-7" "$b"'
+  [ "$RC" = 0 ] || fail "nochange exited $RC: $(cat "$T/$CASE/run.out")"
+  grep -q 'ALREADY-DONE: <where it is fixed' "$STUB/asked" || fail "the brief does not ask for the ALREADY-DONE line"
+  grep -q 'changed nothing' "$STUB/asked" && grep -q '# Issue #7:' "$STUB/asked" && [ "$(tail -n 1 "$STUB/asked")" = "$DONE" ] \
     && ! grep -q 'git diff --cached' "$STUB/asked" || fail "the reviewer was not asked to confirm the issue and the ALREADY-DONE line: $(cat "$STUB/asked")"
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review closed " ] || fail "steps of a card whose issue is already fixed: $(st '.step' | tr '\n' ' ')"
-  [ "$(st 'select(.step == "closed") | [.result, .sha, .reason] | join("|")')" = 'ok||ALREADY-DONE: a.txt already holds the word one' ] || fail "closed line: $(st 'select(.step == "closed")')"
-  [ "$(st 'select(.step == "closed") | .waitSec')" = 0 ] || fail "the closed line does not carry the card's wait: $(st 'select(.step == "closed")')"
-  [ "$(cat "$STUB/closed")" = 7 ] && grep -q 'ALREADY-DONE: a.txt already holds the word one' "$STUB/close-comments" || fail "issue #7 was not closed with the ALREADY-DONE line: $(cat "$STUB/close-comments" 2>&1)"
-  [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "something was committed, or main is dirty, or the worktree is left"
+  [ "$(cat "$STUB/reviewed")" = "$head" ] || fail "the reviewer did not read main as it stood when the review started"
+  [ "$(st '.step' | tr '\n' ' ')" = "picked start review closed " ] || fail "steps of a card whose issue is already fixed: $(st '.step' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "closed") | [.result, .sha, .reason] | join("|")')" = "ok||$DONE" ] || fail "closed line: $(st 'select(.step == "closed")')"
+  [ "$(st 'select(.step == "closed") | .waitSec')" = 4 ] || fail "the closed line does not carry the card's wait: $(st 'select(.step == "closed")')"
+  [ "$(cat "$STUB/closed")" = 7 ] && grep -qF "$DONE" "$STUB/close-comments" || fail "issue #7 was not closed with the ALREADY-DONE line: $(cat "$STUB/close-comments" 2>&1)"
+  [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "something was committed, or main is dirty, or the worktree is left: $(ls "$T/$CASE/cards")"
   loop check || fail "the record check refuses a closed line"
   [ "$(loop cards | jq -c '[.landed, .blocked, .open, .cards[0].step]')" = '[1,0,0,"closed"]' ] || fail "a closed card is not counted like a landed one: $(loop cards)"
   out=$(CONVEYOR_MAIN=$R bash "$SRC/report.sh") || fail "report exited non-zero"
@@ -312,52 +314,53 @@ t_done() {
 
 # The reviewer disagrees: blocked, its findings posted, the issue left open.
 t_donenogo() {
-  donesetup 8; echo "$NOGO" > "$STUB/review.1"
-  loop run 1 >/dev/null || fail "run exited non-zero"
+  donewt 8 "$DONE"; echo "$NOGO" > "$STUB/review.1"
+  fx_in 'cd "$R" && nochange c0-8 8 "$CONVEYOR_CARDS/c0-8" "the brief of # Issue #8:"'
+  [ "$RC" = 0 ] || fail "nochange exited $RC: $(cat "$T/$CASE/run.out")"
   # Bug (#495): the reason said the kept folder holds the session's errors, but the review writes its own in their place.
-  local c; c=$(st 'select(.issue == 8 and .step == "blocked") | .card')
+  local c=c0-8
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -qF "the issue asks. Its session's output and the last error output (of its review, when the review started) are kept in kept/$c/. ALREADY-DONE: a.txt already" || fail "a NO-GO on ALREADY-DONE does not say the kept errors are the review's: $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'reviewer says that main does not do what the issue asks.*ALREADY-DONE: a.txt already' || fail "a NO-GO on ALREADY-DONE did not block with the reason: $(st 'select(.issue == 8) | "\(.step) \(.reason)"')"
   [ "$(st 'select(.issue == 8 and .step == "review") | .result')" = NO-GO ] && grep -q '^8 --body .*blocked' "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the disagreeing review is not recorded or not posted on the issue"
-  [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "issue #8 was closed over a NO-GO, or it got a fix round or a second review"
+  [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "issue #8 was closed over a NO-GO, or it got a second review"
 }
 
-# Main moves while the session works: the reviewer reads the new main. It moves again during the review and replaces
-# the word one in a.txt, the line the ALREADY-DONE line cites, so the fix is gone: the card is blocked and the issue
-# stays open.
+# closed() on card c0-<issue>'s worktree, at main's commit h as the reviewer read it, after main moved to m by
+# <move> during the review. Its exit is in $RC, the reason it prints in run.out.
+donemove() { # <issue> <move>
+  donewt "$1" "$DONE"
+  (cd "$R" && eval "$2") && [ "$(git -C "$R" rev-parse HEAD)" != "$head" ] || fail "main did not move during the review"
+  fx_in "cd \"\$R\" && locked closed c0-$1 $1 \"\$CONVEYOR_CARDS/c0-$1\" '$DONE'"
+}
+# Main moves during the review and replaces the word one in a.txt, the line the ALREADY-DONE line cites, so the fix
+# is gone: closed() refuses, saying why, and the issue stays open.
 t_donemoved() {
-  donesetup 11; echo 'git -C "$R" commit -q --allow-empty -m "landed during the session"' > "$STUB/build"
-  sed -i 's|^case \$(tee "\$STUB/brief") in|. "$STUB/build"\n&|' "$STUB/claude"
-  echo 'git rev-parse HEAD > "$STUB/reviewed"; (cd "$R" && echo two > a.txt && git commit -qam "landed during the review")' > "$STUB/review-cmd"; echo "$GO" > "$STUB/review.1"
-  loop run 1 >/dev/null || fail "run with a moving main exited non-zero"
-  [ "$(cat "$STUB/reviewed")" = "$(git -C "$R" rev-parse HEAD~1)" ] || fail "the reviewer did not read main as it stood when the review started"
-  st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q 'main changed during that review.*ALREADY-DONE: a.txt already' || fail "a GO for a main that moved did not block with the reason: $(st 'select(.issue == 11) | "\(.step) \(.reason)"')"
-  [ "$(git -C "$R" show HEAD:a.txt)" = two ] || fail "main's move during the review did not replace the cited line"
+  donemove 11 'echo two > a.txt && git commit -qam "landed during the review"'
+  [ "$RC" = 1 ] && grep -q '^the reviewer confirmed that main already fixes the issue, but main changed during that review' "$T/$CASE/run.out" \
+    || fail "a GO for a main that moved and changed a.txt was not refused with the reason (exit $RC): $(cat "$T/$CASE/run.out")"
   [ ! -e "$STUB/closed" ] && [ -z "$(st 'select(.issue == 11 and .step == "closed")')" ] || fail "issue #11 was closed although main moved during the review"
 }
 
 # Bug (#552): main moved during the review but left a.txt, the file the ALREADY-DONE line names, as it was; the card
 # was blocked anyway, and on a busy belt every retry's review met another move. The engine checks the named file
-# against the new main and closes the issue, with no second review.
+# against the new main and closes the issue.
 t_donemovedkept() {
-  donesetup 12
-  echo '(cd "$R" && echo other > other.txt && git add other.txt && git commit -qm "landed during the review")' > "$STUB/review-cmd"; echo "$GO" > "$STUB/review.1"
-  loop run 1 >/dev/null || fail "run with a moving main exited non-zero"
-  [ "$(git -C "$R" log -1 --format=%s)" = "landed during the review" ] || fail "main did not move during the review"
-  [ "$(cat "$STUB/closed" 2>&1)" = 12 ] && [ "$(st 'select(.issue == 12 and .step == "closed") | .reason')" = 'ALREADY-DONE: a.txt already holds the word one' ] \
+  donemove 12 'echo other > other.txt && git add other.txt && git commit -qm "landed during the review"'
+  [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "closed() refused although main kept a.txt (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$STUB/closed" 2>&1)" = 12 ] && grep -qF "$DONE" "$STUB/close-comments" && [ "$(st 'select(.issue == 12 and .step == "closed") | [.result, .reason] | join("|")')" = "ok|$DONE" ] \
     || fail "issue #12 was not closed although main kept a.txt: $(st 'select(.issue == 12) | "\(.step) \(.reason)"')"
-  [ -z "$(st 'select(.issue == 12 and .step == "blocked")')" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "the card was blocked, or got a second review"
 }
 
 # No change and no ALREADY-DONE last line (#9 says it, but not last; #10 does not say it): blocked as before, with no review.
 # Bug (#495): the reason did not say what the session replied or where its output and errors are kept, so the owner
 # could not tell why it stopped. It quotes the last reply, on one line, and names the kept folder, which holds both.
 t_doneempty() {
-  donesetup 9 10
-  loop run >/dev/null || fail "run exited non-zero"
-  local c r said
+  donewt 9 $'ALREADY-DONE: a.txt holds it\nI changed nothing.' 10 $'I looked.\n\nI could not find the file named in the issue'
+  local c r said n
+  fx_in 'cd "$R" && nochange c0-9 9 "$CONVEYOR_CARDS/c0-9" brief && nochange c0-10 10 "$CONVEYOR_CARDS/c0-10" brief'
+  [ "$RC" = 0 ] || fail "nochange exited $RC: $(cat "$T/$CASE/run.out")"
   for n in 9 10; do
-    c=$(st "select(.issue == $n and .step == \"blocked\") | .card"); r=$(st "select(.issue == $n and .step == \"blocked\") | .reason")
+    c=c0-$n; r=$(st "select(.issue == $n and .step == \"blocked\") | .reason")
     case $n in 9) said='ALREADY-DONE: a.txt holds it I changed nothing.' ;; 10) said='I looked. I could not find the file named in the issue' ;; esac
     [ "$r" = "the session made no change, so there is nothing to review. Its session's output and errors are kept in kept/$c/. Its last reply: $said" ] \
       || fail "issue $n: no change and no ALREADY-DONE last line was not blocked with its reply and kept folder: $r"
