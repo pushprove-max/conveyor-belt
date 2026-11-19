@@ -50,7 +50,9 @@ t_testpathsset() {
 # Bug it catches (#137): each of productpaths(), a card's test files at landing (claim.sh) and the bug-card check had a
 # pattern of its own, so a fix to one left the others wrong. The issue asks that they read one helper. Which helper a
 # line calls is no behaviour a run shows, so this reads the engine's source: TESTRX is read only in testpaths(), and
-# no engine file outside it tests a path for .test. or .spec. to decide a change's test files.
+# no engine file outside it tests a path for .test. or .spec. to decide a change's test files. The one line
+# of testrun.sh's SHAREDJQ (#384) that names (test|spec) is left out: of the files testpaths() already found, it keeps
+# one named as a test (setup.test.sh) from being taken for a shared helper by its name, and decides no test file.
 t_testpathsone() {
   local l b
   b=$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh" | grep 'TESTRX')
@@ -60,6 +62,7 @@ t_testpathsone() {
   grep -q 'testpaths -v | grep -Ec "\$PRODUCT"' "$SRC/lib/issues.sh" && grep -q 'diff --cached --name-only --no-renames 2>/dev/null | testpaths |' "$SRC/lib/claim.sh" \
     || fail "productpaths() or claim.sh does not read testpaths()"
   ! grep -n '(test|spec)' "$SRC/lib/issues.sh" "$SRC/lib/claim.sh" "$SRC/lib/testrun.sh" | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' \
+    | grep -vF 'or (base | test("[._](test|spec)\\.[^.]+$"; "i") | not)' \
     || fail "an engine file that finds a change's test files still has a pattern of its own"
 }
 
@@ -67,10 +70,11 @@ t_testpathsone() {
 # the tracked files, is each convention's glob: test-*.mjs from src/test-a.mjs and src/test-b.mjs (here against the old
 # fixed patterns, which miss them), never a document's (docs/test-plan.md); a file the test command names by a glob
 # with no test word in its name gives its folder's glob. With the default, which covers test-*.mjs, it offers nothing.
+# The fixture's own stub test file (a.test.sh, filemode() in tests/lib.sh) is covered by *.test.* in each list.
 t_testguess() {
   setup '[]'; tpfiles src/test-a.mjs src/test-b.mjs src/a.mjs docs/test-plan.md checks/one.js
   local out
-  out=$(tpeng 'testguess "npm test" "[\"__tests__/\", \"*.test.*\", \"*.spec.*\"]"; echo --; testguess "node --test '\''checks/*.js'\''" "[\"test-*.mjs\"]"
+  out=$(tpeng 'testguess "npm test" "[\"__tests__/\", \"*.test.*\", \"*.spec.*\"]"; echo --; testguess "node --test '\''checks/*.js'\''" "[\"test-*.mjs\", \"*.test.*\"]"
     echo --; testoffer "npm test"') || fail "the guess failed: $out"
   [ "$out" = $'test-*.mjs\n--\n/checks/*.js\n--' ] || fail "setup's guess is not each convention's glob: $out"
 }
