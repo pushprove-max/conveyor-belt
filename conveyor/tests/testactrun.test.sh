@@ -30,11 +30,29 @@ EOF
 }
 trfree() { flock -n "$T/$CASE/slots/1" true; } # the pool's one slot is free
 
-# Bugs this guards (issue 517): the owner could not time one test file without a card. A run by hand ran more than the
-# file, or ran it with no test slot, beside the cards' runs; its record did not say how it went or how long it took;
-# its slot stayed taken.
+# One case on one fixture (trsetup): its refused paths, then a run that passes, then one that fails. Each case of
+# its own paid the fixture again.
+# Bugs this guards (issue 517): the owner could not time one test file without a card. A run by hand of a path that is
+# not a test file of main (a source file, a file main has not, a path out of the repo, a helper main has in a __tests__
+# folder) ran something, or took a slot. A run by hand ran more than the file, or ran it with no test slot, beside the
+# cards' runs; its record did not say how it went or how long it took; its slot stayed taken. A file that fails run by
+# hand lost its output, or its record said it passed.
 t_tarun() {
-  trsetup; local id
+  trsetup; local id p out
+  mkdir -p "$R/tests/__tests__/lib" && echo 'helper() { :; }' > "$R/tests/__tests__/lib/helper.sh" && git -C "$R" add tests \
+    && git -C "$R" commit -qm 'a test helper' || fail "the helper could not be committed"
+  # tafile() itself, the function `testaction run` hands the path to, in one shell for the five paths: a whole
+  # conveyor.sh a path paid its start-up five times over.
+  out=$(export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/prompts.sh" \
+    && . "$SRC/lib/issues.sh" && . "$SRC/lib/testaction.sh" && names || exit 1
+    for p in a.txt tests/none.test.sh tests/../tests/x.test.sh "$R/tests/x.test.sh" tests/__tests__/lib/helper.sh; do
+      e=$(tafile "$p" 2>&1); echo "$? $p: $e"
+    done) || fail "the engine could not be loaded: $out"
+  [ "$(grep -c '^2 .*: conveyor: .* is not a test file' <<<"$out")" = 5 ] || fail "a run of a path that is not a test file was not refused: $out"
+  # Once through the command itself: `testaction run` must hand tafile's refusal on as exit 2, not swallow it.
+  out=$(loop testaction run a.txt 2>&1); [ $? = 2 ] && grep -q 'is not a test file' <<<"$out" || fail "the command did not refuse a.txt with exit 2: $out"
+  [ ! -e "$STUB/tr-held" ] && [ -z "$(ls "$ST/testactions" 2>/dev/null)" ] && { [ ! -e "$T/$CASE/slots/1" ] || trfree; } || fail "a refused run ran, or took the slot: $(ls "$ST/testactions" 2>&1)"
+
   id=$(loop testaction run tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the run did not start: $id"
   wait_until '[ -s "$STUB/tr-held" ]' "cat '$ST/testactions/$id.err'" || fail "the test command did not start"
   [ "$(cat "$STUB/tr-list")" = $'fail\ttests/x.test.sh' ] || fail "the command was not told to run that file alone: $(cat "$STUB/tr-list")"
@@ -50,26 +68,11 @@ t_tarun() {
   trfree || fail "the slot is still held once the run ended"
   grep -q 'running tests/x.test.sh' "$ST/testactions/$id.txt" && [ ! -L "$ST/testactions/$id.txt" ] || fail "the output was not kept: $(ls -l "$ST/testactions")"
   [ ! -e "$T/$CASE/cards/testactions/$id" ] && [ "$(git -C "$R" worktree list | wc -l)" = 1 ] || fail "the copy of main it ran in was left: $(git -C "$R" worktree list)"
-}
 
-# Bug this guards (issue 517): a file that fails run by hand lost its output, or its record said it passed.
-t_tarunfail() {
-  trsetup; local id
-  echo 3 > "$STUB/tr-rc"; : > "$STUB/tr-go"
-  id=$(loop testaction run tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the run did not start: $id"
+  # A file that fails: its record says fail, and its output is kept.
+  echo 3 > "$STUB/tr-rc"
+  id=$(loop testaction run tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the failing run did not start: $id"
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json' '$ST/testactions/$id.err'" || fail "the failing run did not end"
   [ "$(tarec "$id" '[.state, .result, .cpu] | tojson')" = '["done","fail",2.25]' ] || fail "the record of a failing file does not say fail: $(cat "$ST/testactions/$id.json")"
   grep -q 'running tests/x.test.sh' "$ST/testactions/$id.txt" || fail "the failing file's output was not kept: $(cat "$ST/testactions/$id.txt")"
-}
-
-# Bug this guards (issue 517): a run by hand of a path that is not a test file of main (a source file, a file main has
-# not, a path out of the repo, a helper main has in a __tests__ folder) ran something, or took a slot.
-t_tarunrefused() {
-  trsetup; local p out
-  mkdir -p "$R/tests/__tests__/lib" && echo 'helper() { :; }' > "$R/tests/__tests__/lib/helper.sh" && git -C "$R" add tests \
-    && git -C "$R" commit -qm 'a test helper' || fail "the helper could not be committed"
-  for p in a.txt tests/none.test.sh tests/../tests/x.test.sh "$R/tests/x.test.sh" tests/__tests__/lib/helper.sh; do
-    out=$(loop testaction run "$p" 2>&1); [ $? = 2 ] && grep -q 'is not a test file' <<<"$out" || fail "the run of $p was not refused: $out"
-  done
-  [ ! -e "$STUB/tr-held" ] && [ -z "$(ls "$ST/testactions" 2>/dev/null)" ] && { [ ! -e "$T/$CASE/slots/1" ] || trfree; } || fail "a refused run ran, or took the slot: $(ls "$ST/testactions" 2>&1)"
 }
