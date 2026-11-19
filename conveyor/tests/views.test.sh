@@ -77,7 +77,7 @@ t_snapshot() { local -x FILEMODE=1; snapshotstart
   # No run of the test rules was held by their burst guard (t_rulesburst holds one).
   [ "$(q '.needsYou.testRules')" = null ] || fail "needsYou.testRules is not null with no test rule run: $(q .needsYou.testRules)"
   # No open issue names a dependency in another repository: farDeps is an empty list (t_fardepsfail holds one).
-  [ "$(q '.needsYou | del(.before, .pipeline, .engine, .testRules) | map_values(map(del(.reviews, .track, .metrics, .parent, .start, .pickedAt, .priorSec, .totalSec, .earlier)))')" = "{\"waiting\":[{\"card\":\"c7\",\"issue\":7,\"title\":\"T7\",\"sentence\":\"a new button\",\"since\":\"${d}T00:05:00Z\",\"doneWhen\":null,\"stalls\":0,\"files\":{\"count\":null,\"paths\":null}}],\"blocked\":[{\"card\":\"c8\",\"issue\":8,\"title\":\"T8\",\"reason\":\"review 1: no answer\",\"tail\":\"\",\"since\":\"${d}T00:04:00Z\",\"doneWhen\":null,\"stalls\":0}],\"farDeps\":[]}" ] \
+  [ "$(q '.needsYou | del(.before, .pipeline, .engine, .testRules) | map_values(map(del(.reviews, .track, .metrics, .parent, .start, .pickedAt, .priorSec, .totalSec, .earlier)))')" = "{\"waiting\":[{\"card\":\"c7\",\"issue\":7,\"title\":\"T7\",\"sentence\":\"a new button\",\"since\":\"${d}T00:05:00Z\",\"doneWhen\":null,\"split\":null,\"stalls\":0,\"files\":{\"count\":null,\"paths\":null},\"patch\":null,\"shots\":null}],\"blocked\":[{\"card\":\"c8\",\"issue\":8,\"title\":\"T8\",\"reason\":\"review 1: no answer\",\"tail\":\"\",\"since\":\"${d}T00:04:00Z\",\"doneWhen\":null,\"split\":null,\"stalls\":0}],\"farDeps\":[]}" ] \
     || fail "needsYou: $(q .needsYou)"
   [ "$(q '.belt | map("\(.card) \(.issue) \(.title) \(.step) \(.review) \(.of) \(.stepAt[14:16]) \(.model) \(.tokens.claude) \(.tokens.codex) \(.usd) \(.reading)") | join(", ")')" \
     = '"c1 1 T1 brief null 3 00 null 0 0 null false, c2 2 T2 build null 3 02 claude-sonnet-5-5 0 0 null false, c3 3 T3 review 1 3 03 gpt-6.1-sol 1000000 0 2 true, c4 4 T4 fix null 3 04 claude-sonnet-5-5 1000000 500000 3 true, c5 5 T5 tests null 3 04 null 1000000 500000 3 true, c6 6 T6 landing null 3 05 null 1000000 500000 3 true, c10 10 T10 push null 3 10 null 3000000 1500000 9 true"' ] \
@@ -104,8 +104,8 @@ t_snapshot() { local -x FILEMODE=1; snapshotstart
     = '"c10 10 T10 landed 10 9 3 [100101,100102] true false, c9 9 T9 landed 06 3 1 [] false true, c13 13 T13 closed 05 3 1 [] false null"' ] || fail "landed: $(q .landed)"
   [ "$(q '.health | [.builderCap, .models, (.waiting | map(.issue)), (.blocked | map(.issue)), (.unpushed | map(.issue)), .loop, .gh, (.diskFreeKb > 0)]')" \
     = '[5,{"claude":"claude-sonnet-5-5","codex":"gpt-6.1-sol"},[7],[8],[10],false,true,true]' ] || fail "health: $(q .health)"
-  # The time and free disk are read again by each call.
-  [ "$(q '.health | del(.time, .diskFreeKb)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb)')" ] || fail "health is not the health record"
+  # The time, free disk and GitHub read (ghRead: with no feed, the call's own time) are read again by each call.
+  [ "$(q '.health | del(.time, .diskFreeKb, .ghRead)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb, .ghRead)')" ] || fail "health is not the health record"
   [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[]}' ] || fail "cost: $(q .cost)"
   # Per card, the 7 days: a card landed on an earlier day (11) and the blocked ones (7, 8) are rows; one with no step
   # ended (1, 2) or last worked on before the 7 days (12) is not. The rows add up to the totals.
