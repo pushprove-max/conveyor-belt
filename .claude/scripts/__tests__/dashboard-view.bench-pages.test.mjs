@@ -338,23 +338,23 @@ test('Start: a check that runs shows its step and is read again on the clock unt
   assert.deepEqual(shown('chisle'), ['Checking', 'Running the trivial task.']);
   assert.equal(arm('chisle').querySelector('.bench-sub').getAttribute('aria-live'), 'polite');
   assert.deepEqual([arm('solo').querySelector('.chip').textContent, text(act(bp(w), 'check-solo'))], ['Check expired', 'Check again']);
+  // The clock alone, with no update of the Board, one second at a time for up to a minute: the test holds the panel
+  // to reading again on its clock, not to one interval (#719).
+  const clock = async () => { const n = w.benchAsks.length; for (let s = 0; s < 60 && w.benchAsks.length === n; s += 1) tick(w, 1000); await settle(); };
   const asks = w.benchAsks.length;
   step = 'Reading its change';
-  tick(w, 5000);  // the clock alone: no update of the Board
-  await settle();
+  await clock();
   assert.equal(w.benchAsks.length, asks + 1, 'the clock reads the arms again while one checks');
   assert.deepEqual(shown('chisle'), ['Checking', 'Reading its change.']);
   act(bp(w), 'back').click();
   const row = Array.from(bp(w).querySelectorAll('.bench-arms tr')).find((r) => text(r.children[0]) === 'Checking');
   assert.equal(text(row.children[1].querySelector('.bench-sub')), 'Claude with Chisle: Reading its change','the Overview says the step the check is at');
   step = null;
-  tick(w, 5000);
-  await settle();
+  await clock();
   act(bp(w), 'see-every-arm').click();
   assert.equal(shown('chisle')[0], 'Ready', 'the end of the check shows with no press');
   const done = w.benchAsks.length;
-  tick(w, 5000);
-  await settle();
+  await clock();
   assert.equal(w.benchAsks.length, done, 'once no check runs, the clock reads nothing');
 });
 
