@@ -73,8 +73,10 @@ panel lists them, and "File as issue" files one as an issue (`conveyor/README.md
 is in its own block under the finding, led by "Why the judge declined it" or "Why the code declined it". Each sentence
 starts a new line, code shows in a code font, and a file and line in it opens that line on GitHub.
 
-Findings still open after the last review become follow-up issues, which become cards of their own. A follow-up's own
-leftover findings go to the Declined list. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
+Findings still open after the last review become follow-up issues, which become cards of their own. Each follow-up's
+body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
+a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings
+go to the Declined list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
 It builds only once you release it.
 
 When the pack's `privacy.mode` is public, a follow-up's finding is filed with each part the privacy check flags

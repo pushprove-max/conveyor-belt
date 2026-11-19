@@ -91,7 +91,7 @@ t_proven() {
 # Bugs: a card goes round past 3 reviews, or is blocked on the third NO-GO instead of landing; a leftover
 # finding is not filed, or filed with the wrong mark, depth, labels or milestone; a NEW CARD line is filed as one;
 # the landed line does not name the follow-ups; a run limited to an issue leaves that issue's follow-up unbuilt;
-# a follow-up's card files a follow-up of its own, or its leftover findings leave no trace in the declined list.
+# a depth-1 follow-up's card declines its findings instead of filing them at depth 2.
 t_leftover() {
   setup "$(jq -cs . <(issue 7 2026-01-01 area:billing P3 | jq -c '.milestone = {title: "M1"}') <(issue 3 2025-01-01 P1))"
   for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; for i in 4 5; do moved $i "$NOGO3" > "$STUB/review.$i"; done
@@ -107,19 +107,19 @@ b.txt:22 no mark here | conveyor-followup bug P1 area:billing | M1
   [ "$(jq -rs --arg c "$card" 'map(select((.body | contains("#7")) and (.body | contains($c)) and (.body | test("(^|\n)Follow-up depth: 1(\n|$)")))) | length' "$STUB/filed")" = 3 ] \
     && jq -rs '.[1].body' "$STUB/filed" | grep -q 'b.txt:22' || fail "a follow-up's body lacks the parent, the card, the file:line or the depth line: $(cat "$STUB/filed")"
   [ ! -e "$STUB/comments" ] && [ ! -e "$STUB/closed" ] || fail "a card that landed posted a blocked comment or withdrew a follow-up"
-  # The run is limited to #7: it now builds #7's follow-up, and not #3. That card's issue is itself a follow-up, so
-  # its third NO-GO lands and files nothing (follow-ups of follow-ups were half the engine's commits, built with no
-  # one asked): each finding is in the declined list, declined by code, with the reason.
+  # The run is limited to #7: it now builds #7's follow-up, and not #3. That card's issue is a follow-up at depth 1,
+  # under the cap (MAX_DEPTH, 2), so its third NO-GO files its findings as follow-ups at depth 2, as a first card
+  # does. Bug: a true finding of a follow-up's card went to the declined list and was lost.
   [ ! -e "$ST/declined.jsonl" ] || fail "the card of #7, no follow-up, declined a finding: $(cat "$ST/declined.jsonl")"
   jq -cs --slurpfile old "$STUB/issues.json" '[.[0]] + ($old[0] | map(select(.number == 3)))' "$STUB/filed" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
   loop run --only 7 >/dev/null || fail "second run exited non-zero"
   [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "7 100101 " ] || fail "picks of a run limited to #7: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
-  [ "$(st 'select(.issue == 100101 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[]]' ] && [ "$(wc -l < "$STUB/filed")" = 3 ] \
-    && [ "$(st 'select(.issue == 100101 and .step == "filed") | .step')" = '' ] || fail "a follow-up's card filed a follow-up of its own, or did not land: $(st 'select(.issue == 100101 and (.step | IN("landed", "blocked", "filed")))'; cat "$STUB/filed")"
+  [ "$(st 'select(.issue == 100101 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100104,100105,100106]]' ] \
+    || fail "a depth-1 follow-up's card did not land with its findings filed: $(st 'select(.issue == 100101 and (.step | IN("landed", "blocked", "filed")))'; cat "$STUB/filed")"
   card=$(st 'select(.issue == 100101 and .step == "landed") | .card')
-  [ "$(jq -c --arg c "$card" 'select(.card == $c and .issue == 100101 and (.time | type) == "string") | [.finding, .by, .why]' "$ST/declined.jsonl")" = '["[P0] a.txt:1 wrong word","code","follow-up of a follow-up"]
-["b.txt:22 no mark here","code","follow-up of a follow-up"]
-["[P2] c.txt:3 a nit","code","follow-up of a follow-up"]' ] || fail "the declined list does not hold each leftover finding of the follow-up's card once, with who and why: $(cat "$ST/declined.jsonl" 2>&1)"
+  [ "$(jq -rs --arg c "$card" '.[3:] | map(select((.body | contains("Follow-up to #100101 (Conveyor card \($c))")) and (.body | test("(^|\n)Follow-up depth: 2$")))) | length' "$STUB/filed")" = 3 ] \
+    || fail "a depth-1 follow-up's follow-ups do not name their parent, or do not carry depth 2: $(tail -n 3 "$STUB/filed")"
+  [ ! -e "$ST/declined.jsonl" ] || fail "a depth-1 follow-up's card declined its findings instead of filing them: $(cat "$ST/declined.jsonl")"
 }
 
 # Bugs: with one card in flight and nothing else to pick, the run stops picking, and the follow-ups that
@@ -208,8 +208,8 @@ t_privfix() {
   [ -n "$(st 'select(.step == "landed") | .sha')" ] && ! grep -qF "$HX" "$R/a.txt" || fail "the card did not land without the hit: $(cat "$R/a.txt")"
 }
 
-# Bug: a follow-up chain goes on: a card whose issue is a follow-up at any depth (here 2, filed before a follow-up's
-# card filed none) files another level on its third NO-GO, or its leftover finding is in no declined list.
+# Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
+# level on its third NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
 t_deep() {
   setup "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '[.body = "Follow-up to #5.\n\nFollow-up depth: 2"]')"
   for i in 1 2 3 4; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
@@ -218,33 +218,37 @@ t_deep() {
   [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "$(wc -l < "$STUB/reviews") reviews, not 3"
   [ "$(st 'select(.issue == 7 and .step == "landed") | [.sha, .leftover, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",true,[]]" ] \
     && [ ! -e "$STUB/filed" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a depth-2 card did not land, or filed a follow-up, or the worktree is left: $(st 'select(.issue == 7 and (.step | IN("landed", "blocked")))')"
-  [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P1] a.txt:31 wrong word","code","follow-up of a follow-up"]' ] \
+  [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P1] a.txt:31 wrong word","code","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
     || fail "the depth-2 card's leftover finding is not in the declined list once, with who and why: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
-# Bugs: a follow-up is known only by its depth line, so one with the follow-up label and no such line files another
-# generation; a body past a pipe's 64 KiB (#8's, long lines: 6500 short ones took 100 s) hides it (its read ends early).
-# fukept <issue json>: that bug card's three NO-GO reviews land it with its leftover finding declined, filing none.
+# fukept <issue json> <what it files>: that bug card's three NO-GO reviews land it, filing <what it files>.
 fukept() {
-  local n; n=$(jq .number <<<"$1")
   setup "[$1]"; provenbug; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done
   mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"
   loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed" and .issue != 5) | [.issue, .leftover, .followups] | tojson')" = "[$n,true,[]]" ] && [ ! -e "$STUB/filed" ] \
-    || fail "a card whose issue has the follow-up label, or a depth line in a long body, filed a follow-up or did not land: $(st 'select(.step | IN("landed", "blocked", "filed"))'; cat "$STUB/filed" 2>&1)"
-  [ "$(jq -c '[.issue, .why]' "$ST/declined.jsonl")" = "[$n,\"follow-up of a follow-up\"]" ] || fail "its leftover finding is not in the declined list: $(cat "$ST/declined.jsonl" 2>&1)"
+  [ "$(st 'select(.step == "landed" and .issue != 5) | [.issue, .leftover, .followups] | tojson')" = "[$(jq .number <<<"$1"),true,$2]" ] \
+    || fail "the card did not land filing $2: $(st 'select(.step | IN("landed", "blocked", "filed"))'; cat "$STUB/filed" 2>&1)"
 }
-t_fuknown() { fukept "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5"')"; }
+# Bug: a follow-up is known only by its depth line, so one with the follow-up label and no such line (a slice of a
+# split) counts as depth 0, and its follow-ups as depth 1, so the chain reaches the cap one level late.
+t_fuknown() {
+  fukept "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5"')" '[100101]'
+  jq -r .body "$STUB/filed" | grep -qx 'Follow-up depth: 2' || fail "a follow-up of a labelled issue with no depth line is not at depth 2: $(cat "$STUB/filed")"
+}
+# Bug: a body past a pipe's 64 KiB (#8's, long lines: 6500 short ones took 100 s) hides its depth line (its read ends
+# early), so a card at the cap files another level.
 t_fuknownlong() {
-  local i; i=$(issue 8 2026-01-02 bug P1 | jq -c '.body = "Follow-up depth: 1\n" + (("filler text " * 70 + "\n") * 100)')
+  local i; i=$(issue 8 2026-01-02 bug P1 | jq -c '.body = "Follow-up depth: 2\n" + (("filler text " * 70 + "\n") * 100)')
   [ "$(jq -r .body <<<"$i" | wc -c)" -gt 65536 ] || fail "#8's body fits a pipe"
-  fukept "$i"
+  fukept "$i" '[]'
+  [ ! -e "$STUB/filed" ] && [ "$(jq -c '[.issue, .by]' "$ST/declined.jsonl")" = '[8,"code"]' ] || fail "its leftover finding was filed, or is not in the declined list: $(cat "$STUB/filed" "$ST/declined.jsonl" 2>&1)"
 }
 
 # Bug: a declined list that cannot be written (here a folder is in its place) loses the findings: the card ends as
 # landed and clean, and its review goes with its worktree. It has landed, and ends blocked with its review kept.
 t_declinefail() {
-  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1)]"; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
+  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
   mkdir -p "$ST/declined.jsonl"
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \

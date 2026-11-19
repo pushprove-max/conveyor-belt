@@ -6,9 +6,10 @@
 # A withdrawn follow-up is closed as "not planned", never "completed": nothing fixed its finding. The finding
 # goes to <worktree>.withdrawn, in the order filed (the review's finding lines, as followups() reads them), and from
 # the kept folder into the brief of the issue's next card; the comment names that issue.
-# A card whose issue is itself a follow-up (it has the pack's follow-up label, or its body holds a depth line) files
-# none, so no follow-up has one of its own: its last review's findings go to the declined list when it lands, declined
-# by code as "follow-up of a follow-up"; when they cannot be written there the card ends blocked, landed, its review kept.
+# Each follow-up's body holds its depth, "Follow-up depth: N": its parent's depth (fudepth()) plus 1. A card whose
+# issue is at the cap, MAX_DEPTH (lib/paths.sh), files none, so no chain goes deeper: its last review's findings go to
+# the declined list when it lands, declined by code with FUCAP as the reason; when they cannot be written there the
+# card ends blocked, landed, its review kept.
 # A finding that names one of the pack's pipelineFiles (how the engine builds, reviews, fixes, tests, lands or
 # pushes), or a file under one (onpipeline()), is filed held: the control record holds its issue, as `control hold` does, before the card lands,
 # so it is never built until the owner releases it. Its body holds one more line, "Cost to every card:", which reads
@@ -142,6 +143,14 @@ $(if [ -n "$pass" ]; then echo "Commits since the last pass (${pass:0:12}..${sha
      | if $n == null then . else .filed = [.filed | arrays | .[] | select(.cases != $c)] + [{issue: $n, cases: $c}] end' <<<"$was")"
 }
 
+# <issue json>: prints its follow-up depth: its body's "Follow-up depth: N" line; at least 1 with the pack's follow-up
+# label (a slice of a split has the label and no depth line); else 0.
+fudepth() {
+  jq -r --arg fu "$FOLLOWUP" '[([.body // "" | match("(?:^|\n)Follow-up depth: ([0-9]{1,3})[ \t\r]*(?=\n|$)") | .captures[0].string | tonumber][0] // 0),
+    (if (.labels // []) | any(.name == $fu) then 1 else 0 end)] | max' <<<"$1"
+}
+# shellcheck disable=SC2034 # read by card() (lib/card.sh)
+FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding declined at the cap
 leftovers() { grep -Ev "$NOTFINDING" "$1" 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once
 decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to the declined list (declined()), by code
   local f
@@ -197,7 +206,8 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
   done
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked
+  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth
+  depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
   ! standingon review-followup || { packget auto.reserved res || { echo "cannot read the pack's auto.reserved"; return 1; }; own=1; }
@@ -232,7 +242,7 @@ followups() { # <card> <issue json> <review file>
 
 Finding: $g
 Where: ${where:-the finding names no file:line}$cost$masked
-Follow-up depth: 1" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
+Follow-up depth: $((depth + 1))" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")
     [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''

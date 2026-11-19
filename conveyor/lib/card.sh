@@ -485,9 +485,9 @@ card() { # <card> <issue> [<branch> <tip>]
     elif { [ "$res" = GO ] || [ $((pass + rounds)) -ge "$MAX_REVIEWS" ] || [ -n "$rebased" ] || [ -n "$tfix" ] || [ "$mode" = land ] \
       || { [ -n "$rep" ] && [ "$(counts "$wt.review" | jq '.P0 + .P1')" = 0 ]; }; } \
       && { [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ]; }; then
-      # A card whose issue is itself a follow-up (the pack's follow-up label, or its body's depth line) files none:
-      # its findings are declined.
-      mode=''; last=1; isfu=''; ! jq -e --arg fu "$FOLLOWUP" '(.labels // [] | any(.name == $fu)) or (.body // "" | test("(^|\n)Follow-up depth: 0*[1-9][0-9]*[ \t\r]*(\n|$)"))' <<<"$issue" >/dev/null || isfu=1
+      # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings are
+      # declined. A depth that cannot be read counts as the cap.
+      mode=''; last=1; isfu=1; d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ] && isfu=''
     else
       # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
       # (giveway(), claim()).
@@ -862,7 +862,7 @@ card() { # <card> <issue> [<branch> <tip>]
         [ "$ro" = '[]' ] || extra=$(jq -c --argjson r "$ro" '. + {rollout: $r}' <<<"${extra:-"{}"}")
         if [ ${#mates[@]} != 0 ]; then mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" "$extra"); else t5=("$c" "$n" "$wt" "$cmsg" "$extra"); fi
         # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
-        t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "follow-up of a follow-up" <<<"$dec" \
+        t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" \
           || { block "$c" "$n" "$wt" "the card landed, but the engine could not write its leftover findings to the declined list. The findings are in the kept review"; return; }; break 3; }
         # A batch that did not land. Main moved again before it could: it stays a batch, and its run is found to stand
         # on main as it is now, or it is tested again there (rebatch()). Else its other cards wait on at their claims,
@@ -920,7 +920,8 @@ card() { # <card> <issue> [<branch> <tip>]
       parsecheck=1; continue
     fi
     # A landing that fails after the follow-ups were filed withdraws them, unless main did get the commit.
-    case $t in "landed as "*) [ -z "$dec" ] || decline "$c" "$n" "follow-up of a follow-up" <<<"$dec" ;; *) [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups") ;; esac
+    # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
+    case $t in "landed as "*) [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" ;; *) [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups") ;; esac
     block "$c" "$n" "$wt" "$t"; return
   done
   clean "$wt"

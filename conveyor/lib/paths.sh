@@ -307,4 +307,5 @@ OC_GUARD=${CONVEYOR_OPENCODE_GUARD:-$HERE/opencode/guard.mjs}
 # The guard hook every Codex build, fix and rebase session runs (cxready(), README.md Codex builder).
 CX_GUARD=${CONVEYOR_CODEX_GUARD:-$HERE/codex/guard.mjs}
 MAX_REVIEWS=3 # the review rule in README.md
-MAX_DEPTH=2   # the longest follow-up chain a pick reads: parent, its follow-up, that one's follow-up (filed before a follow-up's card filed none)
+# shellcheck disable=SC2034 # read by lib/card.sh, lib/followups.sh and lib/prompts.sh, which conveyor.sh sources beside this file
+MAX_DEPTH=2   # the follow-up depth cap (fudepth(), lib/followups.sh), so the longest chain a pick reads: parent, its follow-up, that one's follow-up
