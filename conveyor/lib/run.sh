@@ -65,7 +65,7 @@ freeze() { local k; kill -STOP "$1" 2>/dev/null; echo "$1"; for k in $(pgrep -P 
 # project's current engine is another commit, or none is taken yet: enginepin()), or is a `serve` run from a checkout
 # whose HEAD (the commit its conveyor/ came from) is no longer the one it started on. A loop run from a checkout has
 # no version folder, and never restarts on the pin; a `run` from one is not restarted, and its own landings move HEAD.
-# A pack that does not read is not said here: the loop asks at every turn, and says why once (run, told).
+# A pack that does not read is not said here: the loop asks at every turn, and says why once (packturn()).
 stale() {
   local p f
   if [ -n "$OWN" ]; then enginepin p f 2>/dev/null && if [ -n "$p" ]; then [ "$p" != "$OWN" ]; else [ -n "$f" ]; fi
@@ -74,6 +74,13 @@ stale() {
 # <command...>, run under the card records' lock unless this process is stale: then "stale". A landing takes the same
 # lock, so no pick follows one that changed the pin.
 fresh() { if stale; then echo stale; else "$@"; fi; }
+# The pack's names, at every turn of the loop (run()), in run()'s own variables: one that does not read sets nopack to
+# why, which holds the turn's push and pick. Why is said when it changes (told), never at every turn: a loop held for
+# hours has said it once.
+packturn() {
+  nopack=''; names 2>/dev/null || { nopack=$(names 2>&1) || :; nopack=${nopack:-conveyor pack: $PACK could not be read}; }
+  [ "$nopack" = "$told" ] || { told=$nopack; [ -z "$nopack" ] || printf '%s\n' "$nopack" >&2; }
+}
 # <conveyor.sh>: true when that script has the machine's Conveyor (its machine command, and room() under it). A pin older
 # than that would start cards past the machine's cap, pause and room: no loop restarts on it, and install-service
 # refuses it. The command is its line of the command table (`cmd machine `), or in a commit from before the table, its
@@ -307,10 +314,7 @@ run() { # [max-cards] [serve]
       if [ -n "$FOLLOW" ]; then new=$HERE/conveyor.sh
       elif enginepin p 2>/dev/null && installed "$p" ro && machined "$VERSIONS/$p/conveyor/conveyor.sh"; then new=$VERSIONS/$p/conveyor/conveyor.sh; fi
     fi
-    # The pack's names, again at every turn: one that does not read holds this turn's push and pick. Why it does not
-    # is said when it changes, never at every turn: a loop held for hours has said it once.
-    nopack=''; names 2>/dev/null || { nopack=$(names 2>&1) || :; nopack=${nopack:-conveyor pack: $PACK could not be read}; }
-    [ "$nopack" = "$told" ] || { told=$nopack; [ -z "$nopack" ] || printf '%s\n' "$nopack" >&2; }
+    packturn
     # The machine hold (machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
     # changes, as above.
     mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)
@@ -331,10 +335,7 @@ run() { # [max-cards] [serve]
     # the pick and the cards this turn starts find them kept (seat, hostclis, seatready).
     [ -n "$nopack" ] || clis >/dev/null 2>&1 || :
     nocli=''; [ -n "$nopack" ] || nocli=$(clis && codexready) || : # a seat whose CLI is gone, or a reviewer model family that resolves to no model id, holds this turn's pick
-    if [ -z "$nopack" ] && [ -z "$pusher" ] && [ -z "$new" ] && owed=$(owed) && { [ "$owed" != "$tried" ] || [ $((SECONDS - triedat)) -ge "$PUSH_RETRY" ]; }; then
-      tried=$owed; triedat=$SECONDS; read -r c n _ <<<"$owed"
-      checkheld || { push "$c" "$n" & pusher=$!; }
-    fi
+    pushturn # the push, when one is owed and due (lib/push.sh)
     # The control record, at every turn: the cap in force, the guard's reading (taken here, outside the lock:
     # it may go over the network), and a stop, which ends the loop's own cards in progress.
     # Read in this shell (ctlread), so the turn's subshells and the cards it starts find it kept while it stands.

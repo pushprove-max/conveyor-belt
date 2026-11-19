@@ -521,6 +521,15 @@ owed() {
   o=$(stdb ask lines cards 2>/dev/null | jq -r 'select(.step == "landed") | "\(.card) \(.issue) \(.sha)"' 2>/dev/null); o=${o##*$'\n'}
   [ -n "$o" ] && git merge-base --is-ancestor "${o##* }" "refs/heads/$BRANCH" 2>/dev/null && ! atorigin "${o##* }" && echo "$o"
 }
+# The push a turn of the loop starts (run(), lib/run.sh), in run()'s own variables: with the pack read (nopack), no
+# push running (pusher) and no restart due (new), the owed push (owed) is started beside the cards as a job, its pid
+# in pusher, at once when it is not the one last tried (tried), else once PUSH_RETRY seconds have passed since that
+# try (triedat); never while it failed its check on main's commit (checkheld()). The turn goes on at once either way.
+pushturn() {
+  [ -z "$nopack" ] && [ -z "$pusher" ] && [ -z "$new" ] && owed=$(owed) && { [ "$owed" != "$tried" ] || [ $((SECONDS - triedat)) -ge "$PUSH_RETRY" ]; } || return 0
+  tried=$owed; triedat=$SECONDS; read -r c n _ <<<"$owed"
+  checkheld || { push "$c" "$n" & pusher=$!; }
+}
 
 tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks; }
 # The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images
