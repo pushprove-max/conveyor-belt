@@ -58,6 +58,9 @@
 // not read. Filters: Weakened (any count above zero; the first view) and All edits. An opened row's Timeline lists its own edits.
 // Hollow (#77): a file with hollow cases (hollowOf(): its newest ended judge's, else the engine's cheap check's) has the
 // status Hollow, so its filter chip "Hollow N"; an opened row's Judge tab lists them with their kind and reason.
+// Proxy checks (#780): a file whose lines start another test file or the suite runner, or poll a real process (the
+// snapshot's proxy of the file, found by the engine reading it), has the chip "Proxy checks: line N, M" on its row and
+// the filter "Proxy checks N"; beside the chip, each line with what it does and the comment that says why, or that none does.
 // The other fix issues (#189), each a button of an opened row's actions with the preview Optimize opens, and a title
 // the engine knows its card by: Fix hollow cases on a Hollow file (its HOLLOW lines; a deleted case is named on a
 // COVERED-BY line), Fix the waiting on a file that Waits (the clock and CPU of its recent runs, and the WAIT lines its
@@ -142,7 +145,7 @@
   const MARKS = [
     ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
     ['waits', 'Waits', 'info', true], ['flaky', 'Flaky', 'warn', true], ['fails', 'Fails often', 'bad', true],
-    ['hollow', 'Hollow', 'warn', false],
+    ['hollow', 'Hollow', 'warn', false], ['proxy', 'Proxy checks', 'info', false],
     ['issue', 'Has an issue', 'info', false], ['purpose', 'Slow on purpose', 'quiet', false],
     ['runner', 'Runs other test files', 'quiet', false], ['whole', 'Whole suite only', 'quiet', false], ['never', 'Never run', 'quiet', false],
     ['wall', 'Wall only', 'quiet', false]];
@@ -213,7 +216,7 @@
     return MARKS.filter(([k]) => ({
       slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
-      fails: notCard(f).length >= FAILS, hollow: hollowOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
+      fails: notCard(f).length >= FAILS, hollow: hollowOf(f).length > 0, proxy: proxyOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
       runner, whole: runner, never: !list(f.runs).length, wall: wallOnly(f),
     })[k]);
   }
@@ -345,6 +348,10 @@
     const j = actions().find((a) => a.file === f.file && a.action === 'judge' && a.state === 'done' && Array.isArray(a.hollow));
     return list(j ? j.hollow : f.hollow).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
   };
+  // A file's proxy checks (#780), [{line, kind: runs | polls, text, why}]: the snapshot's proxy of the file.
+  const proxyOf = (f) => list(f.proxy).filter((x) => obj(x) && num(x.line) !== null && (x.kind === 'runs' || x.kind === 'polls'));
+  const proxySaid = (x) => `Line ${x.line} ${x.kind === 'runs' ? 'runs another test file or the suite runner' : 'polls a real process'}: `
+    + (typeof x.why === 'string' && x.why ? `why: ${x.why}` : 'no comment says why');
   const hollowSaid = (x) => `${x.case} (${x.kind})${typeof x.reason === 'string' && x.reason ? `: ${x.reason}` : ''}`;
   // The judge's newest verdict for a file, when one is kept.
   const verdictOf = (file) => actions().find((a) => a.file === file && a.action === 'judge' && a.state === 'done' && typeof a.verdict === 'string' && a.verdict !== 'no verdict') || null;
@@ -1855,6 +1862,13 @@
       };
       marks(f).forEach(([k, words, tone]) => {
         if (MARKS.findIndex((m) => m[0] === k) > at) tell();
+        if (k === 'proxy') {
+          const p = proxyOf(f), c = S.ctx.chip(`${words}: ${p.length === 1 ? 'line' : 'lines'} ${p.map((x) => x.line).join(', ')}`, tone);
+          c.classList.add('tests-proxy');
+          c.title = p.map((x) => `${x.line}: ${x.text}`).join('\n');
+          chips.append(c, ...p.map((x) => h('span', 'tests-quiet tests-proxy-why', proxySaid(x))));
+          return;
+        }
         chips.append(k === 'issue' ? issueOf(f, any) : k === 'runner' || k === 'whole' ? h('span', 'tests-quiet', words) : S.ctx.chip(words, tone));
       });
       tell();

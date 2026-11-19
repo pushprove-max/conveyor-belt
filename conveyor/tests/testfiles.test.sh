@@ -436,3 +436,39 @@ t_tfedits() {
   got=$(for f in a.test.mjs bool.test.mjs; do tf_as history testolder "$f"; done | jq -sc 'map([.file, (.olderEdits | map([.card, .issue, .removedAsserts]))])')
   [ "$got" = '[["a.test.mjs",[["c-1",7,1]]],["bool.test.mjs",[]]]' ] || fail "each file's older edits: $got"
 }
+
+# Bug it catches (#780): a test file that checks through a proxy (it starts another test file or the suite runner, or
+# polls a real process) looked like any other on the Tests page. runs.test.sh starts plain.test.sh by bash, by its path
+# under timeout inside "$( )", the pack's test.command with a variable set before it, the same on the line a backslash
+# goes on to (line 6), plain.test.sh after a quoted value with a space, and node --test on a line a backslash joins to
+# one with quotes inside "$( )" (line 9); polls.test.sh calls wait_until, the pack's
+# other poll helper (poll_for) after if !, and wait_until in a function defined on its line, with a " // " in its
+# quoted argument that is no comment. Each is marked with the line its command is on, and the comment
+# beside it, on the line or right above, as its why. plain.test.sh is not marked: it names a test file only as text
+# (echo, cat, a command quoted as an argument), calls a helper whose name starts with wait_until and defines poll_for;
+# a comment that names wait_until is not read.
+t_tfproxy() {
+  setup '[]'; tune '.test.command = "bash run-all.sh" | .test.pollHelpers = ["wait_until", "poll_for"]'
+  mkdir -p "$R/tests"
+  printf '%s\n' '# a whole run of it is what the exit status shows' 'bash tests/plain.test.sh' \
+    'x="$(timeout 30 ./tests/plain.test.sh)" || exit 1' 'CONVEYOR_X=1 bash run-all.sh --quick' \
+    "(cd t && A='a b' \\" '  exec timeout --kill-after=30 60 bash run-all.sh --quick) > out &' \
+    "B=1 C='p q' timeout 9 bash \"\$T/plain.test.sh\" > o" "out=\$(eval \"\$(grep '^\\. \"x' \"f\")\" \\" \
+    '  && node --test t/a.test.js)' > "$R/tests/runs.test.sh"
+  printf '%s\n' '# wait_until in a comment is no poll' 'start &' "wait_until '[ -e done ]' || fail 'not done' # the server writes done once it is up" \
+    'if ! poll_for x; then exit 1; fi' "up() { wait_until \"jq -e '.of // \\\"\\\"' f\" 'cat log'; }" > "$R/tests/polls.test.sh"
+  printf '%s\n' 'echo "bash tests/runs.test.sh"' 'cat tests/runs.test.sh' 'wait_until_ready x' 'poll_for() { :; }' \
+    "check 'cd t && bash all.test.sh' \"x; wait_until y\"" > "$R/tests/plain.test.sh"
+  git -C "$R" add -A && git -C "$R" commit -qm 'tests' || fail "main's files"
+  got=$(tf_in testspart 2026-11-09 | jq -c '[.files[] | select(.file | startswith("tests/")) | {file, proxy}]') || fail "testspart failed: $got"
+  [ "$got" = '[{"file":"tests/plain.test.sh","proxy":[]},'\
+'{"file":"tests/polls.test.sh","proxy":[{"line":3,"kind":"polls","text":"wait_until '"'"'[ -e done ]'"'"' || fail '"'"'not done'"'"'","why":"the server writes done once it is up"},'\
+'{"line":4,"kind":"polls","text":"if ! poll_for x; then exit 1; fi","why":null},'\
+'{"line":5,"kind":"polls","text":"up() { wait_until \"jq -e '"'"'.of // \\\"\\\"'"'"' f\" '"'"'cat log'"'"'; }","why":null}]},'\
+'{"file":"tests/runs.test.sh","proxy":[{"line":2,"kind":"runs","text":"bash tests/plain.test.sh","why":"a whole run of it is what the exit status shows"},'\
+'{"line":3,"kind":"runs","text":"x=\"$(timeout 30 ./tests/plain.test.sh)\" || exit 1","why":null},'\
+'{"line":4,"kind":"runs","text":"CONVEYOR_X=1 bash run-all.sh --quick","why":null},'\
+'{"line":6,"kind":"runs","text":"exec timeout --kill-after=30 60 bash run-all.sh --quick) > out &","why":null},'\
+'{"line":7,"kind":"runs","text":"B=1 C='"'"'p q'"'"' timeout 9 bash \"$T/plain.test.sh\" > o","why":null},'\
+'{"line":9,"kind":"runs","text":"&& node --test t/a.test.js)","why":null}]}]' ] || fail "the proxy checks: $got"
+}

@@ -631,6 +631,15 @@ it. Conveyor checks the card as an Optimize card. The change must keep the file 
 names, and add or remove no other test file. When it drops one of those cases, the card is blocked, and the reason
 names the case. The file must also pass alone with the change, in fewer CPU seconds than its last runs.
 
+Conveyor also finds proxy checks with no model and no test run: it reads each test file of the default branch. A line
+that starts another test file or the suite runner is a proxy check. The suite runner is the pack's `test.command` or
+`test.full`, `.conveyor/test-full.sh`, or the suite runner of the Conveyor engine, and a test file is a path with `.test.` in its name. A line that calls a poll helper is a proxy check too. The poll helpers are in the pack's `test.pollHelpers`
+(`wait_until` when it is not set). The row of such a file shows the chip "Proxy checks" with the line numbers. Point
+at the chip to see the text of each line. Next to the chip, each line says what it does and gives the comment that
+says why: the comment at the end of the line, or the comment lines just above it. When there is no such comment, the
+line says so. Click the "Proxy checks N" filter chip to see only these files. A command that is only text in a
+heredoc can also show as a proxy check.
+
 A file with no run on record shows "Never run". When Conveyor can tell why, the status says it: the pack's
 `tests.patterns` or the test command do not match the file, loading the file fails (with the error), or the file is
 skipped (with its skip markers). Open its row for two actions. **Make it run** opens an issue that asks a card to

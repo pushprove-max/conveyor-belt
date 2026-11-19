@@ -43,6 +43,9 @@
 #   file main's checkout no longer tracks whose landed Optimize deleted or merged it (the totals leave it out);
 #   hollow: the cheap check's hollow cases of a JavaScript or TypeScript file (testhollow(), below), [{case, kind,
 #   reason}], [] with none; null for a file of another kind or not in main's checkout;
+#   proxy: the lines of a file of main's checkout that start another test file or the suite runner, or poll a real
+#   process (testproxy(), below), [{line, kind: runs or polls, text, why: the comment beside it, null with none}], []
+#   with none; null for a file not in main's checkout;
 #   mutation: its newest mutation check (lib/mutate.sh), {file, at, sha, seed, state, reason, of (its mutants), tried,
 #   killed, survived ([{source, line, kind, before, after}]), noresult, notMutated, end}; null when none was made;
 #   mutationPlace: its place in the mutation checks' asked list ($MUTS/asked, mutask()), 1 first; null when not asked;
@@ -242,6 +245,102 @@ testhollow() { # <the test files of main's checkout, a JSON list>
     | reduce (inputs | split("\t") | select(length == 3)) as [$f, $c, $k] ($all; .[$f] += [{case: $c, kind: $k,
         reason: (if $k == "no-assert" then "no expect or assert call" else "its only assertions are toBeDefined or toBeTruthy" end)}])'
 }
+# The proxy checks (#780), found by reading the test files of main's checkout, with no test run and no model: each line
+# of a file that starts another test file or the suite runner (kind runs) or polls a real process (kind polls). A line
+# that ends in a backslash is read with the lines it goes on to, as one. A line is read as commands, split at ; & | (
+# $( and ` (never inside single quotes, and inside double quotes only at $( and `, so a command quoted as text is not
+# read; a ( or $( starts its quotes afresh); each command is read from its first word on, past quotes, { } ) and !, a variable set before it (its value
+# quoted or not), the words then, do, else, if, while, until, exec, time, command, nohup and env, timeout with
+# its time, an interpreter (bash, sh, zsh, node, python, python3, ruby, perl, bun, deno) with its options, and ./.
+# runs: that word is a path ending in a test file's suffix (.test.<ext>), or is one of the runners (the pack's
+# test.command and test.full, conveyor/conveyor.test.sh and .conveyor/test-full.sh, each read the same way; a path
+# that ends in /<runner> too) with the runner's other words after it. polls: that word is one of the pack's
+# test.pollHelpers (wait_until by default). A comment (a line that starts # or //, or the end of a line from a # or //
+# after a space and outside quotes), a helper's own definition and a word set alone (NAME=value) start no command; a
+# command in a heredoc or a string over several lines can be marked too. why: the comment at the end of the line,
+# else the comment lines right above it, joined; null with none: the card rule asks for a comment that says why.
+# PROXY_AWK prints a line for each mark: its file, the line number its command is on, kind, that line's text and why,
+# between tabs.
+# shellcheck disable=SC2016 # awk's own $0 and $(, not the shell's
+PROXY_AWK='function norm(s,  t) {
+    do { t = s
+      sub(/^[ \t!{})"\047]+/, "", s); sub(/^[A-Za-z_][A-Za-z0-9_]*=([^ \t"\047]|\047[^\047]*\047|"[^"]*")*[ \t]+/, "", s)
+      sub(/^(then|do|else|if|while|until|exec|time|command|nohup|env)([ \t]+|$)/, "", s)
+      sub(/^timeout[ \t]+(-[^ \t]+[ \t]+)*[0-9.]+[smhd]?([ \t]+|$)/, "", s)
+      sub(/^(bash|sh|zsh|node|python3?|ruby|perl|bun|deno)([ \t]+-[^ \t]+)*([ \t]+|$)/, "", s)
+      sub(/^\.\//, "", s)
+    } while (s != t)
+    return s
+  }
+  function first(s) { sub(/[ \t].*/, "", s); sub(/["\047)]+$/, "", s); return s }
+  function ends(s, x) { return s == x || (length(s) > length(x) && substr(s, length(s) - length(x)) == "/" x) }
+  function said(s) { gsub(/\t/, " ", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return length(s) > 300 ? substr(s, 1, 300) "..." : s }
+  # mark: the physical line p of the command line read, its text up to the comment and why.
+  function mark(k, p,  why, t) {
+    t = tx[p]; why = ""
+    if (cut < length(buf) + 1 && (p == pn || off[p + 1] > cut)) { why = substr(buf, cut); sub(/^(#+|\/\/+)[ \t]*/, "", why); t = substr(t, 1, cut - off[p]) }
+    sub(/\\$/, "", t)
+    if (why == "") why = above
+    print f "\t" ln[p] "\t" k "\t" said(t) "\t" said(why)
+  }
+  BEGIN { nr = split(ENVIRON["PROXY_RUNNERS"], rr, "\n"); np = split(ENVIRON["PROXY_POLLS"], pp, "\n")
+    # cand: what a line must hold to be read at all (a test file suffix, the name of a runner or of a helper), so the
+    # character walk below runs on few lines.
+    cand = "\\.test\\.[A-Za-z0-9]"
+    for (i = 1; i <= nr; i++) { rr[i] = norm(rr[i]); rw[i] = first(rr[i]); rt[i] = rr[i]; sub(/^[^ \t]*[ \t]*/, "", rt[i]); if (rw[i] != "") cand = cand "|" rx(rw[i]) }
+    for (i = 1; i <= np; i++) if (pp[i] != "") cand = cand "|" rx(pp[i]) }
+  function rx(s) { gsub(/[][\\.^$|?*+(){}\/]/, "\\\\&", s); return s }
+  FNR == 1 { f = FILENAME; sub(/^\.\//, "", f); above = ""; prev = 0; pn = 0; buf = "" }
+  pn == 0 && /^[ \t]*(#|\/\/)/ { c = $0; sub(/^[ \t]*(#+|\/\/+)[ \t]*/, "", c); above = (prev ? above " " : "") c; prev = 1; next }
+  # The command line: the physical lines joined where one ends with a backslash, as the shell reads them; off[], ln[]
+  # and tx[] hold where each starts in buf, its line number and its text, so a mark names the line its command is on.
+  { t = $0; sub(/\\$/, "", t); off[++pn] = length(buf) + 1; ln[pn] = FNR; tx[pn] = $0; buf = buf t
+    if ($0 ~ /\\$/) next }
+  buf !~ cand { prev = 0; above = ""; pn = 0; buf = ""; next }
+  { line = buf; def = ""; delete mk
+    # A function the line defines (name() or function name): its own name there is no call.
+    if (match(line, /^[ \t]*(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) { def = substr(line, 1, RLENGTH); sub(/^[ \t]*(function[ \t]+)?/, "", def); sub(/[ \t]*\(\)$/, "", def) }
+    # The commands of the line, split where the shell would start one: never inside single quotes, inside double
+    # quotes only at $( or `, and up to a # (or //) that starts a comment, outside quotes. A ( or $( starts its quotes
+    # afresh, as the shell does, and its ) gives back the double quote it was in (st[], sp), so the quotes inside a
+    # "$( )" do not turn the rest of the line into text.
+    n = 0; sq = 0; dq = 0; sp = 0; from = 1; L = length(line); cut = L + 1
+    for (k = 1; k <= L; k++) { ch = substr(line, k, 1)
+      if (sq) { if (ch == "\047") sq = 0; continue }
+      if (ch == "\\") { k++; continue }
+      if (ch == "\047" && !dq) { sq = 1; continue }
+      if (ch == "\"") { dq = !dq; continue }
+      if (ch == ")" && !dq && sp > 0) { dq = st[sp--]; continue }
+      if (ch == "(" && (!dq || substr(line, k - 1, 1) == "$")) { st[++sp] = dq; dq = 0 }
+      if (!dq && (k == 1 || substr(line, k - 1, 1) ~ /[ \t]/) && (ch == "#" || substr(line, k) ~ /^\/\/([ \t]|$)/)) { cut = k; break }
+      if (ch !~ /[;&|(`]/ || (dq && ch != "`" && !(ch == "(" && substr(line, k - 1, 1) == "$"))) continue
+      sf[++n] = from; seg[n] = substr(line, from, k - from); from = k + 1 }
+    sf[++n] = from; seg[n] = substr(line, from, cut - from)
+    for (j = 1; j <= n; j++) {
+      s = norm(seg[j]); w = first(s); rest = s; sub(/^[^ \t]*[ \t]*/, "", rest)
+      # A word set alone (NAME=value) starts no command.
+      if (w == "" || w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
+      # norm() cuts words from the front only, so the command word is at sf[j] + what it cut; p: its physical line.
+      pos = sf[j] + length(seg[j]) - length(s); p = 1; while (p < pn && off[p + 1] <= pos) p++
+      if (w ~ /\.test\.[A-Za-z0-9]+$/) mk[p, "runs"] = 1
+      for (i = 1; i <= nr; i++) if (rw[i] != "" && ends(w, rw[i]) && (rt[i] == "" || index(rest " ", rt[i] " ") == 1)) mk[p, "runs"] = 1
+      for (i = 1; i <= np; i++) if (pp[i] != "" && w == pp[i] && !(j == 1 && w == def)) mk[p, "polls"] = 1
+    }
+    for (p = 1; p <= pn; p++) { if ((p, "runs") in mk) mark("runs", p); if ((p, "polls") in mk) mark("polls", p) }
+    prev = 0; above = ""; pn = 0; buf = "" }'
+# testproxy prints {file: [{line, kind, text, why}]} for each test file of main's checkout, a file with none [].
+testproxy() { # <the test files of main's checkout, a JSON list>
+  local f fs=() run pol c a
+  while IFS= read -r -d '' f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done < <(jq -j '.[] | . + "\u0000"' <<<"$1")
+  [ ${#fs[@]} -gt 0 ] || { echo '{}'; return; }
+  packget test.command c test.full a test.pollHelpers pol || return 1
+  run=$(printf '%s\n' "$c" "$a" conveyor/conveyor.test.sh .conveyor/test-full.sh)
+  pol=$(jq -r '.[]? | strings' <<<"$pol")
+  (cd "$MAIN" && printf '%s\0' "${fs[@]}" | PROXY_RUNNERS=$run PROXY_POLLS=$pol LC_ALL=C xargs -0 awk "$PROXY_AWK") \
+    | jq -Rnc --rawfile fs <(printf '%s\n' "${fs[@]}") '($fs | split("\n") | map(select(. != "") | {key: .[2:], value: []}) | from_entries) as $all
+    | reduce (inputs | split("\t") | select(length == 5)) as [$f, $n, $k, $t, $w] ($all;
+        .[$f] += [{line: ($n | tonumber), kind: $k, text: $t, why: (if $w == "" then null else $w end)}])'
+}
 # What the Tests part reads of each line of the records (linesum(), lib/records.sh). A project with no test line has
 # its part all the same. The steps other than test are those that give a Board filing's state (optimize, below) and a
 # card's landed commit (caught, below), as the text of the line names them (so a line that names one in a field of
@@ -351,13 +450,14 @@ rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev
 JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all ln ch hv out nv rp cp su
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all ln ch hv px out nv rp cp su
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
+  px=$(testproxy "$all" 2>/dev/null) && [ -n "$px" ] || px='{}'
   [ -n "$defs" ] && [ -n "$refs" ] || testowners
   # The cases each test file of main's checkout defines, by file (the case scan, CASESCAN).
   cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
@@ -375,9 +475,9 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
-    --slurpfile hv <(printf '%s' "$hv") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
     # their filed lines (fd); the test issues with a file and an issue number (ta).
     ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg
@@ -431,7 +531,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            flaky: ($flaky[$f] // 0),
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
            slowOnPurpose: ($own.slowOnPurpose // null), usual: ($usual | r3),
-           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null),
+           slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null), proxy: ($px[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
            mutationPlace: ($place[$f] // null), cases: ($cs[0][$f] // []),
