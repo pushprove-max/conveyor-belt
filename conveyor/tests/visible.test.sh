@@ -176,6 +176,16 @@ t_unclear() {
     [ "$(visibleof "$r")" = 'GO|' ] || fail "review '${r//$'\n'/ / }' was taken as a clear answer: $(visibleof "$r")"
   done
 }
+# Bug (issue 747): a verdict or USER-VISIBLE line ending in spaces or a tab (a Markdown line break) blocks its card as
+# having no clear verdict; the spaces are left out of the answer, on the last line too. A line with other added text
+# is still no answer.
+t_unclearspaces() {
+  [ "$(visibleof 'USER-VISIBLE: no  ' 'VERDICT: GO')" = 'GO|no' ] || fail "USER-VISIBLE: no with two trailing spaces was not read as no: $(visibleof 'USER-VISIBLE: no  ' 'VERDICT: GO')"
+  [ "$(visibleof $'USER-VISIBLE: yes: a button \t' 'VERDICT: GO  ' '' $'VERDICT: GO\t ')" = 'GO|yes: a button' ] \
+    || fail "a yes line or verdict lines with trailing spaces were not read as written: $(visibleof $'USER-VISIBLE: yes: a button \t' 'VERDICT: GO  ' '' $'VERDICT: GO\t ')"
+  [ "$(visibleof 'USER-VISIBLE: no, I think' 'VERDICT: GO')" = 'GO|' ] || fail "USER-VISIBLE: no, I think was taken as a clear answer"
+  [ "$(visibleof 'USER-VISIBLE: no' 'VERDICT: GO, I think')" = 'none|no' ] || fail "VERDICT: GO, I think was taken as a clear verdict"
+}
 # A NO-GO at the cap with `yes` and no approval: blocked, no follow-ups filed, findings and sentence posted.
 t_visiblecap() {
   visiblestart 20; head=$(git -C "$R" rev-parse HEAD)

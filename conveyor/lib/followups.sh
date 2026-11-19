@@ -338,10 +338,11 @@ pushable() {
 }
 
 # One clear answer or none: every verdict line says the same (a review may repeat its verdict), and the last line is
-# that verdict; a GO beside an open finding is a NO-GO. Prints "GO", "NO-GO" or "none".
+# that verdict; a GO beside an open finding is a NO-GO. Spaces and tabs at a verdict line's end are left out (a
+# Markdown line break). Prints "GO", "NO-GO" or "none".
 verdict() { # <review file>
-  [ "$(grep '^VERDICT:' "$1" | sort -u | wc -l)" -eq 1 ] || { echo none; return; }
-  case $(tail -n 1 "$1") in
+  [ "$(grep '^VERDICT:' "$1" | sed 's/[[:blank:]]*$//' | sort -u | wc -l)" -eq 1 ] || { echo none; return; }
+  case $(tail -n 1 "$1" | sed 's/[[:blank:]]*$//') in
     'VERDICT: GO') if grep -Evq "$NOTFINDING" "$1"; then echo NO-GO; else echo GO; fi ;;
     'VERDICT: NO-GO') echo NO-GO ;;
     *) echo none ;;
@@ -350,6 +351,7 @@ verdict() { # <review file>
 
 # The review's answer to "would a customer or staff member see or do anything differently": prints "no" or
 # "yes: <the reviewer's sentence>", or nothing when the review does not hold exactly one such line, written as asked.
+# Spaces and tabs at the line's end are left out (a Markdown line break); any other added text is not an answer.
 # A review held to a section approved before the build answers "matches" or "differs: <how>" instead: with
 # held, only those two are an answer; with any, all four are (a kept review, whichever it was).
 visible() { # <review file> [held | any]
@@ -357,7 +359,7 @@ visible() { # <review file> [held | any]
   [ "${2:-}" != held ] || f='matches|differs: .*[^[:space:]].*'
   [ "${2:-}" != any ] || f="$f|matches|differs: .*[^[:space:]].*"
   [ "$(grep -c '^USER-VISIBLE:' "$1")" = 1 ] || return 0
-  grep -E "^USER-VISIBLE: ($f)\$" "$1" | sed 's/^USER-VISIBLE: //'
+  grep -E "^USER-VISIBLE: ($f)[[:blank:]]*\$" "$1" | sed 's/^USER-VISIBLE: //; s/[[:blank:]]*$//'
 }
 
 # The last reply of a session's stream (a Claude result, a Codex agent_message or an OpenCode text part) that holds
