@@ -44,6 +44,17 @@ print(json.dumps([[round(d.price(r), 9), d.estimated(r)] for r in ([0, 'gpt-6.2-
 [ "$got" = '[[1.21, false], [0.708004, false], [8.0, false], [4.84, false], [9.28, false], [80.0, false], [18.56, false]]' ] \
   || fail "the gpt-6.2 request prices: $got"
 
+# gpt-6-sol and the daybreak alias. A step of 1M input, 1M cached and 1M output on gpt-6-sol is $2 + $0.20 + $10; a
+# request of 300K input and 1M output is over 272K, so it is at the long rates ($4 in, $15 out), one of 272K input
+# is not ($2 in, $10 out). A gpt-daybreak-blue-latest step costs what the same gpt-5.6-sol step costs ($4 + $0.40 +
+# $20), priced as gpt-5.6-sol. Bugs caught: Codex models the Board offers whose steps have no cost, a daybreak step unpriced.
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+u = {'input': 1000000, 'read': 1000000, 'output': 1000000}
+c = d.card_costs({'cards': [{'steps': [{'step': 'review', 'time': '2026-11-19T00:00:00Z', 'model': m, 'usage': u} for m in ('gpt-6-sol', 'gpt-daybreak-blue-latest', 'gpt-5.6-sol')]}]})
+print(json.dumps([[s['usd'], s['pricedAs']] for s in c['cards'][0]['steps']] + [round(d.price(r), 9) for r in ([0, 'gpt-6-sol', 300000, 0, 0, 0, 1000000], [0, 'gpt-6-sol', 272000, 0, 0, 0, 1000000])]))")
+[ "$got" = '[[12.2, "gpt-6-sol"], [24.4, "gpt-5.6-sol"], [24.4, "gpt-5.6-sol"], 16.2, 10.544]' ] \
+  || fail "the gpt-6-sol and daybreak prices: $got"
+
 # Through the Board's collect: the pack's override reaches the cost today. One request today, 1M input tokens of
 # Sonnet 5.5 in fast mode: $4 at the built-in price, $2 at the pack's $1 override.
 MAIN=$T/main BIN=$T/bin OUT=$T/out H=$T/home

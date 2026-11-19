@@ -3,6 +3,9 @@
 // searched, each changed in its row through `conveyor.sh prices` (POST control). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { boot, deliver, settle, full, act, panel, pricesP, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -215,6 +218,27 @@ test('Rules: a model offered or in force with no price is named as having no pri
     ['claude-fable-5-2 (no price)', 'gpt-6.3-sol (no price; in use by reviewer)']);
   act(box.querySelector('[data-model="gpt-6.3-sol"]'), 'price-new').click();
   assert.equal(act(prices(w).querySelector('.rules-price-addform'), 'price-add-model').value, 'gpt-6.3-sol');
+});
+
+// Bug: seven of the Codex models Codex reports (gpt-6-sol, gpt-6-luna, gpt-6.1-terra, the gpt-5.6 ones and the
+// gpt-daybreak-blue-latest alias) were offered with no price, and a step on one had no cost. With the real built-in
+// table and aliases (dashboard_limit.py card_costs, mapped as snapshot.sh maps them) and no pack prices, none is named.
+test('Rules: every model Codex reports is priced by the built-in table or a built-in alias', () => {
+  const lim = fileURLToPath(new URL('../dashboard_limit.py', import.meta.url));
+  const part = JSON.parse(execFileSync('python3', ['-c', `import sys, json; sys.path.insert(0, ${JSON.stringify(dirname(lim))}); import dashboard_limit as d
+print(json.dumps(d.card_costs({"cards": []})))`], { encoding: 'utf8' }));
+  const codex = ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra',
+    'gpt-5.6-luna', 'gpt-daybreak-blue-latest'];
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = { builtIn: Object.entries(part.table).map(([model, r]) => ({ model, input: r[0], output: r[1], cacheRead: r[2], cacheWrite: r[3] ?? r[0] * 1.25 })),
+    aliases: part.aliases, overrides: {}, names: part.names, seen: [] };
+  const rv = d.panels.rules.data.modelSettings.reviewer;
+  rv.clis = { ...rv.clis, codex: { ...rv.clis.codex, models: codex.slice() } };
+  rv.allowed.codex = codex.slice();
+  deliver(w, d);
+  assert.equal(prices(w).querySelector('.rules-prices-noprice'), null,
+    Array.from(prices(w).querySelectorAll('.rules-noprice'), (x) => x.dataset.model).join(', '));
 });
 
 // Bug: a model ID that is an alias, or a model the pack renames, shown as the raw ID elsewhere on the Board. A running

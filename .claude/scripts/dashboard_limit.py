@@ -487,7 +487,7 @@ def request_row(r):
 # The ":fast" Claude rows are that page's "Fast mode pricing" table, read
 # 2026-11-16; the cache multipliers stack on the fast input price. The gpt-*
 # rows are Codex's models, from the Standard and Fast tables of
-# https://developers.openai.com/api/docs/pricing, read 2026-11-16 (a cache
+# https://developers.openai.com/api/docs/pricing, read 2026-11-19 (a cache
 # write is 1.25x input there too; "priority" in a Codex log is its fast mode).
 # A mode with no published price is priced by estimate() and its dollars are
 # reported as estimated. A model with no row and nothing to estimate from is
@@ -526,12 +526,30 @@ PRICES = {
     "gpt-6.2-sol:fast": (4.0, 20.0, 0.20),
     "gpt-6.2-astra": (8.0, 40.0, 0.40),
     "gpt-6.2-astra:fast": (16.0, 80.0, 0.80),
+    "gpt-6.1-terra": (1.0, 5.0, 0.05),
+    "gpt-6.1-terra:fast": (2.0, 10.0, 0.10),
+    "gpt-6-sol": (2.0, 10.0, 0.20),
+    "gpt-6-sol:fast": (4.0, 20.0, 0.40),
+    "gpt-6-luna": (0.10, 0.50, 0.01),
+    "gpt-6-luna:fast": (0.20, 1.00, 0.02),
+    "gpt-5.6-sol": (4.0, 20.0, 0.40),
+    "gpt-5.6-sol:fast": (8.0, 40.0, 0.80),
+    "gpt-5.6-terra": (2.0, 12.0, 0.20),
+    "gpt-5.6-terra:fast": (4.0, 24.0, 0.40),
+    "gpt-5.6-luna": (0.20, 1.20, 0.02),
+    "gpt-5.6-luna:fast": (0.40, 2.40, 0.04),
 }
 LONG_PRICES = {"claude-haiku-5-5": (0.50, 2.50, 0.05),
                "gpt-6.1-sol": (4.0, 15.0, 0.20), "gpt-6.1-sol:fast": (8.0, 30.0, 0.40),
                "gpt-6-astra": (20.0, 75.0, 2.00), "gpt-6-astra:fast": (40.0, 150.0, 4.00),
                "gpt-6.2-sol": (4.0, 15.0, 0.20), "gpt-6.2-sol:fast": (8.0, 30.0, 0.40),
-               "gpt-6.2-astra": (16.0, 60.0, 0.80), "gpt-6.2-astra:fast": (32.0, 120.0, 1.60)}
+               "gpt-6.2-astra": (16.0, 60.0, 0.80), "gpt-6.2-astra:fast": (32.0, 120.0, 1.60),
+               "gpt-6.1-terra": (2.0, 7.50, 0.10), "gpt-6.1-terra:fast": (4.0, 15.0, 0.20),
+               "gpt-6-sol": (4.0, 15.0, 0.40), "gpt-6-sol:fast": (8.0, 30.0, 0.80),
+               "gpt-6-luna": (0.20, 0.75, 0.02), "gpt-6-luna:fast": (0.40, 1.50, 0.04),
+               "gpt-5.6-sol": (8.0, 30.0, 0.80), "gpt-5.6-sol:fast": (16.0, 60.0, 1.60),
+               "gpt-5.6-terra": (4.0, 18.0, 0.40), "gpt-5.6-terra:fast": (8.0, 36.0, 0.80),
+               "gpt-5.6-luna": (0.40, 1.80, 0.04), "gpt-5.6-luna:fast": (0.80, 3.60, 0.08)}
 LONG_PROMPT = 100_000
 LONG_AT = {m: 272_000 for m in LONG_PRICES if m.startswith("gpt-")}
 
@@ -558,7 +576,10 @@ LONG_AT.update({m + UNKNOWN_TIER: n for m, n in list(LONG_AT.items()) if ":" not
 
 
 OVERRIDDEN = set()  # the models use_prices() priced from the pack's overrides
-ALIASES = {}  # another model ID that means a model (the pack's aliases), and that model (use_prices, canon)
+# Another model ID that means a model, and that model (use_prices, canon): the built-in ones, then the pack's
+# aliases. gpt-daybreak-blue-latest has no price of its own: OpenAI's model page names it a deprecated alias whose
+# snapshot is gpt-5.6-sol.
+ALIASES = {"gpt-daybreak-blue-latest": "gpt-5.6-sol"}
 PRICE_KEYS = ("input", "output", "cacheRead")
 
 
@@ -756,7 +777,7 @@ def card_costs(part, lines=None, kept=None, dest=None):
     The part's `prices` (the pack's prices, added models and aliases) are put over the table first (use_prices), and
     taken out of the part; a step whose model is an alias is priced, and named (pricedAs, pricedBy), as the model it
     means. A step priced at a model an override prices has override: true. The part gets `table`, the built-in rows as
-    they were before ({model: [input, output, cache read]}), and `names`, the display name each model of the table or
+    they were before ({model: [input, output, cache read]}), `aliases`, the built-in aliases ({alias: model}), and `names`, the display name each model of the table or
     the pack has when the pack gives it none (display), for the Rules tab's Model prices. With `since` (a time as the steps' lines write it), it
     gets `seen` too: each model ID the steps of that time or later ran ({model, sessions: how many steps, routes: the
     routes their lines name (proxy, subscription), as: the model it is priced as, null when none prices it}), the most
@@ -852,10 +873,10 @@ def card_costs(part, lines=None, kept=None, dest=None):
         d = round(split(n, PRICES[known(m)]), 4)
         return d, known(m), None, {known(m): {"usd": d, "tokens": n[0] + n[1] + n[2] + n[4]}}
 
-    table = {m: list(p) for m, p in PRICES.items()}
+    table, aliases = {m: list(p) for m, p in PRICES.items()}, dict(ALIASES)
     pack = part.pop("prices", None)
     use_prices(pack)
-    part["table"] = table
+    part["table"], part["aliases"] = table, aliases
     part["names"] = {m: display(m) for m in [*table, *(pack if isinstance(pack, dict) else {})] if m}
     since, seen = part.pop("since", None), {}
 

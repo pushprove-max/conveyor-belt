@@ -11,7 +11,7 @@
 # A card's steps priced with the fixture pack's prices, each 1M input tokens: claude-new-9 has no built-in row and is
 # an added model ($3); claude-opus-5-5 has one ($4) and is priced at its override ($1) instead; a step run as
 # anthropic/claude-opus-5-5, its alias, is priced and named as claude-opus-5-5; m has neither and is unpriced. The
-# priced steps say so (override), and the snapshot lists the built-in rows (with the cache write price), the pack's
+# priced steps say so (override), and the snapshot lists the built-in rows (with the cache write price) and aliases, the pack's
 # entries, each model's display name, the model IDs its steps ran and the research lane's model, for the Rules tab. Bug
 # caught: an added model unpriced though the owner set its price, an override that does not win over the built-in row, a
 # session through a proxy whose model ID is an alias priced at nothing, or a research lane model with no in-use mark.
@@ -35,6 +35,8 @@ t_pricessnap() {
   jq -e '[(.prices.builtIn[] | select(.model == "claude-opus-5-5")), .prices.overrides["claude-new-9"], (.prices.names | .["claude-opus-5-5"], .["claude-new-9"], .["gpt-6.1-sol"])]
     == [{model: "claude-opus-5-5", input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5}, {input: 3, output: 15, cacheRead: 0.3, provider: "claude"},
         "Opus 5.5", "New 9", "GPT-6.1 Sol"]' <<<"$out" > /dev/null || fail "the snapshot's prices: $(jq -c .prices <<<"$out")"
+  # The built-in aliases reach the Rules tab, so gpt-daybreak-blue-latest is not offered as a model with no price.
+  jq -e '.prices.aliases == {"gpt-daybreak-blue-latest": "gpt-5.6-sol"}' <<<"$out" > /dev/null || fail "the snapshot's aliases: $(jq -c .prices.aliases <<<"$out")"
   jq -e '.prices.seen == [{model: "anthropic/claude-opus-5-5", sessions: 1, routes: ["proxy"], as: "claude-opus-5-5"},
     {model: "claude-new-9", sessions: 1, routes: [], as: "claude-new-9"}, {model: "claude-opus-5-5", sessions: 1, routes: [], as: "claude-opus-5-5"},
     {model: "m", sessions: 1, routes: [], as: null}]' <<<"$out" > /dev/null \

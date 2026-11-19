@@ -1567,7 +1567,7 @@
   }
 
   // Model prices (pricesSection): every model the built-in table or the pack prices, from the part's prices: builtIn
-  // (the built-in rows), overrides (the pack's entries: prices, name, provider, aliases), names (each model's own
+  // (the built-in rows), aliases (the built-in aliases: {alias: model}), overrides (the pack's entries: prices, name, provider, aliases), names (each model's own
   // display name) and seen (each model ID this project's steps ran in 30 days, with the model it is priced as). Prices
   // are $ per million tokens. Top to bottom: a search box (an ID, name or alias: the rows that do not match hide as it
   // is typed) and Add model; Seen but not priced (an ID no model and no alias prices: This is… adds it as an alias of
@@ -1655,8 +1655,10 @@
     const over = pricesShown(), names = p.names && typeof p.names === 'object' ? p.names : {};
     const built = new Map(list(p.builtIn).filter((x) => x && typeof x.model === 'string').map((x) => [x.model, x]));
     const nameOf = (m) => (over[m] && typeof over[m].name === 'string' && over[m].name) || (typeof names[m] === 'string' && names[m]) || m;
-    // The model each other ID means (the pack's aliases); the model an ID is priced as (with no date or [1m] on it).
+    // The model each other ID means (the built-in aliases, then the pack's, as dashboard_limit.py use_prices takes
+    // them; one the pack names as a model of its own is no alias); the model an ID is priced as (with no date or [1m] on it).
     const aliasTo = new Map();
+    Object.entries(p.aliases && typeof p.aliases === 'object' ? p.aliases : {}).forEach(([x, m]) => { if (typeof m === 'string' && !Object.hasOwn(over, x)) aliasTo.set(x, m); });
     Object.keys(over).forEach((m) => list(over[m] && over[m].aliases).forEach((x) => { if (typeof x === 'string' && !aliasTo.has(x)) aliasTo.set(x, m); }));
     const canon = (id) => { const b = String(id).replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, ''); return aliasTo.get(b) || b; };
     // The models: each built-in one (its fast mode is its second line) and each the pack prices or adds.

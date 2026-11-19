@@ -190,7 +190,7 @@
 #   holds: the run in progress, the versions, the expected figures; the tab reads the runs and results when shown,
 #   `bench swe history` and `bench swe show`); null before any run.
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
-#   cacheWrite, in $ per million tokens), overrides (the pack's prices, added models and aliases, which win over it),
+#   cacheWrite, in $ per million tokens), aliases (the built-in aliases: {alias: the model it is priced as}), overrides (the pack's prices, added models and aliases, which win over it),
 #   names (each model's display name) and seen (each model ID the steps and the research lane's sessions of the last
 #   30 days ran: model, sessions, routes, as: the model it is priced as, or null) and research (the pack's research lane model, or null); null when the
 #   table cannot be run.
@@ -535,10 +535,10 @@ snapshot() (
       | if $rw == "" then . else .research = {worktree: $rw, projects: $pj} end' \
     | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cardlines "$d/all" "$STATE.priced" "$d/priced" > "$d/pricedall" 2>/dev/null && pricedok=true \
     || { pricedok=false; jq -c '.usd = null | .steps |= map(.usd = null) | if .live then .live.usd = null else . end' "$d/all" > "$d/priced"; } || exit 1
-  # prices: the Rules tab's Model prices, the built-in rows, the pack's entries, each model's display name and the
+  # prices: the Rules tab's Model prices, the built-in rows and aliases, the pack's entries, each model's display name and the
   # model IDs seen in 30 days, and the research lane's model for its mark; null when the table cannot be run.
   { $pricedok && jq -c --argjson o "$pp" --arg rm "$rmodel" '{builtIn: (.table | to_entries | map({model: .key, input: .value[0], output: .value[1], cacheRead: .value[2],
-      cacheWrite: (.value[3] // (.value[0] * 1.25))})), overrides: $o, names, seen, research: (if $rm == "" then null else $rm end)}' "$d/pricedall"; } > "$d/prices" 2>/dev/null \
+      cacheWrite: (.value[3] // (.value[0] * 1.25))})), aliases, overrides: $o, names, seen, research: (if $rm == "" then null else $rm end)}' "$d/pricedall"; } > "$d/prices" 2>/dev/null \
     && [ -s "$d/prices" ] || echo null > "$d/prices"
   echo null > "$d/issues"; echo null > "$d/upall"
   # What health reads of the records (HEALTHLINE), from its kept summary (health brought it up to date): the pick
