@@ -196,6 +196,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # me, `control card <issue> pick`, whose answer is the judge's settings, changing nothing),
 # or full-test (the Rules tab's Run full test suite, Push landed and Push anyway: `conveyor.sh full-test [push | anyway <run id>]`),
 # or push-now (the Control tab's Push now: `conveyor.sh push-now`, what landed pushed with no full test run),
+# or replay (the Cost panel's judge replay study: `conveyor.sh pick replay judge <model> [<effort>] [--last <n>]
+# [--estimate]`; the estimate answers its JSON, a run starts on the host and answers that it started),
 # or merge-pr (the Control tab's Merge: `conveyor.sh pr merge`, the open pull request of Land as pr merged now),
 # or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop`,
 # and Release anyway: `release-run anyway <version> --by <Board user>`),
@@ -232,6 +234,7 @@ CLIS = frozenset({'claude', 'codex', 'opencode'})
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,191}')
 ACCOUNT = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')  # an account name, as conveyor.sh's control takes it
 EFFORTS = frozenset({'minimal', 'low', 'medium', 'high', 'xhigh', 'max'})  # claude's, codex's and opencode's, as conveyor.sh's EFFORTS
+REPLAY_LAST = re.compile(r'[1-9][0-9]{0,3}')  # the reviews a judge replay takes, as conveyor.sh's pick replay --last takes them
 KIND = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,39}')  # a finding kind the judge always accepts, as conveyor.sh's control takes it
 CARD_SEATS = frozenset({'builder', 'reviewer', 'judge'})  # the seats one issue keeps of its own (`conveyor.sh control card`)
 KINDS_MAX = 20
@@ -337,6 +340,7 @@ DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as co
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
                    'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60,  # testaction and testmap stop wait up to 40 s for the end
+                   'replay': 60,  # the judge replay's estimate reads every review line of the records
                    'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 90 s (another Stop, then the run's end)
                    'card': 360}  # Pick for me (card <issue> pick) waits up to conveyor.sh's PICK_TIMEOUT, 300 s, for the judge
 DEPENDS_MAX = 20  # the issues one `control depends` names
@@ -676,6 +680,12 @@ def control_ok(body):
         return n == 2 and said_ok(v[0]) and said_ok(v[1]) and TEST_FILE.fullmatch(v[0].split(': ', 1)[0]) is not None and ': ' in v[0]
     if a == 'test-close':  # Close its issue as done, or put back a flaky case (its flaky issue closed): the issue, then the comment
         return n == 2 and ISSUE.fullmatch(v[0]) is not None and said_ok(v[1])
+    if a == 'replay':  # the Cost panel's judge replay study: a model, an effort if any, --last <n> if any, then --estimate if asked
+        if v[-1:] == ['--estimate']:
+            v, n = v[:-1], n - 1
+        if n >= 3 and v[-2] == '--last' and REPLAY_LAST.fullmatch(v[-1]) is not None:
+            v, n = v[:-2], n - 2
+        return n in (1, 2) and MODEL.fullmatch(v[0]) is not None and (n == 1 or v[1] in EFFORTS)
     if a == 'test-issue':  # File an issue about a test file, or one about each of a list: the file, the title, then the body the owner read and edited
         return n % 3 == 0 and 3 <= n <= 3 * TEST_FILES_MAX and all(
             TEST_FILE.fullmatch(f) is not None and said_ok(t) and len(t) <= 200 and 1 <= len(b.strip()) and len(b) <= TEST_ISSUE_BODY
@@ -850,6 +860,15 @@ def control_script(action, args, main, today, record=None, user=None):
     if action == 'push-now':
         # The push goes on on the host after the answer (conveyor.sh push-now starts it and returns).
         return '%s push-now' % conv
+    if action == 'replay':
+        # The estimate answers at once and calls no model. A run calls the judge once a review, which takes minutes:
+        # its arguments are checked by an estimate first (a refusal is the answer), then it goes on on the host after
+        # the answer, and its result reaches the Cost panel with the next snapshot.
+        said = ' '.join(q(x) for x in args)
+        if args[-1] == '--estimate':
+            return '%s pick replay judge %s' % (conv, said)
+        return ('%s pick replay judge %s --estimate > /dev/null && { nohup env %s pick replay judge %s > /dev/null 2>&1 < /dev/null & '
+                'echo "conveyor: the judge replay started; the Cost panel shows its result when it ends"; }') % (conv, said, conv, said)
     if action == 'release-run':
         # Release: the owner's yes to release-prep, then release, which run on the host after the answer; prep: release-prep
         # alone (Draft notes, Run suite); or Stop. A release over a red suite (anyway) is logged under the Board user who
@@ -1885,6 +1904,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # A benchmark's run, preflight or Compare starts model sessions on the build machine: an admin's.
         if not machine and body['action'] == 'bench' and role_of(read_store(), user) != 'admin':
             return self.reply(403, 'only an admin runs benchmarks')
+        # A judge replay's run calls the judge with the host's model account once a review: an admin's. Its estimate calls no model.
+        if not machine and body['action'] == 'replay' and body['args'][-1] != '--estimate' and role_of(read_store(), user) != 'admin':
+            return self.reply(403, 'only an admin runs a judge replay')
         # A Tests page action on a list of files is answered one result a file; only it may be over MAX_CONTROL_BODY.
         files = None if machine else test_files(body['action'], body['args'])
         if int(length) > MAX_CONTROL_BODY and not files:

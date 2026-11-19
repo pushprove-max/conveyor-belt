@@ -107,7 +107,8 @@
 #           steps each leaves out for having no price), unpriced (those of the 7 days, each with why), landedAfter,
 #           unpricedSteps, cards (today's, each with its usd; a restarted card's row with runs, its dollars every run's),
 #           picks (the rule Pick settings' cards by group and builder choice, each row with its repo), trials
-#           ({dropped, flagged}: the rule's dropped challengers and flagged trial cards, each with its repo), sessions
+#           ({dropped, flagged}: the rule's dropped challengers and flagged trial cards, each with its repo), replays (each
+#           record's last judge replay study and its judge settings, of an engine that runs the study), sessions
 #           (every session on this machine: todayUsd, weekUsd, at list prices).
 #   board   the Board, of the record on host.json's main (repo null when none is), with repos (every record's repo, in
 #           host.json's order) and others ({repo: the same part, of that record} for every other record): state (running, paused,
@@ -899,7 +900,10 @@ PANELS_JQ='
            # The trials of the rule: the groups whose challenger was dropped and the trial cards flagged for a pipeline
            # file, each with its repo; a snapshot from before it carried them gives none.
            trials: {dropped: [$R[] as $r | ($r.snap.cost.trials.dropped // [])[] | {repo: $r.repo} + .],
-             flagged: [$R[] as $r | ($r.snap.cost.trials.flagged // [])[] | {repo: $r.repo} + .]}} end),
+             flagged: [$R[] as $r | ($r.snap.cost.trials.flagged // [])[] | {repo: $r.repo} + .]},
+           # Each record whose engine runs the judge replay study: its last replay (null when none ran) and its judge
+           # settings, whose models the replay can be asked on.
+           replays: [$R[] | select(.snap.cost | has("replay")) | {repo, last: .snap.cost.replay, judge: (.snap.modelSettings.judge // null)}]} end),
         cardsError: $cerr,
         sessions: (if $lim.limit == null then null else {todayUsd: $lim.limit.today.spentUsd, todayComplete: ($lim.limit.today.complete // false), weekUsd: ($lim.limit.cost.week // null)} end),
         sessionsError: $lim.error}} end),

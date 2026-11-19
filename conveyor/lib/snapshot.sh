@@ -207,6 +207,8 @@
 #   cards, landed, usd, firstTry, reviews, open}; a card's earlier runs count with it; usd null when a step of them
 #   has no price). trials: {dropped: [{group, model, effort, cards}], flagged: [{card, issue, group, files}]}, the
 #   groups whose trial challenger two blocked trial cards dropped, and the trial cards whose change touches pipeline files.
+#   replay: the last judge replay study (the last line of REPLAYS, replay() in lib/replay.sh) with no
+#   calls (all of its differ), else null.
 # A day is this machine's local day (day names today). Dollars are list prices from the one price table
 # (dashboard_limit.py, `cards`; the pack's prices win over its rows), at the models that ran the step (its session's result, else the model its line
 # names), never at the models in force now: a step whose line names no model is unpriced. A step that table cannot
@@ -964,7 +966,9 @@ snapshot() (
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
-  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc
+  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" \
+    --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc
+    | .cost.replay = ($rp[0] // null | if . == null then null else del(.calls) end)
     | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = $bn[0] | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1

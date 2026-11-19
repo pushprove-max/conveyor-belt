@@ -342,6 +342,37 @@ The Cost panel on the Board shows a table of the picked cards, one row for each 
 **Pick settings trials** shows each group that has no more trials, with the two blocked cards. It also shows each trial
 card whose change touches a path in `pipelineFiles`, with those paths.
 
+## Judge replay
+
+A judge replay tells you how a different judge would rule on the findings that your judge already ruled on. It runs
+only when you start it. Start it from the Cost panel on the Board, or with
+`conveyor.sh pick replay judge <model> [<effort>] [--last <n>]`. The model must be one that the pack allows the
+judge. With no effort, the effort is medium.
+
+The replay takes the newest review lines, in the card records and the retried lines, where the judge accepted or
+declined findings. By default it takes 20. `--last <n>` sets a different number. For each review, the replay judge
+gets the same findings, the issue, the change of the card, and the findings that were declined on the cards of the
+issue before that judge ran. The change is the commit that landed, or the kept patch of a blocked card, on the commit
+that the review ran on. A review is skipped when its card has no landed commit and no kept patch. It is also skipped
+when that change does not apply on that commit, or is not the change that the judge read, for example when a fix
+round came after the review. For a finding of a kind that the project
+always accepts, the replay uses the ruling that the judge itself gave.
+
+The replay changes no card and no setting, and it runs no tests. The result shows:
+
+- How many findings the replay judge ruled on as the recorded judge did.
+- Each finding where the two rulings are different, with the reason that the replay judge gave.
+- The findings that got no answer, for example when a judge call fails.
+- The cost of the replay, and the cost of the recorded judge on the same reviews.
+
+`--estimate` prints the estimated cost and calls no model: the token use of the recorded judge, at the price of the
+model that you chose. On the Board, **Estimate the cost** shows this estimate, and **Run the replay** starts the
+replay after a second click. Only an admin can start a replay. Only one replay can run at a time.
+
+Each replay writes one line to `replays.jsonl` in the state folder. The line has the result and the usage of each
+judge call, also of a call that failed. The Cost panel shows the last replay of each project beside the Pick settings
+table.
+
 ## The project's checks
 
 Set `test.checkCommand` in `.conveyor/project.json` to a command that runs your project's checks, for example a lint

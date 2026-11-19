@@ -611,7 +611,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
       {"card": "c0-6", "issue": 6, "title": "Landed days ago", "state": "landed", "today": 0, "week": 6.25},
       {"card": "c2-13", "issue": 13, "title": "Broken", "state": "blocked", "today": 2.5, "week": null}],
     "picks": [{"group": "small docs", "model": "claude-x", "effort": "medium", "cards": 2, "landed": 1, "usd": 5, "firstTry": 0, "reviews": 2, "open": 0}],
-    "trials": {"dropped": [{"group": "small docs", "model": "claude-y", "effort": "medium", "cards": ["c1-5", "c1-10"]}], "flagged": [{"card": "c1-15", "issue": 15, "group": "small code", "files": ["ci/deploy.sh"]}]}}}')
+    "trials": {"dropped": [{"group": "small docs", "model": "claude-y", "effort": "medium", "cards": ["c1-5", "c1-10"]}], "flagged": [{"card": "c1-15", "issue": 15, "group": "small code", "files": ["ci/deploy.sh"]}]},
+    "replay": {"model": "claude-j", "agree": 1, "findings": 2}}}')
 C=$(snap '{"belt": [{"card": "c4-5", "issue": 5, "title": "Plugin thing", "step": "build", "review": null, "of": 3, "stepAt": "'"$(ago 60)"'", "model": "claude-x", "tokens": {"claude": 1, "codex": 0}, "usd": 0.25}],
   "queue": {"next": [{"issue": 9, "title": "CD next", "priority": "P3", "followup": false, "retried": true}]},
   "open": {"count": 3, "split": {"queued": 1, "you": 1, "labelOrRule": 0, "belt": 1}, "held": [{"issue": 10, "title": "CD held", "priority": "P3", "followup": false, "labels": [], "created": null, "parent": null, "reasons": [{"kind": "you"}]}]},
@@ -1119,6 +1120,9 @@ q '.panels.cost.data.cards.picks | map([.repo, .group, .usd]) == [["sample", "sm
 # Bug: a dropped challenger or a flagged trial card did not reach the Cost panel, lost its project, or a record from
 # before trials (widgetshop's) hid the other record's.
 q '.panels.cost.data.cards.trials | (.dropped | map([.repo, .group, .cards])) == [["sample", "small docs", ["c1-5", "c1-10"]]] and (.flagged | map([.repo, .issue, .files])) == [["sample", 15, ["ci/deploy.sh"]]]' "each record's trials reach the Cost panel with its repo"
+# Bug: a record's last judge replay, or the judge models a replay can run on, did not reach the Cost panel, or a
+# record whose engine has no replay (no cost.replay in its snapshot) was offered one.
+q '.panels.cost.data.cards.replays | map([.repo, .last.agree, .judge.choices]) == [["sample", 1, ["claude-j"]]]' "the last replay and the judge's models of each record that runs replays reach the Cost panel"
 # The figures are the priced steps'; how many each leaves out is summed over the records, and the steps are
 # listed with why. A record from before it named them leaves the list unknown, never empty.
 q '.panels.cost.data.cards | .todayLeftOut == 0 and .weekLeftOut == 0 and .perLandedLeftOut == 0 and .unpriced == null' "no record gives the steps left out"

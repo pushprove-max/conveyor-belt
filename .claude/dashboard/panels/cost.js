@@ -6,13 +6,97 @@
 // host gave no such rows, todayLeftOut, weekLeftOut, perLandedLeftOut, unpriced: [{repo, card, issue, step, time, why}],
 // picks: [the rule Pick settings' cards, one row a group and builder choice: {repo, group, model, effort, cards, landed,
 // usd (null when a step has no price), firstTry, reviews, open}] | null, trials: {dropped: [{repo, group, model, effort,
-// cards}], flagged: [{repo, card, issue, group, files}]} (none from an older host)};
+// cards}], flagged: [{repo, card, issue, group, files}]} (none from an older host), replays: [each project whose engine
+// runs the judge replay study: {repo, last: its last replay (null when none ran), judge: its judge seat's settings}]};
 // sessions is every session on this machine ({todayUsd, weekUsd}). The three figures are the priced steps' dollars,
 // and the steps they leave out are listed with why; a host from before that gives null for a figure with an
 // unpriced step, shown as "not priced". A card's own sum with an unpriced step in it is null, never a part sum.
 // Why a step has no price, in words: Claude Code's name for a message it wrote itself, with no model run
 // ("<synthetic>"), is said as that.
 const unpricedWhy = (why) => (typeof why === 'string' && why ? why.replace(/<synthetic>/g, 'none (a message Claude Code wrote itself)') : 'no reason given');
+// The judge replay study, beside the pick table: a project's last replay (how often the replay judge agreed with the
+// recorded rulings, each finding where it differs, its cost against the recorded judge's), and Estimate, then Run, on
+// one of the models the project's judge seat takes. Estimate asks the build machine for the cost and calls no model;
+// Run costs money, so it takes a second click (ctx.twice). What was picked, the estimate and the answer stay through
+// a redraw (REPLAY, by project).
+const REPLAY = new Map();
+const replayCost = (ctx, v) => (typeof v === 'number' ? ctx.money(v) : 'unknown: a call has no price');
+function replayEfforts(j, model) {
+  const bare = String(model).replace(/^opencode:/, '');
+  const cli = Object.keys(j.allowed || {}).find((k) => Array.isArray(j.allowed[k]) && j.allowed[k].includes(bare));
+  const e = cli && j.clis && j.clis[cli] ? j.clis[cli].efforts : null;
+  return Array.isArray(e) ? e.filter((x) => typeof x === 'string') : [];
+}
+function replayBox(r, ctx) {
+  const h = ctx.h, box = h('div', 'replay'), x = r.last, s = REPLAY.get(r.repo) || {};
+  REPLAY.set(r.repo, s);
+  box.dataset.repo = r.repo;
+  const head = h('h3', 'group-title');
+  head.append(h('span', null, 'Judge replay '), ctx.tag(r.repo));
+  box.append(head);
+  if (x && typeof x === 'object') {
+    box.append(h('p', 'foot replay-last', `${ctx.modelName(x.model)}${x.effort ? ` ${x.effort}` : ''}, ${ctx.when(x.time)}: it agreed with the recorded judge on ${x.agree} of ${x.findings} findings of ${x.reviews} reviews.`
+      + (x.unanswered ? ` ${x.unanswered} got no answer.` : '') + (x.skipped ? ` ${x.skipped} reviews were left out: they had no diff, or not the diff that their judge read.` : '')
+      + ` Cost: ${replayCost(ctx, x.usd)}; the recorded judge cost ${replayCost(ctx, x.recordedUsd)} on the same reviews.`));
+    if (Array.isArray(x.differ) && x.differ.length) {
+      const ul = h('ul', 'rows compact replay-differ');
+      x.differ.forEach((d) => {
+        const li = h('li', 'row');
+        li.append(h('div', 'row-main', `#${d.issue} ${d.finding}`), h('p', 'row-meta', `The recorded judge: ${d.recorded}. The replay: ${d.replay}${d.reason ? `, ${d.reason}` : ''}`));
+        ul.append(li);
+      });
+      box.append(ul);
+    }
+  } else box.append(h('p', 'foot replay-last', 'No replay has run.'));
+  const j = r.judge && typeof r.judge === 'object' ? r.judge : null;
+  const choices = j && Array.isArray(j.choices) ? j.choices.filter((m) => typeof m === 'string') : [];
+  if (!choices.length) { box.append(h('p', 'foot', 'The pack allows the judge no model, so no replay can run.')); return box; }
+  if (!choices.includes(s.model)) s.model = choices[0];
+  const efforts = replayEfforts(j, s.model);
+  if (!efforts.includes(s.effort)) s.effort = efforts.includes('medium') ? 'medium' : efforts[0] || '';
+  const opt = (v, text) => { const o = h('option', null, text); o.value = v; return o; };
+  const m = h('select', null), e = h('select', null);
+  m.dataset.act = 'replay-model'; e.dataset.act = 'replay-effort';
+  m.setAttribute('aria-label', `The model of the replay judge of ${r.repo}`); e.setAttribute('aria-label', `The effort of the replay judge of ${r.repo}`);
+  m.append(...choices.map((c) => opt(c, ctx.modelName(c))));
+  e.append(...efforts.map((c) => opt(c, c)));
+  m.value = s.model; e.value = s.effort; e.hidden = !efforts.length;
+  m.addEventListener('change', () => { s.model = m.value; s.estimate = null; ctx.redraw(); });
+  e.addEventListener('change', () => { s.effort = e.value; s.estimate = null; ctx.redraw(); });
+  const args = () => [s.model].concat(s.effort ? [s.effort] : []);
+  const btn = (text, act) => { const b = h('button', 'btn btn-quiet', text); b.type = 'button'; b.dataset.act = act; b.disabled = !!s.busy; return b; };
+  const ask = (more, done) => {
+    s.busy = true; s.said = 'Asking the build machine…'; ctx.redraw();
+    ctx.post('control', { action: 'replay', args: args().concat(more), repo: r.repo })
+      .then((res) => res.text().then((t) => done(res.ok, String(t).trim())), () => done(false, 'the build machine did not answer. Make sure that it is on. Then try again'))
+      .then(() => { s.busy = false; ctx.redraw(); });
+  };
+  const est = btn('Estimate the cost', 'replay-estimate');
+  est.addEventListener('click', () => ask(['--estimate'], (ok, t) => {
+    let y = null;
+    try { y = JSON.parse(t); } catch (err) { y = null; }
+    s.estimate = ok && y && typeof y === 'object' && typeof y.reviews === 'number' ? y : null;
+    s.said = s.estimate ? '' : `No estimate: ${t || 'the build machine gave none'}`;
+  }));
+  const acts = h('div', 'board-acts');
+  acts.append(m, e, est);
+  box.append(acts);
+  if (s.estimate && s.estimate.model === s.model && (s.estimate.effort || '') === (s.effort || '')) {
+    const y = s.estimate;
+    box.append(h('p', 'foot replay-estimate', `About ${replayCost(ctx, y.usd)} to replay ${y.findings} findings of ${y.reviews} reviews: the token use of the recorded judge, at the price of this model. The recorded judge cost ${replayCost(ctx, y.recordedUsd)}.`
+      + (y.skipped ? ` ${y.skipped} reviews are left out: they have no diff, or not the diff that their judge read.` : '')));
+    const run = btn('Run the replay', 'replay-run');
+    ctx.twice(run, 'spend', 'Click again to run the replay', () => ask([], (ok, t) => {
+      s.estimate = null;
+      s.said = ok ? 'The replay started. Its result shows here when it ends.' : `Not started: ${t || 'the build machine gave no reason'}`;
+    }));
+    box.append(run);
+  }
+  const note = h('p', 'answer-note', s.said || '');
+  note.setAttribute('aria-live', 'polite');
+  box.append(note);
+  return box;
+}
 window.DASH_APP.panel({
   id: 'cost',
   title: 'Cost',
@@ -132,6 +216,7 @@ window.DASH_APP.panel({
         });
         out.push(h('h3', 'group-title', 'Pick settings trials'), ul);
       }
+      if (Array.isArray(c.replays)) c.replays.forEach((r) => { if (r && typeof r.repo === 'string') out.push(replayBox(r, ctx)); });
     } else out.push(ctx.unread(`The Board could not read the card costs, so it shows none. ${ctx.retry}`, d.cardsError), ctx.restartButton());
     if (d.sessions) {
       const s = d.sessions, p = h('p', 'foot');

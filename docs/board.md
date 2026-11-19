@@ -346,6 +346,11 @@ per landed card and the cards still open. The spend is all the steps of those ca
 blocked, stopped and retried cards of the same issue. A card is still open when it is on the belt or blocked; a card
 that you retried or stopped is not. When one of the steps has no price, the spend is "unknown" ([Pick settings](configuration.md#pick-settings)).
 
+Beside that table, the **Cost** panel shows **Judge replay** for each project. It shows the last replay: how many
+findings the replay judge ruled on as your judge did, each finding where the rulings are different, and the two
+costs. Choose a model and an effort, then click **Estimate the cost**. The panel shows the estimate, and **Run the
+replay**. Click it two times to start the replay. Only an admin can start a replay. The result shows in the panel when the replay ends ([Judge replay](configuration.md#judge-replay)).
+
 The **... without asking** rules turn each standing kind of yes on or off ([Standing yes](foreman.md#standing-yes)).
 All are Off until you turn them on. **Review retry without asking** On: the Foreman's watcher tries again each card
 that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
