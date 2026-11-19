@@ -246,7 +246,6 @@ EOF
 t_trailers() {
   local -x FILEMODE=1
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05))"
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05) <(issue 12 2026-01-06))"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   for i in 1 2 3 4 5 6 7; do echo "$GO" > "$STUB/review.$i"; done
   msgis() { # <issue> <trailer lines>: main's head message is the card's, with those lines after Closes
