@@ -333,6 +333,22 @@ t_trailers() {
     || fail "the trailer the fix session wrote did not land though the tests deleted its file: $(git -C "$R" log -1 --format=%B main)"
 }
 
+# Bug: a required trailer still missing after the one fix session that asked for it does not stop the card, so it
+# commits without the trailer, or it gets no such session. A whole card: that the block comes after that one fix
+# session, before the tests and the commit, is card()'s own order of steps.
+t_trailermissing() {
+  local head
+  setup "[$(issue 8 2026-01-01)]"
+  tune '.commit.trailers = [{"when": "(conformance|guard|parity|coverage)[^/]*\\.test\\.(ts|tsx)$", "token": "Mutation-verified", "ask": "Say what you broke and how the test went red."}]'
+  echo "$GO" > "$STUB/review.1"; echo 'touch b-guard.test.ts' > "$STUB/build"; head=$(git -C "$R" rev-parse main)
+  rulecard 8
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix blocked " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
+    && grep -q 'Say what you broke and how the test went red. It adds b-guard.test.ts.' "$STUB/brief" \
+    || fail "a card missing a required trailer did not get one fix session asking for it, then stop: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  st 'select(.step == "blocked") | .reason' | grep -qF 'missing after its one fix session; nothing landed: Mutation-verified (it adds b-guard.test.ts)' \
+    && [ "$(git -C "$R" rev-parse main)" = "$head" ] || fail "a card missing a required trailer was not blocked with the reason, or landed: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+}
+
 # Bug: a path holding a newline escaped the pack's trailer rule: read a line a name, neither half matches the rule's
 # when, so the card owed no trailer and committed without one. owing() (lib/testrun.sh) reads the added names whole.
 t_trailerpath() {
