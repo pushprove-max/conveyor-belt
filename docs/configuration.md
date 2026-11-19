@@ -328,8 +328,9 @@ The map stays current in these ways:
   If the run passes, Conveyor makes the map from the coverage of that run. It does not run the suite a second time.
   A Go, Rust or Ruby run cannot collect coverage in this way. For these languages, if the run passes, Conveyor runs
   the tests a second time with the tool that setup uses, and makes the map from that run.
-- A source file that the map does not cover gets its tests by name. If no test has a matching name, the card runs
-  no test for that file.
+- A source file that the map does not cover gets the test files that `.conveyor/test-links.json` links to it. If
+  that file gives no test, the source file gets its tests by name. If no test has a matching name, the card runs no
+  test for that file.
 
 To turn the map off, set `test.map` to `off` in the pack. Cards then find their tests by name. To use a map that your
 project keeps, set `test.map` to its path from the root of the repository. Conveyor reads it in each card's worktree

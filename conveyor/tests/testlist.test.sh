@@ -53,3 +53,12 @@ t_testlistmap() {
   listrun 'echo y >> lib/cartsum.js'
   listgot 'one:far/cartsum.test.js' 'the test the map links alone'
 }
+# #712. Bug it catches: docs/configuration.md said a source file the test map does not cover gets its tests by name
+# alone, and runs none with no name match, though the links in .conveyor/test-links.json give it tests (t_testlistmap).
+# A text check: the claim is in the docs, with no behaviour of its own to run (t_testlistmap runs the links).
+t_testlistlinkdocs() {
+  local s
+  s=$(awk '/^- A source file that the map does not cover/ {on = 1} on && (/^$/ || /^- [^A]/) {exit} on' "$SRC/../docs/configuration.md" | tr '\n' ' ')
+  [ -n "$s" ] || fail "docs/configuration.md: the text on a source file the map does not cover is not found"
+  [[ $s == *'`.conveyor/test-links.json` links to it'* ]] || fail "docs/configuration.md: the text on a source file the map does not cover does not name its test links: $s"
+}
