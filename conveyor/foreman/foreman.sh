@@ -15,7 +15,10 @@
 #   project's) with an empty state.md when it has none, and writes $FD/settings.json, the launcher's settings: its
 #   environment (CONVEYOR_FOREMAN=1, the folder, the 1-hour prompt cache; the launcher sets the main checkout it runs
 #   in, as a group's Foreman may run in any of its projects). Written whole each run, so a second run leaves the same
-#   file. Nothing is written into the checkout. Another project's Foreman is set up by the same command there.
+#   file. Into the checkout it writes only env.CLAUDE_CODE_PROMPT_CACHE_TTL=1h in .claude/settings.local.json (other
+#   keys kept; a file that is not a JSON object left as it is), so a claimed Foreman's session restarted there gets
+#   the 1-hour cache; the claim says when its session runs with another. Another project's Foreman is set up by the
+#   same command there.
 # launch [--new] (`conveyor.sh foreman`): runs `claude` in the main checkout with those settings and
 #   CONVEYOR_FOREMAN=1, resuming the marked session (`--resume <id>`) while its transcript exists; --new starts fresh.
 # claim <session id> (/conveyor-belt:foreman, with the session's own id): makes that session the Foreman, one per
@@ -24,7 +27,8 @@
 # words (UserPromptSubmit): the owner asks for the role in words, a prompt that is only "start your role" or "you are
 #   the Foreman" (any case, a closing . or !): in a session in a project's main checkout (one with a pack,
 #   .conveyor/project.json; never a worktree, as a card's), it claims the role as claim does, and tells the session to
-#   reply with the claim's first line. Any other prompt, or the words anywhere else, does nothing.
+#   reply with the claim's first line (and its line on a prompt cache time other than 1h). Any other prompt, or the
+#   words anywhere else, does nothing.
 # start (SessionStart): in the launcher's session (CONVEYOR_FOREMAN=1), at its first start, fresh or resumed, first
 #   marks it the Foreman. A resumed session given a new id whose transcript is the Foreman session's takes the mark
 #   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
@@ -102,6 +106,17 @@ setup() {
   jq -n --arg fd "$FD" \
     '{env: {CONVEYOR_FOREMAN: "1", CONVEYOR_FOREMAN_DIR: $fd, CLAUDE_CODE_PROMPT_CACHE_TTL: "1h"}}' > "$FD/settings.json.new" \
     && mv "$FD/settings.json.new" "$FD/settings.json" || return 1
+  # A Foreman claimed in an ordinary session gets the 1-hour cache from the main checkout's local settings, every other
+  # key kept; a file that is not a JSON object is not ours to rewrite.
+  local sl=$MAIN/.claude/settings.local.json
+  if [ ! -e "$sl" ] || jq -e 'type == "object"' "$sl" > /dev/null 2>&1; then
+    mkdir -p "$MAIN/.claude" && { if [ -e "$sl" ]; then cat "$sl"; else echo '{}'; fi; } \
+      | jq '.env = ((.env | objects) // {}) + {CLAUDE_CODE_PROMPT_CACHE_TTL: "1h"}' > "$sl.new" && mv "$sl.new" "$sl" \
+      || { rm -f "$sl.new"; echo "foreman: the 1-hour prompt cache could not be set in $sl" >&2; return 1; }
+    echo "foreman: set the 1-hour prompt cache (env.CLAUDE_CODE_PROMPT_CACHE_TTL) in $sl"
+  else
+    echo "foreman: $sl is not a JSON object, so it is left as it is; a Foreman claimed in a session here keeps that session's prompt cache time" >&2
+  fi
   echo "foreman: wrote the launcher's settings $FD/settings.json, for $NAME, watching $(wc -w <<<"$n") record(s) of $HOSTF, this project's own or its group's ($n), and no other; start it with /conveyor-belt:foreman in a Claude Code session in this checkout (or conveyor foreman); another project gets its own Foreman by this setup there"
 }
 
@@ -280,7 +295,7 @@ auto() {
   printf -v cmd '%q/shim.sh conveyor/foreman/foreman.sh claim %q' "${CLAUDE_PLUGIN_ROOT:-$(cd "$FHERE/../.." && pwd -P)}" "$SID"
   out="# Foreman: another live session holds the role, so this session did not take it. As your first act, before anything else, ask the owner by the picker (AskUserQuestion), with this question and two options, \"Take over\" and \"Leave it\":
 Session ${m:0:8} (started $st, last active $w) is the Foreman of $p. Make this session the Foreman instead?
-- On \"Take over\": run \`$cmd\`. Its first line says this session is now the Foreman (the other session's watchers stop): reply with that one line, and from then on work by the rest of its output as the Foreman. When it fails, show its message and stop.
+- On \"Take over\": run \`$cmd\`. Its first line says this session is now the Foreman (the other session's watchers stop): reply with that one line, and with the line on the prompt cache time when there is one, and from then on work by the rest of its output as the Foreman. When it fails, show its message and stop.
 - On \"Leave it\": this session stays a normal session; do not ask again in it.
 Then go on with what the owner asked, if anything."
   jq -cn --arg c "$out" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
@@ -318,6 +333,9 @@ claim_cmd() {
   was=$(marked)
   claim "$2" || { echo "foreman: this session could not be made the Foreman ($MARK)"; return 1; }
   echo "This session is now the Foreman$(named): its watchers start at the end of this turn."
+  # A claimed session keeps the cache time it started with; setup's settings.local.json gives a restarted one 1h.
+  [ -z "${CLAUDE_CODE_PROMPT_CACHE_TTL:-}" ] || [ "$CLAUDE_CODE_PROMPT_CACHE_TTL" = 1h ] \
+    || echo "The Foreman runs with the prompt cache time $CLAUDE_CODE_PROMPT_CACHE_TTL, not 1h: a restart of this session takes the 1-hour cache from $MAIN/.claude/settings.local.json, which /conveyor-belt:setup --foreman writes."
   [ "$was" = "$2" ] || { . "$FHERE/../../.claude/hooks/lib/board-open.sh" && board_open "$MAIN"; }
   echo; context
 }
@@ -533,12 +551,15 @@ filed() {
   fi
 }
 
-# words: in a project's main checkout, the claim, its reply the claim's first line (a prompt hook's additionalContext).
+# words: in a project's main checkout, the claim, its reply the claim's first line and its cache-time line if any (a
+# prompt hook's additionalContext).
 words() {
-  local out
+  local out ttl n
   inmain || return 0
   if out=$(claim_cmd claim "$SID" 2>&1); then
-    out="The owner asked, in words, for this session to be the Foreman, and it now is. Reply with only this one line: ${out%%$'\n'*}"$'\n'"From this turn on, work by the rest of this as the Foreman."$'\n\n'"${out#*$'\n'}"
+    # The claim's line on a cache time other than 1h is part of the reply, so the owner sees it.
+    ttl=$(grep -m1 '^The Foreman runs with the prompt cache time ' <<<"$out") && n='these two lines' || n='this one line'
+    out="The owner asked, in words, for this session to be the Foreman, and it now is. Reply with only $n: ${out%%$'\n'*}${ttl:+$'\n'$ttl}"$'\n'"From this turn on, work by the rest of this as the Foreman."$'\n\n'"${out#*$'\n'}"
   else out="The owner asked, in words, for this session to be the Foreman, and the claim failed. Show the owner this and stop: $out"; fi
   jq -cn --arg c "$out" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
 }

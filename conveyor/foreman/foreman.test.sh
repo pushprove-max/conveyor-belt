@@ -1164,9 +1164,14 @@ jq -e 'has("systemMessage") | not' <<<"$out" >/dev/null || fail "the owner was t
 # "Take over" runs the command it names, which moves the role.
 cmd=$(sed -n 's/^- On "Take over": run `\(.*\)`\. Its first line.*/\1/p' <<<"$ctx")
 [ -n "$cmd" ] || fail "no command for \"Take over\": $ctx"
-out=$(cd "$M" && CLAUDE_PROJECT_DIR=$M bash -c "$cmd") && [ "$(mark)" = a4 ] && grep -qxF a3a3a3a3-0000 "$FD/former" \
+out=$(cd "$M" && CLAUDE_PROJECT_DIR=$M CLAUDE_CODE_PROMPT_CACHE_TTL=5m bash -c "$cmd") && [ "$(mark)" = a4 ] && grep -qxF a3a3a3a3-0000 "$FD/former" \
   || fail "\"Take over\" did not move the role: $(mark) $out"
 [ "$(head -n 1 <<<"$out")" = "This session is now the Foreman: its watchers start at the end of this turn." ] || fail "\"Take over\" did not say so in one line: $out"
+# A session taking over with a 5-minute cache: the command prints the cache line, and the session is told to reply
+# with it, or the owner never sees that this Foreman writes 5-minute caches (#714).
+grep -q '^The Foreman runs with the prompt cache time 5m, not 1h: ' <<<"$out" || fail "\"Take over\" in a 5-minute session gave no cache line: $out"
+grep -qF ': reply with that one line, and with the line on the prompt cache time when there is one, and from then on' <<<"$ctx" \
+  || fail "\"Take over\" does not ask for the cache line in the reply: $ctx"
 # "Leave it": a session is asked only at its start, so a later start in it (resumed) asks nothing.
 at "$M" bash "$SRC/foreman.sh" claim a3a3a3a3-0000 > /dev/null
 out=$(open "$M" a5); grep -qF 'Take over' <<<"$out" || fail "a second new session was not asked: $out"

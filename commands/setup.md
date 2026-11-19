@@ -6,7 +6,7 @@ allowed-tools: Bash, AskUserQuestion, Read, Glob, Grep, Write
 
 Set up Conveyor Belt in the project checkout this session runs in. Run every command from that checkout.
 The arguments given were: `$ARGUMENTS`. When they hold `--foreman`, add `--foreman` to each run of step 1's setup command
-(it is safe to run again: it rewrites only the Foreman's own settings and never its saved state). When they hold
+(it is safe to run again: it rewrites the Foreman's own settings and sets the 1-hour prompt cache in this checkout's `.claude/settings.local.json`, keeping that file's other keys, and never touches the Foreman's saved state). When they hold
 `--pin`, add `--pin` to each run of step 1's setup command: a new project is then pinned to this plugin copy's commit instead of
 following the plugin's releases. When they hold `--survey`, ask the user "Run a first test-speed survey now?" (yes / no)
 before step 1, and add `--survey yes` or `--survey no`, as answered, to each run of step 1's setup command. Add none of these to

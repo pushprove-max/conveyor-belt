@@ -17,6 +17,13 @@ the Foreman a name in `foreman.name`, the line shows it in brackets: `This sessi
 The session stays the Foreman when you continue or resume it, and after `/clear` in it. `/clear` in another session
 does not give it the role. `/conveyor-belt:foreman off` ends the role, and it stays off after `/clear`.
 
+The Foreman uses the 1-hour prompt cache. `conveyor.sh foreman` starts its session with it. For a session in the main
+checkout, `/conveyor-belt:setup --foreman` sets `CLAUDE_CODE_PROMPT_CACHE_TTL` to `1h` in the `env` of
+`.claude/settings.local.json` there, and keeps the other settings in that file. When that file is not a JSON object,
+setup leaves it as it is and says so. A session keeps the cache time it started with. When the session that takes the
+role runs with another cache time, such as `5m`, the claim says so in one line. Start that session again to get the
+1-hour cache.
+
 When `/conveyor-belt:foreman` or your words make a session the Foreman, the Board opens in your default browser at
 `https://localhost:<port>/`. It opens once for each claim. A claim by the session that is already the Foreman, a
 resume, `/clear` or a compact opens no new tab. When the Board is not running, the claim says so in one line and
