@@ -177,7 +177,7 @@ EOS
 # the cut, and makes lines that differ only there fold as identical on the Board. Lines that long, 60 of them, are
 # more than one command argument can hold: the line is written all the same, its sentence and its output.
 t_testsfix() {
-  local head
+  local head out
   setup "[$(issue 7 2026-01-01)]"
   for i in 1 2 3 4; do moved "$i" "$NOGO" > "$STUB/review.$i"; done
   echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; printf "%s\n" "== gadget.test.ts" "-- FAIL gadget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"
@@ -190,9 +190,12 @@ t_testsfix() {
   [ "$(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests")" = "4 4 4" ] \
     || fail "sessions, reviews and test runs are $(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests"), not 4 4 4"
   # The test-fix session's brief: the issue, and the end of the output (the last 200 lines hold no more than 140 of
-  # the 300 `out line` lines).
-  grep -q '^# The changed tests fail' "$STUB/brief" && grep -qx 'FAIL gadget.test.ts: expected 2' "$STUB/brief" && grep -qx 'out line 300' "$STUB/brief" \
-    && ! grep -qx 'out line 160' "$STUB/brief" && grep -q '^# Issue #7:' "$STUB/brief" || fail "the fix session was not handed the issue and the last 200 lines of the test output"
+  # the 300 `out line` lines). Bug: a cut of 100 lines kept these lines all the same; the part after the
+  # heading is counted, and ends with the output's last line (the run's LINKED note).
+  out=$(sed '1,/^# The changed tests fail (exit 1): fix that and nothing else\. The end of the test output:$/d' "$STUB/brief")
+  grep -q '^# The changed tests fail' "$STUB/brief" && grep -qx 'FAIL gadget.test.ts: expected 2' <<<"$out" && grep -qx 'out line 300' <<<"$out" \
+    && ! grep -qx 'out line 160' <<<"$out" && [ "$(grep -c '' <<<"$out")" = 200 ] && [[ "$(tail -n 1 <<<"$out")" == "conveyor: the change adds or changes no test file"* ]] \
+    && grep -q '^# Issue #7:' "$STUB/brief" || fail "the fix session was not handed the issue and the last 200 lines of the test output: $(grep -c '' <<<"$out") lines, the last $(tail -n 1 <<<"$out" | cut -c1-200)"
   [ "$(st 'select(.step == "blocked") | .reason')" = "the changed tests failed again after their one fix round (exit 1); nothing landed." ] \
     || fail "the blocked reason is not the one sentence: $(st 'select(.step == "blocked") | .reason')"
   # After the stub's lines come the run's own: a.test.sh's end (`-- FAIL a.test.sh`: filecmd()) and the note of the
