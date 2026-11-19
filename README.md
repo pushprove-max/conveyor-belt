@@ -58,6 +58,13 @@ current by itself. A whole run on main makes it again when it is due. A card add
 Setup's last question is "Start Conveyor now as this machine's service?". To start it later, run
 `/conveyor-belt:setup` again in your project's checkout and answer yes ([Run](docs/setup.md#run)).
 
+## Large work: a parent issue and its parts
+
+To keep a large piece of work as one issue, make it a parent and its smaller issues its GitHub sub-issues (its parts).
+Each part has its own number and its own card. Conveyor never builds the parent. When all its parts are closed,
+Conveyor closes the parent with a comment that names them. `conveyor.sh parts <parent> <issue>...` attaches issues to
+a parent ([Issues](docs/commands.md#issues)).
+
 ## The Board
 
 The Board is a local web page that shows the belt: what needs you, the cards and their steps, what landed and what

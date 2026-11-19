@@ -634,7 +634,11 @@ labelled() {
 
 # authorAssociation, which gh issue list cannot give, is asked of GitHub's GraphQL API, every open issue's in one
 # question (paged), after the list; a listed issue the second answer leaves out (closed between the two questions) is
-# left without one (INSIDE: not inside).
+# left without one (INSIDE: not inside). The same question gives each issue's GitHub sub-issues (its parts): an
+# issue that is a part gets umbrella (its parent's number, when the parent is an issue of this repository), and a
+# parent gets parts ([{ref: "#N", or "owner/repo#N" for another repository's, number: N, null for another
+# repository's, open}]; GitHub allows 100 a parent). A pick never takes a parent (jq/upnext.jq), and umbrellas()
+# (lib/slices.sh) closes one whose parts are all closed.
 openissues() { # <json fields> [gh issue list arguments]
   local out f=$1 lim=1000 a; shift
   [ -z "$GITHUB" ] || { [ -s "$GITHUB/issues" ] && cat "$GITHUB/issues"; return; }  # the snapshot's fields, as `github` kept them
@@ -645,10 +649,17 @@ openissues() { # <json fields> [gh issue list arguments]
   done
   if [ -n "${a:-}" ]; then
     a=$(gh api graphql --paginate -F owner='{owner}' -F repo='{repo}' -f query='query($owner: String!, $repo: String!, $endCursor: String) {
-      repository(owner: $owner, name: $repo) { issues(states: OPEN, first: 100, after: $endCursor) { nodes { number authorAssociation } pageInfo { hasNextPage endCursor } } } }') \
-      && a=$(jq -cse '[.[].data.repository.issues.nodes[] | {key: (.number | tostring), value: .authorAssociation}] | from_entries' <<<"$a") \
+      repository(owner: $owner, name: $repo) { nameWithOwner issues(states: OPEN, first: 100, after: $endCursor) { nodes { number authorAssociation
+        parent { number repository { nameWithOwner } } subIssues(first: 100) { nodes { number state repository { nameWithOwner } } } }
+        pageInfo { hasNextPage endCursor } } } }') \
+      && a=$(jq -cse '[.[].data.repository | .nameWithOwner as $me | .issues.nodes[] | {key: (.number | tostring), value: {authorAssociation,
+          umbrella: (.parent | if . != null and .repository.nameWithOwner == $me then .number else null end),
+          parts: [(.subIssues.nodes // [])[] | (.repository.nameWithOwner == $me) as $here
+            | {ref: (if $here then "#\(.number)" else "\(.repository.nameWithOwner)#\(.number)" end), number: (if $here then .number else null end), open: (.state == "OPEN")}]}}]
+        | from_entries' <<<"$a") \
       || { echo "conveyor: who opened the open issues could not be read (gh api graphql)" >&2; return 1; }
-    out=$(jq -c --argjson a "$a" 'map(.authorAssociation = $a[.number | tostring])' <<<"$out") || return 1
+    out=$(jq -c --argjson a "$a" 'map($a[.number | tostring] as $x | .authorAssociation = $x.authorAssociation
+      | if $x.umbrella != null then .umbrella = $x.umbrella else . end | if ($x.parts // []) != [] then .parts = $x.parts else . end)' <<<"$out") || return 1
   fi
   farstates "$out"
 }

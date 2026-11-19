@@ -106,7 +106,10 @@
 #   record is still given. holding and skipped list only issues pick would take but for the record.
 #   Each of order, holding and waiting, and each of open.held, also has since: when it came to Held or Queue, as
 #   moved.json (MOVED) dates it, so the Board sorts those columns by the time in them, not by the issue's age.
-# open: every open issue and where it is (issues: each with its labels), below at open; null when gh cannot list the issues.
+#   Each issue of the queue, and each card of belt and needsYou.blocked, that is a GitHub sub-issue of a parent
+#   (openissues()) also has umbrella: that parent's number.
+# open: every open issue and where it is (issues: each with its labels), below at open; umbrellas: each open parent
+#   (an issue with GitHub sub-issues) as one entry {issue, title, parts, done, all, inFlight}; null when gh cannot list the issues.
 # control: the whole control record as it stands, start (where new issues start) among it (null when it does
 #   not read); forecast: below, at forecast.
 # modelSettings: the build and review models and efforts in force, where each comes from and the choices: the CLIs
@@ -680,6 +683,10 @@ snapshot() (
     # A follow-up names the card it came from: the issue whose landed line lists it (/units shows "↳ #N").
     ([$all[0][] | select(.x.followups != null) | .issue as $p | .x.followups[] | {key: tostring, value: $p}] | from_entries) as $parents
     | def parent: $parents[.issue | tostring] // null;
+    # A part names its parent (the issue it is a GitHub sub-issue of: umbrella, openissues()); an issue that is no part,
+    # or all of them when the issues were not listed, has no umbrella field.
+      ([$iss[0] // [] | .[] | select(.umbrella != null) | {key: (.number | tostring), value: .umbrella}] | from_entries) as $ums
+    | def umbrella: $ums[.issue | tostring] | if . == null then {} else {umbrella: .} end;
       ($h.pushError.reason // null) as $perr
     | [$all[0][] | .steps[] | select((.time | day) >= $since)] as $steps
     # A card whose issue was closed while it was blocked (x.blockedAt) landed nothing: it is not among the landed.
@@ -745,10 +752,16 @@ snapshot() (
             | select(($i.number | IN($queued[])) | not)
             | {issue: $i.number, title: ($i.title // "")[0:200], priority: level($l; $prio), followup: $isfu,
                labels: $l, created: $i.createdAt, parent: (($i.body // "") | capture("^Follow-up to #(?<n>[0-9]+)") | .n | tonumber) // null, reasons: $why,
-               # The slices of a split issue (the rule Split large issues On): it is their umbrella while it is open.
-               umbrella: ([$c[] | select(.issue == $i.number and (.x.split.filed | type) == "array")] | last | .x.split.filed // null)}] as $hl
+               # The slices of a split issue (the rule Split large issues On), else the parts of a parent (its GitHub
+               # sub-issues in this repository): it is their umbrella while it is open.
+               umbrella: (([$c[] | select(.issue == $i.number and (.x.split.filed | type) == "array")] | last | .x.split.filed)
+                 // ([($i.parts // [])[].number | numbers] | if . == [] then null else . end))}] as $hl
         | ($hl | map(select((.reasons | map(.kind) | unique) == ["you"])) | length) as $you
         | {count: ($open | length), held: $hl,
+           # Each open parent (an issue with GitHub sub-issues) as one entry: its parts, how many of them are done
+           # (closed) of all, and those on the belt.
+           umbrellas: [$open[] | select((.parts // []) != []) | {issue: .number, title: (.title // "")[0:200], parts: [.parts[].ref],
+             done: ([.parts[] | select(.open | not)] | length), all: (.parts | length), inFlight: [.parts[].number | numbers | select(IN($onbelt[]))]}],
            issues: ([$open[] | (.labels | map(.name)) as $l | {issue: .number, title: (.title // "")[0:200], priority: level($l; $prio), labels: $l, created: .createdAt, dependsOn: (needs + farneeds)}] | sort_by(.issue)),
            split: {queued: (($open | length) - ($hl | length) - ([$open[] | select(.number | IN($onbelt[]))] | length)), you: $you,
                    labelOrRule: (($hl | length) - $you), belt: ([$open[] | select(.number | IN($onbelt[]))] | length)}} end) as $openpart
@@ -775,7 +788,7 @@ snapshot() (
              # A follow-up whose change goes beyond the yes up its chain: what goes beyond, as its reviewer said (the ask).
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],
-         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not)) | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls} + times]
+         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not)) | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls} + umbrella + times]
            # A push that failed again on its next try needs the owner, until a push works: one item, under the card
            # of the last landing not pushed, naming every card not pushed; its tail is what git and the hook said.
            # One that failed its check needs the owner at once: it is not tried again until main moves (checkheld()).
@@ -822,9 +835,10 @@ snapshot() (
          done: {tokens: .x.tokens, usd, reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)},
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
          parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
-         beyond: (if $landed then null else .x.beyond end)} + times],
-       queue: {next: ($next | if . == null then null else map(. + {parent: parent} + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end), holding: ($q.holding // null), skipped: ($q.skipped // null),
-         waiting: ($q.waiting // null | if . == null then null else map(. + {waitsOn: [.waitsFor[] | numbers | {issue: ., state: depstate(.)}]}) end)},
+         beyond: (if $landed then null else .x.beyond end)} + umbrella + times],
+       queue: {next: ($next | if . == null then null else map(. + {parent: parent} + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end),
+         holding: ($q.holding // null | if . == null then null else map(. + umbrella) end), skipped: ($q.skipped // null | if . == null then null else map(. + umbrella) end),
+         waiting: ($q.waiting // null | if . == null then null else map(. + {waitsOn: [.waitsFor[] | numbers | {issue: ., state: depstate(.)}]} + umbrella) end)},
        open: $openpart,
        control: $control,
        modelSettings: $settings,

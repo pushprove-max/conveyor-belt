@@ -227,10 +227,19 @@ case $2 in
     # closedAt: $STUB/closedAt.<n>, else "" (a closed issue whose closing time GitHub did not give).
     *'--json state'*) echo "{\"state\":\"$(cat "$STUB/state.$3" 2>/dev/null || cat "$STUB/state" 2>/dev/null || echo CLOSED)\",\"closedAt\":\"$(cat "$STUB/closedAt.$3" 2>/dev/null)\"}" ;;
     *) issues | jq --argjson n "$3" '.[] | select(.number == $n)' ;; esac ;;
-  # gh api graphql: who opened each open issue (an issue's authorAssociation, else OWNER), or when the awaiting-deploy
-  # labels were added.
-  graphql) case "$*" in *authorAssociation*) issues | jq -c '{data: {repository: {issues: {nodes: map({number, authorAssociation: (.authorAssociation // "OWNER")}), pageInfo: {hasNextPage: false, endCursor: null}}}}}' ;;
+  # gh api graphql: who opened each open issue (an issue's authorAssociation, else OWNER) and its parent and sub-issues
+  # ($STUB/subs: a line "<parent> <part>" for each; a part not among the open issues is closed), or when the
+  # awaiting-deploy labels were added.
+  graphql) case "$*" in *authorAssociation*) s=$(jq -cRn '[inputs | split(" ") | map(tonumber)]' "$STUB/subs" 2>/dev/null) || s='[]'
+      issues | jq -c --argjson s "${s:-[]}" 'map(.number) as $open | {data: {repository: {nameWithOwner: "o/r", issues: {nodes: map(.number as $n | {number, authorAssociation: (.authorAssociation // "OWNER"),
+        parent: ([$s[] | select(.[1] == $n) | {number: .[0], repository: {nameWithOwner: "o/r"}}] | first),
+        subIssues: {nodes: [$s[] | select(.[0] == $n) | {number: .[1], state: (if .[1] | IN($open[]) then "OPEN" else "CLOSED" end), repository: {nameWithOwner: "o/r"}}]}}),
+        pageInfo: {hasNextPage: false, endCursor: null}}}}}' ;;
       *) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; esac ;;
+  # gh api .../issues/<p>/sub_issues -F sub_issue_id=<id>: "<p> <part>" added to $STUB/subs (the part's id is
+  # 1000000 + its number); gh api .../issues/<n>: that issue's id.
+  repos/*/sub_issues) p=${2%/sub_issues}; p=${p##*/}; for a; do [[ $a != sub_issue_id=* ]] || echo "$p $((${a#*=} - 1000000))" >> "$STUB/subs"; done ;;
+  repos/*/issues/*) echo "{\"id\": $((${2##*/} + 1000000))}" ;;
   # gh auth token: the token gh holds, read without the network (none, with gh's error text, with $STUB/signed-out;
   # timed out, exit 124 as `timeout` gives, with $STUB/token-timeout; an empty token with $STUB/token-empty). gh auth status: the
   # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.

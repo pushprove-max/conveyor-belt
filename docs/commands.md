@@ -49,6 +49,12 @@
 - `conveyor.sh unblock <issue> --hold` takes a blocked card off the belt and holds its issue. Its kept work stays.
   After `conveyor.sh control release <issue>`, the loop picks the issue again and starts from that kept work. This is
   the Board's **Hold**.
+- A parent issue keeps a large piece of work as one issue. Its parts are its GitHub sub-issues, and each part is an
+  issue with its own number and its own card. The loop never picks an open issue that has sub-issues. At each turn,
+  the loop closes an open parent when all its parts are closed, with a comment that names them.
+  `conveyor.sh parts <parent> <issue>...` attaches the issues as sub-issues of the parent. You can also attach them on
+  GitHub. The Board and `/units` get the parent of each issue in the queue, on the belt and in Needs you, and one
+  entry for each parent with its parts done of all and its parts on the belt.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
   the judge, accounts, the dependency guard, the push check) are in `conveyor/README.md`, Control.
 
@@ -61,7 +67,7 @@ The loop:
 
 - `run [--only <issue>[,<issue>...]] [max-cards]` runs the loop in the foreground until nothing is left to pick. It
   starts at most `max-cards` cards. With `--only`, it builds those issues and the follow-ups filed from them, and
-  `max-cards` is how many build at once.
+  the open parts of a parent among them, and `max-cards` is how many build at once.
 - `serve` runs the same loop with no end, for one project.
 - `machine` runs the machine's one Conveyor, a loop for every record of the host file. `machine pause` and
   `machine resume` pause and resume every project.
@@ -84,6 +90,7 @@ The loop:
 
 Cards:
 
+- `parts <parent> <issue>...` attaches the issues as GitHub sub-issues of the parent ([Issues](#issues)).
 - `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
   card has no issue. It shows as "Main is red (<commit>)". Use `retry <card id>` and `shut <card id>`. `retry 0`

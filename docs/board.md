@@ -330,8 +330,8 @@ here. Your change goes in the control record and wins over the pack
 
 **Split large issues** has three settings per project: Off, Shadow and On. Shadow is the default. Shadow records what
 the Judge would split a large issue into, and builds the issue whole. The tab says "shadow: the verdict is recorded,
-and the issue is built whole". On files the slices as follow-ups and holds the issue as their umbrella until the last
-slice lands or is already done on main. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
+and the issue is built whole". On files the slices as follow-ups and as sub-issues of the issue, and holds the issue
+as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
 ## Held issues and dependencies
 
