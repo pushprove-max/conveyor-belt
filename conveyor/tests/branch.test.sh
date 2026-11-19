@@ -40,7 +40,7 @@ t_branch() {
   [ "$(st 'select(.step == "landed") | .sha')" = "$(git -C "$R" rev-parse main)" ] && [ "$(cat "$R/b.txt")" = bee ] && [ -z "$(git -C "$R" status --porcelain)" ] \
     && [ "$(git -C "$R" rev-parse main~1)" = "$init" ] || fail "main is not its old head plus one commit holding the branch's change"
   [ "$(git -C "$R" log -1 --format=%B main)" = "fix(tooling): fast-lane change"$'\n\n'"Conveyor card $c, branch fast-lane" ] || fail "commit message: $(git -C "$R" log -1 --format=%B main)"
-  [ "$(git -C "$R" rev-parse fast-lane)" = "$tip" ] && grep -q "card $c, branch fast-lane: landed" <<<"$out" && [ "$(ls "$T/$CASE/cards")" = "$c.testlist" ] || fail "the branch moved, the landing was not reported, or the worktree is left: $out"
+  [ "$(git -C "$R" rev-parse fast-lane)" = "$tip" ] && grep -q "card $c, branch fast-lane: landed" <<<"$out" && [ -z "$(ls "$T/$CASE/cards")" ] || fail "the branch moved, the landing was not reported, or the worktree or its files are left: $out $(ls "$T/$CASE/cards")"
   recok "$ST/cards.jsonl" "a land-branch card (its picked line with branch)"
   [ "$(loop cards | jq -c '[.landed, (.cards | map("\(.issue) \(.step) \(.reviews)"))]')" = '[1,["0 landed 1"]]' ] || fail "dashboard row of a branch card: $(loop cards)"
   # A branch card that has its brief line is in review 1, not in a build.
