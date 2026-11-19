@@ -349,6 +349,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .reason { margin-top: var(--sp-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .seen { margin-top: var(--sp-1); font: inherit; font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 .hint, .foot { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+/* The Queue's folded groups (Waiting on another card, Built, waiting for your PROD deploy): the heading is the summary's line. */
+.queue-group { margin-top: var(--sp-2); }
+.queue-group > summary { cursor: pointer; font-size: var(--fs-sm); color: var(--muted); }
+.queue-group-head { display: inline; font: inherit; font-weight: 600; }
+.queue-group > .rows { margin-top: var(--sp-1); }
 .warn-note { margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn); font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
 .num { font-variant-numeric: tabular-nums; }
 /* A text the Board rewrites in place (each second, or as a figure counts to its new value) never wraps, and its digits

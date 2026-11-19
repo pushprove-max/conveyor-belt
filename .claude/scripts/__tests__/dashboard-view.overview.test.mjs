@@ -263,7 +263,7 @@ test('the queue lists the issues built and waiting for a PROD deploy on their ow
   const only = clone(data); only.panels.queue.data.next = [];
   next(w, only);
   assert.equal(state(w, 'queue'), 'ready', 'an empty queue with issues waiting for a deploy is not the empty panel');
-  assert.match(panel(w, 'queue').textContent, /Nothing queued\. Holds keep 2 issues back: see Held\..*Built, waiting for your PROD deploy \(2\):.*Stack split/s);
+  assert.match(panel(w, 'queue').textContent, /Nothing queued\. Holds keep 2 issues back: see Held\..*Built, waiting for your PROD deploy \(2\).*Stack split/s);
 });
 
 // An issue that depends on one still open is shown as "Waits on #N" in the queue and on the Board, after

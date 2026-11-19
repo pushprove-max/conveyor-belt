@@ -3,7 +3,7 @@
 // "Waiting on #N", on the whole Board and on the page filtered to one project. Shared setup: dashboard-view.helpers.mjs.
 // Bug (issue 19): a queued issue waiting on another ("Depends on: #N") was listed as waiting outside the Board but not in the Queue panel.
 import assert from 'node:assert/strict';
-import { P, boot, deliver, full, panel, pickProject, cases } from './dashboard-view.helpers.mjs';
+import { P, boot, deliver, next, full, panel, pickProject, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -19,7 +19,7 @@ function part(next) {
   return d;
 }
 const NEXT = [{ repo: 'sample', issue: 20, title: 'Next up', priority: 'P1', followup: false, retried: false, url: `${P}/20` }];
-const foots = (w) => Array.from(panel(w, 'queue').querySelectorAll('.foot'), (p) => p.textContent);
+const heads = (w) => Array.from(panel(w, 'queue').querySelectorAll('.queue-group-head'), (p) => p.textContent);
 const chips = (w) => Array.from(panel(w, 'queue').querySelectorAll('.chip'), (c) => c.textContent);
 const count = (w) => panel(w, 'queue').querySelector('.panel-count')?.textContent;
 
@@ -28,7 +28,7 @@ for (const [name, next] of [['next empty', []], ['next non-empty', NEXT]]) {
     const w = boot();
     deliver(w, part(next));
     assert.equal(panel(w, 'queue').dataset.state, 'ready', 'a queue with only waiting issues is not drawn as empty');
-    assert.ok(foots(w).includes('Waiting on another card (1):'), foots(w).join(' | '));
+    assert.ok(heads(w).includes('Waiting on another card (1)'), heads(w).join(' | '));
     assert.ok(chips(w).includes('Waiting on #7'), chips(w).join(' | '));
     assert.equal(count(w), String(next.length + 1), 'the count has the waiting issue too');
   });
@@ -62,8 +62,46 @@ test('the Queue filtered to the other project shows no waiting row', () => {
   const w = boot();
   deliver(w, part([]));
   pickProject(w, 'widgetshop');
-  assert.ok(!foots(w).some((t) => /Waiting on another card/.test(t)));
+  assert.ok(!heads(w).some((t) => /Waiting on another card/.test(t)));
   assert.ok(!chips(w).some((t) => /Waiting on/.test(t)));
   pickProject(w, 'sample');
-  assert.ok(foots(w).includes('Waiting on another card (1):'), 'filtered to its own project, it is listed');
+  assert.ok(heads(w).includes('Waiting on another card (1)'), 'filtered to its own project, it is listed');
+});
+
+// Bug (issue 546): every waiting and awaiting-deploy row counted to the Queue's length of 8, so 3 queued issues with 30
+// waiting scrolled inside the panel and the group headings were out of view; the groups were plain headings and lists
+// with no way to close them, and each new part drew the panel anew, so every row was a new node. The test fails if
+// either group is not a closed <details> at first, if a redraw closes the Waiting group the owner opened, or if a row
+// is not kept by its project and issue. jsdom does no layout: the scroll is the panel body's `scrolls` class and the row count the frame cut it by.
+test('3 queued, 30 waiting and 4 awaiting deploy: both counted headings show with no scroll, and an opened Waiting group and its rows survive a new part', () => {
+  const w = boot();
+  const many = (n, from, over) => Array.from({ length: n }, (_, i) => ({ repo: 'sample', card: null, issue: from + i, title: `Issue ${from + i}`, url: `${P}/${from + i}`, ...over }));
+  const queue = (title) => {
+    const d = full();
+    d.panels.queue.data = {
+      next: many(3, 20, { priority: 'P2', followup: false, retried: false }), held: 0, issuesError: null, byRepo: { sample: { held: 0 } },
+      waiting: many(30, 100, { waitsFor: [7], forced: false }).map((x, i) => (i === 0 ? { ...x, title } : x)),
+      awaitingDeploy: many(4, 200, { since: '2026-11-08T17:00:00Z' }),
+    };
+    return d;
+  };
+  deliver(w, queue('First wait'));
+  const q = panel(w, 'queue');
+  assert.deepEqual(heads(w), ['Waiting on another card (30)', 'Built, waiting for your PROD deploy (4)']);
+  assert.equal(q.dataset.rows, '3', 'the length counts the queued rows only');
+  assert.ok(!q.querySelector('.panel-body').classList.contains('scrolls'), 'no scroll inside the panel');
+  const built = q.querySelector('details.queue-group[data-group="built"]');
+  assert.ok(built, 'the awaiting-deploy group is a <details>');
+  assert.equal(built.open, false, 'the awaiting-deploy group starts closed');
+  const group = q.querySelector('details.queue-group[data-group="waiting"]');
+  assert.equal(group.open, false, 'a group starts closed');
+  group.open = true;
+  const row = group.querySelector('.rows > li[data-key="sample#100"]'), queued = q.querySelector('.queue-next > li[data-key="sample#20"]');
+  next(w, queue('First wait, retitled'));
+  assert.equal(q.querySelector('.queue-next > li[data-key="sample#20"]'), queued, 'a queued row is kept by its project and issue');
+  const again = q.querySelector('details.queue-group[data-group="waiting"]');
+  assert.equal(again, group);
+  assert.equal(again.open, true, 'the opened group stays open after a new Queue part');
+  assert.equal(again.querySelector('.rows > li[data-key="sample#100"]'), row, 'the row for the same project and issue is the same node');
+  assert.equal(row.querySelector('.title').textContent, 'First wait, retitled', 'the kept row shows the new part');
 });

@@ -563,7 +563,7 @@ export const SAYS = {
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
   bench: { title: 'Benchmarks', count: '', data: ['Overview', 'Start a run', 'Newest run', 'History', 'Arms', 'Drift watch'],
     empty: 'No benchmarks to show', failed: 'The Board could not read the benchmarks' },
-  queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2):', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
+  queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2)', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
   landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Before deploy: Run migration 0004. Without it: the new column is missing. At db/0004.sql:1', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
   release: { title: 'Release', count: '', data: ['sample', 'Newest release v1.2.0', '2 changes since', 'Notes missing', 'docs/releases/1.3.0.md on main: missing: Draft notes writes them',
     'Draft notes', 'Show 2 changes'], empty: 'No project releases with Conveyor.', failed: 'The Board could not read the release state' },

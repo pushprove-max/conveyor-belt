@@ -68,6 +68,11 @@ serves the Board, because its requests come from a loopback address. An admin se
 - **Tests**: the project's test files.
 - **Benchmarks**: the project's SWE-bench runs and their arms ([Benchmarks tab](#benchmarks-tab)).
 
+The Queue panel lists the issues that Conveyor builds next, in order. Under them are two groups, each a heading with
+its count: **Waiting on another card (N)** and **Built, waiting for your PROD deploy (N)**. A group is closed until
+you click its heading. It stays open when the Board gets new data. The length of the panel counts only the issues
+that Conveyor builds next, so the two headings also show when a group is long.
+
 A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
 each panel. It never hides Needs you.
 
