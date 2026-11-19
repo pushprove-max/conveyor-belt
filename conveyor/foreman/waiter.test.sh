@@ -352,7 +352,24 @@ WAIT_CEILING=20 wait_until "! kill -0 $old 2>/dev/null" || fail "the claim left 
 h=$(wpid); [ "$h" != "$old" ] && isheld "$h" || fail "the claim started no new waiter: waiter.pid names $h"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed noreader stopover reclaim)
+# Issue 610: --check runs after every tool call of the Foreman. While a waiter runs and no wake waits, it ends at once:
+# exit 0, no output, none of the waiter's files changed. Bug: before it found the waiter running, each call walked up
+# its processes with ps to find the session's, which only starting a waiter needs (a ps stand-in notes each run).
+t_checkquiet() {
+fixture checkquiet
+check; h=$(wpid); isheld "$h" || fail "the hook started no waiter"
+wait_until '[ -s "$T/starts" ] && [ -s "$FD/watchers.pid" ]' || fail "the waiter started no watcher"
+files() { (cd "$FD" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cksum < "$f")"; done); }
+before=$(files); [ "$(wakes)" = 0 ] || fail "a wake waits, so the case proves nothing"
+mkdir -p "$T/ps" && printf '#!/bin/sh\necho "$*" >> %s/ps.calls\nexec %s "$@"\n' "$T" "$(command -v ps)" > "$T/ps/ps" && chmod +x "$T/ps/ps"
+out=$(echo '{}' | env -u CONVEYOR_FOREMAN_SESSION_PID PATH="$T/ps:$PATH" CONVEYOR_FOREMAN_WATCHERS="$W" bash "$SRC/waiter.sh" --check 2>&1); rc=$?
+[ "$rc" = 0 ] && [ -z "$out" ] || fail "--check with a waiter running did not end quietly (exit $rc): $out"
+[ ! -e "$T/ps.calls" ] || fail "--check with a waiter running looked up processes: $(cat "$T/ps.calls")"
+[ "$(files)" = "$before" ] || fail "--check with a waiter running changed the waiter's files: $(diff <(echo "$before") <(files))"
+[ "$(wpid)" = "$h" ] && kill -0 "$h" || fail "the waiter $h no longer runs after --check"
+}
+
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed noreader stopover reclaim checkquiet)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

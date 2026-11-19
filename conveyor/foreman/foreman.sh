@@ -7,7 +7,8 @@
 # clears blocked cards and takes every decision to the owner; it builds nothing itself. Its hooks are the plugin's own
 # (hooks/hooks.json, run in every session through the shim): start at SessionStart; stop.sh state, stop.sh reply and
 # waiter.sh (asyncRewake) at Stop; waiter.sh --check after each prompt and each tool call, which starts the waiter
-# again when none runs; filing before a Bash call and filed after it, failed or not. Each stands down in
+# again when none runs; filing before a Bash call and filed after it, failed or not (each through filing-hook.sh,
+# which ends at once, with no shim, for a command that files no issue). Each stands down in
 # any session but the Foreman's (lib.sh foreman).
 # setup (`conveyor.sh setup --foreman`, re-runnable; CONVEYOR_MAIN names the main checkout): checks the host file's
 #   records, makes this project's Foreman's folder ($FD: `foreman` in its state folder, a group's in its first
@@ -416,16 +417,9 @@ EOF
 # Its limit, accepted: it reads the command as written, in the forms above. It does not try to see through deliberate
 # shell indirection beyond them (a command run through eval or a script, a gh or gh-write named through a variable,
 # other quoting tricks), which is out of scope: it checks agents' own commands and is not a security boundary.
-files() {
-  jq -e 'def writes: test("(?i:\\bpost\\b)|\\s-(-(data|json|form|upload-file|body)|[a-zA-Z]*[dFT])");
-    def hex: ascii_downcase | explode | reduce .[] as $c (0; . * 16 + if $c >= 97 then $c - 87 else $c - 48 end);
-    .tool_input.command // "" | gsub("\\\\u(?<u>[0-9a-fA-F]{4})|\\\\x(?<x>[0-9a-fA-F]{2})|%(?<p>[0-9a-fA-F]{2})"; [.u // .x // .p | hex] | implode)
-    | gsub("\\$?[\"\u0027]|\\\\"; "")
-    | test("\\b(issue(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*\\s+((create|new)\\b|(?!-)\\S*[$`])|gh(-write)?(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*\\s+(?!-)\\S*[$`]|gh(-write)?(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*\\s+api\\s[^;&|\\n]*(\\bissues(?![/\\w-])|createIssue|=@|--input\\b|[$`]))")
-      or test("repos/[^/\\s]+/[^/\\s]+/issues(?![/\\w.-])|/graphql(?![/\\w.-])")
-      or ([splits("[;&|\\n]")] | any(test("\\bcurl\\b.*\\s(-[a-zA-Z]*K|--config\\b)") or test("\\bwget\\b.*\\s(-[a-zA-Z]*[ie]|--(config|input-file|execute)\\b)")
-        or (test("\\b(curl|wget)\\b") and test("[$`]") and writes)))' <<<"$1" >/dev/null 2>&1
-}
+# The program is files.jq, which the plugin's hook lines (filing-hook.sh) read too, so a command that files no issue
+# ends there, before the shim looks for the engine.
+files() { jq -e -f "$FHERE/files.jq" <<<"$1" >/dev/null 2>&1; }
 # Every Foreman of the host file, and every lane's filer, files against the same records, so what filing set held is
 # kept in one list for all ($SF/held, beside the host file), and each filing in flight adds a line to $SF/in (the
 # session filing, a tab, the folder of the Foreman or filer filing, whole, a tab, and the Bash call's id; one line per

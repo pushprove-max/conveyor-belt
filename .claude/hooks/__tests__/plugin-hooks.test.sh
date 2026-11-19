@@ -79,7 +79,9 @@ check "set up: git-safety lets git status through" 0 "$(bash_hook 'git status')"
 # on its lock and on GitHub for longer than a hook's 30 s timeout, so a hook that waits for it blocks the call. Here the
 # plugin copy's take is a stub that waits up to 60 s for $T/go: each hook must end well before that, with the notice
 # once, and the take must still be started beside it.
-mkdir -p "$T/plug/conveyor" "$T/takes"; cp "$SRC/shim.sh" "$T/plug/"
+# The plugin copy also holds the filing hook's own lines (hooks.json runs them from it, not through the shim).
+mkdir -p "$T/plug/conveyor/foreman" "$T/takes"; cp "$SRC/shim.sh" "$T/plug/"
+cp "$SRC/conveyor/foreman/filing-hook.sh" "$SRC/conveyor/foreman/files.jq" "$T/plug/conveyor/foreman/"
 printf '#!/usr/bin/env bash\ntouch "%s/takes/$$"\nfor i in $(seq 600); do [ -e "%s/go" ] && break; sleep 0.1; done\nrm -f "%s/takes/$$"\n' \
   "$T" "$T" "$T" > "$T/plug/conveyor/conveyor.sh"
 git init -q "$T/follow"; mkdir -p "$T/follow/.conveyor"

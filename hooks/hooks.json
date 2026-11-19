@@ -51,7 +51,7 @@
           },
           {
             "type": "command",
-            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filing"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/conveyor/foreman/filing-hook.sh filing"
           }
         ]
       },
@@ -135,7 +135,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filed"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/conveyor/foreman/filing-hook.sh filed"
           }
         ]
       }
@@ -146,7 +146,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh filed"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/conveyor/foreman/filing-hook.sh filed"
           }
         ]
       }

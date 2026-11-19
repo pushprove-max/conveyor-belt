@@ -77,6 +77,14 @@ moved() {
 }
 LOG=$FD/waiter.log
 log() { printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$*" >> "$LOG"; } 2>/dev/null
+# --check while a waiter holds waiter.lock and its session's process lives (or waiter.pid names none) has nothing to
+# do, as below: it ends here, before the walk up the processes, which only a hook that starts a waiter or takes one
+# over needs. Each prompt and tool call of the session runs it, so this is the common case.
+if [ "$MODE" = --check ] && [ -e "$FD/waiter.lock" ] && ! flock -n "$FD/waiter.lock" true 2>/dev/null; then
+  { read -r _ _ osp _ < "$FD/waiter.pid"; } 2>/dev/null
+  [[ ${osp:-} =~ ^[0-9]+$ ]] && ! kill -0 "$osp" 2>/dev/null || exit 0
+  osp='' # read again below, when the lock is still held
+fi
 # The session's process: the nearest process above this one that is no shell (the shim and the hook's command line
 # are), found once, by the hook, and passed on to the waiters it starts.
 if [ -z "${CONVEYOR_FOREMAN_SESSION_PID:-}" ]; then

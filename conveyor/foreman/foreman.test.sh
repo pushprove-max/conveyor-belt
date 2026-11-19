@@ -105,9 +105,11 @@ jq -e '.env.CONVEYOR_FOREMAN == "1" and .env.CLAUDE_CODE_PROMPT_CACHE_TTL == "1h
 # The Foreman's hooks are the plugin's own, so a session started any way (claude --continue, an IDE) runs them; the
 # launcher's settings hold none, or its session would run each twice.
 P=$SRC/../../hooks/hooks.json
-for h in 'SessionStart foreman.sh start' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse foreman.sh filing' 'PostToolUse foreman.sh filed' 'PostToolUseFailure foreman.sh filed' \
+# filing and filed go through filing-hook.sh, which runs the shim only for a command that files an issue (issue 610).
+for h in 'SessionStart foreman.sh start' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse filing-hook.sh filing' 'PostToolUse filing-hook.sh filed' 'PostToolUseFailure filing-hook.sh filed' \
   'UserPromptSubmit waiter.sh --check' 'PostToolUse waiter.sh --check'; do # issue 215: a dead waiter is started again by the session's next prompt or tool call
-  jq -e --arg e "${h%% *}" --arg h "shim.sh conveyor/foreman/${h#* }" '[.hooks[$e][]? | select(($e | test("ToolUse") | not) or .matcher == "Bash" or .matcher == null) | .hooks[].command | endswith($h)] | any' "$P" >/dev/null \
+  s="shim.sh conveyor/foreman/${h#* }"; [[ ${h#* } != filing-hook.sh* ]] || s="}\"/conveyor/foreman/${h#* }"
+  jq -e --arg e "${h%% *}" --arg h "$s" '[.hooks[$e][]? | select(($e | test("ToolUse") | not) or .matcher == "Bash" or .matcher == null) | .hooks[].command | endswith($h)] | any' "$P" >/dev/null \
     || fail "no plugin hook runs $h"
 done
 jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("waiter.sh")) | .asyncRewake] == [true]' "$P" >/dev/null || fail "the waiter does not wake the session"
