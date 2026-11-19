@@ -88,7 +88,8 @@ EOF
 # line was the session's, and health never counted the wait. #8 (a.txt, given way 3 times) waits on #7 (a.txt); #7
 # lands, and the session that brings #8 onto main changes b.txt too, which #9 holds in its tests ($STUB/go9): #8 waits
 # on #9, and a minute (waitLimitMin here) into that wait health names it with both cards. #9, its tests over, claims
-# again to land: #8, the older, goes first, and #9 is brought onto its main.
+# again to land: ready, it goes past #8, whose tests have not passed on its change (a ready card lands first: claim()),
+# and #8's change, which no longer applies, is brought onto main by its one rebuild (# Landing conflict).
 t_waitkept() {
   # The old fixture: #8 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in $(seq 8); do echo "$GO" > "$STUB/review.$i"; done
@@ -97,7 +98,7 @@ t_waitkept() {
   cat > "$STUB/build" <<'EOF'
 case $PWD in
   *-7) echo seven >> a.txt ;;
-  *-8) if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then
+  *-8) if grep -qE '^# (Main moved|Landing conflict): apply the same change' "$STUB/brief"; then
       while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ] && ! jq -e .held ../*-9.claim >/dev/null 2>&1; do sleep 0.1; done
       printf 'one\nseven\neight\n' > a.txt; echo eight >> b.txt
     else while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done; echo eight >> a.txt; echo '{"gave": 3}' > "$PWD.claim"; fi ;;
@@ -115,9 +116,9 @@ EOF
   h=$(CONVEYOR_NOW=$(($(jq -r '.at | fromdate' <<<"$live") + 61)) loop health) || fail "health failed: $h"
   [ "$(jq -c '.stuck | map(select(.issue == 8) | [.step, .waitedMin, .waitsOn.issue, (.waitedOn | map(.issue))])' <<<"$h")" = '[["waiting",1,9,[7,9]]]' ] \
     || fail "a wait that follows a session of a card that kept its claim is not counted: $(jq -c .stuck <<<"$h") $(st 'select(.issue == 8) | "\(.step) \(.of // "")"' | tr '\n' ,)"
-  # #9, its tests over, claims again to land: #8, the older, kept its claim and goes first, and #9 is brought onto its main.
+  # #9, its tests over, claims again to land: ready, it goes past #8, and #8 is brought onto its main and lands after it.
   : > "$STUB/go9"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 9 " ] || fail "the three did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 9 8 " ] || fail "the three did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
 }
 
 # Card c7-7's records, each a step or start:<step> (review:GO: a step and its result), at <epoch seconds>, as the loop
