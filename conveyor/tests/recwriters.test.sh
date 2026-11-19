@@ -29,6 +29,7 @@ recsteps() { # <what wrote them> <step>...
 # The records start with a line of a field the check does not know: it is set aside, named with its line and field,
 # and the loop still picks and lands the card (the loop did not stop for it).
 t_recloop() {
+  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on, so the test line's list is the whole suite.
   setup "[$(issue 7 2026-01-01)]"; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; tune '.test.list = "none"'
   good='{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}'
   printf '%s\n' "$good" "${good/\"reason\":\"\"/\"reason\":\"\",\"later\":1}" > "$ST/cards.jsonl"
@@ -90,6 +91,7 @@ t_reclist() {
 # the closed line of a card main already fixes (closed()).
 t_recother() {
   local wt=$T/$CASE/cards/c7 c
+  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on and no test.list, so the test line has no list.
   setup '[]'
   echo slow > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' || fail "main's file"
   for c in 9 10 11; do

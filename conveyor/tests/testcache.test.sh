@@ -15,6 +15,7 @@
 # them both once, on main as it was then; main then moves (c.txt, which neither reads either), and the second card's
 # run is made on main as it is now.
 cachesetup() {
+  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on and no test.list, so each card runs the whole suite the cache keeps.
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   echo 'a' > "$R/a.test"; echo 'b' > "$R/b.test"; git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
   cat > "$STUB/test-cmd" <<'EOF'

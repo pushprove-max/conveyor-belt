@@ -21,6 +21,7 @@ mapeng() { # <command>
 # the pack's test command is $STUB/list-cmd, which writes the arguments it was given to $STUB/got (test.list args).
 nodemain() {
   local t
+  local -x WHOLESUITE=true # The old fixture: the rule Whole suite in a card on, so a change to a file most tests share runs the whole suite.
   setup '[]'
   mkdir -p "$R/src" "$R/test" && echo '{"name": "fixture"}' > "$R/package.json" || fail "the fixture"
   for t in a b; do echo "module.exports = () => '$t';" > "$R/src/$t.js"; done
@@ -217,6 +218,7 @@ t_testmaparea() { local -x WHOLESUITE=true
 # <tools> (space-separated) each written from <script>, the map made (mapbuild()), and its sources must be <want>.
 stubmap() { # <tools> <script> <want> <files>...
   local f t s=$2 w=$3 ts; read -ra ts <<<"$1"; shift 3
+  local -x WHOLESUITE=true # The old fixture: no test.fileCommand, so the map runs the language's own tool (the stub) on the test files: once a file, or once a package for Go.
   setup '[]'
   for f in "$@"; do mkdir -p "$R/$(dirname "$f")" && echo x > "$R/$f"; done
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
