@@ -19,6 +19,7 @@
 # check holds #8 before its tests until #9 waits, ready. Every case of #8 passed on its own change, and of #9 on its
 # own, none selected by both, so the batch runs no case.
 t_batchreuseagain() {
+  local -x WHOLESUITE=true
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]" 'b.txt s.test' 'x.txt x.test' 'y.txt y.test' 'z.txt z.test'
   printf '%s\n' '! grep -q "(#8)" "$1" || [ -e "$STUB/refused" ] || { : > "$STUB/refused"; echo "not #8 yet"; exit 1; }' | sed "s|\$STUB|$STUB|g" > "$R/.git/hooks/commit-msg"
   chmod +x "$R/.git/hooks/commit-msg"

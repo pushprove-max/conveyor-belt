@@ -16,6 +16,7 @@
 # with both in it, on their changes unchanged since, and every other case on its own card's change: the run again
 # runs no case. Bug it catches: a batch run again ran the cases its last run had passed for the same cards.
 t_batchreusemoved() {
+  local -x WHOLESUITE=true
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'b.txt s.test' 'x.txt x.test' 'y.txt y.test'
   echo 'grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; (cd "$R" && echo other > other.txt && git add other.txt && git commit -qm "another file"); }; :' >> "$STUB/test-cmd"
   printf '%s\n' '! git cat-file -e "$2:other.txt" 2>/dev/null || ! git show "$2:a.txt" | grep -qx eight || [ -e "$STUB/flaked" ] || { : > "$STUB/flaked"; echo "fails once"; exit 1; }' > "$STUB/once"
@@ -41,7 +42,6 @@ t_batchreusemoved() {
 # before (a batch formed again of the same cards would else reuse them, batchkeep(), and run no case): its case m1 runs
 # again after main moved.
 t_batchsharedmoved() {
-  local -x FILEMODE=1
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test' \
     'lib/mine.sh lib/mine-other.test.sh' 'lib/other.sh lib/mine-other.test.sh' 'lib/mine-other.test.sh lib/mine-other.test.sh'
   echo 'lib/mine-other.test.sh m1' >> "$STUB/cases"

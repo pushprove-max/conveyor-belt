@@ -16,7 +16,6 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The stub test command notes each run in $STUB/tests and what the step's log folder holds of the kept checks in
 # $STUB/kept. The push after a landing is off: no case here checks it.
 ccsetup() { # <issue number>
-  local -x FILEMODE=1 # every case of this file: the per-file fixture (tests/lib.sh filemode())
   setup "[$(issue "$1" 2026-01-01)]"
   jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"
   tune --arg c "bash $STUB/check" '.test.checkCommand = $c'

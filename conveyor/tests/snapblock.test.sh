@@ -13,7 +13,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # pushed and had its issue closed stays in Needs you as blocked, in the snapshot and in health (the host's view of the
 # loop's problems): a done card shown as needing the owner. A card blocked after it landed with no later step of its
 # own is still blocked. Record order decides, not time: c16's push started before its block and is written after it.
-t_unblock() { local -x FILEMODE=1
+t_unblock() {
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F)
   echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD); git -C "$R" push -q origin main
   rec() { # <card> <issue> <minute> <step> <result> [extra json]
@@ -42,7 +42,7 @@ t_unblock() { local -x FILEMODE=1
 # time (a card waiting on a same-file card asks under it at every poll), so the wait was 3 to 7 s of a 20 to 40 s
 # snapshot, and every reader of it timed out. Or, not waiting for it, the snapshot no longer holds a new issue before
 # its copy, no longer dates the issues it lists, or reads a card `retry` moved from both files.
-t_snaplock() { local -x FILEMODE=1
+t_snaplock() {
   setup "[$(issue 5 2026-03-01 P2)]"
   # Every flock on the card records is noted: the stub stands before the real one, which it then runs.
   real=$(command -v flock)

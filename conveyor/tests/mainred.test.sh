@@ -22,7 +22,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # line with no case), runs it, and the file gets the verdict main and goes to the fix card too, so the card waits, not fixes.
 # One card for both: a second card run cost this file about 40% of its CPU seconds (#467).
 t_mainred() {
-  # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
+  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
   rerunsetup '1 fail flaky' '1 bare three' '2 fail flaky' '2 bare three' '3 fail flaky' '3 bare three' '4 fail flaky' '4 bare three' \
     'main fail flaky' 'main bare three'
   local lp c b waiting='grep -qs "waiting for main to change: c.test, b.test: flaky fail on main" "$T/$CASE/cards/"*.live'
@@ -78,7 +78,7 @@ t_mainred() {
 # run of the case passes and the failure is the card's. Bug it catches: the card went to a fix session and tested
 # again on M1, without main's fix. It is brought onto M2 first, the failed case runs again there and passes: no fix.
 t_mainfixed() {
-  # The old fixture: main's run is test.command's, given the failing case alone (verdicts()), not its file whole.
+  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing case alone (verdicts()), not its file whole.
   rerunsetup '1 fail flaky' '2 fail flaky'
   local m2
   echo '[ "$n" != 2 ] || { echo fixed > "$R/fix.txt"; git -C "$R" add fix.txt; git -C "$R" commit -qm "main fixes flaky"; git -C "$R" rev-parse HEAD > "$STUB/m2"; }
@@ -117,7 +117,7 @@ caughtland() { # what the run after main's second move must show
 }
 # Main moved during the run (its run of the case passes: the failure is the card's).
 t_mainfixedcaught() {
-  # The old fixture: #7 lands on a main that changed a.txt too.
+  local -x WHOLESUITE=true # The old fixture: #7 lands on a main that changed a.txt too.
   caughtsetup; : > "$STUB/move2"
   loop run 1 > /dev/null || fail "run exited non-zero"
   caughtland
@@ -126,7 +126,7 @@ t_mainfixedcaught() {
 # waitSec counts that wait (at least the 1 s slept here). Bug it catches: the drift watch (bench/drift.sh) had no
 # minutes a card waited for main, as no line recorded them.
 t_mainredcaught() {
-  # The old fixture: main's run is test.command's, given the failing case alone (verdicts()), not its file whole.
+  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing case alone (verdicts()), not its file whole.
   caughtsetup 'main fail one'
   local lp
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
@@ -268,7 +268,7 @@ eng() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" && . "$
 # no second card; a case the open card holds, found on a later commit, starts none either. Once that card has landed,
 # a failure on a later commit starts a new card.
 t_mainredcard() {
-  local -x FILEMODE=1; setup "[$(issue 7 2026-01-01)]"
+  setup "[$(issue 7 2026-01-01)]"
   local s s2 out c c2
   s=$(git -C "$R" rev-parse HEAD)
   out=$(eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c2 c.test c.test '"$s"' && locked pick "" "" "$(cat "$STUB/issues.json")"') || fail "the fix card was not picked: $out"
@@ -293,7 +293,7 @@ t_mainredcard() {
 # Bug it catches: a fix card held by `control rules P0=off` (it is labelled a P0 bug) left every card that meets the
 # red main waiting for good. With P0 to P3 off, the P0 issue #7 is not picked, and the fix card still is.
 t_mainredrules() {
-  local -x FILEMODE=1; setup "[$(issue 7 2026-01-01 P0)]"
+  setup "[$(issue 7 2026-01-01 P0)]"
   local s out
   s=$(git -C "$R" rev-parse HEAD)
   loop control rules P0=off P1=off P2=off P3=off >/dev/null || fail "control rules P0=off ... P3=off was refused"
@@ -307,7 +307,7 @@ t_mainredrules() {
 # it under an issue number, or `retry` took only issue numbers, so a blocked fix card could not be given back. Shut by
 # its card id, its commit starts no card again.
 t_mainredretry() {
-  local -x FILEMODE=1; setup "[$(issue 7 2026-01-01)]"
+  setup "[$(issue 7 2026-01-01)]"
   local s out c c2
   s=$(git -C "$R" rev-parse HEAD)
   c=$(eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s"' && locked redpick') || fail "the fix card was not picked: $c"
@@ -355,7 +355,7 @@ t_mainredretry() {
 # session after the review that saw the case added never heard of it. Issue 615: a case with a test link that joins
 # during the card's last test run lands its link; with no redbrief() before the landing, its link was never staged.
 t_mainredland() {
-  local -x FILEMODE=1; setup "[$(issue 7 2026-01-01)]"
+  setup "[$(issue 7 2026-01-01)]"
   printf '%s\n' $'[P1] a.txt:1 wrong word\nUSER-VISIBLE: no\nVERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   provenbug # labelled as a P0 bug: the bug-card check holds it
   # No stub a.test.sh on main: main's run (`bash a.test.sh`) must fail there, or the card closes as already done.
@@ -416,7 +416,7 @@ redcheck() { # <ok.txt in the change>
 # without the fix, so they do not prove it". Each case runs alone, as the test step runs it, fails without the change
 # and passes with it: the check holds.
 t_redproofnotest() {
-  local -x FILEMODE=1; redsetup ''
+  redsetup ''
   local got; got=$(redcheck $'one\nc.test')
   [ "$(head -n 1 <<<"$got")" = "exit 0" ] && [[ $(tail -n 1 <<<"$got") == "Each case main fails at "*" fails there without the change and passes with it: \`a.test: one\`, \`c.test\`." ]] \
     || fail "a red-main fix that adds no test did not pass the check: $got"
@@ -424,7 +424,7 @@ t_redproofnotest() {
 }
 # Bug it catches: a red-main fix that leaves a case failing passed the check, or was blocked without naming the case.
 t_redproofstill() {
-  local -x FILEMODE=1; redsetup ''
+  redsetup ''
   local got; got=$(redcheck one)
   [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [ "$(tail -n 1 <<<"$got")" = '`c.test` still fails with the change.' ] \
     || fail "a change that leaves c.test failing was not blocked naming it: $got"
@@ -433,7 +433,7 @@ t_redproofstill() {
 # change that proves nothing, or was blocked. Its whole run: it closes as already done, its closed line naming the
 # cases and carrying its wait (waitSec, which the drift watch's mean wait reads), and nothing lands.
 t_redproofgreen() {
-  local -x FILEMODE=1; redsetup $'one\nc.test'
+  redsetup $'one\nc.test'
   local s c; s=$(git -C "$R" rev-parse HEAD)
   loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
   c=$(st 'select(.step == "closed") | .card')
@@ -454,7 +454,7 @@ t_redproofgreen() {
 # - a.test: one, a real failure on main: main's, and the only case in the main-red record. Bug it catches: a file the
 #   card only edits was taken for its own, so a case failing on main too never ran there and went to the card.
 t_mainredowncard() {
-  # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
+  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
   redrunner c.test
   local w=$T/$CASE/cards/c7 out
   echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
@@ -475,7 +475,7 @@ t_mainredowncard() {
 # main was marked red for it and the main-fix card could never make it pass. Its failure is the card's, a selection
 # error, it does not run on main, and the main-red record is not written.
 t_mainreddoc() {
-  local -x FILEMODE=1; redrunner ''
+  redrunner ''
   local w=$T/$CASE/cards/c7 out
   mkdir -p "$R/tests/speed" && echo '# A page' > "$R/tests/speed/page.md" && git -C "$R" add tests && git -C "$R" commit -qm page \
     && git -C "$R" worktree add -q --detach "$w" || fail "the card's worktree could not be made"
@@ -496,7 +496,7 @@ t_mainreddoc() {
 # verdict. Card c7's last run fails 300 cases of a.test, each with a long name (about 150 KB); all pass on main, so
 # main runs them and each is the card's.
 t_mainredbigverdicts() {
-  # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
+  local -x WHOLESUITE=true # The old fixture: main's run is test.command's, given the failing cases alone (verdicts()), not each file whole.
   local w=$T/$CASE/cards/c7 out
   redrunner "$(for i in $(seq 300); do printf 'case-%03d-%0480d\n' "$i" 0; done)"
   echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test \
@@ -514,7 +514,7 @@ t_mainredbigverdicts() {
 # for a change and went to review, and main stayed marked red. Its cases run again on main as it is now; they pass, so
 # the card closes as not needed, saying so, nothing lands, and its entry holds main red no more (redopen()).
 t_mainrednochange() {
-  local -x FILEMODE=1; redsetup $'one\nc.test'
+  redsetup $'one\nc.test'
   local s c out
   # The fixture ignores .conveyor/; a project tracks its links file, so the engine can stage it.
   printf 'conveyor/\n.conveyor/*\n!.conveyor/test-links.json\n' > "$R/.gitignore" && echo '{}' > "$R/.conveyor/test-links.json" \
@@ -536,7 +536,7 @@ t_mainrednochange() {
 # while its cases still fail on main. Bug it catches: the card went to the ALREADY-DONE review, whose GO closed it with
 # main still red. It is blocked, naming the run on main, with no review.
 t_mainrednochangered() {
-  local -x FILEMODE=1; redsetup ''
+  redsetup ''
   local w=$T/$CASE/cards/cfix out
   jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
   git -C "$R" worktree add -q --detach "$w" HEAD && echo '{"type":"result","result":"ALREADY-DONE: main fixes it"}' > "$w.out" \
@@ -552,7 +552,7 @@ t_mainrednochangered() {
 # before, as mainred() leaves a case failing at a later commit with that entry: a wait that looked only at main's
 # commit's entry never saw it go. Sets s, main's commit, and mw, the waiting process; its output goes to $STUB/mw.out.
 mwstart() {
-  local -x FILEMODE=1; redsetup '' # the per-file fixture
+  redsetup ''
   git -C "$R" commit -q --allow-empty -m "main moves, still red"
   s=$(git -C "$R" rev-parse HEAD); mkdir -p "$T/$CASE/cards"
   ( eng 'LIVE=2; mainwait "$CONVEYOR_CARDS/c9" '"$s"' "a.test: one"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!

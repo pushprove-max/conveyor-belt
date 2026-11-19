@@ -72,6 +72,7 @@ landedtogether() { [ "$(st 'select(.step == "landed") | .batch | join(" ")' | so
 # and the seven passes were kept. #7's x.txt selects two whole files, w.test's three cases and x.test's two: the count
 # keeps all five, not four (five shared evenly between the two files, rounded down, lost one).
 t_batchreusenone() {
+  local -x WHOLESUITE=true
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt w.test' 'x.txt x.test' 'y.txt y.test'
   echo 'w.test w1 w2 w3' >> "$STUB/cases"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"

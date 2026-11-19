@@ -62,6 +62,7 @@ batchruns() { grep -c "tests a batch of" <<<"$out"; } # the batch test runs the 
 # as if it landed alone, naming the batch; one push carries them. #7's check holds a second more once #8 and #9 wait
 # ($STUB/holdsec), so each has waited a second at least when the batch lands it.
 t_batchland() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; : > "$STUB/holdsec"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac' > "$STUB/build"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
@@ -98,6 +99,7 @@ t_batchland() {
 # reused there and not run again, has a line of its own that says so, with no run and no end, which the record check
 # takes: a reused pass once left only a start line, and the record could not say the card's tests passed.
 t_batchmask() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then rm -f needs-b
@@ -130,6 +132,7 @@ EOF
 # Bug: #9 was given the red run's output but not the runner's logs of it (they stayed with #7), so its failed test line
 # named no failing file. It gets both: its line names clash.test.
 t_batchsplit() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; sed -i 's/^nine$/nine-fixed/' a.txt
@@ -167,6 +170,7 @@ EOF
 # batch is #8 and #9 (its own patch does not apply on theirs), red; #8 alone passes and lands, #9 on top of it is
 # what failed and goes to its fix. No commit on main ever holds eight beside nine.
 t_batchtogether() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; : > "$STUB/overlap"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then sed -i 's/^nine$/nine-fixed/' a.txt
@@ -194,6 +198,7 @@ EOF
 # (line 1 and a new last line of a.txt); #10 changes line 15 and claims a.txt only once the batch is made, while its
 # tests run (they end once #10 has claimed). #10 does not wait on #7, and all three land.
 t_batchapart() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 10 2026-01-04)]"; echo 8 > "$STUB/ready"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 15s/.*/ten/ a.txt ;; esac' > "$STUB/build"
   echo '[ "$n" != 10 ] || while [ -d "$STUB" ]; do ls ../*-8.batch >/dev/null 2>&1 && break; sleep 0.1; done' >> "$STUB/review-cmd"
@@ -213,6 +218,7 @@ t_batchapart() {
 # #7, then fitted onto main, may find #10 holding a.txt and be stacked on it (a session that brings #7 onto main or
 # onto a stack's base changes line 1 alone). Bug it catches too: #10 then waited on #7, an older card stacked on it.
 t_batchleftout() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]"; : > "$STUB/overlap"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change\|^# Stacked: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven/ a.txt
@@ -242,6 +248,7 @@ EOF
 # Bug: its line held the times of the run after its own (#9 and #8's, the one run that takes 3 s more, so the other
 # runs are not slowed for nothing): its run is under 3 s.
 t_batchfails() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   jq -c '.order = [9, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   cat > "$STUB/build" <<'EOF'
@@ -274,6 +281,7 @@ EOF
 # they became ready, and #7 is fitted after, as a waiting card is: one session brings it onto main, it is reviewed
 # again there, and lands on its own tests.
 t_batchleft() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven-eight/ a.txt
@@ -296,7 +304,6 @@ EOF
 # flag-a and #9 flag-b, each passing the check alone; together they fail it, a red run that splits the batch as failing
 # tests do. #8 and #7 land, and #9 goes to its fix with the check named.
 t_batchcheck() {
-  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; rm -f flag-b
@@ -319,7 +326,6 @@ EOF
 # A batch that does not land (main's commit-msg hook refuses #8's commit) leaves the card that took it untested on its
 # own on main as it is: its batch's green run had #8's change in it. #7 is tested again alone and lands alone.
 t_batchalone() {
-  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt ;; esac' > "$STUB/build"
   printf '%s\n' '! grep -q "(#8)" "$1" || { echo "no #8 here"; exit 1; }' > "$R/.git/hooks/commit-msg"; chmod +x "$R/.git/hooks/commit-msg"
@@ -340,6 +346,7 @@ t_batchalone() {
 # batch was tested on. Only #7 is in the order list: ordered first, #8 waits on it, and #6 names it, the card that
 # holds the batch's files, as the card to wait on (of #7 and #8, which goes first); the batch is #7, then #8.
 t_batchhold() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 6 2025-12-31),$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   jq -c '.order = [7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"
@@ -365,7 +372,6 @@ EOF
 # commit, edits b.txt in main's checkout, so #7's change no longer applies there after #8's would have. #8's change
 # is not left staged in main's checkout with no commit and no landed line.
 t_batchapply() {
-  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt; sed -i 1s/.*/seven/ b.txt ;; *) echo eight >> a.txt ;; esac' > "$STUB/build"
@@ -381,6 +387,7 @@ t_batchapply() {
 # commit before it, not the earlier cards' changes too. #8 adds eight.txt; main's commit-msg hook refuses a commit that
 # adds eight.txt without naming #8. #7, after #8 in the batch, adds nothing of the kind, and the batch lands.
 t_batchhooks() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt; : > eight.txt ;; esac' > "$STUB/build"
   printf '%s\n' '! git diff --cached --name-only | grep -qx eight.txt || grep -q "(#8)" "$1" || { echo "eight.txt without #8"; exit 1; }' > "$R/.git/hooks/commit-msg"
@@ -403,6 +410,7 @@ during() { # <shell that commits to main>
 # they passed. Main's line 10 of a.txt, the line #9 changes, changes during the batch's run: #8 and #7 land on that
 # run, and #9 is fitted afterwards, as a waiting card is (one session, a review, its tests), and lands alone.
 t_batchmovedleft() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change\|^# Stacked: apply the same change' "$STUB/brief"; then sed -i 10s/.*/nine-ten/ a.txt
@@ -442,7 +450,6 @@ EOF
 # #7 lands alone, and #8, the card that breaks it, goes to its fix with the check named (not blocked by its own check
 # once released). No commit on main ever holds eight beside flag-x.
 t_batchmovedcheck() {
-  local -x FILEMODE=1
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; sed -i 's/^eight$/eight-fixed/' a.txt
@@ -482,6 +489,7 @@ EOF
 # is fitted onto main as it is then and the checks run there again, with no second batch run. Main gets other.txt
 # during the batch's run and third.txt during the checks of the batch's change on it.
 t_batchmovedagain() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt ;; esac' > "$STUB/build"
   printf '%s\n' '! git cat-file -e "$2:other.txt" 2>/dev/null || [ -e "$STUB/again" ] || ! git show "$2:a.txt" | grep -qx eight \
@@ -509,6 +517,7 @@ t_batchmovedagain() {
 # batch run, main gets #7's commit then #8's. Bug it catches too: the batch put #8, ready first, before #7, and #8's
 # change, made on #7's, does not apply on main alone, so #8 left the batch.
 t_stackbatch() {
+  local -x WHOLESUITE=true
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; : > "$STUB/overlap"; echo 8 > "$STUB/ready"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Stacked: apply the same change' "$STUB/brief"; then tail -n 1 a.txt > "$STUB/stackline"; echo eight >> a.txt

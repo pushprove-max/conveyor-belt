@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-# t_slots, t_slotclock and t_slotwholeclock keep the old fixture, not FILEMODE's: they test the test command itself.
+# t_slots, t_slotclock and t_slotwholeclock set WHOLESUITE=true: they test the test command itself.
 
 # A pool of the case's own, of <n> slots: the host file's testSlots, in a folder no other case shares (testSlotsDir).
 slotpool() { # <n>
@@ -37,7 +37,7 @@ teststep() { # <w>: exits as tests() returns
 # workers without a slot each gets no core beyond its own, with a core kept for the user too (reserveCores; issue
 # 239: the run was started on all the cores left, taskset -c, after it was pinned, and saw them all).
 t_slots() {
-  local w i p=() h
+  local w i p=() h; local -x WHOLESUITE=true
   slotpool 2; setup "[]"
   h=$XDG_CONFIG_HOME/conveyor/host.json
   ! command -v taskset >/dev/null || [ "$(nproc --all)" -lt 3 ] || { jq '.reserveCores = 1' "$h" > "$h.new" && mv -f "$h.new" "$h"; } \
@@ -166,7 +166,7 @@ t_slothome() {
 # testrec.test.sh's t_testrecwait, a card of its own that waited 1 s.
 t_slotclock() {
   local h k b real w=$T/$CASE/cards/c7 now rc l; real=$(command -v timeout)
-  slotpool 1; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 3'
+  local -x WHOLESUITE=true; slotpool 1; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 3'
   git -C "$R" worktree add -q --detach "$w" || fail "the worktree could not be made"
   mkdir -p "$ST"; now=$(date -u +%FT%TZ)
   printf '%s\n' picked worktree deps brief start:build build start:review review:GO start:test | jq -cR --arg t "$now" 'split(":") as [$s, $x]
@@ -210,7 +210,7 @@ t_slotclock() {
 # runs' (slot_whole; wholerun, t_slotwhole below). This case and t_slotclock, each mostly a hold past a timeout, are
 # near the file's top so the runner starts them among its first: this one was its last, and the file's time was its.
 t_slotwholeclock() {
-  local d=$T/$CASE h rc
+  local d=$T/$CASE h rc; local -x WHOLESUITE=true
   slotpool 3; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT
   setup "[]"; mkdir -p "$d"; tune '.tunables.testTimeout = 3'
   git -C "$R" worktree add -q --detach "$d/cards/c7" || fail "the worktree could not be made"
@@ -248,7 +248,7 @@ t_slotcasehost() {
 }
 t_slotcaseprobe() {
   [ -n "${CONVEYOR_SLOTCASE_PROBE:-}" ] || return 0
-  local -x FILEMODE=1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
   printf '%s\n' "if [ \"/dev/fd/\${CONVEYOR_TEST_SLOT%%.*}\" -ef '$SLOT_DIR/1' ]; then echo case; else echo \"\$CONVEYOR_TEST_SLOT\"; fi >> \"\$STUB/slot\"" > "$STUB/test-cmd"
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(cat "$STUB/slot" 2>/dev/null)" = case ] || fail "the card's tests did not run on the case's slot ($SLOT_DIR/1), but on: $(cat "$STUB/slot" 2>&1)"
@@ -285,7 +285,7 @@ t_slotcores() {
 # lives until the case kills it, and push is off: a push takes a slot (push.sh), so the loop's push waited for the
 # process, and the case found it ended (one of 60 s) or never ended (one that lives on).
 t_slotleft() {
-  local i; local -x FILEMODE=1
+  local i
   slotpool 1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; loop control rules push=off > /dev/null
   cat > "$STUB/test-cmd" <<'EOF2'
 echo x >> "$STUB/tests"

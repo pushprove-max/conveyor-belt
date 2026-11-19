@@ -29,7 +29,7 @@ if grep -q '^# Landing conflict' "$STUB/brief"; then cp "$STUB/brief" "$STUB/reb
 else echo two >> a.txt; fi
 EOF
 }
-t_rebase() {
+t_rebase() { local -x WHOLESUITE=true
   rebasesetup 7
   echo 'printf "ONE\ntwo\n" > a.txt' > "$STUB/rebuild"; echo 'ONE other' > "$STUB/move"
   loop run 1 >/dev/null || fail "run exited non-zero"
@@ -184,7 +184,7 @@ t_autoport() {
 
 # The rebuild conflicts too (main moves again during it), and so does the one port after it: blocked with the
 # conflict message, nothing landed.
-t_rebasetwice() {
+t_rebasetwice() { local -x WHOLESUITE=true
   rebasesetup 8
   echo 'echo again > a.txt; echo "THREE$(wc -l < "$STUB/sessions")" > "$R/a.txt"; git -C "$R" commit -qam third' > "$STUB/rebuild"; echo 'TWO second' > "$STUB/move"
   loop run 1 >/dev/null || fail "run exited non-zero"
@@ -212,7 +212,7 @@ t_rebasenogo() {
 
 # Bug: a rebuild session that ends well but leaves no change blocks the card with nothing kept: the
 # reviewed change is deleted with the worktree, and retry builds from nothing.
-t_rebaseempty() {
+t_rebaseempty() { local -x WHOLESUITE=true
   rebasesetup 12
   printf '%s\n' 'if grep -q "^# Landing conflict" "$STUB/brief"; then :' 'else echo ten >> a.txt; fi' > "$STUB/build"; echo 'NINE ninth' > "$STUB/move"
   loop run 1 >/dev/null || fail "run exited non-zero"
@@ -383,7 +383,7 @@ t_keptbuild() {
 }
 
 # NO-GO with more findings than a brief may hold, its fix, then a review that fails: the NO-GO's findings are kept.
-t_keptlong() {
+t_keptlong() { local -x WHOLESUITE=true
   setup "[$(issue 9 2026-01-01)]"
   # 100 findings of 700 bytes: past the brief's 60000 in as few lines as that takes (each line costs the engine more
   # than its bytes do).

@@ -56,7 +56,6 @@ t_workdepinstall() {
 # Bugs: worktree.setup does not run in a new worktree (so a card's build and tests have no dependencies), runs
 # elsewhere, or fails with no reason and no non-zero exit.
 t_workdepcmd() {
-  local -x FILEMODE=1
   local w out; setup "[]"; w=$T/$CASE/card
   tune '.worktree.setup = "pwd -P > installed; echo noise"'
   git -C "$R" worktree add -q --detach "$w" HEAD && out=$(wd_engine "$R" deps "$w") || fail "deps with worktree.setup failed: $out"
@@ -68,7 +67,6 @@ t_workdepcmd() {
 # Bugs: doctor (its line, doctordeps() in lib/setup.sh) passes a project whose new card worktrees lack its installed
 # node_modules, names none of the fixes, leaves its test worktree, or names a folder the pack links.
 t_workdepdoctor() {
-  local -x FILEMODE=1
   local out; setup "[]"; tune '.linkFromMain = []'; mkdir -p "$R/node_modules/x" && echo 'node_modules/' >> "$R/.git/info/exclude"
   out=$(wd_engine "$R" eval '. "$SRC/lib/setup.sh" && doctordeps') && fail "doctor's check passed with node_modules missing in a card worktree: $out"
   [ "$out" = "missing: node_modules in a new card worktree (the main checkout has it, ignored by git, and the tests may need it); fix: add node_modules to the pack's linkFromMain, or set the pack's worktree.setup to the command that installs it, such as npm ci (/conveyor-belt:setup asks which)" ] \
@@ -87,7 +85,6 @@ t_workdepdoctor() {
 t_workdepmissing() {
   # The test pack links node_modules: here the pack links nothing, as one setup wrote before it filled linkFromMain.
   # The card changes a.txt, linked to the stub test file (the per-file fixture), so its tests run.
-  local -x FILEMODE=1
   local c out; branchsetup; wd_folders "$R"; tune '.linkFromMain = []'
   echo '[ -d node_modules ] || { echo "Cannot find module left-pad"; exit 1; }' > "$STUB/test-cmd"
   lane deps a.txt bee; echo "$GO" > "$STUB/review.1"

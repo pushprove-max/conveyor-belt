@@ -14,7 +14,6 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # same rules (plan section 10); a missing or empty rules file lets the card build without them, or blocks it with a reason that does not
 # name the file. The card rules are not the core rules followed by the pack's.
 t_rules() {
-  local -x FILEMODE=1
   local f=$T/$CASE.expected p i k
   printf '%s\n\n%s\n' "$(cat "$SRC/rules/card-core.md")" "$(cat "$SRC/lib/test-card-rules.md")" > "$f"
   setup "[$(issue 7 2026-01-01)]"
@@ -69,7 +68,6 @@ EOS
 # the project, not by its pinned path in the engine's checkout;
 # a pack hooks.json of another shape (one that would set what the generic settings set) lets the card build.
 t_packrules() {
-  local -x FILEMODE=1
   local s r x
   setup "[$(issue 7 2026-01-01 | jq -c '.body = "It breaks in web/src/a.tsx:12, package.json and tools/ too."'), $(issue 8 2026-01-02), $(issue 9 2026-01-03)]"
   for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
@@ -116,7 +114,7 @@ t_packrules() {
 # more than one; a card whose tests fail twice lands, or files follow-ups; a card landing on the last review's NO-GO
 # skips the tests, or files its follow-ups before they have passed; a test run leaves no line in the records.
 t_tests() {
-  # The old fixture: the fix session is handed the last 200 lines of test.command's own output.
+  local -x WHOLESUITE=true # The old fixture: the fix session is handed the last 200 lines of test.command's own output.
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01) <(issue 10 2026-04-01) <(issue 11 2026-05-01))"
   mkdir -p "$R/node_modules/dep" "$R/web/node_modules/wdep" "$R/infra" "$R/cache/deps/cdep"; echo '{}' | tee "$R/package.json" "$R/web/package.json" > "$R/infra/package.json"
   # Bug: a link whose parent folder the worktree does not have (cache/ is main's alone) failed.
@@ -185,7 +183,7 @@ t_tests() {
 # named a passing file as failed. Files run in the log's order: a `== ` line that goes back is a test's own, and a
 # FAIL line a passing file prints is no failure.
 t_testfails() {
-  # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
+  local -x WHOLESUITE=true # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   # The first run: two of four files fail, one case each, one with a line over 200 characters and a second FAIL line,
@@ -234,6 +232,138 @@ EOF
     || fail "the card's steps lack a failed run's failures or output: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
 }
 
+# Bug: a failing file that printed the `== ` line of a file still to run gave that file its failing case; the file
+# passed, so the case was dropped and the Board named the failed file with no case: a test could hide what failed.
+# The runner's own `== ` line for the later file comes after, so the first may be the failing file's: its case is kept.
+# Bugs: when the later file failed too, the case was under it alone, and the file that printed it still showed none:
+# which of the two printed it cannot be told, so both name it; and a passing file that printed an earlier file's
+# `== ` line after a FAIL line of its own had that line counted against the earlier, failed file: the runner prints no
+# file's line after a later file's, so the line is the passing file's own and no failure.
+# Bug: a failing file that printed the next file's `== ` line and ended its output without a newline had the runner's
+# line for the next file joined to its last line, where it was not read: the case was the next, passing file's alone
+# and was dropped. A `== ` line counts wherever it is in a line.
+t_testhide() {
+  local -x WHOLESUITE=true # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
+  setup "$(jq -cs . <(issue 7 2026-01-01))"
+  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  cat > "$STUB/test-cmd" <<'EOF'
+[ -n "${CONVEYOR_TEST_RERUN:-}" ] && ! grep -q '^changed' "$CONVEYOR_TEST_RERUN" || echo x >> "$STUB/tests" # a run again (tests()) is the run it repeats; a run after a fix (its list names the files the fix changed) is not
+[ "$(wc -l < "$STUB/tests")" = 1 ] || { echo "ok all"; exit 0; }
+L=$CONVEYOR_TEST_LOG/run.log
+begin() { echo "== $1"; echo "== $1" >> "$L"; }
+end() { echo "-- $1 $2" >> "$L"; }
+begin tests/a.test.sh; echo "== tests/b.test.sh"; echo "FAIL [alpha]: wrong"; end FAIL tests/a.test.sh
+begin tests/b.test.sh; echo "FAIL [own]: words a passing test prints"; echo "== tests/a.test.sh"; end ok tests/b.test.sh
+begin tests/c.test.sh; echo "== tests/d.test.sh"; echo "FAIL [gamma]: wrong"; end FAIL tests/c.test.sh
+begin tests/d.test.sh; echo "FAIL [delta]: wrong"; end FAIL tests/d.test.sh
+begin tests/e.test.sh; echo "== tests/f.test.sh"; echo "FAIL [eps]: wrong"; printf x; end FAIL tests/e.test.sh
+begin tests/f.test.sh; end ok tests/f.test.sh; exit 1
+EOF
+  loop run 1 > /dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map([.file, (.cases | map(.name) | join(","))] | join(":")) | join(" ")')" \
+    = "tests/a.test.sh:alpha tests/c.test.sh:gamma tests/d.test.sh:gamma,delta tests/e.test.sh:eps" ] \
+    || fail "a failing file's case behind a later file's == line is not under it, or a passing file's own line is a failure: $(st 'select(.step == "test" and .result == "fail") | .failures | tojson')"
+}
+
+# Bug: a test file whose name has a space was cut at it (`tests/my file.test.sh` read as `tests/my`): the failure row
+# and the timeout named a file that does not exist, and the file that ended still read as running. The name is whole,
+# with the words a runner puts after it (the cases run, a duration) left off.
+# Bugs: a name's last space was dropped (the timeout named `tests/my slow file.test.sh` for a file whose name ends in
+# a space); and an end line was read as the end of a file already done whose name it began with (`-- FAIL tests/b 0s`
+# as the passed `tests/b 0s`, not the running `tests/b`), so a passing file was named as failed.
+# Bug: a passing test that printed its own `== ` line again (`== tests/b 0s`, a file done) was read as the beginning
+# of the later file its name begins with (`tests/b`), which failed: the passing file's `FAIL [` line became a case of it.
+t_testfailsspace() {
+  local -x WHOLESUITE=true # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
+  setup "$(jq -cs . <(issue 7 2026-01-01))"
+  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  cat > "$STUB/test-cmd" <<'EOF'
+[ -n "${CONVEYOR_TEST_RERUN:-}" ] && ! grep -q '^changed' "$CONVEYOR_TEST_RERUN" || echo x >> "$STUB/tests" # a run again (tests()) is the run it repeats; a run after a fix (its list names the files the fix changed) is not
+L=$CONVEYOR_TEST_LOG/run.log
+if [ "$(wc -l < "$STUB/tests")" = 1 ]; then
+  echo "== tests/my file.test.sh" | tee -a "$L"; echo "FAIL [spaced]: wrong"; echo "-- FAIL tests/my file.test.sh 0s" >> "$L"
+  echo "== tests/a.test.sh" >> "$L"; echo "== tests/a.test.sh (cases: one two)"; echo "FAIL [plain]: wrong"; echo "-- FAIL   tests/a.test.sh 0s" >> "$L"
+  echo "== tests/b 0s" | tee -a "$L"; echo "== tests/b 0s"; echo "FAIL [own]: wrong"; echo "-- ok tests/b 0s 0s" >> "$L"
+  echo "== tests/b" >> "$L"; echo "== tests/b (cases: late)"; echo "FAIL [late]: wrong"; echo "-- FAIL tests/b 0s" >> "$L"; exit 1
+fi
+echo "== tests/my file.test.sh" | tee -a "$L"; echo "-- ok tests/my file.test.sh" >> "$L"
+echo "== tests/my slow file.test.sh " | tee -a "$L"; kill -ALRM "$PPID"; sleep 30 # sleep: a test file that hangs, cut as at testTimeout (rerun.test.sh)
+EOF
+  tuned '.tunables.testTimeout = 2' loop run 1 > /dev/null || fail "run exited non-zero"
+  f() { st 'select(.step == "test" and .result == "fail") | tojson' | sed -n "$1p" | jq -c "$2"; }
+  [ "$(f 1 '.failures | [.of, .timeout, (.files | map([.file, (.cases | map(.name) | join(","))] | join(":")))]')" \
+    = '[4,null,["tests/my file.test.sh:spaced","tests/a.test.sh:plain","tests/b:late"]]' ] \
+    || fail "a failed file with a space in its name is not named whole with its case, a file done whose name an end line begins with is named for the one running, or a passing file's own line is a case of the failed file its name begins with: $(f 1 .failures)"
+  [ "$(f 2 '.failures | [.of, .timeout, .files]')" = '[2,{"sec":2,"file":"tests/my slow file.test.sh "},[]]' ] \
+    || fail "a timeout does not name, whole to its last space, the file with spaces in its name that was still running: $(f 2 .failures)"
+  [ "$(f 2 .reason)" = '"exit 124: timed out after 2s in tests/my slow file.test.sh "' ] || fail "the reason of the timeout: $(f 2 .reason)"
+}
+
+# Bug: a test command that writes no runner log (a pack that runs one test file itself) had its failing cases under
+# no file: the Board could not say what failed. Such a run is one file, the command.
+t_testnolog() {
+  local -x WHOLESUITE=true # The old fixture: the case is of test.command with no runner log (test.fileCommand's names its file).
+  setup "$(jq -cs . <(issue 7 2026-01-01))"
+  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  echo '[ -n "${CONVEYOR_TEST_RERUN:-}" ] && ! grep -q "^changed" "$CONVEYOR_TEST_RERUN" || echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" != 1 ] || { echo "ok lane"; echo "FAIL [views]: wrong"; exit 1; }; echo "ok one"; kill -ALRM "$PPID"; sleep 30' > "$STUB/test-cmd" # sleep: a test run that hangs, cut as at testTimeout (rerun.test.sh)
+  tuned '.tunables.testTimeout = 2' loop run 1 > /dev/null || fail "run exited non-zero"
+  cmd=$(jq -r .test.command "$R/.conveyor/project.json")
+  f() { st 'select(.step == "test" and .result == "fail") | tojson' | sed -n "$1p" | jq -c --arg c "$cmd" "$2"; }
+  [ "$(f 1 '.failures | [.timeout, (.files == [{file: $c, cases: [{name: "views", line: "FAIL [views]: wrong"}]}])]')" = '[null,true]' ] \
+    || fail "a failing case of a command with no runner log is not under the command: $(f 1 .failures)"
+  # Its time running out is the runner's, not a test's (issue 218): that run gave no result, and says so.
+  [ "$(f 2 '[.failures, .reason]')" = "[null,\"no result: exit 124: the run's time ran out with no test file running\"]" ] \
+    || fail "a timed-out command with no runner log is not a run with no result: $(f 2 '[.failures, .reason]')"
+}
+
+# Bug: two runners each wrote a log, and the files' order was read from the logs joined by name: the runner whose log
+# sorts last ran first, so the other's `== ` line read as going back and its failing case went to the wrong file. The
+# Board named one file for both failures. Order holds within a runner's log only; a `== ` line that goes back in its
+# own log is still a test's own. And a file both runners ran was kept in the first log's order only, so the second
+# runner's run of it read as going back and its failing case went to the file before it.
+t_testrunners() {
+  local -x WHOLESUITE=true # The old fixture: the failures are read from the runners' logs of test.command (test.fileCommand's names its file).
+  setup "$(jq -cs . <(issue 7 2026-01-01))"
+  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  cat > "$STUB/test-cmd" <<'EOF'
+begin() { echo "== $2"; echo "== $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+end() { echo "-- FAIL $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+begin b b.test.sh; echo "FAIL [beta]: wrong"; end b b.test.sh
+begin a shared.test.sh; echo "FAIL [first]: wrong"; end a shared.test.sh
+begin a a.test.sh; echo "FAIL [alpha]: wrong"; end a a.test.sh
+begin b shared.test.sh; echo "FAIL [second]: wrong"; end b shared.test.sh
+begin a a2.test.sh; echo "== a.test.sh"; echo "FAIL [again]: wrong"; end a a2.test.sh
+exit 1
+EOF
+  loop run 1 > /dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map("\(.file):\(.cases | map(.name) | join(","))") | join(" ")' | head -n 1)" \
+    = "shared.test.sh:first,second a.test.sh:alpha a2.test.sh:again b.test.sh:beta" ] \
+    || fail "each runner's failing case is not under its own file: $(st 'select(.step == "test" and .result == "fail") | .failures | tojson' | head -n 1)"
+}
+
+# Bug: a file two runners ran was given to the runner whose log sorts first whenever either could have begun it. Here
+# the other runner began it first, so the first runner's own run of it read as going back, and its failing case went
+# to the file before it: the Board named a file for a failure that was another's. Only the reading of the whole
+# output that takes every one of the runners' `== ` lines is right.
+t_testshared() {
+  local -x WHOLESUITE=true # The old fixture: the failures are read from the runners' logs of test.command (test.fileCommand's names its file).
+  setup "$(jq -cs . <(issue 7 2026-01-01))"
+  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  cat > "$STUB/test-cmd" <<'EOF'
+begin() { echo "== $2"; echo "== $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+end() { echo "-- $3 $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+begin a x.test.sh; end a x.test.sh ok
+begin b shared.test.sh; end b shared.test.sh ok
+begin b b.test.sh; echo "FAIL [beta]: wrong"; end b b.test.sh FAIL
+begin a shared.test.sh; echo "FAIL [alpha]: wrong"; end a shared.test.sh FAIL
+exit 1
+EOF
+  loop run 1 > /dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map("\(.file):\(.cases | map(.name) | join(","))") | join(" ")' | head -n 1)" \
+    = "shared.test.sh:alpha b.test.sh:beta" ] \
+    || fail "a failing case of a file two runners ran is not under that file: $(st 'select(.step == "test" and .result == "fail") | .failures | tojson' | head -n 1)"
+}
+
 # Bugs: a host's commit-msg hook refuses every card that needs a line only the builder can write, because the card
 # cannot put one in Conveyor's message; a line not of the trailer shape, or a Co-Authored-By, reaches the commit; the
 # review does not see the trailers; a pack rule's trailer is missing and the card commits anyway, or gets no session
@@ -243,6 +373,7 @@ EOF
 t_trailers() {
   local -x FILEMODE=1
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05))"
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05) <(issue 12 2026-01-06))"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   for i in 1 2 3 4 5 6 7; do echo "$GO" > "$STUB/review.$i"; done
   msgis() { # <issue> <trailer lines>: main's head message is the card's, with those lines after Closes
@@ -304,7 +435,6 @@ t_trailerpath() {
 # lands, or gets a fix round in place of being blocked; the reason does not hold the check's own lines; a clean card
 # does not land, or lands with no test run.
 t_checks() {
-  local -x FILEMODE=1
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01))"
   echo '{"hex":3}' > "$R/baseline.json"; echo 'SCHEMA_4' > "$R/schema.txt"
   git -C "$R" add -A; git -C "$R" commit -qm ratchets
@@ -353,7 +483,6 @@ CHECK
 # Bug: Held and Queue sorted by when an issue was opened, so one held today came before one held ten days ago when
 # it was opened first. Each issue there carries since: when it came to that column, never when it was opened.
 t_since() {
-  local -x FILEMODE=1
   setup '[]'; touch "$ST/cards.jsonl" "$ST/retried.jsonl"
   { issue 1 2026-01-01T00:00:00Z; issue 2 2026-01-02T00:00:00Z; } | jq -cs . > "$STUB/issues.json"
   on() { local t=$1; shift; CONVEYOR_NOW=$(date -u -d "$t" +%s) loop "$@"; }
@@ -411,7 +540,6 @@ t_since() {
 # lands on main and pushes to origin when the pack names master and upstream; a visible change asks for Dana's yes when
 # the owner is Quinn; the follow-up, type, priority and area labels, and the product paths, are the host project's.
 t_pack() {
-  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01 defect team/billing)]"; O=$T/$CASE/up
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   git -C "$R" branch -m main master; git -C "$R" remote remove origin

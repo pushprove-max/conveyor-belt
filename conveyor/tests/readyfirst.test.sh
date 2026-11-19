@@ -20,7 +20,6 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # #8 does not go past an ordered #7, nor before #7 when #7's tests passed first; tested on a stack's base, #8 is not
 # ready. Of two waiting ready cards, the one ready first goes first, though picked second.
 t_readyclaim() {
-  local -x FILEMODE=1
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
   for n in 7 8; do
@@ -96,6 +95,7 @@ EOF
 # #8 lands while #7 is in its tests. #7 is then fitted onto main with #8's change (it applies there): it is not
 # reviewed again, and it runs again only s.test, the one of its listed test files that #8's landing touched, not x.test.
 t_readyfirst() {
+  local -x WHOLESUITE=true
   rfsetup
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/during" ] && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
@@ -111,6 +111,7 @@ t_readyfirst() {
 # fit nobody reviewed. #7 and #8 both change line 20 of a.txt: #8 lands first, a session brings #7 onto main, and #7
 # is reviewed again there, then tested and landed.
 t_readyclash() {
+  local -x WHOLESUITE=true
   rfsetup
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Landing conflict' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fit.${PWD##*-}"; sed -i 20s/.*/seven/ a.txt; echo x > x.txt

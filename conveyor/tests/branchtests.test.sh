@@ -10,7 +10,6 @@
 # Split from branch.test.sh, whose setup (branchsetup) and bugs these cases share, so no one file is over the
 # CPU budget (test.fileBudget): its six cases cost about 17 CPU s together.
 t_branchtests() {
-  local -x FILEMODE=1
   branchsetup; linkset '{"a.txt": ["a.test.sh"], "e.txt": ["a.test.sh"]}'
   # A failing changed test blocks the landing: one fix round, one more review, a second failure, blocked. Nothing lands.
   # Each failed run is run once more before it counts as failed (tests()): four runs, two test steps.

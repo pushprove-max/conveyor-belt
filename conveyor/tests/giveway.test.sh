@@ -8,8 +8,8 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-# A case with `local -x FILEMODE=1` has the per-file fixture (lib.sh, filemode()). The others keep the old one: their
-# card lands on a main where the other card or main itself changed a.txt too, so its linked a.test.sh runs there again;
+# A case with `local -x WHOLESUITE=true` keeps the whole-suite fixture, not the per-file one (lib.sh, filemode()): its
+# card lands on a main where the other card or main itself changed a.txt too, so a linked a.test.sh would run there again (it has none);
 # heldpass's and t_givewayfixalone's checks that nothing is left fail on the <card>.testlist a landed card leaves in
 # the cards folder (tidy() does not remove it).
 
@@ -81,6 +81,7 @@ gwlanded() {
 # meanwhile, and #7 then goes on from the new main, runs its tests there still holding nothing, and lands. Never two
 # cards hold a.txt at once.
 t_giveway() {
+  local -x WHOLESUITE=true
   gwsetup "$GWLANDED"; : > "$STUB/snapit"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
@@ -99,6 +100,7 @@ t_giveway() {
 # rebase waited the whole session. #8 is built only once #7 has given way, with no card waiting: #8 lands during #7's
 # rebase, and #7 names it.
 t_givewaylate() {
+  local -x WHOLESUITE=true
   gwsetup "$GWLANDED"; : > "$STUB/late"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(jq -c '[.held, .away, .gave, .to]' "$STUB/rebaseclaim" 2>/dev/null)" = '[false,true,1,8]' ] \
@@ -112,6 +114,7 @@ t_givewaylate() {
 # still. #8 then runs its tests holding a.txt (with batches off, a waiting card runs none), and #7, ready, goes past it
 # and lands first (a ready card lands first, the owner, 2026-11-18): #8's landing's rebuild brings it onto #7's main.
 t_givewayback() {
+  local -x WHOLESUITE=true
   gwsetup 'sed -i 8s/.*/seven-8/ a.txt'
   cat > "$STUB/back" <<'EOF'
 p=$(jq .pid ../*-8.claim); while kill -STOP "$p" 2>/dev/null; do pgrep -P "$p" -x sleep >/dev/null && break; kill -CONT "$p"; sleep 0.05; done
@@ -137,7 +140,6 @@ EOF
 # line beside #7's last: #7's checks pass before #8 lands, and run again once #7 is fitted onto #8's main, where they
 # block it, and nothing of #7 lands.
 t_givewaycheck() {
-  local -x FILEMODE=1
   gwsetup "$GWLANDED"
   printf '%s\n' '! { [ "$(head -n 1 a.txt)" = eight ] && [ "$(tail -n 1 a.txt)" = seven ]; } || { echo "eight and seven together"; exit 1; }' > "$STUB/both-check.sh"
   tune --arg a "$STUB/both-check.sh" '.checks = [$a]'
@@ -154,7 +156,6 @@ t_givewaycheck() {
 # check forbids b.txt beside #7's line: it passes on the main #7's tests ran on, runs again on main with b.txt, and
 # blocks #7 there; nothing of #7 lands.
 heldmove() { # <test|land>
-  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo "$1" > "$STUB/bmove"
   printf '%s\n' 'echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt" && rm -f "$STUB/bmove"' > "$STUB/addb"
   echo '[ "$(cat "$STUB/bmove" 2>/dev/null)" != test ] || . "$STUB/addb"; : > "$STUB/tested"' >> "$STUB/test-cmd"
@@ -181,6 +182,7 @@ t_heldlandmove() { heldmove land; }
 # It catches a card that runs its whole test run again each time main moves under it: with 10 to 20 minute runs and
 # several landings an hour, it holds its files run after run while finished cards wait on it.
 heldpass() { # <test|land>
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01)]"; tune '.landBatch = 8'; echo "$GO" > "$STUB/review.1"; echo "$1" > "$STUB/bmove"
   printf '%s\n' 'echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt" && rm -f "$STUB/bmove"' > "$STUB/addb"
   echo '[ "$(cat "$STUB/bmove" 2>/dev/null)" != test ] || . "$STUB/addb"; : > "$STUB/tested"' >> "$STUB/test-cmd"
@@ -204,6 +206,7 @@ t_heldlandpass() { heldpass land; }
 # before give-ways) while #8 waits, and lands first. Never two cards hold a.txt at once. #7's rebase keeps its change
 # to line 8, so #8 overlaps it throughout and is brought onto main by one session after it.
 t_givewaykeep() {
+  local -x WHOLESUITE=true
   gwsetup 'sed -i 8s/.*/seven-8/ a.txt'; echo '{"gave": 3}' > "$STUB/seed"; : > "$STUB/snapit"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
@@ -223,7 +226,6 @@ t_givewaykeep() {
 # #8's change no longer applies to main and #8 waits; #9's applies, and claims a.txt at once. Were #8 ready, #9 would
 # wait for it, the older one, as before.
 t_givewaypast() {
-  local -x FILEMODE=1
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
   for n in 7 8 9; do
@@ -294,6 +296,7 @@ EOF
 # control record's order list, #8 then #7: ordered cards never go past each other, so #8 does not go past #7 once its
 # own tests pass, and is stacked on it (not in it, a ready card lands first: readyfirst.test.sh).
 t_givewayfix() {
+  local -x WHOLESUITE=true
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
   jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   # #7's first tests end once #8 waits stacked and red, or once #8 took another path: tested (not stacked, or its tests
@@ -332,6 +335,7 @@ t_givewayfix() {
 # With no ready card waiting, the fix of failed tests goes as it always did: #7's failed run goes once more, fails again,
 # and #7 alone is fixed, reviewed, tested once more and lands, and its live record and the Board name no card that went in front.
 t_givewayfixalone() {
+  local -x WHOLESUITE=true
   gwfixsetup "[$(issue 7 2026-01-01)]"
   # The fix session says a line, then goes on once the live record has taken it up (last): the look that read the line
   # looked at the claim first, where a give-way that must not come would have shown.
@@ -352,6 +356,7 @@ t_givewayfixalone() {
 # #8, stacked on it, is fitted onto main alone and lands during it. Bug it catches: #7 kept its claim through that run,
 # so #8 waited on it until the run ended (its run here then gives up at once, and #8 lands after it, not during it).
 t_givewaymoved() {
+  local -x WHOLESUITE=true
   gwfixsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 6 7 8; do echo "$GO" > "$STUB/review.$i"; done
   jq -c '.order = [8, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   echo 'while [ -d "$STUB" ]; do jq -e .stackred ../*-8.ready >/dev/null 2>&1 && jq -e ".held == false" ../*-8.claim >/dev/null 2>&1 && break
@@ -380,7 +385,6 @@ EOF
 # Issue 428: #7's tests fail, main moves (b.txt) and #7 gives way for the run on the moved main, which passes; main
 # stays there. Bug it catches: #7 landed on its given-way claim (held false), as nothing claimed its files again.
 t_givewaymovedpass() {
-  local -x FILEMODE=1
   gwfixsetup "[$(issue 7 2026-01-01)]"; echo 'sed -i 1s/.*/seven/ a.txt' > "$STUB/build"
   { cat <<'EOF'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
 case $PWD in *-7) [ -e b.txt ] || { [ -e "$R/b.txt" ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qnm "main moves"; }
@@ -403,7 +407,6 @@ EOF
 # owner, 2026-11-18): #8 was stacked on #7 while #7's tests had not passed, so #8, tested on #7's change, waited for
 # them; it waits running its own on main instead, and goes past #7 once they pass (claim()).
 t_stackonce() {
-  local -x FILEMODE=1
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"; git -C "$R" worktree add -q "$CARDS/c7-7" -b card-7 main
   # stackto() as the engine has it, and what it calls; the pack's landBatch at its default. #7's tests passed
@@ -439,7 +442,6 @@ t_stackonce() {
 # waits, ready, and #7 waits for it, as before. #7, having given way 3 times, gives way once more for a test fix while
 # #8 is stacked on it, so #8 goes on; with no card stacked on it, it keeps its claim.
 t_stackfirst() {
-  local -x FILEMODE=1
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
   for n in 8 7; do
@@ -475,7 +477,6 @@ t_stackfirst() {
 # round with #8 stacked on it (fix); away already (given way to be reviewed again), it is marked for the round. #8,
 # tested, waits on #7 away for no fix round, goes on once #7 is in one, and waits on still while not yet tested.
 t_stackfixround() {
-  local -x FILEMODE=1
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
   for n in 7 8; do

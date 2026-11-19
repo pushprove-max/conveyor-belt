@@ -30,7 +30,6 @@ branchsetup() {
   init=$(git -C "$R" rev-parse HEAD)
 }
 t_branch() {
-  local -x FILEMODE=1
   branchsetup; linkset '{"a.txt": ["a.test.sh"], "b.txt": ["a.test.sh"]}'; init=$(git -C "$R" rev-parse HEAD) # b.txt's change runs the stub test file
   # A good change on a branch that names no issue: one review, the changed tests, landed. No build session.
   lane fast-lane b.txt bee; tip=$(git -C "$R" rev-parse fast-lane); echo "$GO" > "$STUB/review.1"
@@ -52,7 +51,6 @@ t_branch() {
   out=$(loop land-branch fast-lane) && grep -q 'nothing to land' <<<"$out" && [ "$(newest)" = "$c" ] || fail "a branch main already holds made a card or failed: $out"
 }
 t_branchnolink() {
-  local -x FILEMODE=1
   branchsetup
   # Bug: a branch merged into the card's worktree, then the dependencies could not be linked
   # (here a folder the branch tracks is where the link goes), and the block threw the staged change away. It is

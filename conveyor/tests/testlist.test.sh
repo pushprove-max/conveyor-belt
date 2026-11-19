@@ -85,6 +85,7 @@ t_testlistmap() {
 
 # test.list none: the command takes no list, so it is given none and runs the whole suite, and the test line says why.
 t_testlistnone() {
+  local -x WHOLESUITE=true
   listsetup none
   listrun 'echo y >> lib/cartsum.js'
   listgot 'args:|env:' 'no list'
@@ -94,6 +95,7 @@ t_testlistnone() {
 # Bug it catches: a change to a shared test helper, which every test may read, ran only the helper. It runs the whole
 # suite (no list), and the test line names the file.
 t_testlisthelper() {
+  local -x WHOLESUITE=true
   listsetup args
   listrun 'echo y >> test/helpers.js; echo y >> lib/cartsum.js'
   listgot 'args:|env:' 'no list for a change to a shared helper'
@@ -104,6 +106,7 @@ t_testlisthelper() {
 # here a stub mocha on PATH), so the glob still ran every file it matched while the test line said "changed". It is
 # given no path, and the test line says why.
 t_testlistnamed() {
+  local -x WHOLESUITE=true
   listsetup args
   { echo '#!/usr/bin/env bash'; cat "$STUB/list-cmd"; } > "$STUB/mocha" && chmod +x "$STUB/mocha" || fail "the stub mocha"
   tune '.test.command = "mocha '\''lib/*.test.js'\''"'
@@ -115,6 +118,7 @@ t_testlistnamed() {
 # A source file with no test found for it by the map or by name runs the whole suite: no test is skipped that may
 # cover it.
 t_testlistnotest() {
+  local -x WHOLESUITE=true
   listsetup args
   listrun 'echo x > lib/other.js'
   listgot 'args:|env:' 'no list for a file with no test found'

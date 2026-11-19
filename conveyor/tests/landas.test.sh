@@ -222,11 +222,12 @@ t_prrefused() {
 # push alone would not run), each alone on its head; or it merged when the rule was set to button during that run
 # (the rule and the belt were read only before it); or it never merged once the belt was empty and that run passed.
 t_pridle() {
+  local -x WHOLESUITE=true
   local sha
   setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
   printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; [ ! -e "$STUB/during" ] || { bash "$STUB/during"; rm -f "$STUB/during"; }' \
     '[ ! -e "$STUB/red" ] && bash "$1"' > "$STUB/one"
-  tune '.push.landAs = "pr" | .test.fileCommand = "bash \"$STUB/one\""'
+  tune '.push.check = true | .push.landAs = "pr" | .test.fileCommand = "bash \"$STUB/one\""'
   loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
   mkdir -p "$R/lib" && echo good > "$R/lib/m.js" && echo 'grep -qx good lib/m.js' > "$R/lib/m.test.js" || fail "the fixture could not be made"
   la_land 1; la_eng push c1 1 || fail "the push failed"

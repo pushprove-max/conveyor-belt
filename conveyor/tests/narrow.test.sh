@@ -269,7 +269,7 @@ t_narrowcapunder() {
 # limit. With test.cardFiles 2, a change adding three test files gives it two, the one that failed most recently
 # first, and the check's result says one was left out.
 t_narrowcapproof() {
-  local wt=$T/$CASE/cards/c7
+  local wt=$T/$CASE/cards/c7; local -x WHOLESUITE=true
   setup '[]'; wholeoff; tune '.test.list = "env" | .test.cardFiles = 2'
   printf '%s\n' 'printf %s "$CONVEYOR_TEST_FILES" > "$STUB/given"; exit 1' > "$STUB/mainrun-cmd"
   echo '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"d.test.sh","cases":[]}],"timeout":null}}' >> "$ST/cards.jsonl"
@@ -315,19 +315,18 @@ t_narrowlistfailset() {
 # CONVEYOR_TEST_FILE to $STUB/got, a line a run.
 gotcmd() { printf '%s\n' 'echo "args:$*|file:${CONVEYOR_TEST_FILE:-}" >> "$STUB/got"' > "$STUB/test-cmd"; }
 # Bug it catches (#484): the per-file fixture (lib.sh filemode()) left a card's run on test.command, the whole suite.
-# With FILEMODE, a card that changes a.txt runs its linked a.test.sh alone, through test.fileCommand, and nothing else.
+# With setup's default fixture, a card that changes a.txt runs its linked a.test.sh alone, through test.fileCommand, and nothing else.
 t_narrowfilemode() {
-  local -x FILEMODE=1
   setup '[]'; gotcmd
   narrowrun 'echo two >> a.txt'
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'args:a.test.sh|file:a.test.sh' ] \
     || fail "the card did not run a.test.sh alone through test.fileCommand (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
-# Bug it catches (#484): the per-file fixture changed setup for a case that does not opt in. Without FILEMODE, the rule
-# Whole suite in a card is on, and the card's run is the stub test.command with no list.
+# Bug it catches (#484): the per-file fixture left a case that asks for the whole suite on it. With WHOLESUITE=true, the
+# rule Whole suite in a card is on, and the card's run is the stub test.command with no list.
 t_narrowfilemodeoff() {
   # Cleared: a one-file run of this test file (test.fileCommand) exports CONVEYOR_TEST_FILE, which would reach the stub.
-  local -x CONVEYOR_TEST_FILE=
+  local -x CONVEYOR_TEST_FILE='' WHOLESUITE=true
   setup '[]'; gotcmd
   [ "$(jq .rules.wholeSuite "$ST/control.json")" = true ] || fail "the rule Whole suite in a card is not on: $(cat "$ST/control.json")"
   narrowrun 'echo two >> a.txt'

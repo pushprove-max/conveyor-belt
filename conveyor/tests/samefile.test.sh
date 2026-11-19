@@ -11,8 +11,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Each case that runs cards sets a live record every second (the pack's default), not the test pack's 0.2 s: a card
 # waiting at its claim looks again each `live` seconds, and these cards wait a lot. The cases wait on what the cards
 # do (a stub's wait lasts until what it waits for is there), not on those seconds. t_sameoffretry sets its own.
-# A case with `local -x FILEMODE=1` has the per-file fixture (lib.sh, filemode()). The others keep the old one: their
-# card lands on a main where the other card changed a.txt too, so its linked a.test.sh runs there again; t_apart's
+# A case with `local -x WHOLESUITE=true` keeps the whole-suite fixture, not the per-file one (lib.sh, filemode()): its
+# card lands on a main where the other card changed a.txt too, so a linked a.test.sh would run there again (it has none); t_apart's
 # check that nothing is left fails on the <card>.testlist a landed card leaves in the cards folder (tidy() does not
 # remove it).
 
@@ -23,6 +23,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # the first has landed. Here its patch no longer applies (the first changed the same lines): one session brings it
 # there, and it is reviewed again on main.
 t_samefile() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   # Both append to a.txt. #8's build ends once #7 is in review. The first reviews end only once both are in review
   # (a stub's wait lasts until what it waits for is there, or the stub folder is gone: the test's end), #8's once #7
@@ -65,6 +66,7 @@ EOF
 # behind any older one. Here #6 holds a.txt and is ordered, so no card goes past it; once it lands, the ordered #9
 # and #8 go before the older #7 that is not ordered, and #9, earlier in the order list, before #8.
 t_samequeue() {
+  local -x WHOLESUITE=true
   setup "[$(issue 6 2026-01-01),$(issue 7 2026-01-02),$(issue 8 2026-01-03),$(issue 9 2026-01-04)]"; for i in $(seq 7); do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then echo "${PWD##*-}" >> a.txt
@@ -91,6 +93,7 @@ EOF
 # Bug: once the ordered #9 went past #7 on a.txt, both held it, and the Board told #8 it was waiting on #7 (the
 # earlier claim) though the ordered #9 goes first. #8's wait must name #9.
 t_sameboard() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in $(seq 8); do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then echo "${PWD##*-}" >> a.txt
@@ -173,6 +176,7 @@ EOF
 # tests end only then); #8, whose tests ran on a main without #7's change, is fitted onto main with no session and no
 # second review, and lands on the tests it passed (the owner, 2026-11-13: no second run only because main moved).
 t_sameapply() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   { printf '%s\n' 'first() {' '  echo one' '}'; seq 10; printf '%s\n' 'last() {' '  echo two' '}'; } > "$R/a.txt"; git -C "$R" commit -qam "a.txt of two functions"
   cat > "$STUB/build" <<'EOF'
@@ -211,7 +215,6 @@ EOF
 # main, and met "rebase onto main conflicts" at landing. At its landing claim it must be brought onto main, then
 # reviewed again there.
 t_samelate() {
-  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
@@ -234,6 +237,7 @@ EOF
 # 2026-11-18): the younger one, its tests passed after its fix and review, waited on the older one, still in its
 # tests. It lands, and the older one is brought onto main by a session and reviewed again.
 t_sameorder() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then :
@@ -287,6 +291,7 @@ EOF
 # while the older one is in its tests (a ready card lands first, the owner, 2026-11-18), and the older one is then
 # brought onto main and reviewed again.
 t_samelast() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4 5; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   cat > "$STUB/build" <<'EOF2'
 if grep -q '^# The changed tests fail' "$STUB/brief"; then :
@@ -335,6 +340,7 @@ EOF2
 # tests while the older card holds it; the older card, past its own claim then, claims again before it lands and waits
 # for it there, then is brought onto main, reviewed again and lands.
 t_samepast() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   # #8 is ordered once both are picked and #7 holds a.txt.
   cat > "$STUB/build" <<'EOF'
@@ -370,6 +376,7 @@ EOF
 # patch of its card's change (it is taken away once the card holds a.txt: #7's before #8 claims, #8's before #7 claims
 # again): the two cards, whose changes apply together, overlap on the shared file all the same (together()).
 t_samepastclean() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   cat > "$STUB/build" <<'EOF'
@@ -396,6 +403,7 @@ EOF
 # Bug: a card the ordered #8 went past landed without another review when #8 had landed and let go of a.txt before
 # #7's next claim (here, before #7's tests end), so #7 found nobody to wait on. #7 must still be reviewed again from main.
 t_samepastgone() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   cat > "$STUB/build" <<'EOF'
@@ -423,6 +431,7 @@ EOF
 # Here #8 goes past #7 while #7 is at its landing step (its usage reading before the lock waits for that): #7 must not
 # land then, but wait for #8 and be reviewed again from main.
 t_samepastland() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   cat > "$STUB/build" <<'EOF2'
@@ -452,6 +461,7 @@ EOF2
 
 # Bug: cards with no file in common are held to one at a time. Both must be in review at once, as before.
 t_apart() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   echo 'case $PWD in *-7) echo seven >> a.txt ;; *) echo eight > b.txt ;; esac' > "$STUB/build"
   cat > "$STUB/review-cmd" <<'EOF'
@@ -472,7 +482,6 @@ EOF
 # waiting on it goes on to review at once, and the retried issue is picked; a waiting card's step reads waiting, and
 # one that has waited STUCK seconds on a card not on the belt is reported stuck.
 t_sameoff() {
-  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   echo 'case $PWD in *-7) echo seven > b.txt ;; *) echo two >> a.txt ;; esac' > "$STUB/build"
   # Card c1-7 blocked holding a.txt, its claim not yet gone and its process alive; then #7 is given back.
@@ -498,7 +507,6 @@ t_sameoff() {
 # sameoffonly, sameoffcap, sameoffstuck), so they run side by side. sameoffsetup <issue> <issue>: those two issues,
 # every review a GO, the belt's cap 1.
 sameoffsetup() {
-  local -x FILEMODE=1
   setup "[$(issue "$1" 2026-01-03),$(issue "$2" 2026-01-04)]"; for i in $(seq 1 12); do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.live = 1'
   mkdir -p "$T/$CASE/cards"; loop control cap 1 >/dev/null || fail "cap 1 was refused"
 }
@@ -525,7 +533,6 @@ t_sameoffonly() {
 # A card waiting on a card `retry` gave back (not on the belt) for 25 minutes (past STUCK, within waitLimitMin), and
 # one waiting as long on a card on the belt. Card c1-7 blocked and was given back, as in t_sameoff.
 t_sameoffstuck() {
-  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01)]"; mkdir -p "$T/$CASE/cards"
   landed 7 | jq -c '.card = "c1-7" | .step = "picked"' >> "$ST/cards.jsonl"
   landed 7 | jq -c '.card = "c1-7" | .step = "blocked" | .result = "blocked" | .reason = "review 1: review failed (exit 124)"' >> "$ST/cards.jsonl"
@@ -557,7 +564,6 @@ t_sameoffstuck() {
 # fresh wait record is from another step; and once the holder's process is gone the wait never ends, so the waiter is
 # stuck too.
 t_waitclaim() {
-  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]"; mkdir -p "$T/$CASE/cards"
   sleep 300 & holder=$!; sleep 300 & waiter=$! # sleep: stand-ins for two cards' processes, alive
   now=$(jq -rn 'now | todate'); ago25=$(jq -rn 'now - 1500 | todate'); ago20=$(jq -rn 'now - 1200 | todate')

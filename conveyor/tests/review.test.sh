@@ -12,6 +12,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Bugs: a GO card that never reaches main or lands with no record line; cached tokens counted as fresh; a huge issue
 # body cut from the brief; the brief carrying another area's rulings or none.
 t_land() {
+  local -x WHOLESUITE=true
   setup "$(issue 7 2026-01-01 bug area:billing P2 | jq -c '[. + {body: ("x" * 300000 + "END")}]')"
   echo "$GO" > "$STUB/review.1"; provenbug # a bug card
   loop run >/dev/null || fail "run exited non-zero"
@@ -34,6 +35,7 @@ t_land() {
 # Bugs: a merge after NO-GO; a card given up before its review cap instead of going round fix and review until
 # GO; a finding outside the issue dropped from the record.
 t_nogo() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01 area:billing)]"; echo "$NOGO" > "$STUB/review.1"; moved 2 "$NOGO" > "$STUB/review.2"; echo "$GO" > "$STUB/review.3"
   { printf 'a%.0s' {1..1500}; echo; cat "$STUB/review.1"; } > "$STUB/review.0"; mv "$STUB/review.0" "$STUB/review.1"
   loop run >/dev/null || fail "run exited non-zero"
@@ -93,6 +95,7 @@ t_proven() {
 # the landed line does not name the follow-ups; a run limited to an issue leaves that issue's follow-up unbuilt;
 # a depth-1 follow-up's card declines its findings instead of filing them at depth 2.
 t_leftover() {
+  local -x WHOLESUITE=true
   setup "$(jq -cs . <(issue 7 2026-01-01 area:billing P3 | jq -c '.milestone = {title: "M1"}') <(issue 3 2025-01-01 P1))"
   for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; for i in 4 5; do moved $i "$NOGO3" > "$STUB/review.$i"; done
   echo "$NOGO3" | tee "$STUB/review.3" > "$STUB/review.6"; provenbug # the second run builds #7's follow-up, a bug card
@@ -159,6 +162,7 @@ EOF
 # against a main that never got the change; a card blocked after a review does not post that review's findings.
 # Bug: a blocked card's session output, error output and last review were deleted with its worktree.
 t_filefail() {
+  local -x WHOLESUITE=true
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do moved $i "$NOGO3" > "$STUB/review.$i"; done; echo "$NOGO3" > "$STUB/review.3"; head=$(git -C "$R" rev-parse HEAD)
   echo '[ "$n" != 100102 ] || { echo "could not add label" >&2; exit 1; }' > "$STUB/create-cmd"
   loop run >/dev/null || fail "run exited non-zero"
@@ -211,6 +215,7 @@ t_privfix() {
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
 # level on its third NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
 t_deep() {
+  local -x WHOLESUITE=true
   setup "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '[.body = "Follow-up to #5.\n\nFollow-up depth: 2"]')"
   for i in 1 2 3 4; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
   mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"

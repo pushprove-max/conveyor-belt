@@ -19,7 +19,6 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # minutes on #11, a card that is on no belt: stuck for that alone (its wait never ends), it is still said to have
 # waited that long, and behind which cards (a bug: the chain was left out of a card another check had listed).
 t_waitlong() {
-  local -x FILEMODE=1
   local k s now; setup '[]'; tune '.tunables.waitLimitMin = 1'
   now=$(date +%s); mkdir -p "$ST" "$T/$CASE/cards"
   for k in 9 10 12; do
@@ -40,7 +39,7 @@ t_waitlong() {
 # it onto main, #9 (b.txt) takes the turn and holds b.txt in its tests ($STUB/go9), and #8 waits again, on #9: that
 # wait's live record counts the first wait whole, and health adds it to the second.
 t_waitsum() {
-  # The old fixture: #8 lands on a main that changed a.txt too.
+  local -x WHOLESUITE=true # The old fixture: #8 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
   tune '.tunables.live = 3'
   cat > "$STUB/build" <<'EOF'
@@ -91,7 +90,7 @@ EOF
 # again to land: ready, it goes past #8, whose tests have not passed on its change (a ready card lands first: claim()),
 # and #8's change, which no longer applies, is brought onto main by its one rebuild (# Landing conflict).
 t_waitkept() {
-  # The old fixture: #8 lands on a main that changed a.txt too.
+  local -x WHOLESUITE=true # The old fixture: #8 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in $(seq 8); do echo "$GO" > "$STUB/review.$i"; done
   tune '.tunables.waitLimitMin = 1'
   echo one > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"; git -C "$R" push -q origin main
@@ -148,7 +147,6 @@ c7watch() { # <step> <command file>
 # that reads their times is left out and the others stay (a bug: the live record then took no cases at all): the third
 # file's name, two lines, is listed as two files that are not there.
 t_casehung() {
-  local -x FILEMODE=1
   local c=c7-7 was h live now s; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.caseStuck = 2'
   c7at "$(date +%s)" picked worktree deps brief start:build build start:review review:GO start:test
   cat > "$STUB/cases-cmd" <<'EOF'
@@ -188,7 +186,6 @@ EOF
 # its records, as the loop writes them, with no card run, and its session has said nothing; health is asked on the
 # tests' clock (CONVEYOR_NOW).
 t_sessionquiet() {
-  local -x FILEMODE=1
   local at; setup "[$(issue 7 2026-01-01)]"; at=$(date +%s); c7at "$at" picked worktree deps brief start:build
   [ "$(loop health | jq -c '.homes["tunables.sessionStuck"]')" = '{"value":600,"home":"schema default"}' ] || fail "the session limit is not 10 minutes by default: $(loop health | jq -c .homes)"
   [ "$(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)" = '[]' ] || fail "a session silent for under 10 minutes is stuck: $(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)"
@@ -203,7 +200,6 @@ t_sessionquiet() {
 # called it stuck 20 minutes after the build while its tests ran. The card's records end with its build, 1300 s ago
 # (past tunables.stuck), and the run is watched as tests() watches it (the engine's own watch()), with no card run.
 t_proofrun() {
-  local -x FILEMODE=1
   local c=c0-0 w now live s; setup '[]'; now=$(date +%s); mkdir -p "$ST" "$T/$CASE/cards/mainrun"
   for s in picked start build; do
     jq -cn --arg c "$c" --arg s "$s" --argjson t "$((now - 1300))" '{card:$c,issue:0,step:$s,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
@@ -256,7 +252,6 @@ t_mainrunout() {
 # stuck 10 minutes after that. Card c7-7 is in its build by its records, written before the tool call, and its session
 # is watched as its build does it (c7watch), with no card run.
 t_keepalive() {
-  local -x FILEMODE=1
   local c=c7-7 live was at n; setup "[$(issue 7 2026-01-01)]"; c7at "$(($(date +%s) - 5))" picked worktree deps brief start:build
   cat > "$STUB/session" <<'EOF'
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'
@@ -282,7 +277,6 @@ EOF
 # watched as its build does it (c7watch), runs `cd '<its worktree>' && git add -A <its worktree>/<a 39-character
 # folder>/x`. Bug (#507): a path in single quotes was kept whole, so the cut lost the end of the command.
 t_livetree() {
-  local -x FILEMODE=1
   local c=c7-7 cmd; setup "[$(issue 7 2026-01-01)]"; c7at "$(date +%s)" picked worktree deps brief start:build
   cmd="cd '$T/$CASE/cards/$c' && git add -A $T/$CASE/cards/$c/a-folder-name-forty-characters-long-xyz/x"
   [ ${#cmd} -gt 80 ] || fail "the case's command is not over 80 characters: $cmd"
@@ -299,7 +293,6 @@ t_livetree() {
 # seconds with no new line; a card in its build whose process is gone is stuck at once, as is the landing card once no
 # loop runs. Both cards' worktree lines name a process start no process has.
 t_gonelanding() {
-  local -x FILEMODE=1
   local k now; setup '[]'; tune '.tunables.stuck = 1200'; now=$(date +%s)
   for k in 1 2; do
     jq -cn --arg c "c$k-$k" --argjson n "$k" --argjson t "$now" --arg of "$([ $k = 1 ] && echo land || echo build)" --argjson p $$ \
@@ -322,7 +315,6 @@ t_gonelanding() {
 # none recorded times (a batch's reused line and a run that selected no file are no run); once the last run records
 # times, it is 0.
 t_healthuntimed() {
-  local -x FILEMODE=1
   local o; setup '[]'
   for o in '{}' '{result: "fail"}' '{reused: true, times: null}' '{ended: "nothing selected"}'; do
     jq -cn "{card: \"c0-1\", issue: 1, step: \"test\", time: \"2026-11-01T00:00:00Z\", tokens: {claude: 0, codex: 0}, result: \"pass\", sha: \"\", reason: \"\"} + $o"

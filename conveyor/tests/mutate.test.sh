@@ -57,7 +57,6 @@ mu_in() { ( unset SLOT_DIR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/card
 # slot, when another project's card asked for one; a check that began again from its first mutant, or drew new ones,
 # when it resumed.
 t_mutyield() {
-  local -x FILEMODE=1
   musetup; local out i ms ap
   echo '{"step": "test"}' > "$T/$CASE/cards/c-1.live"
   out=$(loop mutate k.test.sh 2>&1) || fail "the check failed: $out"
@@ -92,7 +91,6 @@ t_mutyield() {
 # snapshot (and so dashboard.sh's tests part) does not carry; a mutant counted as killed by k.test.sh, which the
 # mutant's change selects beside s.test.sh, as the test command picks tests.
 t_mutask() {
-  local -x FILEMODE=1
   musetup; local out
   out=$(loop mutate ask k.test.sh src.sh 2>&1); [ $? = 2 ] && [ ! -s "$ST/testactions/mutations/asked" ] || fail "an ask with a file that is not a test file was taken: $out"
   out=$(loop mutate ask s.test.sh 2>&1) && out=$(loop mutate ask k.test.sh 2>&1) || fail "an ask was refused: $out"
@@ -122,7 +120,6 @@ t_mutask() {
 # on record and never caught anything; a.test.sh is unflagged and was never checked, so it would go first by age; its
 # check is older than any, but its file changed since. c.test.sh was checked on the blobs main has now: it is not queued.
 t_mutqueue() {
-  local -x FILEMODE=1
   musetup; local b
   touch "$R/a.test.sh" "$R/n.test.sh" "$R/c.test.sh" && git -C "$R" add . && git -C "$R" commit -qm 'more tests' || fail "main's test files"
   b=$(git -C "$R" rev-parse HEAD:c.test.sh)
