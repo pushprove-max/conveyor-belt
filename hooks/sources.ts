@@ -292,22 +292,24 @@ export const parseStream = (text: string): Feed | null => {
 // The board from the live feed, as from a fetch; a feed that is down says so under it, with when the host was last heard.
 // own: the session's own project, as the fetch names it.
 export const boardOfFeed = (f: Feed, own: string): Pick<State, 'snap' | 'note' | 'notes' | 'host'> => {
-  const b = boardFrom(f.host, f.records, own)
+  const b = boardFrom(f.host, f.records, own, f.live)
   if (!f.live) b.notes.unshift(`units: the live stream is down${f.error ? ` (${f.error})` : ''}; the board is as ${f.host || 'the host'} was ${f.heardAt ? `at ${clockOf(f.heardAt)}` : 'last heard'}`)
   return b
 }
 
 // The cards of own, the session's own project, carry no project name (laneCard finds the Fast lane's card among them);
 // every other record's carry its repo. With no own (this checkout is no record's), every card carries its name.
-const boardFrom = (name: string, records: { repo: string; json: unknown }[], own: string): Pick<State, 'snap' | 'note' | 'notes' | 'host'> => {
+// live: the board is a live feed's whose stream is up (its file fresh, which the reader checks).
+const boardFrom = (name: string, records: { repo: string; json: unknown }[], own: string, live = false): Pick<State, 'snap' | 'note' | 'notes' | 'host'> => {
   const none = (why: string) => ({ snap: null, note: `${CANNOT} (${why})`, notes: [] as string[], host: name })
   const read = records.map(r => ({ repo: r.repo, rec: parseRecord(own && r.repo === own ? '' : r.repo, r.json) }))
   const recs = read.map(r => r.rec).filter((r): r is Rec => !!r)
   if (!recs.length) return none(`${name} gave no snapshot`)
   const notes = read.filter(r => !r.rec).map(r => `units: the ${r.repo} snapshot cannot be read`)
   for (const r of read) if (r.rec && !r.rec.queue) notes.push(`units: the ${r.repo} queue was not read (GitHub did not list the issues)`)
-  // A record's kept snapshot (snapshotAt: when it was made) over a minute old says its age.
-  for (const r of read) {
+  // A record's kept snapshot (snapshotAt: when it was made) over a minute old says its age. A live stream sends a
+  // snapshot only when something in it changes, so on a quiet belt an old one is still the current one: no note.
+  if (!live) for (const r of read) {
     const at = r.rec?.snapshotAt ?? null
     if (at !== null && Date.now() - at > 60_000) notes.push(`units: the ${r.repo} snapshot is ${since(at, Date.now())} old (made at ${clockOf(at)})`)
   }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { activityModel, boardOf, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
+import { activityModel, boardOf, boardOfFeed, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -670,6 +670,19 @@ test('a record\'s kept snapshot over a minute old says its age; a newer one adds
   const old = tableText(board({ snapshotAt: new Date(made).toISOString(), belt: [BELT[1]] }), 100)
   expect(old).toMatch(new RegExp(`\\nunits: the bookstore snapshot is [45]m old \\(made at ${clockOf(made)}\\)$`))
   expect(tableText(board({ snapshotAt: new Date(Date.now() - 30_000).toISOString(), belt: [BELT[1]] }), 100)).not.toMatch(/snapshot is/)
+})
+
+// Issue 631. Bug it catches: a live stream sends a snapshot only when something in it changes, so on a quiet belt
+// snapshotAt passed a minute while nothing was stale and the note showed about once a minute. With the stream down
+// the note shows as from the host, and as read from the host with no feed.
+test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, or read from the host, it does', () => {
+  const made = Date.now() - 90_000
+  const snap = snapshot({ snapshotAt: new Date(made).toISOString() })
+  const note = `units: the bookstore snapshot is 1m old (made at ${clockOf(made)})`
+  const feed = (live: boolean) => boardOfFeed({ host: 'buildbox', records: [{ repo: 'bookstore', json: snap }], live, heardAt: made, error: '' }, '')
+  expect(feed(true).notes.filter(n => /snapshot is/.test(n))).toEqual([])
+  expect(feed(false).notes).toContain(note)
+  expect(boardOf(parseFetch(fetched([['bookstore', snap]]))).notes).toContain(note)
 })
 
 test('a second record\'s cards carry its name, and one record that cannot be read costs only its own note', () => {
