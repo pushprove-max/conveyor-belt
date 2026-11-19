@@ -323,15 +323,45 @@ progs() {
 # list or its list cannot be read. Codex: the models its account can use, the slugs it shows a user (visibility list),
 # from its models cache (models_cache.json in CODEX_HOME, which Codex fetches again as it runs), else from `codex debug
 # models`, its model catalog. OpenCode: `opencode models`, one <provider>/<model> a line. Claude Code has no command
-# that lists its models (its --model takes an alias or a full name): none.
+# that lists its models (its --model takes an alias or a full name): none. For Codex, the models its proxy route
+# offers (codexpxmodels()) are added after its own, each once, so a model the proxy serves is listed before Codex
+# reports it.
 climodels() { # <cli>
-  local list='[.models[]? | select((.visibility // "list") == "list") | .slug | strings] | select(length > 0)'
+  local list='[.models[]? | select((.visibility // "list") == "list") | .slug | strings] | select(length > 0)' own px
   case $1 in
-    codex) jq -ce "$list" "${CODEX_HOME:-$HOME/.codex}/models_cache.json" 2>/dev/null \
-      || timeout 20 codex debug models < /dev/null 2>/dev/null | jq -ce "$list" 2>/dev/null ;;
+    codex) own=$(jq -ce "$list" "${CODEX_HOME:-$HOME/.codex}/models_cache.json" 2>/dev/null \
+      || timeout 20 codex debug models < /dev/null 2>/dev/null | jq -ce "$list" 2>/dev/null) || own=''
+      px=$(codexpxmodels) || px=''
+      [ -n "$own$px" ] || return 1
+      jq -cn --argjson a "${own:-[]}" --argjson b "${px:-[]}" 'reduce ($a + $b)[] as $m ([]; if index([$m]) then . else . + [$m] end)' ;;
     opencode) timeout 20 opencode models < /dev/null 2>/dev/null | jq -Rsce '[splits("\n") | select(test("^[^/[:space:]]+/[^[:space:]]+$"))] | select(length > 0)' 2>/dev/null ;;
     *) return 1 ;;
   esac
+}
+# The models Codex's proxy route (codexProxy, kind proxy) offers, as a JSON array: the ids of its models list, GET
+# <baseUrl>/models (its baseUrl ends in /v1, so /v1/models), when every role's Codex sessions always take the route
+# (proxyrole codex is proxy for the builder and the reviewer): the host's report has one Codex list for every role, so
+# a model only the proxy serves is not offered to a role whose sessions run on the subscription (a role on
+# subscription or fallback). The OpenAI API (kind api) is not asked: its list has every model of
+# the API, most of which Codex does not run. Asked as a session asks: sent its key (routekey()) as a Bearer token, or
+# with none the stand-in key (NOKEY). The key goes in the call's environment, never on a command line, and is not sent
+# on to a redirect. An id that is no model name (one with a space, say) is left out. Fails, so Codex's own list is used
+# alone, when no such route is set, or the list does not come within 10 s or has no model.
+codexpxmodels() {
+  local p b PROXY_ROLE KEY_V KEY_FROM
+  p=$(codexproxyset) || return 1
+  [ "$(jq -r .kind <<<"$p")" != api ] || return 1
+  for PROXY_ROLE in builder reviewer; do [ "$(proxyrole codex)" = proxy ] || return 1; done
+  b=$(jq -r '.baseUrl | strings' <<<"$p"); [ -n "$b" ] || return 1
+  routekey "$p"
+  CONVEYOR_APIKEY=${KEY_V:-$NOKEY} timeout 10 python3 -I -c 'import json, os, re, sys, urllib.request
+key = os.environ.pop("CONVEYOR_APIKEY")
+class Stay(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a): return None
+with urllib.request.build_opener(Stay).open(urllib.request.Request(sys.argv[1], headers={"Authorization": "Bearer " + key}), timeout=8) as r: d = json.load(r)
+ids = [x.get("id") for x in (d.get("data") if isinstance(d, dict) else None) or [] if isinstance(x, dict)]
+print(json.dumps([m for m in ids if isinstance(m, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}", m)]))' "${b%/}/models" 2>/dev/null \
+    | jq -ce 'select(length > 0)' 2>/dev/null
 }
 # The host's report: each CLI of CLINAMES installed here (on PATH) and the models it has registered, as {<cli>: its
 # models (climodels), or null when it offers no list or it has not been read}. Read from CLIS; with fresh every CLI is

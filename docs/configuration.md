@@ -566,7 +566,10 @@ The host asks each CLI for its models:
 
 - Codex: the models that your Codex account can use, from Codex's models cache (`models_cache.json` in `~/.codex`, or
   in `CODEX_HOME` when you set it). Codex gets the list again when it runs, so a new model shows up with no edit.
-  When there is no cache, the host asks `codex debug models`.
+  When there is no cache, the host asks `codex debug models`. When `codexProxy` in the host file sends the Codex
+  sessions of both roles through a proxy (no role in `codexProxy.roles` set to `subscription` or `fallback`), the
+  host also asks the proxy for its `/v1/models` list, with the route's key. It adds the proxy's models to the Codex models, so a model that the proxy serves shows up before Codex reports it. A proxy that
+  does not answer adds no models, and nothing fails. The host does not ask the OpenAI API (`kind` `api`) for its list.
 - OpenCode: `opencode models`, one `<provider>/<model>` a line.
 - Claude Code has no command and no file that lists the models your account can use (its `--model` takes an alias
   such as `opus`, or a full name). For Claude, the Board offers the pack's list, or the list that comes with Conveyor

@@ -56,6 +56,82 @@ judge gpt-b: []' ] || fail "the pack's models.allowed.codex and Codex's report a
   [ "$out" = '[[],"claude-opus-5-5"]' ] || fail "an empty models.allowed.codex took Codex's report, and the reviewer's default moved: $out"
 }
 
+# A host file whose codexProxy (at <base>/v1) takes the builder's Codex sessions through a proxy, and the reviewer's
+# too unless a role is given, its key in a key file, the pack's models.allowed.codex ["gpt-a"] and Codex's cache
+# ["gpt-b"]; written before setup, so the case's state folder is the one the host file gives.
+pxmodels() { # <base URL> [the reviewer's role]
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE/codex"; export CODEX_HOME=$T/$CASE/codex PXKEY=px-key-$RANDOM
+  ( umask 077; echo "$PXKEY" > "$T/$CASE/pxkey" )
+  jq -n --arg b "$1" --arg f "$T/$CASE/pxkey" --arg r "${2:-proxy}" '{codexProxy: {kind: "proxy", baseUrl: "\($b)/v1", keyFile: $f, roles: {builder: "proxy", reviewer: $r}}}' \
+    > "$XDG_CONFIG_HOME/conveyor/host.json"
+  echo '{"models":[{"slug":"gpt-b","visibility":"list"}]}' > "$CODEX_HOME/models_cache.json"
+  setup '[]'
+  tune '.models.allowed.codex = ["gpt-a"]'
+}
+# A stub proxy on a free port of 127.0.0.1, in $d (set by the caller): it lists gpt-d, gpt-a and "bad name" at
+# /v1/models and writes each request's path and Authorization to $d/asked; its port is in $d/port.
+pxstub() {
+  cat > "$d/px.py" <<'PY'
+import http.server, json, os, sys
+d = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(d + "/asked", "a") as f: f.write("%s %s\n" % (self.path, self.headers.get("Authorization") or "-"))
+        body = json.dumps({"data": [{"id": "gpt-d"}, {"id": "gpt-a"}, {"id": "bad name"}]}).encode()
+        self.send_response(200 if self.path == "/v1/models" else 404); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+open(d + "/port.new", "w").write(str(s.server_address[1])); os.rename(d + "/port.new", d + "/port")
+s.serve_forever()
+PY
+  python3 -I "$d/px.py" "$d" & PXSRV=$!; trap 'kill $PXSRV 2>/dev/null' EXIT
+  # The stub is a real process: only it can say when it listens, so wait (up to its exit) for the port it writes.
+  until [ -s "$d/port" ] || ! kill -0 $PXSRV 2>/dev/null; do sleep 0.1; done
+  [ -s "$d/port" ] || fail "the stub proxy did not start"
+}
+# Bug (#794): a model the Codex proxy serves was offered only once Codex reported it or someone added it to the pack
+# by hand. The host's report reads the proxy's /v1/models list (codexpxmodels()), sent the route's key: it lists gpt-d,
+# and the Board's Codex menu (clis, allowed) and the seat check (cardok()) take it beside the pack's and Codex's own
+# models, once each. An id that is no model name ("bad name") is left out.
+t_pxmodelsadd() {
+  local d=$T/$CASE/px out; mkdir -p "$d"
+  pxstub
+  pxmodels "http://127.0.0.1:$(cat "$d/port")"
+  looks 'hostclis fresh >/dev/null && modelsettings null | jq -c ".reviewer | [.clis.codex.models, .allowed.codex]"
+    printf "[%s]\n" "$(cardok reviewer gpt-d medium)"'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = '[["gpt-b","gpt-d","gpt-a"],["gpt-a","gpt-b","gpt-d"]]
+[]' ] || fail "the models the Codex proxy lists are not offered and taken beside the pack's and Codex's: $out"
+  [ "$(cat "$d/asked")" = "/v1/models Bearer $PXKEY" ] || fail "the proxy's model list was not asked once with the route's key: $(cat "$d/asked" 2>&1)"
+  # Bug it catches: the OpenAI API's own list (kind api), every model of the API, was added to the Codex menu.
+  jq '.codexProxy.kind = "api"' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/host.new" && mv "$T/$CASE/host.new" "$XDG_CONFIG_HOME/conveyor/host.json"
+  looks 'hostclis fresh'
+  [ "$(jq -c .codex "$T/$CASE/out")" = '["gpt-b"]' ] && [ "$(wc -l < "$d/asked")" = 1 ] \
+    || fail "the OpenAI API route (kind api) was asked for its models, or they were added: $(cat "$T/$CASE/out" "$d/asked")"
+}
+# Bug it catches: a model only the proxy serves was offered to, and taken for, a reviewer whose Codex sessions stay on
+# the subscription (the host's report has one Codex list for every role). With the reviewer on subscription, the
+# proxy is not asked and the menu is the pack's and Codex's models.
+t_pxmodelssub() {
+  local d=$T/$CASE/px out; mkdir -p "$d"
+  pxstub
+  pxmodels "http://127.0.0.1:$(cat "$d/port")" subscription
+  looks 'hostclis fresh >/dev/null && modelsettings null | jq -c ".reviewer | [.clis.codex.models, .allowed.codex]"'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = '[["gpt-b"],["gpt-a","gpt-b"]]' ] && [ ! -e "$d/asked" ] \
+    || fail "a proxy-only model is offered to a reviewer on the subscription: $out $(cat "$d/asked" 2>&1)"
+}
+# Bug it catches: a proxy that does not answer failed the host's report, or left the menu without the pack's and
+# Codex's models. With nothing listening at the proxy's port, the menu is the pack's and Codex's models, and nothing
+# fails.
+t_pxmodelsdown() {
+  local p; p=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])') || fail "no free port"
+  pxmodels "http://127.0.0.1:$p"
+  looks 'hostclis fresh >/dev/null && modelsettings null | jq -c ".reviewer | [.clis.codex.models, .allowed.codex]"'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = '[["gpt-b"],["gpt-a","gpt-b"]]' ] || fail "with the proxy not answering, the menu is not the pack's and Codex's models: $out"
+}
+
 # Bug: docs/configuration.md said the fallback list keeps the built-in Codex models on a host without Codex, where
 # modelsallowed() offers none (t_modelcache runs that); a reader set models.allowed for nothing. Text check: a doc page has no behaviour to run.
 t_modellistdoc() {
