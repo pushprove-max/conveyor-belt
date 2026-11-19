@@ -497,8 +497,9 @@ card() { # <card> <issue> [<branch> <tip>]
       old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
       # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only
       # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
+      # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
       ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$FIX"$'\n'"$fl$more" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
+      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$FIX"$'\n'"$fl$more" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
       checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
       # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
       mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
@@ -787,7 +788,8 @@ card() { # <card> <issue> [<branch> <tip>]
           tmain=''
           [ -z "$tfix" ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
           tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# The changed tests fail (exit '"$rc"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$wt.test" 2>/dev/null | tr -d '\000')" fix) \
+          # On the testFix seat (seat(): the builder's unless the control record sets testFix).
+          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# The changed tests fail (exit '"$rc"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$wt.test" 2>/dev/null | tr -d '\000')" fix testFix) \
             || { block "$c" "$n" "$wt" "fix: $t"; return; }
           checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
           continue 2

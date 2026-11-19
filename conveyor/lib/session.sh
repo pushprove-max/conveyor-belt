@@ -432,7 +432,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
   # Codex's words are read as Codex's (APISAID) for a Codex review and for a session on a Codex builder model alike.
   case $1 in
     codexreview) codex=true ;;
-    session1) [ "$(seat builder | jq -r .agent 2>/dev/null)" != codex ] || codex=true ;;
+    session1) [ "$(seat "${5:-builder}" | jq -r .agent 2>/dev/null)" != codex ] || codex=true ;; # its seat (session1's 4th argument)
   esac
   apihold "$wt" "$st" "$o"
   while :; do
@@ -466,7 +466,9 @@ apitries() { # <worktree> <step> <output file> <command ...>
 }
 # The worktree's tree before the session is kept in <worktree>.before (treeof(), lib/testrun.sh), so asks() can tell a
 # session that changed nothing from one that found a change already there.
-session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase]
+# The session runs on the seat named (seat(): fix, the repair of review findings, or testFix, the repair of failed
+# changed tests), else the builder's.
+session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase] [seat: builder (the default), fix or testFix]
   local p=$2; newtexts p
   treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"
   apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"
@@ -553,10 +555,10 @@ cxready() { # <worktree>
   [ -s "$1.settings" ] || { echo "the card's settings file $1.settings is missing: a Codex session would run without the command guards, so it does not start"; return 1; }
 }
 session1() {
-  local model effort agent rc s sec f dir='' x='' read=$SESSIONREAD roll run
-  s=$(seat builder) && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no builder model"; return 1; }
+  local model effort agent rc s sec f dir='' x='' read=$SESSIONREAD roll run role=${4:-builder}
+  s=$(seat "$role") && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no builder model"; return 1; }
   # The CLI the seat names, never another: one that is gone starts no session.
-  f=$(seatready builder "$s") || { echo "$f"; return 1; }
+  f=$(seatready "$role" "$s") || { echo "$f"; return 1; }
   # OpenCode takes no effort here (its line names none); OpenCode and Codex run on no Claude account. A Codex model
   # named by its family is the newest of it, as for a review (codexmodel()).
   case $agent in
@@ -597,7 +599,7 @@ session1() {
   # A session that failed still spent its tokens and seconds: block() records them.
   jq -c --arg st "${3:-build}" '{step: $st} + del(.ok)' <<<"$f" > "$1.spent"
   [ -z "$x" ] || [ ! -e "$1.stalled" ] || { echo "stalled twice at ${3:-build}: no progress since $(<"$1.stalled")"; return 1; }
-  if nostart "$rc" "$f" "$1.out" "$1.err" "$agent" "$model" builder "$([ "$agent" != claude ] || printf '%s' "$ACCT")" "$1"; then
+  if nostart "$rc" "$f" "$1.out" "$1.err" "$agent" "$model" "$role" "$([ "$agent" != claude ] || printf '%s' "$ACCT")" "$1"; then
     jq -c --argjson s "$NOSTART_START" '. + {start: $s}' "$1.spent" > "$1.spent.new" && mv -f "$1.spent.new" "$1.spent"
     [ "$agent" != claude ] || routedone 0
     # Its subscription login failed and the proxy is its role's fallback: the same step at once through the proxy.
@@ -696,7 +698,7 @@ cliwords() { # <text>
 # NOSTART_SIGNIN, when the cause is the login: the sign-in failure (expired, was refused or is missing) and what to
 # run, for the pause (signinstop()); NOSTART_START then has signin: true, so a resume puts the card back
 # (signinback()). Else empty.
-nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer> <account, "" for the default login> <worktree>
+nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer|fix|testFix> <account, "" for the default login> <worktree>
   local raw words cause todo n p px c=${9##*/}
   NOSTART_LOGIN='' NOSTART_SIGNIN=''
   [ "$1" != 0 ] && [ "$1" != 124 ] && [ ! -e "$9.stalled" ] || return 1
@@ -757,7 +759,9 @@ startnow() { # <{seat, cli, model, account}>
   local r s m a
   r=$(jq -r '.seat // empty' <<<"$1" 2>/dev/null); [ -n "$r" ] || return 1
   s=$(seat "$r") && jqget "$s" model m agent a || return 1
-  [ "$a" != codex ] || m=$(PROXY_ROLE=$r codexmodel "$m") || return 1
+  # A fix or testFix seat takes the builder's route, as its session does.
+  local p=$r; case $r in fix | testFix) p=builder ;; esac
+  [ "$a" != codex ] || m=$(PROXY_ROLE=$p codexmodel "$m") || return 1
   jq -c --arg c "$a" --arg m "$m" '{seat, cli: $c, model: $m, account: (if $c == "claude" then .account // "" else "" end)}' <<<"$1"
 }
 # A check session: the CLI, model and account startnow() gives, asked for one

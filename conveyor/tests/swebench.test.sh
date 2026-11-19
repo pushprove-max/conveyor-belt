@@ -54,9 +54,11 @@ EOF
   printf '%s\n' 'session() { :; }' > "$e/conveyor/lib/session.sh"; printf '%s\n' 'reviewed() { :; }' > "$e/conveyor/lib/review.sh"
   printf '%s\n' 'brief() { :; }' 'cardrules() { :; }' 'REVIEWT=r' 'FIX=f' > "$e/conveyor/lib/prompts.sh"; printf '%s\n' 'tests() { :; }' > "$e/conveyor/lib/testrun.sh"
   printf '%s\n' 'land() { :; }' 'rereview() { reviewed "$@"; }' > "$e/conveyor/lib/claim.sh"; printf '%s\n' 'push() { :; }' > "$e/conveyor/lib/push.sh"
+  # B, the newer engine, has the fix and testFix seats (its control record's defaults name them); A has none.
   git -C "$e" add -A && git -C "$e" commit -qm A && git -C "$e" tag v1.0.0 \
     && sed -i 's/^V=A/V=B/' "$e/conveyor/lib/fake.sh" && printf '%s\n' 'reviewed() { echo stricter; }' > "$e/conveyor/lib/review.sh" \
-    && git -C "$e" commit -qam 'review: stricter findings' && git clone -q --bare "$e" "$F/eng.git" && rm -rf "$e" || return 1
+    && echo '{"fix": null, "testFix": null}' > "$e/conveyor/lib/control-defaults.json" && git -C "$e" add -A \
+    && git -C "$e" commit -qm 'review: stricter findings' && git clone -q --bare "$e" "$F/eng.git" && rm -rf "$e" || return 1
   cat > "$F/py" <<'EOF'
 #!/usr/bin/env bash
 shift # the harness script's path

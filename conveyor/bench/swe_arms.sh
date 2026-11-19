@@ -5,7 +5,10 @@
 #   label      what the results call the arm
 #   kind       "conveyor": the engine's loop builds the task's card (`conveyor.sh run 1`) on the project's seats with
 #              the arm's seats over them; "agent": the arm's own run command builds it
-#   seats      (conveyor) the control record's model, reviewer and judge the arm sets, as the control record holds them
+#   seats      (conveyor) the control record's model, reviewer, judge, fix and testFix the arm sets, as the control
+#              record holds them (fix and testFix, the repairs of review findings and of failed tests, from the
+#              builder's models; left out, each is the project's, which follows the builder unless set); an engine
+#              version that has no such seat refuses an arm whose card would set it (swe_pack)
 #   rules      (conveyor) "engine" (the default): the engine version's core card rules; "project": those and the
 #              project's card and area rules (swe_pack)
 #   policy     (conveyor) the review policy the arm sets over the control record's: judgeOn (the judge reads the
@@ -56,7 +59,7 @@ swe_choices() {
 # a new revision, $SWE_DIR/arms/<id>.json, {id, name, at, spec}, never written again: saving under the same name makes
 # another revision, so a run keeps the one it used. Prints the ID: arm-<the first 12 of sha256 of name and spec>. The
 # spec holds choices only, no command:
-#   {kind: "conveyor", seats: {model, reviewer, judge}, rules, policy}   each seat given {cli, model, effort} (effort
+#   {kind: "conveyor", seats: {model, reviewer, judge, fix, testFix}, rules, policy}   each seat given {cli, model, effort} (effort
 #                                   optional); rules "engine" or "project" (optional, swe_pack); policy {judgeOn: true
 #                                   or false, judgeAlways: [kind words, as `control judge always` takes them], P0 to P3:
 #                                   true or false}, each optional
@@ -68,12 +71,12 @@ swe_armsave() { # <name> <spec json>
   c=$(swe_choices) || { echo "conveyor: the project's models.allowed cannot be read; nothing saved" >&2; return 1; }
   s=$(jq -cSe 'objects' <<<"$2" 2>/dev/null) || { echo "conveyor: the arm's spec is not a JSON object; nothing saved" >&2; return 1; }
   w=$(jq -rn --arg n "$1" --argjson s "$s" --argjson c "$c" '
-    def seaterr($k; $v): (if $k == "model" then "builder" else $k end) as $w | (if $k == "model" then $c.builder else $c.reviewer end) as $p
+    def seaterr($k; $v): (if $k == "model" then "builder" else $k end) as $w | (if $k | IN("model", "fix", "testFix") then $c.builder else $c.reviewer end) as $p
       | if ($v | type) != "object" or (($v | keys) - ["cli", "model", "effort"]) != [] then "the \($w) seat takes cli, model and effort only"
         elif ($v.cli | type) != "string" or ($p | has($v.cli) | not) then "the \($w) seat cannot run on the CLI \($v.cli | tojson)"
         elif ($v.model | type) != "string" or ($p[$v.cli] | index([$v.model])) == null then "the project does not allow \($v.model | tojson) on \($v.cli) for the \($w) seat"
         elif $v.effort == null then empty
-        elif $k == "model" and $v.cli == "opencode" then "an OpenCode builder takes no effort"
+        elif ($k | IN("model", "fix", "testFix")) and $v.cli == "opencode" then "an OpenCode \($w) seat takes no effort"
         elif ($v.effort | type) != "string" or ($c.efforts[$v.cli] | index([$v.effort])) == null then "\($v.cli) takes no effort \($v.effort | tojson)"
         else empty end;
     [ if ($n | length) < 1 or ($n | length) > 80 or ($n | test("[[:cntrl:]]")) or ($n | test("^\\s|\\s$")) then "the name must be 1 to 80 characters, with no control character and no space at either end"
@@ -86,7 +89,7 @@ swe_armsave() { # <name> <spec json>
           elif $p | has("judgeAlways") and (.judgeAlways | type != "array" or length > 20 or any(type != "string" or (test("^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$") | not)))
             then "judgeAlways is a list of at most 20 finding kinds, each a word of letters, digits, _ and -"
           elif ($t | type) != "object" then "seats must be an object"
-          elif (($t | keys) - ["model", "reviewer", "judge"]) != [] then "the seats are model (the builder), reviewer and judge, not \(($t | keys) - ["model", "reviewer", "judge"] | join(", "))"
+          elif (($t | keys) - ["model", "reviewer", "judge", "fix", "testFix"]) != [] then "the seats are model (the builder), reviewer, judge, fix and testFix, not \(($t | keys) - ["model", "reviewer", "judge", "fix", "testFix"] | join(", "))"
           else $t | to_entries[] | seaterr(.key; .value) end
       elif $s.kind == "agent" then
         (($s | keys) - ["kind", "recipe", "cli", "model"]) as $x
@@ -133,7 +136,7 @@ swe_login() { # <claude | codex>
 }
 # The logins an arm's container is given: the arm's own, and for a conveyor arm the CLI of each seat `run 1` uses
 # there (the project's control record with the arm's seats and its policy's judgeOn over it, as swe_pack writes it:
-# the builder, the reviewer and the judge only when it is on; the Tests seat serves `testaction`, which the run does not start), so a Conveyor arm on Claude seats needs
+# the builder, the reviewer, the judge only when it is on, and the fix and testFix seats; the Tests seat serves `testaction`, which the run does not start), so a Conveyor arm on Claude seats needs
 # no Codex login. The seats are worked out on the models the engine in the container offers, not this host's: the
 # task's pack (swe_pack: the project's models.allowed, with a host arm's seats in it) when it lists some, else the
 # built-in MODELS0, as the arm's install puts Codex in the container even where this host has none.
@@ -143,10 +146,11 @@ swe_logins() { # <arm json>
     s=$(jq -c '.seats // {}' <<<"$1")
     c=$(ctl 2>/dev/null) && c=$(jq -c --argjson s "$s" --argjson p "$(jq -c '.policy // {}' <<<"$1")" '. + $s + ($p | with_entries(select(.key == "judgeOn")))' <<<"$c") || c=null
     packget models.allowed a 2>/dev/null || a=''
-    x=$(jq -r --argjson c "$c" --argjson s "$(jq -c 'if has("revision") then {} else .seats // {} end' <<<"$1")" --argjson d "$MODELS0" "$SEATNOW$JUDGENOW"'
+    x=$(jq -r --argjson c "$c" --argjson s "$(jq -c 'if has("revision") then {} else .seats // {} end' <<<"$1")" --argjson d "$MODELS0" "$SEATNOW$JUDGENOW$FIXSEAT"'
         reduce ($s[] | objects | select(.cli != null)) as $x (.; .[$x.cli] = ((.[$x.cli] // []) + [$x.model] | unique)) | (. // $d)
         | ([try seatnow("builder"; $c)] | first) as $b | ([try seatnow("reviewer"; $c)] | first) as $r
-        | $b, $r, (if $c.judgeOn == true and $r != null then [try judgenow($c; $r)] | first else null end) | .agent? // empty' <<<"${a:-null}")
+        | $b, $r, (if $c.judgeOn == true and $r != null then [try judgenow($c; $r)] | first else null end), fixseat($c; "fix"; $b), fixseat($c; "testFix"; $b)
+        | .agent? // empty' <<<"${a:-null}")
   fi
   jq -r --arg x "$x" '[(.login // [])[], ($x | splits("\n")) | select(IN("claude", "codex"))] | unique | join(" ")' <<<"$1"
 }
@@ -214,7 +218,7 @@ swe_taskrules() { # <arm json> < tasks
 # matches is left out of the pack, as no card there reads its rule. A rule file the card reads missing or unreadable
 # refuses the arm.
 swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
-  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m l g f a i=0 ar='{}';s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
+  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m l g f a e i=0 ar='{}';s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
   mkdir -p "$d" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
   case $m in
     engine) ;;
@@ -241,6 +245,13 @@ swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
   mkdir -p "$SWE_SST" && ctl | jq --argjson s "$s" --argjson p "$(jq -c '.policy // {}' <<<"$4")" '.mode = "run" | .held = [] | .order = [] | .startHeld = [] | .start = "queue" | .rules.followups = false | .rules.visible = false
     | .rules.push = true | .cards = {} | del(.account, .reviewAccount) + $s
     | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))' > "$SWE_SST/control.json" || { echo "the project's control record could not be read"; return 1; }
+  # A fix or testFix seat the card's record sets (the arm's, or the project's) that the engine version does not know
+  # (its lib/control-defaults.json has no such key: an engine from before those seats) would be passed over there
+  # unread, and the card would repair on its builder: the arm is refused.
+  e=$(jq -c 'objects' "${3%/conveyor.sh}/lib/control-defaults.json" 2>/dev/null) && [ -n "$e" ] || e='{}'
+  f=$(jq -r --argjson e "$e" '[("fix", "testFix") as $k | select(.[$k] != null and ($e | has($k) | not)) | $k] | join(" and ")' "$SWE_SST/control.json") \
+    || { echo "the task's control record could not be read"; return 1; }
+  [ -z "$f" ] || { echo "the card's $f seat is set (by the arm or the project), and the engine version it runs on has no such seat, so its card would repair on the builder: run the arm on a newer engine"; return 1; }
   # The rules P0 to P3 also keep an issue of that level off the queue (upnext.jq), and the task's issue has no
   # priority label, so the engine reads it as P3: an arm with P3 off (its P3 findings minor) never got its card
   # picked. The issue takes no label while its level's rule is on, else the pack's least urgent priority whose level's

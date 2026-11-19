@@ -278,7 +278,7 @@ window.DASH_APP.panel({
     // machine's own login: the cards can run on another account. One row for one account; with more (a project's
     // builder and reviewer accounts, or more projects), each row names its project and account.
     const limits = Array.isArray(d.limits) ? d.limits.filter((l) => l && typeof l === 'object') : [];
-    const USES = { build: 'build and fix', review: 'reviews' };
+    const USES = { build: 'build and fix', fix: 'fix', review: 'reviews' };
     const AGAIN = 'Conveyor reads it again before its next pick.';
     limits.forEach((l) => {
       const who = l.account || 'default';

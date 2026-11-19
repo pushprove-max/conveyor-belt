@@ -5,7 +5,9 @@
 # needs the owner's yes (yesrule()), rules.wholeSuite whether a card's test step may run the whole suite (wholerule(),
 # lib/testrun.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
-# a model of the pack's models.allowed, whose program it is (seatnow()); tests (the Tests seat, the test actions'
+# a model of the pack's models.allowed, whose program it is (seatnow()); fix (the session that repairs review
+# findings) and testFix (the one that repairs failed changed tests) are null, the card's builder, or a builder seat of
+# their own, as model is (seat()); tests (the Tests seat, the test actions'
 # sessions: testaction(), lib/testaction.sh) is null or {cli, model, effort}, always with its CLI; cards holds the
 # per-card seats by issue number ({"<issue>": {builder, reviewer, judge}}, each left out or {model, effort (null: the
 # project's)}, `control card`), which that issue's card runs on in place of the project's (seat(), SEATCARD);
@@ -68,7 +70,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and ((.start == "held") == (.startHeld | length > 0 and (last.to == null)))
       and (.rules | (.never | type == "array" and all(type == "string")) and ([.P0, .P1, .P2, .P3, .followups, .push, .visible, .wholeSuite] | all(type == "boolean"))
         and (.split | IN("off", "shadow", "on")))
-      and ([.model, .reviewer, .judge, .tests] | all(. == null or (type == "object" and (keys - ["effort", "cli"]) == ["model"] and (.model | type == "string")
+      and ([.model, .reviewer, .judge, .tests, .fix, .testFix] | all(. == null or (type == "object" and (keys - ["effort", "cli"]) == ["model"] and (.model | type == "string")
         and (.effort == null or (.effort | type == "string")) and (.cli == null or (.cli | IN("claude", "codex", "opencode"))))))
       and (.tests == null or .tests.cli != null)
       and (.cards | type == "object" and all(to_entries[]; (.key | test("^[1-9][0-9]{0,8}$")) and (.value | type == "object" and length > 0
@@ -160,21 +162,27 @@ PERCARD='def cardset($c; $n): ($c // {} | .cards // {} | .[$n] // {});
 # Within a card (SEATCARD: its issue, set by card()), the seats the record keeps for that issue (cards, `control card`)
 # stand in for the project's (percard), each read when its step starts, so a step already running keeps its seat.
 # A card with no judge of its own has the project's: the default judge follows the project's reviewer ($rj), not the
-# card's, as the Board shows it.
+# card's, as the Board shows it. The fix and testFix seats (the sessions that repair review findings and failed
+# changed tests) are the card's builder, unless the record sets one of its own (fix, testFix), named by a model the
+# pack lists for the builder or with its CLI, as model is: then that one, for every card. fixseat($c; $k; $b) is that
+# seat in jq ($k: fix or testFix, $b the builder's seat; needs SEATNOW), so the benchmark's logins name the same CLI.
+FIXSEAT='def fixseat($c; $k; $b): ($c // {})[$k] as $o
+  | if $o != null and ($o.cli != null or ([okmodels("builder")[][]] | index($o.model))) then [try seatnow("builder"; {model: $o})] | first else $b end;'
 declare -gA SEAT_V=(); SEAT_K=''
-seat() { # <builder|reviewer|judge> [the control record, when the caller has read it]
+seat() { # <builder|reviewer|judge|fix|testFix> [the control record, when the caller has read it]
   local a c=${2:-} x CTL_V n=${SEATCARD:-}; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
   # A record with no key "<issue>" keeps no seats for the card: the project's, worked out (and kept) once for all cards.
   [[ $c == *"\"$n\":"* ]] || n=''
   modelsallowed a || return 1
   if [ "$SEAT_K" != "$n"$'\037'"$c"$'\037'"$a" ]; then
     # Each seat on its own (try): one that fails to work out is none, as it was read alone.
-    mapfile -d '' -t x < <(jq -j --argjson c0 "$c" --arg n "$n" --argjson e "$EFFORTS" "$SEATNOW$JUDGENOW$PERCARD"'percard($c0; $n) as $c
+    mapfile -d '' -t x < <(jq -j --argjson c0 "$c" --arg n "$n" --argjson e "$EFFORTS" "$SEATNOW$JUDGENOW$PERCARD$FIXSEAT"'percard($c0; $n) as $c
         | ([try seatnow("builder"; $c)] | first | cardfit($c0; $n; $e; "builder")) as $b | ([try seatnow("reviewer"; $c)] | first | cardfit($c0; $n; $e; "reviewer")) as $r
         | ([try seatnow("reviewer"; $c0)] | first) as $rj
-        | ($b, $r, (if $rj == null then null else [try judgenow($c; $rj)] | first | cardfit($c0; $n; $e; "judge") end)) | (if . == null then "" else tojson end) + "\u0000"' <<<"$a" 2>/dev/null) \
-      && [ "${#x[@]}" = 3 ] || return 1
-    SEAT_V=([builder]=${x[0]} [reviewer]=${x[1]} [judge]=${x[2]}); SEAT_K=$n$'\037'$c$'\037'$a
+        | ($b, $r, (if $rj == null then null else [try judgenow($c; $rj)] | first | cardfit($c0; $n; $e; "judge") end), fixseat($c0; "fix"; $b), fixseat($c0; "testFix"; $b))
+        | (if . == null then "" else tojson end) + "\u0000"' <<<"$a" 2>/dev/null) \
+      && [ "${#x[@]}" = 5 ] || return 1
+    SEAT_V=([builder]=${x[0]} [reviewer]=${x[1]} [judge]=${x[2]} [fix]=${x[3]} [testFix]=${x[4]}); SEAT_K=$n$'\037'$c$'\037'$a
   fi
   [ -n "${SEAT_V[$1]:-}" ] && printf '%s\n' "${SEAT_V[$1]}"
 }
@@ -376,6 +384,8 @@ clis() {
   local c r rc=0 CTL_V; if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi
   # In the calling shell, so what seat and seatready work out is kept there.
   for r in builder reviewer; do seat "$r" "$c" >/dev/null || continue; seatready "$r" "${SEAT_V[$r]}" || rc=1; done
+  # A fix or testFix seat of its own (one that is not the builder's) is checked too.
+  for r in fix testFix; do seat "$r" "$c" >/dev/null && [ "${SEAT_V[$r]}" != "${SEAT_V[builder]}" ] || continue; seatready "$r" "${SEAT_V[$r]}" || rc=1; done
   return $rc
 }
 # Models through an API proxy. Claude's: card sessions run with --setting-sources "", so a base URL in the user's

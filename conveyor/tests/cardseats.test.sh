@@ -68,6 +68,50 @@ t_cardseatjudge() {
   [ "$out" = $'j2\nj claude\nj' ] || fail "#7's reviewer or judge is not its own reviewer and the project's judge (j2, j claude, j): $out"
 }
 
+# Bug: the fix of a review's findings and the fix of failed changed tests ran on the builder's model and effort, when
+# the control record names a fix and a testFix seat of their own. The build stays on the builder (m, medium), the
+# review fix runs on fix (m2, high), the test fix on testFix (m2, low), and the test command calls no model.
+t_cardseatfix() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  jq -c '.fix = {model: "m2", effort: "high"} | .testFix = {model: "m2", effort: "low"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  printf '%s\n' '[P1] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  for i in 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
+  # The changed tests fail, every run, until the session told they fail has run.
+  echo 'echo two >> a.txt; ! grep -q "The changed tests fail" "$STUB/brief" || touch "$STUB/testfixed"' > "$STUB/build"
+  echo '[ -e "$STUB/testfixed" ] || { echo "FAIL a.test.sh"; exit 1; }' > "$STUB/test-cmd"
+  : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.issue == 7 and (.step | IN("build", "fix"))) | "\(.step) \(.model) \(.effort)"' | tr '\n' ,)" = "build m medium,fix m2 high,fix m2 low," ] \
+    || fail "the build, review fix and test fix did not run on builder, fix and testFix: $(st 'select(.issue == 7) | [.step, .result, .model, .effort] | tostring' | tr '\n' ' ')"
+  [ "$(cut -d' ' -f1-5 "$STUB/sessions" | tr '\n' ,)" = "-p --model m --effort medium,-p --model m2 --effort high,-p --model m2 --effort low," ] \
+    || fail "the Claude sessions ran on: $(cut -d' ' -f1-5 "$STUB/sessions")"
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land"
+}
+
+# Bug: a card with no fix or testFix seat set repaired on another model than its own builder (here #7's own m2 at
+# high, not the project's m): an ordinary card inherits its builder for both repairs.
+t_cardseatfixfollow() {
+  local out s
+  seatsetup '[]'
+  loop control card 7 builder m2 high >/dev/null || fail "control card did not take #7's builder"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && for s in fix testFix; do SEATCARD=7 seat "$s" | jq -r '"\(.model) \(.effort)"'; SEATCARD='' seat "$s" | jq -r '"\(.model) \(.effort)"'; done 2>&1)
+  [ "$out" = $'m2 high\nm medium\nm2 high\nm medium' ] || fail "the fix and testFix seats are not #7's builder and the project's builder: $out"
+}
+
+# Bug: with a Codex builder and reviewer the guard read no Claude account, so a Claude fix or testFix seat repaired
+# on the builder's account past its usage limit. And the Board named that account's use "build and fix" (the
+# "build" role) though it only repairs: its role is "fix", and a Claude builder's stays "build".
+t_cardseatfixguard() {
+  local out k
+  seatsetup '[]'
+  jq -cn '{time: (now | todate), pct: 90}' > "$ST/limit.jsonl"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && tunables && c=$(jq -c '.model = {cli: "codex", model: "x"} | .reviewer = {cli: "codex", model: "x"}' "$ST/control.json") \
+    && for k in '' fix testFix; do jq -c --arg k "$k" 'if $k == "" then . else .[$k] = {model: "m"} end' <<<"$c" | { read -r r; guardread "$r" | jq -r .pct; subaccts "$r" | cut -d ' ' -f 1; echo "$k:"; }; done \
+    && jq -c '.model = {cli: "claude", model: "m"} | .reviewer = {cli: "codex", model: "x"} | .testFix = {cli: "codex", model: "x"}' <<<"$c" | { read -r r; subaccts "$r" | cut -d ' ' -f 1; } 2>&1)
+  [ "$out" = $':\n90\nfix\nfix:\n90\nfix\ntestFix:\nbuild' ] || fail "the guard did not read the builder's account for a Claude repair seat alone (or read it for none), or named a repair-only account's role build, or a Claude builder's not build: $out"
+}
+
 # Bug: a per-card seat took a model the pack does not allow that seat (a session would start on a model nobody
 # chose), or an effort its CLI does not take, without saying which models are allowed; clear left the seat set.
 t_cardseatset() {

@@ -211,6 +211,29 @@ t_swerules() {
   jq -e '.areas | keys == ["x.py"]' "$SWE_FX/pack.seen" > /dev/null || fail "the card's pack maps an area its task does not name: $(jq -c .areas "$SWE_FX/pack.seen")"
 }
 
+# The benchmark's fix and testFix seats (the repairs of review findings and of failed tests). Bugs: a saved arm took a
+# review model for a repair seat, which runs the builder's sessions; the card in the container got the project's
+# repair seats, not the arm's; a fix seat on Codex, with every other seat on Claude, had no Codex login there; and an
+# earlier engine, whose control record knows no such seat (the fixture's v1.0.0), ran the arm, its card passing the
+# seats over unread and repairing on the builder, with nobody told.
+t_swefixseats() {
+  swe; local out id
+  tune '.models.allowed["codex-builder"] = ["xb"]' || fail "the Codex builder model was not allowed"
+  out=$(loop bench swe arms save 'Review model fixes' '{"kind":"conveyor","seats":{"fix":{"cli":"codex","model":"x"}}}' 2>&1) \
+    && fail "a review model was saved as the fix seat: $out"
+  [[ $out == *'the project does not allow "x" on codex for the fix seat'* ]] || fail "the review model was not refused for the fix seat: $out"
+  id=$(loop bench swe arms save 'Codex fixes' '{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"m"},"reviewer":{"cli":"claude","model":"claude-sonnet-5-5"},"fix":{"cli":"codex","model":"xb","effort":"high"},"testFix":{"cli":"claude","model":"m","effort":"low"}},"policy":{"judgeOn":false}}' 2>&1) \
+    || fail "the arm was not saved: $id"
+  out=$(loop bench swe 1 --arm "$id" --engine v1.0.0 2>&1) && fail "an engine with no fix or testFix seat ran the arm: $out"
+  [[ $out == *"the card's fix and testFix seat is set (by the arm or the project), and the engine version it runs on has no such seat"* ]] \
+    || fail "the earlier engine's refusal does not say why: $out"
+  [ ! -e "$SWE_FX/log" ] || fail "a card ran on the engine with no repair seats: $(cat "$SWE_FX/log")"
+  out=$(loop bench swe 1 --arm "$id" 2>&1) || fail "the run on main's engine failed: $out"
+  jq -e '.fix == {cli: "codex", model: "xb", effort: "high"} and .testFix == {cli: "claude", model: "m", effort: "low"}' "$SWE_FX/control.seen" > /dev/null \
+    || fail "the card's control record does not hold the arm's repair seats: $(jq -c '{fix, testFix}' "$SWE_FX/control.seen")"
+  [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] || fail "the container of an arm whose fix seat is on Codex had no Codex login"
+}
+
 # An arm whose policy turns off every level the task's issue can have would start a loop that never picks its card;
 # it is refused, and says why.
 t_swepolicyoff() {

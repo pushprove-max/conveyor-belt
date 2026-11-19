@@ -118,7 +118,7 @@
 # inFlight: the accounts the cards on the belt started on, whatever the control record names now, each pair once:
 #   {account, reviewAccount}, as their worktree lines name them (null: the default login; for a review, its account).
 # limits: the weekly limit reading of each Claude account a card started on the control record runs on, the guard's
-#   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, review), pct, readAt, email (its
+#   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, fix: repairs alone, review), pct, readAt, email (its
 #   login on this machine)}]; null when it could not be read.
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
 # packLandAs: the pack's push.landAs (main or pr), the rule Land as while the control record's landAs is null; null

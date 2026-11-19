@@ -86,7 +86,7 @@ arms on the same tasks. With no `--arm`, the run uses the `conveyor` arm.
 
 | Arm | What builds a task | Install in the container | Login |
 | --- | --- | --- | --- |
-| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, and the engine version | Claude, and Codex when the builder, the reviewer or the judge uses Codex |
+| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, and the engine version | Claude, and Codex when a seat uses Codex |
 | `conveyor-codex-claude` | Conveyor, with Codex as the builder and Claude as the reviewer | The same as `conveyor` | Claude and Codex |
 | `solo` | One Claude session, with no shell (the same as `--solo`) | The Claude Code CLI | Claude |
 | `solo-review` | One Claude session, then one more Claude session that reviews the change and fixes it | The Claude Code CLI | Claude |
@@ -125,7 +125,11 @@ conveyor.sh bench swe arms show arm-0123456789ab
 
 `save` prints the ID of the saved arm, for example `arm-0123456789ab`. Give that ID to `--arm` or to
 `bench swe arms check`, as you give the name of an arm. A Conveyor arm takes the seats `model` (the builder),
-`reviewer` and `judge`. Each seat takes `cli`, `model` and, if you want, `effort`. A Conveyor arm can also take
+`reviewer`, `judge`, `fix` and `testFix`. `fix` is the session that fixes the findings of a review. `testFix` is the
+session that fixes the card's tests when they fail. When you leave `fix` or `testFix` out, that session uses the
+project's own setting for it, and the builder when the project has none. Each seat takes `cli`, `model` and, if you want, `effort`. The test command and the official grade use no
+model. An engine version that has no `fix` or `testFix` seat cannot run an arm that sets one: the check and the
+start refuse the arm and tell you why. Choose a newer engine version. A Conveyor arm can also take
 `rules` and `policy`. An agent arm takes `recipe`, `cli` (`claude` or `codex`, the CLI that the recipe signs in to) and `model`.
 
 The `rules` choice sets the rules that the task's card gets:
@@ -155,7 +159,7 @@ The task's card uses the seats of the arm over the seats of your control record.
 When you save the same name again with other choices, you get a new ID. The earlier arm does not change, and
 `bench swe arms show` still shows it. A run keeps the ID of the arm that it used.
 
-You can choose only the models that the project allows. The builder takes the builder models of the `models.allowed`
+You can choose only the models that the project allows. The builder, `fix` and `testFix` take the builder models of the `models.allowed`
 setting in `.conveyor/project.json`: `claude`, `codex-builder` and `opencode`. The reviewer and the judge take the
 review models: `codex`, `claude-reviewer` and `opencode`. An agent arm takes the models of both lists for its CLI.
 When the project has no `models.allowed` setting, Conveyor uses its own default models. The effort must be one that

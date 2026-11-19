@@ -236,6 +236,16 @@ test('Health: a builder account and a reviewer account each show their own readi
   assert.equal(panel(w, 'health').querySelector('dt[data-check="Usage limit"]'), null, 'no row without its account');
 });
 
+// Issue 636. Bug: with a Codex builder and a Claude fix or testFix seat, the Claude account only repairs, yet its row
+// said "build and fix". The snapshot names that use "fix", and the row says so.
+test('Health: an account that only repairs says fix, not build and fix', () => {
+  const data = full();
+  data.panels.health.data.limits = [{ repo: 'sample', account: 'repairs', uses: ['fix'], pct: 40, readAt: iso(T0 - 60000), email: 'noreply-a@example.com' }];
+  const w = page('health');
+  deliver(w, data);
+  assert.match(dd(w, 'Usage limit').textContent, /^Fine40% of the 7-day limit usedaccount repairs, noreply-a@example\.com: fix$/);
+});
+
 // Issue 151. Bug: on a machine whose every role runs on an API route (billed per token, no subscription), Health warned
 // for ever that the usage limit was not read and that the default account, used by no card, had a pause from the usage
 // server. The record's routes name no role on the subscription, the engine reads no account for it (limits empty), and
