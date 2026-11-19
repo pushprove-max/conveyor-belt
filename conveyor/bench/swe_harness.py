@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """The SWE-bench side of `conveyor.sh bench swe` (bench/swe.sh): the task list, each task's Docker image, and the
-grade of a final patch by the official harness. It runs in a Python that has the swebench package (pip install
-swebench, which brings datasets) and a Docker it can use; swe.sh starts it with the swebench virtualenv's Python
-(swe_h()). Nothing here builds a card.
+grade of a final patch by the official harness. It runs in a Python that has the swebench package at the release this file
+is written for (SWEBENCH, which brings datasets) and a Docker it can use; swe.sh starts it with the swebench
+virtualenv's Python (swe_h()). Nothing here builds a card.
 
 Usage:
+  swe_harness.py check
+      exit 1, saying which swebench this Python has, when it is not SWEBENCH (an arm's preflight runs it).
   swe_harness.py tasks <dataset> <revision> <out>
       every task of the dataset at that revision, one JSON line each, in the dataset's order, to <out>:
       {id, repo, url, base, issue, image, cmd}: no reference fix and no hidden test (cmd: the task's test command,
@@ -30,6 +32,33 @@ import sys
 import tempfile
 
 
+# The swebench release this file is written for, as docs/benchmarks.md installs it: swebench 5 has no
+# MAP_REPO_VERSION_TO_SPECS, which tasks() reads.
+SWEBENCH = '4.1.0'
+
+
+# '' when this Python's swebench is SWEBENCH, else what it has and what to install.
+def swebench_wrong():
+    try:
+        import swebench
+    except ImportError:
+        v, has = None, 'no swebench package'
+    else:
+        # The package's own __version__ first: a swebench on PYTHONPATH need not be the one pip recorded.
+        v = getattr(swebench, '__version__', None)
+        if not v:
+            try:
+                from importlib.metadata import version
+                v = version('swebench')
+            except Exception:
+                v = None
+        has = 'swebench %s' % v if v else 'a swebench of no known version'
+    if v == SWEBENCH:
+        return ''
+    return 'the SWE-bench harness has %s; it needs swebench==%s: install it in the harness virtualenv, %s (docs/benchmarks.md)' % (
+        has, SWEBENCH, sys.prefix)
+
+
 def image_of(instance):
     # The harness's prebuilt evaluation image on Docker Hub (namespace swebench).
     return 'swebench/sweb.eval.x86_64.%s:latest' % instance.lower().replace('__', '_1776_')
@@ -46,8 +75,12 @@ def private_cache():
 
 
 def tasks(dataset, revision, out):
+    try:
+        from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS
+    except ImportError:
+        raise SystemExit('conveyor: ' + (swebench_wrong()
+                                         or 'the SWE-bench harness has swebench %s with no MAP_REPO_VERSION_TO_SPECS' % SWEBENCH))
     from datasets import load_dataset
-    from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS
     rows = load_dataset(dataset, split='test', revision=revision)
     with open(out, 'w') as f:
         for r in rows:
@@ -95,6 +128,11 @@ def grade(dataset, revision, instance, patch, folder, cache):
 
 
 def main(a):
+    if a == ['check']:
+        w = swebench_wrong()
+        if w:
+            print(w)
+        return 1 if w else 0
     if len(a) == 2 and a[0] == 'image':
         return image(a[1])
     if (len(a) == 4 and a[0] == 'tasks') or (len(a) == 6 and a[0] == 'grade'):
@@ -106,7 +144,7 @@ def main(a):
             return (tasks(*a[1:]) or 0) if a[0] == 'tasks' else grade(*a[1:], cache)
         finally:
             shutil.rmtree(cache, ignore_errors=True)
-    sys.stderr.write('usage: swe_harness.py tasks <dataset> <revision> <out> | image <image> | grade <dataset> <revision> <id> <patch> <folder>\n')
+    sys.stderr.write('usage: swe_harness.py check | tasks <dataset> <revision> <out> | image <image> | grade <dataset> <revision> <id> <patch> <folder>\n')
     return 2
 
 

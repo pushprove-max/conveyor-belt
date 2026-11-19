@@ -14,8 +14,11 @@ it:
 
 ```
 python3 -m venv ~/.local/share/conveyor/swebench-venv
-~/.local/share/conveyor/swebench-venv/bin/pip install swebench
+~/.local/share/conveyor/swebench-venv/bin/pip install swebench==4.1.0
 ```
+
+Conveyor needs this release of swebench. An arm's check fails when the harness has another release, and says which
+release it has.
 
 The first run reads the task list from the dataset. Each task then fetches its Docker image, which can be several
 gigabytes.

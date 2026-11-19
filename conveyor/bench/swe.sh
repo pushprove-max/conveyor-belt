@@ -59,11 +59,16 @@ swe_put() { printf '%s\n' "$2" > "$1.$$" && mv -f "$1.$$" "$1"; } # <file> <text
 # earlier harness kept beside it (raw.<revision>.jsonl, with the reference fixes and hidden tests) are removed first.
 # A list whose tasks have no cmd (the test command run in the task's container) is made again.
 swe_tasks() {
-  local rev f; rev=$(swe_conf .revision); f=$SWE_DIR/tasks.$rev.jsonl
+  local rev f err; rev=$(swe_conf .revision); f=$SWE_DIR/tasks.$rev.jsonl
   rm -f "$SWE_DIR"/raw.*.jsonl
   [ -s "$f" ] && head -n 1 "$f" | jq -e 'has("cmd")' > /dev/null 2>&1 && { printf '%s\n' "$f"; return; }
-  mkdir -p "$SWE_DIR" && swe_h tasks "$(swe_conf .dataset)" "$rev" "$SWE_DIR/raw.$rev" >&2 \
-    || { echo "conveyor: the SWE-bench task list could not be read (the harness needs Python with the swebench package, in $SWE_VENV: docs/benchmarks.md)" >&2; return 1; }
+  # The harness's own conveyor: line (a swebench of the wrong version says which it has and which to install) is the
+  # error; else its whole output (a failed download's traceback) goes on, and the error names its last line.
+  mkdir -p "$SWE_DIR" && err=$(swe_h tasks "$(swe_conf .dataset)" "$rev" "$SWE_DIR/raw.$rev" 2>&1 >&2) \
+    || { local why; why=$(grep '^conveyor: ' <<<"$err" | tail -n 1)
+      [ -n "$why" ] || { [ -z "$err" ] || printf '%s\n' "$err" >&2
+        why="conveyor: the SWE-bench task list could not be read: $(grep -v '^[[:space:]]*$' <<<"$err" | tail -n 1) (the harness runs in $SWE_VENV: docs/benchmarks.md)"; }
+      echo "$why" >&2; return 1; }
   python3 -I -c 'import hashlib, json, sys
 seed = sys.argv[1]
 rows = [json.loads(l) for l in open(sys.argv[2]) if l.strip()]

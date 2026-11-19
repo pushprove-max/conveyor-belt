@@ -174,7 +174,7 @@ swe_checktask() { # <image>
   jq -nc --arg u "file://$g" --arg b "$(git -C "$g" rev-parse main)" --arg i "$1" \
     '{id: "preflight", url: $u, base: $b, issue: "hello.py prints \"helo\". It should print \"hello\".", image: $i, cmd: "python3 hello.py"}'
 }
-# An arm's preflight: offered, Docker answering, each login it uses present on this machine, then the trivial task in
+# An arm's preflight: offered, Docker answering, the harness's swebench the release it is written for, each login it uses present on this machine, then the trivial task in
 # a container: its install, its preflight command and its run, which must fire and change hello.py. Prints nothing
 # when it passed, else what is missing; keeps the state in preflight/<arm>/<key>.json (swe_arms reads it).
 swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
@@ -182,6 +182,7 @@ swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kin
   n=$(jq -r .name <<<"$a")
   if jq -e '.offered == false' <<<"$a" > /dev/null; then why="not offered: $(jq -r '.why // "no reason given"' <<<"$a")"
   elif ! docker info > /dev/null 2>&1; then why="Docker is not installed or not running (docker info failed)"
+  elif ! b=$(swe_h check 2> /dev/null); then why=${b:-"the SWE-bench harness's Python could not run (docs/benchmarks.md)"}
   else
     for l in $(swe_logins "$a"); do
       f=$(swe_login "$l") && [ -s "$f" ] && continue

@@ -1143,6 +1143,7 @@
 {"area": "bench", "file": "conveyor/bench/arms/superpowers.json"}
 {"area": "bench", "test": "swebench.test.sh"}
 {"area": "bench", "test": "swebenchshow.test.sh"}
+{"area": "bench", "test": "swebenchver.test.sh"}
 {"area": "busy", "test": "swebench.test.sh"}
 {"area": "snapshot", "test": "swebench.test.sh"}
 {"area": "snapshot", "test": "rollout.test.sh"}
