@@ -103,7 +103,8 @@
       "asked-fix",
       "review-followup",
       "release-check",
-      "fixed-block"
+      "fixed-block",
+      "review-retry"
     ]
   }
 }
