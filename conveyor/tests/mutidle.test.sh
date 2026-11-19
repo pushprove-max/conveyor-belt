@@ -17,7 +17,8 @@ t_mutserve() {
   loop serve > "$STUB/serve.out" 2>&1 & mupid=$!; trap 'kill $mupid 2>/dev/null' EXIT
   wait_until "[ \"\$(cat '$ST/testactions/mutations/idle' 2>/dev/null)\" = '$(git -C "$R" rev-parse HEAD)' ]" "cat '$STUB/serve.out'; cat '$ST'/testactions/mutations/*.json" \
     || fail "the idle loop did not check its queue to the end"
-  [ "$(jq -cs 'map([.file, .state, .tried]) | sort' "$ST"/testactions/mutations/*.json)" = '[["k.test.sh","done",3],["s.test.sh","done",3]]' ] \
+  # a.test.sh, the per-file fixture's stub test file, sources nothing: its check is done with no mutant to try.
+  [ "$(jq -cs 'map([.file, .state, .tried]) | sort' "$ST"/testactions/mutations/*.json)" = '[["a.test.sh","done",0],["k.test.sh","done",3],["s.test.sh","done",3]]' ] \
     || fail "the idle loop did not check each test file once: $(cat "$ST"/testactions/mutations/*.json)"
   kill $mupid; wait $mupid 2>/dev/null; return 0
 }
