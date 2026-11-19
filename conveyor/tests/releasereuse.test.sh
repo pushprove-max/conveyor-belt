@@ -47,8 +47,6 @@ rrprep() {
 # changes src/s3.sh, which the changed-tests command maps to t/f3: only t/f1 and t/f3 run (t/f2's pass is kept), a pass
 # is posted on B, the record names the run reused and the files rerun, and `release` takes the pass and releases B with
 # no suite run.
-# other file passed on the commit before. Here B changes t/f1 alone: only t/f1 runs, a pass is posted on B, the record
-# names the run reused and the file rerun, and `release` takes the pass and releases B with no suite run.
 # Bug (#44, D2): Push landed ran the whole suite on a commit release-prep had just passed. Before the release, B is made
 # an unpushed landing (origin put back on A, a card's landed line naming B): Push landed runs no test and pushes B.
 t_relreusefail() {
@@ -60,8 +58,6 @@ t_relreusefail() {
   grep -q "statuses/$B -f state=success -f context=conveyor/release-suite " "$STUB/gh-calls" || fail "no passing status was posted on B: $(cat "$STUB/gh-calls")"
   jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh", "t/f3.test.sh"], kept: 1}' "$RUN" > /dev/null \
     || fail "the record does not name the run reused and the files rerun: $(cat "$RUN")"
-  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh"], kept: 2}' "$RUN" > /dev/null \
-    || fail "the record does not name the run reused and the file rerun: $(cat "$RUN")"
   git -C "$T/$CASE/origin" update-ref refs/heads/main "$A" && git -C "$R" update-ref "refs/remotes/origin/main" "$A" \
     && rm -f "$ST/pushed" && landed 7 | jq -c --arg b "$B" '.sha = $b' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
   rm -f "$STUB/ran"
