@@ -462,7 +462,8 @@ t_since() {
   setup '[]'; touch "$ST/cards.jsonl" "$ST/retried.jsonl"
   { issue 1 2026-01-01T00:00:00Z; issue 2 2026-01-02T00:00:00Z; } | jq -cs . > "$STUB/issues.json"
   on() { local t=$1; shift; CONVEYOR_NOW=$(date -u -d "$t" +%s) loop "$@"; }
-  at() { on "$1" snapshot; }
+  # --fresh: each snapshot is built at its own time; a kept one (a few seconds old) still holds the earlier holds.
+  at() { on "$1" snapshot --fresh; }
   col() { jq -c "$1 | map([.issue, .since])"; }
   # First sight, with no times kept: both are dated by that snapshot, not by when each was opened.
   out=$(at 2026-10-01); [ "$(col .queue.order <<<"$out")" = '[[1,"2026-10-01T00:00:00Z"],[2,"2026-10-01T00:00:00Z"]]' ] || fail "first sight: $out"

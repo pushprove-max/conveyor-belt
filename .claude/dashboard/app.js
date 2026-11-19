@@ -1866,7 +1866,7 @@
   // with same(body, data, ctx) is told that part came again (the Board weighs a snapshot by when it was begun,
   // so one equal to a snapshot it turned away is still news to it). A panel that throws shows its own error and takes
   // no other panel with it. It does not cut the panel to its length: each caller runs arrange() or arrangeSoon() after
-  // it, which cuts every panel of the tab in one read pass and one write pass (a cut here laid the page out once a panel).
+  // it, which cuts every panel of the tab in one read round and one write round (a cut here laid the page out once a panel).
   function draw(p, part) {
     // A panel with older entries is drawn whole when a newer history has come, or when it is time to read it again.
     if (typeof p.mod.older === 'function' && (p.hist !== histVer || histDue())) p.json = undefined;

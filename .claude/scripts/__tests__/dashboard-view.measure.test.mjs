@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// One measure pass a frame (issue 498): a read of the layout after a write lays the page out again, so each read the
+// One measure round a frame (issue 498): a read of the layout after a write lays the page out again, so each read the
 // page makes is a layout the owner waits for while they scroll. A refresh measures each cut panel once, in arrange();
 // the feed's events of one version draw the tabs and the head once, at the next frame; the head is measured only when
 // what it shows changed; a feed that opens or closes draws Health alone. Shared setup: dashboard-view.helpers.mjs.
@@ -44,7 +44,7 @@ test('a refresh measures the rows of each cut panel once, in arrange(), not also
     const rows = asked.filter((el) => el !== body(w, id) && body(w, id).contains(el)).length;
     assert.equal(rows, 1, `${id}'s rows are measured once: ${rows}`);
   }
-  assert.deepEqual(seen, [3, 3, 3], 'each read comes after all three panels were drawn: the arrange() pass');
+  assert.deepEqual(seen, [3, 3, 3], 'each read comes after all three panels were drawn: the arrange() round');
 });
 
 test('the feed\'s events of one version draw the head once, at the next frame; an event for another tab measures nothing; a new Density fits it again', () => {
