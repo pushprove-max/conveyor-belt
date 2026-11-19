@@ -558,8 +558,9 @@ swe_arms() { # [check [--settings <json>] <arm>... | save <name> <spec json> | s
     [ $# -gt 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
     local names=() as=() qs=() fs=() fds=() js=() x=() since i SWE_CKF='' SWE_CKFD='' SWE_CKID='' SWE_CKPREP='' SWE_CKIMG='' SWE_CKWHY=''
     mapfile -t names < <(printf '%s\n' "$@" | awk '!s[$0]++')
-    # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run.
-    for n in "${names[@]}"; do a=$(swe_arm "$n") || continue; case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
+    # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run. An arm
+    # or saved revision that is not there refuses the whole request, as a run's does, before any check is admitted.
+    for n in "${names[@]}"; do a=$(swe_arm "$n") || { echo "conveyor: no arm $n: \`conveyor.sh bench swe arms\` lists them" >&2; return 1; }; case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
     ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no preflight starts while it stands" >&2; return 1; }
     # Each arm's check is admitted at once, its record written (checking) before any setup, and its ID printed: an arm
     # whose check runs now (another request's) waits for it. A conveyor arm checks on main's engine (its key names it;

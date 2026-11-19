@@ -69,8 +69,9 @@ Each key is optional. A key that you leave out keeps its value in `conveyor/benc
 The run records its settings in its line in the run history. `conveyor.sh bench swe arms check --settings <json>
 <arm>...` runs the preflights with the same settings.
 
-Before it starts, a run prints the sessions it usually takes and the worst case, and the minutes it is expected to
-take. A run does not start while the usage guard (`conveyor.sh control guard`, in [the control
+When a run has recorded its start, it prints `conveyor: run <run ID> started`. A run that reuses the kept result of
+each of its tasks does not print this line. Before its first task, it prints the
+sessions it usually takes and the worst case, and the minutes it is expected to take. A run does not start while the usage guard (`conveyor.sh control guard`, in [the control
 record](configuration.md#the-control-record)) is reached, and it stops before the next task when the guard is reached
 during the run. The guard reads the Claude account, so it does not stop an arm that does not use the Claude login.
 `conveyor.sh bench swe stop` ends a run.
@@ -225,7 +226,8 @@ conveyor.sh bench swe arms check codex-sol caveman
 ```
 
 The first command lists each arm with the state of its last preflight. The second runs the preflight of the arms that
-you name. It does not start while the usage guard is reached, unless no arm that you name uses the Claude login.
+you name. It does not start while the usage guard is reached, unless no arm that you name uses the Claude login. It
+does not start when an arm or saved arm that you name is not on this machine.
 
 The check prints `<arm>: checking <check ID>` for each arm when it starts, then `<arm>: ready` or
 `<arm>: failed: <why>` when it ends. A Conveyor arm is checked on main's engine. While a check runs, the list, the

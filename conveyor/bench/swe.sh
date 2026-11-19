@@ -474,7 +474,7 @@ swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] 
 # tasks. Each arm is picked only once its preflight passed (swe_ready) and, for a conveyor arm, the area rule files
 # its cards of these tasks read are there (swe_taskrules).
 swe_run() { # <n> <engine> <arm>...
-  local n=$1 eng0=$2 tf all i t id r x a l gc='' ga='' why ctxs=() specs=() plan='[]' ra tag SWE_TASK=''
+  local n=$1 eng0=$2 tf all i t id r x a l left gc='' ga='' why ctxs=() specs=() plan='[]' ra tag SWE_TASK=''
   shift 2
   mkdir -p "$SWE_DIR" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7 || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
   for x; do a=$(swe_arm "$x") || { echo "conveyor: no arm $x: \`conveyor.sh bench swe arms\` lists them" >&2; return 2; }
@@ -506,6 +506,11 @@ swe_run() { # <n> <engine> <arm>...
        cols: ($c | map({arm, key, label, kind, engine, version, model})), set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}),
        done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []}')"
   swe_board; swe_event 'Run started'
+  # The run's receipt, once its record is written: the Board's Start answers it. A run that reuses the saved result
+  # of each of its tasks prints none, so Start waits for its end and answers its result.
+  left=''; for x in "${ctxs[@]}"; do swe_use "$x"
+    while IFS= read -r id; do swe_reused "$id" || { left=1; break; }; done < <(head -n "$n" "$tf" | jq -r .id); [ -z "$left" ] || break; done
+  [ -z "$left" ] || echo "conveyor: run $SWE_RUN started"
   trap 'pkill -TERM -P $$ 2>/dev/null; swe_end stopped; exit 143' TERM INT
   for x in "${ctxs[@]}"; do
     swe_use "$x"; swe_phase Checking

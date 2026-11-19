@@ -775,8 +775,11 @@ written by one model call from those facts only. No task runs again.
 You can pick only an arm whose preflight passed. An arm that is not checked yet or that changed has **Check**. An arm
 that failed, or whose last pass expired, has **Check again**. Each runs the arm's preflight on the build machine. While
 the check runs, the arm shows **Checking** and the step that the check is at, and the page reads the arms again every
-few seconds until the check ends. The answer to a check shows inside its arm: sending, the reason when it is refused, or that it
-started. When the check ends, it says that the check passed, or that it failed and why. Before you click **Start**,
+few seconds until the check ends. The answer to a check shows inside its arm: sending, the reason when it is refused, or the
+ID of the check once the build machine has recorded it. When the check ends, it says that the check passed, or that it
+failed and why. The answer to **Start** is the ID of the run once the build machine has recorded it, or the reason when
+the build machine refuses the run. A run whose tasks all have kept results gives no ID: its answer is its result, when the run ends.
+The build machine refuses a check or a run that names a saved arm it does not have. Before you click **Start**,
 the page shows the usual and worst-case sessions, the minutes and the cost of each arm, for the tasks it did not run
 on that version before. With no arm picked, it says "Choose an arm to see the estimate." and shows no figures. The cost is an estimate at list prices: each session costs the mean of this project's own
 priced card sessions, or of those on the arm's model when the arm has a model. An arm with no priced session of its

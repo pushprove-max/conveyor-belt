@@ -204,9 +204,10 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
-# or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight and Compare: `conveyor.sh bench swe <n>
-# [--solo | [--arm <arm>]... [--engine <version>]] | stop | versions | arms check <arm>... | diff <A> <B> [--json]`; an
-# admin's alone),
+# or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved and Compare: `conveyor.sh
+# bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings <json>] | stop | versions | arms check
+# [--settings <json>] <arm>... | arms save <name> <spec json> | diff <A> <B> [--json]`, an arm being a host arm's name or
+# a saved revision's ID; Start and a check answer their receipt; an admin's alone),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
@@ -250,6 +251,85 @@ BENCH_SIDE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,119}')
 BENCH_ARM = re.compile(r'[a-z0-9][a-z0-9-]{0,63}')  # an arm's name, as bench swe's swe_arm takes it
 BENCH_ARMS_MAX = 20  # the arms one Start or one preflight check names
 BENCH_RUN = re.compile(r'r[0-9]{8}T[0-9]{6}-[0-9]{1,10}')  # a run's id, as bench swe show takes it (GET /bench)
+BENCH_ARMID = re.compile(r'arm-[0-9a-f]{12}')  # a saved arm's revision ID, as bench swe arms save prints it
+# A Start's or a check's --settings and a saved arm's spec are each one JSON object sent as one argument, of at most
+# BENCH_JSON_MAX characters. Their fields are checked here as bench swe's swe_settings and swe_armsave check their shape;
+# the engine still checks what only the build machine knows (its CPUs and memory, the models the project allows).
+BENCH_JSON_MAX = 4096
+BENCH_CPUS_MAX = 1024
+BENCH_MEMORY = re.compile(r'([1-9][0-9]{0,6})([mg])')
+BENCH_SETTINGS = frozenset({'revision', 'seed', 'cpus', 'memory', 'taskTimeout'})
+BENCH_SEATS = frozenset({'model', 'reviewer', 'judge', 'fix', 'testFix'})
+BENCH_POLICY = frozenset({'judgeOn', 'judgeAlways', 'P0', 'P1', 'P2', 'P3'})
+CONTROL_CHAR = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def bench_json(x):
+    """The JSON object one argument holds, or None: another value, NaN or Infinity, or over BENCH_JSON_MAX characters."""
+    def refuse(c):
+        raise ValueError(c)
+    if not isinstance(x, str) or len(x) > BENCH_JSON_MAX:
+        return None
+    try:
+        v = json.loads(x, parse_constant=refuse)
+    except (ValueError, RecursionError):
+        return None
+    return v if isinstance(v, dict) else None
+
+
+def bench_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def bench_settings_ok(x):
+    """Whether x is the settings a Start or a check shares (swe_settings): an object of revision (a full commit id),
+    seed (1 to 80 characters, no control character), cpus (above 0), memory (<n>m or <n>g, 512m or more) and
+    taskTimeout (a whole number of seconds, 60 to 86400), each optional, and nothing else."""
+    s = bench_json(x)
+    if s is None or not set(s) <= BENCH_SETTINGS:
+        return False
+    m = BENCH_MEMORY.fullmatch(s['memory']) if isinstance(s.get('memory'), str) else None
+    t = s.get('taskTimeout', 60)
+    return (('revision' not in s or (isinstance(s['revision'], str) and re.fullmatch(r'[0-9a-f]{40}', s['revision']) is not None))
+            and ('seed' not in s or (isinstance(s['seed'], str) and 1 <= len(s['seed']) <= 80 and not CONTROL_CHAR.search(s['seed'])))
+            and ('cpus' not in s or (bench_number(s['cpus']) and 0 < s['cpus'] <= BENCH_CPUS_MAX))
+            and ('memory' not in s or (m is not None and int(m[1]) * (1024 if m[2] == 'g' else 1) >= 512))
+            and bench_number(t) and 60 <= t <= 86400 and t == int(t))
+
+
+def bench_one_of(v, words):
+    """Whether v is one of the words (a list or an object is none of them, never a TypeError)."""
+    return isinstance(v, str) and v in words
+
+
+def bench_seat_ok(v):
+    """One seat of a saved Conveyor arm: {cli, model, effort}, effort optional."""
+    return (isinstance(v, dict) and set(v) <= {'cli', 'model', 'effort'} and bench_one_of(v.get('cli'), CLIS)
+            and isinstance(v.get('model'), str) and MODEL.fullmatch(v['model']) is not None and bench_one_of(v.get('effort', 'low'), EFFORTS))
+
+
+def bench_spec_ok(name, x):
+    """Whether name and x are a saved arm's (`bench swe arms save`, swe_armsave): a name of 1 to 80 characters with no
+    control character and no space at either end, and a spec of {kind: "conveyor", seats, rules, policy} or {kind:
+    "agent", recipe, cli, model, effort}, with no other field."""
+    if not (isinstance(name, str) and 1 <= len(name) <= 80 and name == name.strip() and not CONTROL_CHAR.search(name)):
+        return False
+    s = bench_json(x)
+    if s is None:
+        return False
+    if s.get('kind') == 'conveyor':
+        seats, policy = s.get('seats', {}), s.get('policy', {})
+        return (set(s) <= {'kind', 'seats', 'rules', 'policy'} and s.get('rules', 'engine') in ('engine', 'project')
+                and isinstance(seats, dict) and set(seats) <= BENCH_SEATS and all(bench_seat_ok(v) for v in seats.values())
+                and isinstance(policy, dict) and set(policy) <= BENCH_POLICY
+                and all(isinstance(v, bool) for k, v in policy.items() if k != 'judgeAlways')
+                and (lambda j: isinstance(j, list) and len(j) <= KINDS_MAX and all(isinstance(w, str) and KIND.fullmatch(w) for w in j))(policy.get('judgeAlways', [])))
+    if s.get('kind') == 'agent':
+        return (set(s) <= {'kind', 'recipe', 'cli', 'model', 'effort'} and isinstance(s.get('recipe'), str)
+                and BENCH_ARM.fullmatch(s['recipe']) is not None and BENCH_ARMID.fullmatch(s['recipe']) is None
+                and s.get('cli') in ('claude', 'codex') and isinstance(s.get('model'), str) and MODEL.fullmatch(s['model']) is not None
+                and bench_one_of(s.get('effort', 'low'), EFFORTS))
+    return False
 # every other action: 30 s. start outlasts conveyor.sh's 60 s `timeout 60 gh issue list` (control start), so the
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
@@ -551,16 +631,27 @@ def control_ok(body):
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testmap':  # the Tests page's Build the test map, or its Stop
         return v in (['build'], ['stop'])
-    if a == 'bench':  # the Benchmarks tab: Start (n, then --solo, or arms and a version), Stop, List versions, an arm's preflight, Compare (two versions or results keys)
+    if a == 'bench':  # the Benchmarks tab: Start (n, then --solo, or arms and a version, then the shared settings), Stop, List versions, an arm's preflight, an arm saved, Compare (two versions or results keys)
         if v in (['stop'], ['versions']):
             return True
         if v[:1] == ['diff']:
             return n in (3, 4) and all(BENCH_SIDE.fullmatch(x) for x in v[1:3]) and v[3:] in ([], ['--json'])
+        if v[:2] == ['arms', 'save']:
+            return n == 4 and bench_spec_ok(v[2], v[3])
         if v[:2] == ['arms', 'check']:
-            return 3 <= n <= 2 + BENCH_ARMS_MAX and all(BENCH_ARM.fullmatch(x) for x in v[2:])
+            arms = v[2:]
+            if arms[:1] == ['--settings']:
+                if not (len(arms) >= 2 and bench_settings_ok(arms[1])):
+                    return False
+                arms = arms[2:]
+            return 1 <= len(arms) <= BENCH_ARMS_MAX and all(BENCH_ARM.fullmatch(x) for x in arms)
         if not (n >= 2 and v[0] == 'run' and BENCH_N.fullmatch(v[1]) is not None and int(v[1]) <= 500):
             return False
         rest, arms = v[2:], 0
+        if rest[-2:-1] == ['--settings']:
+            if not bench_settings_ok(rest[-1]):
+                return False
+            rest = rest[:-2]
         if rest == ['--solo']:
             return True
         while rest[:1] == ['--arm'] and len(rest) >= 2 and BENCH_ARM.fullmatch(rest[1]) is not None:
@@ -759,15 +850,24 @@ def control_script(action, args, main, today, record=None, user=None):
         return '%s auto standing %s %s' % (conv, q(args[0]), q(args[1]))
     if action == 'bench':
         if args[0] == 'run' or args[:2] == ['arms', 'check']:
-            # A run takes hours, and an arm's preflight minutes: it starts on the host and goes on after the answer. One
-            # the engine refuses at once (a run already going, the usage guard reached, a version it cannot take)
-            # answers its refusal on stderr, the stream the handler reads when a script fails; one that ends well at
-            # once (all its results saved before) answers its summary on stdout, the stream the handler reads when a
-            # script succeeds.
-            what, rest = ('the SWE-bench run', args[1:]) if args[0] == 'run' else ("the arms' preflights", args)
-            return ('l=$(mktemp) || exit 1; %s bench swe %s > "$l" 2>&1 < /dev/null & p=$!; sleep 3; '
-                    'if kill -0 "$p" 2>/dev/null; then rm -f "$l"; echo "conveyor: %s started"; '
-                    'else wait "$p"; r=$?; if [ "$r" = 0 ]; then cat "$l"; else cat "$l" >&2; fi; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in rest), what)
+            # A run takes hours, and an arm's preflight minutes: it starts on the host and goes on after the answer. The
+            # answer is its receipt, the lines the engine prints once it has recorded the admission: a run's
+            # "conveyor: run <id> started", and for each arm checked "<arm>: checking <check id>" (or "<arm>: waiting
+            # ...", behind another request's check). One the engine ends before that (a run already going, the usage
+            # guard reached, an arm or saved revision not there, a version it cannot take) answers its refusal on
+            # stderr, the stream the handler reads when a script fails; one that ends well with no receipt (a run that
+            # reuses each task's saved result prints none) answers its output on stdout, the stream the handler reads
+            # when a script succeeds. Once the receipt is printed, the answer is the receipt alone, whether or not the
+            # work has ended since: its end is in its record, so the answer does not depend on when the poll reads the log.
+            if args[0] == 'run':
+                rest, said = args[1:], "grep -E '^conveyor: run r[0-9]{8}T[0-9]{6}-[0-9]+ started$' \"$l\""
+            else:
+                names = args[4:] if args[2:3] == ['--settings'] else args[2:]
+                rest, said = args, ' && '.join("grep -E '^%s: (checking|waiting) ' \"$l\"" % x for x in dict.fromkeys(names))
+            return ('l=$(mktemp) || exit 1; %s bench swe %s > "$l" 2>&1 < /dev/null & p=$!; '
+                    'while kill -0 "$p" 2>/dev/null && ! { %s; } > /dev/null; do sleep 0.2; done; '
+                    'if a=$(%s); then printf "%%s\\n" "$a"; rm -f "$l"; '
+                    'else wait "$p"; r=$?; if [ "$r" = 0 ]; then cat "$l"; else cat "$l" >&2; fi; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in rest), said, said)
         return '%s bench swe %s' % (conv, ' '.join(q(x) for x in args))
     if action in ('testaction', 'testrules', 'testmap'):
         # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's;
@@ -1832,8 +1932,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if err:
                 return self.reply(*err)
             said = (run.stdout.strip().splitlines() or ['done'])[-1]
-        # Compare's answer is the whole comparison (totals, the tasks, each flipped task's facts); the ruling row keeps its last line.
-        answer = run.stdout.strip() if results is None and action == 'bench' and args[:1] == ['diff'] and run.stdout.strip() else said
+        # Compare's answer is the whole comparison (totals, the tasks, each flipped task's facts); a Start's and a check's
+        # is every line of their receipt, or of their end when it came first; the ruling row keeps its last line.
+        whole = action == 'bench' and (args[:1] in (['diff'], ['run']) or args[:2] == ['arms', 'check'])
+        answer = run.stdout.strip() if results is None and whole and run.stdout.strip() else said
         try:  # the ruling row names the Board user who did it, as /answer's does
             log_ruling('Board control: %s' % ' '.join([action] + args), said, user)
         except OSError:

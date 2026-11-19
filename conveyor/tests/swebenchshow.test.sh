@@ -118,6 +118,13 @@ t_swearmsaverun() {
   id=$(loop bench swe arms save 'Codex builds' '{"kind":"conveyor","seats":{"model":{"cli":"codex","model":"xb"}}}' 2>&1) || fail "the arm was not saved: $id"
   o=$(loop bench swe 1 --arm "$id" 2>&1) || fail "the saved arm's run failed: $o"
   grep -q "^Resolved 1 of 1 with Codex builds on engine main ($EB); not run: 0\.$" <<<"$o" || fail "the saved arm did not run under its name: $o"
+  # Bug (#640): the Board's Start had no receipt of the run it started, only a guess that its process still ran; the
+  # run prints its id once its record is written.
+  [ "$(head -n 1 <<<"$o")" = "conveyor: run $(tail -n 1 "$B/runs.jsonl" | jq -r .id) started" ] || fail "the run printed no receipt of its record first: $o"
+  # Bug (#640): a check that named a saved revision not there still admitted and ran the other arms' checks, so the
+  # Board's request neither failed nor got every receipt; it is refused whole, no check admitted.
+  o=$(loop bench swe arms check "$id" arm-ffffffffffff 2>&1) && fail "a check of an unknown revision was taken: $o"
+  [ "$o" = 'conveyor: no arm arm-ffffffffffff: `conveyor.sh bench swe arms` lists them' ] || fail "the check of an unknown revision admitted another arm's: $o"
   jq -e '.model == {cli: "codex", model: "xb"}' "$SWE_FX/control.seen" > /dev/null || fail "the engine was not given the saved arm's builder: $(cat "$SWE_FX/control.seen")"
   [ "$(jq -c .models.allowed "$SWE_FX/pack.seen")" = "$(jq -c .models.allowed "$R/.conveyor/project.json")" ] \
     || fail "the saved arm changed the sandbox's allowed models: $(jq -c .models.allowed "$SWE_FX/pack.seen")"
@@ -167,6 +174,9 @@ t_swesettings() {
 t_swereuse() {
   swe; local o first; first=$(sweorder | head -n 1)
   o=$(loop bench swe 1 2>&1) && o=$(loop bench swe 1 2>&1) && grep -q "^1/1 $first: resolved (reused)$" <<<"$o" || fail "the unchanged arm's result was not reused: $o"
+  # Bug (#640): a run that reused every result printed its receipt, so the Board's Start answered the receipt and not
+  # the result. It prints none: Start waits for its end and answers its result.
+  ! grep -q '^conveyor: run .* started$' <<<"$o" && grep -q '^Resolved 1 of 1 with ' <<<"$o" || fail "the run of reused results printed a receipt, or no result: $o"
   jq -c '.model.effort = "high"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
   o=$(loop bench swe 1 2>&1) && grep -q "^1/1 $first: resolved$" <<<"$o" || fail "a run on another builder effort returned the former result: $o"
 }
