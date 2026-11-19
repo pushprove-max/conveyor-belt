@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 60
+# timeout: 300
 # Engine cases: the list a batch's test run is given (batchlist()) names a file whose cases cannot run apart as one
-# `pass` line. The case calls batchlist() itself: what it proves is the list, not a whole batch run (the fixture of
-# batchreuse.test.sh, reusesetup, paid 14 CPU s for the same answer).
+# `pass` line. t_batchreusewhole calls batchlist() itself: what it proves is the list, not a whole batch run.
+# t_batchreuseshared is a whole batch run (the fixture of batchreuse.test.sh, reusesetup): what the batch's run runs
+# and keeps, and that both cards land as one batch.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -24,5 +25,22 @@ t_batchreusewhole() {
     units: ["s.test\ts1", "x.test\tx1", "x.test\tx2", "y.test\ty1", "y.test\ty2", "z.test\tz1", "z.test\tz2"], kept: 5, all: false}')
   ( eval "$(sed -n '/^batchlist() {/,/^}/p' "$SRC/lib/claim.sh")"; batchlist "$wt" "$keep" ) || fail "batchlist failed"
   list=$(grep -Ev $'^(change|base|tree)\t' "$wt.rerun" | tr '\t\n' ' ,')
-  [ "$list" = "pass x.test,pass y.test,ok z.test z1," ] || fail "the batch's list does not pass x.test whole, or names s.test: $list"
+  [ "$list" = "pass x.test,pass y.test,ok z.test z1," ] || fail "the batch's list is not pass x.test, pass y.test and z.test's kept case z1 alone (it names x.test or y.test by case, names s.test or z2, or leaves one out): $list"
+}
+
+# A file whose cases cannot run apart (x.test, named in $STUB/whole, as the engine's own closure.test.sh) honours only
+# a `pass` line. #7 passed x.test whole, its log naming each case (`ok x1`, `ok x2`), and no other card selects it:
+# the batch's list says x.test passed, so the run runs s.test's shared case alone, which both cards select (a.txt,
+# which both change, selects it), not y.test's, which #8 passed alone; #7's test line says one case ran and four were
+# kept. Bugs it catches: the list named x.test's cases as `ok` lines alone, and the run ran x.test whole again; the
+# batch's run ran a case a card passed alone again, or skipped the case both cards select.
+t_batchreuseshared() {
+  reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'a.txt s.test' 'x.txt x.test' 'y.txt y.test'
+  echo x.test > "$STUB/whole"
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  c7=$(cardof 7); c8=$(cardof 8)
+  [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1," ] || fail "the batch's run did not run s1 alone (it ran again x.test, which #7 passed whole, or y.test, which #8 passed, or skipped s1, which both cards select): $(runs)"
+  landedtogether "$c8 $c7" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
+  [ "$(st 'select(.issue == 7 and .step == "test") | [.result, .selected.cases, .selected.kept] | tojson' | tail -n 1)" = '["pass",1,4]' ] \
+    || fail "#7's last test line does not say one case ran and four passes were kept: $(st 'select(.issue == 7 and .step == "test")')"
 }
