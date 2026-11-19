@@ -169,12 +169,16 @@ test('Compare: two arms of the runs selected, the flipped tasks with where they 
   act(bp(w), 'compare').click();
   assert.equal(text(said()), 'Wait for the answer to the last action.');
   assert.equal(w.posts.splice(0).length, 1, 'the second click sends nothing');
-  // A reply swe_diff can give: with no task flipped, both arms resolved the same tasks.
-  answer(BH.reply(JSON.stringify({ a: { version: A, totals: { resolved: 11 } }, b: { version: B2, totals: { resolved: 11 } }, tasks: 20, flipped: [] })));
+  // A reply swe_diff can give: with no task flipped, both arms resolved the same tasks, and equal totals are
+  // withinNoise: true (swe.sh's swe_diff). Bug it guards (#653): the fixture left withinNoise out, so the page said a
+  // difference of 0 was "past the noise", which swe_diff never says.
+  answer(BH.reply(JSON.stringify({ a: { version: A, commit: EB, totals: { resolved: 11 } }, b: { version: B2, commit: null, totals: { resolved: 11 } }, tasks: 20, same: [], flipped: [], withinNoise: true })));
   await settle();
   assert.equal(text(said()), 'Compared.');
   assert.equal(text(bp(w).querySelector('.bench-compare .bench-headline')),
     `On the 20 tasks both ran: ${A} resolved 11, ${B2} 11. 0 tasks flipped to ${A}, 0 the other way, 11 resolved by both, 9 by neither.`, 'the first reply is shown');
+  assert.equal(text(bp(w).querySelector('.bench-compare > .board-from')),
+    'With 20 tasks a difference under 7 tasks is within the noise. This difference is 0: within the noise.');
 });
 
 // Bug it guards: Start offered Conveyor or Claude alone only, with no arm's preflight state, so an arm that cannot run
