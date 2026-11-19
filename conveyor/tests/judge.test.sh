@@ -484,6 +484,21 @@ t_minoroff() {
     || fail "the review does not list and count the accepted P3: $(jr 7) $(jf 7 .)"
 }
 
+# Bug: card() runs the judge, minor() and the verdict in the wrong order or skips one, so an accepted P3 on a P3-off
+# card costs a fix round, a follow-up, or is missing from the landed card's review line. A whole card run, because
+# t_minoroff calls those functions in its own order: only card() shows the order they run in on a card.
+t_minoroffrun() {
+  judging "[$(issue 7 2026-01-01 P1)]"
+  loop control rules P3=off >/dev/null || fail "control rules P3=off was refused"
+  printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  echo 'F1 ACCEPT: the name misleads the next reader. Cost to every card: none' > "$STUB/judge.1"
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(rev 7 .result | tr '\n' ' ')" = "GO " ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ ! -e "$STUB/filed" ] \
+    || fail "an accepted P3 with the rule P3 off made a NO-GO, a fix round or a follow-up: $(rev 7 .result | tr '\n' ' '), $(wc -l < "$STUB/sessions") sessions"
+  rev 7 .reason | grep -qxF "MINOR: $MINOR3" && [ "$(rev 7 '.counts.P3')" = 1 ] && [ "$(rev 7 '.judge.accepted[0].finding')" = "$MINOR3" ] \
+    || fail "the landed card's review line does not list and count the accepted P3: $(rev 7 '[.reason, .counts] | tojson')"
+}
+
 # Bug: a line the reviewer itself starts with `MINOR:` is taken as a P3 listed only, so a P1 written so counts for
 # nothing and the review is a GO.
 t_minorforged() {
