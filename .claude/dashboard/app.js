@@ -49,7 +49,7 @@
   const modules = new Map();
   const panels = new Map();
   const RETRY_MS = 15000;   // a live feed the server refused is asked for again after this
-  let layouts = {}, prefs = null, tab = 'overview', grid = null, loaded = false, failedLoads = 0, updatedAt = null, alive = null, aliveSeenAt = 0, view = null, dragging = null;
+  let layouts = {}, prefs = null, tab = 'overview', grid = null, loaded = false, failedLoads = 0, updatedAt = null, alive = null, aliveSeenAt = 0, aliveOld = false, view = null, dragging = null;
   // placed: the key of the layout last arranged and each panel's column then (arrange()).
   let arranging = false, queued = false, placed = null;
   // The live feed: the page server's /events. While it is open each change comes as it happens, one panel at a
@@ -1640,7 +1640,7 @@
       histText = text;
       hist = x.panels;
       histVer += 1;
-      // A page not shown draws it when shown again (redrawAll), as the panels' history version changed.
+      // A page not shown draws it when shown again (shownAgain()), as the panels' history version changed.
       if (!doc.hidden) drawOlder();
     }, () => {});
   }
@@ -2319,7 +2319,7 @@
     const el = byId('status'), up = byId('updated');
     let word = 'Loading', tone = 'quiet';
     const age = updatedAt === null ? null : now() - updatedAt;
-    if (alive !== null && now() - aliveSeenAt > ALIVE_MS) { word = 'Feed stopped'; tone = 'bad'; }
+    if (alive !== null && !aliveOld && now() - aliveSeenAt > ALIVE_MS) { word = 'Feed stopped'; tone = 'bad'; }
     else if (!loaded) { if (failedLoads) { word = 'No data'; tone = 'bad'; } }
     else if (age === null || age > STALE_MS || failedLoads > 1) { word = 'Stale'; tone = 'warn'; }
     // Live only while the feed sends each change; fresh data read from data.js at each refresh is Polling.
@@ -2412,21 +2412,26 @@
   function feedChanged(open) {
     if (feedOpen === open) return;
     feedOpen = open;
-    if (doc.hidden) return;  // shownAgain() draws every panel again
-    status();  // Live or Polling
     const hp = panels.get('health');
+    // Drawn anew when it is next drawn: now, when its tab opens, or when the page is shown again (shownAgain()).
+    if (hp) hp.json = undefined;
+    if (doc.hidden) return;
+    status();  // Live or Polling
     if (!loaded || !hp) return;
-    hp.json = undefined;  // on the other tab, it is drawn anew when that tab opens
     if (tabOf('health') !== tab) return;
     draw(hp, last.panels[partOf('health')]);
     arrangeSoon();
   }
-  // The page shown again: drawn once from what it kept while hidden.
+  // The page shown again: drawn once from what it kept while hidden. Only a panel whose part changed while hidden is
+  // drawn again (draw() leaves one with the part it drew as it is); a refresh skipped while hidden runs now, once.
   function shownAgain() {
     if (doc.hidden) return;
     if (grid && loaded) grid.setAttribute('aria-busy', 'false');
-    redrawAll();
+    if (last) idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[partOf(id)]));
+    drawHead();
+    arrangeSoon();
     drawTabs();
+    if (missed) { missed = false; aliveOld = true; refresh(); }
     tick();
   }
   // True when the page asked for the feed; false when this browser or address has none.
@@ -2475,15 +2480,21 @@
   }
   // waitFeed: the page's first refresh, with the feed just asked for: data.js is not read, as the feed's first
   // message has the whole of it; follow's error handler reads it if the feed does not open.
+  // A hidden page reads nothing (the feed stays open): missed asks shownAgain() for one refresh when it is shown.
+  // aliveOld: the heartbeat read before the page was hidden is old, not stopped: status() does not judge the feed by it
+  // until the refresh run when shown has read alive.js again (or failed to).
+  let missed = false;
   function refresh(waitFeed = false) {
+    if (doc.hidden) { missed = true; return; }
     if (!feedOpen && !waitFeed) readData();
     script('alive.js', () => {
+      aliveOld = false;
       const a = window.DASH_ALIVE;
       if (!a || typeof a !== 'object' || parse(a.at) === null) return;
       if (alive === null || a.at !== alive.at) aliveSeenAt = now();
       alive = a;
       if (typeof a.view === 'string') { if (view === null) view = a.view; else if (a.view !== view) { newer = true; newView(); } }
-    });
+    }, () => { aliveOld = false; });
   }
   // A page left open picks up a newer copy of itself, but only when the owner loses nothing by it: no focused field,
   // no field with text the owner typed, no two-click button or question that waits for its second click, no request
