@@ -186,10 +186,13 @@ latestart() {
   mark() { jq -cn --arg c "c$1" --argjson i "$1" --arg s "$2" --arg t "$3" --arg r "$4" --arg sha "${5:-}" '{card:$c,issue:$i,step:$s,time:$t,tokens:{claude:0,codex:0},result:$r,sha:$sha,reason:""}' >> "$S/cards.jsonl"; }
   after() { q '[.belt[] | select(.landed) | [.card, .step, .track.detailAt, .track.label, (.track.detail[14:16] | map(.state[0:1]) | join("")), .track.steps[5].state[0:1], .track.reason]]'; }
 }
-# One read: a card that lands while the snapshot is built (here as health asks gh) is in no part of that snapshot.
+# One read: a card that lands while the snapshot is built (here just after the state database wrote the snapshot's copy of the records, before the rows, health and the prices are read) is in no part of that snapshot. Not as health asks gh: the snapshot asks GitHub before its build begins (snapask), so a card landed then is in the whole snapshot.
 t_snapshotlate() { local -x FILEMODE=1; latestart
-  echo '[ -e "$STUB/was-late" ] || { cat "$STUB/late" >> "$ST/cards.jsonl"; : > "$STUB/was-late"; }' > "$STUB/status-cmd"
-  out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot exited non-zero when a card landed as it was built"
+  # The hooks below are exported bash functions, not programs on PATH: on macOS p_path puts Homebrew's python3 and df
+  # first on PATH, so a stub there is never run; the engine's bash runs a function of that name before any program.
+  out=$(python3() { command python3 "$@"; local rc=$?; case "$*" in *state.py*" -o "*" lines cards -- "*) [ -e "$STUB/was-late" ] || { cat "$STUB/late" >> "$ST/cards.jsonl"; : > "$STUB/was-late"; } ;; esac; return $rc; }
+    export -f python3; loop snapshot --fresh 2>/dev/null) || fail "snapshot exited non-zero when a card landed as it was built"
+  [ -e "$STUB/was-late" ] || fail "the late landing's hook never ran in the snapshot"
   grep -q '"card":"c5".*"landed"' "$S/cards.jsonl" || fail "the test's late landing was not written"
   [ "$(q '[(.belt | map(.card) | index("c5") != null), (.landed | map(.card)), (.health.unpushed | map(.card)), .health.newest[11:16]]')" = '[true,["c10","c9","c13"],["c10"],"00:05"]' ] \
     || fail "a card that landed while the snapshot was built is in part of it: $out"
@@ -197,8 +200,8 @@ t_snapshotlate() { local -x FILEMODE=1; latestart
     || fail "the next snapshot does not hold the landed card whole: $out"
   # A blocked card given back with `retry` leaves the views; what it cost stays in today's and the week's dollars.
   [ "$(q '.cost | [.today, .week]')" = '[31,37]' ] || fail "cost before the retry: $(q .cost)"
-  loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"; echo '{ grep -c "made anew" "$STUB/err" || :; } >> "$STUB/said"' > "$STUB/status-cmd" # what the snapshot had said when health asked gh
-  out=$(loop snapshot --fresh 2>"$STUB/err") || fail "snapshot after a retry exited non-zero"; [ "$(sort -u "$STUB/said")" = 1 ] || fail "the snapshot after a retry rewrote the card records did not say it is made anew before health's long work, so a reader that stops it waits with no reason (#282): $(tr '\n' ' ' < "$STUB/said"), $(cat "$STUB/err")"
+  loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"; # what the snapshot had said when health read the free disk (df), in the build: gh is asked before the build begins
+  out=$(df() { { grep -c "made anew" "$STUB/err" || :; } >> "$STUB/said"; command df "$@"; }; export -f df; loop snapshot --fresh 2>"$STUB/err") || fail "snapshot after a retry exited non-zero"; [ "$(sort -u "$STUB/said")" = 1 ] || fail "the snapshot after a retry rewrote the card records did not say it is made anew before health's long work, so a reader that stops it waits with no reason (#282): $(tr '\n' ' ' < "$STUB/said"), $(cat "$STUB/err")"
   [ "$(q '[(.cost | del(.cards)), .needsYou.blocked, (.health.blocked | length), ([.belt[], .landed[]] | map(.card) | index("c8")), (.cost.cards[] | select(.card == "c8") | [.state, .today, .week])]')" \
     = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[]},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
   # The rest of a landed card's track. Cards 10 and 5 landed and are not at origin: both are on the belt, pushing.
