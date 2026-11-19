@@ -21,11 +21,16 @@
 #   card, what was seen, evidence path) before any check, so the finding outlives a refused or short reply. In the
 #   plugin's own repository (lib.sh plugin_home) the Foreman files it there itself, so a line that does not end
 #   "filed as #<n>" is refused too, at every stop of the turn (not only once, as the checks above are).
+# Each refused stop is noted in $FD/refused-stops (lib.sh refused_put), which waiter.sh reads.
 set -uo pipefail
 INPUT=$(cat)
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
 foreman "$(jq -r '.session_id // empty | strings' <<<"$INPUT" 2>/dev/null)" || exit 0
-block() { jq -cn --arg r "$1" '{decision: "block", reason: $r}'; exit 0; }
+# block <reason>: refuses the stop, noted by its stop_key (lib.sh), so the waiter relays again a wake it relayed at it.
+block() {
+  refused_put "$(stop_key "$(jq -r '.transcript_path // empty | strings' <<<"$INPUT" 2>/dev/null)")"
+  jq -cn --arg r "$1" '{decision: "block", reason: $r}'; exit 0
+}
 
 case ${1:-} in
   state)

@@ -226,3 +226,16 @@ pending_run() {
   done
   [ "$n" -gt 0 ]
 }
+# stop_key <transcript>: the uuid of the transcript's last assistant entry (the reply that stops), which names one stop:
+# every Stop hook of that stop reads the same, a later stop of the session a newer one. Empty with none.
+stop_key() {
+  [ -f "${1:-}" ] || return 0
+  grep -F '"type":"assistant"' "$1" | jq -r 'select(.type == "assistant") | .uuid // empty | strings' 2>/dev/null | tail -n 1
+}
+# Stops a hook refused (stop.sh), one stop_key a line, the last 20: the waiter reads it to know whether the stop at
+# which it relayed a wake ended a turn.
+REFUSED=$FD/refused-stops
+refused_put() { # <key>
+  [ -n "${1:-}" ] || return 0
+  { mkdir -p "$FD" && printf '%s\n' "$1" >> "$REFUSED" && tail -n 20 "$REFUSED" > "$REFUSED.$$" && mv -f "$REFUSED.$$" "$REFUSED"; } 2>/dev/null
+}

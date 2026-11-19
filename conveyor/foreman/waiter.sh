@@ -30,9 +30,11 @@
 # reply check (stop.sh) knows a turn a wake started. A relayed wake leaves pending only once it is on stderr: a kill
 # before that relays it again, never loses it. It is then kept as sent until a later stop shows the session got it
 # (issue 592): a stop that another hook refused (stop.sh) ends no turn, so the wake relayed at it, or by its waiter
-# during the turn it goes on with, is dropped with it. The next stop says so (stop_hook_active): it takes over the
-# waiter that runs, held or not, and relays the sent wakes again. A stop of the same session that follows no refused
-# stop drops them; a stop of another session (after a claim) relays them again, as the old session had them.
+# during the turn it goes on with, is dropped with it. The next stop follows a refused stop (stop_hook_active): it
+# takes over the waiter that runs, held or not, and relays the sent wakes again when stop.sh refused the stop they were
+# relayed at (refused-stops, lib.sh stop_key). Any other stop of the same session drops them: the stop the waiter
+# itself refused to relay them reached the session with them (issue 605). A stop of another session (after a claim)
+# relays them again, as the old session had them.
 # The waiter and its watchers run from the install the shim started it from (versions/<commit>). Once a minute it
 # reads the commit the project runs now (its pack's plugin.commit, else for a pack that follows the plugin its
 # conveyor-engine.json commit, as shim.sh reads them); when that is another installed commit, it stops its watchers
@@ -57,6 +59,9 @@ AFTER=$(jq -r '.stop_hook_active | booleans' <<<"$IN" 2>/dev/null)
 SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/waiter.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
 foreman "$SID" || exit 0
+# KEY: the stop this Stop hook runs at (stop_key), kept by a waiter that moved to a new install. Other hooks read none.
+KEY=''
+[ -n "$MODE" ] || KEY=${CONVEYOR_FOREMAN_STOP-$(stop_key "$(jq -r '.transcript_path // empty | strings' <<<"$IN" 2>/dev/null)")}
 # FROM: the commit of the install this copy runs from, by the path it was started by (the shim's, links not
 # followed); empty when it runs from a checkout, which never moves.
 VERSIONS=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions
@@ -180,6 +185,7 @@ deliver() {
   trap - PIPE
   live
   printf '%s\n' "$text" > "$FD/last-wake.txt"
+  printf '%s\n' "$KEY" > "$FD/sent-stop"
   while IFS= read -r f; do mv -f "$f" "$f.sent-$SID"; done < "$ACK"
   why='it delivered a wake'
 }
@@ -200,12 +206,18 @@ onterm() {
   kill "${sp:-}" 2>/dev/null; why="it was stopped (a claim, a stop that took over, or the end of its hook)"; stop_all; exit 0
 }
 trap onterm TERM HUP INT
-# The wakes relayed before (<wake>.sent-<session>, deliver): a stop of their session that follows no refused stop
-# drops them, as they reached it; any other stop puts them back in pending, so it relays them again.
+# The wakes relayed before (<wake>.sent-<session>, deliver, at the stop sent-stop names): a stop of another session,
+# or one that follows a refused stop when stop.sh refused the stop they were relayed at, puts them back in pending, so
+# it relays them again; any other stop of their session drops them, as they reached it.
 if [ -z "$MODE" ] && [ -n "$AFTER" ]; then
+  lost=false
+  if [ "$AFTER" = true ]; then
+    { read -r sent < "$FD/sent-stop"; } 2>/dev/null || sent=''
+    [ -z "$sent" ] || ! grep -qxF -- "$sent" "$REFUSED" 2>/dev/null || lost=true
+  fi
   for f in "$PENDING"/*.wake.sent-*; do
     [ -f "$f" ] || continue
-    if [ "$AFTER" = false ] && [ "${f##*.sent-}" = "$SID" ]; then rm -f "$f"; else mv -f "$f" "${f%.sent-*}"; fi
+    if [ "$lost" = false ] && [ "${f##*.sent-}" = "$SID" ]; then rm -f "$f"; else mv -f "$f" "${f%.sent-*}"; fi
   done
 fi
 [ -n "$MODE" ] || ! deliver || { rm -f "$ACK"; handoff; exit 2; }
@@ -244,7 +256,7 @@ while :; do
   # closes this waiter.lock, so its flock takes it; a held one keeps its fd 7), with this one's renew time.
   if new=$(moved); then
     stop_all; log "moves to the install $new"; trap - EXIT
-    CONVEYOR_FOREMAN_END=$end exec bash "$VERSIONS/$new/conveyor/foreman/waiter.sh" $MODE <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')"
+    CONVEYOR_FOREMAN_END=$end CONVEYOR_FOREMAN_STOP=$KEY exec bash "$VERSIONS/$new/conveyor/foreman/waiter.sh" $MODE <<<"$(jq -cn --arg s "$SID" '{session_id: $s}')"
   fi
   # The install it runs from is gone, with no other to move to: its watchers cannot be started again from it, so it
   # never runs on with one missing. One wake, then it ends; no handoff, as its own waiter.sh is gone too.

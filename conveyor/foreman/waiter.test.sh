@@ -10,7 +10,7 @@ SRC=$(cd "$(dirname "$0")" && pwd -P)
 . "$SRC/../tests/wait.sh"
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
 cd "$B" || exit 1
-unset CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_LAUNCH CONVEYOR_MAIN CLAUDE_PROJECT_DIR CONVEYOR_FOREMAN_DOWN CONVEYOR_FOREMAN_END CONVEYOR_FOREMAN_WATCHERS
+unset CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_LAUNCH CONVEYOR_MAIN CLAUDE_PROJECT_DIR CONVEYOR_FOREMAN_DOWN CONVEYOR_FOREMAN_END CONVEYOR_FOREMAN_STOP CONVEYOR_FOREMAN_WATCHERS
 fail() { echo "FAIL [$CASE]: $*" >&2; exit 1; }
 # A Foreman of its own in $B/<case> (T): its folder FD, no session marked (CONVEYOR_FOREMAN=1, as the launcher's), and
 # a stand-in for the session's process (SP, CONVEYOR_FOREMAN_SESSION_PID), ended with the case so its waiters end.
@@ -225,26 +225,51 @@ kill "$hp"
 # Issue 592. after <true|false> [<session>]: a stop whose input says whether the stop before it was refused by another
 # hook (stop_hook_active), run to its end, 30 s at most (a waiter with nothing to deliver listens on).
 after() {
-  jq -cn --argjson a "$1" --arg s "${2:-}" '{stop_hook_active: $a} + if $s == "" then {} else {session_id: $s} end' \
+  jq -cn --argjson a "$1" --arg s "${2:-}" --arg t "$T/transcript.jsonl" '{stop_hook_active: $a, transcript_path: $t} + if $s == "" then {} else {session_id: $s} end' \
     | CONVEYOR_FOREMAN_WATCHERS=$W timeout 30 bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null
 }
+# said <uuid> <text>: the session's reply, which the next stop reads (its stop_key).
+said() { jq -cn --arg u "$1" --arg x "$2" '{type: "assistant", uuid: $u, message: {content: [{type: "text", text: $x}]}}' >> "$T/transcript.jsonl"; }
+# stopwait: the waiter of the stop running in the background has started its watchers, so it relayed nothing at once.
+stopwait() { wait_until "p=\$(wpid) && ps -o args= -p \"\$p\" | grep -q 'waiter\.sh\$' && [ -s $FD/watchers.pid ]"; }
 
-# D1: a stop that stop.sh refuses ends no turn, so the wake its waiter relays there is lost with it. Bug: the waiter
+# D2: a stop that stop.sh refuses ends no turn, so the wake its waiter relays there is lost with it. Bug: the waiter
 # took that wake as delivered, and the blocked card it named stayed unreported. The next stop delivers it, once.
 t_refused() {
 fixture refused
 check; isheld "$(wpid)" || fail "no waiter listens during the turn"
 put 'Alert: blocked #7'; wait_until '[ "$(wakes)" = 1 ]' || fail "the wake found during the turn was not kept in pending"
-after false; rc=$? # the stop another hook refuses: the wake relayed here reaches no turn
+jq -cn '{type: "user", uuid: "u1", message: {content: "go"}}' > "$T/transcript.jsonl"; said a1 'Which card first?'
+jq -cn --arg t "$T/transcript.jsonl" '{stop_hook_active: false, transcript_path: $t}' | bash "$SRC/stop.sh" reply | grep -q '"block"' \
+  || fail "the reply check did not refuse a question in text"
+after false; rc=$? # the stop the reply check refuses: the wake relayed here reaches no turn
 [ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #7' ] || fail "the refused stop's waiter did not relay the wake (exit $rc): $(cat "$T/wake")"
-after true; rc=$?
+said a2 'Idle'; after true; rc=$?
 [ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #7' ] || fail "the stop after the refused one did not deliver the wake again (exit $rc): $(cat "$T/wake")"
-# Once: the stop of the turn that wake started relays nothing. Its watchers start after its first relay (watchers.pid).
-after false & s=$!
-wait_until "p=\$(wpid) && ps -o args= -p \"\$p\" | grep -q 'waiter\.sh\$' && [ -s $FD/watchers.pid ]" || fail "the third stop's waiter did not start"
+# Once: the stop of the turn that wake started (it follows the refusal that delivered it) relays nothing.
+said a3 'Idle'; after true & s=$!
+stopwait || fail "the third stop's waiter did not listen; it relayed: $(cat "$T/wake")"
 [ ! -s "$T/wake" ] || fail "the wake was delivered twice: $(cat "$T/wake")"
 compgen -G "$FD/pending/*.sent-*" > /dev/null && fail "a wake the session got is still kept as sent: $(ls "$FD/pending")"
 kill "$(wpid)"; wait "$s"
+}
+
+# D1 (issue 605): the waiter relays a wake by refusing the stop itself, so the stop of the reply to it always follows
+# a refused stop. Bug: that stop took the wake as lost and relayed it again, after every reply, without end. No other
+# hook refused the stop it was relayed at: the next stop drops it, and the stop after relays nothing either.
+t_delivered() {
+fixture delivered
+check; put 'Alert: blocked #5'; wait_until '[ "$(wakes)" = 1 ]' || fail "the wake was not kept in pending"
+said a1 'Retried #5.'; after false; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #5' ] || fail "the stop did not relay the wake (exit $rc): $(cat "$T/wake")"
+said a2 'Idle'; after true & s=$!
+stopwait || fail "the stop after the relay did not listen; it relayed: $(cat "$T/wake")"
+[ ! -s "$T/wake" ] || fail "the stop after the refusal that delivered the wake relayed it again: $(cat "$T/wake")"
+[ "$(wakes)" = 0 ] && ! compgen -G "$FD/pending/*.sent-*" > /dev/null || fail "the delivered wake was kept: $(ls "$FD/pending")"
+said a3 'Idle'; after true & s2=$!
+wait "$s"; stopwait || fail "the stop after did not listen"
+[ ! -s "$T/wake" ] || fail "the stop after relayed the wake again: $(cat "$T/wake")"
+kill "$(wpid)"; wait "$s2"
 }
 
 # D1: the refused stop's own waiter listens during the turn the refusal goes on with; a wake it relays then is lost
@@ -327,7 +352,7 @@ WAIT_CEILING=20 wait_until "! kill -0 $old 2>/dev/null" || fail "the claim left 
 h=$(wpid); [ "$h" != "$old" ] && isheld "$h" || fail "the claim started no new waiter: waiter.pid names $h"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused refusedwait claimed noreader stopover reclaim)
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed noreader stopover reclaim)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
