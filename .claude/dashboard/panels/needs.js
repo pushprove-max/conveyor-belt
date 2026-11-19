@@ -394,6 +394,14 @@ window.DASH_APP.panel({
       condition.setAttribute('aria-label', `Condition for the yes to ${t}`);
       why.type = 'text'; why.maxLength = 300; why.placeholder = 'Why not';
       why.setAttribute('aria-label', `Why not, for ${t}`);
+      // A condition or a reason typed and not yet sent is kept through a reload of the page, by the entry (as keyOf);
+      // both are forgotten once the build machine takes an answer for the entry (send).
+      const entry = before ? `before:${c.repo}#${c.issue}` : `waiting:${c.card}`;
+      [['condition', condition], ['why', why]].forEach(([k, f]) => {
+        const was = ctx.kept('draft', `${entry}:${k}`);
+        if (typeof was === 'string') f.value = was;
+        f.addEventListener('input', () => ctx.keep('draft', `${entry}:${k}`, f.value));
+      });
       const acts = {
         approve: { label: 'Approve', ask: `Click again to approve ${t}`, field: null },
         condition: { label: 'Approve with this condition', ask: `Click again to approve ${t} with this condition`, field: condition },
@@ -428,6 +436,7 @@ window.DASH_APP.panel({
             if (!r.ok) { if (li) li.classList.remove('is-pending'); busy = false; draw(); note.textContent = `Not done: ${r.said}`; return; }
             // Taken: the entry is greyed in place and its buttons and fields go, until it leaves the panel.
             if (li) li.classList.add('is-pending');
+            ctx.keep('draft', `${entry}:condition`, ''); ctx.keep('draft', `${entry}:why`, '');
             box.querySelectorAll('.answer').forEach((a) => { a.hidden = true; });
             // The build machine's reply is shown only when the action failed (above).
             const wait = `${t} leaves Needs you in about a minute`;
@@ -481,6 +490,9 @@ window.DASH_APP.panel({
       box.append(one, two, three, note);
       return box;
     }
+    // The name under which an answer typed and not yet sent is kept through a reload: its decision's. send forgets
+    // it once the build machine takes the answer.
+    const draftOf = (x) => `${x.repo}:${x.id}@${x.askedAt}`;
     const send = (x, text, note) => {
       if (!text) { note.textContent = 'Type an answer first, or pick one.'; return; }
       note.textContent = 'Sending…';
@@ -490,7 +502,7 @@ window.DASH_APP.panel({
           const said = String(t).trim() || `the build machine answered ${r.status}`;
           // A 5xx reply already says what was recorded; it is shown as the host wrote it.
           // The build machine's reply is shown only when the answer was not recorded.
-          if (r.ok) return 'Answered: it leaves Needs you in about a minute.';
+          if (r.ok) { ctx.keep('draft', draftOf(x), ''); return 'Answered: it leaves Needs you in about a minute.'; }
           return r.status >= 500 ? said : `Not recorded: ${said}`;
         }), () => 'Not recorded: the build machine did not answer. Make sure that it is on. Then try again.')
         .then((msg) => { note.textContent = msg; });
@@ -508,6 +520,10 @@ window.DASH_APP.panel({
       const field = h('input', 'field');
       field.type = 'text'; field.maxLength = 500; field.placeholder = x.proposedDefault || 'Your answer';
       field.setAttribute('aria-label', `Answer to ${x.id}`);
+      // The answer typed and not yet sent is kept through a reload of the page, by the decision.
+      const draft = draftOf(x), was = ctx.kept('draft', draft);
+      if (typeof was === 'string') field.value = was;
+      field.addEventListener('input', () => ctx.keep('draft', draft, field.value));
       let options = Array.isArray(x.options) ? x.options : [];
       if (!options.length && x.proposedDefault) options = [x.proposedDefault];
       options.forEach((o) => {

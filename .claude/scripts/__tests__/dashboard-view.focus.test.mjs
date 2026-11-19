@@ -14,7 +14,7 @@ const VIEW = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..',
 const ACTION = {
   'account.js': ['code', 'code'],
   'app.js': ['p.grip', 'byId(`tab-${nt}`)', 'drag', '(tools.up.disabled ? tools.down : tools.up)', '(tools.down.disabled ? tools.up : tools.down)',
-    'showAll', 'open', 'open', 'btn'],
+    'showAll', 'open', 'open', 'btn', 'row'],
   'login.js': ["byId(on ? 'login-code-input' : 'login-secret')", '(user.value ? secret : user)', 'secret', 'input', 'input', "byId('login-code-input')"],
   'panels/metrics.js': ['again'],
   'panels/needs.js': ['acts[k].field'],

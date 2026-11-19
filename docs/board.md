@@ -105,6 +105,17 @@ waits for you to confirm, or a request has no answer yet. Then the page shows **
 status mark, and keeps what you did. The page loads again by itself when you finish, for example when you clear the
 field, or when you go to another browser tab. Click **Reload** to load the new version at once.
 
+A reload keeps these, in this browser tab only, until you close the tab or someone signs in again in any tab of
+this browser:
+
+- how many rows each list shows after **Show 5 more** or **Show all**, for each project that **Show** picks and for
+  every project,
+- an answer, a condition or a reason (**Why not**) that you typed in Needs you and did not send,
+- the text in the Board's filter, for each project.
+
+After **Show 5 more**, the cursor goes to the first new row. If that row is in a closed group, the cursor goes to the
+heading of that group.
+
 **Show**, in the machine bar, picks the project that every tab shows.
 
 ## Needs you

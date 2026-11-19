@@ -551,26 +551,70 @@
     parent.dataset.filled = '1';
     return added;
   }
+  // ---- what the owner set that a reload keeps: list lengths, Needs-you drafts, the Board filter ----
+  // Kept in sessionStorage (this tab only, until it closes), read once at start: a page that reloads itself on a new
+  // view (newView) shows them again. One entry, {"<kind>\n<scope>\n<name>": value}: the kind and scope before the name
+  // keep a name such as __proto__ an own key. A browser whose storage throws keeps them for the page's life only.
+  // The entry is {login, items}: login is the login mark (localStorage, shared by every tab) when it was written. Each
+  // sign-in (login.js) sets a new mark, so an entry another user's login made old, in this tab or another, is not
+  // read; nor is any entry when the mark cannot be read, as then a new login cannot be seen.
+  const KEPT_KEY = 'conveyor-board-kept', LOGIN_KEY = 'conveyor-board-login';
+  const keptLogin = (() => { try { return window.localStorage.getItem(LOGIN_KEY) || ''; } catch (e) { return null; } })();
+  const kept = (() => {
+    try {
+      const s = JSON.parse(window.sessionStorage.getItem(KEPT_KEY)), x = s && s.items;
+      return keptLogin !== null && s.login === keptLogin && x && typeof x === 'object' && !Array.isArray(x) ? x : {};
+    } catch (e) { return {}; }
+  })();
+  // A list's length and the Board filter are kept by the project the panel shows (scope): a panel of every project's
+  // rows (projects: true) by the machine head's filter, else '' for every project; the Board and the Rules, which show
+  // one project at a time, by that project. keptScope(mod) is it; a draft names its record, so has no scope.
+  const keptScope = (mod) => projectOnly() || (mod.projects === true ? '' : param('repo') || '');
+  const keptName = (kind, scope, name) => `${kind}\n${scope}\n${name}`;
+  const keptGet = (kind, scope, name) => { const k = keptName(kind, scope, name); return Object.hasOwn(kept, k) ? kept[k] : undefined; };
+  // keep(kind, scope, name, value): value '' or undefined forgets it.
+  function keep(kind, scope, name, value) {
+    const k = keptName(kind, scope, name);
+    if (value === undefined || value === '') delete kept[k]; else kept[k] = value;
+    try { window.sessionStorage.setItem(KEPT_KEY, JSON.stringify({ login: keptLogin, items: kept })); } catch (e) { /* kept then for this page's life only */ }
+  }
   // A long list shows its first `size` items (5 unless said), then "Show <size> more" and "Show all (N)". show(items)
-  // draws the items given; the control returned goes under them. The owner's choice is kept per list (key) for the
-  // page's life, through every redraw; a list of `size` or fewer has no control. done() runs after a click.
+  // draws the items given; the control returned goes under them. The owner's choice is kept per list (key) through
+  // every redraw and a reload (keep, in scope); a list of `size` or fewer has no control. done() runs after a click. After
+  // "Show <size> more" the focus goes to the first new row: the item at the old length in the list just above the control.
+  // A row in a closed group (a <details> the owner left closed) cannot take the focus: that group's heading takes it.
   const PAGE = 5;
-  const pages = new Map();
-  function more(key, items, show, size, done) {
+  const pageOf = (scope, key) => { const v = keptGet('pages', scope, key); return v === 'all' || (Number.isInteger(v) && v > 0) ? v : undefined; };
+  const rowsAbove = (box) => {
+    let c = box.previousElementSibling;
+    while (c && !c.matches('ul, ol') && !c.querySelector('ul, ol')) c = c.previousElementSibling;
+    return c ? Array.from(c.querySelectorAll('li')).filter((li) => !li.parentElement.closest('li') || !c.contains(li.parentElement.closest('li'))) : [];
+  };
+  function more(key, items, show, size, done, scope = '') {
     const step = size || PAGE, n = items.length;
     const box = h('div', 'show-more'), next = h('button', 'btn btn-quiet'), all = h('button', 'btn btn-quiet');
     box.dataset.list = key;
     next.type = 'button'; next.dataset.act = 'list-more';
     all.type = 'button'; all.dataset.act = 'list-all';
+    const shown = () => { const want = pageOf(scope, key) || step; return want === 'all' ? n : Math.min(n, want); };
     const paint = () => {
-      const want = pages.get(key) || step, limit = want === 'all' ? n : Math.min(n, want);
+      const limit = shown();
       show(items.slice(0, limit));
       box.hidden = limit >= n;
       next.textContent = `Show ${step} more`;
       all.textContent = `Show all (${n})`;
     };
-    next.addEventListener('click', () => { pages.set(key, (pages.get(key) || step) + step); paint(); if (done) done(); });
-    all.addEventListener('click', () => { pages.set(key, 'all'); paint(); if (done) done(); });
+    next.addEventListener('click', () => {
+      const was = shown();
+      keep('pages', scope, key, was + step); paint(); if (done) done();
+      let row = rowsAbove(box)[was];
+      for (let g = row && row.parentElement.closest('details:not([open])'); g; g = g.parentElement && g.parentElement.closest('details:not([open])')) {
+        const head = g.querySelector(':scope > summary');
+        if (head) row = head;
+      }
+      if (row) { if (row.matches('li') && !row.hasAttribute('tabindex')) row.tabIndex = -1; row.focus(); }
+    });
+    all.addEventListener('click', () => { keep('pages', scope, key, 'all'); paint(); if (done) done(); });
     box.append(next, all);
     paint();
     return box;
@@ -1871,7 +1915,11 @@
       // redraw(): the panel drawn again from the part it has, its count too (what the owner did changed what it shows).
       redraw() { p.json = undefined; if (last) draw(p, last.panels[partOf(mod.id)]); arrangeSoon(); },
       // more(key, items, show, size): the shared long list (see more above), kept per panel and key.
-      more: (key, items, show, size) => more(`${mod.id}:${key}`, items, show, size, () => { clip(p); arrangeSoon(); }),
+      more: (key, items, show, size) => more(`${mod.id}:${key}`, items, show, size, () => { clip(p); arrangeSoon(); }, keptScope(mod)),
+      // kept(kind, name) and keep(kind, name, value): what a reload keeps (see keep above). Kind 'draft' is one for
+      // every project (its name names the record); any other kind is kept by the project the panel shows (keptScope).
+      kept: (kind, name) => keptGet(kind, kind === 'draft' ? '' : keptScope(mod), name),
+      keep: (kind, name, value) => keep(kind, kind === 'draft' ? '' : keptScope(mod), name, value),
     };
     return p;
   }

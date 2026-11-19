@@ -118,7 +118,8 @@ export const OVERVIEW = LIST.filter((id) => TAB(id) === 'overview');
 
 // One page in jsdom. `store` is what an earlier visit left in localStorage; `list` and `extra` stand in for
 // panels/index.js and for panel files of the test's own; `tab` is the tab the address opens (none: the page's own).
-export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '', rects = false, feed = false, tab = null, query = '', width = 1440 } = {}) {
+// `session`, when given, is the page's sessionStorage (one a test shares between two pages, or one that throws).
+export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '', rects = false, feed = false, tab = null, query = '', width = 1440, session = null } = {}) {
   const { JSDOM, VirtualConsole } = dom();
   const virtualConsole = new VirtualConsole();
   const w = new JSDOM(html, { url: `https://dash.test/index.html${tab ? `?tab=${tab}` : query}`, runScripts: 'outside-only', virtualConsole }).window;
@@ -128,6 +129,7 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
   w.clock = T0;
   w.Date.now = () => w.clock;
   for (const [k, v] of Object.entries(store)) w.localStorage.setItem(k, v);
+  if (session) Object.defineProperty(w, 'sessionStorage', { configurable: true, get: () => session });
   // The viewport is `width` wide: a max-width query matches at or under it.
   w.matchMedia = (q) => {
     const max = /max-width: (\d+)px/.exec(q);

@@ -1046,17 +1046,21 @@
     return out.map((x, i) => [x, key(x), i]).sort((a, b) => (a[1] === b[1] ? a[2] - b[2] : a[1] < b[1] ? -s : s)).map((x) => x[0]);
   }
   // The one row of filters and the sort of every column (the project is picked in the machine head, above the tabs).
-  // The text box is the same node from one draw to the next, so what is typed keeps its place and the caret.
+  // The text box is the same node from one draw to the next, so what is typed keeps its place and the caret; the text
+  // is kept through a reload of the page (ctx.keep), and read back when the box is first made.
   function textBox() {
     if (S.text) return S.text;
     const t = S.ctx.h('input', 'field board-select board-text');
     t.type = 'search'; t.placeholder = 'Filter: #, title'; t.dataset.filter = 'text'; t.setAttribute('aria-label', 'Filter every column by number or title');
-    t.addEventListener('input', () => { S.filter.text = t.value; draw(); });
+    const was = S.ctx.kept('filter', 'board');
+    if (typeof was === 'string') { S.filter.text = was; t.value = was; }
+    t.addEventListener('input', () => { S.filter.text = t.value; S.ctx.keep('filter', 'board', t.value); draw(); });
     S.text = t;
     return t;
   }
   function clearFilters() {
     S.filter.text = '';
+    S.ctx.keep('filter', 'board', '');
     if (S.text) S.text.value = '';
     S.ctx.params({ bprio: '', barea: '', blabel: '' });
     draw();

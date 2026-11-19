@@ -11,6 +11,13 @@
   'use strict';
   const byId = (id) => document.getElementById(id);
   const pw = byId('login-password'), code = byId('login-code'), err = byId('login-error');
+  // Signed in: on to the Board. What the Board keeps through a reload (app.js, KEPT_KEY: unsent answers, list lengths,
+  // the filter) is in each tab's own sessionStorage, and is the last user's. A new login mark in localStorage, which
+  // every tab of this browser reads, tells the Board in each tab, at its next start, to show none of it.
+  function signedIn() {
+    try { window.localStorage.setItem('conveyor-board-login', `${Date.now()}-${Math.random()}`); } catch (e) { /* the Board then shows nothing kept */ }
+    window.location.assign('/');
+  }
   function say(text) { err.textContent = text; err.hidden = !text; }
   // The name a trusted device gets when none is typed, from the browser's user agent: "<browser> on <system>".
   function deviceName(ua) {
@@ -69,7 +76,7 @@
     if (!user.value || !secret.value) { say('Enter your user name and password.'); (user.value ? secret : user).focus(); return; }
     const label = byId('login-label').value.trim();
     post({ user: user.value, password: secret.value, trust: trust.checked, label: trust.checked ? label || autoName : '' }, pw).then((r) => {
-      if (r.status === 200) { window.location.assign('/'); return; }
+      if (r.status === 200) { signedIn(); return; }
       secret.value = '';
       if (r.status === 202) { say(''); codeStep(true); return; }
       say(r.text || `The server answered ${r.status}.`); secret.focus();
@@ -80,7 +87,7 @@
     const input = byId('login-code-input');
     if (!input.value.trim()) { say('Enter the code.'); input.focus(); return; }
     post({ code: input.value.trim() }, code).then((r) => {
-      if (r.status === 200) { window.location.assign('/'); return; }
+      if (r.status === 200) { signedIn(); return; }
       input.value = '';
       say(r.text || `The server answered ${r.status}.`);
       // The code step is gone (expired, or the password changed): back to the password.
