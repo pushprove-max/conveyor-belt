@@ -11,6 +11,7 @@ declare module 'claude-code' {
       state: Record<string, unknown> | null
       view: { band: boolean; pane: boolean; status: boolean }
       frame: number
+      details: boolean
       now: number
     }
   }
