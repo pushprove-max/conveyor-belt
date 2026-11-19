@@ -23,8 +23,15 @@ allfails() { # <exit> [<testTimeout>]
   local w=$T/$CASE/wt; mkdir -p "$w.testlog"
   (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog bash cmd > "$w.test" 2>&1 < /dev/null)
   ( eval "$(sed -n '/^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
-    packget() { return 1; } # the pack's test.command: the logs name the run's files, so it names none
+    packget() { [ -n "${PACKCMD:-}" ] && printf -v "$2" '%s' "$PACKCMD"; } # the pack's test.command: $PACKCMD, else none
     TEST_TIMEOUT=${2:-600} testfails "$w.test" "$1" )
+}
+# Why the card's run allfails() last ran gave no result, given its exit and the step's timeout (voidrun()); fails
+# when the run gave a result.
+void() { # <exit> [<testTimeout>]
+  ( eval "$(sed -n '/^voidrun() {/,/^}/p; /^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+    packget() { [ -n "${PACKCMD:-}" ] && printf -v "$2" '%s' "$PACKCMD"; }
+    TEST_TIMEOUT=${2:-600} voidrun "$T/$CASE/wt" "$1" )
 }
 # Issue 442: a passed node case (`✔ <name> (<n>ms)`) or TAP case (`ok <n> - <name>`) was not read as passed, only a
 # line `ok <case>` with no space in its case was: a main-red fix card for a named node case always blocked with "gave
@@ -77,4 +84,126 @@ EOF
   f=$(logfails 124 2 | jq -c '[.timeout, (.files | map(.file))]') || fail "the failures could not be read"
   [ "$f" = '[{"sec":2,"file":"tests/b 0s"},["tests/b"]]' ] \
     || fail "an end line in one runner's log ended a file another runner had open: the failed file or the file the timeout names is the other runner's: $f"
+}
+
+# Bug: a failing file that printed the `== ` line of a file still to run gave that file its failing case; the file
+# passed, so the case was dropped and the Board named the failed file with no case: a test could hide what failed.
+# The runner's own `== ` line for the later file comes after, so the first may be the failing file's: its case is kept.
+# Bugs: when the later file failed too, the case was under it alone, and the file that printed it still showed none:
+# which of the two printed it cannot be told, so both name it; and a passing file that printed an earlier file's
+# `== ` line after a FAIL line of its own had that line counted against the earlier, failed file: the runner prints no
+# file's line after a later file's, so the line is the passing file's own and no failure.
+# Bug: a failing file that printed the next file's `== ` line and ended its output without a newline had the runner's
+# line for the next file joined to its last line, where it was not read: the case was the next, passing file's alone
+# and was dropped. A `== ` line counts wherever it is in a line.
+t_testhide() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+L=$CONVEYOR_TEST_LOG/run.log
+begin() { echo "== $1"; echo "== $1" >> "$L"; }
+end() { echo "-- $1 $2" >> "$L"; }
+begin tests/a.test.sh; echo "== tests/b.test.sh"; echo "FAIL [alpha]: wrong"; end FAIL tests/a.test.sh
+begin tests/b.test.sh; echo "FAIL [own]: words a passing test prints"; echo "== tests/a.test.sh"; end ok tests/b.test.sh
+begin tests/c.test.sh; echo "== tests/d.test.sh"; echo "FAIL [gamma]: wrong"; end FAIL tests/c.test.sh
+begin tests/d.test.sh; echo "FAIL [delta]: wrong"; end FAIL tests/d.test.sh
+begin tests/e.test.sh; echo "== tests/f.test.sh"; echo "FAIL [eps]: wrong"; printf x; end FAIL tests/e.test.sh
+begin tests/f.test.sh; end ok tests/f.test.sh; exit 1
+EOF
+  f=$(logfails 1) || fail "the failures could not be read"
+  [ "$(jq -r '.files | map([.file, (.cases | map(.name) | join(","))] | join(":")) | join(" ")' <<<"$f")" \
+    = "tests/a.test.sh:alpha tests/c.test.sh:gamma tests/d.test.sh:gamma,delta tests/e.test.sh:eps" ] \
+    || fail "a failing file's case behind a later file's == line is not under it, or a passing file's own line is a failure: $f"
+}
+
+# Bug: a test file whose name has a space was cut at it (`tests/my file.test.sh` read as `tests/my`): the failure row
+# and the timeout named a file that does not exist, and the file that ended still read as running. The name is whole,
+# with the words a runner puts after it (the cases run, a duration) left off.
+# Bugs: a name's last space was dropped (the timeout named `tests/my slow file.test.sh` for a file whose name ends in
+# a space); and an end line was read as the end of a file already done whose name it began with (`-- FAIL tests/b 0s`
+# as the passed `tests/b 0s`, not the running `tests/b`), so a passing file was named as failed.
+# Bug: a passing test that printed its own `== ` line again (`== tests/b 0s`, a file done) was read as the beginning
+# of the later file its name begins with (`tests/b`), which failed: the passing file's `FAIL [` line became a case of it.
+t_testfailsspace() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+L=$CONVEYOR_TEST_LOG/run.log
+echo "== tests/my file.test.sh" | tee -a "$L"; echo "FAIL [spaced]: wrong"; echo "-- FAIL tests/my file.test.sh 0s" >> "$L"
+echo "== tests/a.test.sh" >> "$L"; echo "== tests/a.test.sh (cases: one two)"; echo "FAIL [plain]: wrong"; echo "-- FAIL   tests/a.test.sh 0s" >> "$L"
+echo "== tests/b 0s" | tee -a "$L"; echo "== tests/b 0s"; echo "FAIL [own]: wrong"; echo "-- ok tests/b 0s 0s" >> "$L"
+echo "== tests/b" >> "$L"; echo "== tests/b (cases: late)"; echo "FAIL [late]: wrong"; echo "-- FAIL tests/b 0s" >> "$L"; exit 1
+EOF
+  f=$(logfails 1) || fail "the failures could not be read"
+  [ "$(jq -c '[.of, .timeout, (.files | map([.file, (.cases | map(.name) | join(","))] | join(":")))]' <<<"$f")" \
+    = '[4,null,["tests/my file.test.sh:spaced","tests/a.test.sh:plain","tests/b:late"]]' ] \
+    || fail "a failed file with a space in its name is not named whole with its case, a file done whose name an end line begins with is named for the one running, or a passing file's own line is a case of the failed file its name begins with: $f"
+}
+# The timeout of t_testfailsspace's bugs: a run cut by its time (2 s, exit 124) in a file whose name has spaces, its
+# last one too. The card's reason names the timeout's file as it is (rules.test.sh t_testfails).
+t_testfailsspacetimeout() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+L=$CONVEYOR_TEST_LOG/run.log
+echo "== tests/my file.test.sh" | tee -a "$L"; echo "-- ok tests/my file.test.sh" >> "$L"
+echo "== tests/my slow file.test.sh " | tee -a "$L"
+EOF
+  f=$(logfails 124 2 | jq -c '[.of, .timeout, .files]') || fail "the failures could not be read"
+  [ "$f" = '[2,{"sec":2,"file":"tests/my slow file.test.sh "},[]]' ] \
+    || fail "a timeout does not name, whole to its last space, the file with spaces in its name that was still running: $f"
+}
+
+# Bug: a test command that writes no runner log (a pack that runs one test file itself) had its failing cases under
+# no file: the Board could not say what failed. Such a run is one file, the command (the pack's test.command).
+t_testnolog() {
+  mkdir -p "$T/$CASE"; echo 'echo "ok lane"; echo "FAIL [views]: wrong"; exit 1' > "$T/$CASE/cmd"
+  local -x PACKCMD='bash run-tests.sh'
+  f=$(logfails 1 | jq -c '[.timeout, .files]') || fail "the failures could not be read"
+  [ "$f" = '[null,[{"file":"bash run-tests.sh","cases":[{"name":"views","line":"FAIL [views]: wrong"}]}]]' ] \
+    || fail "a failing case of a command with no runner log is not under the command: $f"
+}
+# Bug (issue 218): the time of a command with no runner log running out was read as a test's: it is the runner's, so
+# that run gave no result, and says so.
+t_testnologtimeout() {
+  mkdir -p "$T/$CASE"; echo 'echo "ok one"' > "$T/$CASE/cmd"
+  local -x PACKCMD='bash run-tests.sh'
+  allfails 124 2 > /dev/null || fail "the failures of the timed-out run could not be read"
+  f=$(void 124 2) && [ "$f" = "exit 124: the run's time ran out with no test file running" ] \
+    || fail "a timed-out command with no runner log is not a run with no result: $f"
+}
+
+# Bug: two runners each wrote a log, and the files' order was read from the logs joined by name: the runner whose log
+# sorts last ran first, so the other's `== ` line read as going back and its failing case went to the wrong file. The
+# Board named one file for both failures. Order holds within a runner's log only; a `== ` line that goes back in its
+# own log is still a test's own. And a file both runners ran was kept in the first log's order only, so the second
+# runner's run of it read as going back and its failing case went to the file before it.
+t_testrunners() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+begin() { echo "== $2"; echo "== $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+end() { echo "-- FAIL $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+begin b b.test.sh; echo "FAIL [beta]: wrong"; end b b.test.sh
+begin a shared.test.sh; echo "FAIL [first]: wrong"; end a shared.test.sh
+begin a a.test.sh; echo "FAIL [alpha]: wrong"; end a a.test.sh
+begin b shared.test.sh; echo "FAIL [second]: wrong"; end b shared.test.sh
+begin a a2.test.sh; echo "== a.test.sh"; echo "FAIL [again]: wrong"; end a a2.test.sh
+exit 1
+EOF
+  f=$(logfails 1) || fail "the failures could not be read"
+  [ "$(jq -r '.files | map("\(.file):\(.cases | map(.name) | join(","))") | join(" ")' <<<"$f")" \
+    = "shared.test.sh:first,second a.test.sh:alpha a2.test.sh:again b.test.sh:beta" ] \
+    || fail "each runner's failing case is not under its own file: $f"
+}
+
+# Bug: a file two runners ran was given to the runner whose log sorts first whenever either could have begun it. Here
+# the other runner began it first, so the first runner's own run of it read as going back, and its failing case went
+# to the file before it: the Board named a file for a failure that was another's. Only the reading of the whole
+# output that takes every one of the runners' `== ` lines is right.
+t_testshared() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+begin() { echo "== $2"; echo "== $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+end() { echo "-- $3 $2" >> "$CONVEYOR_TEST_LOG/$1.log"; }
+begin a x.test.sh; end a x.test.sh ok
+begin b shared.test.sh; end b shared.test.sh ok
+begin b b.test.sh; echo "FAIL [beta]: wrong"; end b b.test.sh FAIL
+begin a shared.test.sh; echo "FAIL [alpha]: wrong"; end a shared.test.sh FAIL
+exit 1
+EOF
+  f=$(logfails 1) || fail "the failures could not be read"
+  [ "$(jq -r '.files | map("\(.file):\(.cases | map(.name) | join(","))") | join(" ")' <<<"$f")" = "shared.test.sh:alpha b.test.sh:beta" ] \
+    || fail "a failing case of a file two runners ran is not under that file: $f"
 }
