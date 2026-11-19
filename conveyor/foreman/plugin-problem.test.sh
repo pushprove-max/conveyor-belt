@@ -72,6 +72,18 @@ t_home() {
   ! grep -q 'running cards keep' <<<"$out" || fail "the start-up text lists an entry filed as #449: $out"
 }
 
+# Bug (#564): stop.sh exits at once when reply-mark already names the turn, so the plugin check must come before
+# that exit; below it, an unfiled line said after a question refusal marked the turn passed unfiled.
+t_mark() {
+  fixture mark "git@github.com:${OWN#https://github.com/}.git"
+  out=$(turn u1 'Should I retry #7?')
+  jq -e '.decision == "block" and (.reason | contains("asks the owner a question"))' <<<"$out" >/dev/null && [ "$(cat "$FD/reply-mark")" = u1 ] \
+    || fail "the question refusal did not mark turn u1 in reply-mark: $out"
+  out=$(again "$LINE")
+  jq -e '.decision == "block" and (.reason | contains("filed as #<n>"))' <<<"$out" >/dev/null \
+    || fail "a plugin problem with no issue number passed after a question refusal marked the turn: $out"
+}
+
 # Bug (#479): "filed as #0" names no issue, yet the stop hook passed it as filed and the start-up list hid its note,
 # so a problem never filed was lost. Now the line is refused and its note stays in the unfiled list. And (E1) the note
 # kept "#0" in its text, so the line said again with a valid number added a second note and left the #0 one listed.
