@@ -37,7 +37,8 @@ First install the requirements, then sign in, before step 1:
      the user for exactly those, and nothing else: whose yes a change customers or staff will
      see needs; the path prefixes of product code; the command that runs a change's tests; "Run a first test-speed
      survey now?" (yes / no); "Write these test-file patterns in the pack?" (yes / no), with the patterns and the count
-     of tracked files that setup named; "Run the whole suite once under coverage to make the test map?" (yes / no), with
+     of tracked files that setup named; "Set the pack's test.fileCommand to the test command, so a card runs each of
+     its test files alone through it?" (yes / no), with the runner that setup named; "Run the whole suite once under coverage to make the test map?" (yes / no), with
      the tool and the time that setup named; "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
      research lane (a read-only sandboxed worktree)?" (yes / no); "Link these dependency folders into each card's
      worktree?", showing the folders and the lockfiles setup named (yes / no / install them in each worktree with a

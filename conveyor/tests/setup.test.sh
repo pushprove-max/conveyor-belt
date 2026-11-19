@@ -257,6 +257,10 @@ t_setuptestlist() {
   was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
     && grep -qF -- "--file-command <yes or no: the test command runs jest, which takes test files as arguments; set the pack's test.fileCommand to the test command," <<<"$out" \
     || fail "setup did not ask to set test.fileCommand for jest before changing anything: $out"
+  # #709. Bug: commands/setup.md listed --file-command but not its question, so the session had nothing to ask. The
+  # file is instructions to a Claude session and cannot run here, so the case reads its text.
+  tr -s ' \n' '  ' < "$SRC/../commands/setup.md" | grep -qF "\"Set the pack's test.fileCommand to the test command, so a card runs each of its test files alone through it?\" (yes / no)" \
+    || fail "commands/setup.md does not give the question to ask for --file-command"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --file-command yes --test-map no 2>&1) && jq -e '.test.fileCommand == "npm test"' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --file-command yes did not write test.fileCommand: $out"
   # #152. Bug: setup did not find how to read the runner's report, so no card recorded test times unless the owner
