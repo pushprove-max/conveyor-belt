@@ -71,6 +71,19 @@ t_swearmsave() {
     grep -qF "${o#*/}; nothing saved" <<<"$id2" || fail "the refusal does not say why: $id2"
   done
   [ "$(ls "$B/arms" | wc -l)" = 2 ] || fail "a refused arm was kept: $(ls "$B/arms")"
+  # Bug (#641): history listed the host arms only, so after a reload the Board's arm form could not show, check or reuse
+  # a saved revision, had no recipe facts to offer an agent arm's method, and could not say what a seat left out runs on.
+  # The project sets a test repair seat of its own (its fix follows the builder) and its judge on.
+  jq -c '.testFix = {cli: "claude", model: "m", effort: "high"} | .judgeOn = true | .judgeAlways = ["style"]' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" \
+    || fail "the control record was not changed"
+  o=$(loop bench swe history 2>&1) || fail "history failed: $(head -c 300 <<<"$o")"
+  [ "$(jq -c --arg a "$id1" '[.arms[] | select(.revision != null) | [.name == $a, .label, .kind, .state, .revision.name, .revision.recipe, .spec.seats.model.effort]] | sort' <<<"$o")" \
+    = '[[false,"Claude builds, Codex reviews","conveyor","unchecked","Claude builds, Codex reviews","conveyor",null],[true,"Claude builds, Codex reviews","conveyor","unchecked","Claude builds, Codex reviews","conveyor","high"]]' ] \
+    || fail "history does not list both saved revisions with their name, state and own spec: $(jq -c '.arms | map([.name, .label, .state, .revision, .spec])' <<<"$o")"
+  [ "$(jq -c '[.arms[] | select(.name | IN("solo", "conveyor")) | [.name, .revision, .spec, .sessions, .effort]]' <<<"$o")" \
+    = '[["conveyor",null,{"kind":"conveyor"},null,false],["solo",null,{"kind":"agent","recipe":"solo","cli":"claude","model":"m"},1,true]]' ] \
+    || fail "a host arm has not the spec a copy starts from and its recipe facts: $(jq -c '[.arms[] | select(.name | IN("solo", "conveyor")) | [.name, .revision, .spec, .sessions, .effort]]' <<<"$o")"
+  [ "$(jq -c .defaults <<<"$o")" = '{"seats":{"model":{"model":"m","effort":"medium","agent":"claude"},"reviewer":{"model":"x","effort":"medium","agent":"codex"},"judge":{"model":"claude-opus-5-5","effort":"medium","agent":"claude"},"fix":null,"testFix":{"model":"m","effort":"high","agent":"claude"}},"judgeOwn":false,"judgeOn":true,"judgeAlways":["style"]}' ] || fail "history does not publish the seats an arm that sets none runs on: $(jq -c .defaults <<<"$o")"
   # An agent arm's recipe runs on the saved model, not on its own (solo's: the builder's, m), and on the saved effort
   # (#637: the effort never reached the CLI).
   tune '.models.allowed.claude += ["m2"]'

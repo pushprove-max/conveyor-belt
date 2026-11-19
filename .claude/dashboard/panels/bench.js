@@ -22,7 +22,10 @@
 //     picked; ticking one not checked, changed or failed runs its preflight, and picks it once the arms read again
 //     show it ready) and, before Start, each arm's usual and worst-case sessions, minutes
 //     and cost for the tasks it has not run yet (each session at perTask.session, the mean dollars of this project's
-//     own priced sessions). Start is off while the usage guard holds an arm picked back.
+//     own priced sessions). Start is off while the usage guard holds an arm picked back. New Conveyor arm, New agent
+//     arm and an arm's Edit a copy open the arm editor (a Conveyor arm's rules and five seats, or an agent arm's CLI,
+//     model, effort and method), whose Save arm keeps a new revision on the build machine (`bench swe arms save`); the
+//     saved revisions are listed under Saved arms, each its own arm with its own check, by its revision ID.
 //   Infographic: the runs ticked (up to 6) on a fixed template filled by code (SVG, no library; no model writes or picks
 //     anything), with its notes on how to read it, which a title typed cannot remove; Download SVG and Download PNG,
 //     each with the table of its figures beside it (<id>.csv).
@@ -45,6 +48,7 @@
     older: false,       // History shows every run, not the newest 20
     start: { n: 20, arms: new Set(['conveyor']), engine: 'main', commit: '', checking: new Map() },
     cmp: { a: '', b: '', data: null, text: null, all: false, ask: null, n: 0 },
+    edit: null,         // the arm editor's form while it is open (blank, copyOf), else null
     title: IG_TITLE,
     busy: false, held: false, late: false, keep: null,
     said: new Map(),    // each action's answer, by its key: {repo, text, tone}, shown beside that action (saidAt)
@@ -324,7 +328,7 @@
     return s;
   }
   function armsPart() {
-    const arms = armsOf(), s = section('bench-arms', 'Arms', hist() ? arms.length : null, 'An arm is one way to build a task. Each is one file in conveyor/bench/arms/ with a preflight.');
+    const arms = armsOf(), s = section('bench-arms', 'Arms', hist() ? arms.length : null, 'An arm is one way to build a task, with a preflight: a file in conveyor/bench/arms/, or an arm saved on Start a run.');
     if (!hist()) { s.append(reading('the arms')); return s; }
     const t = h('table', 'tests-table'), rows = [['Ready', (a) => a.state === 'ready', 'ok'], ['Checking', (a) => a.state === 'checking', 'quiet'], ['Preflight failing', (a) => a.state === 'failed', 'bad'],
       ['Not checked', (a) => a.state === 'unchecked' || a.state === 'changed' || a.state === 'expired', 'quiet'], ['Not offered', (a) => a.state === 'not offered', 'quiet']];
@@ -606,8 +610,9 @@
   }
 
   // ---- Start a run ----
-  const armGroup = (a) => (a.state === 'not offered' ? 'Other agents' : { 1: 'Conveyor', 3: 'Conveyor', 2: 'Claude, plain', 5: 'Claude + a plugin or method', 4: 'Codex' }[group(a)]);
-  const GROUPS = ['Conveyor', 'Claude, plain', 'Claude + a plugin or method', 'Codex', 'Other agents'];
+  // A saved revision (`bench swe arms save`: history gives it a revision) is in Saved arms, whatever it builds with.
+  const armGroup = (a) => (obj(a.revision) ? 'Saved arms' : a.state === 'not offered' ? 'Other agents' : { 1: 'Conveyor', 3: 'Conveyor', 2: 'Claude, plain', 5: 'Claude + a plugin or method', 4: 'Codex' }[group(a)]);
+  const GROUPS = ['Saved arms', 'Conveyor', 'Claude, plain', 'Claude + a plugin or method', 'Codex', 'Other agents'];
   const ARM_STATE = { ready: ['Ready', 'ok'], checking: ['Checking', 'quiet'], failed: ['Preflight failed', 'bad'], unchecked: ['Not checked', 'quiet'], changed: ['Changed since its check', 'warn'],
     expired: ['Check expired', 'warn'], 'not offered': ['Not offered', 'quiet'] };
   const versionsOf = () => list(obj(B.d && B.d.bench) && B.d.bench.versions).filter((v) => obj(v) && typeof v.name === 'string');
@@ -667,7 +672,7 @@
       saidAt('versions'), h('span', 'board-from', 'The version is the one every Conveyor arm of the run builds with.'));
     s.append(row, vrow);
     if (!hist()) return [s, reading('the arms')];
-    return [s, armPick(), before()];
+    return [s, armPick(), ...(B.edit ? [editor()] : []), before()];
   }
   // An arm ticked while not ready waits in B.start.checking (name -> its check time then) for its preflight: picked once
   // it reads ready, cleared once it reads failed with a newer check time.
@@ -685,7 +690,9 @@
     const picked = arms.filter((a) => a.state === 'ready' && B.start.arms.has(a.name));
     const s = section('bench-arm-pick', 'Arms', `${picked.length} picked`, 'An arm can be picked once its preflight succeeds: installed, logged in, and it runs one trivial task headless. Ticking an arm not ready runs its preflight.');
     GROUPS.forEach((g) => {
-      const these = arms.filter((a) => armGroup(a) === g);
+      // Saved arms by name, each name's newest revision first.
+      const these = arms.filter((a) => armGroup(a) === g)
+        .sort((x, y) => (g !== 'Saved arms' ? 0 : String(x.label).localeCompare(String(y.label)) || String(y.revision.at || '').localeCompare(String(x.revision.at || ''))));
       if (!these.length) return;
       const grid = h('div', 'bench-armgrid');
       s.append(h('p', 'board-label', g), grid);
@@ -706,7 +713,8 @@
         const [word, tone] = checking && a.state !== 'checking' ? ['Checking its preflight…', 'quiet'] : ARM_STATE[a.state] || [String(a.state), 'quiet'];
         // A check that runs shows the step it is at, in a polite live region (the arms are read again while it runs: recheck).
         const sub = a.state === 'checking' ? h('span', 'bench-sub', String(a.step || 'Starting the test container').replace(/\.?$/, '.'))
-          : h('span', 'bench-sub', a.why || (a.kind === 'conveyor' ? 'the engine\'s loop builds each task: build, reviews, fix rounds, test step' : `${sessionsWord(a.perTask && a.perTask.worst) || 'its own sessions'} a task, headless`));
+          : h('span', 'bench-sub', a.why || (obj(a.revision) ? `Saved ${B.ctx.when(a.revision.at)} as ${a.name}: ${specSaid(a.spec)}`
+            : a.kind === 'conveyor' ? 'the engine\'s loop builds each task: build, reviews, fix rounds, test step' : `${sessionsWord(a.perTask && a.perTask.worst) || 'its own sessions'} a task, headless`));
         if (a.state === 'checking') sub.setAttribute('aria-live', 'polite');
         text.append(h('span', 'bench-name', a.label), ' ', B.ctx.chip(word, tone), sub);
         const p = plan(a);
@@ -717,6 +725,7 @@
           cell.append(button(a.state === 'failed' || a.state === 'expired' ? 'Check again' : 'Check', 'btn-quiet btn-sm', `check-${a.name}`, `Run the preflight of ${a.label}`,
             () => send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, () => readHist(true), null, { at: atOf(a) })));
         }
+        if (obj(a.spec)) cell.append(button('Edit a copy', 'btn-quiet btn-sm', `copy-${a.name}`, `Edit a copy of ${a.label}`, () => openEdit(copyOf(a))));
         // The answer to this arm's check (its box or its Check button) shows in the arm, not at the foot of the page. Once
         // the arms are read again, a check the host took is answered by the arm's state: passed when the arm reads ready,
         // failed when it reads failed with a check time other than the one it had when the check was sent.
@@ -729,7 +738,204 @@
         grid.append(cell);
       });
     });
-    s.append(button('Read the arms again', 'btn-quiet btn-sm', 'arms-again', 'Read the arms and their preflights again', () => readHist(true)));
+    const tools = h('div', 'bench-row');
+    tools.append(button('New Conveyor arm', 'btn-sm', 'new-conveyor', 'New Conveyor arm', () => openEdit(blank('conveyor'))),
+      button('New agent arm', 'btn-sm', 'new-agent', 'New agent arm', () => openEdit(blank('agent'))),
+      button('Read the arms again', 'btn-quiet btn-sm', 'arms-again', 'Read the arms and their preflights again', () => readHist(true)));
+    s.append(tools);
+    return s;
+  }
+  // ---- the arm editor (Start a run): a Conveyor arm's rules and seats, or an agent arm's CLI, model, effort and method,
+  // saved as a new revision on the build machine (`bench swe arms save <name> <spec>`, the revision's ID its answer).
+  // Its choices are history's: choices (the models the project allows each pool, by CLI, and each CLI's efforts),
+  // defaults (what a sandbox runs for a seat the arm leaves out) and each arm's spec (what a copy starts from). ----
+  // Each seat of a Conveyor arm: its key in the spec, its title, the pool it takes its models from, and what it runs.
+  const SEATS = [['model', 'Builder', 'builder', 'The session that writes the first patch.'], ['reviewer', 'Reviewer', 'reviewer', 'Each review of the patch.'],
+    ['judge', 'Judge', 'reviewer', 'Reads the reviews and decides which findings stand.'], ['fix', 'Fix', 'builder', 'The session that repairs review findings.'],
+    ['testFix', 'Test repair', 'builder', 'The session that repairs a failed test. The test it repairs is the task\'s own test command, from the harness.']];
+  const AGENT_CLIS = ['claude', 'codex'];  // the CLIs whose login a benchmark container is given (swe_logins)
+  const choicesOf = () => obj(hist() && hist().choices);
+  const defaultsOf = () => obj(hist() && hist().defaults);
+  const poolOf = (pool) => obj(choicesOf() && choicesOf()[pool]) || {};
+  const seatOf = (v) => (obj(v) && typeof v.model === 'string' ? { cli: v.cli || v.agent, model: v.model, effort: v.effort || null } : null);
+  const seatSaid = (v) => (v ? [v.cli, v.model, v.effort].filter(Boolean).join(' · ') : 'not known');
+  // The efforts a seat takes on a CLI: none for an OpenCode seat of the builder pool (swe_armsave refuses one).
+  const effortsOf = (pool, cli) => (pool === 'builder' && cli === 'opencode' ? [] : list(obj(choicesOf() && choicesOf().efforts) && choicesOf().efforts[cli]));
+  // A seat's choice made one its pool allows: its CLI when the pool has models on it (else the CLI that has its model,
+  // else the first with any), its model when allowed on that CLI (else the first), its effort when the CLI takes it
+  // (else medium, else the first). null when the pool has no model at all.
+  function fit(pool, v) {
+    const p = poolOf(pool), clis = Object.keys(p).filter((c) => list(p[c]).length);
+    if (!clis.length) return null;
+    const cli = v && clis.includes(v.cli) ? v.cli : (v && clis.find((c) => list(p[c]).includes(v.model))) || clis[0], ms = list(p[cli]), es = effortsOf(pool, cli);
+    return { cli, model: v && ms.includes(v.model) ? v.model : ms[0], effort: !es.length ? null : v && es.includes(v.effort) ? v.effort : es.includes('medium') ? 'medium' : es[0] };
+  }
+  // Why the project does not allow a seat's choice in its pool, or null. A copy keeps a supplied arm's seat the project
+  // does not allow as it is, shown as not allowed, and Save waits until another is chosen: never replaced unseen.
+  function seatWhy(pool, v) {
+    if (!v) return null;
+    return !list(poolOf(pool)[v.cli]).includes(v.model) ? `this project does not allow ${v.model} on ${v.cli} here`
+      : v.effort && !effortsOf(pool, v.cli).includes(v.effort) ? `${v.cli} takes no effort ${v.effort} here` : null;
+  }
+  const kept = (pool, v) => (v && seatWhy(pool, v) ? v : fit(pool, v));
+  // A picker's options with the value it holds added, as not allowed, when the options do not have it.
+  const withOwn = (opts, v) => (v && !opts.some(([x]) => x === v) ? opts.concat([[v, `${v} (not allowed here)`, true]]) : opts);
+  // A draft opened (new or a copy) shows no answer to the Save of the one before it.
+  function openEdit(e) { B.said.delete(saidKey('save-arm')); B.edit = e; draw(); }
+  // The judge model the project's setting gives the arm: the project's own judge, else (one that follows the reviewer)
+  // the first model the project allows the review on another CLI than the arm's reviewer, at medium (judgenow).
+  function projectJudge(e) {
+    const d = defaultsOf();
+    if (!d) return null;
+    if (d.judgeOwn || !e.seats.reviewer) return seatOf(obj(d.seats) && d.seats.judge);
+    const p = poolOf('reviewer'), c = Object.keys(p).find((x) => x !== e.seats.reviewer.cli && list(p[x]).length);
+    return c ? { cli: c, model: p[c][0], effort: 'medium' } : null;
+  }
+  // Whether the arm's judge reads the reviews: null when the project's setting is not known.
+  const judgeOn = (e) => (obj(e.judge) || e.judge === 'on' ? true : e.judge === 'off' ? false : defaultsOf() ? defaultsOf().judgeOn === true : null);
+  // What a seat runs on: the arm's own choice, else the project's; fix and test repair follow the arm's builder unless
+  // the project sets its own.
+  function resolved(e, k) {
+    const ds = obj(defaultsOf() && defaultsOf().seats) || {};
+    if (k === 'judge') return obj(e.judge) ? e.judge : projectJudge(e);
+    if (e.seats[k]) return e.seats[k];
+    return (k === 'fix' || k === 'testFix') ? seatOf(ds[k]) || resolved(e, 'model') : seatOf(ds[k]);
+  }
+  // The recipes an agent arm may run on a CLI: host agent arms offered that take a model on that CLI alone (their spec).
+  const recipesOf = (cli) => armsOf().filter((a) => !obj(a.revision) && a.kind === 'agent' && a.state !== 'not offered' && obj(a.spec) && a.spec.cli === cli);
+  // Method None: the CLI's plain recipe, one session and no method (Claude alone, Codex alone).
+  const plainOf = (cli) => { const rs = recipesOf(cli); return rs.find((a) => a.sessions === 1 && [2, 4].includes(group(a))) || rs[0] || null; };
+  const recipeOf = (e) => recipesOf(e.cli).find((a) => a.name === e.recipe) || null;
+  function blank(kind) {
+    if (kind === 'conveyor') return { kind, name: '', rules: 'engine', seats: {}, judge: 'project', policy: {} };
+    const ag = obj(choicesOf() && choicesOf().agent) || {}, cli = AGENT_CLIS.find((c) => list(ag[c]).length && plainOf(c)) || AGENT_CLIS[0];
+    return { kind, name: '', cli, recipe: (plainOf(cli) || {}).name || '', model: list(ag[cli])[0] || '', effort: '' };
+  }
+  // The editor on a copy of an arm: a saved revision keeps its name (Save then makes a new revision of it), a host arm's
+  // copy is named apart from it. A review policy the copy holds beside the judge (judgeAlways, P0 to P3) is kept, and so
+  // is a seat the project does not allow (kept).
+  function copyOf(a) {
+    const s = a.spec, name = obj(a.revision) ? String(a.label) : `${a.label} (copy)`;
+    if (s.kind === 'agent') return { kind: 'agent', name, cli: s.cli, recipe: s.recipe, model: s.model, effort: s.effort || '' };
+    const seats = obj(s.seats) || {}, policy = { ...(obj(s.policy) || {}) }, mine = {};
+    SEATS.forEach(([k, , pool]) => { if (k !== 'judge' && obj(seats[k])) mine[k] = kept(pool, seatOf(seats[k])); });
+    const judge = obj(seats.judge) ? kept('reviewer', seatOf(seats.judge)) : policy.judgeOn === false ? 'off' : policy.judgeOn === true ? 'on' : 'project';
+    delete policy.judgeOn;
+    return { kind: 'conveyor', name, rules: s.rules === 'project' ? 'project' : 'engine', seats: mine, judge, policy };
+  }
+  // The spec Save sends: a Conveyor arm's own seats only (a seat left out is the project's), the judge's off or on as
+  // judgeOn; an agent arm's effort only when one is chosen and its recipe passes it.
+  function specOf(e) {
+    const one = (v) => ({ cli: v.cli, model: v.model, ...(v.effort ? { effort: v.effort } : {}) });
+    if (e.kind === 'agent') return { kind: 'agent', recipe: e.recipe, cli: e.cli, model: e.model, ...(e.effort && recipeOf(e) && recipeOf(e).effort ? { effort: e.effort } : {}) };
+    const seats = {}, policy = { ...e.policy };
+    SEATS.forEach(([k]) => { const v = k === 'judge' ? (obj(e.judge) ? e.judge : null) : e.seats[k]; if (v) seats[k] = one(v); });
+    if (e.judge !== 'project') policy.judgeOn = e.judge !== 'off';
+    return { kind: 'conveyor', rules: e.rules, ...(Object.keys(seats).length ? { seats } : {}), ...(Object.keys(policy).length ? { policy } : {}) };
+  }
+  // What a saved arm runs, in one line.
+  function specSaid(s) {
+    if (!obj(s)) return '';
+    if (s.kind === 'agent') { const r = armsOf().find((a) => a.name === s.recipe); return `${r ? r.label : s.recipe} on ${seatSaid(seatOf(s))}`; }
+    const seats = obj(s.seats) || {}, own = SEATS.filter(([k]) => obj(seats[k])).map(([k, t]) => `${t} ${seatSaid(seatOf(seats[k]))}`);
+    return [own.length ? own.join('; ') : 'the project\'s seats', s.policy && s.policy.judgeOn === false ? 'judge off' : '', s.rules === 'project' ? 'engine and project rules' : 'engine rules'].filter(Boolean).join('; ');
+  }
+  // Why a name cannot be saved (swe_armsave's rule), or null.
+  const nameWhy = (n) => (!n ? 'Name the arm to save it.' : n.length > 80 ? 'A name has at most 80 characters.' : n !== n.trim() ? 'A name has no space at either end.'
+    : Array.from(n).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) ? 'A name has no control character.' : null);
+  function picker(act, label, opts, value, fn) {
+    const s = h('select', 'field');
+    s.dataset.act = act; s.setAttribute('aria-label', label);
+    opts.forEach(([v, t, off]) => { const o = h('option', null, t); o.value = v; o.disabled = Boolean(off); s.append(o); });
+    s.value = value;
+    s.addEventListener('change', () => { fn(s.value); draw(); });
+    return s;
+  }
+  // One seat's row: the CLI, model and effort it runs on. A seat that follows another shows those values beside Use
+  // another model; one of the arm's own has a picker each, the models and efforts those its CLI allows the pool.
+  function seatRow(e, [k, title, pool, what]) {
+    const row = h('div', 'bench-row bench-seat'), d = defaultsOf(), own = k === 'judge' ? (obj(e.judge) ? e.judge : null) : e.seats[k];
+    const set = (v) => { if (k === 'judge') e.judge = v; else e.seats[k] = v; };
+    row.dataset.seat = k;
+    row.append(h('span', 'board-label', title));
+    if (k === 'judge') {
+      row.append(picker('seat-judge-mode', 'Judge', [['project', 'Project judge setting'], ['off', 'Off'], ['on', 'On, the project\'s judge model'], ['own', 'Choose a model']], own ? 'own' : e.judge,
+        (v) => { e.judge = v === 'own' ? fit(pool, projectJudge(e)) || 'project' : v; }));
+    }
+    if (own) {
+      const p = poolOf(pool), es = effortsOf(pool, own.cli), why = seatWhy(pool, own);
+      row.append(picker(`seat-${k}-cli`, `${title} CLI`, withOwn(Object.keys(p).map((c) => [c, list(p[c]).length ? c : `${c} (the project allows it no model here)`, !list(p[c]).length]), own.cli), own.cli,
+        (v) => set(fit(pool, { ...own, cli: v }))),
+      picker(`seat-${k}-model`, `${title} model`, withOwn(list(p[own.cli]).map((m) => [m, m]), own.model), own.model, (v) => set({ ...own, model: v })),
+      es.length ? picker(`seat-${k}-effort`, `${title} effort`, withOwn(es.map((x) => [x, x]), own.effort), own.effort, (v) => set({ ...own, effort: v })) : h('span', 'board-from', `${own.cli} takes no effort for this seat`));
+      if (why) row.append(h('span', 'warn-note bench-seat-why', `Not allowed: ${why}. Choose another.`));
+      if (k !== 'judge') row.append(button(k === 'fix' || k === 'testFix' ? 'Follow again' : 'Use the project\'s', 'btn-quiet btn-sm', `seat-${k}-follow`, `Use the project's ${title.toLowerCase()} again`, () => { delete e.seats[k]; draw(); }));
+    } else if (k === 'judge') {
+      row.append(h('span', 'bench-seat-now', judgeOn(e) === false ? 'Off: no judge reads the reviews.' : seatSaid(resolved(e, k))));
+    } else {
+      const follows = { model: 'Project builder', reviewer: 'Project reviewer' }[k] || (seatOf(d && obj(d.seats) && d.seats[k]) ? `Project ${title.toLowerCase()} seat` : 'Follow builder');
+      row.append(h('span', 'bench-seat-now', `${follows}: ${seatSaid(resolved(e, k))}`),
+        button('Use another model', 'btn-quiet btn-sm', `seat-${k}-own`, `Use another model for the ${title.toLowerCase()}`, () => { set(fit(pool, resolved(e, k))); draw(); }));
+    }
+    const always = list(e.policy.judgeAlways || (d && d.judgeAlways));
+    row.append(h('span', 'bench-sub', k !== 'judge' || judgeOn(e) === false ? what
+      : `${what} It always accepts ${always.length ? `the findings of kind ${always.join(', ')}` : 'no kind of finding'} without weighing it.`));
+    return row;
+  }
+  function conveyorPart(e, box) {
+    const c = choicesOf();
+    box.append(h('p', 'board-from', c.source === 'project' ? 'The models are those this project allows in models.allowed.' : 'The models are the engine\'s defaults: this project sets no models.allowed.'));
+    const rules = h('div', 'bench-row');
+    rules.append(h('span', 'board-label', 'Rules'), picker('edit-rules', 'Rules', [['engine', 'Engine rules'], ['project', 'Engine and project rules']], e.rules, (v) => { e.rules = v; }),
+      h('span', 'board-from', e.rules === 'project' ? 'The core card and review rules of the engine, and this project\'s card rules and the area rules of each task\'s card.' : 'The core card and review rules of the engine that the run builds with.'));
+    box.append(rules);
+    if (!defaultsOf()) box.append(h('p', 'warn-note', 'The project\'s seats could not be read on the build machine: a seat that follows the project shows "not known".'));
+    SEATS.forEach((x) => box.append(seatRow(e, x)));
+    box.append(h('p', 'info-note', 'Fixed in the sandbox for every arm: no follow-up issues, no approval of visible changes, and the push goes to the sandbox. The engine is the Conveyor version of the run.'));
+  }
+  const agentSeat = (e) => ({ cli: e.cli, model: e.model, effort: e.effort || null });
+  function agentPart(e, box) {
+    const c = choicesOf(), ag = obj(c.agent) || {}, clis = Array.from(new Set(AGENT_CLIS.concat(Object.keys(obj(c.efforts) || {})))), r = recipeOf(e);
+    const cliWhy = (x) => (!AGENT_CLIS.includes(x) ? 'not available: a benchmark container cannot sign in to it yet' : !list(ag[x]).length ? 'the project allows it no model'
+      : !recipesOf(x).length ? 'no recipe on this machine runs it' : null);
+    const row = (label, ...xs) => { const p = h('div', 'bench-row'); p.append(h('span', 'board-label', label), ...xs); box.append(p); };
+    row('CLI', picker('edit-cli', 'CLI', clis.map((x) => [x, cliWhy(x) ? `${x} (${cliWhy(x)})` : x, cliWhy(x)]), e.cli, (v) => {
+      const p = plainOf(v), ms = list(ag[v]);
+      Object.assign(e, { cli: v, recipe: p ? p.name : '', model: ms.includes(e.model) ? e.model : ms[0] || '', effort: effortsOf('agent', v).includes(e.effort) ? e.effort : '' });
+    }));
+    const why = seatWhy('agent', agentSeat(e));
+    row('Model', picker('edit-model', 'Model', withOwn(list(ag[e.cli]).map((m) => [m, m]), e.model), e.model, (v) => { e.model = v; }),
+      ...(why ? [h('span', 'warn-note bench-seat-why', `Not allowed: ${why}. Choose another.`)] : []));
+    row('Effort', r && r.effort ? picker('edit-effort', 'Effort', withOwn([['', 'the CLI\'s own']].concat(effortsOf('agent', e.cli).map((x) => [x, x])), e.effort), e.effort, (v) => { e.effort = v; })
+      : h('span', 'board-from', 'This method does not pass an effort to its CLI.'));
+    row('Method', picker('edit-method', 'Method', recipesOf(e.cli).map((a) => [a.name, `${a === plainOf(e.cli) ? `None (${a.label})` : a.label} · ${sessionsWord(a.sessions) || 'its own sessions'} a task`]), e.recipe,
+      (v) => { e.recipe = v; const x = recipeOf(e); if (!x || !x.effort) e.effort = ''; }),
+    h('span', 'board-from', r ? `${sessionsWord(r.sessions) || 'Its own sessions'} a task.` : 'Choose a method.'));
+  }
+  function editor() {
+    const e = B.edit, s = section('bench-edit', e.kind === 'conveyor' ? 'Conveyor arm' : 'Agent arm', null, 'Choose what builds each task, then Save arm. Saving starts no session.');
+    s.querySelector('.bench-head').append(button('Close', 'btn-quiet btn-sm', 'edit-close', 'Close the arm editor', () => { B.edit = null; draw(); }));
+    if (!choicesOf()) {
+      s.append(h('p', 'warn-note', 'The models this project allows could not be read on the build machine, so no arm can be saved now.'), saidAt('save-arm'));
+      return s;
+    }
+    const nrow = h('div', 'bench-row'), name = h('input', 'field'), note = h('span', 'board-from bench-why');
+    name.value = e.name; name.dataset.act = 'edit-name'; name.setAttribute('aria-label', 'Name'); name.maxLength = 120; name.placeholder = 'Claude builds, Codex reviews';
+    nrow.append(h('span', 'board-label', 'Name'), name, note);
+    s.append(nrow);
+    if (e.kind === 'conveyor') conveyorPart(e, s); else agentPart(e, s);
+    const save = button('Save arm', 'btn-primary', 'save-arm', 'Save the arm', () => {
+      send('save-arm', ['arms', 'save', e.name, JSON.stringify(specOf(e))], (t) => `Saved as ${t}. It is under Saved arms: tick it to check it and use it.`, () => readHist(true));
+    });
+    // The name is checked as it is typed, beside its field, with no redraw (the field keeps its caret).
+    // A seat the project does not allow (a copy keeps one as it is) holds Save until another is chosen.
+    const bad = e.kind === 'agent' ? (seatWhy('agent', agentSeat(e)) ? 'Model' : null)
+      : (SEATS.find(([k, , pool]) => seatWhy(pool, k === 'judge' ? (obj(e.judge) ? e.judge : null) : e.seats[k])) || [])[1];
+    const check = () => { const why = nameWhy(e.name) || (e.kind === 'agent' && !recipeOf(e) ? 'Choose a CLI and a method.' : null)
+      || (bad ? `${bad}: this project does not allow the choice. Choose another.` : null); note.textContent = why || ''; save.disabled = Boolean(why) || B.busy; };
+    name.addEventListener('input', () => { e.name = name.value; check(); });
+    check();
+    s.append(save, saidAt('save-arm'));
     return s;
   }
   function before() {
@@ -923,7 +1129,7 @@
   function render(el, d, ctx) {
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Benchmarks: ${view.repo}` : null);
-    if (B.repo !== undefined && view.repo !== B.repo) { B.sel = []; B.open = null; B.task = null; B.cmp = { a: '', b: '', data: null, text: null, all: false, ask: null, n: B.cmp.n }; B.runs.clear(); }
+    if (B.repo !== undefined && view.repo !== B.repo) { B.sel = []; B.open = null; B.task = null; B.cmp = { a: '', b: '', data: null, text: null, all: false, ask: null, n: B.cmp.n }; B.runs.clear(); B.edit = null; }
     Object.assign(B, { el, ctx, d: view, repo: view.repo });
     if (B.held) { B.late = true; return; }
     draw();

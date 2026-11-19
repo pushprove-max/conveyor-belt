@@ -226,28 +226,47 @@ swe_lines() {
 # in the pinned order (a run reuses them); guard, whether the usage guard
 # holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set;
 # choices, the models and efforts a saved arm may choose (swe_choices; null when the pack does not read).
+# The arms are the host arms and then each saved revision (swe_armsave; one whose recipe is gone is left out), each
+# with revision ({id, name, at, recipe}; null for a host arm), spec (the choices the Board's arm form starts a copy
+# from: a saved revision's own; a host conveyor arm's seats, rules and policy; a host agent arm's recipe, CLI and
+# model when it takes a model on one CLI a container signs in to; else null), sessions and effort (a host agent arm's:
+# the sessions a trial takes, and whether its run passes $SWE_EFFORT, so a saved arm on it may choose one).
+# defaults, the seats a sandbox runs for each seat an arm leaves out (seat() on swe_ctl's record for an arm that sets
+# none: the project's, with no card's own), fix and testFix null when the project's follows the builder, judgeOwn
+# whether the project's judge names its model (else it follows the reviewer), and its judgeOn and judgeAlways; null
+# when the control record does not read.
 swe_history() {
-  local arms='[]' n a r p m k i x gc=false ga=false ch
-  for n in $(swe_armnames); do
+  local arms='[]' n a r p m k i x s gc=false ga=false ch c df
+  for n in $(swe_armnames) $(cd "$SWE_DIR/arms" 2>/dev/null && for x in arm-*.json; do [ -e "$x" ] && echo "${x%.json}"; done); do
     a=$(swe_arm "$n") || continue
+    s=null; [[ ! $n =~ $SWE_ARMID ]] || s=$(jq -c '.spec' "$SWE_DIR/arms/$n.json") || continue
     [ "$(jq -r .kind <<<"$a")" != conveyor ] || swe_mainc
     mapfile -t x < <(swe_armnow "$a"); r=$(swe_checkstate "$a" "${x[0]}" "${x[1]}")
-    p=null; k=null
+    p=null; k=null; m=''
     if jq -e '.offered != false' <<<"$a" > /dev/null; then
-      m=''; [ "$(jq -r .kind <<<"$a")" = conveyor ] || { m=$(jq -r '.model // ""' <<<"$a"); [ "$m" != builder ] || m=$(swe_solomodel); }
+      [ "$(jq -r .kind <<<"$a")" = conveyor ] || { m=$(jq -r '.model // ""' <<<"$a"); [ "$m" != builder ] || m=$(swe_solomodel); }
       i=$(swe_inputs "$a" "$m") && k=$(swe_reskey "$a" '' "$m" "$i" | jq -R .) || k=null
       p=$(swe_pertask "$n" "$(jq -r .kind <<<"$a")" "$(jq -r '.sessions // 1' <<<"$a")" "$m")
     fi
-    arms=$(jq -c --argjson a "$a" --argjson r "$r" --argjson p "$p" --argjson k "$k" --arg g "$(swe_guards "$a")" '. + [{name: $a.name, label: ($a.label // $a.name), kind: $a.kind,
+    arms=$(jq -c --argjson a "$a" --argjson r "$r" --argjson p "$p" --argjson k "$k" --arg g "$(swe_guards "$a")" --argjson s "$s" --arg m "$m" '. + [{name: $a.name, label: ($a.label // $a.name), kind: $a.kind,
       state: $r.state, why: $r.why, at: $r.at, step: $r.step, check: $r.id, guard: (if $g == "" then null else $g end), perTask: $p,
-      key: (if $a.kind == "conveyor" then null else $k end), keyPrefix: (if $a.kind == "conveyor" then $k else null end)}]' <<<"$arms")
+      key: (if $a.kind == "conveyor" then null else $k end), keyPrefix: (if $a.kind == "conveyor" then $k else null end),
+      revision: ($a.revision // null), sessions: (if $a.kind == "agent" and $a.revision == null then $a.sessions // 1 else null end),
+      effort: ($a.kind == "agent" and $a.revision == null and $a.effort == true),
+      spec: (if $s != null then $s elif $a.kind == "conveyor" then {kind: "conveyor"} + ($a | {seats, rules, policy} | with_entries(select(.value != null)))
+        elif $a.offered != false and ($a.model | type) == "string" and $m != "" and (($a.login // []) | IN(["claude"], ["codex"])) then {kind: "agent", recipe: $a.name, cli: $a.login[0], model: $m}
+        else null end)}]' <<<"$arms")
   done
   ! swe_guarded || gc=true; ! swe_guarded 1 || ga=true
   ch=$(swe_choices) || ch=null
-  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson ch "$ch" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
+  # Each seat read on its own: one the record cannot work out is null, as seat() gives none.
+  c=$(swe_ctl '{}' 2>/dev/null) && df=$(for x in builder reviewer judge fix testFix; do seat "$x" "$c" || echo null; done | jq -sc --argjson c "$c" '
+    {seats: {model: .[0], reviewer: .[1], judge: .[2], fix: (if $c.fix == null then null else .[3] end), testFix: (if $c.testFix == null then null else .[4] end)},
+     judgeOwn: ($c.judge.model != null), judgeOn: ($c.judgeOn == true), judgeAlways: ($c.judgeAlways // [])}') || df=null
+  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson ch "$ch" --argjson df "$df" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
     --slurpfile order <(jq -c .id "$(swe_list "$(swe_set .revision)" "$(swe_set .seed)")" 2>/dev/null) --argjson set "$SWE_SET" "$SWE_RUNSUM"'
     ($res | map({key: "\(.key)/\(.task)", value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
-    | {set: ($set | {dataset, revision, seed}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch,
+    | {set: ($set | {dataset, revision, seed}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df,
        runs: (sort_by(.started // "") | reverse | map(runsum($R))),
        keys: ($res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort)}))}'
 }

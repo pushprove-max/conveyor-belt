@@ -786,6 +786,26 @@ priced card sessions, or of those on the arm's model when the arm has a model. A
 model shows "–" for cost, and then the page shows no total. **Start** is off while the usage guard holds back an arm
 you picked.
 
+You can make your own arm on **Start a run**. **New Conveyor arm** opens a name field, a rules picker and five seats:
+Builder, Reviewer, Judge, Fix and Test repair. Each seat shows the CLI, model and effort that will run. A seat starts
+on the project's own seat. Fix and Test repair follow the arm's builder, unless the project sets its own seat for them.
+**Use another model** gives the seat its own CLI, model and effort. You can choose only the models that the project
+allows for that seat on that CLI, and the efforts that the CLI takes. When you change the CLI, the model and effort
+lists change with it. The Judge can follow the project's setting, be off, be on with the project's judge model, or
+use a model that you choose. Its row says which kinds of finding the judge always accepts. The rules picker sets
+**Engine rules** or **Engine and project rules**. **New agent arm** opens Name, CLI, Model, Effort and Method. Method
+**None** runs the CLI alone, in one session. The other methods are the recipes on the build machine for that CLI, each
+with the number of sessions that it takes for a task. A CLI that a benchmark container cannot sign in to is shown but
+cannot be chosen. **Edit a copy** on an arm opens the editor with that arm's choices. When the project does not allow
+a choice of the arm, the copy keeps it and marks it "Not allowed". You cannot save the copy until you choose another.
+
+**Save arm** saves the arm on the build machine as a new revision with an ID of its own. It does not start a session.
+The name must have 1 to 80 characters, with no space at either end. When you save a name again with other choices,
+you get a new revision, and the earlier one does not change. Each revision shows under **Saved arms**, on this visit
+and on later ones. Tick it, or click **Check**, to run its preflight. A check belongs to one revision: when it
+passes, it does not pick a revision that you saved after it. When you untick an arm while its check runs, the check
+continues, but the arm stays unpicked when the check passes.
+
 **Infographic** draws the runs you ticked on a fixed template: the resolved tasks of each arm with the noise band, the
 sessions, tokens and minutes, the number of tasks, the dates, the versions and the model IDs. Code fills it. No model
 writes or picks anything. You can type a title. The notes on how to read the graphic stay under any title.

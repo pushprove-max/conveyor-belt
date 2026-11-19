@@ -196,7 +196,9 @@ review models: `codex`, `claude-reviewer` and `opencode`. An agent arm takes the
 When the project has no `models.allowed` setting, Conveyor uses its own default models. The effort must be one that
 the CLI takes. Conveyor does not save an arm with a choice that is not permitted, and it tells you why. A saved arm
 does not add a model to the project's models. `bench swe history` shows the permitted choices under `choices`, and
-`source` tells you if they come from the project or from the defaults.
+`source` tells you if they come from the project or from the defaults. It shows each saved arm under `arms`, with its
+`revision` and its `spec`. Under `defaults` it shows the seats that a task's card uses for a seat that an arm does
+not set.
 
 ### Containers and logins
 

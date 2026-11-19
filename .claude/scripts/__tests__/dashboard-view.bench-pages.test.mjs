@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Benchmarks tab's other pages (#326, the owner's approved mockup: run.html, compare.html, start.html,
 // infographic.html): a run's tasks by arm with one task opened and Export figures; Compare of two arms with the flipped
-// tasks; Start a run with the cost before Start and only the arms whose preflight passed; the infographic of the runs
+// tasks; Start a run with the cost before Start and only the arms whose preflight passed, and its arm editor (#641:
+// a Conveyor or agent arm saved as a revision, listed again after a reload, and its checks); the infographic of the runs
 // selected, whose notes a title cannot remove. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
 import { boot, next, tick, settle, act, cases, full, BH } from './dashboard-view.helpers.mjs';
@@ -470,4 +471,184 @@ test('Infographic: made from 2 selected runs on the fixed template; a title type
   pick(w, `pick-${OLD}`);
   act(bp(w), 'sel-infographic').click();
   assert.equal(bp(w).querySelector('.bench-infographic .bench-said'), null, 'no answer about the last selection');
+});
+
+// The arm editor's history (#641), as `bench swe history` gives it: the models the project allows each pool by CLI
+// (choices: no Codex builder), the seats a sandbox runs for a seat an arm leaves out (defaults: the judge follows the
+// reviewer, fix and test repair the builder), each arm's spec and recipe facts, and the saved revisions given.
+const EFF = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['minimal', 'low', 'medium', 'high', 'xhigh'], opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] };
+const CHOICES = { source: 'project', builder: { claude: ['claude-opus-5-5', 'claude-sonnet-5-5'], codex: [], opencode: [] }, reviewer: { codex: ['gpt-6.1-sol', 'gpt-6-astra'], claude: ['claude-opus-5-5'], opencode: [] },
+  agent: { claude: ['claude-opus-5-5', 'claude-sonnet-5-5'], codex: ['gpt-6.1-sol', 'gpt-6-astra'] }, efforts: EFF };
+const DEFAULTS = { seats: { model: { model: 'claude-opus-5-5', effort: 'high', agent: 'claude' }, reviewer: { model: 'gpt-6.1-sol', effort: 'medium', agent: 'codex' },
+  judge: { model: 'claude-opus-5-5', effort: 'medium', agent: 'claude' }, fix: null, testFix: null }, judgeOwn: false, judgeOn: true, judgeAlways: ['style'] };
+const ARM = 'Claude builds, Codex reviews';
+const saved = (id, spec, state = 'unchecked') => ({ name: id, label: ARM, kind: 'conveyor', state, why: null, at: state === 'ready' ? '2026-11-19T06:20:00Z' : null, guard: 'conveyor',
+  perTask: { usual: 2.5, worst: 8, minutes: 20, session: 1.25 }, key: null, keyPrefix: '', revision: { id, name: ARM, at: '2026-11-19T06:00:00Z', recipe: 'conveyor' }, spec, sessions: null, effort: false });
+const RECIPE = (model, sessions) => ({ sessions, effort: true, model });
+function eh(revs = []) {
+  const x = BH.hist(), more = { conveyor: { spec: { kind: 'conveyor' } }, solo: RECIPE('claude-opus-5-5', 1), chisle: RECIPE('claude-opus-5-5', 4), 'codex-sol': RECIPE('gpt-6.2-sol', 1) };
+  const facts = (a) => { const m = more[a.name]; return !m ? {} : m.spec ? m : { sessions: m.sessions, effort: m.effort, spec: { kind: 'agent', recipe: a.name, cli: /^codex/.test(a.name) ? 'codex' : 'claude', model: m.model } }; };
+  return { ...x, choices: CHOICES, defaults: DEFAULTS, arms: x.arms.map((a) => ({ ...a, ...facts(a) })).concat(revs) };
+}
+const opts = (w, a) => Array.from(act(bp(w), a).options, (o) => (o.disabled ? `${o.textContent} [off]` : o.textContent));
+const seatsNow = (w) => Array.from(bp(w).querySelectorAll('.bench-seat'), (r) => (r.querySelector('.bench-seat-now') ? text(r.querySelector('.bench-seat-now'))
+  : Array.from(r.querySelectorAll('select'), (s) => s.value).join(' · ')));
+const named = (w, n) => { const f = act(bp(w), 'edit-name'); f.value = n; f.dispatchEvent(new w.Event('input')); };
+const saveSent = (w) => w.posts.splice(0).map((p) => [...p.body.args.slice(0, 3), JSON.parse(p.body.args[3])]);
+async function editing(body) {
+  const w = boot({ tab: 'bench' });
+  BH.open(w, { body });
+  await settle();
+  act(bp(w), 'to-start').click();
+  return w;
+}
+// The Conveyor arm the editor saves, and a saved arm whose Codex builder this project does not allow.
+const ID = 'arm-0123456789ab', spec = { kind: 'conveyor', rules: 'project', policy: { judgeOn: true }, seats: { model: { cli: 'claude', model: 'claude-sonnet-5-5', effort: 'max' },
+  reviewer: { cli: 'claude', model: 'claude-opus-5-5', effort: 'medium' }, judge: { cli: 'codex', model: 'gpt-6-astra', effort: 'medium' },
+  fix: { cli: 'claude', model: 'claude-sonnet-5-5', effort: 'low' }, testFix: { cli: 'claude', model: 'claude-opus-5-5', effort: 'max' } } };
+const CX = 'arm-0000000000cd', cx = { kind: 'conveyor', seats: { model: { cli: 'codex', model: 'gpt-6.2-sol', effort: 'high' } } };
+
+// Bugs it guards (#641): a benchmark arm's seats were a list someone picked in a file, with no way to say which model
+// does what; and a Conveyor builder could be offered a Codex review model where the project lists no Codex builder.
+// Each seat shows what runs; its own choice offers only what its pool allows on the CLI picked (a CLI changed changes
+// both lists); and the saved spec holds exactly the seats chosen.
+test('Arm editor: a Conveyor arm shows each seat\'s values, takes its own model for each, follows the CLI\'s models and efforts, and is saved', async () => {
+  const w = await editing(() => eh());
+  act(bp(w), 'new-conveyor').click();
+  assert.deepEqual(heads(w), ['Start a run', 'Arms', 'Conveyor arm', 'Before you start']);
+  assert.deepEqual(seatsNow(w), ['Project builder: claude · claude-opus-5-5 · high', 'Project reviewer: codex · gpt-6.1-sol · medium', 'claude · claude-opus-5-5 · medium',
+    'Follow builder: claude · claude-opus-5-5 · high', 'Follow builder: claude · claude-opus-5-5 · high']);
+  assert.match(text(bp(w).querySelector('[data-seat="judge"] .bench-sub')), /always accepts the findings of kind style/);
+  act(bp(w), 'seat-model-own').click();
+  assert.deepEqual(opts(w, 'seat-model-cli'), ['claude', 'codex (the project allows it no model here) [off]', 'opencode (the project allows it no model here) [off]']);
+  choose(w, 'seat-model-model', 'claude-sonnet-5-5'); choose(w, 'seat-model-effort', 'max');
+  assert.equal(seatsNow(w)[3], 'Follow builder: claude · claude-sonnet-5-5 · max', 'fix follows the arm\'s builder');
+  act(bp(w), 'seat-reviewer-own').click();
+  choose(w, 'seat-reviewer-effort', 'minimal');
+  choose(w, 'seat-reviewer-cli', 'claude');
+  assert.deepEqual([opts(w, 'seat-reviewer-model'), opts(w, 'seat-reviewer-effort'), act(bp(w), 'seat-reviewer-effort').value], [['claude-opus-5-5'], EFF.claude, 'medium'], 'the CLI changed its models and efforts');
+  assert.equal(seatsNow(w)[2], 'codex · gpt-6.1-sol · medium', 'the project\'s judge follows the arm\'s reviewer onto another CLI');
+  choose(w, 'seat-judge-mode', 'own'); choose(w, 'seat-judge-model', 'gpt-6-astra');
+  act(bp(w), 'seat-fix-own').click(); choose(w, 'seat-fix-effort', 'low');
+  act(bp(w), 'seat-testFix-own').click(); choose(w, 'seat-testFix-model', 'claude-opus-5-5');
+  choose(w, 'edit-rules', 'project');
+  assert.deepEqual([text(bp(w).querySelector('.bench-edit .bench-why')), act(bp(w), 'save-arm').disabled], ['Name the arm to save it.', true]);
+  named(w, `${ARM} `);
+  assert.deepEqual([text(bp(w).querySelector('.bench-edit .bench-why')), act(bp(w), 'save-arm').disabled], ['A name has no space at either end.', true], 'checked as typed, beside the field');
+  named(w, ARM);
+  w.reply = BH.reply(ID);
+  act(bp(w), 'save-arm').click();
+  assert.deepEqual(saveSent(w), [['arms', 'save', ARM, spec]]);
+  await settle();
+  assert.equal(text(bp(w).querySelector('[data-said="save-arm"]')), `Saved as ${ID}. It is under Saved arms: tick it to check it and use it.`);
+});
+
+// Bug it guards (#641): a saved arm was not offered on a later visit. After a reload the build machine lists the
+// revision; it is checked, picked and started by its ID, and a copy reads its seats.
+test('Arm editor: a saved Conveyor arm is listed after a reload, checked, started by its ID and copied with its seats', async () => {
+  const v = await editing(() => eh([saved(ID, spec), saved(CX, cx)]));
+  assert.equal(text(bp(v).querySelector('.bench-arm-pick > .board-label')), 'Saved arms');
+  assert.equal(bp(v).querySelector(`.bench-arm[data-arm="${ID}"] .chip`).textContent, 'Not checked');
+  assert.match(text(bp(v).querySelector(`.bench-arm[data-arm="${ID}"] .bench-sub`)), new RegExp(`^Saved .* as ${ID}: Builder claude · claude-sonnet-5-5 · max; Reviewer claude · claude-opus-5-5 · medium; Judge codex · gpt-6-astra · medium; Fix .*; engine and project rules`));
+  v.reply = BH.reply(`${ID}: checking c1`);
+  pick(v, `arm-${ID}`);
+  assert.deepEqual(v.posts.splice(0).map((p) => p.body.args), [['arms', 'check', ID]]);
+  await settle();
+  v.benchBody = () => eh([saved(ID, spec, 'ready'), saved(CX, cx)]);
+  act(bp(v), 'arms-again').click();
+  await settle();
+  act(bp(v), 'start').click();
+  assert.deepEqual(v.posts.splice(0).map((p) => p.body.args), [['run', '20', '--arm', 'conveyor', '--arm', ID, '--engine', 'main']]);
+  act(bp(v), `copy-${ID}`).click();
+  assert.deepEqual([act(bp(v), 'edit-name').value, seatsNow(v)[0]], [ARM, 'claude · claude-sonnet-5-5 · max']);
+  // Bug it guards (#641 review): a copy of an arm whose builder this project does not allow (a Codex builder, with no
+  // Codex builder list) replaced it with the first Claude model unseen. It is kept, shown as not allowed, and holds Save.
+  await settle();
+  act(bp(v), `copy-${CX}`).click();
+  assert.deepEqual([seatsNow(v)[0], opts(v, 'seat-model-model')], ['codex · gpt-6.2-sol · high', ['gpt-6.2-sol (not allowed here) [off]']]);
+  assert.equal(text(bp(v).querySelector('[data-seat="model"] .bench-seat-why')), 'Not allowed: this project does not allow gpt-6.2-sol on codex here. Choose another.');
+  assert.deepEqual([text(bp(v).querySelector('.bench-edit .bench-why')), act(bp(v), 'save-arm').disabled], ['Builder: this project does not allow the choice. Choose another.', true]);
+  choose(v, 'seat-model-cli', 'claude');
+  assert.deepEqual([seatsNow(v)[0], act(bp(v), 'save-arm').disabled], ['claude · claude-opus-5-5 · high', false], 'a choice the project allows frees Save');
+});
+
+// Bugs it guards (#641): an agent arm's model and method were fixed in its recipe file, its effort never chosen, and
+// a CLI a container cannot sign in to could be offered. It starts on one session with Method None; each method shows
+// its sessions; a CLI changed changes the models, efforts and methods offered; and the spec saved is what is shown.
+const AID = 'arm-00000000000a', aspec = { kind: 'agent', recipe: 'codex-sol', cli: 'codex', model: 'gpt-6-astra', effort: 'minimal' };
+test('Arm editor: an agent arm starts on Method None, shows each method\'s sessions, follows its CLI, and saves the choices shown', async () => {
+  const w = await editing(() => eh());
+  act(bp(w), 'new-agent').click();
+  assert.deepEqual(heads(w), ['Start a run', 'Arms', 'Agent arm', 'Before you start']);
+  assert.deepEqual(opts(w, 'edit-cli'), ['claude', 'codex', 'opencode (not available: a benchmark container cannot sign in to it yet) [off]']);
+  assert.deepEqual(opts(w, 'edit-method'), ['None (Claude alone) · one session a task', 'Claude with Chisle · 4 sessions a task']);
+  assert.deepEqual(['edit-method', 'edit-model', 'edit-effort'].map((a) => act(bp(w), a).value), ['solo', 'claude-opus-5-5', '']);
+  choose(w, 'edit-method', 'chisle'); choose(w, 'edit-effort', 'high');
+  choose(w, 'edit-cli', 'codex');
+  assert.deepEqual([opts(w, 'edit-method'), opts(w, 'edit-model'), opts(w, 'edit-effort')], [['None (Codex alone (gpt-6.2-sol)) · one session a task'], CHOICES.agent.codex, ['the CLI\'s own', ...EFF.codex]]);
+  assert.deepEqual(['edit-method', 'edit-model', 'edit-effort'].map((a) => act(bp(w), a).value), ['codex-sol', 'gpt-6.1-sol', 'high'], 'an effort the new CLI takes is kept');
+  choose(w, 'edit-model', 'gpt-6-astra'); choose(w, 'edit-effort', 'minimal');
+  named(w, 'Codex on astra');
+  w.reply = BH.reply(AID);
+  act(bp(w), 'save-arm').click();
+  assert.deepEqual(saveSent(w), [['arms', 'save', 'Codex on astra', aspec]]);
+  await settle();
+  assert.equal(text(bp(w).querySelector('[data-said="save-arm"]')), `Saved as ${AID}. It is under Saved arms: tick it to check it and use it.`);
+  // Bug it guards (#641 review): a new draft showed the last arm's save receipt, as if it were saved.
+  act(bp(w), 'new-conveyor').click();
+  assert.equal(bp(w).querySelector('[data-said="save-arm"]'), null, 'a new draft shows no receipt of the arm saved before it');
+});
+
+// Bug it guards (#641): a saved agent arm was not offered on a later visit. After a reload the revision is listed
+// with its choices, checked, started by its ID, and a copy reads its choices.
+test('Arm editor: a saved agent arm is listed after a reload with its choices, checked, started by its ID and copied', async () => {
+  const rev =(state) => ({ ...saved(AID, aspec, state), kind: 'agent', label: 'Codex on astra', guard: 'codex', revision: { id: AID, name: 'Codex on astra', at: '2026-11-19T06:00:00Z', recipe: 'codex-sol' } });
+  const v = await editing(() => eh([rev()]));
+  assert.match(text(bp(v).querySelector(`.bench-arm[data-arm="${AID}"] .bench-sub`)), new RegExp(`^Saved .* as ${AID}: .* on codex · gpt-6-astra · minimal$`));
+  v.reply = BH.reply(`${AID}: checking c1`);
+  pick(v, `arm-${AID}`);
+  assert.deepEqual(v.posts.splice(0).map((p) => p.body.args), [['arms', 'check', AID]]);
+  await settle();
+  v.benchBody = () => eh([rev('ready')]);
+  act(bp(v), 'arms-again').click();
+  await settle();
+  act(bp(v), 'start').click();
+  assert.deepEqual(v.posts.splice(0).map((p) => p.body.args), [['run', '20', '--arm', 'conveyor', '--arm', AID, '--engine', 'main']]);
+  act(bp(v), `copy-${AID}`).click();
+  assert.deepEqual(['edit-name', 'edit-cli', 'edit-model', 'edit-effort', 'edit-method'].map((a) => act(bp(v), a).value), ['Codex on astra', 'codex', 'gpt-6-astra', 'minimal', 'codex-sol']);
+});
+
+// Bugs it guards (#641): a check is of one revision; an edit saved while it runs is another, with an ID of its own,
+// and a late pass of the old one must not pick it. Unticking an arm while its check runs withdraws it: the pass that
+// comes after must not pick it again.
+test('Saved arms: an old revision\'s check cannot pick its edited copy; an arm unticked during its check stays unpicked after it passes', async () => {
+  const R1 = 'arm-aaaaaaaaaaaa', R2 = 'arm-bbbbbbbbbbbb', s1 = { kind: 'conveyor', seats: { model: { cli: 'claude', model: 'claude-opus-5-5', effort: 'high' } } };
+  const s2 = { kind: 'conveyor', rules: 'engine', seats: { model: { ...s1.seats.model, effort: 'max' } } };
+  const w = await editing(() => eh([saved(R1, s1)]));
+  const arm = (id) => bp(w).querySelector(`.bench-arm[data-arm="${id}"]`);
+  const shown = (id) => [arm(id).querySelector('input').checked, arm(id).querySelector('.chip').textContent];
+  const read = async (...revs) => { w.benchBody = () => eh(revs); act(bp(w), 'arms-again').click(); await settle(); };
+  w.reply = BH.reply(`${R1}: checking c1`);
+  pick(w, `arm-${R1}`);
+  await settle();
+  act(bp(w), `copy-${R1}`).click();
+  choose(w, 'seat-model-effort', 'max');
+  w.reply = BH.reply(R2);
+  act(bp(w), 'save-arm').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args.slice(0, 3)), [['arms', 'check', R1], ['arms', 'save', ARM]]);
+  await settle();
+  await read(saved(R1, s1, 'ready'), saved(R2, s2));
+  assert.deepEqual([shown(R1), shown(R2)], [[true, 'Ready'], [false, 'Not checked']], 'the old revision\'s pass picks the old revision only');
+  assert.equal(arm(R2).parentElement.querySelector('.bench-said'), null, 'no answer of the old check beside the edited copy');
+  w.reply = BH.reply(`${R2}: checking c2`);
+  pick(w, `arm-${R2}`);
+  await settle();
+  await read(saved(R1, s1, 'ready'), { ...saved(R2, s2), state: 'checking', step: 'Running the trivial task' });
+  pick(w, `arm-${R2}`);
+  assert.deepEqual(shown(R2), [false, 'Checking']);
+  await read(saved(R1, s1, 'ready'), saved(R2, s2, 'ready'));
+  assert.deepEqual(shown(R2), [false, 'Ready'], 'the pass after the untick does not pick it');
+  w.posts.splice(0);
+  act(bp(w), 'start').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '20', '--arm', 'conveyor', '--arm', R1, '--engine', 'main']]);
 });
