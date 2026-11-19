@@ -3,8 +3,9 @@
 """dashboard_server.py <port> <directory> -- the Conveyor dashboard's page server.
 
 It serves the folder dashboard.sh --loop writes (the page and its data.js), every file `no-cache`, so a browser
-revalidates the page's code instead of guessing it is fresh. Scripts and the stylesheet go gzip-compressed to a
-browser that accepts it, and a connection is kept (HTTP/1.1) for the next file. Everything is served over HTTPS
+revalidates the page's code instead of guessing it is fresh: each file has an ETag from its stat, and a request that
+names it in If-None-Match is a 304, so the page polls data.js and alive.js at the same address. Scripts and the
+stylesheet go gzip-compressed to a browser that accepts it, and a connection is kept (HTTP/1.1) for the next file. Everything is served over HTTPS
 behind a login (the owner's ruling): the only public routes are PUBLIC below.
 The page keeps its layout in the browser. A logged-in caller can do these things and nothing else: send the Board's
 Time setting through `POST /time` (time.json, the one file written in the served folder, for the /units pane); answer one open decision through `POST /answer`, restart the collector through
@@ -353,6 +354,21 @@ def accepts_gzip(header):
         except ValueError:
             qs[name.strip().lower()] = 0.0
     return qs.get('gzip', qs.get('*', 0.0)) > 0
+
+
+def etag(st, zipped):
+    """A served file's ETag, from its os.stat st: a rewrite changes it even within the second Last-Modified counts in.
+    The gzip-compressed copy is another representation of the file, so it has its own tag."""
+    return '"%x-%x-%x%s"' % (st.st_mtime_ns, st.st_size, st.st_ino, '-gz' if zipped else '')
+
+
+def etag_matches(header, tag):
+    """Whether an If-None-Match header names tag (or is `*`), by the weak comparison that header uses."""
+    for item in (header or '').split(','):
+        item = item.strip()
+        if item == '*' or (item[2:] if item.startswith('W/') else item) == tag:
+            return True
+    return False
 
 
 def gzipped(path, st):
@@ -1346,18 +1362,34 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # rest of the body must not be read as the next request, so the connection ends with the reply.
         if self.command == 'POST' and not self.close_connection:
             self.send_header('Connection', 'close')
+        tag, self.tag = getattr(self, 'tag', None), None
+        if tag:
+            self.send_header('ETag', tag)
         super().end_headers()
 
     def file_head(self):
-        """A file of the served folder, as SimpleHTTPRequestHandler serves it; a script or the stylesheet goes
-        gzip-compressed to a browser that accepts it (gzipped: its compressed copy, made when the file changed)."""
+        """A file of the served folder, as SimpleHTTPRequestHandler serves it, with its ETag; a request whose
+        If-None-Match names it is a 304. A script or the stylesheet goes gzip-compressed to a browser that accepts it
+        (gzipped: its compressed copy, made when the file changed)."""
         path = self.translate_path(self.path)
-        if not path.endswith(GZIP_TYPES) or not accepts_gzip(self.headers.get('Accept-Encoding')):
-            return super().send_head()
+        if os.path.isdir(path) and urllib.parse.urlsplit(self.path).path.endswith('/'):
+            # The folder's index page, as SimpleHTTPRequestHandler picks it (`/` is the Board's index.html): its tag.
+            path = next((p for p in (os.path.join(path, i) for i in ('index.html', 'index.htm')) if os.path.isfile(p)), path)
+        zipped = path.endswith(GZIP_TYPES) and accepts_gzip(self.headers.get('Accept-Encoding'))
         try:
             st = os.stat(path)
-            if not os.path.isfile(path):
-                return super().send_head()
+        except OSError:
+            return super().send_head()  # gone, or unreadable: its 404 or 403
+        if not os.path.isfile(path):
+            return super().send_head()
+        self.tag = etag(st, zipped)
+        if etag_matches(self.headers.get('If-None-Match'), self.tag):
+            self.send_response(304)
+            self.end_headers()
+            return None
+        if not zipped:
+            return super().send_head()
+        try:
             since = self.headers.get('If-Modified-Since')
             if since and 'If-None-Match' not in self.headers:
                 try:
@@ -1370,6 +1402,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     pass  # a date that does not parse: the whole file, as SimpleHTTPRequestHandler does
             body = gzipped(path, st)
         except OSError:
+            self.tag = None
             return super().send_head()  # gone, or unreadable: its 404 or 403
         self.send_response(200)
         self.send_header('Content-Type', self.guess_type(path))
@@ -1450,7 +1483,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return None
         if self.public():
             self.path = '/login.html'
-            return super().send_head()
+            return self.file_head()
         if path in LOGIN_FILES:
             return self.file_head()
         if not self.authed():

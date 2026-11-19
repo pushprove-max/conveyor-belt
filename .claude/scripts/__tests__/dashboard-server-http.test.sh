@@ -66,6 +66,37 @@ with open(os.path.join(OUT, 'data.js'), 'wb') as f:
     f.write(new)
 s, h, got = get(c, '/data.js?2', {'Accept-Encoding': 'gzip'})
 check('changed_file_compressed_again', gzip.decompress(got) == new, got[:40])
+# Issue 550: the page polls data.js at one address and revalidates it by ETag. data.js rewritten twice within one
+# second has one Last-Modified for both texts: a 304 by date (or by a tag made from it) keeps the first text in the
+# page. The tag is made from the file's stat, so the second text is a 200; the unchanged file is a 304.
+first, second = {}, int(os.stat(os.path.join(OUT, 'data.js')).st_mtime) * 10**9
+for n, text in enumerate((b'window.DASH = {"panels": {"a": {}}};\n', b'window.DASH = {"panels": {"bb": {}}};\n')):
+    with open(os.path.join(OUT, 'data.js'), 'wb') as f:
+        f.write(text)
+    os.utime(os.path.join(OUT, 'data.js'), ns=(second + n + 1, second + n + 1))
+    for enc in ('gzip', 'identity'):
+        if n == 0:
+            s, h, _ = get(c, '/data.js', {'Accept-Encoding': enc})
+            check('etag_sent_%s' % enc, s == 200 and h.get('etag'), h)
+            first[enc] = h
+            continue
+        s, h, got = get(c, '/data.js', {'Accept-Encoding': enc, 'If-None-Match': first[enc]['etag'],
+                                        'If-Modified-Since': first[enc]['last-modified']})
+        check('same_second_rewrite_%s' % enc, s == 200 and (gzip.decompress(got) if enc == 'gzip' else got) == text
+              and h.get('last-modified') == first[enc]['last-modified'] and h.get('etag') != first[enc]['etag'], (s, h, got[:40]))
+        s, h2, got = get(c, '/data.js', {'Accept-Encoding': enc, 'If-None-Match': h['etag']})
+        check('unchanged_etag_304_%s' % enc, s == 304 and got == b'' and h2.get('etag') == h['etag'], (s, h2))
+# The Board at / (its index.html) and the sign-in page at /login (login.html) are served by other routes than the
+# file path: without a tag there, a browser revalidates them by date only and a same-second rewrite stays unseen.
+for route, name in (('/', 'index.html'), ('/login', 'login.html')):
+    body = b'<!doctype html><title>%s</title>\n' % name.encode()
+    with open(os.path.join(OUT, name), 'wb') as f:
+        f.write(body)
+    s, h, got = get(c, route)
+    check('etag_%s' % name, s == 200 and got == body and h.get('etag'), (s, h, got[:40]))
+    for match in (h.get('etag'), '*'):
+        s, h2, got = get(c, route, {'If-None-Match': match})
+        check('etag_304_%s_%s' % (name, match), s == 304 and got == b'' and h2.get('etag') == h['etag'], (s, h2))
 # D3: two requests on one connection are both answered: the server speaks HTTP/1.1 and keeps it open.
 sock = c.sock
 s1 = get(c, '/app.js')[0]

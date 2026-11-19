@@ -2367,9 +2367,10 @@
     if (/^https?:$/.test(window.location.protocol) && typeof window.fetch === 'function') window.fetch(`alive.js?${now()}`).then(goLogin, () => {});
     status();
   }
+  // The same address on each read: the server's ETag makes the browser's revalidation a 304 while the file is unchanged.
   function script(name, onload, onerror) {
     const s = doc.createElement('script');
-    s.src = `${name}?${now()}`;
+    s.src = name;
     s.addEventListener('load', () => { s.remove(); onload(); });
     s.addEventListener('error', () => { s.remove(); if (onerror) onerror(); });
     doc.head.append(s);

@@ -525,7 +525,10 @@ test('the live feed: a data.js asked for before the feed\'s snapshot, answering 
   deliver(w, full());
   // The page's feed is down a moment: data.js is asked for, and is slow to answer.
   refresh(w);
-  assert.ok(pending(w, 'data.js'));
+  // Issue 550: each poll asks for the same address, so the browser revalidates by ETag (a 304 while unchanged) and
+  // does not keep a new cached copy per poll; a query string added again fails here.
+  assert.equal(pending(w, 'data.js')?.getAttribute('src'), 'data.js', 'data.js is polled at one stable address');
+  assert.equal(pending(w, 'alive.js')?.getAttribute('src'), 'alive.js', 'alive.js is polled at one stable address');
   // The feed opens and its snapshot is newer: a running step's live fields.
   const newer = full(T0 + 5000);
   newer.panels.belt.data.cards[0].live = { turns: 2, lastOutputAt: iso(T0), action: 'Bash: newer' };
