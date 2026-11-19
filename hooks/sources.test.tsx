@@ -786,6 +786,31 @@ test('a forced issue counts as ready only, and is not in Pick order', () => {
   expect(text).toMatch(/\nPICK ORDER +1 ready\nWaiting +Requires\n#4 +#2\n\n/)
 })
 
+// Issue 650. Bug it catches: the parts of a parent issue (its GitHub sub-issues) showed as rows of their own, with no
+// word of the parent, its parts done or the part in flight; a card in flight did not name the parent it is a part of.
+test('a parent with three parts, one done, one in flight and one waiting, is one Pick order entry, and its card names it', () => {
+  const umbrellas = [{ issue: 647, title: 'Parts of a large piece of work', parts: ['#635', '#636', '#637'], done: 1, all: 3, inFlight: [636] }]
+  // #701 is a part of a parent the snapshot does not list: it keeps its own row, so it is not lost.
+  const waiting = [{ issue: 637, title: 'Third part', waitsFor: [636], umbrella: 647 }, { issue: 700, title: 'No part', waitsFor: [699] },
+    { issue: 701, title: 'Part of an unlisted parent', waitsFor: [700], umbrella: 900 }]
+  const s = board({ belt: [{ ...BELT[0], issue: 636, card: 'c3-636', title: 'Second part', umbrella: 647 }], queue: { next: [], held: {}, waiting }, open: { umbrellas } })
+  const text = paneModel(s, 72, 0).map(plain).join('\n')
+  expect(text).toMatch(/\nPICK ORDER +0 ready\nParent +Parts\n#647 +1 of 3 done · #636 in flight  Parts of a large piece of work\nWaiting +Requires\n#700 +#699\n#701 +#700\n\n/)
+  expect(text).not.toMatch(/\n#637 /)
+  expect(text).toMatch(/\nBUILD MATRIX [^]*\n#636 of #647  ▶ /)
+  expect(text).toMatch(/\nWORKER ACTIVITY\n\S+ #636 of #647  build/)
+})
+
+// Issue 650. Bug it catches: each part of a parent counted as an issue of its own in the head's READY and WAITING.
+test('the parts of one parent count as one in READY, and not in WAITING while a part is ready', () => {
+  const umbrellas = [{ issue: 650, title: 'Parent', parts: ['#651', '#652', '#653'], done: 0, all: 3, inFlight: [] }]
+  const next = [651, 652].map(n => ({ issue: n, title: `Part ${n}`, priority: 'P2', followup: false, retried: false, umbrella: 650 }))
+  const s = board({ queue: { next, held: {}, waiting: [{ issue: 653, title: 'Part 653', waitsFor: [651], umbrella: 650 }] }, open: { umbrellas } })
+  const text = paneModel(s, 72, 0).map(plain).join('\n')
+  expect(text).toContain('\n0 ON BELT · 1 READY · 0 WAITING · 0 NEEDS YOU\n')
+  expect(text).toMatch(/\nPICK ORDER +1 ready\nParent +Parts\n#650 +0 of 3 done  Parent\n\n/)
+})
+
 // Issue 497. Bug it catches: a card's step marks did not follow its track: a done step, a skipped one and the one running.
 // The engine's track gives Fix as skipped once Test runs after a GO (conveyor/jq/track.jq), and the matrix showed a dash.
 test('a card with Build and Review done and Test running shows ✓ ✓ · ▶ in Build, Review, Fix and Test', () => {
