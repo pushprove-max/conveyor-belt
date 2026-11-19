@@ -704,10 +704,10 @@ echo ran > "$M/.gitignore"
 git -C "$M" init -q && git -C "$M" add -A && git -C "$M" commit -qm init
 mran() { rm -f "$M/ran"; (cd "$M" && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; echo $? > "$T/rc"; LC_ALL=C sort "$M/ran" 2>/dev/null | tr -s ' ' | sed 's/ $//' | paste -sd' ' -; }
 cases=$(ls "$M"/conveyor/tests/*.test.sh | wc -l)
-marea() { # <engine file>
+marea() { # <engine file>; leaves the case files the run ran in mgot
   local f=$1 want got
   want=$(jq -r --arg f "$f" '.areas[] | select(.files | index($f)) | .tests[]' "$HMAP" | sed 's/[.]test[.]sh$//' | sort | tr '\n' ' ')
-  echo two >> "$M/$f"; got=$(mran); echo one > "$M/$f"
+  echo two >> "$M/$f"; got=$(mran); echo one > "$M/$f"; mgot=$got
   [ -n "$want" ] && [ "$got" = "${want% }" ] && [ "$(wc -w <<<"$got")" -lt "$cases" ] && [ "$(cat "$T/rc")" = 0 ] \
     && ok "a change to $f alone runs its area's case files ($got), not the whole engine test" \
     || no "$f changed: ran '$got', want '$want' of $cases case files, exit $(cat "$T/rc"): $(cat "$T/out")"
@@ -715,6 +715,21 @@ marea() { # <engine file>
 p_mtestrun() { marea conveyor/lib/testrun.sh; }
 p_mreview() { marea conveyor/lib/review.sh; }
 p_mclaim() { marea conveyor/lib/claim.sh; }
+# Bug (#398, issue 543): a change to conveyor/lib/snapshot.sh broke the since case of rules.test.sh, which reads the
+# snapshot's fields, and the change's run never ran it. Each case file here builds a snapshot and reads its fields
+# (setup.test.sh and doctorbudget.test.sh through doctor's Board check, dashboard.sh --check), so a change to
+# snapshot.sh alone must run it.
+p_msnapshot() {
+  local c missing
+  mgot=''; marea conveyor/lib/snapshot.sh
+  missing=$(for c in rules accounts accountsflight boardone budget clis codex fail giveway landas machine machinehold \
+    mainred modellist models opencode proxyroute records rerun samefile slices slots snapkept stall standing testmapbuild \
+    testrules transcript watch setup doctorbudget; do
+    [[ " $mgot " == *" $c "* ]] || echo "$c"
+  done)
+  [ -z "$missing" ] && ok "a change to conveyor/lib/snapshot.sh runs each case file that reads the snapshot's fields" \
+    || no "conveyor/lib/snapshot.sh changed: ran '$mgot', without the snapshot readers: $missing"
+}
 p_mall() {
   echo two >> "$M/conveyor/tests/lib.sh"; got=$(mran)
   [ "$got" = ALL ] && ok "a change to conveyor/tests/lib.sh runs the whole engine test" || no "conveyor/tests/lib.sh changed: ran '$got': $(cat "$T/out")"
@@ -860,7 +875,7 @@ p_mapnames() {
   [ -z "$big" ] && ok "no area of this checkout's map lists more than half the case files without a why" || no "areas over half the $cases case files with no why: $big"
 }
 
-for p in mtestrun mreview mclaim mall mdisp mbase mmap mfuncs mcmds mdefaults; do part "$p" m; done
+for p in mtestrun mreview mclaim msnapshot mall mdisp mbase mmap mfuncs mcmds mdefaults; do part "$p" m; done
 part mapnames
 wait
 for p in "${PARTS[@]}"; do
