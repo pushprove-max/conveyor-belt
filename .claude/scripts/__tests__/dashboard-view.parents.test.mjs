@@ -64,6 +64,9 @@ test('Board: Show its card on a closed part and on a waiting part shows the card
   assert.equal(board.querySelector('.board-col[data-col="landed"] .bcard[data-issue="91"]'), null, 'the closed part\'s card is past the first page');
   link(90, '#91').click();
   assert.equal(w.document.activeElement, board.querySelector('.board-col[data-col="landed"] .bcard[data-issue="91"]'), 'the closed part\'s card in Landed today');
+  // On a phone app.css hides a folded Landed today (or Held) but its heading: the link opens the column, as its button does.
+  assert.ok(board.querySelector('.board-col[data-col="landed"]').classList.contains('open'), 'Landed today is unfolded');
+  assert.equal(board.querySelector('[data-act="fold-landed"]').getAttribute('aria-expanded'), 'true', 'its button says it is open');
   const text = board.querySelector('[data-filter="text"]');
   text.value = '93'; text.dispatchEvent(new w.Event('input'));
   assert.equal(board.querySelector('.board-col[data-col="queue"] .bcard[data-issue="97"]'), null, 'the filter hides the waiting part');

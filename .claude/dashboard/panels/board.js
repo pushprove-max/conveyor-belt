@@ -566,6 +566,9 @@
       if (!find()) { const all = elOf(PART).querySelector(`.board-col[data-col="${col}"] .show-more [data-act="list-all"]`); if (all) all.click(); }
       const c = find();
       if (!c) return;
+      // On a phone (app.css) Held and Landed today are folded until their button opens them: open the column first.
+      const fold = c.closest('.board-col:not(.open)')?.querySelector(':scope > .board-head .board-fold');
+      if (fold) fold.click();
       const g = c.closest('details');
       if (g && !g.open) g.open = true;
       if (typeof c.scrollIntoView === 'function') c.scrollIntoView({ block: 'nearest' });
