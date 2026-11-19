@@ -80,8 +80,9 @@ t_optnocause() {
   [ ! -e "$STUB/mainran" ] || fail "the file ran though the check already failed: $(cat "$STUB/mainran")"
 }
 
-# D4. Bug it catches: a "stabilise" card that makes its file dearer than its recent runs lands, as only a speed up was
-# held to a cost. At 23 CPU s against a median of 22 it is blocked, and the reason names the verdict and that figure.
+# D4. Bug it catches: a "stabilise" card is not held to the cost of its recent runs, so one dearer than them lands, or
+# is blocked only as not faster than its old median (4), as the old check held every card that kept its file and added
+# no test file. At 23 CPU s against a median of 22 it is blocked, and the reason names the verdict and that figure.
 t_optdearer() {
   ovrun stabilise 'echo steady > f.test.sh' 23 "$FIXED"
   [ "$RC" != 0 ] && [ "$WHY" = 'the file is dearer than the median of its recent runs (22 CPU s), which the verdict stabilise does not allow: 23 CPU s now' ] \
