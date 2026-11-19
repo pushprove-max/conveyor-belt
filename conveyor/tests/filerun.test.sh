@@ -6,7 +6,7 @@
 # runner is a stub on PATH that records the folder it ran in and its arguments: no real toolchain is needed. Each
 # fixture's package is in a folder of its own, as in a workspace or monorepo, so each case also shows the file run from
 # its package. A filter of the run's list that names no case of the file (`conveyor-no-case`) reaches the runner as
-# a filter of that case, which runs none, never as a run of the whole file or suite.
+# a filter of that name, never as a run of the whole file or suite: it runs only the cases the runner matches to it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -117,4 +117,14 @@ t_fileruncargo() {
 t_filerunrspec() {
   frsetup 'app/Gemfile=x' 'app/spec/m_spec.rb=x'
   frcheck app/spec/m_spec.rb 'bundle /app|exec rspec spec/m_spec.rb' 'bundle /app|exec rspec -e conveyor-no-case spec/m_spec.rb'
+}
+
+# Bug it catches: the header of filerun.sh said a filter that names no case of the file runs none, while rspec -e
+# (and the JavaScript runners' end match) also runs a case whose name only holds that name, so a reader trusted a
+# narrower rerun than the one made. A text check, as a comment has no behaviour to run.
+t_filerundoc() {
+  local h
+  h=$(sed -n '/^set -u$/q; s/^# \{0,1\}//p' "$SRC/lib/filerun.sh" | tr '\n' ' ') || fail "the header of filerun.sh could not be read"
+  case $h in *"a filter that names no case of the file runs none"*) fail "the header still says a filter that names no case runs none" ;; esac
+  case $h in *"unless that runner also matches part of a name"*) ;; *) fail "the header does not say that a runner that matches part of a name runs more" ;; esac
 }

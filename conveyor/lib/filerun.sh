@@ -14,7 +14,8 @@
 #   tests/<name>.rs   of a crate (Cargo.toml): `cargo test --test <name>`, that test target only
 #   *_spec.rb         under a Gemfile or .rspec: `bundle exec rspec <path>` (with a Gemfile), else `rspec <path>`
 # The cases the run's list (CONVEYOR_TEST_RERUN) names of the file in `fail<TAB><file><TAB><case>` lines, unless one
-# such line names the file with no case, are the run's filter: a filter that names no case of the file runs none.
+# such line names the file with no case, are the run's filter. A filter runs the cases each runner below matches to
+# it, so a name that is no exact case name of the file runs none, unless that runner also matches part of a name:
 # node --test, vitest, jest and bun: -t or --test-name-pattern `(^| )(<cases>)$`, as they match a case's name with its
 # suites' names before it, and a failed case is named alone (testfails()), so it also runs a case whose name ends with
 # a space and one of <cases>; pytest: the node ids <path>::<case>, each that case only; go: -run `^(<cases>)$` and
