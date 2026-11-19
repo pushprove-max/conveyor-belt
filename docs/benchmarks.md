@@ -256,6 +256,7 @@ settings that run used, from these results only:
 - a version, or a Conveyor arm at a version: the results on the commit of that version;
 - an arm that uses the model of the builder seat, such as `solo`: the results on the builder's model as it is set now, when
   that is a Claude model, else all its results;
+- an arm with a model of its own, such as `codex-sol`: the results on the model the arm has now;
 - any other arm: all its results.
 
 To read older results, give their results key. It shows:
