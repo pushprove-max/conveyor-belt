@@ -105,3 +105,57 @@ t_autooffcount() {
   out=$(cd "$R" && loop auto off) && [[ $out == "auto OFF after 1 decided, 3 waiting for the owner: "* ]] || fail "auto off: $out"
   [ "$(cd "$R" && loop auto band | jq .count)" = 1 ] || fail "the band after off: $(cd "$R" && loop auto band)"
 }
+
+# Bugs: with the project's owner-way.md (its written profile of how the owner decides) beside the Foreman's rules.md,
+# auto rules does not name it or tell the Foreman to read it first and to keep its "Never decide; ask" and "Hard lines"
+# sections; or, with no such file, the rules are not the ones auto printed before profiles (checked word for word,
+# the count of the owner's picks and the ruling log's line with them). Full mode: the project's own Foreman, in
+# <state folder>/foreman. Narrow: this checkout is beta of the group alpha, beta (foreman.groups), so the profile is in
+# alpha's Foreman folder, beside the group's rules.md, never in beta's own state folder.
+autoprofile() { # <on|narrow>
+  local out before after fd line want run r; autoledger; unset CONVEYOR_FOREMAN_DIR
+  fd=$ST/foreman
+  if [ "$1" = narrow ]; then
+    git init -q "$T/$CASE/alpha" && mkdir -p "$T/$CASE/alpha/.conveyor" && cp "$R/.conveyor/project.json" "$T/$CASE/alpha/.conveyor/"
+    mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n --arg a "$T/$CASE/alpha" --arg b "$R" \
+      '{records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}], foreman: {groups: [["alpha", "beta"]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+    fd=$(CONVEYOR_MAIN=$T/$CASE/alpha bash "$SRC/conveyor.sh" state-dir)/foreman || fail "alpha has no state folder"
+    [ "$(cd "$R" && loop state-dir)" = "$ST" ] && [ "$fd" != "$ST/foreman" ] || fail "the group fixture: beta's state folder is alpha's"
+    mkdir -p "$ST/foreman"; printf '%s\n' '# Not the group profile' > "$ST/foreman/owner-way.md"
+  fi
+  mkdir -p "$fd"
+  out=$(cd "$R" && loop auto "$1") || fail "auto $1 failed: $out"
+  IFS=$'\t' read -r since log < <(jq -r '[.since, .log] | @tsv' "$ST/auto/mode.json")
+  run="bash $(printf %q "$SRC/conveyor.sh") auto decide"
+  r='production deploy, prod deploy, delete, feature flag, security, password, product setting, configured value, licence, license, consent'
+  if [ "$1" = on ]; then
+    want="# AUTO IS ON (since $since, /conveyor-belt:auto on)
+
+The owner is away and has handed you their open decisions. Pick what is best for the project's long-term health, not the fastest path.
+
+- Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers each open decision that has a recommended option, that nothing reserves and that the owner's latest ruling on the same question does not answer otherwise, logs it, and lists the rest under \"## Waiting for the owner\" in $log.
+- A question a session sends you that is not in the ledger: decide it the same way. Log it first in $log under \"## Decisions\" as \"### HH:MM <what>\", then the bullets **Question**, **Picked**, **Why** (the reasoning and the long-term trade-off) and **Reversible**.
+- How the owner decides: the owner took the recommended option in 1 of their last 2 picker answers. Their recorded picks are in the ruling log $CONVEYOR_RULING_LOG; read the ones on the same subject before you decide what the ledger does not hold.
+- Never decide; list under \"## Waiting for the owner\" instead: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings; a question with no recommended option, or with two good ones.
+- Do not ask the owner: the picker is refused while this is on. Keep \"## Summary\" in the log current.
+- When the owner next types to you, give a short account of what you decided and point at the log. This stays on until /conveyor-belt:auto off."
+  else
+    want="# AUTO NARROW IS ON (since $since, /conveyor-belt:auto narrow)
+
+The owner is here. Decide only the formalities; ask them everything else as usual (the picker is allowed).
+
+- Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers only an open decision whose recommended option the owner gave in their latest ruling on the same question (in $CONVEYOR_RULING_LOG) and that nothing reserves, logs it in $log, and leaves the rest for the owner.
+- Tell the owner each one in one line in your next reply: \"Decided without asking: <what>, because <why>; say 'reverse <id>' to undo.\"
+- Never decide: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings. When unsure, ask the owner."
+  fi
+  before=$(cd "$R" && loop auto rules) && [ "$before" = "$want" ] \
+    || fail "auto $1 rules with no profile are not what they were: $(diff <(echo "$want") <(echo "$before"))"
+  printf '%s\n' '# How the owner decides' '## Never decide; ask' '- pricing' '## Hard lines' '- no tracking' > "$fd/owner-way.md"
+  after=$(cd "$R" && loop auto rules) || fail "auto rules with a profile failed: $after"
+  line="- The owner's written profile of how they decide is in $fd/owner-way.md: read it before you decide. Follow its \"Never decide; ask\" and \"Hard lines\" sections as you follow the pack's auto.reserved."
+  # Every line of before stays (the count of the owner's picks with them); the profile's line is added once.
+  [ "$(grep -vxF -- "$line" <<<"$after")" = "$want" ] && [ "$(grep -cxF -- "$line" <<<"$after")" = 1 ] \
+    || fail "auto $1 rules with $fd/owner-way.md: $after"
+}
+t_autoprofile() { autoprofile on; }
+t_autoprofilen() { autoprofile narrow; }

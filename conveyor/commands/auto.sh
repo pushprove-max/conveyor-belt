@@ -9,7 +9,8 @@
 #   gave in their latest ruling on the same question (in the ruling log). Each starts a log,
 #   <state folder>/auto/<date>-<time>.md: "## Summary", "## Decisions", "## Waiting for the owner". off ends it.
 # - status: one line for the owner. band: {scope: full|narrow|off, since, count} for the plugin's band (hooks/auto.tsx).
-#   rules: what the Foreman is told while it is on; nothing while it is off.
+#   rules: what the Foreman is told while it is on; nothing while it is off. When the project keeps owner-way.md, its
+#   written profile of how the owner decides, in the Foreman's folder (beside rules.md), the rules name it.
 # - standing: the standing kinds of routine yes this checkout's pack turns on (lib/standing.sh), which hold whether
 #   auto is on or off; nothing when no kind is on. The Foreman's start asks each of its records for them (foreman.sh),
 #   on the host that has the record, as the Board turns them on or off there. <run>: how the rules name the engine to
@@ -51,6 +52,16 @@ way() {
       else "the owner took the recommended option in \($k) of their last \($n) picker answers" end' "$RL"
 }
 reserved() { packget auto.reserved RES && jq -r 'join(", ")' <<<"$RES"; }
+# The project's written profile of how the owner decides, beside the Foreman's rules.md (the plugin ships none): when
+# it is there, a newline and the rules' line that names it, else nothing. The folder is the one the Foreman's own
+# reading (foreman/lib.sh FD) names: the launcher's, else for a group the first-named project's, never this checkout's.
+profile() {
+  local f
+  f=$(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && printf %s "$FD"' _ "$HERE/foreman/lib.sh") && [ -n "$f" ] || return 0
+  f=$f/owner-way.md
+  [ -s "$f" ] || return 0
+  printf '\n%s' "- The owner's written profile of how they decide is in $f: read it before you decide. Follow its \"Never decide; ask\" and \"Hard lines\" sections as you follow the pack's auto.reserved."
+}
 
 case $2 in
   on|narrow)
@@ -87,7 +98,7 @@ case $2 in
   rules)
     [ -n "$m" ] || exit 0
     r=$(reserved) || exit 1
-    run="bash $(printf %q "$HERE/conveyor.sh") auto decide"
+    run="bash $(printf %q "$HERE/conveyor.sh") auto decide" p=$(profile)
     if [ "$scope" = full ]; then
       cat <<EOF
 # AUTO IS ON (since $since, /conveyor-belt:auto on)
@@ -96,7 +107,7 @@ The owner is away and has handed you their open decisions. Pick what is best for
 
 - Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers each open decision that has a recommended option, that nothing reserves and that the owner's latest ruling on the same question does not answer otherwise, logs it, and lists the rest under "## Waiting for the owner" in $log.
 - A question a session sends you that is not in the ledger: decide it the same way. Log it first in $log under "## Decisions" as "### HH:MM <what>", then the bullets **Question**, **Picked**, **Why** (the reasoning and the long-term trade-off) and **Reversible**.
-- How the owner decides: $(way). Their recorded picks are in the ruling log ${RL:-(none named)}; read the ones on the same subject before you decide what the ledger does not hold.
+- How the owner decides: $(way). Their recorded picks are in the ruling log ${RL:-(none named)}; read the ones on the same subject before you decide what the ledger does not hold.$p
 - Never decide; list under "## Waiting for the owner" instead: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings; a question with no recommended option, or with two good ones.
 - Do not ask the owner: the picker is refused while this is on. Keep "## Summary" in the log current.
 - When the owner next types to you, give a short account of what you decided and point at the log. This stays on until /conveyor-belt:auto off.
@@ -109,7 +120,7 @@ The owner is here. Decide only the formalities; ask them everything else as usua
 
 - Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers only an open decision whose recommended option the owner gave in their latest ruling on the same question (in ${RL:-the ruling log}) and that nothing reserves, logs it in $log, and leaves the rest for the owner.
 - Tell the owner each one in one line in your next reply: "Decided without asking: <what>, because <why>; say 'reverse <id>' to undo."
-- Never decide: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings. When unsure, ask the owner.
+- Never decide: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings. When unsure, ask the owner.$p
 EOF
     fi ;;
   standing)
