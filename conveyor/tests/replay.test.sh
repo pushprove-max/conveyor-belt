@@ -108,6 +108,10 @@ t_replayestimate() {
   fx_in '. "$HERE/lib/replay.sh"; judgecall() { echo called >> "$STUB/judged"; return 1; }; replay judge claude-haiku-5-5 --estimate; replay judge m9 --estimate; echo "rc $?"'
   head -n 1 "$T/$CASE/run.out" | jq -e '. == {"estimate":true,"model":"claude-haiku-5-5","effort":"medium","reviews":3,"skipped":2,"findings":4,"usd":0.3,"recordedUsd":6}' >/dev/null \
     || fail "the estimate: $(cat "$T/$CASE/run.out")"
+  # Bug caught: `conveyor.sh pick replay` (commands/pick.sh) did not reach replay(), which the cases above call
+  # directly; the estimate is the one replay the CLI can run here with no judge.
+  cli=$(loop pick replay judge claude-haiku-5-5 --estimate 2>&1) && [ "$cli" = "$(head -n 1 "$T/$CASE/run.out")" ] \
+    || fail "conveyor.sh pick replay did not give the estimate: $cli"
   grep -q '^rc 2$' "$T/$CASE/run.out" && grep -q 'm9 is not one of the models' "$T/$CASE/run.out" || fail "a model the pack does not allow was taken: $(cat "$T/$CASE/run.out")"
   [ ! -e "$STUB/judged" ] && [ ! -e "$ST/replays.jsonl" ] || fail "the estimate called the judge or wrote a replay"
   # Bug caught: an estimate passed while a replay ran, so the Board started a second replay that ended at once.
