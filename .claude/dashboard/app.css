@@ -629,6 +629,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .release-line { min-width: 0; overflow-wrap: anywhere; }
 .release-go { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .release-version { width: 10ch; }
+/* The suite's mode question under the buttons: each choice its name over its one line. */
+.release-mode { margin-top: var(--sp-2); display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.release-mode > p { flex-basis: 100%; margin: 0; }
+.release-mode-pick { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.release-mode-name { font-weight: 700; }
 .release-cases, .release-reasons { margin: var(--sp-1) 0 0 var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .release-change { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
 .release-change-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

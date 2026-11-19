@@ -57,7 +57,8 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.equal(card(w).querySelector('[data-figure="version-notes"]'), null, 'no line under the box for a version with notes');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [], 'one press sends nothing');
   // Bug: Run suite also made the tag and the GitHub release once the suite passed: it sends prep, release-prep alone.
-  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [], 'the second press asks the suite\'s mode first');
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-serial').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--serial'], repo: 'plugin' }]);
   // Bug: a version typed in place of 1.0.0 kept 1.0.0's notes step and button, then sent the typed one, whose missing
   // notes made release-prep draft them in place of the suite the button named.
   const field = card(w).querySelector('[data-field="version"]');
@@ -74,7 +75,9 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.equal(act(card(w), 'release-prep').textContent, 'Draft notes');
   assert.equal(w.document.activeElement, card(w).querySelector('[data-field="version"]'), 'the field keeps the focus as the card is drawn again');
   act(card(w), 'release-prep').click();
+  // Draft notes runs no suite, so it asks no mode (#791).
   assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.1.0'], repo: 'plugin' }]);
+  assert.equal(card(w).querySelector('[data-figure="mode-ask"]'), null);
   // With no project that releases with Conveyor, one line says so.
   const none = boot(), d = data(null);
   d.panels.release.data.records.splice(0, 1);
@@ -105,8 +108,8 @@ test('D2: Release offers Small, Wide and Full, starts Small, and at Small shows 
   assert.equal(size.value, 'small');
   assert.deepEqual(Array.from(card(w).querySelectorAll('.release-steps > [data-step]'), (s) => s.dataset.step), ['release-notes', 'full-suite', 'release']);
   assert.equal(act(card(w), 'release-prep').textContent, 'Run suite');
-  assert.deepEqual(await sent(w, () => { act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click(); }),
-    [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }], 'the button works at Small');
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click(); act(card(w), 'mode-parallel').click(); }),
+    [{ action: 'release-run', args: ['prep', '1.0.0', '--parallel'], repo: 'plugin' }], 'the button works at Small');
   // jsdom lays nothing out: the rule that puts each step's chip above its line, and the field above its button, is read.
   assert.match(css, /\.panel\[data-panel="release"\]\[data-size="small"\] \.release-steps \.row-main,\s*\.panel\[data-panel="release"\]\[data-size="small"\] \.release-go \{ flex-direction: column;/);
   size.value = 'wide'; size.dispatchEvent(new w.Event('change'));
@@ -136,6 +139,55 @@ test('D2: a run under way shows a progress bar of files done of all, the failed 
   assert.ok(shown(w, act(card(w), 'release')) && shown(w, act(card(w), 'release-prep')), 'both buttons show while the suite runs');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
+});
+
+// Bug this guards (#791): a press that starts the suite sent no mode, so every release suite ran its files one by one,
+// or sent one the owner did not choose.
+test('#791: Run suite asks one by one or in parallel; in parallel sends --parallel, one by one --serial, Cancel nothing', async () => {
+  const w = boot();
+  deliver(w, data(null));
+  const press = () => { act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click(); };
+  assert.deepEqual(await sent(w, press), [], 'nothing is sent before the mode is chosen');
+  const ask = card(w).querySelector('[data-figure="mode-ask"]');
+  assert.equal(ask.querySelector('p').textContent, 'Run the test files one by one or in parallel?');
+  assert.match(act(ask, 'mode-serial').textContent, /^One by one.*Slower, the least load/);
+  assert.match(act(ask, 'mode-parallel').textContent, /^In parallel.*Faster, more load on the build machine\. The belt is slower meanwhile/);
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-parallel').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--parallel'], repo: 'plugin' }]);
+  assert.equal(card(w).querySelector('[data-figure="mode-ask"]'), null, 'the question closes once answered');
+  press();
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-serial').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--serial'], repo: 'plugin' }]);
+  press();
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-cancel').click()), []);
+  assert.equal(card(w).querySelector('[data-figure="mode-ask"]'), null);
+  // Bug: a question left open while a run began elsewhere started a second run beside it.
+  press();
+  next(w, data({ ...RUN, ended: null, state: 'running' }));
+  assert.equal(card(w).querySelector('[data-figure="mode-ask"]'), null, 'no question while a run is under way');
+});
+// Bug this guards (#791): Release that runs the suite first started it with no mode chosen.
+test('#791: Release that runs the suite first asks the mode and sends it after the version', async () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, step: 'release', ended: '2026-11-14T08:25:00Z', state: 'refused', failed: 0, cases: [], reasons: [] }));
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release').click(); act(card(w), 'release').click(); }), []);
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-parallel').click()), [{ action: 'release-run', args: ['1.0.0', '--parallel'], repo: 'plugin' }]);
+});
+// Bug this guards (#791): step 2 did not say whether the suite runs, or ran, its files one by one or in parallel.
+test('#791: step 2 shows the mode of the run under way and of the last run, from its record', () => {
+  const w = boot();
+  const mode = () => { const p = stepOf(w, 'full-suite').querySelector('[data-figure="suite-mode"]'); return p && p.textContent; };
+  deliver(w, data({ ...RUN, ended: null, state: 'running', mode: 'parallel', files: { done: 1, of: 9 } }));
+  assert.equal(mode(), 'Runs its test files in parallel');
+  next(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: 'serial', failed: 0, cases: [] }));
+  assert.equal(mode(), 'Ran its test files one by one');
+  next(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: null, failed: 0, cases: [] }));
+  assert.equal(mode(), null, 'a record with no mode says none');
+  // Bug this guards: step 2 said the files ran in a mode when the run reused a green run and ran no file.
+  next(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: 'parallel', failed: 0, cases: [], reused: { sha: HEAD, time: '2026-11-14T07:00:00Z', ran: [], kept: 9 } }));
+  assert.equal(mode(), null, 'a reused pass ran no file');
+  // Bug this guards: step 2 hid the mode while `conveyor.sh release` ran the suite itself (its record's mode is its
+  // own; a release that runs no suite has none: t_relreuse).
+  next(w, data({ ...RUN, step: 'release', ended: null, state: 'running', mode: 'parallel', failed: 0, cases: [], files: { done: 1, of: 9 } }));
+  assert.equal(mode(), 'Runs its test files in parallel', 'release running the suite says its mode');
 });
 
 // Bug this guards (#253): a case stopped at its file's `# timeout:` limit showed only as a failed file, so a hung case
@@ -198,7 +250,7 @@ test('D3: passed on main\'s head, Release 1.0.0; a card lands, Main moved and Ru
   assert.equal(act(card(w), 'release-prep').textContent, 'Run again on the new main');
   assert.equal(act(card(w), 'release').disabled, true, 'no release of a main the suite never tested');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), []);
-  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }]);
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-prep').click(); act(card(w), 'mode-serial').click(); }), [{ action: 'release-run', args: ['prep', '1.0.0', '--serial'], repo: 'plugin' }]);
   next(w, data({ ...passed, step: 'release', state: 'released' }, { tag: 'v1.0.0', count: 2, head: NEW, next: '1.1.0', notes: false }));
   assert.equal(chip(w), 'Released');
   assert.equal(stepOf(w, 'release').dataset.state, 'done');

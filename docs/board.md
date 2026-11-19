@@ -427,7 +427,10 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
 1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
-   that failed. A test case that ran out of time shows as "<case>: timed out". A full test run in progress shows here too. When **Release** is enabled, the step also says what
+   that failed. A test case that ran out of time shows as "<case>: timed out". When the run under way, or the last run,
+   runs test files, the step says how: one by one or in parallel. It says no mode for a run that keeps every pass of an
+   earlier run, or for a **Release** that uses the suite that passed before, because these run no test files. A full
+   test run in progress shows here too. When **Release** is enabled, the step also says what
    it does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
 3. **Release**: the tag and the GitHub release.
 
@@ -442,6 +445,14 @@ under the field says so.
 The card has two buttons, in this order. The first writes the notes draft or runs the suite. Its label follows the state: **Draft notes**,
 **Run suite**, **Run suite again** or **Run again on the new main**. The second is **Release** with the version (for
 example **Release 1.0.0**). Click a button, then click again.
+
+When the button runs the suite, the second click asks "Run the test files one by one or in parallel?". This applies to
+**Run suite**, **Run suite again**, **Run again on the new main**, and **Release** when it runs the suite first. Click
+one of the two choices, or **Cancel**:
+
+- **One by one**: slower, with the least load on the build machine. Conveyor adds `--serial` to the command.
+- **In parallel**: faster, with more load on the build machine. The belt is slower while the suite runs. Conveyor adds
+  `--parallel` to the command.
 
 To release from the panel:
 

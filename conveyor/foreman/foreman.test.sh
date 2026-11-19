@@ -136,6 +136,11 @@ grep -qF '# Check status with conveyor.sh foreman status, not your own snapshot 
 grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?"' <<<"$out" \
   && grep -qF 'on yes run conveyor.sh setup pack-commit yes' <<<"$out" \
   || fail "the Foreman's start context does not ask the owner by the picker to commit the pack: $out"
+# Bug (#791): the Foreman started a release's suite with no mode, so it ran one by one whatever the owner wanted. Its
+# rules tell it to ask the owner by the picker for the mode before release-run prep or release-run, and to pass it.
+grep -qF '# A release'"'"'s suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?"' <<<"$out" \
+  && grep -qF 'pass the answer last in the command: --serial for one by one, --parallel for in parallel.' <<<"$out" \
+  || fail "the Foreman's start context does not tell it to ask the owner for the suite's mode and pass it: $out"
 # Bug (#220): on a wake for a waiting card the Foreman only reported it, and cards waited for hours. Its rules tell it
 # to find the cause and fix it.
 grep -qF '# A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits' <<<"$out" \

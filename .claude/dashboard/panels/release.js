@@ -13,7 +13,10 @@
 // suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite of that
 // version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
 // ("Runs the suite first"); then release makes the tag and the GitHub release. Beside release-prep's red result on main's
-// head, Release anyway sends `release-run anyway <version>`: release over that failed suite. Stop (`release-run stop`, a second click too) shows only while a run is
+// head, Release anyway sends `release-run anyway <version>`: release over that failed suite. Each button that starts the
+// suite (Run suite, Run suite again, Run again on the new main, and Release when it runs the suite first) asks, after
+// its second click and before it sends, whether the suite runs its test files one by one or in parallel, and sends the
+// choice last, `--serial` or `--parallel`; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows only while a run is
 // under way. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
 // release-prep judged flaky (it passed every run alone) under the suite's step. The panel is wide or full,
 // never small: in the narrow column every line wraps.
@@ -23,10 +26,51 @@
   const typed = new Map();  // repo -> the version typed, kept through a redraw
   const said = new Map();   // repo -> what the build machine answered to the last press
   const opened = new Set(); // repos whose changes list is open, kept through a redraw
+  const asking = new Map(); // repo -> {v, args, what}: a press that waits for the suite's mode, kept through a redraw
   const short = (sha) => (typeof sha === 'string' ? sha.slice(0, 12) : '');
   const list = (x) => (Array.isArray(x) ? x : []);
   const num = (v) => typeof v === 'number' && Number.isFinite(v);
   const MARK = { done: '✓', failed: '✗', now: '▶', todo: '·' };
+  // The suite's two modes: the flag release-run takes, the words step 2 says, the choice's name and its one line.
+  const MODES = [
+    { mode: 'serial', said: 'one by one', label: 'One by one', line: 'Slower, the least load on the build machine.' },
+    { mode: 'parallel', said: 'in parallel', label: 'In parallel', line: 'Faster, more load on the build machine. The belt is slower meanwhile.' },
+  ];
+
+  // The mode of a run's suite (its record's mode) as a line on step 2, or null when the record has none or no file ran
+  // in that mode: a run that reused a green run and ran no file (its reused.ran empty). A release that runs no suite
+  // itself has no mode in its record (release-prep.sh relstart()); one that runs the suite has its own.
+  function modeLine(h, x, going) {
+    const m = MODES.find((o) => o.mode === x.mode);
+    if (!m) return null;
+    if (x.reused && typeof x.reused === 'object' && Array.isArray(x.reused.ran) && !x.reused.ran.length) return null;
+    const p = h('p', 'row-meta', `${going ? 'Runs' : 'Ran'} its test files ${m.said}`);
+    p.dataset.figure = 'suite-mode';
+    return p;
+  }
+
+  // The question a press that starts the suite waits on: one by one or in parallel, each with what it means, and
+  // Cancel. A choice sends the press's args with the mode last.
+  function modeAsk(h, ctx, repo, a) {
+    const box = h('div', 'release-mode');
+    box.dataset.figure = 'mode-ask';
+    box.setAttribute('role', 'group');
+    const q = h('p', 'row-meta', 'Run the test files one by one or in parallel?');
+    box.setAttribute('aria-label', q.textContent);
+    box.append(q);
+    MODES.forEach((o) => {
+      const b = h('button', 'btn release-mode-pick');
+      b.type = 'button'; b.dataset.act = `mode-${o.mode}`;
+      b.append(h('span', 'release-mode-name', o.label), h('span', 'board-from', o.line));
+      b.addEventListener('click', () => { asking.delete(repo); send(ctx, repo, [...a.args, `--${o.mode}`], a.what); });
+      box.append(b);
+    });
+    const no = h('button', 'btn btn-quiet', 'Cancel');
+    no.type = 'button'; no.dataset.act = 'mode-cancel';
+    no.addEventListener('click', () => { asking.delete(repo); ctx.redraw(); });
+    box.append(no);
+    return box;
+  }
 
   function send(ctx, repo, args, what) {
     said.set(repo, 'Sending…'); ctx.redraw();
@@ -212,7 +256,7 @@
       stop.type = 'button'; stop.dataset.act = 'release-stop';
       stop.title = 'End this run\'s processes. Nothing else of Conveyor stops.';
       const moved = run.moved === true ? h('p', 'warn-note', 'Main moved while the suite runs: a card landed, so the suite does not test the new main.') : null;
-      s2 = step(h, 'Full suite', 'now', line, ...counts(h, run, true), moved,
+      s2 = step(h, 'Full suite', 'now', line, modeLine(h, run, true), ...counts(h, run, true), moved,
         ctx.twice(stop, 'final', 'Click again to stop the run', () => send(ctx, rec.repo, ['stop'], 'The run is stopped.')));
     } else if (s.cur && (s.passed || s.failed || s.moved)) {
       const c = s.cur, line = h('span', null, `${s.failed ? 'Failed' : 'Passed'} on ${short(c.sha)}`);
@@ -226,7 +270,7 @@
         : !u.ran.length ? `Reused the green run of ${typeof u.time === 'string' ? ctx.clock(u.time) : 'an earlier time'} on ${short(u.sha)}`
           : `Reran ${files(u.ran.length)}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`);
       scope.dataset.figure = 'suite-scope';
-      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, ...counts(h, c, false), flakyList(h, c), reasonsList(h, why[1]));
+      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, modeLine(h, c, false), ...counts(h, c, false), flakyList(h, c), reasonsList(h, why[1]));
     } else {
       s2 = step(h, 'Full suite', why[1].length ? 'failed' : 'todo', `Not run on main's head (${short(m.head)})`, reasonsList(h, why[1]));
     }
@@ -298,15 +342,25 @@
       field.focus({ preventScroll: true });
       if (at !== null) field.setSelectionRange(at, at);
     });
+    // A press that runs the suite waits for its mode (modeAsk); Draft notes runs no suite, nor Release that uses the
+    // suite that passed.
+    const start = (args, what, suite) => {
+      if (!suite) { send(ctx, rec.repo, args, what); return; }
+      asking.set(rec.repo, { v, args, what }); ctx.redraw();
+    };
     ctx.twice(btn, 'spend', ask, () => {
-      if (VERSION.test(v)) send(ctx, rec.repo, ['prep', v], what);
+      if (VERSION.test(v)) start(['prep', v], what, label !== 'Draft notes');
     });
     ctx.twice(rel, 'spend', `Click again to release ${v}. ${suiteSaid}.`, () => {
-      if (!waits) send(ctx, rec.repo, [v], `Release ${v} started.`);
+      if (!waits) start([v], `Release ${v} started.`, !s.reuse);
     });
     go.append(input, btn, rel);
     if (said.has(rec.repo)) { const t = h('span', 'undo-line', said.get(rec.repo)); t.setAttribute('role', 'status'); go.append(t); }
     card.append(head, steps, go);
+    // The question shows while it is of the version in the field and the button pressed can still run: no run under
+    // way, and Release waiting for nothing.
+    const a = asking.get(rec.repo);
+    if (a && a.v === v && !(a.args[0] === 'prep' ? btn.disabled : waits)) card.append(modeAsk(h, ctx, rec.repo, a));
     // A version with no notes on main says so under the box.
     if (VERSION.test(v) && !notes) {
       const p = h('p', 'row-meta', `${v} has no release notes: docs/releases/${v}.md is not on main.`);
