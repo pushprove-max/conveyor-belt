@@ -526,10 +526,14 @@
     const both = (num(ta.resolved) || 0) - toA, neither = n - both - flips.length, diff = Math.abs((num(ta.resolved) || 0) - (num(tb.resolved) || 0));
     const head = h('p', 'bench-headline');
     head.append(`On the ${n} tasks both ran: ${A} resolved ${ta.resolved}, ${Bn} ${tb.resolved}. `, h('span', 'ok', `${plural(toA, 'task')} flipped to ${A}`), `, ${toB} the other way, ${both} resolved by both, ${neither} by neither.`);
-    const rate = n ? diff / n : 0, need = rate > 0 ? Math.min(500, Math.ceil(2 / (rate * rate))) : null;
+    // The fewest tasks, up to the benchmark's whole set, at which the same rate of difference is past noiseOf: an
+    // estimate such as 2 / rate² can still leave it within the noise, and capping it would name a count that cannot tell.
+    const rate = n ? diff / n : 0, max = num(obj(B.d && B.d.bench) && B.d.bench.max) || 500;
+    let need = null;
+    for (let m = n + 1; rate > 0 && m <= max && need === null; m += 1) if (rate * m >= noiseOf(m)) need = m;
     const foot = h('p', 'board-from');
     foot.append(`${String(d.noise || noiseSaid(n)).replace(/^w/, 'W').replace(/\.?$/, '.')} This difference is ${diff}: `, h('strong', null, d.withinNoise ? 'within the noise' : 'past the noise'),
-      d.withinNoise && need && need > n ? `. Run about ${need} tasks to tell a difference of this size.` : '.');
+      !d.withinNoise || !rate || n >= max ? '.' : need ? `. Run about ${need} tasks to tell a difference of this size.` : `. Even all ${max} tasks cannot tell a difference of this size.`);
     const t = h('table', 'tests-table'), hr = h('tr');
     ['', 'Resolved', 'Sessions', 'Tokens', 'Minutes', 'Cost', 'Cost a resolved task'].forEach((x, i) => hr.append(h('th', i ? 'r' : null, x)));
     t.append(hr);

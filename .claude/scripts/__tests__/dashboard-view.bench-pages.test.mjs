@@ -106,7 +106,7 @@ test('Compare: two arms of the runs selected, the flipped tasks with where they 
   assert.equal(text(bp(w).querySelector('.bench-compare .bench-headline')),
     `On the 5 tasks both ran: ${A} resolved 4, ${B2} 2. 2 tasks flipped to ${A}, 0 the other way, 2 resolved by both, 1 by neither.`);
   assert.equal(text(bp(w).querySelector('.bench-compare > .board-from')),
-    'With 5 tasks a difference under 4 tasks is within the noise. This difference is 2: within the noise. Run about 13 tasks to tell a difference of this size.');
+    'With 5 tasks a difference under 4 tasks is within the noise. This difference is 2: within the noise. Run about 15 tasks to tell a difference of this size.');
   assert.equal(text(bp(w).querySelector('.bench-flipped summary')), 'The 2 flipped tasks');
   assert.deepEqual(heads(w), ['Compare', 'django__django-15347', 'sympy__sympy-21614']);
   const flip = bp(w).querySelector('.bench-flip');
@@ -118,6 +118,16 @@ test('Compare: two arms of the runs selected, the flipped tasks with where they 
     'Engine changes that touch that step: none to show (they are not two versions of the engine)']);
   assert.deepEqual(Array.from(reading.children, text), ['The model\'s reading written by one model call from the facts only', 'The review round caught the edge case the single session missed.']);
   assert.equal(text(bp(w).querySelectorAll('.bench-flip')[1].querySelector('.bench-reading p')), 'None: the model call failed.');
+  // Bug it guards (#541): the count to run was 2 / rate², capped at 500, so a difference of 1 in 20 asked for 500 tasks,
+  // where the same rate gives 25 and the noise is 32. Above, 2 of 5 asked for 13 (5.2 against a noise of 6): it is 15.
+  // A count that cannot tell is never named; the reading says even the whole set cannot.
+  w.reply = BH.reply(JSON.stringify({ a: { version: A, commit: EB, totals: { resolved: 11 } }, b: { version: B2, commit: null, totals: { resolved: 10 } }, tasks: 20, same: [],
+    flipped: [{ task: 'django__django-15347', apart: 'review', a: fact(true, 3, 1, 'ok', []), b: fact(false, 1, 0, null, []), changes: null, versions: [A, B2], reading: null }], withinNoise: true }));
+  act(bp(w), 'compare').click();
+  w.posts.splice(0);
+  await settle();
+  assert.equal(text(bp(w).querySelector('.bench-compare > .board-from')),
+    'With 20 tasks a difference under 7 tasks is within the noise. This difference is 1: within the noise. Even all 500 tasks cannot tell a difference of this size.');
 });
 
 // Bug it guards: Start offered Conveyor or Claude alone only, with no arm's preflight state, so an arm that cannot run
