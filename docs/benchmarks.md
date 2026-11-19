@@ -119,7 +119,7 @@ the `conveyor` arm with its own seats, and an agent arm on an agent arm that tak
 
 ```
 conveyor.sh bench swe arms save "Claude builds, Codex reviews" '{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"claude-opus-5-5","effort":"high"},"reviewer":{"cli":"codex","model":"gpt-6.2-sol"}}}'
-conveyor.sh bench swe arms save "Claude alone on Sonnet" '{"kind":"agent","recipe":"solo","cli":"claude","model":"claude-sonnet-5-5"}'
+conveyor.sh bench swe arms save "Claude alone on Sonnet" '{"kind":"agent","recipe":"solo","cli":"claude","model":"claude-sonnet-5-5","effort":"high"}'
 conveyor.sh bench swe arms show arm-0123456789ab
 ```
 
@@ -130,7 +130,10 @@ session that fixes the card's tests when they fail. When you leave `fix` or `tes
 project's own setting for it, and the builder when the project has none. Each seat takes `cli`, `model` and, if you want, `effort`. The test command and the official grade use no
 model. An engine version that has no `fix` or `testFix` seat cannot run an arm that sets one: the check and the
 start refuse the arm and tell you why. Choose a newer engine version. A Conveyor arm can also take
-`rules` and `policy`. An agent arm takes `recipe`, `cli` (`claude` or `codex`, the CLI that the recipe signs in to) and `model`.
+`rules` and `policy`. An agent arm takes `recipe`, `cli` (`claude` or `codex`, the CLI that the recipe signs in to),
+`model` and, if you want, `effort`. The recipe's CLI runs on that model and effort. Without `effort`, the CLI uses
+its own default effort. The save refuses a recipe that does not run on the CLI you chose, or that cannot pass an
+effort to its CLI when you choose one. Each agent arm in the table above that is offered takes an effort.
 
 The `rules` choice sets the rules that the task's card gets:
 

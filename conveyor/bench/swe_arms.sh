@@ -19,11 +19,13 @@
 #   install    shell run first in the task's container, as the bench user (HOME /bench, ~/.local/bin on PATH)
 #   preflight  shell run in the container after install: exit 0 when the arm's tools are in place and signed in
 #   run        (agent) shell that builds the task headless in the task's checkout: $SWE_PROMPT is the file of the
-#              issue, $SWE_MODEL the model; what it prints is the trial's output
+#              issue, $SWE_MODEL the model, $SWE_EFFORT the effort (empty: the CLI's own); what it prints is the
+#              trial's output
 #   fired      (agent) jq over the output's JSON lines, as one array: true when the arm's method ran
 #   tokens     (agent) jq over the same array: the tokens the trial took
 #   sessions   (agent) the sessions a trial takes
 #   model      (agent) the model given as $SWE_MODEL; "builder": the builder seat's Claude model, as Claude alone takes
+#   effort     (agent) true when run passes $SWE_EFFORT to its CLI: only then may a saved arm on it choose an effort
 #   exclude    paths the arm's method writes in the checkout that are not the change: kept out of the patch
 #   offered    false for an arm that cannot run here, with why
 # A saved arm (`bench swe arms save`, swe_armsave) is a revision the Board's form made: a name and choices only, no
@@ -63,7 +65,8 @@ swe_choices() {
 #                                   optional); rules "engine" or "project" (optional, swe_pack); policy {judgeOn: true
 #                                   or false, judgeAlways: [kind words, as `control judge always` takes them], P0 to P3:
 #                                   true or false}, each optional
-#   {kind: "agent", recipe: <host agent arm>, cli: <claude | codex>, model}
+#   {kind: "agent", recipe: <host agent arm>, cli: <claude | codex>, model, effort}   effort optional, one of the
+#                                   CLI's; the recipe must take it (its effort field), and its run gets it as $SWE_EFFORT
 # A model the project does not allow that seat (or that CLI, for an agent) is refused, nothing kept: a saved arm cannot
 # add a model to the project's choices (swe_pack adds a host arm's seat models to the sandbox's list, never a saved one's).
 swe_armsave() { # <name> <spec json>
@@ -92,20 +95,23 @@ swe_armsave() { # <name> <spec json>
           elif (($t | keys) - ["model", "reviewer", "judge", "fix", "testFix"]) != [] then "the seats are model (the builder), reviewer, judge, fix and testFix, not \(($t | keys) - ["model", "reviewer", "judge", "fix", "testFix"] | join(", "))"
           else $t | to_entries[] | seaterr(.key; .value) end
       elif $s.kind == "agent" then
-        (($s | keys) - ["kind", "recipe", "cli", "model"]) as $x
-        | if $x != [] then "an agent arm takes kind, recipe, cli and model only, not \($x | join(", "))"
+        (($s | keys) - ["kind", "recipe", "cli", "model", "effort"]) as $x
+        | if $x != [] then "an agent arm takes kind, recipe, cli, model and effort only, not \($x | join(", "))"
           elif ($s.recipe | type) != "string" or ($s.recipe | test("^[a-z0-9][a-z0-9-]*$") | not) then "the recipe must name an agent arm"
           elif ($c.agent | has($s.cli | tostring) | not) then "an agent arm runs on claude or codex, not \($s.cli | tojson)"
           elif ($s.model | type) != "string" or ($c.agent[$s.cli] | index([$s.model])) == null then "the project does not allow \($s.model | tojson) on \($s.cli)"
+          elif ($s | has("effort")) and (($s.effort | type) != "string" or ($c.efforts[$s.cli] | index([$s.effort])) == null) then "\($s.cli) takes no effort \($s.effort | tojson)"
           else empty end
       else "kind must be conveyor or agent" end ] | first // empty')
-  # An agent arm's recipe: a host arm of that kind, offered, signed in with the CLI chosen, that runs on the model given.
+  # An agent arm's recipe: a host arm of that kind, offered, signed in with the CLI chosen, that runs on the model given
+  # and, when one is chosen, passes the effort to its CLI.
   if [ -z "$w" ] && [ "$(jq -r .kind <<<"$s")" = agent ]; then
     f=$(jq -r .recipe <<<"$s")
     if [[ $f =~ $SWE_ARMID ]] || ! r=$(swe_arm "$f") || [ "$(jq -r .kind <<<"$r")" != agent ]; then w="no agent arm $f"
     elif jq -e '.offered == false' <<<"$r" > /dev/null; then w="the arm $f is not offered: $(jq -r '.why // "no reason given"' <<<"$r")"
     elif ! jq -e '.model | type == "string"' <<<"$r" > /dev/null; then w="the arm $f takes no model"
-    elif ! jq -e --arg c "$(jq -r .cli <<<"$s")" '.login == [$c]' <<<"$r" > /dev/null; then w="the arm $f does not run on $(jq -r .cli <<<"$s") alone"; fi
+    elif ! jq -e --arg c "$(jq -r .cli <<<"$s")" '.login == [$c]' <<<"$r" > /dev/null; then w="the arm $f does not run on $(jq -r .cli <<<"$s") alone"
+    elif jq -e 'has("effort")' <<<"$s" > /dev/null && ! jq -e '.effort == true' <<<"$r" > /dev/null; then w="the arm $f takes no effort: its command does not pass one to its CLI"; fi
   fi
   [ -z "$w" ] || { echo "conveyor: $w; nothing saved" >&2; return 1; }
   id=arm-$(jq -cSn --arg n "$1" --argjson s "$s" '{name: $n, spec: $s}' | sha256sum | cut -c1-12)
@@ -288,7 +294,7 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
   elif ! swe_in 600 "$c" "$sb/$SWE_MAIN" "$(jq -r '.preflight // "true"' <<<"$a")" "SWE_SB=$sb" < /dev/null > "$h/install.log" 2>&1; then
     why="its preflight command failed: $(cliwords "$(tail -n 20 "$h/install.log")" | tail -n 2 | paste -sd ' ' -)"
   else
-    swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" < /dev/null > "$h/out" 2> "$h/err"; rc=$?
+    swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")" < /dev/null > "$h/out" 2> "$h/err"; rc=$?
     # A command stopped at the task's time limit is the arm's own result: its patch is graded.
     [ "$rc" = 0 ] || [ "$rc" = 124 ] || why="its command failed (exit $rc): $(cliwords "$(tail -n 20 "$h/err" 2>/dev/null; jq -rRn "$NOSTARTSAID" "$h/out" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"
   fi

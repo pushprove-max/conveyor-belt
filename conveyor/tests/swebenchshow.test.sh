@@ -62,17 +62,48 @@ t_swearmsave() {
       '{"kind":"conveyor","policy":{"judgeOn":"no"}}/judgeOn and P0 to P3 are true or false' \
       '{"kind":"conveyor","policy":{"judgeAlways":["-x"]}}/judgeAlways is a list of at most 20 finding kinds, each a word of letters, digits, _ and -' \
       '{"kind":"conveyor","policy":{"P4":true}}/the policy takes judgeOn, judgeAlways and P0 to P3 only' \
-      '{"kind":"agent","recipe":"solo","cli":"claude","model":"m","run":"true"}/takes kind, recipe, cli and model only, not run'; do
+      '{"kind":"agent","recipe":"solo","cli":"claude","model":"m","run":"true"}/takes kind, recipe, cli, model and effort only, not run' \
+      '{"kind":"agent","recipe":"solo","cli":"claude","model":"m","effort":"minimal"}/claude takes no effort "minimal"'; do
     id2=$(loop bench swe arms save bad "${o%%/*}" 2>&1) && fail "a choice the project does not allow was saved: ${o%%/*}"
     grep -qF "${o#*/}; nothing saved" <<<"$id2" || fail "the refusal does not say why: $id2"
   done
   [ "$(ls "$B/arms" | wc -l)" = 2 ] || fail "a refused arm was kept: $(ls "$B/arms")"
-  # An agent arm's recipe runs on the saved model, not on its own (solo's: the builder's, m).
+  # An agent arm's recipe runs on the saved model, not on its own (solo's: the builder's, m), and on the saved effort
+  # (#637: the effort never reached the CLI).
   tune '.models.allowed.claude += ["m2"]'
-  id2=$(loop bench swe arms save 'Claude alone on m2' '{"kind":"agent","recipe":"solo","cli":"claude","model":"m2"}' 2>&1) || fail "an agent arm on an allowed model was refused: $id2"
+  id2=$(loop bench swe arms save 'Claude alone on m2' '{"kind":"agent","recipe":"solo","cli":"claude","model":"m2","effort":"high"}' 2>&1) || fail "an agent arm on an allowed model was refused: $id2"
   echo 'echo fixed > x.py' > "$STUB/build"
   o=$(loop bench swe 1 --arm "$id2" 2>&1) || fail "the saved agent arm's run failed: $o"
-  [[ $(tail -n 1 "$STUB/sessions") == *'--model m2 '* ]] || fail "the recipe was not given the saved arm's model: $(tail -n 1 "$STUB/sessions")"
+  [[ $(tail -n 1 "$STUB/sessions") == *'--model m2 --effort high '* ]] || fail "the recipe was not given the saved arm's model and effort: $(tail -n 1 "$STUB/sessions")"
+}
+
+# Bugs (#637): a saved agent arm's effort never reached its CLI (Codex alone, or a Claude method such as Superpowers);
+# a recipe that cannot pass an effort, or that runs on another CLI, was not refused at the save; and a method arm
+# that did not fire must keep why in its result. The recipes are the real ones, with nothing to install; the Codex
+# stand-in notes its arguments, and the Claude stub fires Superpowers' filter on the preflight's task alone.
+t_swearmeffort() {
+  swe; local a o cx sp first
+  first=$(sweorder | head -n 1)
+  tune '.models.allowed.claude += ["m2"]'
+  for a in codex-sol superpowers; do jq '.install = "true" | .preflight = "true"' "$SRC/bench/arms/$a.json" > "$SWE_FX/arms/$a.json" || fail "the recipe $a was not copied"; done
+  jq 'del(.effort)' "$SWE_FX/arms/solo.json" > "$SWE_FX/arms/no-effort.json" || fail "the recipe with no effort was not made"
+  for o in '{"kind":"agent","recipe":"no-effort","cli":"claude","model":"m2","effort":"high"}/the arm no-effort takes no effort' \
+      '{"kind":"agent","recipe":"superpowers","cli":"codex","model":"x"}/the arm superpowers does not run on codex alone' \
+      '{"kind":"agent","recipe":"codex-sol","cli":"codex","model":"x","effort":"max"}/codex takes no effort "max"'; do
+    a=$(loop bench swe arms save bad "${o%%/*}" 2>&1) && fail "an incompatible method was saved: ${o%%/*}"
+    grep -qF "${o#*/}" <<<"$a" || fail "the refusal does not say why: $a"
+  done
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "$*" >> "$SWE_FX/codex-args"; cat > /dev/null; [ ! -e hello.py ] || echo "print(\"hello\")" > hello.py; [ ! -e x.py ] || echo fixed > x.py' \
+    'echo "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"' > "$SWE_FX/bin/codex" && chmod +x "$SWE_FX/bin/codex" || fail "the Codex stand-in was not made"
+  echo 'if [ -e hello.py ]; then echo "print(\"hello\")" > hello.py; echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"superpowers:x\"}}]}}"; else echo fixed > x.py; fi' > "$STUB/build"
+  cx=$(loop bench swe arms save 'Codex on x' '{"kind":"agent","recipe":"codex-sol","cli":"codex","model":"x","effort":"low"}' 2>&1) || fail "the Codex arm was refused: $cx"
+  sp=$(loop bench swe arms save 'Superpowers on m2' '{"kind":"agent","recipe":"superpowers","cli":"claude","model":"m2","effort":"max"}' 2>&1) || fail "the method arm was refused: $sp"
+  o=$(loop bench swe 1 --arm "$cx" --arm "$sp" 2>&1) || fail "the run failed: $o"
+  [ -s "$SWE_FX/codex-args" ] && ! grep -v -- '-m x -c model_reasoning_effort="low" -' "$SWE_FX/codex-args" || fail "Codex was not given the saved model and effort: $(cat "$SWE_FX/codex-args")"
+  [ -s "$STUB/sessions" ] && ! grep -v -- '--model m2 --effort max$' "$STUB/sessions" || fail "the method's Claude was not given the saved model and effort: $(cat "$STUB/sessions")"
+  jq -e '.resolved' "$B/results/$cx/$first.json" > /dev/null || fail "the Codex arm did not resolve its task: $(cat "$B/results/$cx/$first.json" 2>&1)"
+  jq -e '.fired == false and .why == "it did not fire: its output shows no use of its method"' "$B/results/$sp/$first.json" > /dev/null \
+    && grep -qF "unresolved (it did not fire: its output shows no use of its method)" <<<"$o" || fail "the method that did not fire lost why: $o $(cat "$B/results/$sp/$first.json" 2>&1)"
 }
 
 # Bug (#634): a conveyor arm's seat models were added to the sandbox pack's models.allowed under the seat's CLI, so a

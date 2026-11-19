@@ -2,10 +2,11 @@
   "label": "Claude with Caveman",
   "kind": "agent",
   "model": "builder",
+  "effort": true,
   "login": ["claude"],
   "install": "set -e; mkdir -p ~/.local; curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz | tar -xJ -C ~/.local --strip-components=1; curl -fsSL https://claude.ai/install.sh | bash; claude plugin marketplace add JuliusBrussee/caveman; claude plugin install caveman@caveman",
   "preflight": "claude plugin list | grep -q caveman",
-  "run": "set -e; export CAVEMAN_DEFAULT_MODE=caveman; c() { claude -p --output-format stream-json --verbose --permission-mode bypassPermissions ${SWE_MODEL:+--model \"$SWE_MODEL\"} \"$@\"; }; printf '/caveman\\n' | c; c --continue < \"$SWE_PROMPT\"",
+  "run": "set -e; export CAVEMAN_DEFAULT_MODE=caveman; c() { claude -p --output-format stream-json --verbose --permission-mode bypassPermissions ${SWE_MODEL:+--model \"$SWE_MODEL\"} ${SWE_EFFORT:+--effort \"$SWE_EFFORT\"} \"$@\"; }; printf '/caveman\\n' | c; c --continue < \"$SWE_PROMPT\"",
   "fired": "any(.type == \"system\" and .subtype == \"init\" and ((.slash_commands // []) | any(tostring | test(\"caveman\")))) and (map(select(.type == \"result\" and (.is_error | not))) | length) >= 2",
   "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
   "sessions": 2

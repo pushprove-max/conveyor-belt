@@ -2,10 +2,11 @@
   "label": "Claude alone",
   "kind": "agent",
   "model": "builder",
+  "effort": true,
   "login": ["claude"],
   "install": "curl -fsSL https://claude.ai/install.sh | bash",
   "preflight": "claude --version",
-  "run": "claude -p --output-format json --permission-mode dontAsk ${SWE_MODEL:+--model \"$SWE_MODEL\"} --setting-sources \"\" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools \"Edit(/$PWD/**)\" < \"$SWE_PROMPT\"",
+  "run": "claude -p --output-format json --permission-mode dontAsk ${SWE_MODEL:+--model \"$SWE_MODEL\"} ${SWE_EFFORT:+--effort \"$SWE_EFFORT\"} --setting-sources \"\" --strict-mcp-config --tools Read,Grep,Glob,Edit,Write --allowedTools \"Edit(/$PWD/**)\" < \"$SWE_PROMPT\"",
   "fired": "any(.type == \"result\" and (.is_error | not))",
   "tokens": "map(select(.type == \"result\") | .usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0)) | add",
   "sessions": 1
