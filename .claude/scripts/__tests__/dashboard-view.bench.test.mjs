@@ -202,10 +202,15 @@ test('A run going: the tab opens on it, its step moves with the same done count,
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-loglines li'), (li) => Array.from(li.children, text).slice(1)),
     [['Run', '', 'Run started'], ['Conveyor 1.5.0', t1, 'Reused: Resolved'], ['Conveyor 1.5.0', t3, 'Building']]);
   // The step moves on and no result comes: done stays 4, seq goes up.
+  // Bug it guards (#643): the run page read the run again only when the live run's `done` changed, so a step change
+  // (Building to Reviewing, `seq` up, `done` the same) kept the cached Building cell until a result arrived.
+  const cell = () => text(bp(w).querySelector(`tr[data-task="${t3}"] .bench-cell`));
+  assert.equal(cell(), 'Building');
   phase = 'Reviewing';
   next(w, snap(2));
   await settle();
   assert.match(now(), / · Reviewing since /, 'the step change read the run again');
+  assert.equal(cell(), 'Reviewing', 'the step change redrew the matrix cell');
   assert.match(text(bp(w).querySelector('.bench-sofar')), /^4 of 10 arm results finished/);
   // A read with no answer keeps the last update and says so; Read again reads it.
   phase = 'Testing'; lost = true;
