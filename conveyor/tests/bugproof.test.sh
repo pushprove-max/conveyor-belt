@@ -461,7 +461,7 @@ t_speedfaster() {
 t_speedslow() {
   local -x FILEMODE=1
   speedcard 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
     || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
   [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   # #180: with no version on its line, a later change to the check could not tell this block from others.
@@ -526,7 +526,7 @@ t_optkeep() {
 t_optslow() {
   local -x FILEMODE=1
   optcard 'echo fast > f.test.sh' 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster: 10 CPU s on record, 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
     || fail "an Optimize card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
   [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] || fail "the blocked line does not carry the speed check's version $SPEEDV: $(st 'select(.step == "blocked")')"
 }

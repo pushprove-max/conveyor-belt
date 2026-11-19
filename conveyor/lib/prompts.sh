@@ -604,14 +604,16 @@ files its issue'"'"'s Done-when names instead, and is not checked when it names 
 SPEEDREVIEW='# The speed-up check
 This issue speeds up one test file and keeps what it tests, so no test must fail on main'"'"'s code without the change.
 After the build, the file was run alone with the change, on a test slot. It must pass, and its CPU seconds must be lower
-than its median on record. Judge whether the file still tests all that it tested before. Its result:'
+than the median of its recent runs (its median on record when the issue lists none). Judge whether the file still tests all that it tested before. Its result:'
 # What the review of an Optimize card (optproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh
 OPTREVIEW='# The Optimize check
-This issue optimizes one test file: the change speeds it up, splits it, merges it into another test file or deletes
-it, and keeps what it tests, so no test must fail on main'"'"'s code without the change. A file the change keeps, and the
-test files a split adds, were run alone with the change, on a test slot: they must pass. A file kept must be faster
-than its median on record; the files of a split, their CPU seconds summed, must take at most the file'"'"'s median plus a start-up allowance for each file the split adds. Judge whether the tests still test all
+This issue optimizes one test file: the change does what the judge'"'"'s verdict in the issue asks (speed it up, keep it,
+stabilise it, split it, merge it into another test file or delete it), and keeps what it tests, so no test must fail on
+main'"'"'s code without the change. A file the change keeps, and the
+test files a split adds, were run alone with the change, on a test slot: they must pass. The figure they are held to is
+the median of the recent runs the issue lists (the file'"'"'s median on record when it lists none). A file kept must cost
+less than that figure, or, for stabilise, no more than it; the files of a split, their CPU seconds summed, must take at most that figure plus a start-up allowance for each file the split adds. Judge whether the tests still test all
 that the file tested before. Its result:'
 # What the review of a Fix failures card (steadyproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh

@@ -49,7 +49,7 @@ t_ownbudget() {
     'It has 2 cases, about 5 CPU s each on average (its runner does not give the CPU seconds of each case).'; do
     grep -qxF "$l" "$STUB/brief" || fail "the build's brief lacks the line: $l"
   done
-  grep -qF 'The check passes a split only when every case passes and the files'"'"' CPU seconds summed are at most the CPU seconds on record plus a start-up allowance of 1 CPU s' "$STUB/brief" \
+  grep -qF 'The check passes a split only when every case passes and the files'"'"' CPU seconds summed are at most the CPU seconds above plus a start-up allowance of 1 CPU s' "$STUB/brief" \
     && ! grep -qiE 'OWN-BUDGET|fileBudget|budget of' "$STUB/brief" \
     || fail "the build's brief does not say how a split is checked, or still names a budget: $(grep -iE 'budget|split' "$STUB/brief")"
   [ -z "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" ] \

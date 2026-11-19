@@ -305,6 +305,7 @@
 {"area": "testrun", "test": "narrow.test.sh"}
 {"area": "testrun", "test": "runner.test.sh"}
 {"area": "testrun", "test": "splitcheck.test.sh"}
+{"area": "testrun", "test": "optverdict.test.sh"}
 {"area": "testrun", "test": "steadycheck.test.sh"}
 {"area": "testrun", "test": "fixcheck.test.sh"}
 {"area": "testrun", "test": "runcheck.test.sh"}

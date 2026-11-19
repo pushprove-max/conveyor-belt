@@ -631,7 +631,7 @@ does not count them as a run of that file.
 **How a split is checked.** A split does not lower the CPU seconds summed: each new file has its own start-up. It
 gives files that run side by side. So the check of an Optimize card (Bug cards: the new tests
 fail without the fix, below) passes a split when every case passes and the
-CPU seconds summed are at most the old file's median on record plus a start-up allowance for each new file. The check
+CPU seconds summed are at most the median of the old file's recent runs plus a start-up allowance for each new file. The check
 measures the allowance: it runs the first new file with no case selected. When the test command starts node --test,
 pytest, go test, cargo test or rspec, Conveyor runs that runner on the file itself, with the runner's own filter set
 to a case name that no file has (go test runs the file's package; cargo test needs a `tests/<name>.rs` file). Any
@@ -1014,20 +1014,41 @@ A bug card that speeds up one test file is checked another way too. This is an i
 test file", as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing named, else
 the title's next word. Such a change keeps what the file tests, so its tests pass on main's code, and no test must fail
 there. The file runs alone, with the change, on a test slot, with the pack's `test.command`. It must pass, and its CPU
-seconds must be lower than its median on record (the median the Tests page shows). The card's `bugproof` line (result
+seconds must be lower than the median of its recent runs: the runs on the issue's "Last runs, newest first" line, as
+the Tests page writes it. When the issue has no such line, the check uses the file's median on record (the median the
+Tests page shows). The card's `bugproof` line (result
 `ok` or `fail`) names the file and both numbers: `speed: {file, before, after}`. When the file is not faster, the card
-is blocked with "the file is not faster: <before> CPU s on record, <after> CPU s now", with no review. When the file
+is blocked with "the file is not faster than <the median of its recent runs, or its median on record> (<before> CPU
+s), as the verdict speed up asks: <after> CPU s now", with no review. When the file
 fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
 shown the result.
 
 A bug card that optimizes one test file is checked in the same way. This is an issue whose title starts "Optimize the
 test file", as the Tests page files it. The card picks the fix: it speeds the file up, splits it, merges it into
-another test file, or deletes it. No test must fail on main's code. The check depends on what the change does:
+another test file, or deletes it. No test must fail on main's code. The check follows the judge's verdict in the
+issue: the line "The judge's verdict (...): <verdict>." that the Tests page writes, else the last `VERDICT:` line. An
+issue with no verdict can take any of the changes below, each checked as the list after them says. The change must do
+what the verdict asks, else the card is blocked with a reason that names the verdict:
 
-- The change keeps the file and adds no test file: the check is the speed-up check above.
+- speed up: the change keeps the file and adds no test file, and the file must cost less than its recent runs.
+- keep: the change keeps the file and adds no test file, and the file must cost less than its recent runs.
+- stabilise: the change keeps the file and adds no test file. The build's reply ends with one line
+  `STABILISED: <case> | <its cause> | <how the change removes it>` for each case that the issue names on a `CAUSE:`
+  line, or at least one line when the issue names none. A case with no line blocks the card before the run. The file
+  must cost no more than its recent runs. The review gets the lines and checks each one against the code.
+- split: the change changes or removes the file and adds test files.
+- merge: the change removes the file and changes another test file, or changes the file and removes another test
+  file. It adds no test file. When the file stays, it must cost no more than its recent runs plus the median on record
+  of each test file merged into it.
+- delete: the change removes the file and adds or changes no other test file.
+
+Then the check depends on what the change does:
+
+- The change keeps the file and adds no test file: the check is the speed-up check above (for stabilise and merge,
+  the file may cost as much as its figure).
 - The change adds test files (a split): the new files run alone, with the change, on a test slot, and so does the rest
   of the old file when the change keeps it. They must pass. Their CPU
-  seconds summed must be at most the old file's median plus a start-up allowance for each file the split adds (Test
+  seconds summed must be at most the median of the old file's recent runs plus a start-up allowance for each file the split adds (Test
   file times, above). Else the card is blocked with no review. The reason names the sum, how far it is over its limit,
   and the allowance.
 - The change removes the file and adds no test file (a delete, or a merge into another file): it is not run with the
@@ -1042,8 +1063,9 @@ removes the file and changes another test file is a merge into that file; one th
 delete.
 
 The build of a speed-up or Optimize card is told the target. Before the build, the file runs alone on main's code to
-count its cases. The brief gives the file's CPU seconds on record, its count of cases and their average
-CPU seconds. It also says how the check above takes a split.
+count its cases. The brief gives the CPU seconds that the check holds the file to (the median of its recent runs, or
+its median on record), its count of cases and their average CPU seconds. It also says how the check above takes a
+split, and what the issue's verdict asks.
 
 The loop retries a blocked card by itself when the check above has changed since the card was blocked. When the loop
 starts, it looks at each issue whose last card is blocked by an older version of this check. It retries the card one

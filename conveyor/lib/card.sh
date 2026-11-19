@@ -314,7 +314,7 @@ card() { # <card> <issue> [<branch> <tip>]
     rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || ! jq -se --argjson r "$rounds" 'map(.round) | max < $r' "$wt.rounds/findings.jsonl" >/dev/null 2>&1 \
       || rep=$(repeats "$wt")
     [ -z "$rep" ] || more+=$'\n\n'"$(again "$rep")"
-    [ -z "$sf" ] || { t=$(speedbrief "$c" "$wt" "$sf") && more+=$'\n\n'"$t"; } \
+    [ -z "$sf" ] || { t=$(speedbrief "$c" "$wt" "$sf" "$issue") && more+=$'\n\n'"$t"; } \
       || { block "$c" "$n" "$wt" "brief: the engine could not read the project pack for the split allowance of $sf"; return; }
     began "$c" "$n" build
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
@@ -324,7 +324,8 @@ card() { # <card> <issue> [<branch> <tip>]
     # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
     # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
-    # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when its file is not faster, a split takes more
+    # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when the change does not do what its issue's verdict
+    # asks, its file costs more than its recent runs allow, a split takes more
     # CPU seconds than it may, or a file does not pass, the card is blocked with that reason and no review, its blocked line
     # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
     # FIXFAILS) is checked by steadyproof(): when its file fails in one of its runs in a row, the card is blocked
