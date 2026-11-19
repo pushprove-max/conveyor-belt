@@ -1508,9 +1508,12 @@ prints it and keeps it. A project with no snapshot yet gets its first one that w
 /units show the age of a snapshot that is more than a minute old.
 
 Every snapshot also writes those lists whole to `history.json` in the state folder, and `conveyor.sh history` prints
-that file. The Board does not read it with the live feed: its Landed, Metrics, Cost and Declined panels ask the page
-server for it (`GET /history`) when they are drawn, at most once a minute, and show the older entries from it beside
-the live ones. The Foreman's watcher asks for it when an issue it awaits is in neither `pushedCards` nor
+that file. The snapshot's `historySum` is a checksum of that file without the wait and run times of the Metrics cards. These times grow with the clock while a card is blocked or open. So `historySum` changes when an entry changes, but not when only the clock moves. The Board does not read it with the live feed: its Landed, Metrics, Cost and Declined panels ask the page
+server for it (`GET /history`) at most once a minute while one of them is shown and not collapsed, and show the older
+entries from it beside the live ones. The page server reads the history from the host again only when the ledger
+changed: when a project's `historySum` or day changes. A dismiss or an issue filed from the Board makes the next ask
+read it again too, with or without the live feed. Without the live feed, the page server keeps its copy for a minute. When the history did not change, the page server answers "not modified" and the panels stay as they
+are. The Foreman's watcher asks for it when an issue it awaits is in neither `pushedCards` nor
 `metrics.cards` of the snapshot, so a push past the cut still wakes it.
 The snapshot's tests part keeps the newest 5 runs and test edits of each test file. `conveyor.sh history test <file>`
 prints the older ones of one file. The Board's Tests page asks the page server for them (`GET /older`) when you open

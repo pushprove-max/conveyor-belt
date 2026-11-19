@@ -157,14 +157,21 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
   w.requestAnimationFrame = (fn) => { w.frames.push(fn); return w.frames.length; };
   w.posts = [];
   // The history (GET history): w.historyBody (never w.history: that is the window's own) is what the server gives ({panels}); with none, it answers 404 and the
-  // panels keep their live parts. w.historyAsks counts the asks.
+  // panels keep their live parts. w.historyAsks counts the asks. w.historyTag is its ETag: an ask whose If-None-Match
+  // names it is a 304, as the server's; w.historyIfNoneMatch lists each ask's If-None-Match (null with none).
   w.historyAsks = 0;
+  w.historyIfNoneMatch = [];
   w.fetch = (url, opt) => {
     if (/^alive\.js\?\d+$/.test(url)) return Promise.resolve(w.aliveReply || { ok: true, status: 200, redirected: false, url: 'https://dash.test/alive.js' });
     if (url === 'history') {
-      assert.equal(opt, undefined, 'the history is read with a plain GET');
+      const inm = opt === undefined ? null : opt.headers['If-None-Match'];
+      assert.ok(opt === undefined || (Object.keys(opt).join() === 'headers' && Object.keys(opt.headers).join() === 'If-None-Match'),
+        `the history is read with a plain GET, with If-None-Match at most: ${JSON.stringify(opt)}`);
       w.historyAsks += 1;
-      return Promise.resolve(w.historyBody ? { ok: true, status: 200, json: () => Promise.resolve(w.historyBody) } : { ok: false, status: 404 });
+      w.historyIfNoneMatch.push(inm);
+      if (w.historyBody && w.historyTag && inm === w.historyTag) return Promise.resolve({ ok: false, status: 304 });
+      const headers = { get: (n) => (n.toLowerCase() === 'etag' ? w.historyTag || null : null) };
+      return Promise.resolve(w.historyBody ? { ok: true, status: 200, headers, json: () => Promise.resolve(w.historyBody) } : { ok: false, status: 404 });
     }
     // The Health panel's Work now (GET work): w.workReply is the server's answer ({ok, status, json, text}); w.workAsks counts the asks.
     if (url === 'work') {

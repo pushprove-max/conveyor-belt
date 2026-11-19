@@ -45,6 +45,40 @@ t_snapsize() {
     || fail "history does not hold every entry: $(jq -c '[(.landed, .metrics.cards, .cost.cards, .cost.unpriced, .declinedRest, .pushedCards | length), .landed[-1].card]' <<<"$hist")"
 }
 
+# Bug (#551): the Board reads the history again only when a snapshot's historySum changes. A sum cut from what the
+# snapshot keeps missed a change past its cut (an expired declined line dismissed or filed as an issue), so the Board
+# kept showing it as it was. A sum of the history whole changed every second while a card was blocked or open (its
+# waitMaxSec and runSec grow with the clock), so the Board read the host again with no ledger change; a retried issue's
+# open card has them in its runs' sums and in thisRun too, which a sum less the card's own fields still missed.
+# historySum must stay the same while only the clock moves and change when an old line does.
+t_historysum() {
+  local d now a b c h1
+  export TZ=UTC; setup "[$(issue 1 2026-01-01) $(issue 2 2026-01-01)]"; mkdir -p "$ST"; d=$(date -u +%F)
+  now=$(jq -n --arg d "$d" '"\($d)T12:00:00Z" | fromdate')
+  # c1 blocked at 10:00 and c2 open since 11:00, both today: their waitMaxSec and runSec grow with the clock. c3 is
+  # issue 1 again, open since 11:30: its second run, with the growing runSec in its sums and in thisRun.
+  jq -cn --arg d "$d" '{card: "c1", issue: 1, step: "picked", time: "\($d)T09:00:00Z", result: "ok", title: "T1"},
+    {card: "c1", issue: 1, step: "blocked", time: "\($d)T10:00:00Z", result: "blocked", reason: "review 1: no answer"},
+    {card: "c2", issue: 2, step: "picked", time: "\($d)T11:00:00Z", result: "ok", title: "T2"},
+    {card: "c3", issue: 1, step: "picked", time: "\($d)T11:30:00Z", result: "ok", title: "T1"}
+    | . + {tokens: {claude: 0, codex: 0}, sha: "", reason: (.reason // "")}' > "$ST/cards.jsonl"
+  # 29 dismissed lines today, and d0, expired (10 days old) and not dismissed: the oldest, past the snapshot's cut of
+  # declinedRest (its newest 20), so a change to it is only in the history.
+  jq -cn --arg d "$d" 'range(0; 30) as $i | {id: "d\($i)", time: ("\($d)T00:00:00Z" | fromdate) + $i - (if $i == 0 then 864000 else 0 end) | todate,
+    card: "c\($i)", issue: $i, finding: "[P2] a.txt:\($i) a finding", by: "code", why: "a reason", repo: "x"}
+    + if $i == 0 then {} else {dismissed: {time: "\($d)T01:00:00Z", by: "owner"}} end' > "$ST/declined.jsonl"
+  a=$(CONVEYOR_NOW=$now loop snapshot | jq -r '.historySum') || fail "snapshot exited non-zero"
+  h1=$(jq -c '[.metrics.cards[] | [.card, .metrics.waitMaxSec, .metrics.runSec, .metrics.thisRun.runSec]]' "$ST/history.json")
+  b=$(CONVEYOR_NOW=$((now + 60)) loop snapshot --fresh | jq -r '.historySum')
+  # The fixture holds: a minute on, the blocked card's wait and the open card's run are longer in the history.
+  [ "$(jq -c '[.metrics.cards[] | [.card, .metrics.waitMaxSec, .metrics.runSec, .metrics.thisRun.runSec]]' "$ST/history.json")" != "$h1" ] \
+    || fail "the blocked and open cards' times did not grow with the clock: $h1"
+  [ "$b" = "$a" ] && [ "$a" != null ] || fail "historySum changed with only the clock moved: $a then $b"
+  loop declined dismiss d0 > /dev/null || fail "the dismissal failed"
+  c=$(CONVEYOR_NOW=$((now + 60)) loop snapshot --fresh | jq -r '.historySum')
+  [ "$c" != "$a" ] && [ "$c" != null ] || fail "historySum did not change with an old declined line dismissed: $a then $c"
+}
+
 # Bug (#530): `conveyor.sh history` on a new state (no history.json yet) takes a snapshot first, and the snapshot's
 # tests part reads the test rules (lib/testrules.sh). The history command's script (commands/history.sh) did not load
 # that file, so the first history printed shell errors (TESTRULES unset, testrulesettings not found).

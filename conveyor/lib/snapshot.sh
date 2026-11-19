@@ -159,7 +159,10 @@
 # The lists that grow with every card that lands are cut to their newest SNAPKEEP, so a snapshot read every second
 # stays the same size however many cards land (README.md says its bound): landed, metrics.cards, cost.cards,
 # cost.unpriced (newest step first; steps of one time in their order) and declinedRest (and pushedCards, above). Each list whole is in HISTORY, written by every snapshot as it
-# ends; `conveyor.sh history` prints it, and the Board reads it when a panel that shows them opens.
+# ends; `conveyor.sh history` prints it, and the Board reads it when a panel that shows them opens. historySum: the
+#   cksum of that history as written, less every waitMaxSec and runSec in metrics.cards (thisRun's too), which grow
+#   with the clock while a card is blocked or open (null when it could not be written); the Board reads the history again only when
+#   it or the day changed.
 # health: the health record, which names builderCap, models and efforts as in force (the control record's, else the seed's).
 # testSlots: the machine's test-slot pool (lib/slots.sh), {used: the slots a test run holds now, of: the pool's size};
 #   null when the pool cannot be read.
@@ -924,11 +927,17 @@ snapshot() (
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1
   # The lists whole go to HISTORY, by a file of their own beside it and one rename, so a reader never sees half of one;
   # the record printed holds the newest of each. A history that cannot be written leaves the last one and says so.
+  # historySum is the cksum of the history written (null when none was), so it changes when any entry of it does; less
+  # every waitMaxSec and runSec in a card's metrics (its runs' sums and thisRun too), which grow with the clock alone
+  # while the card is blocked or open.
+  hs=''
   { hf=$(mktemp "$HISTORY.XXXXXX") && jq -c '{landed, metrics: {cards: .metrics.cards}, cost: {cards: .cost.cards, unpriced: .cost.unpriced}, declinedRest, pushedCards}' "$d/full" > "$hf" \
-      && mv -f "$hf" "$HISTORY"; } || { rm -f "${hf:-}"; echo "conveyor: cannot write $HISTORY; the history the Board reads is the last one written" >&2; }
+      && hs=$(jq -c 'del(.metrics.cards[]?.metrics | .. | objects | .waitMaxSec, .runSec)' "$hf") && hs=$(printf '%s\n' "$hs" | cksum | tr ' ' -) && mv -f "$hf" "$HISTORY"; } \
+    || { hs=''; rm -f "${hf:-}"; echo "conveyor: cannot write $HISTORY; the history the Board reads is the last one written" >&2; }
   # Past the cut, landed keeps every card still on the belt (the Board puts one landed today in Landed, not Building),
   # and branches the newest row of each lane's change (lanekeys), so a lane left as it was is still told it landed.
-  jq -c --argjson k "$SNAPKEEP" --argjson p "$PUSHKEEP" --argjson lk "$(lanekeys)" '.landedCount = (.landed | length)
+  jq -c --argjson k "$SNAPKEEP" --argjson p "$PUSHKEEP" --argjson lk "$(lanekeys)" --arg hs "$hs" '.landedCount = (.landed | length)
+    | .historySum = (if $hs == "" then null else $hs end)
     | .landedUsd = (if all(.landed[]; .usd | type == "number") then [.landed[].usd] | add // 0 else null end)
     | [.belt[] | select(.landed == true) | .card] as $on
     | .landed |= [to_entries[] | select(.key < $k or (.value.card | IN($on[]))) | .value]

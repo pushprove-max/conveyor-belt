@@ -1324,6 +1324,8 @@
   }
   function toggle(key, id, on) {
     change(() => { const l = lay(); l[key] = l[key].filter((x) => x !== id).concat(on ? [id] : []); });
+    // A panel with older entries expanded or shown again reads the history when it is time to (olderShown).
+    if (!on && histDue() && olderShown()) readHistory();
   }
   // Restore puts the tab in view back as it was by default, with the density, theme, time and date.
   function reset() {
@@ -1613,18 +1615,20 @@
   // ---- the history: the older entries of the lists the snapshot cuts to its newest (conveyor/README.md, The snapshot) ----
   // A panel with older(live, history) is drawn from its live part with the older entries laid in from the history:
   // the page server's GET /history, the same part built from every entry. It is asked for when such a panel is drawn
-  // on the tab in view, at most once every HISTORY_MS, and each such panel is drawn again when a history that differs
-  // from the last one has come (an equal one draws nothing). Until one has come, or when it does not read, the live
-  // part is drawn alone. The history changes where the live part does not (an older declined line filed), and the
-  // feed never draws again a part that does not change: so each read, whether it came or failed, sets a timer that
-  // HISTORY_MS later reads it again while such a panel is on the tab in view and the page is shown; and such a panel
-  // the page draws when the last read is HISTORY_MS old (the tab or the page shown again after the timer found those
-  // panels hidden) is drawn again, which reads it again too.
+  // and shown (on the tab in view, not hidden, not collapsed), at most once every HISTORY_MS, with the ETag of the
+  // last one in If-None-Match: the server's 304, the history unchanged, changes nothing. Each such panel is drawn again
+  // only when a history that differs from the last one has come (an equal one draws nothing). Until one has come, or
+  // when it does not read, the live part is drawn alone. The history changes where the live part does not (an older
+  // declined line filed), and the feed never draws again a part that does not change: so each read, whether it came or
+  // failed, sets a timer that HISTORY_MS later reads it again while such a panel is shown and the page is shown; and
+  // such a panel drawn when the last read is HISTORY_MS old (the tab or the page shown again after the timer found
+  // those panels hidden, or one expanded again) reads it again too.
   const HISTORY_MS = 60000;
-  let hist = null, histText = null, histAt = null, histVer = 0, histTimer = null;
+  let hist = null, histText = null, histTag = null, histAt = null, histVer = 0, histTimer = null;
   const histCan = () => /^https?:$/.test(window.location.protocol) && typeof window.fetch === 'function';
   const histDue = () => histCan() && (histAt === null || now() - histAt >= HISTORY_MS);
-  const olderShown = () => Boolean(last) && Array.from(panels).some(([id, p]) => typeof p.mod.older === 'function' && tabOf(id) === tab);
+  const olderShown = () => Boolean(last) && Array.from(panels).some(([id, p]) => typeof p.mod.older === 'function' && tabOf(id) === tab
+    && !layouts[tab].collapsed.includes(id) && !layouts[tab].hidden.includes(id));
   function drawOlder() {
     if (last) panels.forEach((p, id) => { if (typeof p.mod.older === 'function' && tabOf(id) === tab) draw(p, last.panels[partOf(id)]); });
     arrangeSoon();
@@ -1633,8 +1637,14 @@
     histAt = now();
     if (histTimer !== null) window.clearTimeout(histTimer);
     histTimer = window.setTimeout(() => { histTimer = null; if (!doc.hidden && olderShown()) readHistory(); }, HISTORY_MS);
-    window.fetch('history').then((r) => (r.ok ? r.json() : null)).then((x) => {
+    let tag = null;
+    window.fetch('history', histTag ? { headers: { 'If-None-Match': histTag } } : undefined).then((r) => {
+      if (!r.ok) return null;  // a 304 too: the history the page has is the server's
+      tag = r.headers.get('ETag');
+      return r.json();
+    }).then((x) => {
       if (!x || typeof x !== 'object' || !x.panels || typeof x.panels !== 'object') return;
+      histTag = tag;
       const text = JSON.stringify(x.panels);
       if (text === histText) return;
       histText = text;
@@ -1646,7 +1656,6 @@
   }
   function withOlder(mod, live) {
     if (typeof mod.older !== 'function') return live;
-    if (histDue()) readHistory();
     const old = hist && hist[mod.id];
     return old && !old.error && old.data && typeof old.data === 'object' ? mod.older(live, old.data) : live;
   }
@@ -1991,9 +2000,11 @@
   // no other panel with it. It does not cut the panel to its length: each caller runs arrange() or arrangeSoon() after
   // it, which cuts every panel of the tab in one read round and one write round (a cut here laid the page out once a panel).
   function draw(p, part) {
-    // A panel with older entries is drawn again when a newer history has come, or when it is time to read it again;
-    // not whole (ctx.whole), so a panel that draws its rows with ctx.list keeps the rows that did not change.
-    const older = typeof p.mod.older === 'function' && (p.hist !== histVer || histDue());
+    // A panel with older entries asks for the history when it is time to read it again, and is drawn again only when a
+    // newer history has come; not whole (ctx.whole), so a panel that draws its rows with ctx.list keeps the rows that
+    // did not change.
+    if (typeof p.mod.older === 'function' && histDue() && olderShown()) readHistory();
+    const older = typeof p.mod.older === 'function' && p.hist !== histVer;
     p.hist = histVer;
     // The model names (modelName) are part of what a panel shows: a new alias or name draws it again.
     const names = namesKey(), json = JSON.stringify(part === undefined ? null : part) + names;

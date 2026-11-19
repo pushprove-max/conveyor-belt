@@ -543,6 +543,10 @@ test('the live feed: a data.js asked for before the feed\'s snapshot, answering 
   // The same when the feed opened and closed again before data.js answered: its snapshot is newer all the same.
   es.readyState = 0; es.emit('error');
   refresh(w);
+  // Issue 551: the second refresh asks for alive.js at the same address as the first (a per-poll address is a new
+  // cached copy each time, never a 304).
+  const alives = Array.from(w.document.head.querySelectorAll('script[src^="alive.js"]'), (s) => s.getAttribute('src'));
+  assert.ok(alives.length >= 2 && alives.every((s) => s === 'alive.js'), `alive.js at one address on two refreshes: ${alives}`);
   es.readyState = 1; es.emit('open');
   es.emit('snapshot', newer);
   es.readyState = 0; es.emit('error');

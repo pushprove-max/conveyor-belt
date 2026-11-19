@@ -2,7 +2,7 @@
 // The history (#524): the Landed, Metrics, Cost and Declined panels read the older entries the live snapshot no
 // longer carries from GET history. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, panel, deliver, next, later, settle, full, clone, P, CARD_METRICS, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, panel, deliver, next, later, settle, full, clone, hidePanel, P, CARD_METRICS, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const rows = (w, id) => Array.from(panel(w, id).querySelectorAll('.rows > .row .title'), (t) => t.textContent);
@@ -118,6 +118,40 @@ test('a history read equal to the last one draws nothing', async () => {
   assert.equal(w.historyAsks, 2, 'read again a minute later');
   assert.deepEqual(renders(), before, 'no history panel drawn again');
   assert.ok(rows(w, 'landed').includes('Older card'));
+});
+
+// Bug (#551): each minute the history panels were drawn again from an unchanged part, as the read was due, and the
+// read sent no validator, so the server sent the whole history again; now it is asked for with the last ETag, and its
+// 304 leaves the panels as they are.
+test('a history read the server answers 304 to, its ETag unchanged, draws nothing', async () => {
+  const w = boot();
+  const h = clone(full().panels);
+  h.landed.data.cards.push({ ...h.landed.data.cards[0], card: 'c1-2', title: 'Older card', time: iso(T0 - 9000000) });
+  w.historyBody = { updatedAt: iso(T0), panels: h };
+  w.historyTag = '"k1"';
+  deliver(w, full());
+  await settle(); await settle();
+  const before = panel(w, 'landed').dataset.renders;
+  w.clock += 60000;
+  next(w, full());  // the same live part, with the read due
+  await settle(); await settle();
+  assert.deepEqual(w.historyIfNoneMatch, [null, '"k1"'], 'the second read names the first one\'s ETag');
+  assert.equal(panel(w, 'landed').dataset.renders, before, 'Landed is not drawn again for a 304');
+  assert.ok(rows(w, 'landed').includes('Older card'), 'the history the page has stays');
+});
+
+// Bug (#551): the history was read each minute for a panel the owner had collapsed, as only the tab was looked at.
+test('a collapsed Declined, alone of the four on the tab, asks for no history until it is expanded', async () => {
+  const w = boot();
+  for (const id of ['landed', 'metrics', 'cost']) hidePanel(w, id);
+  panel(w, 'declined').querySelector('.tool.collapse').click();
+  w.historyBody = { updatedAt: iso(T0), panels: clone(full().panels) };
+  deliver(w, full());
+  await settle(); await settle();
+  assert.equal(w.historyAsks, 0, 'no ask for a collapsed panel');
+  panel(w, 'declined').querySelector('.tool.collapse').click();
+  await settle();
+  assert.equal(w.historyAsks, 1, 'expanded, it asks');
 });
 
 // Bug: a history read before midnight laid yesterday's cards into today's Landed and Cost.

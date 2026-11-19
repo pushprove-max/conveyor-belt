@@ -321,7 +321,7 @@ rm "$OUT/stream.json"
 quiet; run  # a cycle, which keeps the slower parts
 card() { jq -cn --arg c "$1" --arg t "$2" '{card: $c, issue: 7, title: $c, step: "landed", time: $t, usd: 1, reviews: 1, followups: [], sha: "abc", pushed: true}'; }
 NEW=$(card c-new "$(ago 60)") OLD=$(card c-old "$(ago 7200)")
-jq -cn --argjson s "$(snap "{\"landed\": [$NEW], \"landedCount\": 2}")" --argjson w "$(snap)" --arg at "$NOWISO" '{host: "devbox", reachable: true, error: null,
+jq -cn --argjson s "$(snap "{\"landed\": [$NEW], \"landedCount\": 2, \"historySum\": \"1-1\"}")" --argjson w "$(snap '{"historySum": "2-2"}')" --arg at "$NOWISO" '{host: "devbox", reachable: true, error: null,
   records: [{repo: "sample", snap: $s, steered: true, repoUrl: "https://github.com/o/r", lastPushAt: null}, {repo: "widgetshop", snap: $w, steered: false, repoUrl: null, lastPushAt: null}],
   stream: {live: true, heardAt: $at, since: null, error: null}}' > "$OUT/stream.json"
 hist() { jq -cn --argjson l "$1" '{landed: $l, metrics: {cards: []}, cost: {cards: [], unpriced: []}, declinedRest: []}'; }
@@ -332,10 +332,123 @@ h=$(hrun) || fail "--history exited non-zero"
 [ "$(jq -c '[(.panels | keys), (.panels.landed.data.cards | map(.card))]' <<<"$h")" = '[["cost","declined","landed","metrics"],["c-new","c-old"]]' ] \
   || fail "--history does not give the four parts with the older card of the day: $(jq -c '.panels.landed' <<<"$h" | cut -c1-600)"
 [ "$(grep -c "conveyor.sh' history" "$T/ssh-calls")" = 1 ] && [ "$(wc -l < "$T/ssh-calls")" = 1 ] || fail "--history asks the host for every record's history in one command: $(cat "$T/ssh-calls")"
-[ "$(hrun | jq -c '.panels.landed.data.cards | length')" = 2 ] && [ "$(wc -l < "$T/ssh-calls")" = 1 ] || fail "a second --history inside the minute asked the host again: $(cat "$T/ssh-calls")"
+[ "$(hrun | jq -c '.panels.landed.data.cards | length')" = 2 ] && [ "$(wc -l < "$T/ssh-calls")" = 1 ] || fail "a second --history with no ledger change asked the host again: $(cat "$T/ssh-calls")"
 rm "$OUT/cache/history.json"; echo 255 > "$T/ssh-rc"
 h=''; ! h=$(hrun 2>/dev/null) && [ -z "$h" ] || fail "a host that gave no history was passed off as one: $h"
 ) & started history
+
+# --- GET /history (#551): the page server's handler, run on stand-in requests, on the real dashboard.sh --history and
+# the ssh stub. Bugs: the history was read from the host each minute for each page though the ledger had not changed;
+# two asks at once both read it; the whole history went again to a page that had it; a dismiss from the Board was not
+# shown until the copy aged out ---
+( fresh historyserver
+quiet; run  # a cycle, which keeps the slower parts
+CARD=$(jq -cn --arg t "$(ago 60)" '{card: "c-new", issue: 7, title: "c-new", step: "landed", time: $t, usd: 1, reviews: 1, followups: [], sha: "abc", pushed: true}')
+feed() {  # stream.json, as the live feed writes it, sample's snapshot with landedCount $1 and historySum $2
+  jq -cn --argjson s "$(snap "{\"landed\": [$CARD], \"landedCount\": $1, \"historySum\": \"$2\"}")" --argjson w "$(snap '{"historySum": "2-2"}')" --arg at "$NOWISO" '{host: "devbox", reachable: true, error: null,
+    records: [{repo: "sample", snap: $s, steered: true, repoUrl: null, lastPushAt: null}, {repo: "widgetshop", snap: $w, steered: false, repoUrl: null, lastPushAt: null}],
+    stream: {live: true, heardAt: $at, since: null, error: null}}' > "$OUT/stream.json"
+}
+feed 1 1-1
+hist=$(jq -cn --argjson c "$CARD" '{landed: [$c], metrics: {cards: []}, cost: {cards: [], unpriced: []}, declinedRest: []}')
+printf '%s\n%s\n@@end\n' "$hist" "$hist" > "$T/ssh-out"; : > "$T/ssh-calls"
+env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" \
+  CONVEYOR_SCRATCH="$SCR" CONVEYOR_DASHBOARD_DIR="$OUT" CONVEYOR_DASHBOARD_AUTH="$T/auth/dashboard-auth.json" CONVEYOR_RULING_LOG="$T/rulings.jsonl" \
+  timeout 120 "$PY" - "$SOURCE/.claude/scripts" "$OUT" "$T/ssh-calls" <<'EOF' || fail "GET /history: exit $? (see the lines above)"
+import io, json, os, subprocess, sys, threading, time
+sys.path.insert(0, sys.argv[1])
+import dashboard_server as ds
+OUT, CALLS = sys.argv[2], sys.argv[3]
+SSH_OUT = os.path.join(os.path.dirname(CALLS), 'ssh-out')
+bad = []
+def reads():  # the host's history reads so far
+    return sum("conveyor.sh' history" in l for l in open(CALLS))
+started = []  # the --history processes started: an ask the kept copy answers starts none (#566 D2)
+real_run = ds.run_script
+def counted(cmd, *a, **k):
+    if '--history' in cmd:
+        started.append(cmd)
+    return real_run(cmd, *a, **k)
+ds.run_script = counted
+class Page:
+    """A stand-in request: logged in, from the page's own address, its reply kept."""
+    def __init__(self, inm=None, body=None):
+        self.directory, self.out, self.code, self.tag, self.close_connection = OUT, io.BytesIO(), None, None, False
+        self.headers = {'If-None-Match': inm} if inm else {}
+        if body is not None:
+            raw = json.dumps(body).encode()
+            self.headers['Content-Length'], self.rfile = str(len(raw)), io.BytesIO(raw)
+        self.wfile, self.client_address = self.out, ('192.0.2.1', 0)
+    def authed(self, store=None): return 'ann'
+    def own_page(self): return True
+    def send_response(self, code): self.code = code
+    def send_header(self, *a): return None
+    def end_headers(self): return None
+    def reply(self, code, text, headers=None): self.code, self.text = code, text
+    def send_error(self, code): self.code = code
+def get(inm=None):
+    p = Page(inm)
+    ds.Handler.history(p)
+    return p
+def dismiss(did):
+    """POST /control dismiss of did, then the host's history after it: the line in sample's declinedRest."""
+    d = Page(body={'action': 'dismiss', 'args': [did], 'repo': 'sample'})
+    ds.Handler.control(d)
+    lines = open(SSH_OUT).read().split('\n')
+    h = json.loads(lines[0])
+    h['declinedRest'] = h['declinedRest'] + [{'id': did, 'repo': 'sample', 'finding': '[P2] a.txt:1 a line', 'dismissed': {'by': 'ann'}}]
+    lines[0] = json.dumps(h)
+    open(SSH_OUT, 'w').write('\n'.join(lines))
+    return d.code
+ds.conveyor_host = lambda: ('devbox', 'user@devbox', '/srv/main', {'sample': '/srv/main', 'widgetshop': '/srv/cd'})
+a = get()
+if not (a.code == 200 and a.tag and reads() == 1):
+    bad.append('a first ask reads the host and sends an ETag: %s %r, %d reads' % (a.code, a.tag, reads()))
+b = get(a.tag)
+if not (b.code == 304 and b.out.getvalue() == b'' and reads() == 1 and len(started) == 1):
+    bad.append('a second ask with the first ETag and no ledger change is a 304 with no host read and no process: %s, %d reads, %d started'
+               % (b.code, reads(), len(started)))
+STREAM = os.path.join(OUT, 'stream.json')
+def snap(**kw):  # sets fields of sample's snapshot in the live feed
+    s = json.load(open(STREAM))
+    s['records'][0]['snap'].update(kw)
+    json.dump(s, open(STREAM, 'w'))
+snap(landedCount=2, historySum='3-3')  # a new landed card: the snapshot's history, and so its sum, changes
+c = get(a.tag)
+if not (c.code == 200 and reads() == 2 and c.tag != a.tag):
+    bad.append('a new landedCount reads the host again, under a new ETag: %s, %d reads' % (c.code, reads()))
+snap(day='2000-01-02')  # midnight: Cost's rows past the live cut are of another day, with the same history
+if not (get(c.tag).code == 200 and reads() == 3):
+    bad.append('a new day reads the host again: %d reads' % reads())
+# The dismissed line goes to declinedRest; the live feed's snapshot, taken before the dismiss, has the same key.
+dcode = dismiss('d0123456789ab')
+e = get(c.tag)
+if not (dcode == 200 and e.code == 200 and reads() == 4 and b'd0123456789ab' in e.out.getvalue()):
+    bad.append('a POST /control dismiss makes the next ask read the host again: %s %s, %d reads' % (dcode, e.code, reads()))
+for name in ('history.json', 'history.key'):
+    if os.path.exists(os.path.join(OUT, 'cache', name)):
+        os.remove(os.path.join(OUT, 'cache', name))
+two = [Page(), Page()]
+runs = [threading.Thread(target=ds.Handler.history, args=(p,)) for p in two]
+for t in runs: t.start()
+for t in runs: t.join()
+if not ([p.code for p in two] == [200, 200] and two[0].out.getvalue() == two[1].out.getvalue() and reads() == 5):
+    bad.append('two asks at once on a cold copy read the host once: %s, %d reads' % ([p.code for p in two], reads()))
+old = time.time() - 120  # the live feed stopped: no ledger key, the copy kept while it is young
+os.utime(STREAM, (old, old))
+n = len(started)
+f = get()
+if not (f.code == 200 and json.loads(f.out.getvalue()).get('panels') and reads() == 5 and len(started) == n):
+    bad.append('with no live feed a young copy is given with no host read and no process: %s, %d reads' % (f.code, reads()))
+dcode = dismiss('d0123456789ac')  # with no live feed, a dismiss drops the young copy too
+g = get()  # not the young copy: the host is read again (then its records too, which the stub does not answer: a 502)
+if not (dcode == 200 and g.code != 200 and reads() == 6):
+    bad.append('with no live feed a POST /control dismiss makes the next ask read the host again: %s %s, %d reads' % (dcode, g.code, reads()))
+for why in bad:
+    print('FAIL: GET /history: ' + why, file=sys.stderr)
+sys.exit(1 if bad else 0)
+EOF
+) & started historyserver
 
 # --- --work (#197): the Health panel's Work now, the first record's `conveyor.sh work --json`, which reads every
 # record's cards, in one host command. Bugs: each record was asked for its work and the answers merged, so one card

@@ -268,8 +268,7 @@ TTL=300          # the usage read: asked again once its copy is this old, so a 6
 CYCLE_LIMIT=900  # --loop kills a cycle running longer (a hung read)
 SSH_LIMIT=60     # the one ssh command; a snapshot lists GitHub's open issues, which takes seconds
 ACTIVE=600       # a lane's session whose record moved in this many seconds is working (whole minutes: find -mmin)
-HISTORY_TTL=60   # --history gives the copy it built while it is this young, so the page's asks are one host read a minute
-                 # (the page server's HISTORY_TTL: it serves that copy itself, with no process, while it is this young)
+HISTORY_TTL=60   # --history with no live feed (so no ledger key) gives the copy it built while it is this young
 STREAM_FRESH=60  # stream.json older than this: the live feed is not running (it rewrites the file every 10 s)
 PORT=${CONVEYOR_DASHBOARD_PORT:-8790}
 RUN='' PUB='' SRV='' ALV='' STM='' LCK=''
@@ -1086,20 +1085,35 @@ kept_parts() {
 
 # --history: the Landed, Metrics, Cost and Declined parts as data.js has them, but built from every entry: each
 # record's `conveyor.sh history` (the lists whole, of which its snapshot holds the newest) laid into its record. The
-# page server gives it at GET /history, which the page asks for when one of those panels is drawn, never with the live
-# feed. Printed as {updatedAt, panels}, and kept in cache/history.json, printed from there while it is under
-# HISTORY_TTL seconds old. The rest of each record is the live feed's (with none running, read as a cycle reads it),
-# the other parts those the last cycle kept. A host that gives no history of every record prints nothing: exit 1.
+# page server gives it at GET /history, which the page asks for while one of those panels is shown, never with the
+# live feed. Printed as {updatedAt, panels}, and kept in cache/history.json, with the ledger key it was built for in
+# cache/history.key. The ledger key is cut from the live feed's records, with no host read
+# (ledger_key). While the live feed's key is the kept one, the kept copy is printed; the page server's POST /control
+# drops the kept copy and key, so the next ask builds again. With no key (no live feed, or a record with no
+# historySum) the copy is printed while it is under HISTORY_TTL seconds old. The rest of each record is the live
+# feed's (with none running, read as a cycle reads it), the other parts those the last cycle kept. A host that gives no
+# history of every record prints nothing: exit 1. The page server reads the same key and copy itself (kept_history).
+# ledger_key <conveyor.json>: each record's repo, snapshot historySum (the cksum of its history less the Metrics cards'
+# wait and run times, so any other change to an entry changes it, and the clock alone does not) and day, as one line;
+# nothing and 1 when a record has no historySum.
+ledger_key() {
+  jq -ce '[.records[] | {repo, h: .snap.historySum, day: .snap.day}] | select(all(.[]; .h | type == "string"))' "$1"
+}
 history() {
-  local host main engine target recs why remote cmd f=$CACHE/history.json at
-  at=$(stat -c %Y "$f" 2>/dev/null) && [ $(( $(date +%s) - at )) -lt $HISTORY_TTL ] && jq -ce 'objects' "$f" 2>/dev/null && return 0
-  NOW=$(date +%s)
+  local host main engine target recs why remote cmd f=$CACHE/history.json k=$CACHE/history.key at key='' live=''
   RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
+  stream_conv > "$RUN/conveyor.json" && live=1 && key=$(ledger_key "$RUN/conveyor.json") || key=''
+  if [ -n "$key" ]; then  # the key before the copy: the copy is written before its key, and dropped after it
+    [ "$(cat "$k" 2>/dev/null)" = "$key" ] && jq -ce 'objects' "$f" 2>/dev/null && return 0
+  else
+    at=$(stat -c %Y "$f" 2>/dev/null) && [ $(( $(date +%s) - at )) -lt $HISTORY_TTL ] && jq -ce 'objects' "$f" 2>/dev/null && return 0
+  fi
+  NOW=$(date +%s)
   hostof || { echo "dashboard: no history: $why" >&2; return 1; }
   cmd=$(jq -r --arg e "$engine/conveyor/conveyor.sh" 'map("CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) history") | join(" && ") + " && echo @@end"' <<<"$recs")
   onhost "$cmd" > "$RUN/history" 2>"$RUN/err-history" \
     || { echo "dashboard: $host gave no history: $(tail -n 1 "$RUN/err-history" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
-  { stream_conv || conveyor; } > "$RUN/conveyor.json" && kept_parts || return 1
+  { [ -n "$live" ] || conveyor > "$RUN/conveyor.json"; } && kept_parts || return 1
   jq -c --argjson recs "$recs" --rawfile h "$RUN/history" '($h | split("\n")) as $l | ($recs | length) as $n
     | if ($l | index("@@end")) != $n or (.records | type) != "array" then error("no history of every record") else . end
     | ([range(0; $n) as $i | {key: $recs[$i].repo, value: ($l[$i] | fromjson | objects)}] | from_entries) as $x
@@ -1108,7 +1122,10 @@ history() {
     "$RUN/conveyor.json" > "$RUN/conveyor.whole" 2>"$RUN/err-history" && mv -f "$RUN/conveyor.whole" "$RUN/conveyor.json" \
     || { echo "dashboard: $host gave no history of every record" >&2; return 1; }
   panels | jq -c '{updatedAt, panels: (.panels | {landed, metrics, cost, declined})}' > "$RUN/out" && [ -s "$RUN/out" ] \
-    && mv -f "$RUN/out" "$f" && cat "$f"
+    && mv -f "$RUN/out" "$f" || return 1
+  # The key of the copy now kept; none with no key, so a later live feed's key never matches a copy built without it.
+  if [ -n "$key" ]; then printf '%s\n' "$key" > "$RUN/key" && mv -f "$RUN/key" "$k"; else rm -f "$k"; fi
+  cat "$f"
 }
 
 # --work: the Health panel's Work now, what keeps the Conveyor host busy now: `conveyor.sh work --json` of the first

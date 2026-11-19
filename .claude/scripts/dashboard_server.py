@@ -26,7 +26,9 @@ none did; a comment line every PING seconds keeps it open, and a login that has 
 every 0.2 s by one thread for every client. At most MAX_FOLLOWERS are open at once (503 past that); the page falls
 back to reading data.js every 15 s while it has none.
 `GET /history`, behind the login too, gives the older entries data.js no longer carries (dashboard.sh --history):
-the page asks for it when its Landed, Metrics, Cost or Declined panel is drawn, at most once a minute.
+the page asks for it at most once a minute while its Landed, Metrics, Cost or Declined panel is shown and not
+collapsed. It is built again only when the ledger changed (or a POST /control was taken), one build at a time, and its
+ETag is that of the copy built for the ledger key: an If-None-Match that names it is a 304.
 `GET /work`, behind the login too, gives what keeps the Conveyor host busy now (dashboard.sh --work): the Health
 panel asks for it when the owner opens Work now or reads it again.
 `GET /older?repo=<repo>&file=<test file>`, behind the login too, gives the older runs and test edits of one test file
@@ -113,8 +115,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_ANSWER_BODY = 4096
 MAX_TIME_BODY = 64     # POST /time: {"time": "24-hour"}
 RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because the restart kills this server
-HISTORY_TTL = 60       # GET /history serves dashboard.sh's copy while it is this young, with no process (its HISTORY_TTL)
-HISTORY_LIMIT = 90     # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
+HISTORY_TTL = 60       # GET /history with no live feed gives the kept copy while it is this young (dashboard.sh's HISTORY_TTL)
+STREAM_FRESH = 60      # stream.json older than this: no live feed, so no ledger key (dashboard.sh's STREAM_FRESH)
+HISTORY_LIMIT = 90    # GET /history: dashboard.sh --history's one ssh command (its SSH_LIMIT, 60 s) and the build
 WORK_LIMIT = 90        # GET /work: dashboard.sh --work's one ssh command (its SSH_LIMIT, 60 s) and the merge
 OLDER_LIMIT = 90       # GET /older: dashboard.sh --older's one ssh command (its SSH_LIMIT, 60 s) and the tagging
 DONEWHEN_LIMIT = 90    # GET /donewhen and /excerpts: dashboard.sh --donewhen's or --excerpts's one ssh command (its SSH_LIMIT, 60 s) and its check
@@ -342,6 +345,13 @@ GZIP_TYPES = ('.js', '.css')
 GZIPPED = {}
 GZIP_LOCK = threading.Lock()
 
+# GET /history: one dashboard.sh --history at a time per served folder (a second ask waits for it, then gets the copy
+# it kept, with no host read): folder -> its lock. And each folder's count of POST /control actions taken: a build that
+# one was taken beside drops the key it kept, as its copy may be from before the action.
+HISTORY_LOCKS = {}
+HISTORY_DROPS = {}
+HISTORY_LOCK = threading.Lock()
+
 
 def accepts_gzip(header):
     """Whether an Accept-Encoding header takes gzip: named with a q that is not 0, or, when gzip is not named, `*` so."""
@@ -385,18 +395,71 @@ def gzipped(path, st):
     return body
 
 
-def fresh_history(directory):
-    """dashboard.sh --history's copy, cache/history.json in the served folder (its OUT), as bytes while it is under
-    HISTORY_TTL seconds old and a JSON object, the copy that script would print; else None, and the script is run."""
-    path = os.path.join(directory, 'cache', 'history.json')
+def history_lock(directory):
+    """The lock of GET /history's builds for the served folder directory, and its count of POST /control actions taken."""
+    d = os.path.realpath(directory)
+    with HISTORY_LOCK:
+        return HISTORY_LOCKS.setdefault(d, threading.Lock()), HISTORY_DROPS.get(d, 0)
+
+
+def drop_history_key(directory):
+    """POST /control took an action: dashboard.sh --history's kept copy and its ledger key (cache/history.json and
+    cache/history.key in the served folder, its OUT) are dropped, so the next GET /history builds the history again,
+    with the live feed or without it."""
+    d = os.path.realpath(directory)
+    with HISTORY_LOCK:
+        HISTORY_DROPS[d] = HISTORY_DROPS.get(d, 0) + 1
+    for name in ('history.key', 'history.json'):  # the key first: a reader takes the key before the copy (kept_history)
+        try:
+            os.remove(os.path.join(directory, 'cache', name))
+        except OSError:
+            pass
+
+
+def ledger_key(directory):
+    """dashboard.sh's ledger_key of the live feed (stream.json in the served folder), as a list: each record's repo,
+    snapshot historySum and day. None when the feed is not fresh (its stream_conv) or a record has no historySum."""
+    path = os.path.join(directory, 'stream.json')
     try:
-        if time.time() - os.stat(path).st_mtime >= HISTORY_TTL:
+        if time.time() - os.stat(path).st_mtime > STREAM_FRESH:
             return None
         with open(path, 'rb') as f:
+            feed = json.load(f)
+        if not isinstance(feed.get('stream'), dict):
+            return None
+        key = [{'repo': r.get('repo'), 'h': (r.get('snap') or {}).get('historySum'), 'day': (r.get('snap') or {}).get('day')}
+               for r in feed['records']]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return key if all(isinstance(r['h'], str) for r in key) else None
+
+
+def kept_history(directory):
+    """dashboard.sh --history's kept copy (cache/history.json) and its ETag, while that script would print it with no
+    host read: its kept key (cache/history.key) is the live feed's ledger key, or, with no key, the copy is under
+    HISTORY_TTL seconds old. Else None. The ETag is of the key and the copy, so a copy built again for the same key
+    (after a POST /control action) has a new one."""
+    cache = os.path.join(directory, 'cache')
+    key = ledger_key(directory)
+    try:
+        if key is None:
+            kept = b''
+            if time.time() - os.stat(os.path.join(cache, 'history.json')).st_mtime >= HISTORY_TTL:
+                return None
+        else:
+            # The key before the copy: dashboard.sh writes the copy, then its key, and a drop removes the key first,
+            # so a copy read after a matching key is never one from before it.
+            with open(os.path.join(cache, 'history.key'), 'rb') as f:
+                kept = f.read()
+            if json.loads(kept) != key:
+                return None
+        with open(os.path.join(cache, 'history.json'), 'rb') as f:
             body = f.read()
-        return body if isinstance(json.loads(body), dict) else None
+        if not isinstance(json.loads(body), dict):
+            return None
     except (OSError, ValueError):
         return None
+    return body, '"%s"' % hashlib.sha256(kept + b'\n' + body).hexdigest()[:32]
 
 
 def control_ok(body):
@@ -1750,6 +1813,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return (502, '%s did not answer' % host), None
             if run.returncode != 0:
                 return (409, (run.stderr.strip().splitlines() or ['%s refused it (exit %d)' % (host, run.returncode)])[-1]), None
+            # A dismiss or a filed issue changes the history where the live feed's ledger key may not show it: the next
+            # GET /history builds it again.
+            drop_history_key(self.directory)
             return None, run
         results = None
         if files:
@@ -1975,25 +2041,39 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def history(self):
         """GET /history: the Landed, Metrics, Cost and Declined parts built from every entry, where data.js holds the
-        newest the snapshot keeps: dashboard.sh --history's JSON, which it reads from the host at most once a minute.
-        Its copy of the last minute is served from the file, with no process (fresh_history). The page asks for it
-        when one of those panels is drawn. 502 with the reason when it gives none."""
+        newest the snapshot keeps: dashboard.sh --history's JSON, which reads the host again only when the ledger
+        changed. Its kept copy, while that script would print it, is served from the file with no process
+        (kept_history). One build at a time per served folder: a second ask waits for it and gets the copy it kept.
+        The ETag is that of the key and the copy, and an If-None-Match that names it is a 304. The page asks for it
+        while one of those panels is shown. 502 with the reason when it gives none."""
         if not self.authed():
             return self.reply(401, 'log in to see the history')
-        body = fresh_history(self.directory)
-        if body is None:
-            try:
-                run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--history'], HISTORY_LIMIT)
-            except subprocess.TimeoutExpired:
-                return self.reply(502, 'the history did not come in %d s' % HISTORY_LIMIT)
-            except OSError as e:
-                return self.reply(502, 'could not start dashboard.sh: %s' % e)
-            if run.returncode != 0:
-                return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
-            body = run.stdout.encode()
+        kept = kept_history(self.directory)
+        if kept is None:
+            lock, drops = history_lock(self.directory)
+            with lock:
+                kept = kept_history(self.directory)  # one built while this ask waited
+                if kept is None:
+                    drops = history_lock(self.directory)[1]
+                    try:
+                        run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--history'], HISTORY_LIMIT)
+                    except subprocess.TimeoutExpired:
+                        return self.reply(502, 'the history did not come in %d s' % HISTORY_LIMIT)
+                    except OSError as e:
+                        return self.reply(502, 'could not start dashboard.sh: %s' % e)
+                    if run.returncode != 0:
+                        return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
+                    if history_lock(self.directory)[1] != drops:  # an action taken while it ran: its copy may be from before
+                        drop_history_key(self.directory)
+                    # The copy as kept, with its ETag; its own output, with none, when it was dropped or the feed moved.
+                    kept = kept_history(self.directory) or (run.stdout.encode(), None)
+        body, self.tag = kept  # end_headers sends the tag, with Cache-Control no-cache
+        if self.tag and etag_matches(self.headers.get('If-None-Match'), self.tag):
+            self.send_response(304)
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)

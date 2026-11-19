@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# The page server's work for each open page (issue 566), by function: GET /events, GET /history, GET /work, GET /older, GET /donewhen and the login check
+# The page server's work for each open page (issue 566), by function: GET /events, GET /work, GET /older, GET /donewhen and the login check
 # called on a stand-in request, with no server or socket. Every open page did again work one could do for all: each /events
-# connection serialised every panel of data.js (about 1.1 MB) on each update, and each GET /history started bash,
-# every 60 s a page, though dashboard.sh kept the answer for 60 s.
+# connection serialised every panel of data.js (about 1.1 MB) on each update.
 set -euo pipefail
 SOURCE=$(git rev-parse --show-toplevel)
 # The server imports the Board's own packages: its virtualenv, as dashboard-server.test.sh runs it.
@@ -127,34 +126,10 @@ if os.geteuid() != 0:
           'login_store_failed_read_not_kept: once readable again the store is read: %r' % ds.read_store())
 ds.json.load = real_load
 
-# D2. Bug: each GET /history started bash, every 60 s for each open page, though dashboard.sh --history only printed
-# its copy of the last minute. A fresh copy is served from the file and starts no process; an old one runs the script.
+# GET /history (D2 of #566 kept a minute's copy here) is tested on the real dashboard.sh --history and a stub host in
+# dashboard.test.sh's historyserver part (#551): it reads the host only when the ledger changed, and an ask its kept
+# copy answers starts no process.
 started = []
-def no_process(*a, **k):
-    started.append(a[0] if a else k.get('args'))
-    return subprocess.CompletedProcess(a[0] if a else None, 0, '{"updatedAt":"built","panels":{}}\n', '')
-ds.run_script = no_process
-real_popen = subprocess.Popen
-def popen(*a, **k):
-    started.append(a[0] if a else k.get('args'))
-    return real_popen(*a, **k)
-ds.subprocess.Popen = popen
-os.makedirs(os.path.join(T, 'cache'))
-cached = os.path.join(T, 'cache', 'history.json')
-with open(cached, 'w') as f:
-    f.write('{"updatedAt":"cached","panels":{}}\n')
-fresh = Page()
-ds.Handler.history(fresh)
-check(started == [], 'history_with_a_fresh_cache_starts_no_process: started %r' % started)
-check(fresh.code == 200 and json.loads(fresh.out.getvalue())['updatedAt'] == 'cached',
-      'history: a fresh cache is the answer: %s %r' % (fresh.code, fresh.out.getvalue()[:200]))
-old = time.time() - 120  # two minutes: past dashboard.sh's HISTORY_TTL of 60 s
-os.utime(cached, (old, old))
-stale = Page()
-ds.Handler.history(stale)
-check(len(started) == 1 and stale.code == 200 and json.loads(stale.out.getvalue())['updatedAt'] == 'built',
-      'history: a cache older than HISTORY_TTL runs dashboard.sh --history and gives its answer: %r %s' % (started, stale.code))
-subprocess.Popen = real_popen
 
 # D3 (#197). Bugs: GET /work served no reading, or a kept one, of what keeps the host busy; a failed reading reached
 # the page as an empty machine. Each ask runs dashboard.sh --work and gives its JSON; a failure is a 502 with its reason.
