@@ -24,6 +24,12 @@ setup leaves it as it is and says so. A session keeps the cache time it started 
 role runs with another cache time, such as `5m`, the claim says so in one line. Start that session again to get the
 1-hour cache.
 
+While the Foreman is idle, the waiter sends it a short keepalive turn every 50 minutes, so the cache stays warm. Before
+the next one, it reads the usage of the Foreman's last turn since the last keepalive turn: that turn, or your own turn
+when you used the Foreman soon after it. When the turn wrote the cache again and read none of it, the cache did not stay warm, so the waiter sends no more keepalive turns until the Foreman is active again. Each
+stop adds a line with the turn's usage to `keepalive.log` in the Foreman's folder. When the usage cannot be read, the
+keepalive turns go on.
+
 When `/conveyor-belt:foreman` or your words make a session the Foreman, the Board opens in your default browser at
 `https://localhost:<port>/`. It opens once for each claim. A claim by the session that is already the Foreman, a
 resume, `/clear` or a compact opens no new tab. When the Board is not running, the claim says so in one line and
