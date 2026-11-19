@@ -1027,7 +1027,9 @@ control() { # [action [arguments]]
         else [ $# -ge 3 ] && [ $# -le 4 ] && [ "$2" = promote ] || { bad; return; }
           p=$(jq -rs --arg s "$1" --arg m "$3" --arg e "${4:-}" 'map(objects | select(.seat == $s and .model == $m and ($e == "" or .effort == $e) and (.reviews | numbers) > 0))
             | last | .effort // empty' "$REPLAYS" 2>/dev/null)
-          [ -n "$p" ] || { echo "conveyor: no $1 replay result on $3${4:+ at $4} effort: run conveyor.sh pick replay $1 $3 first; nothing changed" >&2; return 1; }
+          # Only the judge has a replay to run (replay(), lib/replay.sh): a reviewer refusal names no command.
+          [ -n "$p" ] || { if [ "$1" = judge ]; then x="run conveyor.sh pick replay judge $3${4:+ $4} first"; else x="conveyor.sh has no reviewer replay to run"; fi
+            echo "conveyor: no $1 replay result on $3${4:+ at $4} effort: $x; nothing changed" >&2; return 1; }
           f='.picks[$v[0]] = {decision: "promote", at: ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate), choice: {model: $v[2], effort: $p}}'
         fi
       else [ $# = 3 ] && [[ $1 =~ ^(small|medium)$ ]] && [[ $2 =~ ^(docs|code)$ ]] && [[ $3 =~ ^(promote|keep|drop|add|next)$ ]] || { bad; return; }

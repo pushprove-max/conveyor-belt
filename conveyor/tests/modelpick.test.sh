@@ -386,9 +386,13 @@ t_pickseats() {
   pk='for n in 21 25; do SEATCARD=$n; PICK=""; PICKSEAT=""; PICKSEATS=""; modelpick c1-$n $n 2>/dev/null; echo "$n $(jq -c "[.trial, .seats]" <<<"$PICK") $(seat judge | jq -r "\"\(.model) \(.effort)\"")"; done'
   fx_in "$pk"; before=$(cat "$T/$CASE/run.out")
   case $before in *m2*) fail "the fixture's default judge is m2, so the case cannot tell the promoted one: $before" ;; esac
-  loop control pick judge promote m2 >/dev/null 2>&1 && fail "control pick judge promote m2 was taken with no replay result"
+  # Bug caught (#862): the refusal told the owner to run `pick replay <seat> <model>`, which for the reviewer is a
+  # usage error (replay() runs only the judge) and for the judge dropped the effort asked.
+  r=$(loop control pick judge promote m2 high 2>&1 >/dev/null) && fail "control pick judge promote m2 was taken with no replay result"
+  [[ $r == *"run conveyor.sh pick replay judge m2 high first"* ]] || fail "the judge refusal does not name the replay for its model and effort: $r"
   jq -cn '{time: "2026-11-01T00:00:00Z", seat: "judge", model: "m2", effort: "high", last: 20, reviews: 3}' >> "$ST/replays.jsonl"
-  loop control pick reviewer promote m2 >/dev/null 2>&1 && fail "control pick reviewer promote m2 was taken on a judge replay result"
+  r=$(loop control pick reviewer promote m2 2>&1 >/dev/null) && fail "control pick reviewer promote m2 was taken on a judge replay result"
+  [[ $r == *"no reviewer replay to run"* && $r != *"pick replay reviewer"* ]] || fail "the reviewer refusal names a replay command that cannot run: $r"
   loop control pick judge promote m2 >/dev/null || fail "control pick judge promote m2 was refused after its replay result"
   fx_in "$pk"
   d=$(sed -n 2p <<<"$before" | cut -d' ' -f3-)
