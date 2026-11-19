@@ -285,6 +285,8 @@ q '(.panels.belt.data.cards | map(.card)) == ["c-fed"] and .panels.health.data.s
 q '.panels.board.data.building | map([.card, .atEnd]) == [["c-fed", true]]' "the Board's building column dropped atEnd"
 for k in limit decisions lanes; do [ -s "$OUT/cache/part-$k.json" ] || fail "the cycle did not keep its $k part for --publish"; done
 feed false c-later; stub sleep 'exit 0'  # a slow read would show here: --publish runs none
+# A kept limit part with a reading, for limit.json below.
+jq -cn --arg r "$NOWISO" '{limit: {usedPct: 41.5, resetsAt: $r, goalPct: 50, usd: 12}, error: "the usage read failed (test); showing the last reading"}' > "$OUT/cache/part-limit.json"
 # Each jq run of --publish is counted. The feed runs one --publish per change, up to one each 2 s, so its cost is the
 # Board's CPU. Bug caught: one --publish ran jq about ten times: stream.json read twice, every part checked again and
 # its own data.js parsed again.
@@ -297,6 +299,10 @@ rm "$BIN/jq" "$BIN/sleep"
 q '(.panels.belt.data.cards | map(.card)) == ["c-later"] and (.panels.health.data.stream | .live == false and .error == "devbox: no line in 30 s")' \
   "--publish puts the feed's newest part on the page, stale marker and all"
 q '.panels.needs.data.decisions == [] and .panels.health.data.limitError != null' "--publish keeps the slower parts the cycle read"
+# #858: the plugin's pane reads the limit from limit.json alone, as data.js outgrows any reader's cap; a publish that left it out
+# or stale lost the pane's weekly limit and pause warning.
+jq -e --argjson d "$(json)" '. == {limit: ($d.panels.health.data.limit | {usedPct, resetsAt})} and .limit.usedPct == 41.5' "$OUT/limit.json" >/dev/null \
+  || fail "limit.json beside data.js holds the health panel's usedPct and resetsAt: $(cat "$OUT/limit.json" 2>&1)"
 [ -z "$(find "$OUT" -maxdepth 1 \( -name '.run.*' -o -name '.data.js.*' -o -name '.publish.lock' \) | head -n 1)" ] || fail "--publish leaves a temporary file or its lock: $(ls -A "$OUT")"
 # The first start: no cycle has kept its slow parts yet. The feed's card still reaches the page, those parts "not read yet".
 mkdir -p "$T/kept" && mv "$OUT"/cache/part-*.json "$T/kept/" && feed true c-first
@@ -305,6 +311,7 @@ env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST
 q '(.panels.belt.data.cards | map(.card)) == ["c-first"] and (.panels.health.data.limitError | test("not read yet"))
    and (.panels.lanes.error | test("not read yet")) and (.panels.needs.data.decisionsError | test("not read yet"))' \
   "--publish before the first cycle kept its parts puts the feed's card on the page at once"
+[ "$(jq -c . "$OUT/limit.json")" = '{"limit":null}' ] || fail "with no limit in the health panel limit.json says null, never the last limit: $(cat "$OUT/limit.json")"
 mv "$T/kept"/part-*.json "$OUT/cache/"
 touch -d '2 minutes ago' "$OUT/stream.json"; quiet; : > "$T/ssh-calls"
 run

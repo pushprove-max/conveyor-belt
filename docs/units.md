@@ -203,9 +203,12 @@ snapshot as above.
 
 Then three reads on this machine:
 
-- The 7-day limit, from the Board's data file `data.js` in the same folder as the feed (its health panel's
-  `panels.health.data.limit.usedPct` and `.resetsAt`), read again only when the file's write time changes; with no
-  folder named, `usage limit not read`.
+- The 7-day limit, from the Board's limit file `limit.json` in the same folder as the feed (the `usedPct` and
+  `resetsAt` of its health panel's limit, which the Board writes there each time it writes `data.js`), read again only
+  when the file's write time changes. `/units` never reads `data.js`, whatever its size. With no folder named, or a
+  `limit.json` that holds no limit, `weekly limit not read`. A folder with `data.js` and no `limit.json` comes from a
+  Board on an older engine: the limit shows as not read, and a line under the board says
+  `units: the Board's folder has data.js but no limit.json (the Board runs an older engine); the usage limit is not read`.
 - The test map of the session's checkout, from `conveyor.sh testmap` of the plugin's own copy of Conveyor: the run
   that makes the map writes how far it is in `.conveyor/test-map.run.json`, beside the map. When Conveyor for this
   checkout runs on a build machine, the map is that machine's: `conveyor.sh testmap` runs there, in the same `ssh`
@@ -226,8 +229,8 @@ A snapshot that cannot be read is one plain line in every view, and nothing from
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
 The Foreman line still shows under it.
 
-Smaller gaps are named where they are: `usage limit not read`, `today partial` and `cost partial` (a step could not be
+Smaller gaps are named where they are: `weekly limit not read`, `today partial` and `cost partial` (a step could not be
 priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed
-(`stream.json`) or data file (`data.js`) over the 4 MiB cap (shown as 4.2 MB; the engine refuses a larger read) is not
-read, nor tried again each second, and a line under the board names its size and the cap; with no board, that line
-comes first in the one line every view draws.
+(`stream.json`) over the 4 MiB cap (shown as 4.2 MB; the engine refuses a larger read), or a limit file
+(`limit.json`) over 16384 bytes, is not read, nor tried again each second, and a line under the board names its size
+and the cap; with no board, that line comes first in the one line every view draws.

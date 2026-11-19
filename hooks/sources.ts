@@ -356,11 +356,11 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
   }
 }
 
-// The 7-day usage limit, from the dashboard's data file (`window.<name> = {...};`), where the Board puts it: its health
-// panel's data (`panels.health.data.limit`). null when it holds none.
+// The 7-day usage limit, from the Board's limit file (limit.json, `{"limit": {usedPct, resetsAt}}`), which the Board
+// writes beside data.js from its health panel's `panels.health.data.limit`. null when it holds none.
 export const parseLimit = (text: string): Limit | null => {
   try {
-    const l = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)).panels?.health?.data?.limit
+    const l = JSON.parse(text)?.limit
     const pct = num(l?.usedPct)
     const resetsAt = time(l?.resetsAt)
     return pct === null || resetsAt === null ? null : { pct, resetsAt }

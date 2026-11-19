@@ -865,12 +865,13 @@ test('a toast names each card that newly needs you or newly landed, never what w
 })
 
 // the limit was looked for at the top of the file, where the Board never puts it, so it was never read.
-test('the usage limit is read from the data file\'s health panel, where the Board puts it, and a file without one gives none', () => {
-  const data = (limit: unknown) => `window.DASH = ${JSON.stringify({ panels: { health: { data: { limit } } } })};`
+test('the usage limit is read from limit.json\'s limit, where the Board puts it, and a file without one gives none', () => {
+  const data = (limit: unknown) => JSON.stringify({ limit })
   expect(parseLimit(data({ usedPct: 41.5, resetsAt: '2026-11-12T00:00:00Z' }))).toEqual({ pct: 41.5, resetsAt: Date.UTC(2026, 10, 12) })
   expect(parseLimit(data(null))).toBe(null)
   expect(parseLimit(data({ usedPct: '41' }))).toBe(null)
-  expect(parseLimit('not a data file')).toBe(null)
+  expect(parseLimit('not a limit file')).toBe(null)
+  expect(parseLimit('null')).toBe(null)
 })
 
 test('the seat is main (where the Foreman runs) or a worker worktree; no folder name makes a seat', () => {

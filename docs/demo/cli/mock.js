@@ -3,7 +3,8 @@
 // clock, answered as a real Conveyor answers the plugin, so /units and the Foreman run unchanged.
 // node mock.js serve <feed folder> <start delay s>: the story clock stands at 0 until `ask go`, and for the delay
 //   after it, then runs one story second a second. Every 250 ms it writes <feed folder>/stream.json (the Board's live feed, which /units reads) and
-//   data.js (the Board's data, where /units reads the usage limit); it answers `ask` on 127.0.0.1:PORT.
+//   data.js (the Board's data) and limit.json (the usage limit alone, as the Board writes it beside data.js, which
+//   /units reads); it answers `ask` on 127.0.0.1:PORT.
 // node mock.js ask <command> [<argument>...]: one engine command, answered from the timeline and printed as the
 //   engine prints it: snapshot, health, cards, history and retry <issue>; go starts the story clock. Exit 1 for
 //   another command or issue.
@@ -47,19 +48,28 @@ export function answer(tl, t, cmd, args) {
   return [1, `conveyor: ${cmd} is not answered here`];
 }
 
+// limit.json as dashboard.sh writes it: the health panel's usedPct and resetsAt, or null with no limit.
+function limitFile(board) {
+  const l = board?.panels?.health?.data?.limit;
+  return { limit: l && typeof l === 'object' ? { usedPct: l.usedPct, resetsAt: l.resetsAt } : null };
+}
+
+// One write of the feed folder: stream.json, data.js and limit.json, each by write-then-rename.
+export function writeFeed(feed, board) {
+  const put = (name, text) => { fs.writeFileSync(path.join(feed, `${name}.new`), text); fs.renameSync(path.join(feed, `${name}.new`), path.join(feed, name)); };
+  const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  put('stream.json', JSON.stringify({ host: HOST, reachable: true, error: null, records: [{ repo: REPO, snap: record(board) }],
+    stream: { live: true, heardAt: at, since: null, error: null, writtenAt: at } }));
+  put('data.js', `window.DASH = ${JSON.stringify(board)};`);
+  put('limit.json', JSON.stringify(limitFile(board)));
+}
+
 function serve(feed, delay) {
   const tl = createTimeline();
   let start = null;
   const now = () => (start === null ? 0 : Math.max(0, (Date.now() - start) / 1000));
   fs.mkdirSync(feed, { recursive: true });
-  const put = (name, text) => { fs.writeFileSync(path.join(feed, `${name}.new`), text); fs.renameSync(path.join(feed, `${name}.new`), path.join(feed, name)); };
-  const write = () => {
-    const board = tl.snapshot(now());
-    const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-    put('stream.json', JSON.stringify({ host: HOST, reachable: true, error: null, records: [{ repo: REPO, snap: record(board) }],
-      stream: { live: true, heardAt: at, since: null, error: null, writtenAt: at } }));
-    put('data.js', `window.DASH = ${JSON.stringify(board)};`);
-  };
+  const write = () => writeFeed(feed, tl.snapshot(now()));
   write();
   setInterval(write, 250);
   http.createServer((req, res) => {

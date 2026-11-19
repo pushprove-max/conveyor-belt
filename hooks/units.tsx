@@ -125,18 +125,22 @@ const readResearch = async ($: EngineInterface, wt: string, home: string): Promi
 }
 
 const NO_LIMIT = { limit: null, over: null }
-// The data file's write time and the limit read from it: the file is read again only once that time changes.
-let dataRead: { file: string; at: number; limit: State['limit'] } | null = null
-// The usage limit is the account's, kept by the Board in its data file; none there reads "not read". over: the line
-// that says the file was too big to read.
+// The limit file's write time and the limit read from it: the file is read again only once that time changes.
+let limitRead: { file: string; at: number; limit: State['limit'] } | null = null
+// The Board's limit file holds the usage limit alone, a few hundred bytes; a larger one is not the Board's and is not read.
+const MAX_LIMIT = 16 * 1024
+const NO_LIMIT_FILE = "units: the Board's folder has data.js but no limit.json (the Board runs an older engine); the usage limit is not read"
+// The usage limit is the account's, kept by the Board in limit.json beside its data file; none there reads "not read".
+// data.js is never read: it grows with the projects and their tests, past any cap. over: the line that says why the
+// limit file was not read: too big, or missing from a folder an older Board writes (data.js there, only looked at).
 const readLimit = async ($: EngineInterface): Promise<{ limit: State['limit']; over: string | null }> => {
   if (!feedDir) return NO_LIMIT
-  const file = `${feedDir}/data.js`
+  const file = `${feedDir}/limit.json`
   const st = await $.fs.stat(file).catch(() => undefined)
-  if (st && st.size > MAX_DATA) return { limit: null, over: overCap("the Board's data file (data.js)", st.size, 'the usage limit is not read') }
-  if (!st) return NO_LIMIT
-  if (dataRead?.file !== file || dataRead.at !== st.mtimeMs) dataRead = { file, at: st.mtimeMs, limit: parseLimit((await $.fs.read(file)) as string) }
-  return { limit: dataRead.limit, over: null }
+  if (!st) return (await $.fs.stat(`${feedDir}/data.js`).catch(() => undefined)) ? { limit: null, over: NO_LIMIT_FILE } : NO_LIMIT
+  if (st.size > MAX_LIMIT) return { limit: null, over: `units: the Board's limit file (limit.json) is ${st.size} bytes, over the ${MAX_LIMIT} byte cap; the usage limit is not read` }
+  if (limitRead?.file !== file || limitRead.at !== st.mtimeMs) limitRead = { file, at: st.mtimeMs, limit: parseLimit((await $.fs.read(file)) as string) }
+  return { limit: limitRead.limit, over: null }
 }
 // The Board's Time setting, as its page last sent it: on a change, or on opening only once per browser and only when not
 // the default (app.js TIME_SENT_KEY) (dashboard_server.py's POST /time writes
@@ -150,7 +154,7 @@ const readTime = async ($: EngineInterface) => {
   if (file && st && st.size <= 1024) t = await $.fs.read(file).then(s => JSON.parse(s as string)?.time, () => undefined).catch(() => undefined)
   setClock(t === '12-hour' || t === '24-hour' ? t : optionTime)
 }
-// The data file's over-cap line as the limit was last read: a feed board laid over the state keeps it, as it keeps
+// The limit file's not-read line (dataOver) as the limit was last read: a feed board laid over the state keeps it, as it keeps
 // the limit. A board with no snapshot is drawn as its note alone, so the
 // line leads the note too.
 let dataOver: string | null = null
@@ -235,7 +239,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   if (f) own = f.own
   // The feed's board again for the own this fetch named, which the feed was read before.
   const board = fed && f ? (feedBoardOf(fed.key) ?? fed.board) : boardOf(f, r?.isStdoutTruncated ? CUT : null)
-  // Read whether or not the host answered: a failed fetch must not drop the data file's over-cap line.
+  // Read whether or not the host answered: a failed fetch must not drop the limit file's not-read line.
   const lim = await readLimit($).catch(() => NO_LIMIT)
   dataOver = lim.over
   // Before the state is published: the views it draws write their times in the Board's Time.
@@ -431,7 +435,7 @@ const begin = async ($: EngineInterface) => {
   feedKey = null
   feedBoard = null
   dataOver = null
-  dataRead = null
+  limitRead = null
   // Where the feed is, learnt here on this machine: waiting for the first fetch to say would leave the feed unread
   // for as long as the host takes to answer it. Not waited for either (the session would start up to 5 s late); the
   // first poll waits on the same run, and the second's check starts once it answers.

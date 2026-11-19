@@ -3,7 +3,8 @@
 # dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older|--donewhen|--shot|--excerpts|--bench] -- the collector of the Conveyor dashboard (the
 # strip-down to Conveyor). It writes one file, data.js in dashboard/ of the state folder (`conveyor.sh state-dir`)
 # (`window.DASH = {...};`), which the static page in .claude/dashboard/ reads, through the page server's /events as it
-# changes, or every 15 s when that stream is not open. No model call, ever.
+# changes, or every 15 s when that stream is not open, and beside it limit.json, the usage limit alone, which the
+# plugin's pane in Claude Code reads. No model call, ever.
 # No argument collects once; --loop collects every 60 s, serves the page (dashboard_server.py), runs the live Conveyor
 # feed (dashboard_stream.py) and is what --install runs as a user service; between cycles it also runs
 # sync-install.sh when it is beside this script (a release folder has none), which reinstalls the main checkout's
@@ -1056,25 +1057,31 @@ publish_lock() {
   echo "dashboard: another build of data.js holds $OUT/.publish.lock" >&2; return 1
 }
 
-# panels -- {updatedAt, panels}: every panel's part, from the five parts in $RUN (conveyor, limit, decisions, lanes,
-# foremen .json). It fails when the build fails or gives nothing (-e).
+# panels [limit] -- {updatedAt, panels}: every panel's part, from the five parts in $RUN (conveyor, limit, decisions,
+# lanes, foremen .json). With `limit`, a line before it: limit.json's ({limit: the health part's usedPct and resetsAt,
+# null with no limit}), from the same jq run. It fails when the build fails or gives nothing (-e).
 panels() {
-  local upd
+  local upd two=''
+  [ "${1-}" != limit ] || two=' | {limit: ((.panels.health.data.limit | objects | {usedPct, resetsAt}) // null)}, .'
   upd=$(jq -ce 'objects' "$OUT/update.json" 2>/dev/null) || upd=null
   jq -cne --slurpfile conv "$RUN/conveyor.json" --slurpfile lim "$RUN/limit.json" --slurpfile dec "$RUN/decisions.json" --slurpfile lanes "$RUN/lanes.json" \
     --slurpfile fm "$RUN/foremen.json" --argjson upd "$upd" --slurpfile kinds "$HERE/dashboard_needs.json" \
-    --arg at "$(iso "$NOW")" '$conv[0] as $conv | $lim[0] as $lim | $dec[0] as $dec | $lanes[0] as $lanes | $fm[0] as $fm | $kinds[0] as $kinds | {updatedAt: $at, panels: ('"$PANELS_JQ"')}'
+    --arg at "$(iso "$NOW")" '$conv[0] as $conv | $lim[0] as $lim | $dec[0] as $dec | $lanes[0] as $lanes | $fm[0] as $fm | $kinds[0] as $kinds | {updatedAt: $at, panels: ('"$PANELS_JQ"')}'"$two"
 }
 
-# publish -- data.js from the five parts in $RUN (conveyor, limit, decisions, lanes, foremen .json), with one rename.
+# publish -- data.js from the five parts in $RUN (conveyor, limit, decisions, lanes, foremen .json), with one rename,
+# and limit.json beside it, with one rename of its own: the usage limit alone, for the plugin's pane in Claude Code,
+# which never reads data.js (data.js grows with the projects and their tests, past any cap a reader can set).
 # Each part was checked once before it is here, so it is not checked again: render checks what it read, stream_conv
 # gives only a whole stream.json, and a kept part was checked by the cycle that kept it. data.js is panels' one jq
 # output, so it is not parsed again either.
 publish() {
   PUB=$(mktemp "$OUT/.data.js.XXXXXX") || return 1
-  { printf 'window.DASH = '; panels || exit 1; } > "$PUB" || { echo "dashboard: the page parts could not be built" >&2; return 1; }
+  { panels limit | { IFS= read -r l && printf '%s\n' "$l" > "$RUN/limit.out" && printf 'window.DASH = ' && cat; } || exit 1; } > "$PUB" \
+    || { echo "dashboard: the page parts could not be built" >&2; return 1; }
   printf ';\n' >> "$PUB"
   chmod 644 "$PUB" && mv -f "$PUB" "$OUT/data.js" || return 1
+  chmod 644 "$RUN/limit.out" && mv -f "$RUN/limit.out" "$OUT/limit.json" || return 1
   rm -rf "$RUN" ${LCK:+"$LCK"}; RUN='' PUB='' LCK=''
 }
 

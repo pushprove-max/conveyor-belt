@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createTimeline } from '../timeline.js';
-import { answer } from './mock.js';
+import { answer, writeFeed } from './mock.js';
 
 const WATCH = fileURLToPath(new URL('../../../conveyor/foreman/watch-conveyor.sh', import.meta.url));
 
@@ -43,4 +43,20 @@ test('retry 44 puts #44 back on the belt; a retry of a card not blocked is refus
   assert.deepEqual(snap.health.blocked, []);
   assert.equal(snap.belt.find((c) => c.issue === 44).step, 'build');
   assert.equal(answer(tl, 3, 'retry', ['44'])[0], 1);
+});
+
+// Bug caught: the demo's feed folder has data.js but no limit.json (or one in another shape), so the /units pane in
+// the Claude Code beats loses its 31% weekly limit and shows the older-engine line; /units reads only limit.json.
+test("the feed folder's limit.json holds the health panel's usedPct and resetsAt, null with no limit", (t) => {
+  const T = mkdtempSync(join(tmpdir(), 'demo-feed-'));
+  t.after(() => rmSync(T, { recursive: true, force: true }));
+  const read = () => JSON.parse(readFileSync(join(T, 'limit.json'), 'utf8'));
+  const board = createTimeline().snapshot(0);
+  const l = board.panels.health.data.limit;
+  writeFeed(T, board);
+  assert.deepEqual(read(), { limit: { usedPct: 31, resetsAt: l.resetsAt } });
+  assert.match(l.resetsAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+  board.panels.health.data.limit = null;
+  writeFeed(T, board);
+  assert.deepEqual(read(), { limit: null });
 });

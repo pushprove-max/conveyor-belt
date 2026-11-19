@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { register as loadAgain } from './units'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
 
-// The mod asks for one thing, its fetch (a bash run in the main checkout), then reads the dashboard's data file for the
+// The mod asks for one thing, its fetch (a bash run in the main checkout), then reads the Board's limit file for the
 // usage limit and the Research lane's session logs. Each hook below stands for the engine over an in-memory disk; the
 // fetch answers with `w.fetch`, the lines the real script prints.
 
@@ -12,11 +12,12 @@ const MAIN = '/r/main'
 const WS = '/r/ws'
 const HOME = '/r/home'
 const NOW = Date.UTC(2026, 10, 10, 4, 40, 0)
-// The Board's folder, as FEED_DIR names it: the folder the Board writes data.js and stream.json to.
+// The Board's folder, as FEED_DIR names it: the folder the Board writes data.js, limit.json and stream.json to.
 const BOARD = '/r/state/bookstore/dashboard'
 const DATA = `${BOARD}/data.js`
-// The data file as the Board writes it: the limit under its health panel's data.
-const dataJs = (usedPct: number, resetsAt: string) => `window.DASH = ${JSON.stringify({ panels: { health: { data: { limit: { usedPct, resetsAt } } } } })};`
+const LIMIT = `${BOARD}/limit.json`
+// The limit file as the Board writes it: its health panel's limit alone.
+const limitJson = (usedPct: number, resetsAt: string) => JSON.stringify({ limit: { usedPct, resetsAt } })
 const SESSION = { surface: 'terminal', isInteractive: true } as const
 const SEATS = { main: [`${MAIN}/.git`, MAIN], worker: [`${MAIN}/.git/worktrees/u`, '/r/cards/c1-3864'] }
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString()
@@ -109,7 +110,7 @@ const CANNOT = 'units: the Conveyor snapshot cannot be read (buildbox is unreach
 
 test('/units prints the header, the four sections and the two lanes from one fetch run in the main checkout', async ($, on) => {
   const w = world(on, 'main', answer(FULL), {
-    [DATA]: dataJs(34, new Date(NOW + 5 * 3600_000).toISOString()),
+    [LIMIT]: limitJson(34, new Date(NOW + 5 * 3600_000).toISOString()),
     [`${WS}/Research/.git`]: 'gitdir: x', [`${HOME}/.claude/projects/-r-ws-Research/a.jsonl`]: '{}',
   })
   await start($, 'main')
@@ -175,7 +176,7 @@ test('an empty board prints every section with its empty line, a missing data fi
 })
 
 test('a snapshot that cannot be read is one plain line in /units and the pane', async ($, on) => {
-  const w = world(on, 'main', answer(null, 'host\tbuildbox\tssh\t255'), { [DATA]: dataJs(34, '2026-11-12T00:00:00Z') })
+  const w = world(on, 'main', answer(null, 'host\tbuildbox\tssh\t255'), { [LIMIT]: limitJson(34, '2026-11-12T00:00:00Z') })
   await start($, 'main')
   await w.clock.settle()
   expect(await units($)).toBe(CANNOT)
@@ -668,21 +669,46 @@ test('a feed file the collector no longer writes is no feed: the fetch asks the 
   expect(feeds(w)).toEqual([])
 })
 
-// a feed or data file over the cap was skipped with no word, and /units went blank once the snapshot passed 4 MB.
-test('a feed and a data file over the cap are not read: a line names each one\'s size and the cap, over the host\'s board or as its one line', async ($, on) => {
-  const w = world(on, 'main', answer(FULL), { [FEED]: ' '.repeat(4_500_000), [DATA]: ' '.repeat(4_600_000) })
+// a feed or limit file over the cap was skipped with no word, and /units went blank once the snapshot passed 4 MB.
+test('a feed and a limit file over the cap are not read: a line names each one\'s size and the cap, over the host\'s board or as its one line', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [FEED]: ' '.repeat(4_500_000), [LIMIT]: ' '.repeat(20_000) })
   await start($, 'main')
   await units($)
   await w.clock.settle()
   const text = await units($)
   expect(text).toContain('#3863')
   expect(text).toContain("units: the Board's live feed (stream.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host")
-  expect(text).toContain("units: the Board's data file (data.js) is 4.6 MB, over the 4.2 MB cap; the usage limit is not read")
+  expect(text).toContain("units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read")
   expect(feeds(w)).toEqual([])
+  expect(w.reads).not.toContain(LIMIT)
   w.fetchRc = 3
   await units($)
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toBe("units: the Board's live feed (stream.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host; units: the Board's data file (data.js) is 4.6 MB, over the 4.2 MB cap; the usage limit is not read; units: the Conveyor snapshot cannot be read (the fetch did not run)")
+  expect(await draw($, 'Pane')).toBe("units: the Board's live feed (stream.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host; units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read; units: the Conveyor snapshot cannot be read (the fetch did not run)")
+})
+
+// #858: /units read the whole data.js for the limit and refused it past 4 MiB, which data.js outgrew (the Tests
+// panel grows with every project's tests): the pane lost the weekly limit and its pause warning.
+test('the limit is read from limit.json, whatever data.js\'s size: no over-cap line, and data.js is never read', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [DATA]: ' '.repeat(4_600_000), [LIMIT]: limitJson(34, new Date(NOW + 5 * 3600_000).toISOString()) })
+  await start($, 'main')
+  await w.clock.settle()
+  const text = await units($)
+  expect(text).toContain('weekly limit 34% · resets 5h 0m')
+  expect(text).not.toContain('over the')
+  expect(w.reads).not.toContain(DATA)
+})
+
+// #858: a Board folder an older engine writes has no limit.json; the limit must read "not read" with a line naming
+// the missing file, never a limit taken from data.js nor data.js's size.
+test('a Board folder with data.js and no limit.json: the limit is not read, and the line names limit.json', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [DATA]: `window.DASH = ${JSON.stringify({ panels: { health: { data: { limit: { usedPct: 34, resetsAt: '2026-11-12T00:00:00Z' } } } } })};` })
+  await start($, 'main')
+  await w.clock.settle()
+  const text = await units($)
+  expect(text).toContain('weekly limit not read')
+  expect(text).toContain("units: the Board's folder has data.js but no limit.json (the Board runs an older engine); the usage limit is not read")
+  expect(w.reads).not.toContain(DATA)
 })
 
 // the engine refuses a read over 4 MiB, so under the old 32 MB cap a 4.5 MB feed failed its read without a word,
@@ -716,19 +742,19 @@ test('a fetch whose output was cut short is its own cannot-be-read line', async 
   expect(await units($)).toBe('units: the Conveyor snapshot cannot be read (the fetch printed over the 4.2 MB cap and was cut short)')
 })
 
-// the data file (1.1 MB on the Mac) was read and parsed on every poll.
-test('the data file is parsed again only when its write time changes', async ($, on) => {
+// the data file (1.1 MB on the Mac) was read and parsed on every poll; the limit file must not be.
+test('the limit file is parsed again only when its write time changes', async ($, on) => {
   const resets = new Date(NOW + 5 * 3600_000).toISOString()
-  const w = world(on, 'main', answer(FULL), { [DATA]: dataJs(34, resets) })
+  const w = world(on, 'main', answer(FULL), { [LIMIT]: limitJson(34, resets) })
   await start($, 'main')
   await w.clock.settle()
-  const dataReads = () => w.reads.filter(p => p === DATA).length
+  const dataReads = () => w.reads.filter(p => p === LIMIT).length
   expect(dataReads()).toBe(1)
   await w.clock.advance(60_000)
   await w.clock.settle()
   expect(fetches(w).length).toBe(2)
   expect(dataReads()).toBe(1)
-  w.files.set(DATA, { text: dataJs(50, resets), at: NOW + 61_000 })
+  w.files.set(LIMIT, { text: limitJson(50, resets), at: NOW + 61_000 })
   await w.clock.advance(60_000)
   await w.clock.settle()
   expect(dataReads()).toBe(2)
@@ -736,10 +762,10 @@ test('the data file is parsed again only when its write time changes', async ($,
 })
 
 // a feed board laid over the state, by the second's read or by a poll whose fetch answered after it,
-// replaced the notes and took the data file's over-cap line with them.
-test('the data file\'s over-cap line stays under a board the feed changes, each second and after a slow poll', async ($, on) => {
-  const line = "units: the Board's data file (data.js) is 4.6 MB, over the 4.2 MB cap; the usage limit is not read"
-  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()), [DATA]: ' '.repeat(4_600_000) })
+// replaced the notes and took the limit file's over-cap line with them.
+test('the limit file\'s over-cap line stays under a board the feed changes, each second and after a slow poll', async ($, on) => {
+  const line = "units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read"
+  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()), [LIMIT]: ' '.repeat(20_000) })
   await start($, 'main')
   await units($)
   await w.clock.settle()
@@ -775,10 +801,10 @@ test('the data file\'s over-cap line stays under a board the feed changes, each 
 
 // a feed board with no snapshot is drawn as its note alone; the over-cap line went only into the notes, so no
 // view showed it, whether the second's read or a slow poll laid that board over the state.
-test('the data file\'s over-cap line leads the one line drawn when the feed gives no snapshot, each second and after a slow poll', async ($, on) => {
-  const line = "units: the Board's data file (data.js) is 4.6 MB, over the 4.2 MB cap; the usage limit is not read"
+test('the limit file\'s over-cap line leads the one line drawn when the feed gives no snapshot, each second and after a slow poll', async ($, on) => {
+  const line = "units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read"
   const none = `${line}; units: the Conveyor snapshot cannot be read (buildbox gave no snapshot)`
-  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()), [DATA]: ' '.repeat(4_600_000) })
+  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()), [LIMIT]: ' '.repeat(20_000) })
   await start($, 'main')
   await units($)
   await w.clock.settle()
