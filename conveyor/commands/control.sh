@@ -15,6 +15,8 @@
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
 . "$HERE/lib/slices.sh" || exit 1
+# `pick <group> next` reads the challengers (PICKTRIAL, PICKLADDER).
+. "$HERE/lib/modelpick.sh" || exit 1
 shift; if [ "${1:-}" = depends ]; then shift; depends "$@"
 elif [ "${1:-}" = card ] && [ "${3:-}" = pick ]; then
   [ $# = 3 ] && [[ $2 =~ ^[1-9][0-9]{0,8}$ ]] || { echo "usage: conveyor.sh control card <issue> pick" >&2; exit 2; }

@@ -799,7 +799,7 @@ snapshot() (
           else "open, no card" end;
     # The groups of the rule Pick settings that had trial cards (picktrial(), lib/modelpick.sh), each with the decision
     # of the owner on it (picks in the control record, `control pick`). A card here is one that no later run of its issue
-    # follows, picked by auto in a run of it, with the spend of all its runs, as picks counts them: a trial card when a
+    # follows, picked by auto in a run of it, with the spend of all its runs, as picks counts them, but a run on another challenger: a trial card when a
     # run of it was a trial; else a promoted card when its newest pick is promoted (pickpromote(): by its mark, not its
     # choice, as the builder of the project can be the challenger too); else a default card when that pick is by auto. A group
     # is here when it had a trial or a promoted card, so a group promoted before any trial gets its cost check too; its
@@ -807,27 +807,40 @@ snapshot() (
     # Each side: cards, landed, ended (landed, closed or blocked, and not given
     # back), usd (null when a step has no price) and perLanded (usd / landed: null with none landed, or usd null).
     # due: when the tenth trial card ended after the last decision of the owner (of all of them, before the first), while the
-    # owner has not promoted or dropped the challenger; else null. over: promoted cards cost more per landed card than
-    # default cards (modelpick() then sets the rule to shadow, with back, the Needs you line, as its reason).
+    # owner has not promoted or dropped the challenger; else null. over: in a group promoted now (also while its next
+    # challenger is on trial), promoted cards of the choice promoted now cost more per landed card than default cards (modelpick() then sets the rule to shadow, with back, the Needs you line, as its reason).
     def dollars: if . == null then "not known" else (. * 100 | round) as $c | "$\($c / 100 | floor).\($c % 100 | tostring | if length == 1 then "0" + . else . end)" end;
-    ([$all[0][] | select(.card | IN($later[]) | not) | (($runsOf[.card] // [.]) | map(.x.pick | objects)) as $ps
+    ([$all[0][] | select(.card | IN($later[]) | not) | ($runsOf[.card] // [.]) as $rs | ($rs | map(.x.pick | objects)) as $ps
         | select(any($ps[]; .by == "auto"))
+        | ($ps | map(select(.trial == true or .promoted == true)) | last | .choice) as $chc
         | {group: ($ps | last | .group), trial: any($ps[]; .trial == true), promoted: ($ps | last | .promoted == true), by: ($ps | last | .by),
-           challenger: ($ps | map(select(.trial == true or .promoted == true)) | last | .choice),
+           challenger: $chc,
            landed: ((.step | IN("landed", "closed")) and .x.blockedAt == null), ended: (.result != "" and (.x.retried | not)),
-           end: .x.endAt, usd: ([.runSteps[]] | usd)}]
+           # Not the spend of a run on another challenger (one the owner replaced before a retry): it does not count for this one.
+           end: .x.endAt, usd: ([$rs[] | select((.x.pick | objects | (.trial == true or .promoted == true) and [.choice.model, .choice.effort] != [$chc.model, $chc.effort]) // false | not) | .steps[]] | usd)}]
       | group_by(.group) | map(select(any(.[]; .trial or .promoted)))
-      | map(.[0].group as $g | (map(.challenger | objects) | first) as $ch | ($control // {} | .picks // {} | .[$g // ""]) as $d
+      | map(.[0].group as $g | ($control // {} | .picks // {} | .[$g // ""]) as $d
+        # A group whose next challenger the owner put on trial (`control pick <group> next`) has it as its challenger,
+        # and its trial side is the trials of that one only.
+        | ($d.challenger // (map(.challenger | objects) | first)) as $ch
+        | map(select((.trial | not) or $d.challenger == null or ([.challenger.model, .challenger.effort] == [$ch.model, $ch.effort])))
         | def side: {cards: length, landed: (map(select(.landed)) | length), ended: (map(select(.ended)) | length),
             usd: (map(.usd) | if any(. == null) then null else add // 0 | . * 10000 | round / 10000 end)}
             | .perLanded = (if .landed > 0 and .usd != null then .usd / .landed * 10000 | round / 10000 else null end);
         (map(select(.trial and .ended and ($d == null or .end > $d.at))) | sort_by(.end)) as $since
         | map(select(.trial | not)) as $rest
+        # The choice promoted now: the one kept while the next is on trial, else the promoted challenger. The promoted
+        # side is its cards only, not those of a choice the owner replaced since (promote after next).
+        | (if $d.promoted != null then $d.promoted elif $d.decision == "promote" then $ch else null end) as $pc
         | {group: $g, model: $ch.model, effort: $ch.effort, decision: ($d.decision // null), decidedAt: ($d.at // null),
-           trial: (map(select(.trial)) | side), default: ($rest | map(select((.promoted | not) and .by == "auto")) | side), promoted: ($rest | map(select(.promoted)) | side),
+           trial: (map(select(.trial)) | side), default: ($rest | map(select((.promoted | not) and .by == "auto")) | side), promoted: ($rest | map(select(.promoted and $pc != null and [.challenger.model, .challenger.effort] == [$pc.model, $pc.effort])) | side),
            due: (if ($d.decision // "" | IN("promote", "drop")) or ($since | length) < 10 then null else $since[9].end end)}
-        | .over = (.decision == "promote" and .promoted.perLanded != null and .default.perLanded != null and .promoted.perLanded > .default.perLanded)
-        | if .over then .back = "Promoted cards of \(.group) on \(.model) cost \(.promoted.perLanded | dollars) for each landed card, more than the \(.default.perLanded | dollars) of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, choose keep or drop for the group: conveyor.sh control pick \(.group) keep or drop." else . end)) as $pg
+        | .over = ($pc != null and .promoted.perLanded != null and .default.perLanded != null and .promoted.perLanded > .default.perLanded)
+        # The commands named are those that end the promoted choice: while the next challenger is on trial, keep keeps
+        # the promoted choice and drop goes back to it, so promote (the next one in its place) or a second drop (no trials).
+        | if .over then .back = "Promoted cards of \(.group) on \($pc.model) at \($pc.effort) effort cost \(.promoted.perLanded | dollars) for each landed card, more than the \(.default.perLanded | dollars) of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, "
+            + if $d.promoted != null then "choose promote or drop for the group. promote builds on \($ch.model) at \($ch.effort) effort in its place: conveyor.sh control pick \(.group) promote. drop, two times, ends the trials and builds on the defaults: conveyor.sh control pick \(.group) drop, then conveyor.sh control pick \(.group) drop."
+              else "choose keep or drop for the group: conveyor.sh control pick \(.group) keep or drop." end else . end)) as $pg
     | {time: $h.time, day: $day, repo: $h.repo,
        needsYou: {
          waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes)))

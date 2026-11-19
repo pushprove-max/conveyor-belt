@@ -39,12 +39,14 @@ t_pickshadow() {
 # split.doneWhen 3) with small ones, or one with the label documentation with code. One fixture, one call an issue.
 # Issue 11 names only the directory conveyor/lib/, in Markdown bold: a path with no extension that SPLITSIZE's files
 # do not hold, and a "**" that onpipeline() kept as part of the name; it went into the code group (#825).
+# Also caught (#766): an issue at the thresholds but under twice them (issue 9) was not medium, or one at twice them
+# (issue 12, six Done-when items) was not large.
 t_pickgroups() {
-  setup "[$(issue 8 2026-01-01 | jq -c '.body = "Change conveyor/lib/run.sh."'),$(issue 9 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"'),$(issue 10 2026-01-01 documentation | jq -c '.body = "Change src/a.js."'),$(issue 11 2026-01-01 | jq -c '.body = "Change how the scripts in **conveyor/lib/** log."')]"
+  setup "[$(issue 8 2026-01-01 | jq -c '.body = "Change conveyor/lib/run.sh."'),$(issue 9 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"'),$(issue 10 2026-01-01 documentation | jq -c '.body = "Change src/a.js."'),$(issue 11 2026-01-01 | jq -c '.body = "Change how the scripts in **conveyor/lib/** log."'),$(issue 12 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three\n- four\n- five\n- six"')]"
   tune '.split.doneWhen = 3 | .pipelineFiles = ["conveyor/lib/"]'
   loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
-  fx_in 'for n in 8 9 10 11; do SEATCARD=$n PICK=""; modelpick c1-$n $n; jq -r "\"\(.group) \(.mode)\"" <<<"$PICK"; done'
-  [ "$(cat "$T/$CASE/run.out")" = $'small pipeline on\nlarge code on\nsmall docs on\nsmall pipeline on' ] || fail "the groups of a pipeline, a large, a documentation and a pipeline-directory issue: $(cat "$T/$CASE/run.out")"
+  fx_in 'for n in 8 9 10 11 12; do SEATCARD=$n PICK=""; modelpick c1-$n $n; jq -r "\"\(.group) \(.mode)\"" <<<"$PICK"; done'
+  [ "$(cat "$T/$CASE/run.out")" = $'small pipeline on\nmedium code on\nsmall docs on\nsmall pipeline on\nlarge code on' ] || fail "the groups of a pipeline, a medium, a documentation, a pipeline-directory and a large issue: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug caught: a card whose builder the owner set was recorded as the rule's choice, or the pick moved its builder off
@@ -77,11 +79,12 @@ t_picktrial() {
 }
 
 # Bugs caught (#828): a second eligible card in the share took the trial while one was in flight; a card out of the
-# share, a pipeline one or a large one took it; a blocked trial card's retry built on the challenger again; two
+# share, a pipeline one or a medium one took it; a blocked trial card's retry built on the challenger again; two
 # blocked trial cards of a group did not drop its challenger (the next card of the group in the share), the drop
 # reached another group, or the snapshot did not list it. One fixture; each card is picked as card() picks it (pk),
 # after its picked line, and prints its group, trial, the pick's builder and the builder seat() gives it. Issues 15,
-# 35 and 40 are small code, 20, 11, 45 and 55 small docs, 25 pipeline and 30 large.
+# 35 and 40 are small code, 20, 11, 45 and 55 small docs, 25 pipeline and 30 medium code (#766: a medium group the
+# owner did not add gets the defaults).
 # Also caught: c1-15's filed line (its follow-ups, filed before it lands) freed the trial for c1-20; once c1-35's
 # issue was closed while it was blocked (shut()), the snapshot no longer listed the drop the rule still applies; a
 # builder the owner set for #45 during its trial was replaced by the challenger; c1-45, its process gone before any
@@ -127,7 +130,7 @@ EOF
 c1-20 small docs false m m
 c1-11 small docs false m m
 c1-25 small pipeline false m m
-c1-30 large code false m m
+c1-30 medium code false m m
 c2-15 small code false m m
 c1-35 small code true claude-sonnet-5-5 claude-sonnet-5-5
 c1-40 small code false m m
@@ -294,10 +297,103 @@ t_pickback() {
   fx_in 'SEATCARD=21; PICK=""; PICKSEAT=""; modelpick c1-21 21 2>/dev/null; jq -c "[.mode, .choice.model]" <<<"$PICK"; seat builder | jq -r .model'
   [ "$(cat "$T/$CASE/run.out")" = $'["shadow","m"]\nm' ] || fail "the card picked as the rule went back to shadow: $(cat "$T/$CASE/run.out")"
   [ "$(jq -r '.rules.pick' "$ST/control.json")" = shadow ] || fail "the rule is not back in shadow: $(jq -c '[.rules.pick, .pickBack]' "$ST/control.json")"
-  [ "$(loop snapshot --fresh | jq -c '.needsYou.pick | map([.title, .reason])')" = '[["Pick settings went back to Shadow","Promoted cards of small docs on claude-sonnet-5-5 cost $4.00 for each landed card, more than the $2.00 of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, choose keep or drop for the group: conveyor.sh control pick small docs keep or drop."]]' ] \
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.pick | map([.title, .reason])')" = '[["Pick settings went back to Shadow","Promoted cards of small docs on claude-sonnet-5-5 at medium effort cost $4.00 for each landed card, more than the $2.00 of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, choose keep or drop for the group: conveyor.sh control pick small docs keep or drop."]]' ] \
     || fail "Needs you has no line for the return to shadow: $(loop snapshot | jq -c .needsYou.pick)"
   loop control rules pick=on >/dev/null && [ "$(jq -c .pickBack "$ST/control.json")" = null ] || fail "control rules pick=on did not clear the line: $(jq -c .pickBack "$ST/control.json")"
   CONVEYOR_NOW=$(($(date +%s) + 100)) loop control pick small docs promote >/dev/null || fail "control pick small docs promote was refused"
   fx_in 'SEATCARD=21; PICK=""; PICKSEAT=""; modelpick c1-21 21 2>/dev/null; jq -c "[.mode, .choice.model]" <<<"$PICK"'
   [ "$(cat "$T/$CASE/run.out")" = '["on","claude-sonnet-5-5"]' ] || fail "a snapshot built before the owner's new promote set the rule back: $(cat "$T/$CASE/run.out"); $(jq -c .rules.pick "$ST/control.json")"
+}
+
+# Bugs caught (#766): a card of a medium group in the share was a trial before the owner added the group, or was not
+# one after; `control pick medium code add` was taken before the owner's decision on the small code trial result, or
+# twice; a decision on a medium group was taken before it was added. Issue 30 (three Done-when items, split.doneWhen 3)
+# is medium code.
+t_pickaddgroup() {
+  setup "[$(issue 30 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"')]"
+  tune '.split.doneWhen = 3 | .models.allowed.claude += ["claude-sonnet-5-5"]'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  loop control pick medium code add >/dev/null 2>&1 && fail "control pick medium code add was taken before a decision on small code"
+  loop control pick medium code keep >/dev/null 2>&1 && fail "a decision on medium code was taken before the group was added"
+  pk='SEATCARD=30; PICK=""; PICKSEAT=""; modelpick c1-30 30 2>/dev/null; jq -r "\"\(.group) \(.trial) \(.choice.model)\"" <<<"$PICK"; seat builder | jq -r .model'
+  fx_in "$pk"
+  [ "$(cat "$T/$CASE/run.out")" = $'medium code false m\nm' ] || fail "a card of a medium group not added did not get the defaults: $(cat "$T/$CASE/run.out")"
+  loop control pick small code keep >/dev/null && loop control pick medium code add >/dev/null || fail "control pick medium code add was refused after a decision on small code"
+  loop control pick medium code add >/dev/null 2>&1 && fail "control pick medium code add was taken twice"
+  fx_in "$pk"
+  [ "$(cat "$T/$CASE/run.out")" = $'medium code true claude-sonnet-5-5\nclaude-sonnet-5-5' ] || fail "the card in the share of an added medium group is no trial: $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs caught (#766): `control pick <group> next` was taken on a group not promoted; after next, a promoted card left
+# the promoted challenger, the card in the share was no trial of the next one (Sonnet 5.5 at low effort), or the
+# snapshot named the old challenger and counted its trial cards with the new one's; a drop did not go back to the
+# promoted challenger, with no trials. Issue 21 is out of the share, 25 in it; both are small docs. The snapshot's
+# cards: c1-101, an older trial at medium effort, and c1-102, a trial at low effort.
+t_picknext() {
+  setup "[$(for n in 21 25; do issue $n 2026-01-01 | jq -c '.body = "Fix a typo in docs/guide.md."'; done | paste -sd, -)]"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"]'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  loop control pick small docs next >/dev/null 2>&1 && fail "control pick small docs next was taken on a group not promoted"
+  loop control pick small docs promote >/dev/null && loop control pick small docs next >/dev/null || fail "control pick small docs next was refused after promote"
+  [ "$(jq -c '.picks["small docs"] | [.decision, .promoted, .challenger]' "$ST/control.json")" = '["next",{"model":"claude-sonnet-5-5","effort":"medium"},{"model":"claude-sonnet-5-5","effort":"low"}]' ] \
+    || fail "next did not put the next challenger on trial beside the promoted one: $(jq -c .picks "$ST/control.json")"
+  pk='for n in 21 25; do SEATCARD=$n; PICK=""; PICKSEAT=""; modelpick c1-$n $n 2>/dev/null; echo "$n $(jq -r "\"\(.trial) \(.promoted // false) \(.choice.effort)\"" <<<"$PICK") $(seat builder | jq -r "\"\(.model) \(.effort)\"")"; done'
+  fx_in "$pk"
+  [ "$(cat "$T/$CASE/run.out")" = $'21 false true medium claude-sonnet-5-5 medium\n25 true false low claude-sonnet-5-5 low' ] || fail "the cards of a group with its next challenger on trial: $(cat "$T/$CASE/run.out")"
+  pcard c1-101 101 trial claude-sonnet-5-5 landed
+  x='{"pick":{"choice":{"effort":"low"}}}'; pl c1-102 102 picked trial; pl c1-102 102 build trial ok "$x"; pl c1-102 102 landed trial ok '{"sha":"s102","product":false,"pick":{"choice":{"effort":"low"}}}'
+  [ "$(loop snapshot --fresh | jq -c '.cost.trials.groups | map([.model, .effort, .trial.cards])')" = '[["claude-sonnet-5-5","low",1]]' ] \
+    || fail "the snapshot's group does not show the next challenger and its trial cards only: $(loop snapshot | jq -c .cost.trials.groups)"
+  loop control pick small docs drop >/dev/null || fail "control pick small docs drop was refused"
+  fx_in "$pk"
+  [ "$(cat "$T/$CASE/run.out")" = $'21 false true medium claude-sonnet-5-5 medium\n25 false false medium m medium' ] || fail "a drop of the next challenger did not go back to the promoted one: $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs caught (#766): while the next challenger was on trial, the return to Shadow told the owner to choose keep or
+# drop, which both leave the costly promoted choice in force; after the owner promoted the next challenger (Sonnet 5.5
+# at low effort) in place of the first, the cost check pooled the promoted cards of both choices, so the first one's
+# cost could send the cheaper choice back to Shadow; a retry of an issue whose card blocked on the replaced choice
+# charged that run's spend to the choice promoted now. Cards: c1-301, a default card on a $2 build; c1-201, a
+# promoted card at medium effort on a $4 build; c1-200, a promoted card of issue 202 at medium effort, blocked after a
+# $4 build; c1-202, its retry, a promoted card at low effort that lands on a $2 build.
+t_pickbacknext() {
+  setup "[$(issue 21 2026-01-01 | jq -c '.body = "Fix a typo in docs/guide.md."')]"
+  loop control rules pick=on >/dev/null && loop control pick small docs promote >/dev/null && loop control pick small docs next >/dev/null || fail "control rules pick=on, promote or next was refused"
+  pcard c1-301 301 default claude-sonnet-5-5 landed; pcard c1-201 201 promoted claude-opus-5-5 landed
+  [ "$(loop snapshot --fresh | jq -c '.cost.trials.groups | map([.over, .back])')" = '[[true,"Promoted cards of small docs on claude-sonnet-5-5 at medium effort cost $4.00 for each landed card, more than the $2.00 of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, choose promote or drop for the group. promote builds on claude-sonnet-5-5 at low effort in its place: conveyor.sh control pick small docs promote. drop, two times, ends the trials and builds on the defaults: conveyor.sh control pick small docs drop, then conveyor.sh control pick small docs drop."]]' ] \
+    || fail "the return to Shadow while the next challenger is on trial names commands that keep the promoted choice: $(loop snapshot | jq -c '.cost.trials.groups | map([.over, .back])')"
+  # The two drops the line names end the costly choice.
+  loop control pick small docs drop >/dev/null && loop control pick small docs drop >/dev/null || fail "control pick small docs drop was refused"
+  [ "$(loop snapshot --fresh | jq -c '[.cost.trials.groups[] | .over]')" = '[false]' ] && [ "$(jq -r '.picks["small docs"].decision' "$ST/control.json")" = drop ] || fail "two drops left the costly choice promoted: $(jq -c .picks "$ST/control.json")"
+  # The promote the line names ends it too, and the cards of the replaced choice no longer count.
+  loop control pick small docs promote >/dev/null && loop control pick small docs next >/dev/null && loop control pick small docs promote >/dev/null || fail "control pick small docs promote, next, promote was refused"
+  pcard c1-200 202 promoted claude-opus-5-5 blocked
+  pl c1-202 202 picked promoted
+  pl c1-202 202 build promoted ok '{"tokens":{"claude":1000000,"codex":0},"usage":{"input":1000000,"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5","pick":{"choice":{"effort":"low"}}}'
+  pl c1-202 202 landed promoted ok '{"sha":"s202","product":false,"pick":{"choice":{"effort":"low"}}}'
+  [ "$(loop snapshot --fresh | jq -c '.cost.trials.groups | map([.effort, .promoted.cards, .promoted.perLanded, .over])')" = '[["low",1,2,false]]' ] \
+    || fail "the cost check pooled the promoted cards or runs of the replaced choice: $(loop snapshot | jq -c .cost.trials.groups)"
+}
+
+# Bugs caught (#766): a judge or reviewer the owner promoted with no replay result of it was taken; once the owner
+# promoted a judge from its replay result, a card of the rule On that is no trial did not have it as its judge, or
+# its pick did not record it; a trial card's judge left the default; the judge was used before the promote. Issue 21
+# is out of the share, 25 in it; both are small docs. The replay line is the one replay() writes, cut to the fields read.
+t_pickseats() {
+  setup "[$(for n in 21 25; do issue $n 2026-01-01 | jq -c '.body = "Fix a typo in docs/guide.md."'; done | paste -sd, -)]"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.allowed["claude-reviewer"] += ["m2"]'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  pk='for n in 21 25; do SEATCARD=$n; PICK=""; PICKSEAT=""; PICKSEATS=""; modelpick c1-$n $n 2>/dev/null; echo "$n $(jq -c "[.trial, .seats]" <<<"$PICK") $(seat judge | jq -r "\"\(.model) \(.effort)\"")"; done'
+  fx_in "$pk"; before=$(cat "$T/$CASE/run.out")
+  case $before in *m2*) fail "the fixture's default judge is m2, so the case cannot tell the promoted one: $before" ;; esac
+  loop control pick judge promote m2 >/dev/null 2>&1 && fail "control pick judge promote m2 was taken with no replay result"
+  jq -cn '{time: "2026-11-01T00:00:00Z", seat: "judge", model: "m2", effort: "high", last: 20, reviews: 3}' >> "$ST/replays.jsonl"
+  loop control pick reviewer promote m2 >/dev/null 2>&1 && fail "control pick reviewer promote m2 was taken on a judge replay result"
+  loop control pick judge promote m2 >/dev/null || fail "control pick judge promote m2 was refused after its replay result"
+  fx_in "$pk"
+  d=$(sed -n 2p <<<"$before" | cut -d' ' -f3-)
+  [ "$(cat "$T/$CASE/run.out")" = "21 [false,{\"judge\":{\"model\":\"m2\",\"effort\":\"high\"}}] m2 high
+25 [true,null] $d" ] || fail "the judge seat of a card that is no trial and of a trial card, after the promote: $(cat "$T/$CASE/run.out"); before it: $before"
+  fx_in 'SEATCARD=21; PICK=""; PICKSEATS=""; modelpick c1-21 21 2>/dev/null; jq -cn --argjson p "$PICK" "{card: \"c1-21\", issue: 21, step: \"worktree\", time: \"2026-11-01T00:00:00Z\", tokens: {claude: 0, codex: 0}, result: \"ok\", sha: \"\", reason: \"\", pick: \$p}"'
+  recok "$T/$CASE/run.out" "a pick with a promoted judge"
 }

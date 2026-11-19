@@ -174,8 +174,8 @@ card() { # <card> <issue> [<branch> <tip>]
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
   [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
-  # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh, PICKSEAT by seat() in lib/control.sh
-  local PICK='' PICKCARD='' PICKSEAT='' # the card's pick (modelpick(), lib/modelpick.sh), which line() puts on each of its lines, and a trial's builder
+  # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh, PICKSEAT and PICKSEATS by seat() in lib/control.sh
+  local PICK='' PICKCARD='' PICKSEAT='' PICKSEATS='' # the card's pick (modelpick(), lib/modelpick.sh), which line() puts on each of its lines, a trial's builder and the promoted reviewer and judge
   [ -n "$br" ] || [ "$n" = 0 ] || modelpick "$c" "$n"
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \

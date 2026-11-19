@@ -299,7 +299,8 @@ Shadow and On. Off is the default. `conveyor.sh control rules pick=off`, `pick=s
 Conveyor picks one time for each card, after the split check and before the build. Each slice of a split issue gets
 its own pick. Fix cards that have no issue get no pick. Code puts the card in a group, and no model is asked:
 
-- **small** or **large**: small when the issue is under all the `split` limits in `.conveyor/project.json`.
+- **small**, **medium** or **large**: small when the issue is under all the `split` limits in `.conveyor/project.json`.
+  Medium when it is under two times each of these limits. Else large.
 - **pipeline**, **docs** or **code**: pipeline when the issue names a path in `pipelineFiles`. Else docs when it has
   the label `documentation`, or when each path that it names is a Markdown file or a file under `docs/`. Else code.
 
@@ -321,8 +322,9 @@ With the rule On, a trial card builds on the challenger, Sonnet 5.5 at medium ef
 pick has `trial: true`. All other cards build on the project's builder. Its review and judge use the project's
 settings.
 
-- **Eligible cards**: a card is eligible when its group is "small docs" or "small code". The issue is small and names
-  no path in `pipelineFiles`. A card whose builder you set is not eligible. When you set the builder of a trial
+- **Eligible cards**: a card is eligible when its group is "small docs" or "small code", or a medium group that you
+  added (below). The issue names no path in `pipelineFiles`. The cards of a medium group that you did not add use
+  the project's settings. A card whose builder you set is not eligible. When you set the builder of a trial
   card's issue (`control card`) while the card runs, each later step of the card that uses the builder uses yours. The
   other steps keep their own settings.
 - **Share**: 1 eligible card in 5 is a trial: the card of an issue whose number is a multiple of 5.
@@ -349,7 +351,7 @@ card whose change touches a path in `pipelineFiles`, with those paths.
 When ten trial cards of a group are done (landed, closed or blocked), **Needs you** on the Board asks you for a
 decision about the challenger of that group. The line shows the trial cards and the default cards of the group: how
 many there are, how many landed, and the spend for each landed card. The spend of a card includes all its runs, and
-its blocked runs too. When a step has no price, the spend shows as not known. Conveyor does not promote the challenger
+its blocked runs too, but not a run on a different challenger. When a step has no price, the spend shows as not known. Conveyor does not promote the challenger
 itself. Give your decision with `conveyor.sh control pick <group> <decision>`, for example
 `conveyor.sh control pick small docs promote`:
 
@@ -360,6 +362,26 @@ itself. Give your decision with `conveyor.sh control pick <group> <decision>`, f
   that were blocked before your decision do not count for a drop.
 - **drop**: the group has no more trials. Its cards build on the project's builder.
 
+Two more decisions add trials. Conveyor does not make them itself:
+
+- **add**: `conveyor.sh control pick medium <docs|code> add` makes the cards of that medium group eligible for
+  trials. You can add a medium group after you gave a decision for the small group of the same kind.
+- **next**: `conveyor.sh control pick <group> next`, for a group that you promoted, starts trials of the next
+  challenger. The next challenger is Sonnet 5.5 at low effort, then Haiku 5.5 (`claude-haiku-5-5`) at medium effort,
+  then Haiku 5.5 at low effort. The promoted cards of the group stay on the promoted challenger. The card of an issue
+  whose number is a multiple of 5 is a trial of the next challenger. After ten trial cards, Needs you asks again:
+  promote makes the next challenger the promoted one, keep continues the trials, and drop goes back to the challenger
+  that you promoted before.
+
+### Reviewer and judge
+
+The reviewer and the judge of a card use the project's settings, until you promote a choice from a replay result
+(see Judge replay, below). Give your decision with `conveyor.sh control pick <reviewer|judge> promote <model>
+[<effort>]`. Conveyor refuses it when `replays.jsonl` has no result for that seat, model and effort. With the rule
+On, each card that is not a trial then uses that choice, and its `pick` field has `seats`. A trial card keeps the
+project's reviewer and judge. A reviewer or judge that you set for a card (`control card`) keeps your setting.
+`conveyor.sh control pick <reviewer|judge> drop` takes the choice away.
+
 ### Back to Shadow
 
 With the rule On, Conveyor compares the promoted cards of a group with its default cards before it starts each card.
@@ -367,7 +389,11 @@ It does this also for a group that you promote before it has trial cards.
 When the promoted cards cost more for each landed card, Conveyor sets the rule to Shadow. **Needs you** then shows
 a line with the two costs. The line stays until you set the rule again. Before you set it to On again, choose
 `keep` or `drop` for the group, because the same costs set the rule to Shadow again. Conveyor uses the costs that the Board
-showed last.
+showed last. It compares only the promoted cards of the challenger that is promoted now.
+
+When the next challenger has trials, `keep` and `drop` keep the promoted challenger. The line then tells you to
+choose `promote`, which builds on the next challenger in its place, or `drop` two times, which stops the trials and
+builds on the defaults.
 
 ## Judge replay
 

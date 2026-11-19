@@ -55,7 +55,9 @@ its own, and the Board's Rules tab sets them in its Judge row.
   chooses for it, as `pick` on each step line of the card from then on, up to its end. The choice is the project's builder, or the
   card's own builder when you set it (`control card`). In Shadow, the card builds on its builder as before. In On,
   1 small card in 5 that names no pipeline file is a trial on Sonnet 5.5 at medium effort. After ten trial cards of
-  a group, Needs you asks for your decision: `conveyor.sh control pick <group> <promote|keep|drop>`. When the
+  a group, Needs you asks for your decision: `conveyor.sh control pick <group> <promote|keep|drop>`. Only your
+  decision adds a medium group (`add`), tries the next challenger of a promoted group (`next`), or gives the cards a
+  reviewer or judge from a replay result (`control pick <reviewer|judge> promote <model>`). When the
   promoted cards of a group cost more for each landed card than its default cards, the rule goes back to Shadow
   ([Pick settings](../docs/configuration.md#pick-settings)).
 

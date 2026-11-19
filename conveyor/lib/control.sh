@@ -2,7 +2,7 @@
 # The control record, whole: the file's keys over CTL0's, so a record written before a key existed still reads.
 # mode is run, pause or stop; cap and guard are a number or null; held and order are issue numbers; rules.never is
 # the area labels never built, rules.push whether a card that lands is pushed (off: land only, owed()), rules.visible whether a visible change
-# needs the owner's yes (yesrule()), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"small docs" or "small code": {decision: promote, keep or drop, at}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
+# needs the owner's yes (yesrule()), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"<small|medium> <docs|code>": {decision: promote, keep, drop, add or next, at, challenger and promoted: {model, effort}, when the owner's next set them}}) and on the reviewer and judge seats ({"reviewer" or "judge": {decision: promote, at, choice: {model, effort}}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
 # a model of the pack's models.allowed, whose program it is (seatnow()); fix (the session that repairs review
 # findings) and testFix (the one that repairs failed changed tests) are null, the card's builder, or a builder seat of
@@ -80,8 +80,10 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.signin == null or (.signin | type == "string")) and (.landAs == null or (.landAs | IN("main", "pr")))
       and (.prMerge == null or (.prMerge | IN("button", "release", "idle")))
       and (.onboarded == null or (.onboarded | type == "object" and keys == ["at", "rules"] and (.at | type == "string") and (.rules | type == "array" and all(type == "string"))))
-      and (.picks | type == "object" and all(to_entries[]; (.key | IN("small docs", "small code")) and (.value | type == "object" and keys == ["at", "decision"]
-        and (.at | type == "string") and (.decision | IN("promote", "keep", "drop")))))
+      and (.picks | type == "object" and all(to_entries[]; def choice: type == "object" and keys == ["effort", "model"] and all(.[]; type == "string");
+        if .key | IN("reviewer", "judge") then .value | type == "object" and keys == ["at", "choice", "decision"] and (.at | type == "string") and .decision == "promote" and (.choice | choice)
+        else (.key | test("^(small|medium) (docs|code)$")) and (.value | type == "object" and (keys - ["challenger", "promoted"]) == ["at", "decision"]
+          and (.at | type == "string") and (.decision | IN("promote", "keep", "drop", "add", "next")) and all(.challenger, .promoted | select(. != null); choice)) end))
       and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
       and ([.account, .reviewAccount] | all(. == null or (type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")))))' \
     "$@" 2>/dev/null
@@ -176,6 +178,8 @@ seat() { # <builder|reviewer|judge|fix|testFix> [the control record, when the ca
   # A trial card (PICKSEAT, card()'s: picktrial(), lib/modelpick.sh) builds on the rule's challenger, as if the record
   # set it for the issue's builder, until the owner sets one for the issue (that always wins); its other seats are the record's.
   [ -z "${PICKSEAT:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEAT" '.cards[$n].builder //= $p' <<<"$c") || return 1
+  # So does a card's reviewer or judge that the owner promoted from a replay result (PICKSEATS: pickseats()).
+  [ -z "${PICKSEATS:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEATS" 'reduce ($p | to_entries[]) as $e (.; .cards[$n][$e.key] //= $e.value)' <<<"$c") || return 1
   # A record with no key "<issue>" keeps no seats for the card: the project's, worked out (and kept) once for all cards.
   [[ $c == *"\"$n\":"* ]] || n=''
   modelsallowed a || return 1
@@ -960,7 +964,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick small <docs|code> <promote|keep|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1011,9 +1015,38 @@ control() { # [action [arguments]]
     # The owner's decision on a group's trial challenger (modelpick(), lib/modelpick.sh), asked in Needs you after ten
     # trial cards: promote (the group builds on the challenger, 1 card in 5 on the default), keep (the trials go on,
     # and the next ten ask again) or drop (no more trials). When it was taken: the trial cards that ended before it
-    # are not asked about again.
-    pick) [ $# = 3 ] && [ "$1" = small ] && [[ $2 =~ ^(docs|code)$ ]] && [[ $3 =~ ^(promote|keep|drop)$ ]] || { bad; return; }
-      f='.picks[$v[0] + " " + $v[1]] = {decision: $v[2], at: ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate)}' ;;
+    # are not asked about again. add (a medium group only, once the owner decided on the small group of its kind after
+    # its trial result) makes the group eligible for trials. next (a promoted group only) keeps its promoted cards on
+    # that challenger and tries the next one on PICKLADDER (lib/modelpick.sh); then keep goes on with both, promote
+    # takes the next one, and drop goes back to the promoted one.
+    # A reviewer or judge seat joins the pick only by the owner's promote of a choice that a replay result names (a
+    # line of REPLAYS for that seat, model and effort, of one review or more: replay(), lib/replay.sh); drop takes it
+    # out, and the seat is the defaults again.
+    pick) if [[ ${1:-} =~ ^(reviewer|judge)$ ]]; then
+        if [ $# = 2 ] && [ "$2" = drop ]; then f='del(.picks[$v[0]])'
+        else [ $# -ge 3 ] && [ $# -le 4 ] && [ "$2" = promote ] || { bad; return; }
+          p=$(jq -rs --arg s "$1" --arg m "$3" --arg e "${4:-}" 'map(objects | select(.seat == $s and .model == $m and ($e == "" or .effort == $e) and (.reviews | numbers) > 0))
+            | last | .effort // empty' "$REPLAYS" 2>/dev/null)
+          [ -n "$p" ] || { echo "conveyor: no $1 replay result on $3${4:+ at $4} effort: run conveyor.sh pick replay $1 $3 first; nothing changed" >&2; return 1; }
+          f='.picks[$v[0]] = {decision: "promote", at: ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate), choice: {model: $v[2], effort: $p}}'
+        fi
+      else [ $# = 3 ] && [[ $1 =~ ^(small|medium)$ ]] && [[ $2 =~ ^(docs|code)$ ]] && [[ $3 =~ ^(promote|keep|drop|add|next)$ ]] || { bad; return; }
+        x=$(jq -r --arg g "$1 $2" '.picks[$g].decision // ""' <<<"$c")
+        if [ "$3" = add ]; then
+          [ "$1" = medium ] && [ -z "$x" ] && jq -e --arg k "small $2" '.picks[$k].decision != null' <<<"$c" >/dev/null \
+            || { echo "conveyor: add is for a medium group not yet added, after your decision on the small $2 trial result; nothing changed" >&2; return 1; }
+        elif [ "$1" = medium ] && [ -z "$x" ]; then echo "conveyor: medium $2 has no trials: add it first (conveyor.sh control pick medium $2 add); nothing changed" >&2; return 1
+        elif [ "$3" = next ]; then
+          p=$(jq -c --argjson l "$PICKLADDER" --argjson t "$PICKTRIAL" --arg g "$1 $2" '(.picks[$g].challenger // $t) as $ch
+            | ($l | index([$ch])) as $i | select($i != null and $l[$i + 1] != null) | [$ch, $l[$i + 1]]' <<<"$c")
+          [ "$x" = promote ] && [ -n "$p" ] || { echo "conveyor: next is for a promoted group whose challenger has a next one; nothing changed" >&2; return 1; }
+        fi
+        f='.picks[$v[0] + " " + $v[1]] as $r | ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate) as $t
+          | .picks[$v[0] + " " + $v[1]] = (if $v[2] == "next" then ($p | fromjson) as [$o, $nx] | {decision: "next", at: $t, promoted: $o, challenger: $nx}
+            elif $v[2] == "keep" then ($r // {}) + {decision: "keep", at: $t}
+            elif $v[2] == "drop" and $r.promoted != null then {decision: "promote", at: $t, challenger: $r.promoted}
+            else {decision: $v[2], at: $t} + ($r // {} | if .challenger != null then {challenger} else {} end) end)'
+      fi ;;
     # The judge's on or off and the finding kinds it always accepts (no kind clears them) are the record's too. The
     # Tests seat is set as the others are; default is none, and no test action starts.
     model | reviewer | judge | tests)

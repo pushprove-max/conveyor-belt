@@ -132,10 +132,13 @@ def ok: . as $r | (keys - known) == need
         # A card's pick (modelpick(), lib/modelpick.sh), on each of its lines from the pick on: its group, the
         # builder chosen, by whom, whether it is a trial, and the rule's setting; on a trial card, the pipeline files its
         # change touches (trialflag()), when there are any; on a card of a promoted group on the challenger
-        # (pickpromote()), promoted: true.
-        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline", "promoted"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
+        # (pickpromote()), promoted: true; on a card of the rule On that is not a trial, the reviewer and judge seats
+        # the owner promoted from a replay result (pickseats()), seats.
+        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline", "promoted", "seats"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
           and (.pipeline == null or (.trial and (.pipeline | type == "array" and length > 0 and all(type == "string"))))
           and ((has("promoted") | not) or (.promoted == true and .trial == false))
+          and ((has("seats") | not) or (.trial == false and .mode == "on" and (.seats | type == "object" and length > 0 and all(keys[]; IN("reviewer", "judge"))
+            and all(.[]; type == "object" and keys == ["effort", "model"] and all(.[]; type == "string")))))
           and (.choice | type == "object" and keys == ["effort", "model"] and (.model | type == "string") and (.effort == null or (.effort | type == "string")))
           and (.by | IN("owner", "auto")) and (.trial | type == "boolean") and (.mode | IN("shadow", "on"))))
         and ((.step == "split") == (.split != null))
