@@ -191,7 +191,7 @@ t_judgeidmark() {
   local w=$T/$CASE/w m; mkdir -p "$w" && git -C "$w" init -q || fail "the worktree could not be made"
   printf '%s\n' '[P1] [E2][security] a.txt:2 exposed token' '[P1][security] [E3] a.txt:3 exposed key' '[P1] a.txt:4 plain' > "$w.review"
   # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  m=$(eval "$(grep -E '^(NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgemarks "$w" '["security"]')
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgemarks "$w" '["security"]')
   [ "$(jq -c 'map(.kind)' <<<"$m")" = '["security","security",null]' ] || fail "a finding with an id mark lost its always-accepted kind: $m"
 }
 
