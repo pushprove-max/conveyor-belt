@@ -600,6 +600,17 @@ review, Conveyor runs the file alone 3 times in a row with the change, each run 
 and take at most 2 times its CPU seconds on the clock. When a run does not, the card is blocked, and the reason names
 that run.
 
+A test must check what it protects directly. Some files check it through a proxy: they run other test files or the
+suite runner, run the real loop, or wait for a real process with a poll such as `wait_until`. Judge says what a file
+protects and how it checks it. For a proxy, the verdict is indirect, and Judge names each proxy part on a line
+`DIRECT: <what it protects> | <the direct check> | <the cases that must keep passing>`. With that verdict,
+**Rewrite as a direct check** is the step that the Board suggests. A Whole suite only file does not get it, because
+the check of the card runs the file alone: make it run alone first. The button opens the issue preview, with the title
+"Rewrite the test file <file> as direct checks" and the DIRECT lines in its text. You can edit both before you file
+it. Conveyor checks the card as an Optimize card. The change must keep the file and each case that a DIRECT line
+names, and add or remove no other test file. When it drops one of those cases, the card is blocked, and the reason
+names the case. The file must also pass alone with the change, in fewer CPU seconds than its last runs.
+
 A file with no run on record shows "Never run". When Conveyor can tell why, the status says it: the pack's
 `tests.patterns` or the test command do not match the file, loading the file fails (with the error), or the file is
 skipped (with its skip markers). Open its row for two actions. **Make it run** opens an issue that asks a card to
@@ -630,7 +641,8 @@ cards and by how much each one changed it, and whether its runs are slower or fa
 verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
 buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Fix failures** (on a file
 with a flaky or main failure), **Fix hollow cases** (on a Hollow file), **Fix the waiting** (on a file that Waits),
-**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), Run and More. The step that the Board suggests is the primary
+**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), **Rewrite as a direct check** (when the verdict is indirect, on a file that is not Whole suite only), Run
+and More. The step that the Board suggests is the primary
 button. Six tiles follow: the CPU seconds now with the median, the last 4 runs as bars, the last Optimize as a
 percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs
 caught and the mutants caught (or "not checked"). Point at a bar, or move the keyboard focus to it, to see its CPU

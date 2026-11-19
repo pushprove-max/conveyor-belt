@@ -1532,8 +1532,10 @@ redrun() { # <worktree> <cases json>
 # The test file of a speed-up issue (card()): an issue whose title starts SPEEDUP (or the title start given: OPTIMIZE),
 # as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing kept for the issue
 # ($TAFILED), else the title's word after that start. Prints it; fails for any other issue.
-# shellcheck disable=SC2034 # OPTIMIZE is used in lib/card.sh
-SPEEDUP='Speed up the test file ' OPTIMIZE='Optimize the test file '
+# A Rewrite as a direct check issue (#778, REWRITE: "Rewrite the test file <file> as direct checks") is an Optimize
+# issue with the verdict indirect (optverdict()).
+# shellcheck disable=SC2034 # OPTIMIZE and REWRITE are used in lib/card.sh
+SPEEDUP='Speed up the test file ' OPTIMIZE='Optimize the test file ' REWRITE='Rewrite the test file '
 speedfile() { # <issue json> [title start: SPEEDUP]
   local t f p=${2:-$SPEEDUP}
   t=$(jq -r '.title // ""' <<<"$1"); [[ $t == "$p"* ]] || return 1
@@ -1544,8 +1546,10 @@ speedfile() { # <issue json> [title start: SPEEDUP]
 # The verdict an Optimize card is checked by (speedproof(), optproof()): the one its issue's body names on the Board's
 # line "The judge's verdict (<when, seat>): <verdict>." (draftIssue(), .claude/dashboard/panels/tests.js), else on its
 # last VERDICT: line (TAVERDICTS, lib/testaction.sh), in lower case; <none> ("speed up" when not given) for an issue
-# that names none (a speed-up issue).
+# that names none (a speed-up issue). A Rewrite as a direct check issue (its title starts REWRITE) is indirect,
+# whatever its body says.
 optverdict() { # <issue json> [<none>]
+  ! speedfile "$1" "$REWRITE" > /dev/null || { echo indirect; return 0; }
   jq -r --arg v "$TAVERDICTS" --arg n "${2:-speed up}" '[(.body // "") | split("\n")[] | sub("^[\\s*`_>-]+"; "")] as $l
     | ([$l[] | capture("^The judge.s verdict \\(.*\\):\\s*(?<v>" + $v + ")[\\s.*`_]*$"; "i").v | ascii_downcase] | last)
       // ([$l[] | capture("^VERDICT:[\\s*`_]*(?<v>" + $v + ")([^[:alpha:]].*)?$"; "i").v | ascii_downcase] | last) // $n' <<<"$1" 2>/dev/null \
@@ -1620,7 +1624,8 @@ speedbrief() { # <card> <worktree> <test file> <issue json>
         stabilise: "The change keeps the file, adds or removes no other test file, removes the cause of each of its flaky or failing cases, and must not make it cost more than the CPU seconds above. End your reply with one line \($sl) for each case the issue names on a CAUSE line (at least one when it names none): a case with no such line blocks the card. The review checks each line against the code.",
         split: "The change splits the file: it changes or removes the file and adds test files.",
         merge: "The change merges the file with another test file: it removes one of the two and changes the other, and adds no test file. When the file stays, it must not cost more than the CPU seconds above plus the median on record of each test file merged into it.",
-        delete: "The change deletes the file and adds or changes no other test file."}[$v] end'
+        delete: "The change deletes the file and adds or changes no other test file.",
+        indirect: "The change rewrites each proxy part the issue names on a DIRECT line as the direct check it names. It keeps the file and every case those lines name, adds or removes no other test file, and must make the file cost less than the CPU seconds above."}[$v] end'
 }
 # The check of a speed-up card (card(): a bug card whose issue speedfile() names a test file), in place of the bug-card
 # check (bugproof()): a speed-up keeps what the file tests, so its tests pass on main's code by design. The file runs
@@ -1813,7 +1818,7 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -z "$why" ]
 }
-# The check of an Optimize card (card(): a bug card whose issue speedfile() names with OPTIMIZE), in place of the
+# The check of an Optimize card (card(): a bug card whose issue speedfile() names with OPTIMIZE or REWRITE), in place of the
 # bug-card check: the card speeds its test file up, splits it, merges it into another test file or deletes it, and
 # keeps what it tests, so no test must fail on main's code. A change that keeps the file, or adds test files (a split),
 # is checked as a speed-up (speedproof(), given the test files it adds). A change that removes the file and adds no
@@ -1834,8 +1839,8 @@ optproof() { # <card> <worktree> <issue json> <test file>
   mapfile -t gone < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=D HEAD 2>/dev/null | testpaths)
   # The change does what the issue's verdict asks (optverdict()): a split changes or removes the file and adds test
   # files; a delete removes the file and adds or changes no other test file; a merge removes the file and changes
-  # another test file, or changes the file and removes another, and adds none; speed up, keep and stabilise keep the
-  # file and add or remove none. An issue that names no verdict may take any of these shapes.
+  # another test file, or changes the file and removes another, and adds none; speed up, keep, stabilise and indirect
+  # keep the file and add or remove none. An issue that names no verdict may take any of these shapes.
   v=$(optverdict "$3" any)
   case $v in
     split) if [ ${#add[@]} = 0 ]; then why="the verdict is split, and the change adds no test file"
@@ -1851,6 +1856,15 @@ optproof() { # <card> <worktree> <issue json> <test file>
     'speed up' | keep | stabilise) if [ ! -e "$2/$f" ]; then why="the verdict is $v, and the change removes the test file $f"
       elif [ ${#add[@]} != 0 ]; then why="the verdict is $v, and the change adds test files: ${add[*]}"
       elif [ ${#gone[@]} != 0 ]; then why="the verdict is $v, and the change removes test files, as a merge does: ${gone[*]}"; fi ;;
+    # indirect (#778): as speed up, and the file still holds each case the issue's DIRECT lines name (tadirect(),
+    # casesgone()): a rewrite as direct checks loses no case that must keep passing.
+    indirect) if [ ! -e "$2/$f" ]; then why="the verdict is $v, and the change removes the test file $f"
+      elif [ ${#add[@]} != 0 ]; then why="the verdict is $v, and the change adds test files: ${add[*]}"
+      elif [ ${#gone[@]} != 0 ]; then why="the verdict is $v, and the change removes test files, as a merge does: ${gone[*]}"
+      else
+        cs=$(casesgone "$2" "$f" "$(jq -r '.body // ""' <<<"$3" | tadirect /dev/stdin 2>/dev/null | jq -r '.direct[]?.cases[]' 2>/dev/null | awk 'NF && !s[$0]++')")
+        [ -z "$cs" ] || why="the verdict is $v, and the change drops cases of $f that the issue's DIRECT lines say must keep passing: $(paste -sd, <<<"$cs" | sed 's/,/, /g')"
+      fi ;;
   esac
   if [ -n "$why" ]; then
     printf '%s\n' "$why" > "$2.unfixed"
@@ -1999,24 +2013,18 @@ HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\
             elif $k == "}" then .s |= .[:-1]
             else . end)
       | .s |= until(length == 0 or (.[-1] | . != "\u0027" and . != "\""); .[:-1]); .in);'
-hollowproof() { # <card> <worktree> <issue json> <test file>
-  local wt=$2 f=$4 c x cs starts='' rw kept gone=() uncov=() cov s j why='' found='' old='' sc d
-  rm -f "$wt.unfixed"
-  # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
-  git -C "$wt" add -A 2>/dev/null && ! git -C "$wt" diff --cached --quiet HEAD 2>/dev/null || return 0
-  cs=$(jq -r '.body // ""' <<<"$3" | tatagged HOLLOW "$TAHOLLOW" /dev/stdin 2>/dev/null | jq -r '.[] | objects | .case | gsub("^[`\"\u0027]+|[`\"\u0027]+$"; "")' 2>/dev/null | awk 'NF && !s[$0]++')
-  # The lines of the file that start a case (HOLLOW_JQ; the whole file for a language it has no row for), each plain: a
-  # case is kept while one of them names it, so its name left in a comment does not keep it, also when no case is left.
-  # Each start line is kept in starts with its line number and the number of the case's last line first
-  # (<n><tab><e><tab><line>); a language with no row has none, as a line of it is not a case. A case ends at its close
-  # line (the row's close; for Python the line before the next line of code at most as far in as its start line), and
-  # at the latest on the line before the next start line, so the code between two cases (a table of values set up for
-  # a later case) is in no case (#606). A line of fixture text in a case (a JSON record in a heredoc, the end of a
-  # template string, a comment or a docstring at the left edge) does not end it, as it starts inside text (shin, jsin,
-  # tq); brackets are not counted across lines, as one in a regular expression or a case pattern closes nothing. In
-  # shell a comment or a line of code whose last bracket closes one it opened (shin) does not end it either (#612),
-  # and shin reads a start line without the case's own opener, so a case of one line (t_x() { f; }) ends there.
-  [ ! -e "$wt/$f" ] || starts=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
+# The lines of a test file that start a case (hollowproof(), optproof()), by HOLLOW_JQ: "row", then each start line
+# with its line number and the number of the case's last line first (<n><tab><e><tab><line>), each plain; "none" for
+# a language with no row, as a line of it is not a case. A case ends at its close
+# line (the row's close; for Python the line before the next line of code at most as far in as its start line), and
+# at the latest on the line before the next start line, so the code between two cases (a table of values set up for
+# a later case) is in no case (#606). A line of fixture text in a case (a JSON record in a heredoc, the end of a
+# template string, a comment or a docstring at the left edge) does not end it, as it starts inside text (shin, jsin,
+# tq); brackets are not counted across lines, as one in a regular expression or a case pattern closes nothing. In
+# shell a comment or a line of code whose last bracket closes one it opened (shin) does not end it either (#612),
+# and shin reads a start line without the case's own opener, so a case of one line (t_x() { f; }) ends there.
+casestarts() { # <worktree> <test file>
+  jq -Rsr --arg f "$2" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
       | if $t == null then "none" else split("\n") as $ls | [range(0; $ls | length) | select($ls[.] | test($t.case))] as $k
         | (if $t.close == null then [] elif $t.sh then [[$ls[] | if test($t.case) then sub("^.*?\\(\\s*\\)\\s*[{(]|^\\s*@test\\s+(\"(\\\\.|[^\"])*\"|\\S+)\\s*\\{"; "") else . end] | shin] else [$ls | jsin] end) as $tx | [$ls[] | tq] as $tq
         | ["row"] + [range(0; $k | length) as $i | $k[$i] as $a | (if $i + 1 < ($k | length) then $k[$i + 1] else ($ls | length) end) as $z
@@ -2024,13 +2032,42 @@ hollowproof() { # <card> <worktree> <issue json> <test file>
           | (if $t.close then first(range($a; $z) | select(($tx[.] | not) and ($ls[.] | ind) <= $in and ($ls[.] | test($t.close)))) // ($z - 1)
             else (first(foreach range($a + 1; $z) as $j ({q: $tq[$a]}; {p: .q, q: (.q + $tq[$j])};
                 select(.p % 2 == 0 and ($ls[$j] | test($t.note) | not) and ($ls[$j] | ind) <= $in) | $j)) // $z) - 1 end) as $e
-          | "\($a + 1)\t\($e + 1)\t\($ls[$a] | plain)"] | join("\n") end' "$wt/$f" 2>/dev/null)
-  rw=$(head -n 1 <<<"$starts"); starts=$(tail -n +2 <<<"$starts")
-  if [ "$rw" = row ]; then kept=$(cut -f3- <<<"$starts"); else kept=$(sed 's/\\\(.\)/\1/g' "$wt/$f" 2>/dev/null); fi
-  while IFS= read -r c; do
-    [ -n "$c" ] || continue
-    [ -e "$wt/$f" ] && grep -qF -- "$c" <<<"$kept" || gone+=("$c")
-  done <<<"$cs"
+          | "\($a + 1)\t\($e + 1)\t\($ls[$a] | plain)"] | join("\n") end' "$1/$2" 2>/dev/null
+}
+# The names of <cases> (one a line) that the test file in <worktree> no longer holds (hollowproof(), optproof()): a case
+# is held while the name of a case that a line starts (casestarts(); any line of the file, unescaped, for a language
+# with no row) holds it as a whole name: no letter or digit just before it (a prefix such as t_ may be), and no letter,
+# digit or _ just after it, so t_slotwholeclock does not hold the case slotwhole. The name is the start line's head
+# (t_x(), @test "x", the first argument of test( or it(), not the rest of the line, so a case of one line that calls a
+# helper (t_autoreruledn() { autoreruled narrow; }) does not hold a case named as the helper. Every case is gone when
+# the file is.
+casesgone() { # <worktree> <test file> <cases>
+  local st kept
+  [ -e "$1/$2" ] || { awk 'NF' <<<"$3"; return 0; }
+  st=$(casestarts "$1" "$2")
+  if [ "$(head -n 1 <<<"$st")" = row ]; then
+    kept=$(tail -n +2 <<<"$st" | cut -f3- | sed -E -e 's/^[[:space:]]*(function[[:space:]]+)?((t_|test)[A-Za-z0-9_]*)[[:space:]]*\(\).*/\2/' -e t \
+      -e 's/^[[:space:]]*@test[[:space:]]+("[^"]*"|[^[:space:]]+).*/\1/' -e t \
+      -e "s/^[[:space:]]*[xf]?(it|test)(\\.[A-Za-z]+)?[[:space:]]*\\([[:space:]]*(\"[^\"]*\"|'[^']*'|\`[^\`]*\`).*/\\3/" -e t -e 's/,.*//')
+  else kept=$(sed 's/\\\(.\)/\1/g' "$1/$2" 2>/dev/null); fi
+  K=$kept awk 'function held(c,   s, i, n, b, a) { n = length(c); s = ENVIRON["K"]
+      while ((i = index(s, c)) > 0) { b = substr(s, i - 1, 1); a = substr(s, i + n, 1)
+        if ((i == 1 || b !~ /[A-Za-z0-9]/) && a !~ /[A-Za-z0-9_]/) return 1
+        s = substr(s, i + 1) }
+      return 0 }
+    $0 != "" && !held($0)' <<<"$3"
+}
+hollowproof() { # <card> <worktree> <issue json> <test file>
+  local wt=$2 f=$4 c x cs starts='' gone=() uncov=() cov s j why='' found='' old='' sc d
+  rm -f "$wt.unfixed"
+  # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
+  git -C "$wt" add -A 2>/dev/null && ! git -C "$wt" diff --cached --quiet HEAD 2>/dev/null || return 0
+  cs=$(jq -r '.body // ""' <<<"$3" | tatagged HOLLOW "$TAHOLLOW" /dev/stdin 2>/dev/null | jq -r '.[] | objects | .case | gsub("^[`\"\u0027]+|[`\"\u0027]+$"; "")' 2>/dev/null | awk 'NF && !s[$0]++')
+  # The lines of the file that start a case (casestarts()): a case is kept while one of them names it, so its name left
+  # in a comment does not keep it, also when no case is left (casesgone()).
+  [ ! -e "$wt/$f" ] || starts=$(casestarts "$wt" "$f")
+  starts=$(tail -n +2 <<<"$starts")
+  mapfile -t gone < <(casesgone "$wt" "$f" "$cs")
   # The COVERED-BY lines of the build's reply and of each later fix's reply, each {file, for}: a deleted case is covered by a line for it whose file the change keeps.
   cov=$(jq -Rrn '[inputs | fromjson? // empty | objects | if .type == "result" then .result elif .type == "item.completed" and .item.type? == "agent_message" then .item.text
       elif .type == "text" then .part.text? else empty end | strings | split("\n")[] | sub("^[\\s*`_>-]+"; "")

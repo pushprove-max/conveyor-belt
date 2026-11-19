@@ -185,3 +185,20 @@ t_optmergeinto() {
   grep -qF 'it passed in 24 CPU s, not more than the median of its recent runs plus the median on record of g.test.sh, 24 CPU s.' "$FXWT.unfixed" \
     || fail "the review is not shown the summed figure: $(cat "$FXWT.unfixed")"
 }
+
+# Bug it catches (#778): a Rewrite as a direct check card, its issue as the Tests page files it (its title, no verdict
+# line, the judge's DIRECT lines), drops the case relpin that a DIRECT line says must keep passing, leaving its name in
+# a comment, keeping the longer case relpinclock and the case of one line t_relpinn that calls a helper named relpin,
+# and passes as an Optimize card: the rewrite loses that case. It is blocked before the file runs.
+t_optdirect() {
+  setup '[]'
+  fx_wt "printf '%s\n' 't_relstop() { :; }' '# relpin was here' 't_relpinclock() { :; }' 't_relpinn() { relpin narrow; }' > f.test.sh" f.test.sh "$(printf '%s\n' 't_relstop() { :; }' 't_relpin() { :; }' 't_relpinclock() { :; }' 't_relpinn() { relpin narrow; }')"
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  ISSUE=$(jq -cn '{number: 7, title: "Rewrite the test file f.test.sh as direct checks", body: ([
+    "This test file checks what it protects through a proxy.", "", "Its proxy parts (what it protects | the direct check | the cases that must keep passing):",
+    "- DIRECT: the install holds the right files | compare the installed list with the manifest | `relstop`, relpin"] | join("\n"))}')
+  fx_in 'optproof c7 "$FXWT" "$ISSUE" f.test.sh'
+  [ "$RC" != 0 ] && [ "$WHY" = "the verdict is indirect, and the change drops cases of f.test.sh that the issue's DIRECT lines say must keep passing: relpin" ] && [ ! -e "$STUB/mainran" ] \
+    || fail "a rewrite that drops a case its DIRECT lines name was not blocked: exit $RC, $WHY"
+  [ "$(st 'select(.step == "bugproof") | .result')" = fail ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
+}

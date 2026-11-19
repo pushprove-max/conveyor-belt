@@ -79,8 +79,9 @@ t_tajudge() {
   # recent failure of the file alone, newest first: its verdict, card, failing cases and the end of its output; a step
   # that passed on re-run too.
   [[ $out == *$'\n- 2026-11-06T00:00:00Z, card c6-11 (#11), verdict flaky, failing cases: four\n- 2026-11-05T00:00:00Z, card c4-9 (#9), verdict card, failing cases: one\n  The end of its output:\n    not ok one\n- 2026-11-04T00:00:00Z, card c3-8 (#8), verdict main, failing cases: two\n  The end of its output:\n    ok one\n    not ok two: port 8080 in use'* ]] \
-    && ! grep -qF 'not ok three' <<<"$out" && grep -qF 'CAUSE: <case> | <kind> | <one-line reason>' <<<"$out" && grep -qF 'VERDICT: <keep | speed up | split | merge | delete | stabilise>' <<<"$out" \
-    || fail "the prompt does not give the failures of the file alone, with their verdicts, cards, cases and output, and ask for CAUSE lines and stabilise: $out"
+    && ! grep -qF 'not ok three' <<<"$out" && grep -qF 'CAUSE: <case> | <kind> | <one-line reason>' <<<"$out" && grep -qF 'VERDICT: <keep | speed up | split | merge | delete | stabilise | indirect>' <<<"$out" \
+    && grep -qF 'DIRECT: <what it protects> | <the direct check that would replace it> | <the cases that must keep passing, comma-separated>' <<<"$out" \
+    || fail "the prompt does not give the failures of the file alone, with their verdicts, cards, cases and output, and ask for CAUSE and DIRECT lines, stabilise and indirect: $out"
   # Bug it catches (#335): the judge told the owner the file's newest run passed, read from a card's run, when the
   # release suite had failed it since. Its newest run is the release suite's failed run (newer than every card line
   # above), named as the run it is.
@@ -223,6 +224,20 @@ t_taverdict() {
   out=$(STATE=$T/taverdict/state . "$SRC/lib/testaction.sh" && taverdict "$f") && [ "$out" = '"stabilise"' ] || fail "a stabilise verdict does not read: $out"
   printf '%s\n' 'VERDICT: stable' > "$f"
   out=$(STATE=$T/taverdict/state . "$SRC/lib/testaction.sh" && taverdict "$f") && [ "$out" = '"no verdict"' ] || fail "a word that is no verdict reads as one: $out"
+}
+
+# Bug this guards (#778): a judge found a file that checks what it protects through a proxy (it runs the suite again),
+# and its record had no verdict for it and no part to rewrite, so the Tests page could not offer the direct check. The
+# record's fields (tajudged(), as the end of tarun() writes them) hold the verdict indirect and each DIRECT line that
+# reads, its cases split; a DIRECT line with no case is left out.
+t_tadirect() {
+  local f=$T/tadirect.txt out
+  printf '%s\n' 'It runs the whole suite again from a copy.' \
+    '- DIRECT: the install holds the right files | compare the installed list with the manifest | `relfiles`, relpins' \
+    'DIRECT: the loop lands | no cases named |' '**VERDICT: Indirect**' > "$f"
+  out=$(STATE=$T/tadirect/state . "$SRC/lib/testaction.sh" && tajudged "$f" | jq -c '{verdict, direct}') \
+    && [ "$out" = '{"verdict":"indirect","direct":[{"protects":"the install holds the right files","check":"compare the installed list with the manifest","cases":["relfiles","relpins"]}]}' ] \
+    || fail "the record of an indirect judge does not hold its verdict and DIRECT line: $out"
 }
 
 # Bug this guards: a session that never ended held its action running for ever.

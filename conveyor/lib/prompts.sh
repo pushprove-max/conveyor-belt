@@ -598,7 +598,8 @@ than the median of its recent runs (its median on record when the issue lists no
 # shellcheck disable=SC2034 # used in lib/card.sh
 OPTREVIEW='# The Optimize check
 This issue optimizes one test file: the change does what the judge'"'"'s verdict in the issue asks (speed it up, keep it,
-stabilise it, split it, merge it into another test file or delete it), and keeps what it tests, so no test must fail on
+stabilise it, split it, merge it into another test file, delete it, or rewrite its proxy parts as the direct checks its
+DIRECT lines name), and keeps what it tests, so no test must fail on
 main'"'"'s code without the change. A file the change keeps, and the
 test files a split adds, were run alone with the change, on a test slot: they must pass. The figure they are held to is
 the median of the recent runs the issue lists (the file'"'"'s median on record when it lists none). A file kept must cost

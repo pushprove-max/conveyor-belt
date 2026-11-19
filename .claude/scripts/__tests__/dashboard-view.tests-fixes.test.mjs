@@ -14,9 +14,10 @@ const WAITS = [{ case: 'mergewait', kind: 'polling', at: 'conveyor/tests/merge.t
 // A file with no run on record, as the snapshot's tests part has it, with why it never ran (null: the engine cannot tell).
 const never = (file, neverRun) => ({ file, cpu: null, median: null, change: null, runs: [], lastRun: null, timedRuns: 0, runsOnRecord: 0, failedSteps: 0,
   failures: [], flaky: 0, issue: null, slowOnPurpose: null, usual: null, slower: false, hollow: null, waits: null, neverRun });
-function show({ acts = [], waits = WAITS } = {}) {
+function show({ acts = [], waits = WAITS, whole = null } = {}) {
   const d = snap({ acts }), files = d.panels.tests.data.tests.files, of = (f) => files.find((x) => x.file === f);
   of(X).hollow = HOLLOW;
+  if (whole) of(whole).wholeOnly = true;
   of(MERGE).waits = waits;
   files.push(never(NEVER, { kind: 'patterns', reason: 'the pack\'s tests.patterns do not match it' }), never(SKIPPED, null));
   const w = boot({ tab: 'tests' });
@@ -90,4 +91,31 @@ test('Tests fixes: a Never run file shows why in its row, and Make it run and De
   assert.match(body, /\nDone when:\n- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it\.$/);
   [, body] = preview(w, SKIPPED, 'make-run');
   assert.match(body, /The engine cannot tell why\./);
+});
+
+// Bug it guards (#778): a judge found that merge.test.sh checks what it protects through a proxy (the verdict
+// indirect, with a DIRECT line), and its row still suggested Run, with no way to file the rewrite. Rewrite as a direct
+// check is the one primary step; its preview's title is the one the engine checks as an Optimize card (REWRITE,
+// optproof()), its body the DIRECT line as that check reads it, and filing it posts one test-issue. Bug it guards too:
+// a runner (wholeOnly, here X) with the verdict indirect was offered the rewrite, whose card's check times the file
+// alone, which a card's Test step never does for a runner, so that card was always refused.
+test('Tests fixes: an indirect verdict makes Rewrite as a direct check the primary step, its preview holding the file and its DIRECT lines', async () => {
+  const direct = [{ protects: 'the install holds the right files', check: 'compare the installed list with the manifest', cases: ['relfiles', 'relpins'] }];
+  const done = { state: 'done', end: iso(Date.now()), verdict: 'indirect', direct, text: 'It runs the suite again.\nVERDICT: indirect\n' };
+  const w = show({ acts: [rec(done), rec({ ...done, id: 'judge-x', file: X })], whole: X });
+  assert.equal(act(open(w, SKIPPED), 'rewrite-direct'), null, 'a file with no indirect verdict has no Rewrite as a direct check');
+  assert.equal(act(open(w, X), 'rewrite-direct'), null, 'a runner with the verdict indirect has no Rewrite as a direct check');
+  assert.ok(act(opened(w, X), 'make-alone'), 'a runner with the verdict indirect keeps Make it run alone');
+  const steps = open(w, MERGE).querySelector('.tests-steps');
+  assert.deepEqual(Array.from(steps.querySelectorAll('.btn-primary'), (b) => b.textContent), ['Rewrite as a direct check']);
+  const [title, body] = preview(w, MERGE, 'rewrite-direct');
+  assert.equal(title, `Rewrite the test file ${MERGE} as direct checks`);
+  assert.match(body, /\nIts proxy parts \(what it protects \| the direct check \| the cases that must keep passing\):\n- DIRECT: the install holds the right files \| compare the installed list with the manifest \| relfiles, relpins\n/);
+  assert.match(body, /\n- Last runs, newest first: 12\.0 CPU s \(card #509\), /);
+  assert.match(body, /\nThe judge's verdict \(.+\): indirect\.\n/);
+  w.reply = TA.reply('https://github.com/example/sample/issues/702');
+  act(opened(w, MERGE), 'issue-file').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => [p.body.action, p.body.args[0], p.body.args[1], p.body.args[2]]), [['test-issue', MERGE, title, body]]);
+  assert.match(opened(w, MERGE).textContent, /Rewrite as a direct check: Filed: https:\/\/github\.com\/example\/sample\/issues\/702/);
 });

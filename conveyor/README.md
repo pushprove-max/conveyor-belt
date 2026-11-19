@@ -1195,8 +1195,11 @@ A test action asks a model about one test file of the project, in one headless s
 and files no issue (or runs the file by hand, with no session: `testaction run`, below):
 
 - `conveyor.sh testaction judge <test file>`: is the file worth its cost? The session answers keep, speed up, split,
-  merge with another file (it names that file), delete, or stabilise, with its evidence, and ends with a line
-  `VERDICT: <keep | speed up | split | merge | delete | stabilise>`. Stabilise is for a file whose failures with the
+  merge with another file (it names that file), delete, stabilise, or indirect, with its evidence, and ends with a line
+  `VERDICT: <keep | speed up | split | merge | delete | stabilise | indirect>`. Indirect is for a file that checks
+  what it protects through a proxy: it runs other test files or the suite runner, runs the real loop, or waits for a
+  real process with a poll. The session names each proxy part on a line
+  `DIRECT: <what it protects> | <the direct check> | <the cases that must keep passing>`. Stabilise is for a file whose failures with the
   verdict flaky or main have a cause in the test: shared state, timing, order, environment or a fixture. The session
   names the cause of each failing case on a line `CAUSE: <case> | <kind> | <one-line reason>`. The kind is
   `shared state`, `timing`, `order`, `environment` or `fixture`. Before that line it names each hollow case of the file, a case

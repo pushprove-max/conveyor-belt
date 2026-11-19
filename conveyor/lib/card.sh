@@ -189,7 +189,7 @@ card() { # <card> <issue> [<branch> <tip>]
   fi
   # The test file of a speed-up or Optimize card (a bug card whose issue speedfile() names): its build is told the
   # target (speedbrief()).
-  [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=''
+  [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=''
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
   # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
   [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
@@ -324,7 +324,7 @@ card() { # <card> <issue> [<branch> <tip>]
     # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
     # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
-    # that optimizes one (speedfile() with OPTIMIZE) by optproof(): when the change does not do what its issue's verdict
+    # that optimizes one (speedfile() with OPTIMIZE, or REWRITE: Rewrite as a direct check, #778) by optproof(): when the change does not do what its issue's verdict
     # asks, its file costs more than its recent runs allow, a split takes more
     # CPU seconds than it may, or a file does not pass, the card is blocked with that reason and no review, its blocked line
     # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
@@ -337,7 +337,7 @@ card() { # <card> <issue> [<branch> <tip>]
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-    elif sf=$(speedfile "$issue" "$OPTIMIZE"); then
+    elif sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE"); then
       sk=$OPTREVIEW; optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$FIXFAILS"); then
       sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }

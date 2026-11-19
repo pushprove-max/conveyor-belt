@@ -35,7 +35,8 @@
 // tied to its pane. Overview: the diagnosis box (its state: its CPU s now, after which Optimize cards and by
 // how much each changed it, its trend; the judge's verdict chip with its reason in one line and Full report, which
 // opens the Judge tab; the buttons Judge, Optimize (Optimize again once one landed), Fix failures, Fix hollow cases,
-// Fix the waiting, Make it run, Delete it (#189), Make it run alone and Record CPU time (#190), Run and More, the next step suggested,
+// Fix the waiting, Make it run, Delete it (#189), Make it run alone and Record CPU time (#190), Rewrite as a direct
+// check (#778: with the verdict indirect, the next step), Run and More, the next step suggested,
 // nextStep(), primary), the box of its action, the editors picked, six tiles (CPU
 // now with its median, the last 4 runs as bars with their values on hover and on focus, the last Optimize, the clock,
 // bugs caught, mutants), its failures (#188: the card changes it caught, apart, then each failed test step with its
@@ -62,6 +63,9 @@
 // COVERED-BY line), Fix the waiting on a file that Waits (the clock and CPU of its recent runs, and the WAIT lines its
 // newest judge named, the snapshot's waits), and Make it run and Delete it on a file Never run, whose row says why
 // it did not run when the engine can tell (the snapshot's neverRun). Each Done-when is what the card's check proves.
+// #778: a file whose newest judge's verdict is indirect (it checks what it protects through a proxy) has Rewrite as a
+// direct check, its next step: the preview of "Rewrite the test file <file> as direct checks" (REWRITE, lib/testrun.sh:
+// an Optimize card, checked by optproof()), its body built from the judge's DIRECT lines (draftDirect()).
 // #190: a wholeOnly file's status says what a change to it costs (the snapshot's suite: the newest whole-suite run's
 // CPU seconds), and Make it run alone files the issue aloneproof() checks; a Wall only file's status names its runner
 // (the pack's test.report) and, by the engine's plan (the snapshot's settings.cpuTime), either has Record CPU time,
@@ -737,6 +741,24 @@
   const draftRun = (f) => drafted('Make it run', `Make the test file ${f.file} run`, f.file,
     [neverSaid(f), 'Make the test command run it (or the pack\'s tests.patterns match it), or fix what stops it loading or skips it. Keep what it tests.'], [],
     ['- The card\'s test step runs this file, and it succeeds.']);
+  // Rewrite as a direct check (#778): the proxy parts its newest judge with the verdict indirect named on DIRECT lines
+  // (the record's direct: [{protects, check, cases}]), each as a DIRECT line the card's check reads (optproof()); the
+  // recent runs, as draftIssue() lists them, are the figure the check holds the file to.
+  const directOf = (file) => {
+    const v = verdictOf(file);
+    return v && v.verdict === 'indirect' ? list(v.direct).filter((x) => obj(x) && typeof x.protects === 'string' && typeof x.check === 'string' && Array.isArray(x.cases)) : [];
+  };
+  const directSaid = (x) => `${x.protects} | ${x.check} | ${x.cases.filter((c) => typeof c === 'string').join(', ')}`;
+  function draftDirect(f) {
+    const v = verdictOf(f.file), runs = list(f.runs).filter(obj);
+    return drafted('Rewrite as a direct check', `Rewrite the test file ${f.file} as direct checks`, f.file,
+      ['This test file checks what it protects through a proxy: it runs other test files or the suite runner, runs the real loop, or waits on a real process with a poll. Rewrite each proxy part below as the direct check named for it, and keep each case named there passing.',
+        '', `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (${runBy(r)})`).join(', ') || 'none'}`,
+        ...(v ? ['', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`] : [])],
+      [['Its proxy parts (what it protects | the direct check | the cases that must keep passing):', directOf(f.file), (x) => `- DIRECT: ${directSaid(x)}`]],
+      ['- The file keeps each case that a DIRECT line above names, and adds or removes no other test file.',
+        '- Run alone with the change on a test slot, the file passes and costs less CPU time than its recent runs.']);
+  }
   const draftDelete = (f) => drafted('Delete it', `Delete the test file ${f.file}`, f.file,
     [neverSaid(f), 'Delete it. For each of its cases that matters, name the test that already proves its behaviour, on a line of its own: COVERED-BY: <test file>: <its case>. When no other test proves a case that matters, make the file run instead.'], [],
     ['- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it.']);
@@ -905,14 +927,19 @@
   }
   // The next step a row suggests (#130), from its state, its judge's verdict and its Optimize issues: run a file that
   // has no CPU time to judge, or that runs other test files; judge a file that needs a look and has no verdict; else
-  // run it. No test file has a CPU budget (#349), so no step follows from one.
+  // run it. No test file has a CPU budget (#349), so no step follows from one. A verdict indirect (#778) asks for the
+  // rewrite as direct checks first, except on a runner (wholeOnly): its card's check (optproof()) times the file alone,
+  // and a card's Test step never runs a runner alone, so Make it run alone comes first.
   function nextStep(f) {
-    if (f.wholeOnly === true || !cpuTimed(f)) return 'run';
+    if (f.wholeOnly === true) return 'run';
+    const v = verdictOf(f.file);
+    if (v && v.verdict === 'indirect') return 'rewrite-direct';
+    if (!cpuTimed(f)) return 'run';
     return look(f) && !verdictOf(f.file) ? 'judge' : 'run';
   }
   // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Fix failures (with failures no
   // card's change caused), Fix hollow cases (Hollow), Fix the waiting (Waits), Make it run and Delete it (Never run),
-  // Run and More; the next step suggested is the primary one.
+  // Rewrite as a direct check (the verdict indirect), Run and More; the next step suggested is the primary one.
   function stepButtons(f) {
     const h = S.ctx.h, file = f.file, now = h('div', 'tests-act-row tests-steps'), noSeat = !tmodel(), next = nextStep(f);
     const btn = (key, text, act, label, fn) => button(text, `${key === next ? 'btn-primary' : 'btn-quiet'} tests-act`, act, label, fn);
@@ -933,7 +960,8 @@
     // The other fix issues (#189), each on a file with its status: the same preview, of its own draft.
     const has = (k) => marks(f).some((m) => m[0] === k);
     const fixes = [[has('hollow'), 'Fix hollow cases', 'fix-hollow', draftHollow], [has('waits'), 'Fix the waiting', 'fix-waits', draftWaits],
-      [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete], [f.wholeOnly === true, 'Make it run alone', 'make-alone', draftAlone]]
+      [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete], [f.wholeOnly === true, 'Make it run alone', 'make-alone', draftAlone],
+      [next === 'rewrite-direct', 'Rewrite as a direct check', 'rewrite-direct', draftDirect]]
       .filter(([on]) => on).map(([, text, act, draft]) => btn(act, text, act, `${text}: preview an issue about ${file}`, () => {
         S.notes.delete(dk(file)); S.ask = draft(f); S.keep = { act: 'issue-title', file }; draw();
       }));
