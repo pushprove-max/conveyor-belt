@@ -727,7 +727,7 @@ doctordeps() {
 # but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
 # which says how to get a newer one. The project's checks need jq and git; without either they are named as not checked.
 # Setup's suggestion of a test.fileCommand, while the pack sets none and the project's test files run alone as plain
-# scripts (fileguess()): a card runs each of its test files alone through it, and stops at its test step without it.
+# scripts (fileguess()): a card runs each of its test files alone through it, and stops at its test step without it (a bug card with a fix at Build, bugproof()).
 filehint() {
   local fc g
   packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] && g=$(fileguess "$MAIN") && [ -n "$g" ] || return 0
@@ -735,7 +735,7 @@ filehint() {
 }
 # Doctor's warning of a pack whose cards cannot run their test files (listcmd(), lib/testrun.sh): a card runs each
 # alone through test.fileCommand, and the pack does not set it, so every card whose change is linked to a test file
-# stops at its test step.
+# stops at its test step (a bug card with a fix at Build, bugproof()).
 narrowwarn() {
   local fc
   packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] || return 0

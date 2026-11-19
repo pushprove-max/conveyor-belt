@@ -533,7 +533,10 @@ failure, the bug-card check, the run on main, the main-red check, the checks of 
 Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
 time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file runs past it, Conveyor stops the file
 and every process it started, and the file fails. With no `test.fileCommand`, a card with a test file to run stops at
-its test step under Needs you, and the reason names `test.fileCommand`. A card with no test file to run passes its
+its test step under Needs you, and the reason names `test.fileCommand`. A bug card with a test file and a fix stops earlier,
+at Build: its bug-card check cannot run, and the card is blocked with that reason (Bug cards: the new tests fail
+without the fix). A bug card whose change is only test files, or only comments in other files, has no check to run and
+stops at its test step. A card with no test file to run passes its
 test step. [Which tests a card
 runs](../docs/configuration.md#which-tests-a-card-runs) says which files are on the list.
 The list is the test files the card's change adds or changes (`"by": "own"`; a shared helper is none). Of a test file

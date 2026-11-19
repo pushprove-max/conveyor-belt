@@ -223,6 +223,23 @@ t_bugfilecommand() {
     || fail "the card proved through test.fileCommand did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
+# #711. Bug it catches: the guides said every card with a test file and no test.fileCommand stops at its test step,
+# but a bug card with a fix cannot run its bug-card check (bugproof() exit 2; t_wideoffnolist checks that stop), and
+# card() blocks it at Build, while a test-only or comments-only bug card skips the check and stops at its test step.
+# The pages and the schema have no behaviour to run, so their text is read.
+t_bugnofilecmd() {
+  local p
+  for p in conveyor/README.md docs/configuration.md; do
+    tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qiE 'a bug card with a test file and a fix stops earlier, at (its )?Build' \
+      || fail "$p does not say a bug card with a fix and no test.fileCommand stops at Build"
+    tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qiE 'a bug card whose change is only test files, or only comments in other files, has no check to run,? and( it)? stops at its test step' \
+      || fail "$p does not say a test-only or comments-only bug card stops at its test step"
+  done
+  jq -r .properties.test.properties.fileCommand.description "$SRC/schema/pack.schema.json" \
+    | grep -qF 'a bug card with a fix (a change of more than test files and comments) at Build' \
+    || fail "the pack schema's test.fileCommand does not say only a bug card with a fix stops at Build"
+}
+
 # A bug card of #7 whose build writes <card> into the product file <file>, which holds <main> on main: its fix and its
 # new test are both in that file, and it adds no test file. Its test command is <runner>, on main's code (the check)
 # and on the card (its test step, which must pass for it to land); each run on main notes in $STUB/mainran its staged
