@@ -28,6 +28,7 @@ budgetedit() { # <seconds> <CPU seconds>
 # With the test rules' switch on, a rule of the old measure budget matches nothing, and a rule of 2 card runs in a row
 # whose clock time is over their CPU seconds files one issue by #7's run, after its test step.
 t_budgetkept() {
+  local -x WHOLESUITE=true # The old fixture: #8 changes s.test alone, which no test file is linked to, so the per-file fixture runs no test for it.
   budgetedit 9 6.5
   [ "$(reviews 8)" = "GO " ] || fail "an already slow file went to the review: $(reviews 8)"
   [ "$(slowof 8)" = null ] || fail "#8's test line flags the file over a CPU budget: $(slowof 8)"
