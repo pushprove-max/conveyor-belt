@@ -676,6 +676,17 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 /* How the open issues split, and Held grouped by reason with its filter. */
 .board-split { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-3); font-size: var(--fs-sm); color: var(--muted); }
 .board-split .board-value { color: var(--text); }
+/* Each open parent issue as one row of its parts: done of all with a bar, the part in flight; it opens to every part. */
+.board-parents { display: grid; gap: var(--sp-1); margin-top: var(--sp-3); }
+.board-parent { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+.board-parent-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); cursor: pointer; }
+.board-parent-title { font-weight: 650; overflow-wrap: anywhere; }
+.board-parent-done, .board-parent-now { color: var(--muted); }
+.board-parent-bar { display: inline-block; width: 6rem; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.board-parent-fill { display: block; height: 100%; background: var(--ok); }
+.board-parent-parts { display: grid; gap: var(--sp-1); margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
+.board-part { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.board-part-title { overflow-wrap: anywhere; }
 /* The check run tile, under the control bar while a run goes and for an hour after. */
 .board-checkrun { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
 .board-checkrun .board-split { margin-top: 0; }

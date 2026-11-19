@@ -123,7 +123,8 @@
 #           failed}, or null), split (what the rule Split large issues made of its issue, {result, slices, filed}, or
 #           null) and stalls (how many times a step of it made no progress and was ended; 0 for none), and open (every open issue, as the snapshot's open: count,
 #           split {queued, you, labelOrRule, belt}, held, each with its reasons, and issues, every open issue with its
-#           labels and dependsOn, the numbers its Depends on: lines name; null when GitHub did not list them),
+#           labels and dependsOn, the numbers its Depends on: lines name; null when GitHub did not list them, and
+#           umbrellas, each open parent with its parts, done of all, those in flight and the closed ones),
 #           unpushed (the landed cards whose commits origin lacks, oldest first, each with since; null from a snapshot
 #           without them), fullTest (the snapshot's: command, why, running, last; null from a snapshot without it) and
 #           landingPr (health's: the open pull request of Land as pr, {number, url, cards, merge}, for Merge; null with none),
@@ -695,7 +696,8 @@ PANELS_JQ='
   def limitOf($s): ([($s.limits // [])[] | objects | .pct | numbers] | max) as $m
     | if $s.health.guard.reading != null then {pct: $s.health.guard.reading, from: "loop"} elif $m != null then {pct: $m, from: "loop"} else null end;
   # Every open issue of a record (open.issues, null from a snapshot without it) beside its held ones, each linked.
-  def openOf($r): $r.snap.open | if type == "object" then {count, split, held: (.held | few($r)), issues: (.issues | if . == null then null else few($r) end)} else null end;
+  def openOf($r): $r.snap.open | if type == "object" then {count, split, held: (.held | few($r)), issues: (.issues | if . == null then null else few($r) end),
+    umbrellas: (.umbrellas | if type == "array" then few($r) else null end)} else null end;
   # The Board of one record: the loop as its control record steers it, in six columns.
   # stays: Stop now leaves the card running (halt() in conveyor/lib/run.sh): it has landed, is filing its follow-ups
   # or landing, or has filed them, or has filed the slices of a split (split.filed, or track.grown).

@@ -109,7 +109,7 @@
 #   Each issue of the queue, and each card of belt and needsYou.blocked, that is a GitHub sub-issue of a parent
 #   (openissues()) also has umbrella: that parent's number.
 # open: every open issue and where it is (issues: each with its labels), below at open; umbrellas: each open parent
-#   (an issue with GitHub sub-issues) as one entry {issue, title, parts, done, all, inFlight}; null when gh cannot list the issues.
+#   (an issue with GitHub sub-issues) as one entry {issue, title, parts, done, all, inFlight, closed}; null when gh cannot list the issues.
 # control: the whole control record as it stands, start (where new issues start) among it (null when it does
 #   not read); forecast: below, at forecast.
 # modelSettings: the build and review models and efforts in force, where each comes from and the choices: the CLIs
@@ -759,9 +759,10 @@ snapshot() (
         | ($hl | map(select((.reasons | map(.kind) | unique) == ["you"])) | length) as $you
         | {count: ($open | length), held: $hl,
            # Each open parent (an issue with GitHub sub-issues) as one entry: its parts, how many of them are done
-           # (closed) of all, and those on the belt.
+           # (closed) of all, those on the belt, and the closed ones (the Board shows them as landed).
            umbrellas: [$open[] | select((.parts // []) != []) | {issue: .number, title: (.title // "")[0:200], parts: [.parts[].ref],
-             done: ([.parts[] | select(.open | not)] | length), all: (.parts | length), inFlight: [.parts[].number | numbers | select(IN($onbelt[]))]}],
+             done: ([.parts[] | select(.open | not)] | length), all: (.parts | length), inFlight: [.parts[].number | numbers | select(IN($onbelt[]))],
+             closed: [.parts[] | select(.open | not) | .ref]}],
            issues: ([$open[] | (.labels | map(.name)) as $l | {issue: .number, title: (.title // "")[0:200], priority: level($l; $prio), labels: $l, created: .createdAt, dependsOn: (needs + farneeds)}] | sort_by(.issue)),
            split: {queued: (($open | length) - ($hl | length) - ([$open[] | select(.number | IN($onbelt[]))] | length)), you: $you,
                    labelOrRule: (($hl | length) - $you), belt: ([$open[] | select(.number | IN($onbelt[]))] | length)}} end) as $openpart

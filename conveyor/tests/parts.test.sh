@@ -44,12 +44,13 @@ t_partsfollowup() {
 
 # `parts 10 11 12` attaches #11 and #12 to #10; the snapshot names #10 as the umbrella of #11 in the queue and of #12
 # on the belt, gives #10 one entry with 0 of 2 parts done and #12 in flight, and names #20 as the umbrella of its
-# blocked part #21. Bug caught: the Board and /units could not tell which parent an issue or card is a part of.
+# blocked part #21, with its closed part #22 among its closed ones. Bug caught: the Board and /units could not tell
+# which parent an issue or card is a part of, and the Board could not tell which part had landed.
 t_partscmd() {
   setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03), $(issue 20 2026-11-04), $(issue 21 2026-11-05)]"
   loop parts 10 11 12 > "$T/$CASE/parts.out" 2>&1 || fail "parts failed: $(cat "$T/$CASE/parts.out")"
   [ "$(cat "$STUB/subs" 2>/dev/null)" = $'10 11\n10 12' ] || fail "parts did not attach #11 and #12 to #10: $(cat "$STUB/subs" 2>/dev/null) $(cat "$T/$CASE/parts.out")"
-  echo '20 21' >> "$STUB/subs"
+  printf '20 21\n20 22\n' >> "$STUB/subs"
   # #12's card is on the belt (picked, not ended); #21's is blocked.
   jq -cn 'def l($c; $n; $s; $r; $t): {card: $c, issue: $n, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: ""};
     l("c1-12"; 12; "picked"; "ok"; "2026-11-10T09:00:00Z") + {title: "title 12"}, l("c2-21"; 21; "picked"; "ok"; "2026-11-10T09:00:00Z") + {title: "title 21"},
@@ -57,8 +58,10 @@ t_partscmd() {
   loop snapshot > "$T/$CASE/snap.json" || fail "the snapshot failed: $(head -c 400 "$T/$CASE/snap.json")"
   [ "$(jq -c '[(.queue.order[] | select(.issue == 11) | .umbrella), (.belt[] | select(.issue == 12) | .umbrella), (.needsYou.blocked[] | select(.issue == 21) | .umbrella)]' "$T/$CASE/snap.json")" = '[10,10,20]' ] \
     || fail "the snapshot does not name each part's parent: $(jq -c '[.queue.order, .belt, .needsYou.blocked] | map(map({issue, umbrella}))' "$T/$CASE/snap.json")"
-  [ "$(jq -c '.open.umbrellas | map(select(.issue == 10))' "$T/$CASE/snap.json")" = '[{"issue":10,"title":"title 10","parts":["#11","#12"],"done":0,"all":2,"inFlight":[12]}]' ] \
+  [ "$(jq -c '.open.umbrellas | map(select(.issue == 10))' "$T/$CASE/snap.json")" = '[{"issue":10,"title":"title 10","parts":["#11","#12"],"done":0,"all":2,"inFlight":[12],"closed":[]}]' ] \
     || fail "the snapshot does not give #10 one entry with 0 of 2 parts done and #12 in flight: $(jq -c .open.umbrellas "$T/$CASE/snap.json")"
+  [ "$(jq -c '.open.umbrellas | map(select(.issue == 20) | {done, all, closed})' "$T/$CASE/snap.json")" = '[{"done":1,"all":2,"closed":["#22"]}]' ] \
+    || fail "the snapshot does not name #22 as the closed part of #20: $(jq -c .open.umbrellas "$T/$CASE/snap.json")"
   jq -e '[.queue.order[].issue] | index(10) == null' "$T/$CASE/snap.json" >/dev/null || fail "the parent #10 is in the queue: $(jq -c '.queue.order' "$T/$CASE/snap.json")"
 }
 

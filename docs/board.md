@@ -63,6 +63,10 @@ serves the Board, because its requests come from a loopback address. An admin se
 - **Control**: the panels **Projects and Foremen**, **Loop**, **Push landed and full test suite** and **Board**. Loop
   has the loop's state, **Pause <project> after current**, **Stop now and requeue N cards**, the weekly limit bar, and
   today's landed count and cost. Board has the cards in their columns. The machine head has **Pause all projects**.
+  Above the columns, each open parent issue is one row: its title, its parts done of all with a bar, and each part
+  being built with its step. Open the row to see each part as landed, building, waiting or blocked, with **Show its
+  card**. Each part also keeps its own card in its column, so a blocked part is also in Needs you
+  ([Issues](commands.md#issues)).
 - **Rules**: the panels **Rules**, **What these rules produce**, **Model prices**, **Held by you or a label** and
   **Open issues**. On Control and Rules, the line that says what an action did, with its Undo, shows in the panel
   where you did it.

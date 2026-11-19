@@ -35,10 +35,11 @@
 // Every card in Held, Queue, Building, Review and Needs you shows its builder, reviewer and judge, each its own or the
 // project's, and has Settings and Pick for me (seats(), below): a blocked card's are set before its Retry.
 // The head says how the open issues split: queued, held by you, held by a label or skipped by a rule, on the belt.
+// Under it, each open parent issue is one row of its parts (parents(), below).
 // Its part (dashboard.sh, board): {repo (null: no record is on the host's main), state, reason (why it picks nothing | null), loop, control, cap, guard,
 // modelSettings, limit, held, queue (room on the one the machine holds back: why, as "waiting for a machine slot: ..."), skipped, waits (issues waiting on another, with waitsFor), issuesError,
 // building, review, waiting, blocked, landed (the day's newest; each with batch: the cards it landed with, itself among them | null),
-// today ({landed, usd}: every card of the day, counted and its usd added up, null when one has none), open ({count, split, held: each with its reasons} | null),
+// today ({landed, usd}: every card of the day, counted and its usd added up, null when one has none), open ({count, split, held: each with its reasons, umbrellas: each open parent with its parts} | null),
 // unpushed (the landed cards origin lacks | null), fullTest (command, why, running, last | null), and checkRuns
 // (only when a pack names checks.progress: each record's {repo, error}, or its run with repo, counts, done, all and leftSec;
 // with repo null too, when the Board shows those runs under "No loop to steer"), areaPrefix, repos (every project on
@@ -69,7 +70,8 @@
     groups: new Map(), filter: { text: '' }, text: null, unlabeled: new Set(), released: new Set(),
     dep: null, depText: '', depSaid: new Map(),
     seats: null, picks: new Map(),  // the card whose Settings is open ({issue, draft}), and each card's Pick for me ({busy}, {data} or {error})
-    dw: new Map(), dwOpen: new Set() };  // a card's Done-when items by card and check stamp ({busy, data, error}), and the cards whose line is open
+    dw: new Map(), dwOpen: new Set(),  // a card's Done-when items by card and check stamp ({busy, data, error}), and the cards whose line is open
+    partsOpen: new Set() };  // the parents whose row of parts is open
   const DEPENDS_MAX = 20;  // the issues one depends takes (dashboard_server.py)
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -529,6 +531,86 @@
     p.append(h('span', 'board-value', `${o.count} open`), h('span', null, `${s.queued} queued`), h('span', null, `${s.you} held by you`),
       h('span', null, `${s.labelOrRule} held by a label or skipped by a rule`), h('span', null, `${s.belt} on the belt`));
     return p;
+  }
+
+  // The parts of each open parent (an issue with GitHub sub-issues: open.umbrellas) as one row: the parent's title,
+  // its parts done of all with a bar, and its parts being built with their step. The row opens to every part with its
+  // state (landed: closed or landed today; building, with its step; blocked; waiting: any other) and a link to its
+  // card on the Board. The parts' own cards stay in their columns, so a blocked part is still in Needs you.
+  // raw: every column's cards (unshaped); a part's card is looked up there, in the column it is in, closed or not.
+  function partState(ref, closed, raw) {
+    const m = /^#(\d+)$/.exec(ref), n = m ? Number(m[1]) : null;
+    const of = (k, keep = () => true) => (n === null ? null : (raw[k] || []).find((x) => x && x.issue === n && keep(x)) || null);
+    const at = (col, card) => (card ? { card, col } : {});
+    if (closed.includes(ref)) return { state: 'landed', ...at('landed', of('landed')) };
+    let c = of('building');
+    if (c) return { state: 'building', step: c.step === 'waiting' ? waitsOn(c.waitsOn) : STEP[c.step] || c.step || 'in progress', card: c, col: 'building' };
+    if ((c = of('review'))) return { state: 'building', step: `review ${c.review || '?'} of ${c.of || 3}`, card: c, col: 'review' };
+    if ((c = of('needs', (x) => !x.waiting))) return { state: 'blocked', card: c, col: 'needs' };
+    if ((c = of('landed'))) return { state: 'landed', card: c, col: 'landed' };
+    // Waiting for the owner's yes (Needs you), queued, waiting on another issue (in Queue) or held: not being built.
+    const col = ['needs', 'queue', 'held'].find((k) => of(k));
+    const open = n === null ? null : issues(S.d.open && S.d.open.issues).find((x) => x && x.issue === n);
+    return { state: 'waiting', ...at(col, col && of(col)), title: ((col && of(col)) || open || {}).title };
+  }
+  // A link to the part's card on the Board: it brings the card into view and gives it the focus. A card the filter or
+  // its column's page hides is shown first: the filter is cleared, then the column shows all its cards.
+  function cardLink(n, col) {
+    const a = S.ctx.h('a', 'board-part-card', 'Show its card');
+    a.href = `#board-card-${n}`;
+    a.dataset.act = 'part-card';
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const find = () => elOf(PART).querySelector(`.board-col[data-col="${col}"] .bcard[data-issue="${n}"]`);
+      if (!find() && filtering()) clearFilters();
+      if (!find()) { const all = elOf(PART).querySelector(`.board-col[data-col="${col}"] .show-more [data-act="list-all"]`); if (all) all.click(); }
+      const c = find();
+      if (!c) return;
+      const g = c.closest('details');
+      if (g && !g.open) g.open = true;
+      if (typeof c.scrollIntoView === 'function') c.scrollIntoView({ block: 'nearest' });
+      if (c.tabIndex < 0) c.tabIndex = -1;
+      c.focus({ preventScroll: true });
+    });
+    return a;
+  }
+  function parents() {
+    const h = S.ctx.h, list = issues(S.d.open && S.d.open.umbrellas).filter((u) => u && num(u.issue) !== null);
+    const box = h('div', 'board-parents'), raw = unshaped();
+    box.hidden = !list.length;
+    list.forEach((u) => {
+      const refs = issues(u.parts).filter((r) => typeof r === 'string'), closed = issues(u.closed);
+      const all = num(u.all) ?? refs.length, done = num(u.done) ?? closed.length;
+      const parts = refs.map((ref) => ({ ref, ...partState(ref, closed, raw) }));
+      const det = h('details', 'board-parent');
+      det.dataset.issue = String(u.issue);
+      det.open = S.partsOpen.has(u.issue);
+      det.addEventListener('toggle', () => { if (det.open) S.partsOpen.add(u.issue); else S.partsOpen.delete(u.issue); });
+      const sum = h('summary', 'board-parent-head');
+      const bar = h('span', 'board-parent-bar');
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', `${done} of ${all} parts done`);
+      const fill = h('span', 'board-parent-fill');
+      fill.style.width = `${all > 0 ? Math.round((100 * Math.min(done, all)) / all) : 0}%`;
+      bar.append(fill);
+      sum.append(S.ctx.issueLink(u), h('span', 'board-parent-title', u.title || 'untitled'), h('span', 'board-parent-done', `${done} of ${all} done`), bar);
+      const now = parts.filter((p) => p.state === 'building');
+      sum.append(h('span', 'board-parent-now', now.length ? now.map((p) => `${p.ref} ${p.step}`).join(', ') : 'no part being built'));
+      const ul = h('ul', 'board-parent-parts');
+      ul.append(...parts.map((p) => {
+        const li = h('li', 'board-part');
+        li.dataset.part = p.ref; li.dataset.state = p.state;
+        const title = p.card ? p.card.title : p.title;
+        li.append(h('span', 'issue', p.ref));
+        if (title) li.append(h('span', 'board-part-title', title));
+        li.append(S.ctx.chip(p.state === 'building' ? `building: ${p.step}` : p.state, { landed: 'ok', building: 'info', blocked: 'bad', waiting: 'quiet' }[p.state]));
+        if (p.card && num(p.card.issue) !== null) li.append(cardLink(p.card.issue, p.col));
+        return li;
+      }));
+      det.append(sum, ul);
+      box.append(det);
+    });
+    return box;
   }
 
   // ---- the cards ----
@@ -1253,7 +1335,8 @@
     }
     const a = document.activeElement, from = a ? Array.from(S.at).find(([, p]) => p.el.contains(a)) : null;
     // The focus a pending action took (its control was off) comes back when the controls do.
-    const keep = (from ? { panel: from[0], issue: a.closest('.bcard') && a.closest('.bcard').dataset.issue, col: a.closest('.bcard') && a.closest('.bcard').dataset.col, act: a.dataset.act || null, card: a.classList.contains('bcard'), filter: a.dataset.filter || null } : null) || S.keep;
+    const keep = (from ? { panel: from[0], issue: a.closest('.bcard') && a.closest('.bcard').dataset.issue, col: a.closest('.bcard') && a.closest('.bcard').dataset.col, act: a.dataset.act || null, card: a.classList.contains('bcard'), filter: a.dataset.filter || null,
+      parent: a.closest('.board-parent') && a.closest('.board-parent').dataset.issue, part: a.closest('.board-part') && a.closest('.board-part').dataset.part } : null) || S.keep;
     S.keep = null;
     if (top) {
       if (!top.querySelector('.board-top')) top.replaceChildren(h('div', 'board-top'), noteLine());
@@ -1270,7 +1353,10 @@
     if (to) {
       // A card in two columns: the one in the column the focus was in, else (it moved) the card where it is now.
       const c = keep.issue ? (keep.col && to.querySelector(`.bcard[data-col="${keep.col}"][data-issue="${keep.issue}"]`)) || to.querySelector(`.bcard[data-issue="${keep.issue}"]`) : null;
-      const again = keep.filter ? to.querySelector(`[data-filter="${keep.filter}"]`) : keep.card ? c : (keep.act ? (c || to).querySelector(`[data-act="${keep.act}"]`) : null);
+      // In a parent's row: its part's link (by the part), else its summary, which is drawn again on every draw.
+      const row = keep.parent ? to.querySelector(`.board-parent[data-issue="${keep.parent}"]`) : null;
+      const inRow = row && (keep.part ? row.querySelector(`.board-part[data-part="${keep.part}"] [data-act="part-card"]`) : row.querySelector(':scope > summary'));
+      const again = keep.parent ? inRow : keep.filter ? to.querySelector(`[data-filter="${keep.filter}"]`) : keep.card ? c : (keep.act ? (c || to).querySelector(`[data-act="${keep.act}"]`) : null);
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (S.busy) S.keep = keep;
     } else if (keep && !from) S.keep = keep;  // kept for a panel not drawn now
@@ -1282,7 +1368,7 @@
     if (!el.querySelector('.board')) {
       const board = h('div', 'board');
       COLS.forEach(([k, t]) => board.append(column(k, t)));
-      el.replaceChildren(h('div', 'board-view'), h('div', 'board-counts'), noteLine(), board,
+      el.replaceChildren(h('div', 'board-view'), h('div', 'board-counts'), h('div', 'board-parents'), noteLine(), board,
         h('p', 'foot', 'Drag a card between Held and Queue, or onto a queued card to put it first. On a card, the arrow keys do the same.'));
     }
     // Each card's box and its place: its column and its index among that column's cards. A card glides only when its
@@ -1292,6 +1378,7 @@
     if (motion) el.querySelectorAll('.bcard').forEach((c) => before.set(c.dataset.issue, { box: c.getBoundingClientRect(), place: placeOf(c) }));
     el.querySelector('.board-view').replaceChildren(viewBar());
     el.querySelector('.board-counts').replaceChildren(split());
+    el.querySelector('.board-parents').replaceWith(parents());
     const raw = unshaped(), filled = el.querySelector('.board').dataset.filled === '1';
     COLS.forEach(([k]) => {
       const col = el.querySelector(`.board-col[data-col="${k}"]`), note = col.querySelector('.warn-note');

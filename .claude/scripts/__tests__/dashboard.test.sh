@@ -592,7 +592,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "forecast": {"cards": 1, "usd": 0.95, "perCard": {"usd": 0.95, "pct": 0.5}, "guard": 90, "reading": 42, "pausesAt": null},
   "fullTest": {"command": true, "why": null, "running": null, "last": {"time": "2026-11-05T01:00:00Z", "kind": "run", "push": true, "sha": "abc", "state": "failed", "exit": 1, "cases": [], "pushed": null}},
   "open": {"count": 6, "split": {"queued": 2, "you": 1, "labelOrRule": 2, "belt": 1}, "held": [{"issue": 30, "title": "Held one", "priority": "P3", "followup": false, "labels": [], "created": null, "parent": null, "reasons": [{"kind": "you"}]},
-    {"issue": 33, "title": "Backlog one", "priority": "P2", "followup": false, "labels": ["backlog"], "created": null, "parent": null, "reasons": [{"kind": "label", "label": "backlog"}]}]},
+    {"issue": 33, "title": "Backlog one", "priority": "P2", "followup": false, "labels": ["backlog"], "created": null, "parent": null, "reasons": [{"kind": "label", "label": "backlog"}]}],
+    "umbrellas": [{"issue": 34, "title": "Parent one", "parts": ["#35", "#36"], "done": 1, "all": 2, "inFlight": [], "closed": ["#35"]}]},
   "awaitingDeploy": [{"issue": 802, "title": "Stack split", "since": "2026-11-05T00:00:00Z"}, {"issue": 803, "title": "No time", "since": null}],
   "metrics": {"cards": [{"card": "c5-1", "issue": 1, "metrics": {"buildSec": 600, "reviewSec": 300, "fixSec": null}}, {"card": "c5-2", "issue": 2, "metrics": {"buildSec": 200, "reviewSec": 100, "fixSec": 0}},
     {"card": "c5-3", "issue": 3, "metrics": {"buildSec": 400}}], "prev": {"cards": 2, "landed": 1}, "days": [{"day": "2026-11-09", "landed": 1, "blocked": 0}],
@@ -725,6 +726,8 @@ q '.panels.rules.data | .state == "paused" and .modelSettings.builder.choices ==
   and (.open.held | map([.issue, .url, (.reasons | map(.label // .kind))])) == [[30, "'"$PU"'/30", ["you"]], [33, "'"$PU"'/33", ["backlog"]]]' "the Rules part: state, models, limit, waits and the held issues with why"
 # Every open issue reaches the Board, each held one with its reasons and a link; a record without it gives null.
 q '.panels.board.data.open | .count == 6 and .split == {queued: 2, you: 1, labelOrRule: 2, belt: 1} and (.held | map([.issue, .url, (.reasons | map(.label // .kind))])) == [[30, "'"$PU"'/30", ["you"]], [33, "'"$PU"'/33", ["backlog"]]]' "the Board has every open issue: the split and the held ones with why"
+# Bug: the snapshot's open parents (open.umbrellas) did not reach the Board, so it could not show a parent's parts as one row.
+q '.panels.board.data.open.umbrellas | map([.issue, .url, .done, .all, .closed]) == [[34, "'"$PU"'/34", 1, 2, ["#35"]]]' "the Board has each open parent with its parts done of all and its link"
 # Every record on the host is steered from the Board and the Rules tab: both parts name every record, and each record
 # not on host.json's main has its own Board and Rules under others, its own cards and links, never main's. Bug: only
 # main's record reached the page, so the second project's issues, queue and rules could not be seen or steered there.
